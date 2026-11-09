@@ -1,0 +1,17 @@
+[Desktop Entry]
+Type=Application
+Name=Kinefin
+GenericName=Jellyfin Client
+GenericName[it]=Client Jellyfin
+GenericName[nl]=Jellyfin-cliënt
+GenericName[tr]=Jellyfin İstemcisi
+Comment=Watch and listen to your Jellyfin server, with native mpv playback
+Comment[it]=Guarda e ascolta il tuo server Jellyfin, con riproduzione mpv nativa
+Exec=kinefin %u
+Icon=io.github.the_beper.Kinefin
+Terminal=false
+Categories=AudioVideo;Video;Music;Player;Qt;
+Keywords=jellyfin;media;video;music;
+SingleMainWindow=true
+StartupNotify=true
+X-KDE-StartupNotify=true

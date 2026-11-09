@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.the_beper.Kinefin</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <developer id="io.github.the_beper">
+    <name>the-beper</name>
+  </developer>
+  <name>Kinefin</name>
+  <summary>A KDE Plasma 6 Jellyfin client with native mpv playback</summary>
+  <description>
+    <p>Kinefin is a client for Jellyfin servers, written for Plasma. Browse your library natively in Kirigami and play through native libmpv: audio passthrough, hardware decoding, subtitle styling, and the display refresh rate following your media on Plasma Wayland.</p>
+    <p>It is a native app, not a web wrapper: the interface is Plasma's, the Jellyfin client talks to the server API directly, and there is no browser embedded. Server administration stays where it belongs — one button opens the server's web interface in your browser.</p>
+    <p>Offline downloads, no browser involved:</p>
+    <ul>
+      <li>In-app download manager with series auto-rules (next unwatched episodes, whole seasons, new episodes), exportable to your own folders through the portals</li>
+      <li>Downloaded titles play fully offline in the same interface</li>
+    </ul>
+    <p>Native playback through mpv:</p>
+    <ul>
+      <li>Direct play with hardware decoding, or transcodes only when the settings ask for it</li>
+      <li>Audio passthrough per codec (AC3, E-AC3, DTS, DTS-HD, TrueHD), device selection, normalization</li>
+      <li>Subtitles of your server, with native styling and per-language selection</li>
+      <li>MPRIS on the session bus, screensaver inhibition, gamepads through SDL3</li>
+    </ul>
+    <p>Part of the world, not of the web:</p>
+    <ul>
+      <li>Follows your Plasma theme, translations, keyboard shortcuts and HIG patterns</li>
+      <li>Single instance, sessions per profile like Jellyfin Desktop</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">io.github.the_beper.Kinefin.desktop</launchable>
+  <url type="homepage">https://github.com/the-beper/Kinefin</url>
+  <url type="bugtracker">https://github.com/the-beper/Kinefin/issues</url>
+  <url type="vcs-browser">https://github.com/the-beper/Kinefin</url>
+  <!-- TODO(first release): decide about donations/help URLs; the <releases> block is written by build/release/version-bump.sh (one <release> per version) and is empty until then. -->
+  <content_rating type="oars-1.1"/>
+  <requires>
+    <control>keyboard</control>
+    <control>pointing</control>
+  </requires>
+  <provides>
+    <binary>kinefin</binary>
+  </provides>
+</component>

@@ -1,0 +1,31 @@
+name: Bug report
+description: Something does not work as expected
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected and what you got.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Kinefin version
+      description: Help → About.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: System
+      description: Fedora (or other distro) and Plasma versions, Flatpak or not, and the Jellyfin server version you connected to.
+      placeholder: "Fedora 45, Plasma 6.x, Flatpak, Jellyfin 12.4"
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log output
+      description: "Optional. The logs of the running profile: `~/.var/app/io.github.the_beper.Kinefin/data/kinefin/profiles/<id>/logs/` (Flatpak) or `~/.local/share/kinefin/profiles/<id>/logs/`, newest file, around the problem. Do not paste the whole file if it contains URLs with your token (it should not; report it if it does)."
+      render: shell

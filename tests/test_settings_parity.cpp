@@ -1,0 +1,127 @@
+// SPDX-FileCopyrightText: 2026 Kinefin contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+#include "settings/SettingDefinitions.h"
+
+#include <QFile>
+#include <QRegularExpression>
+#include <QtTest>
+
+using Kinefin::SettingDefinition;
+
+namespace {
+struct ParityRow {
+    QString section;
+    QString key;
+    QString defaultText;
+    bool defined; // ✅ or ◇ in the Kinefin column
+    bool hidden;  // ◇
+};
+
+QStringList backticked(const QString &cell)
+{
+    QStringList tokens;
+    static const QRegularExpression pattern(QStringLiteral("`([^`]+)`"));
+    for (const auto &match : pattern.globalMatch(cell))
+        tokens << match.captured(1);
+    return tokens;
+}
+
+// The §2.1-§2.5 tables of the parity document. §2.4 and §2.5 have no "Upstream UI" column and every row is implemented.
+QList<ParityRow> parityRows(const QString &text)
+{
+    QList<ParityRow> rows;
+    QString section;
+    bool inSettings = false;
+    for (const QString &line : text.split(QLatin1Char('\n'))) {
+        static const QRegularExpression heading(QStringLiteral("^### 2\\.[1-5] `(\\w+)`"));
+        if (line.startsWith(QLatin1String("## ")) || line.startsWith(QLatin1String("### 2.6")))
+            inSettings = false;
+        if (const auto match = heading.match(line); match.hasMatch()) {
+            section = match.captured(1);
+            inSettings = true;
+            continue;
+        }
+        if (!inSettings || !line.startsWith(QLatin1String("| `")))
+            continue;
+        const QStringList cells = line.split(QLatin1Char('|'), Qt::SkipEmptyParts);
+        const bool fullTable =
+            section != QLatin1String("subtitles") && section != QLatin1String("other");
+        const QString status = fullTable ? cells.value(3) : QStringLiteral("✅");
+        const QStringList ids = backticked(cells.value(0));
+        if (ids.isEmpty() || ids.first().contains(QLatin1Char('{')) || ids.size() > 1)
+            continue; // a multi-id row (`webMode` / `layout`) is never a defined setting
+        const QString defaultCell = cells.value(1);
+        QString defaultText = backticked(defaultCell).value(0);
+        if (defaultText.startsWith(QLatin1Char('"')))
+            defaultText = defaultText.mid(1, defaultText.size() - 2);
+        rows.append({section, ids.first(), defaultText,
+                     status.contains(QStringLiteral("✅")) || status.contains(QStringLiteral("◇")),
+                     status.contains(QStringLiteral("◇"))});
+    }
+    return rows;
+}
+
+QString defaultText(const SettingDefinition &definition)
+{
+    if (definition.type == SettingDefinition::Type::String)
+        return definition.defaultValue.toString();
+    if (definition.type == SettingDefinition::Type::Double)
+        return QString::number(definition.defaultValue.toDouble(), 'f', 1);
+    return definition.defaultValue.toString();
+}
+} // namespace
+
+class TestSettingsParity : public QObject {
+    Q_OBJECT
+  private Q_SLOTS:
+    void tableMatchesTheParityDocument()
+    {
+        QFile file(QStringLiteral(KINEFIN_SOURCE_DIR "/docs/feature-parity.md"));
+        if (!file.open(QIODevice::ReadOnly))
+            QSKIP("docs/feature-parity.md is not part of this checkout");
+        const QList<ParityRow> rows = parityRows(QString::fromUtf8(file.readAll()));
+        QVERIFY(rows.size() > 50);
+
+        int defined = 0;
+        for (const ParityRow &row : rows) {
+            const auto *definition = Kinefin::findSetting(row.section, row.key);
+            if (!row.defined) {
+                QVERIFY2(!definition,
+                         qPrintable(row.section + QLatin1Char('.') + row.key
+                                    + QStringLiteral(" is dropped in the parity doc but defined")));
+                continue;
+            }
+            ++defined;
+            const QString name = row.section + QLatin1Char('.') + row.key;
+            QVERIFY2(definition,
+                     qPrintable(name + QStringLiteral(" is in the parity doc but not defined")));
+            QCOMPARE(definition->hidden, row.hidden);
+            QCOMPARE(defaultText(*definition), row.defaultText);
+            QVERIFY2(definition->hidden || !definition->label.isEmpty(),
+                     qPrintable(name + QStringLiteral(" is visible but has no label")));
+        }
+        QCOMPARE(Kinefin::settingDefinitions().size(), defined);
+    }
+
+    void everyDefaultIsValid()
+    {
+        for (const SettingDefinition &definition : Kinefin::settingDefinitions()) {
+            QVERIFY2(Kinefin::validatedSettingValue(definition, definition.defaultValue).isValid(),
+                     qPrintable(definition.section + QLatin1Char('.') + definition.key));
+            for (const auto &option : definition.options)
+                QVERIFY(Kinefin::validatedSettingValue(definition, option.value).isValid());
+        }
+    }
+
+    void sectionsAndKeysAreUnique()
+    {
+        QSet<QString> seen;
+        for (const SettingDefinition &definition : Kinefin::settingDefinitions()) {
+            const QString id = definition.section + QLatin1Char('/') + definition.key;
+            QVERIFY2(!seen.contains(id), qPrintable(id));
+            seen.insert(id);
+        }
+    }
+};
+QTEST_APPLESS_MAIN(TestSettingsParity)
+#include "test_settings_parity.moc"

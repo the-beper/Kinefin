@@ -1,0 +1,27 @@
+{
+  "Items": [
+    {
+      "Name": "Movies",
+      "Id": "e2a1aa11a8d94b5c999a25cf59abcd01",
+      "CollectionType": "movies",
+      "PrimaryImageAspectRatio": 1.5,
+      "ChildCount": 1820
+    },
+    {
+      "Name": "Series",
+      "Id": "7f1b8f4b3e2148c5a8f2b7c9d0e1f2a3",
+      "CollectionType": "tvshows",
+      "PrimaryImageAspectRatio": 0.75,
+      "ChildCount": 4200
+    },
+    {
+      "Name": "Music",
+      "Id": "2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f",
+      "CollectionType": "music",
+      "PrimaryImageAspectRatio": 1.0,
+      "ChildCount": 12500
+    }
+  ],
+  "TotalRecordCount": 3,
+  "StartIndex": 0
+}

@@ -1,0 +1,157 @@
+// SPDX-FileCopyrightText: 2026 Kinefin contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+#include "app/ConnectionController.h"
+#include "app/Logging.h"
+#include "app/ProfileCommands.h"
+#include "integration/LinkRouter.h"
+#include "settings/ClientSettings.h"
+#include "settings/KWalletTokenStore.h"
+#include "settings/ProfileIdentity.h"
+#include "settings/ProfileIndex.h"
+#include "settings/ProfilePaths.h"
+
+#include <QCommandLineParser>
+#include <QCoreApplication>
+#include <QGuiApplication>
+#include <QQmlApplicationEngine>
+#include <QQuickWindow>
+#include <QTextStream>
+#include <QVariant>
+#include <KAboutData>
+#include <KDBusService>
+#include <KLocalizedQmlContext>
+#include <KLocalizedString>
+#include <optional>
+
+int main(int argc, char *argv[])
+{
+    QGuiApplication app(argc, argv);
+    QCoreApplication::setApplicationName(QStringLiteral("Kinefin"));
+    // Reversed by KDBusService: io.github.the_beper.Kinefin.
+    QCoreApplication::setOrganizationDomain(QStringLiteral("the_beper.github.io"));
+    QGuiApplication::setDesktopFileName(QStringLiteral("io.github.the_beper.Kinefin"));
+    KLocalizedString::setApplicationDomain("kinefin");
+    KAboutData aboutData(QStringLiteral("Kinefin"), QStringLiteral("Kinefin"),
+                         QStringLiteral(KINEFIN_VERSION));
+    // KAboutData::setApplicationData overwrites QCoreApplication metadata;
+    // set these on aboutData, not only on QCoreApplication, or the D-Bus
+    // service name becomes io.github.the_beper.kinefin (wrong case).
+    aboutData.setOrganizationDomain(QByteArrayLiteral("the_beper.github.io"));
+    aboutData.setDesktopFileName(QStringLiteral("io.github.the_beper.Kinefin"));
+    KAboutData::setApplicationData(aboutData);
+
+    QCommandLineParser parser;
+    parser.setApplicationDescription(QStringLiteral("Kinefin native Jellyfin client (P0 shell)"));
+    parser.addHelpOption();
+    parser.addVersionOption();
+    parser.addPositionalArgument(QStringLiteral("url"),
+                                 QStringLiteral("Provisional jellyfin://item/<id> URL"),
+                                 QStringLiteral("[url]"));
+    parser.addOption(
+        {QStringLiteral("log-level"),
+         QStringLiteral("Log level of the log file: debug, info, warn, error, fatal or disable."),
+         QStringLiteral("level")});
+    Kinefin::addProfileOptions(parser);
+    parser.process(app);
+    if (parser.positionalArguments().size() > 1) {
+        qCritical("Only one URL can be handled at startup");
+        return 2;
+    }
+    if (!parser.positionalArguments().isEmpty()
+        && !Kinefin::parseItemLink(parser.positionalArguments().first())) {
+        qCritical("Unsupported or unsafe Jellyfin URL");
+        return 2;
+    }
+    std::optional<Kinefin::LogLevel> cliLogLevel;
+    if (parser.isSet(QStringLiteral("log-level"))) {
+        cliLogLevel = Kinefin::parseLogLevel(parser.value(QStringLiteral("log-level")));
+        if (!cliLogLevel) {
+            qCritical("Unknown log level");
+            return 2;
+        }
+    }
+
+    QString profileError;
+    if (!Kinefin::ensureDefaultProfileIndex(&profileError)) {
+        QTextStream(stderr) << "kinefin: " << profileError << Qt::endl;
+        return 1;
+    }
+    // The profile commands run before the single-instance service: they work while the app is open.
+    {
+        QTextStream out(stdout);
+        QTextStream err(stderr);
+        Kinefin::KWalletTokenStore store;
+        if (const auto exitCode = Kinefin::runProfileCommand(parser, store, out, err))
+            return *exitCode;
+    }
+    const QString profileId = Kinefin::startupProfileId(parser, &profileError);
+    if (profileId.isEmpty()) {
+        QTextStream(stderr) << "kinefin: " << profileError << Qt::endl;
+        return 2;
+    }
+
+    KDBusService service(KDBusService::Unique);
+
+    const auto profileLock = Kinefin::lockProfile(profileId, &profileError);
+    if (!profileLock) {
+        QTextStream(stderr) << "kinefin: " << profileError << Qt::endl;
+        return 1;
+    }
+    Kinefin::ClientSettings settings(Kinefin::ClientSettings::pathForProfile(profileId));
+    const auto settingsLevel = Kinefin::parseLogLevel(
+        settings.value(QStringLiteral("main"), QStringLiteral("logLevel")).toString());
+    // Warnings of the settings constructor (a newer-format file moved aside) precede the log file: they reach stderr only, because the log level is itself a setting.
+    struct LogGuard {
+        ~LogGuard() { Kinefin::removeProfileLog(); }
+    } logGuard;
+    QString logError;
+    if (!Kinefin::installProfileLog(
+            Kinefin::profileLogDirectory(profileId),
+            cliLogLevel.value_or(settingsLevel.value_or(Kinefin::LogLevel::Debug)), &logError))
+        qWarning("No log file for this profile: %s", qPrintable(logError));
+
+    const QString deviceId = Kinefin::profileDeviceId(profileId, &profileError);
+    if (deviceId.isEmpty()) {
+        qCritical("Unable to read the profile: %s", qPrintable(profileError));
+        return 1;
+    }
+    Kinefin::ConnectionController connection(profileId, deviceId, QStringLiteral(KINEFIN_VERSION));
+
+    QQmlApplicationEngine engine;
+    engine.setInitialProperties({{QStringLiteral("connection"), QVariant::fromValue(&connection)}});
+    // Register the KI18n QML context so Main.qml can translate its strings.
+    KLocalization::setupLocalizedContext(&engine);
+    engine.loadFromModule(QStringLiteral("org.kde.kinefin"), QStringLiteral("Main"));
+    if (engine.rootObjects().isEmpty()) {
+        qCritical("Could not load the Kinefin QML shell");
+        return 1;
+    }
+    QObject *root = engine.rootObjects().constFirst();
+    auto showItem = [root](const QString &argument) {
+        const auto itemId = Kinefin::parseItemLink(argument);
+        if (!itemId)
+            return;
+        root->setProperty("requestedItemId", QVariant(*itemId));
+        if (auto *window = qobject_cast<QQuickWindow *>(root)) {
+            window->show();
+            window->raise();
+            window->requestActivate();
+        }
+    };
+    if (!parser.positionalArguments().isEmpty()) {
+        showItem(parser.positionalArguments().first());
+    }
+    QObject::connect(&service, &KDBusService::activateRequested, &app,
+                     [showItem, root](const QStringList &args, const QString &) {
+                         // The forwarded argument list may include argv[0]; ignore unknown
+                         // switches/arguments, and never log inbound URI values or credentials.
+                         for (const QString &argument : args)
+                             showItem(argument);
+                         if (auto *window = qobject_cast<QQuickWindow *>(root)) {
+                             window->show();
+                             window->raise();
+                             window->requestActivate();
+                         }
+                     });
+    return app.exec();
+}

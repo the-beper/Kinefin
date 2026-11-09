@@ -1,0 +1,47 @@
+{
+  "Name": "Kinefin",
+  "MaxStaticBitrate": 1000000000,
+  "MusicStreamingTranscodingBitrate": 1280000,
+  "DirectPlayProfiles": [
+    { "Type": "Audio" },
+    { "Type": "Photo" },
+    { "Type": "Video" }
+  ],
+  "TranscodingProfiles": [
+    { "Type": "Audio" },
+    {
+      "Type": "Video",
+      "Container": "ts",
+      "Protocol": "hls",
+      "AudioCodec": "aac,mp3,ac3,opus,vorbis",
+      "VideoCodec": "h264,mpeg4,mpeg2video",
+      "MaxAudioChannels": "2"
+    },
+    { "Type": "Photo", "Container": "jpeg" }
+  ],
+  "ContainerProfiles": [],
+  "CodecProfiles": [
+    {
+      "Type": "Video",
+      "Conditions": [
+        { "Condition": "NotEquals", "Property": "VideoRangeType", "Value": "DOVI" }
+      ]
+    }
+  ],
+  "SubtitleProfiles": [
+    { "Format": "srt", "Method": "External" },
+    { "Format": "srt", "Method": "Embed" },
+    { "Format": "ass", "Method": "External" },
+    { "Format": "ass", "Method": "Embed" },
+    { "Format": "sub", "Method": "External" },
+    { "Format": "sub", "Method": "Embed" },
+    { "Format": "ssa", "Method": "External" },
+    { "Format": "ssa", "Method": "Embed" },
+    { "Format": "smi", "Method": "External" },
+    { "Format": "smi", "Method": "Embed" },
+    { "Format": "pgssub", "Method": "Embed" },
+    { "Format": "dvdsub", "Method": "Embed" },
+    { "Format": "dvbsub", "Method": "Embed" },
+    { "Format": "pgs", "Method": "Embed" }
+  ]
+}

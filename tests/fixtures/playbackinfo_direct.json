@@ -1,0 +1,55 @@
+{
+  "MediaSources": [
+    {
+      "Id": "c1b2a3d4e5f6071829304a5b6c7d8e9f",
+      "Path": "/data/movies/dune2/Dune.Part.Two.2024.1080p.BluRay.mkv",
+      "Type": "Default",
+      "Protocol": "File",
+      "Container": "mkv,webm",
+      "Size": 22984714240,
+      "RunTimeTicks": 100540000000,
+      "ETag": "dune2-mkv-etag",
+      "Name": "Dune Part Two (2024) 1080p BluRay",
+      "SupportsTranscoding": true,
+      "SupportsDirectStream": true,
+      "SupportsDirectPlay": true,
+      "SupportsProbing": true,
+      "VideoType": "VideoFile",
+      "MediaStreams": [
+        {
+          "Index": 0,
+          "Type": "Video",
+          "Codec": "h264",
+          "BitRate": 18300000,
+          "Width": 1920,
+          "Height": 1080,
+          "AverageFrameRate": 23.976,
+          "RealFrameRate": 23.976,
+          "VideoRange": "SDR",
+          "VideoRangeType": "SDR"
+        },
+        {
+          "Index": 1,
+          "Type": "Audio",
+          "Codec": "dts",
+          "BitRate": 1509000,
+          "Channels": 6,
+          "Language": "eng",
+          "IsDefault": true,
+          "IsExternal": false
+        },
+        {
+          "Index": 2,
+          "Type": "Subtitle",
+          "Codec": "subrip",
+          "Language": "eng",
+          "IsExternal": true,
+          "IsTextSubtitleStream": true,
+          "DeliveryMethod": "External",
+          "DeliveryUrl": "/Videos/c7dd3b1a/Subtitles/2/0/Stream.srt"
+        }
+      ]
+    }
+  ],
+  "PlaySessionId": "b6c7d8e9f0a1b2c3"
+}

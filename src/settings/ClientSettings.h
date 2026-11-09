@@ -1,0 +1,59 @@
+// SPDX-FileCopyrightText: 2026 Kinefin contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+#pragma once
+
+#include <QObject>
+#include <QSet>
+#include <QString>
+#include <QVariant>
+
+#include <memory>
+
+class KConfig;
+
+namespace Kinefin {
+struct DeviceProfileOptions;
+class SettingsSectionModel;
+
+// The client settings of one profile (parity §2), stored in a KConfig file whose groups are the parity sections. Only values that differ from the default are written, and nothing is written until the first change. Every read and write goes through `SettingDefinition`: an unknown key, a hidden key, a value of the wrong type or outside a closed list is refused on write and replaced by the default on read.
+class ClientSettings final : public QObject {
+    Q_OBJECT
+
+  public:
+    static constexpr int kFormatVersion = 1;
+
+    // `path` is the config file. A file written by a newer format version is renamed to `<path>.broken` (replacing an older one) and the settings start from the defaults; if the rename fails nothing is ever written to that file.
+    explicit ClientSettings(const QString &path, QObject *parent = nullptr);
+    ~ClientSettings() override;
+
+    // `<profile data dir>/kinefin.conf`; empty for an invalid profile id.
+    static QString pathForProfile(const QString &profileId);
+
+    [[nodiscard]] QString path() const { return m_path; }
+    // The stored value, or the default when absent or invalid. Invalid QVariant for an unknown key.
+    Q_INVOKABLE QVariant value(const QString &section, const QString &key) const;
+    // Hidden keys can be read by the program but not changed through here; they are only hand-edited.
+    Q_INVOKABLE bool setValue(const QString &section, const QString &key, const QVariant &value);
+    Q_INVOKABLE bool isDefault(const QString &section, const QString &key) const;
+    // The visible settings of one section, owned by this object.
+    Q_INVOKABLE QObject *sectionModel(const QString &section);
+
+    [[nodiscard]] DeviceProfileOptions deviceProfileOptions() const;
+
+  Q_SIGNALS:
+    void valueChanged(const QString &section, const QString &key);
+    // A change is kept in memory but could not be written (read-only file or directory, newer format that could not be moved aside).
+    void saveFailed();
+
+  private:
+    QVariant storedValue(const QString &section, const QString &key) const;
+
+    QString m_path;
+    std::unique_ptr<KConfig>
+        m_config; // null while the file is a newer format that cannot be moved aside
+    QHash<QString, QVariant> m_memory; // values of a session that cannot write
+    QHash<QString, SettingsSectionModel *> m_models;
+    // Keys already reported as invalid, so one bad hand edit logs once.
+    mutable QSet<QString> m_warned;
+};
+} // namespace Kinefin

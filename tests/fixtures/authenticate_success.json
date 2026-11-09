@@ -1,0 +1,26 @@
+{
+  "User": {
+    "Name": "bepi",
+    "Id": "d5ed5d4e2e5447b58e9f2b6f7bd5c96a",
+    "PrimaryImageTag": "tag-avatar-1",
+    "Policy": {
+      "IsAdministrator": false,
+      "EnableMediaPlayback": true,
+      "EnableContentDownloading": true,
+      "EnableSubtitleManagement": false,
+      "EnableSyncTranscoding": true,
+      "AuthenticationProviderId": "Jellyfin.Server.Implementations.Users.DefaultAuthenticationProvider",
+      "PasswordResetProviderId": "Jellyfin.Server.Implementations.Users.DefaultPasswordResetProvider"
+    },
+    "Configuration": { "SubtitleLanguagePreference": "ita", "AudioLanguagePreference": "ita" }
+  },
+  "AccessToken": "f2f4b7c1ee8a4d0bb2a5f9d1f9e0e2ab",
+  "ServerId": "9c076c52ba5340d59f6baf5b57cf0a5e",
+  "SessionInfo": {
+    "Id": "a0b1c2d3e4f5",
+    "UserId": "d5ed5d4e2e5447b58e9f2b6f7bd5c96a",
+    "UserName": "bepi",
+    "Client": "Kinefin",
+    "DeviceName": "kinefin-desktop"
+  }
+}

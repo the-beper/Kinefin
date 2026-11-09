@@ -1,0 +1,172 @@
+name: Release
+
+# Pushing a tag vX.Y.Z builds, verifies and publishes a Flatpak-only release in jobs of one run, all for the same commit (github.sha). Keep this file small and boring: every job rebuilds nothing beyond what CI proved already (ci-gate).
+#
+# validate       the tag names the version of the sources and the commit, which is on main ci-gate        the CI run for that commit, pushed to main, finished green build-flatpak  build and smoke-test the bundle verify         the exact SHA256SUMS publish        draft release, asset, then publish; rebuilds nothing and can be re-run after a failure
+#
+# TODO (before the first release): pin the build image by digest (images.yml, Digest summary) and port KuickShare's signed-OSTree-repository release pipeline in case of self-hosting (Flathub submissions do not need it).
+on:
+  push:
+    tags: ["v*"]
+
+permissions: {}
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+
+      - name: Check the tag, the version and the commit
+        id: check
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          version=$(sed -n 's/^project(kinefin VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
+          [ -n "$version" ] || { echo "no version in CMakeLists.txt" >&2; exit 1; }
+          [ "$RELEASE_TAG" = "v$version" ] || { echo "tag $RELEASE_TAG does not name version $version" >&2; exit 1; }
+          # The commit must be on main (a build of a stray branch is not a release).
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || {
+            echo "$GITHUB_SHA is not on main" >&2; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  ci-gate:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Wait for the CI run of this commit on main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          deadline=$(( $(date +%s) + 1200 ))
+          while :; do
+            state=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&event=push&branch=main&per_page=50" \
+              --jq '.workflow_runs | sort_by(.id) | last | if . == null then "none" else "\(.status) \(.conclusion)" end')
+            echo "CI run of the push of $GITHUB_SHA to main: $state"
+            case $state in
+              "completed success") exit 0 ;;
+              "completed "*) echo "CI failed on this commit: fix it, push to main, and tag the new commit" >&2; exit 1 ;;
+            esac
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "CI has no finished run for the push of this commit to main after 20 minutes: push the commit to main and wait for it, then run this job again" >&2
+              exit 1
+            fi
+            sleep 30
+          done
+
+  build-flatpak:
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      # The flatpak image is private on ghcr: log podman into it with this token.
+      packages: read
+    outputs:
+      # Read by the `verify` job to compare against its downloaded copy.
+      flatpak_sha256: ${{ steps.hash.outputs.flatpak }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      # By digest before the first release too; until pinned, CI tests the image that the fedora45 tag points to now.
+      - name: Pull the build image
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          echo "$GHCR_TOKEN" | podman login ghcr.io -u "${{ github.actor }}" --password-stdin
+          podman pull ghcr.io/the-beper/kinefin-flatpak:fedora45
+          podman tag ghcr.io/the-beper/kinefin-flatpak:fedora45 localhost/kinefin-flatpak:fedora45
+
+      - name: Build the Flatpak
+        run: build/flatpak/build-flatpak.sh
+
+      - name: Smoke test
+        env:
+          KINEFIN_EXPECT_VERSION: ${{ needs.validate.outputs.version }}
+        run: build/flatpak/test-flatpak.sh dist/Kinefin-x86_64.flatpak
+
+      - name: Hash
+        id: hash
+        run: echo "flatpak=$(sha256sum dist/Kinefin-x86_64.flatpak | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: asset-flatpak
+          path: dist/Kinefin-x86_64.flatpak
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
+  verify:
+    needs: [build-flatpak]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: asset-flatpak
+          path: release-assets
+
+      - name: Write and check SHA256SUMS
+        env:
+          EXPECT_SHA256_FLATPAK: ${{ needs.build-flatpak.outputs.flatpak_sha256 }}
+        run: |
+          cd release-assets
+          sha256sum Kinefin-x86_64.flatpak > SHA256SUMS
+          echo "$EXPECT_SHA256_FLATPAK  Kinefin-x86_64.flatpak" | sha256sum -c -
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-assets
+          path: release-assets/*
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
+  publish:
+    needs: [ci-gate, verify]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-assets
+          path: release-assets
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$RELEASE_TAG" release-assets/Kinefin-x86_64.flatpak release-assets/SHA256SUMS \
+            --title "Kinefin ${RELEASE_TAG#v}" --generate-notes
+          gh release edit "$RELEASE_TAG" --draft=false

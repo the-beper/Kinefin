@@ -1,0 +1,21 @@
+{
+  "MediaSources": [
+    {
+      "Id": "c1b2a3d4e5f6071829304a5b6c7d8e9f",
+      "Type": "Default",
+      "Protocol": "File",
+      "Container": "mkv",
+      "Size": 22197875292,
+      "RunTimeTicks": 100540000000,
+      "SupportsTranscoding": false,
+      "SupportsDirectStream": false,
+      "SupportsDirectPlay": false,
+      "RequiresOpening": false,
+      "RequiresClosing": false,
+      "SupportsProbing": true,
+      "TranscodingSubProtocol": "http",
+      "RequiredHttpHeaders": {}
+    }
+  ],
+  "PlaySessionId": "b6c7d8e9f0a1b2c3"
+}

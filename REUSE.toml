@@ -1,0 +1,17 @@
+# SPDX-FileCopyrightText: 2026 Kinefin contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+version = 1
+
+# The tracked first-party source, docs and repository automation are GPL-3.0-or-later. Existing in-file copyright/license markers are aggregated, not overwritten
+[[annotations]]
+path = "**"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Kinefin contributors"
+SPDX-License-Identifier = "GPL-3.0-or-later"
+
+# AppStream metadata is explicitly CC0 (see metadata_license in XML)
+[[annotations]]
+path = "data/io.github.the_beper.Kinefin.metainfo.xml"
+precedence = "override"
+SPDX-FileCopyrightText = "2026 Kinefin contributors"
+SPDX-License-Identifier = "CC0-1.0"

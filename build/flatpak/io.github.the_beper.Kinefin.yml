@@ -1,0 +1,175 @@
+app-id: io.github.the_beper.Kinefin
+runtime: org.kde.Platform
+runtime-version: "6.11"
+sdk: org.kde.Sdk
+command: kinefin
+finish-args:
+  # Wayland only: the desktop session is Wayland on every target platform (Fedora GNOME is Wayland-only since 43, Plasma dropped its X11 session upstream in 6.8; there is no fallback-x11 socket on purpose, see docs/feature-parity.md §11).
+  - --socket=wayland
+  # Audio passthrough/normalization/explicit device output through PipeWire/Pulse.
+  - --socket=pulseaudio
+  - --share=network
+  - --device=dri
+  - --device=input
+  # Single instance (KDBusService): the base name and any numbered variant share this prefix.
+  - --own-name=io.github.the_beper.Kinefin.*
+  - --own-name=io.github.the_beper.Kinefin
+  # MPRIS; the player suffixes the per-profile variant (parity: upstream appends .profile_<id>).
+  - --own-name=org.mpris.MediaPlayer2.Kinefin.*
+  # Inhibit the screensaver while playing, and release it otherwise (org.freedesktop.ScreenSaver).
+  - --talk-name=org.freedesktop.ScreenSaver
+  # P7 download policy observes the read-only Metered property. No NM control actions.
+  - --system-talk-name=org.freedesktop.NetworkManager
+  # The access tokens live in the user's KWallet (KWalletTokenStore): the daemon is the only way to them from the sandbox, and there is no plaintext fallback.
+  - --talk-name=org.kde.kwalletd6
+  # The power actions of the host commands (parity of "Power options").
+  - --system-talk-name=org.freedesktop.login1
+  # Portals: the browser links (server web UI, externallinks) and the folder picker of the download export (a per-folder Document-portal grant, never a --filesystem=home).
+  # TODO (P10b, docs/cast-research.md): --system-talk-name=org.freedesktop.Avahi lands here only
+  # when the Google Cast stage needs mDNS discovery (DLNA stage discovers via SSDP, no grant needed).
+  - --talk-name=org.freedesktop.portal.Desktop
+# xdg-download is not needed: downloads live inside the sandbox and reach a host folder only through a portal grant (§10 of the parity doc).
+
+cleanup:
+  - /include
+  - /lib/pkgconfig
+  - /lib/cmake
+  - '*.a'
+  - '*.la'
+  - /share/man
+  - /share/doc
+modules:
+  - name: libmpv
+    buildsystem: meson
+    config-opts:
+      - -Dalsa=disabled
+      - -Dbuild-date=false
+      - -Ddebug=false
+      - -Dlibmpv=true
+      # Wayland-only build: no x11 backends, hence no libXpresent; Lua is unused by our player (no osc/scripts are loaded from libmpv) so the luajit module is not built either.
+      - -Dlua=disabled
+      - -Dwayland=enabled
+      - -Dx11=disabled
+      - -Dmanpage-build=disabled
+    cleanup:
+      - /share/applications
+      - /share/bash-completion
+      - /share/doc
+      - /share/fish
+      - /share/icons
+      - /share/zsh
+    # The module chain (libplacebo, libass, uchardet) and the pins follow the upstream Flathub recipe of Jellyfin Desktop (flathub/org.jellyfin.JellyfinDesktop), minus its X11 parts:
+    # Kinefin plays through the same libmpv, built Wayland-only.
+    sources:
+      - type: archive
+        url: https://github.com/mpv-player/mpv/archive/refs/tags/v0.42.0.tar.gz
+        sha256: bcfebbfa2b65a6d88dc97ea18117831072373e38b5785a2afb874ed4df5070dd
+        x-checker-data:
+          type: anitya
+          project-id: 5348
+          stable-only: true
+          url-template: https://github.com/mpv-player/mpv/archive/refs/tags/v$version.tar.gz
+    modules:
+      - name: libplacebo
+        buildsystem: meson
+        config-opts:
+          - -Ddemos=false
+        cleanup:
+          - /include
+          - /lib/pkgconfig
+        sources:
+          - type: git
+            url: https://github.com/haasn/libplacebo.git
+            tag: v7.387.0
+            commit: 275f7dea27924cdd34ab2e6c20e448b6bc4fab65
+            x-checker-data:
+              type: git
+              tag-pattern: ^v([\d.]+)$
+      - name: libass
+        config-opts:
+          - --disable-static
+          - --enable-asm
+          - --enable-harfbuzz
+          - --enable-fontconfig
+        sources:
+          - type: archive
+            url: https://github.com/libass/libass/releases/download/0.17.5/libass-0.17.5.tar.gz
+            sha256: caab4b993dd7be6187c55623b789ed75dddefea6e65938af134637c732fe094a
+
+      - name: uchardet
+        buildsystem: cmake-ninja
+        config-opts:
+          - -DCMAKE_BUILD_TYPE=Release
+          - -DBUILD_STATIC=0
+          - -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+        cleanup:
+          - /bin
+        sources:
+          - type: archive
+            url: https://www.freedesktop.org/software/uchardet/releases/uchardet-0.0.8.tar.xz
+            sha256: e97a60cfc00a1c147a674b097bb1422abd9fa78a2d9ce3f3fdcc2e78a34ac5f0
+            x-checker-data:
+              type: anitya
+              project-id: 9265
+              stable-only: true
+              url-template: https://www.freedesktop.org/software/uchardet/releases/uchardet-$version.tar.xz
+
+  # TODO (P6, docs/plan.md): add the libkscreen module (mode switching, parity §5) and, if the
+  # first release keeps gamepads, an SDL3 module — neither ships in org.kde.Sdk.
+  # mpvqt is NOT a standalone module: the app's root CMakeLists vendors it via FetchContent
+  # and the build sandbox has no network to fetch with, so the kinefin module below carries
+  # the exact pinned tarball as a local file source (downloaded by flatpak-builder on the
+  # host) and points the KINEFIN_MPVQT_URL cache var at it. Building it as a module would be
+  # pointless anyway: the manifest's global cleanup removes /include and /lib/cmake, so an
+  # app-side find_package(MpvQt) could never see it.
+
+  # Qt6::WebSockets is not in org.kde.Platform 6.11 (verified live: no libQt6WebSockets on
+  # 2026-11-08) nor in org.kde.Sdk, so the build must produce it for the app's own /app prefix.
+  # The runtime's Qt is exactly 6.11.2: the module's own find_package refuses 6.11.3 against
+  # it (observed in the first Flatpak round), so the pin is the matching patch release.
+  - name: qtwebsockets
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DQT_BUILD_EXAMPLES=OFF
+      - -DQT_DISABLE_INTERNAL_DOCGEN=ON
+    cleanup:
+      - /share
+    sources:
+      - type: git
+        url: https://github.com/qt/qtwebsockets.git
+        tag: v6.11.2
+        commit: 3eab06de7076a83514e98c2403baa433d137b013
+
+  - name: kinefin
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DBUILD_TESTING=OFF
+      # Vendored mpvqt (the file source below): subproject pinned by both the
+      # flatpak-builder source hash and CMake's URL_HASH. FetchContent adds it with
+      # install rules suppressed, so nothing from mpvqt lands in /app at all.
+      - -DKINEFIN_MPVQT_URL=file:///run/build/kinefin/mpvqt-1.2.1.tar.xz
+    # The translations are compiled by the CMake install (ECM PO), no extra step needed here.
+    # The scalable SVG stays for native installs, but appstreamcli compose (glycin) fails on SVG icons, so the Flatpak icon bundle must be pure raster: the SVG is removed from the /app icon tree only in this context.
+    post-install:
+      - rm -f /app/share/icons/hicolor/scalable/apps/io.github.the_beper.Kinefin.svg
+    sources:
+      # CI and local builds build this checkout (dev scaffold; switched to type: git once tagged).
+      - type: dir
+        path: ../..
+        skip: [.git, dist]
+        # For Flathub submissions the source switches to the release tag:
+        # - type: git url: https://github.com/the-beper/Kinefin.git tag: vX.Y.Z x-checker-data:
+        # type: git tag-pattern: ^v([\d.]+)$
+      # The exact mpvqt the engine vendors: copied into /run/build/kinefin, and only
+      # read there (the configure-time FetchContent never needs the network from the
+      # sandbox).
+      - type: file
+        url: https://download.kde.org/stable/mpvqt/mpvqt-1.2.1.tar.xz
+        sha256: 6ff5f56a0edd8248073446e5cc038f47d4b17c46b6af43cf438123d0ac911189
+        dest-filename: mpvqt-1.2.1.tar.xz
+        x-checker-data:
+          type: anitya
+          project-id: 370634
+          url-template: https://download.kde.org/stable/mpvqt/mpvqt-$version.tar.xz

@@ -1,0 +1,12 @@
+/dist/
+/docwork/
+__pycache__/
+**/*.pyc
+*~
+.#*
+/.vscode/
+/po/kinefin.pot
+/temp/
+/.cache/
+
+/docs/

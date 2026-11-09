@@ -1,0 +1,30 @@
+# Kinefin C++ formatting: LLVM with Qt-like knobs (4-space indent, function braces on their own line, other braces attached, operators leading continuation lines). The check gate (build/check.sh) fails on drift, so format before commit: clang-format -i <files>. The build image's clang-format has no "Qt" preset, hence the explicit knobs
+BasedOnStyle: LLVM
+IndentWidth: 4
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterFunction: true
+BreakBeforeBinaryOperators: NonAssignment
+ReflowComments: Never
+ColumnLimit: 100
+Standard: c++20
+
+SortIncludes: CaseSensitive
+IncludeCategories:
+  # Qt public headers
+  - Regex: '<(Q[A-Za-z]|qt[a-z])'
+    Priority: 1
+  # KDE frameworks
+  - Regex: '<(K[A-Za-z]|klocalized[a-z_]*\.h)'
+    Priority: 2
+  # mpv / mpvqt
+  - Regex: '^(<mpv|["<](mpv/MpvQt|MpvQt))'
+    Priority: 3
+  # our own headers
+  - Regex: '^["<](src/kinefin|\./|\.\./)'
+    Priority: 4
+
+PointerAlignment: Right
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortCaseLabelsOnASingleLine: false

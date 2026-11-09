@@ -1,0 +1,190 @@
+name: CI
+
+# Pull requests, pushes to main and manual runs. Tags do not run it again: a release needs the `required` job green on its commit (release.yml, ci-gate). There is no path filter on the triggers (a skipped workflow would leave a required check pending): the `changes` job decides what runs, and `required` checks that every skip was intended.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+# Only a pull request cancels its older run (per ref); runs on main and manual runs always finish.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # Which jobs the change needs (build/ci/changes.sh). Main and manual runs always run everything.
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      code: ${{ steps.changes.outputs.code }}
+      packaging: ${{ steps.changes.outputs.packaging }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Select the jobs
+        id: changes
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: build/ci/changes.sh
+
+  lint:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      ACTIONLINT_VERSION: "1.7.12"
+      # From the release's own checksums file (actionlint_1.7.12_checksums.txt), linux amd64 tarball.
+      ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: shellcheck
+        run: |
+          shellcheck --version
+          find build scripts po \( -name '*.sh' -o -name '*.hook' \) -print0 | xargs -0 shellcheck --severity=warning
+
+      - name: Install actionlint
+        run: |
+          dir="$RUNNER_TEMP/actionlint"
+          mkdir -p "$dir"
+          tarball="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -fsSL -o "$dir/$tarball" "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/$tarball"
+          echo "$ACTIONLINT_SHA256  $dir/$tarball" | sha256sum -c -
+          tar -xzf "$dir/$tarball" -C "$dir" actionlint
+          echo "$dir" >> "$GITHUB_PATH"
+
+      - name: actionlint
+        run: actionlint -color
+
+  check:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      # The build image is private on ghcr: reading it needs this token.
+      packages: read
+    container:
+      image: ghcr.io/the-beper/kinefin-build:fedora45
+      # Without credentials the pull is anonymous, and ghcr answers 403 for a private image.
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Checks
+        run: build/check.sh
+
+  flatpak:
+    needs: changes
+    if: needs.changes.outputs.packaging == 'true'
+    # Pinned runner image, as the release's build-flatpak: the same podman, flatpak and ostree.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      # The flatpak image is private on ghcr: log podman into it with this token.
+      packages: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # On the plain runner, as the release's build job: the scripts run the image from images.yml with rootless podman (no job container, no --privileged). The release pins the image by digest; CI tests the one the tag points to now.
+      - name: Pull the build image
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          echo "$GHCR_TOKEN" | podman login ghcr.io -u "${{ github.actor }}" --password-stdin
+          podman pull ghcr.io/the-beper/kinefin-flatpak:fedora45
+          podman tag ghcr.io/the-beper/kinefin-flatpak:fedora45 localhost/kinefin-flatpak:fedora45
+
+      - name: Build Flatpak
+        run: build/flatpak/build-flatpak.sh
+
+      - name: Smoke test (mandatory after packaging succeeds)
+        run: build/flatpak/test-flatpak.sh dist/Kinefin-x86_64.flatpak
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: Kinefin-x86_64.flatpak
+          path: dist/Kinefin-x86_64.flatpak
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 0
+
+  # The one check to require (branch protection and the release gate): green only when every job that had to run succeeded. A job that was skipped because the change did not need it counts as done; any other skip, failure or cancellation fails it.
+  required:
+    if: always()
+    needs: [changes, lint, check, flatpak]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    env:
+      NEEDS: ${{ toJSON(needs) }}
+      EVENT_NAME: ${{ github.event_name }}
+    steps:
+      - name: Verify the results
+        run: |
+          python3 -I - <<'PY'
+          import json, os, sys
+
+          needs = json.loads(os.environ["NEEDS"])
+          # job -> the `changes` output that makes it mandatory (None: always)
+          flag_of = {
+              "lint": None,
+              "check": "code",
+              "flatpak": "packaging",
+          }
+
+          changes = needs.get("changes", {})
+          flags = changes.get("outputs") or {}
+          failed = False
+          rows = []
+
+          result = changes.get("result", "missing")
+          failed = failed or result != "success"
+          rows.append(("changes", result, "yes", "ok" if result == "success" else "FAIL"))
+
+          for job, flag in flag_of.items():
+              result = needs.get(job, {}).get("result", "missing")
+              if flag is None:
+                  wanted = True
+              elif flags.get(flag) in ("true", "false"):
+                  wanted = flags[flag] == "true"
+              else:
+                  rows.append((job, result, "?", "FAIL (changes gave no '%s' flag)" % flag))
+                  failed = True
+                  continue
+              if result == "success":
+                  verdict = "ok"
+              elif result == "skipped" and not wanted:
+                  verdict = "skipped on purpose"
+              else:
+                  verdict = "FAIL"
+                  failed = True
+              rows.append((job, result, "yes" if wanted else "no", verdict))
+
+          print("%-10s %-10s %-7s %s" % ("job", "result", "needed", "verdict"))
+          for row in rows:
+              print("%-10s %-10s %-7s %s" % row)
+          sys.exit(1 if failed else 0)
+          PY

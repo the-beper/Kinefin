@@ -1,0 +1,8 @@
+# Line endings are always LF in this Linux-only tree; git keeps the worktree and the index identical.
+* text=auto eol=lf
+
+# Binary files (never mangled by line-ending logic or diffs).
+*.png binary
+*.jpg binary
+*.xz binary
+*.gz binary

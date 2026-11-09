@@ -1,0 +1,32 @@
+{
+  "Items": [
+    {
+      "Name": "Arcturus (2012)",
+      "Id": "f0e1d2c3b4a5968778695a4b3c2d1e0f",
+      "Type": "Movie",
+      "Container": "mkv",
+      "ProductionYear": 2012,
+      "RunTimeTicks": 10800000000,
+      "Overview": "A survey ship answers a distress call nobody sent — in widescreen.",
+      "Genres": ["Science Fiction", "Mystery"],
+      "CommunityRating": 7.1,
+      "OfficialRating": "PG-13",
+      "UserData": { "Key": "arcturus", "Played": false, "PlaybackPositionTicks": 2340000000, "PlayCount": 0 },
+      "ImageTags": { "Primary": "arcturus-primary", "Backdrop": "arcturus-backdrop" },
+      "MediaSources": [
+        {
+          "Id": "ms-arcturus-0001",
+          "Path": "/data/arcturus/Arcturus.2012.1080p.mkv",
+          "Type": "Default",
+          "Container": "mkv",
+          "Size": 10148168896,
+          "SupportsDirectPlay": true,
+          "SupportsDirectStream": true,
+          "SupportsTranscoding": true
+        }
+      ]
+    }
+  ],
+  "StartIndex": 0,
+  "TotalRecordCount": 1
+}

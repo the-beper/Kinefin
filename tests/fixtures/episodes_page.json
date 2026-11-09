@@ -1,0 +1,33 @@
+{
+  "Items": [
+    {
+      "Name": "S02E05 - The Silent Sea",
+      "SeriesName": "Abyss Station",
+      "Id": "b1b2c3d4e5f64788990a1b2c3d4e5f60",
+      "SeriesId": "aa11bb22cc33dd44ee55ff6677889900",
+      "SeasonId": "11aa22bb33cc44dd55ee66ff778899aa",
+      "ParentIndexNumber": 2,
+      "IndexNumber": 5,
+      "Container": "mkv",
+      "PremiereDate": "2026-03-18T20:00:00Z",
+      "RunTimeTicks": 17400000000,
+      "UserData": { "Key": "ep5", "Played": false, "PlaybackPositionTicks": 0, "UnplayedItemCount": 1 },
+      "ImageTags": { "Primary": "ep5-primary-tag" },
+      "MediaSources": [
+        {
+          "Id": "ms-ep5-0001",
+          "Path": "/data/series/Abyss Station/Season 02/Abyss.Station.S02E05.mkv",
+          "Type": "Default",
+          "Container": "mkv",
+          "Size": 14284910899,
+          "SupportsDirectPlay": true,
+          "SupportsDirectStream": true,
+          "SupportsTranscoding": true,
+          "IsInfiniteStream": false
+        }
+      ]
+    }
+  ],
+  "StartIndex": 4,
+  "TotalRecordCount": 12
+}

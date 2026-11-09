@@ -1,0 +1,6 @@
+{
+  "PlayableMediaTypes": ["Video"],
+  "SupportedCommands": [],
+  "SupportsMediaControl": false,
+  "SupportsPersistentIdentifier": true
+}
