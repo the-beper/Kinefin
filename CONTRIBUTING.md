@@ -15,7 +15,7 @@ A scaffold-forward project of one developer. These are the real rules; the layou
 | `po/` | Gettext: `LINGUAS`, `POTFILES.in`, `extract.sh`, per-language catalogs |
 | `src/api/` | Jellyfin REST client (auth, discovery, device profile, media sources, reporting) |
 | `src/downloads/` | Not started: download queue, tracked-series auto rules, portal export (feature doc: parity §10) |
-| `src/app/` | `ConnectionController`: the one object the QML pages talk to (servers, sign-in, Quick Connect, session restore) |
+| `src/app/` | `ConnectionController`: the one object the QML pages talk to (servers, sign-in, Quick Connect, session restore); profile commands and logging; `ClientSettingsQml.h`, which exposes the settings object to QML |
 | `src/player/` | Playback session state machine, server reporting (`PlaybackReporter`) and the mpv engine (`PlaybackEngine`); property mapping and subtitles come later |
 | `src/integration/` | Safe `jellyfin://` link parser; MPRIS, screensaver/power, Wayland/libkscreen display switching, SDL3/optional CEC input |
 | `src/settings/` | Profile index and identity, server credentials, KConfig client settings (`SettingDefinitions`, `ClientSettings`, `SettingsSectionModel`) |
@@ -53,7 +53,7 @@ build/build-env.sh build/check.sh
 python3 scripts/po.py status        # 0 pending per language
 ```
 
-`tests/test_kwallet_host.cpp` runs against the session's real KWallet and is skipped unless `KINEFIN_TEST_KWALLET=1`; the command is in the plan's "KWallet host checks". Run it before proposing a commit. Shell scripts (`build/`, `scripts/`, `po/`) are shellcheck-clean (`--severity=warning`); C++ code follows the Qt-like style of `.clang-format` (LLVM base with explicit knobs: the image's clang-format has no `Qt` preset) (`clang-format -i <files>` before proposing — the image gate fails on drift; `.editorconfig` governs the non-C++ text files).
+`tests/shell_smoke.py` starts the binary offscreen three times (Servers, then Settings and About through the `KINEFIN_START_PAGE` start-up hook) and fails on any QML problem. `tests/test_kwallet_host.cpp` runs against the session's real KWallet and is skipped unless `KINEFIN_TEST_KWALLET=1`; the command is in the plan's "KWallet host checks". Run it before proposing a commit. Shell scripts (`build/`, `scripts/`, `po/`) are shellcheck-clean (`--severity=warning`); C++ code follows the Qt-like style of `.clang-format` (LLVM base with explicit knobs: the image's clang-format has no `Qt` preset) (`clang-format -i <files>` before proposing — the image gate fails on drift; `.editorconfig` governs the non-C++ text files).
 
 ## Flatpak
 

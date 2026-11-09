@@ -38,6 +38,11 @@ int main(int argc, char *argv[])
     // service name becomes io.github.the_beper.kinefin (wrong case).
     aboutData.setOrganizationDomain(QByteArrayLiteral("the_beper.github.io"));
     aboutData.setDesktopFileName(QStringLiteral("io.github.the_beper.Kinefin"));
+    aboutData.setShortDescription(i18n("A native Jellyfin client for KDE Plasma"));
+    aboutData.setLicense(KAboutLicense::GPL_V3);
+    aboutData.setCopyrightStatement(QStringLiteral("© 2026 Kinefin contributors"));
+    aboutData.setHomepage(QStringLiteral("https://github.com/the-beper/Kinefin"));
+    aboutData.setBugAddress("https://github.com/the-beper/Kinefin/issues");
     KAboutData::setApplicationData(aboutData);
 
     QCommandLineParser parser;
@@ -51,8 +56,21 @@ int main(int argc, char *argv[])
         {QStringLiteral("log-level"),
          QStringLiteral("Log level of the log file: debug, info, warn, error, fatal or disable."),
          QStringLiteral("level")});
+    parser.addOption({QStringLiteral("fullscreen"), QStringLiteral("Start in full screen.")});
+    parser.addOption({QStringLiteral("windowed"), QStringLiteral("Start in a window.")});
+    parser.addOption(
+        {QStringLiteral("desktop"), QStringLiteral("Start the desktop interface (the only one).")});
+    parser.addOption({QStringLiteral("tv"), QStringLiteral("Not supported.")});
     Kinefin::addProfileOptions(parser);
     parser.process(app);
+    if (parser.isSet(QStringLiteral("tv"))) {
+        qCritical("The TV interface is not supported");
+        return 2;
+    }
+    if (parser.isSet(QStringLiteral("fullscreen")) && parser.isSet(QStringLiteral("windowed"))) {
+        qCritical("--fullscreen and --windowed exclude each other");
+        return 2;
+    }
     if (parser.positionalArguments().size() > 1) {
         qCritical("Only one URL can be handled at startup");
         return 2;
@@ -118,7 +136,16 @@ int main(int argc, char *argv[])
     Kinefin::ConnectionController connection(profileId, deviceId, QStringLiteral(KINEFIN_VERSION));
 
     QQmlApplicationEngine engine;
-    engine.setInitialProperties({{QStringLiteral("connection"), QVariant::fromValue(&connection)}});
+    // "fullscreen" or "windowed" when a flag decides this run; empty to follow the setting.
+    const QString windowMode =
+        parser.isSet(QStringLiteral("fullscreen")) ? QStringLiteral("fullscreen")
+        : parser.isSet(QStringLiteral("windowed")) ? QStringLiteral("windowed")
+                                                   : QString();
+    engine.setInitialProperties(
+        {{QStringLiteral("connection"), QVariant::fromValue(&connection)},
+         {QStringLiteral("settings"), QVariant::fromValue(&settings)},
+         {QStringLiteral("startupWindowMode"), windowMode},
+         {QStringLiteral("startupPage"), qEnvironmentVariable("KINEFIN_START_PAGE")}});
     // Register the KI18n QML context so Main.qml can translate its strings.
     KLocalization::setupLocalizedContext(&engine);
     engine.loadFromModule(QStringLiteral("org.kde.kinefin"), QStringLiteral("Main"));

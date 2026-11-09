@@ -3,6 +3,7 @@
 #pragma once
 
 #include <QObject>
+#include <QRect>
 #include <QSet>
 #include <QString>
 #include <QVariant>
@@ -13,6 +14,7 @@ class KConfig;
 
 namespace Kinefin {
 struct DeviceProfileOptions;
+struct SettingDefinition;
 class SettingsSectionModel;
 
 // The client settings of one profile (parity §2), stored in a KConfig file whose groups are the parity sections. Only values that differ from the default are written, and nothing is written until the first change. Every read and write goes through `SettingDefinition`: an unknown key, a hidden key, a value of the wrong type or outside a closed list is refused on write and replaced by the default on read.
@@ -21,6 +23,8 @@ class ClientSettings final : public QObject {
 
   public:
     static constexpr int kFormatVersion = 1;
+    static constexpr int kMinimumWindowSize = 200;
+    static constexpr int kMaximumWindowSize = 32000;
 
     // `path` is the config file. A file written by a newer format version is renamed to `<path>.broken` (replacing an older one) and the settings start from the defaults; if the rename fails nothing is ever written to that file.
     explicit ClientSettings(const QString &path, QObject *parent = nullptr);
@@ -38,6 +42,10 @@ class ClientSettings final : public QObject {
     // The visible settings of one section, owned by this object.
     Q_INVOKABLE QObject *sectionModel(const QString &section);
 
+    // The window geometry of the last session (`state.geometry`, parity §2.6): a hidden key with its own accessors because the settings page never shows it. Empty when nothing usable is stored.
+    Q_INVOKABLE QRect windowGeometry() const;
+    Q_INVOKABLE void setWindowGeometry(const QRect &geometry);
+
     [[nodiscard]] DeviceProfileOptions deviceProfileOptions() const;
 
   Q_SIGNALS:
@@ -46,6 +54,8 @@ class ClientSettings final : public QObject {
     void saveFailed();
 
   private:
+    bool store(const SettingDefinition &definition, const QVariant &checked,
+               bool reportFailure = true);
     QVariant storedValue(const QString &section, const QString &key) const;
 
     QString m_path;

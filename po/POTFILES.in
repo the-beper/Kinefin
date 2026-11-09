@@ -3,8 +3,10 @@
 # The check gate requires every i18n-bearing source to be listed; entries below are
 # extracted with xgettext and compared against the committed catalogs.
 src/app/ConnectionController.cpp
+src/main.cpp
 src/settings/SettingDefinitions.cpp
 src/qml/HomePage.qml
 src/qml/LoginPage.qml
 src/qml/Main.qml
 src/qml/ServersPage.qml
+src/qml/SettingsPage.qml

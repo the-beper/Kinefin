@@ -21,4 +21,15 @@ std::optional<QString> parseItemLink(const QString &input)
     }
     return path.mid(1).toLower();
 }
+
+std::optional<QUrl> parseWebLink(const QString &input)
+{
+    const QUrl url(input, QUrl::StrictMode);
+    const QString scheme = url.scheme();
+    if (!url.isValid() || (scheme != QLatin1String("http") && scheme != QLatin1String("https"))
+        || url.host().isEmpty() || !url.userInfo().isEmpty()) {
+        return std::nullopt;
+    }
+    return url;
+}
 } // namespace Kinefin

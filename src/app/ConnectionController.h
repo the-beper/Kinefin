@@ -71,6 +71,8 @@ class ConnectionController : public QObject {
     Q_INVOKABLE void reloadLibraries();
     // Removes a stored server; signs out first when it is the active one.
     Q_INVOKABLE void removeServer(const QString &serverId);
+    // Opens the active server's own web interface in the host browser (the app's one action for everything server-side). False when there is no server or its address is not an http(s) link.
+    Q_INVOKABLE bool openServerWebInterface() const;
 
   Q_SIGNALS:
     void stateChanged();

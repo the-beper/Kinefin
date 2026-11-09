@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "ConnectionController.h"
 
+#include <QDesktopServices>
 #include <QHostAddress>
 #include <QJsonArray>
 #include <QJsonObject>
@@ -9,6 +10,7 @@
 #include <QUrl>
 #include <KLocalizedString>
 
+#include "integration/LinkRouter.h"
 #include "settings/KWalletTokenStore.h"
 
 namespace Kinefin {
@@ -189,6 +191,12 @@ void ConnectionController::signOut()
     refreshServers();
     setError({});
     setState(Idle);
+}
+
+bool ConnectionController::openServerWebInterface() const
+{
+    const auto link = parseWebLink(m_serverUrl);
+    return link && QDesktopServices::openUrl(*link);
 }
 
 void ConnectionController::removeServer(const QString &serverId)

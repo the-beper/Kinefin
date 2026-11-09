@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: kinefin 0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-11-09 19:26+0000\n"
+"POT-Creation-Date: 2026-11-09 21:35+0000\n"
 "PO-Revision-Date: 2026-11-07 00:00+0000\n"
 "Last-Translator: the-beper\n"
 "Language: en\n"
@@ -12,7 +12,7 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-#: src/app/ConnectionController.cpp:42
+#: src/app/ConnectionController.cpp:44
 msgid ""
 "Could not save the session in KWallet. You will have to sign in again next "
 "time"
@@ -20,27 +20,27 @@ msgstr ""
 "Could not save the session in KWallet. You will have to sign in again next "
 "time"
 
-#: src/app/ConnectionController.cpp:84
+#: src/app/ConnectionController.cpp:86
 msgid "The device identity of this profile is invalid"
 msgstr "The device identity of this profile is invalid"
 
-#: src/app/ConnectionController.cpp:88
+#: src/app/ConnectionController.cpp:90
 msgid "Enter a valid server address"
 msgstr "Enter a valid server address"
 
-#: src/app/ConnectionController.cpp:141
+#: src/app/ConnectionController.cpp:143
 msgid "Enter a username and a password"
 msgstr "Enter a username and a password"
 
-#: src/app/ConnectionController.cpp:153
+#: src/app/ConnectionController.cpp:155
 msgid "Quick Connect is not available"
 msgstr "Quick Connect is not available"
 
-#: src/app/ConnectionController.cpp:228
+#: src/app/ConnectionController.cpp:236
 msgid "Your session has expired. Sign in again"
 msgstr "Your session has expired. Sign in again"
 
-#: src/app/ConnectionController.cpp:237
+#: src/app/ConnectionController.cpp:245
 msgid ""
 "Could not reach a Jellyfin server. Check the address and your network "
 "connection"
@@ -48,25 +48,29 @@ msgstr ""
 "Could not reach a Jellyfin server. Check the address and your network "
 "connection"
 
-#: src/app/ConnectionController.cpp:241
+#: src/app/ConnectionController.cpp:249
 msgid "Wrong username or password"
 msgstr "Wrong username or password"
 
-#: src/app/ConnectionController.cpp:242
+#: src/app/ConnectionController.cpp:250
 msgid "Signing in failed. Try again, or check the server"
 msgstr "Signing in failed. Try again, or check the server"
 
-#: src/app/ConnectionController.cpp:247
+#: src/app/ConnectionController.cpp:255
 msgid "Quick Connect is not available on this server"
 msgstr "Quick Connect is not available on this server"
 
-#: src/app/ConnectionController.cpp:248
+#: src/app/ConnectionController.cpp:256
 msgid "Quick Connect failed or expired. Start it again"
 msgstr "Quick Connect failed or expired. Start it again"
 
-#: src/app/ConnectionController.cpp:255
+#: src/app/ConnectionController.cpp:263
 msgid "Could not load the libraries. Try again"
 msgstr "Could not load the libraries. Try again"
+
+#: src/main.cpp:41
+msgid "A native Jellyfin client for KDE Plasma"
+msgstr "A native Jellyfin client for KDE Plasma"
 
 #: src/settings/SettingDefinitions.cpp:26
 msgid "Full Screen"
@@ -180,7 +184,7 @@ msgstr "Deinterlace"
 msgid "Display Refresh Rate Sync"
 msgstr "Display Refresh Rate Sync"
 
-#: src/settings/SettingDefinitions.cpp:303
+#: src/settings/SettingDefinitions.cpp:303 src/qml/SettingsPage.qml:18
 msgid "Audio"
 msgstr "Audio"
 
@@ -329,7 +333,7 @@ msgstr "Font"
 msgid "Manual MPV Configuration"
 msgstr "Manual MPV Configuration"
 
-#: src/qml/HomePage.qml:15 src/qml/Main.qml:64
+#: src/qml/HomePage.qml:15 src/qml/Main.qml:128
 msgid "Home"
 msgstr "Home"
 
@@ -406,21 +410,39 @@ msgstr "Waiting for approval…"
 msgid "Cancel"
 msgstr "Cancel"
 
-#: src/qml/Main.qml:70
+#: src/qml/Main.qml:42
+msgid ""
+"The settings could not be saved: check the free space and the permissions of "
+"the profile folder. Changes last until Kinefin closes"
+msgstr "The settings could not be saved: check the free space and the permissions of the profile folder. Changes last until Kinefin closes"
+
+#: src/qml/Main.qml:134
 msgid "Switch Server"
 msgstr "Switch Server"
 
-#: src/qml/Main.qml:76
+#: src/qml/Main.qml:140
 msgid "Sign Out"
 msgstr "Sign Out"
 
-#: src/qml/Main.qml:82 src/qml/Main.qml:96
+#: src/qml/Main.qml:146
+msgid "Open Server Web Interface"
+msgstr "Open Server Web Interface"
+
+#: src/qml/Main.qml:151
+msgid "The server web interface could not be opened: check the default browser"
+msgstr "The server web interface could not be opened: check the default browser"
+
+#: src/qml/Main.qml:155 src/qml/SettingsPage.qml:14
 msgid "Settings"
 msgstr "Settings"
 
-#: src/qml/Main.qml:100
-msgid "Settings are not available yet"
-msgstr "Settings are not available yet"
+#: src/qml/Main.qml:160
+msgid "About Kinefin"
+msgstr "About Kinefin"
+
+#: src/qml/Main.qml:165
+msgid "Quit"
+msgstr "Quit"
 
 #: src/qml/ServersPage.qml:15
 msgid "Servers"
@@ -487,3 +509,19 @@ msgstr "Server address"
 #: src/qml/ServersPage.qml:151
 msgid "Connecting…"
 msgstr "Connecting…"
+
+#: src/qml/SettingsPage.qml:17
+msgid "General"
+msgstr "General"
+
+#: src/qml/SettingsPage.qml:19
+msgid "Video"
+msgstr "Video"
+
+#: src/qml/SettingsPage.qml:20
+msgid "Subtitles"
+msgstr "Subtitles"
+
+#: src/qml/SettingsPage.qml:21
+msgid "mpv"
+msgstr "mpv"

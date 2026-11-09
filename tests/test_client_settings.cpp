@@ -294,6 +294,50 @@ class TestClientSettings : public QObject {
         QVERIFY(!fromSettings.forceTranscodeDovi);
         QCOMPARE(fromSettings.channels, QStringLiteral("auto"));
     }
+
+    void windowGeometryRoundTripsAndStaysOutOfTheSettingsPage()
+    {
+        {
+            ClientSettings settings(path());
+            QVERIFY(settings.windowGeometry().isEmpty());
+            settings.setWindowGeometry(QRect(10, -20, 1280, 720));
+            QCOMPARE(settings.windowGeometry(), QRect(10, -20, 1280, 720));
+            // Hidden: the generic setter refuses it.
+            QVERIFY(!settings.setValue(QStringLiteral("state"), QStringLiteral("geometry"),
+                                       QStringLiteral("0,0,800,600")));
+        }
+        ClientSettings reopened(path());
+        QCOMPARE(reopened.windowGeometry(), QRect(10, -20, 1280, 720));
+        auto *model =
+            qobject_cast<QAbstractItemModel *>(reopened.sectionModel(QStringLiteral("state")));
+        QCOMPARE(model->rowCount(), 0);
+    }
+
+    void aNonsenseGeometryIsIgnoredOnRead()
+    {
+        const QStringList bad = {QStringLiteral("1,2,3"),
+                                 QStringLiteral("a,b,c,d"),
+                                 QStringLiteral("0,0,10,10"),
+                                 QStringLiteral("0,0,99999,600"),
+                                 QStringLiteral("999999,0,800,600"),
+                                 QStringLiteral("0,0,800,-600"),
+                                 QStringLiteral("2147483647,0,800,600"),
+                                 QStringLiteral("-2147483648,0,800,600"),
+                                 QStringLiteral("0,0,2147483647,600")};
+        for (const QString &text : bad) {
+            writeFile(path(), "[General]\nversion=1\n\n[state]\ngeometry=" + text.toUtf8() + "\n");
+            ClientSettings settings(path());
+            QVERIFY2(settings.windowGeometry().isEmpty(), qPrintable(text));
+        }
+    }
+
+    void anEmptyGeometryIsNotStored()
+    {
+        ClientSettings settings(path());
+        settings.setWindowGeometry(QRect());
+        QVERIFY(settings.windowGeometry().isEmpty());
+        QVERIFY(!QFile::exists(path()));
+    }
 };
 QTEST_GUILESS_MAIN(TestClientSettings)
 #include "test_client_settings.moc"

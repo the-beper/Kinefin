@@ -100,7 +100,11 @@ class TestSettingsParity : public QObject {
             QVERIFY2(definition->hidden || !definition->label.isEmpty(),
                      qPrintable(name + QStringLiteral(" is visible but has no label")));
         }
-        QCOMPARE(Kinefin::settingDefinitions().size(), defined);
+        // The tables of §2.1-§2.5 plus the one §2.6 key the program uses, `state.geometry`.
+        const auto *geometry =
+            Kinefin::findSetting(QStringLiteral("state"), QStringLiteral("geometry"));
+        QVERIFY(geometry && geometry->hidden && geometry->defaultValue == QStringLiteral(""));
+        QCOMPARE(Kinefin::settingDefinitions().size(), defined + 1);
     }
 
     void everyDefaultIsValid()

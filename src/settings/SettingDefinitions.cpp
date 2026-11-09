@@ -609,6 +609,17 @@ QList<SettingDefinition> buildDefinitions()
          false,
          true,
          kli18n("Manual MPV Configuration")},
+        // Parity §2.6: window geometry, "x,y,width,height".
+        {QStringLiteral("state"),
+         QStringLiteral("geometry"),
+         T::String,
+         QStringLiteral(""),
+         {},
+         0,
+         0,
+         true,
+         false,
+         KLazyLocalizedString()},
     };
 }
 

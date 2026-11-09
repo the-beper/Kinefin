@@ -138,6 +138,14 @@ bool ClientSettings::setValue(const QString &section, const QString &key, const 
     const QVariant checked = validatedSettingValue(*definition, newValue);
     if (!checked.isValid())
         return false;
+    return store(*definition, checked);
+}
+
+bool ClientSettings::store(const SettingDefinition &definition, const QVariant &checked,
+                           bool reportFailure)
+{
+    const QString &section = definition.section;
+    const QString &key = definition.key;
     if (checked == value(section, key))
         return true;
 
@@ -145,7 +153,7 @@ bool ClientSettings::setValue(const QString &section, const QString &key, const 
     bool saved = false;
     if (m_config) {
         KConfigGroup group = m_config->group(section);
-        if (checked == definition->defaultValue)
+        if (checked == definition.defaultValue)
             group.deleteEntry(key);
         else
             group.writeEntry(key, checked.toString());
@@ -157,9 +165,53 @@ bool ClientSettings::setValue(const QString &section, const QString &key, const 
     else
         m_memory.insert(id, checked);
     Q_EMIT valueChanged(section, key);
-    if (!saved)
-        Q_EMIT saveFailed();
+    if (!saved) {
+        if (reportFailure)
+            Q_EMIT saveFailed();
+        else
+            qCWarning(settingsLog) << "could not save" << section << key;
+    }
     return true;
+}
+
+QRect ClientSettings::windowGeometry() const
+{
+    const QStringList parts = value(QStringLiteral("state"), QStringLiteral("geometry"))
+                                  .toString()
+                                  .split(QLatin1Char(','));
+    if (parts.size() != 4)
+        return {};
+    int numbers[4];
+    for (int index = 0; index < 4; ++index) {
+        bool ok = false;
+        numbers[index] = parts.at(index).toInt(&ok);
+        if (!ok)
+            return {};
+    }
+    // Checked before the QRect exists: its right and bottom edges overflow for values near the int limits.
+    const auto inRange = [](int number, int low) {
+        return number >= low && number <= kMaximumWindowSize;
+    };
+    const bool plausible =
+        inRange(numbers[0], -kMaximumWindowSize) && inRange(numbers[1], -kMaximumWindowSize)
+        && inRange(numbers[2], kMinimumWindowSize) && inRange(numbers[3], kMinimumWindowSize);
+    return plausible ? QRect(numbers[0], numbers[1], numbers[2], numbers[3]) : QRect();
+}
+
+void ClientSettings::setWindowGeometry(const QRect &geometry)
+{
+    const SettingDefinition *definition =
+        findSetting(QStringLiteral("state"), QStringLiteral("geometry"));
+    if (!definition || geometry.isEmpty())
+        return;
+    // Written while the window closes: a failure is only logged, nobody would see a notification.
+    store(*definition,
+          QStringLiteral("%1,%2,%3,%4")
+              .arg(geometry.x())
+              .arg(geometry.y())
+              .arg(geometry.width())
+              .arg(geometry.height()),
+          false);
 }
 
 QObject *ClientSettings::sectionModel(const QString &section)

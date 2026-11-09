@@ -69,6 +69,8 @@ add_library(kinefin_core STATIC
     src/settings/TokenStore.h
 )
 target_include_directories(kinefin_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+# Lets the QML module see the core library's types that src/app/ClientSettingsQml.h exposes.
+qt_extract_metatypes(kinefin_core)
 target_compile_definitions(kinefin_core PRIVATE TRANSLATION_DOMAIN="kinefin")
 target_link_libraries(kinefin_core PUBLIC Qt6::Core Qt6::Network Qt6::WebSockets KF6::Wallet KF6::ConfigCore KF6::I18n)
 
@@ -93,7 +95,7 @@ target_include_directories(kinefin PRIVATE src/app)
 target_compile_definitions(kinefin PRIVATE KINEFIN_VERSION="${PROJECT_VERSION}" TRANSLATION_DOMAIN="kinefin")
 ki18n_install(po)
 
-foreach(page Main HomePage LoginPage MessageBox ServersPage)
+foreach(page Main HomePage LoginPage MessageBox ServersPage SettingsPage SettingsSectionPage SettingRow AboutPage)
     set_source_files_properties(src/qml/${page}.qml PROPERTIES QT_RESOURCE_ALIAS ${page}.qml)
 endforeach()
 qt_add_qml_module(kinefin
@@ -105,7 +107,12 @@ qt_add_qml_module(kinefin
         src/qml/LoginPage.qml
         src/qml/MessageBox.qml
         src/qml/ServersPage.qml
+        src/qml/SettingsPage.qml
+        src/qml/SettingsSectionPage.qml
+        src/qml/SettingRow.qml
+        src/qml/AboutPage.qml
     SOURCES
+        src/app/ClientSettingsQml.h
         src/app/ConnectionController.cpp
         src/app/ConnectionController.h
 )
@@ -179,7 +186,7 @@ if(BUILD_TESTING)
 
     add_executable(test_connection_controller tests/test_connection_controller.cpp src/app/ConnectionController.cpp)
     target_compile_definitions(test_connection_controller PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}" TRANSLATION_DOMAIN="kinefin")
-    target_link_libraries(test_connection_controller PRIVATE kinefin_core Qt6::Test Qt6::Qml KF6::I18n)
+    target_link_libraries(test_connection_controller PRIVATE kinefin_core Qt6::Test Qt6::Gui Qt6::Qml KF6::I18n)
     add_test(NAME connection_controller COMMAND test_connection_controller)
 
     add_executable(test_server_credentials tests/test_server_credentials.cpp)

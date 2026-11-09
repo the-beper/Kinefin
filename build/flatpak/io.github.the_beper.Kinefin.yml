@@ -141,6 +141,17 @@ modules:
         tag: v6.11.2
         commit: 3eab06de7076a83514e98c2403baa433d137b013
 
+  # The Settings page uses FormCard (docs/architecture.md, KDE HIG exceptions); org.kde.Platform does not ship kirigami-addons. The version matches the one in the build image (build/Containerfile), where qmllint and the smoke test run.
+  - name: kirigami-addons
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DBUILD_TESTING=OFF
+    sources:
+      - type: archive
+        url: https://download.kde.org/stable/kirigami-addons/kirigami-addons-1.13.1.tar.xz
+        sha256: 76026f0abe8c948208ce75a02a9ecac60c618ac5288ca546e09da64bc4af7050
+
   - name: kinefin
     buildsystem: cmake-ninja
     config-opts:

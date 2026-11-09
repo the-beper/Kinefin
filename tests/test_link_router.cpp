@@ -23,6 +23,17 @@ class TestLinkRouter : public QObject {
             QVERIFY2(!Kinefin::parseItemLink(QString::fromLatin1(url)), url);
         }
     }
+    void webLinksAreHttpOrHttpsWithoutCredentials()
+    {
+        QVERIFY(Kinefin::parseWebLink(QStringLiteral("https://jellyfin.example.com:8920/web/")));
+        QVERIFY(Kinefin::parseWebLink(QStringLiteral("http://192.168.1.10:8096")));
+        for (const auto &text :
+             {"file:///etc/passwd", "javascript:alert(1)", "ftp://example.com",
+              "jellyfin://item/abcdef0123456789abcdef0123456789", "https://user:pass@example.com/",
+              "https:///no-host", "example.com", "https://exa mple.com/", ""}) {
+            QVERIFY2(!Kinefin::parseWebLink(QString::fromLatin1(text)), text);
+        }
+    }
 };
 QTEST_APPLESS_MAIN(TestLinkRouter)
 #include "test_link_router.moc"
