@@ -15,6 +15,7 @@
 #include <QMutex>
 #include <QMutexLocker>
 #include <QQmlApplicationEngine>
+#include <QQmlListReference>
 #include <QQuickItem>
 #include <QQuickWindow>
 #include <QTemporaryDir>
@@ -67,6 +68,14 @@ QString address(const FakeJellyfin &server)
 }
 
 const QString kMovies = QStringLiteral("e2a1aa11a8d94b5c999a25cf59abcd01");
+const QString kMovieId = QStringLiteral("f0e1d2c3b4a5968778695a4b3c2d1e0f");
+
+QByteArray envelope(const QJsonArray &items)
+{
+    return QJsonDocument(QJsonObject{{QStringLiteral("Items"), items},
+                                     {QStringLiteral("TotalRecordCount"), items.size()}})
+        .toJson(QJsonDocument::Compact);
+}
 
 // Everything a signed-in window needs: the fake server, the controller with its token store, the settings, the image fetcher and the engine with the real Main.qml (declared last, so it is destroyed first)
 struct Ui {
@@ -79,6 +88,9 @@ struct Ui {
     {
         controller.setImageOrigin(origin);
     }
+
+    // A page pushed a moment ago may still be creating its items: let the engine finish before it is torn down, or Qt warns about items in creation
+    ~Ui() { QTest::qWait(300); }
 
     // Loads Main.qml; true when a window came up
     bool load()
@@ -98,6 +110,20 @@ struct Ui {
         return window && QTest::qWaitForWindowExposed(window);
     }
 
+    // The fixture movie everywhere: in the library grid, in Continue Watching and behind the details route
+    void serveMovie()
+    {
+        const QJsonObject movie = QJsonDocument::fromJson(fixture(QStringLiteral("movie_item")))
+                                      .object()
+                                      .value(QStringLiteral("Items"))
+                                      .toArray()
+                                      .first()
+                                      .toObject();
+        server.itemsById.insert(kMovieId, QJsonDocument(movie).toJson(QJsonDocument::Compact));
+        server.listingRawBody.insert(QStringLiteral("Items"), envelope(QJsonArray{movie}));
+        server.listingRawBody.insert(QStringLiteral("Resume"), envelope(QJsonArray{movie}));
+    }
+
     bool signIn()
     {
         controller.connectTo(address(server));
@@ -115,6 +141,15 @@ struct Ui {
     QQuickItem *item(const QString &objectName) const
     {
         for (QQuickItem *candidate : allItems(window->contentItem())) {
+            if (candidate->objectName() == objectName)
+                return candidate;
+        }
+        return nullptr;
+    }
+    // The item below `root` with this object name: the Home page lists the same cards as a library page under it
+    static QQuickItem *itemIn(QQuickItem *root, const QString &objectName)
+    {
+        for (QQuickItem *candidate : allItems(root)) {
             if (candidate->objectName() == objectName)
                 return candidate;
         }
@@ -348,6 +383,174 @@ class TestUiPages : public QObject {
         QTRY_COMPARE(flickable->property("contentY").toReal(), baseline);
         QVERIFY(list->mapToScene(QPointF(0, list->height() / 2)).y() < ui.window->height());
         QTRY_VERIFY((wheelOver(list), flickable->property("contentY").toReal() > baseline));
+    }
+
+    void aLibraryTileOpensItsDetails()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QTRY_VERIFY(ui.item(QStringLiteral("libraryCard_") + kMovies) != nullptr);
+        QVERIFY(ui.openLibraryTile(kMovies));
+        QQuickItem *card = nullptr;
+        QTRY_VERIFY((card = Ui::itemIn(ui.item(QStringLiteral("libraryPage")),
+                                       QStringLiteral("mediaCard_") + kMovieId))
+                    != nullptr);
+        QTRY_VERIFY(card->isVisible() && card->isEnabled());
+        ui.clickCenter(card);
+        QTRY_VERIFY(ui.item(QStringLiteral("itemDetailsPage")) != nullptr);
+        // The item and every section its fixture has
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Arcturus (2012)")));
+        for (const QString &heading :
+             {QStringLiteral("Cast and Crew"), QStringLiteral("Chapters"),
+              QStringLiteral("Media Info"), QStringLiteral("More Like This")})
+            QTRY_VERIFY2(ui.showsText(heading), qPrintable(heading));
+        QVERIFY(ui.showsText(QStringLiteral("Mira Vale"), false));
+        QVERIFY(ui.showsText(QStringLiteral("The Ship"), false));
+        // Playback is not wired yet: the Resume action is there and disabled
+        QQmlListReference actions(ui.item(QStringLiteral("itemDetailsPage")), "actions");
+        bool foundPlay = false;
+        for (qsizetype i = 0; i < actions.count(); ++i) {
+            // The fixture movie has a resume point: the action reads Resume
+            if (actions.at(i)->property("text").toString() == QStringLiteral("Resume")) {
+                foundPlay = true;
+                QVERIFY(!actions.at(i)->property("enabled").toBool());
+            }
+        }
+        QVERIFY(foundPlay);
+    }
+
+    void returnOnAHomeRowOpensDetailsAndBackReturns()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *list = nullptr;
+        QTRY_VERIFY((list = ui.item(QStringLiteral("homeRowList_0"))) != nullptr);
+        QTRY_COMPARE(list->property("count").toInt(), 1);
+        list->forceActiveFocus();
+        QTest::keyClick(ui.window, Qt::Key_Return);
+        QTRY_VERIFY(ui.item(QStringLiteral("itemDetailsPage")) != nullptr);
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Arcturus (2012)")));
+        // Back returns to Home
+        auto *stack = ui.window->property("pageStack").value<QObject *>();
+        QVERIFY(stack);
+        QVERIFY(QMetaObject::invokeMethod(stack, "pop", Q_ARG(QVariant, QVariant())));
+        QTRY_VERIFY(ui.item(QStringLiteral("itemDetailsPage")) == nullptr);
+        QVERIFY(ui.item(QStringLiteral("homePage")) != nullptr);
+    }
+
+    void detailsRenderServerTextAsPlainText()
+    {
+        Ui ui(m_home->path());
+        const QString hostile =
+            QStringLiteral("<b>bold</b><img src=\"http://evil.invalid/x.png\">");
+        const auto with = [&hostile](const QString &suffix) { return QString(hostile + suffix); };
+        const QJsonObject item{
+            {QStringLiteral("Id"), kMovieId},
+            {QStringLiteral("Type"), QStringLiteral("Movie")},
+            {QStringLiteral("Name"), with(QStringLiteral(" name"))},
+            {QStringLiteral("SeriesName"), with(QStringLiteral(" series"))},
+            {QStringLiteral("SeriesId"), QStringLiteral("aa11bb22cc33dd44ee55ff6677889900")},
+            {QStringLiteral("Overview"), with(QStringLiteral(" overview"))},
+            {QStringLiteral("Taglines"), QJsonArray{with(QStringLiteral(" tagline"))}},
+            {QStringLiteral("Genres"), QJsonArray{with(QStringLiteral(" genre"))}},
+            {QStringLiteral("People"),
+             QJsonArray{QJsonObject{{QStringLiteral("Name"), with(QStringLiteral(" person"))},
+                                    {QStringLiteral("Role"), with(QStringLiteral(" role"))},
+                                    {QStringLiteral("Type"), QStringLiteral("Actor")}}}},
+            {QStringLiteral("Chapters"),
+             QJsonArray{QJsonObject{{QStringLiteral("Name"), with(QStringLiteral(" chapter"))},
+                                    {QStringLiteral("StartPositionTicks"), 0}}}},
+            {QStringLiteral("MediaSources"),
+             QJsonArray{QJsonObject{
+                 {QStringLiteral("Id"), QStringLiteral("ms1")},
+                 {QStringLiteral("Container"), with(QStringLiteral(" container"))},
+                 {QStringLiteral("MediaStreams"),
+                  QJsonArray{QJsonObject{
+                      {QStringLiteral("Type"), QStringLiteral("Audio")},
+                      {QStringLiteral("DisplayTitle"), with(QStringLiteral(" stream"))}}}}}}}};
+        ui.server.itemsById.insert(kMovieId, QJsonDocument(item).toJson(QJsonDocument::Compact));
+        ui.server.listingRawBody.insert(QStringLiteral("Items"), envelope(QJsonArray{item}));
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QTRY_VERIFY(ui.item(QStringLiteral("libraryCard_") + kMovies) != nullptr);
+        QVERIFY(ui.openLibraryTile(kMovies));
+        QQuickItem *card = nullptr;
+        QTRY_VERIFY((card = Ui::itemIn(ui.item(QStringLiteral("libraryPage")),
+                                       QStringLiteral("mediaCard_") + kMovieId))
+                    != nullptr);
+        ui.clickCenter(card);
+        QTRY_VERIFY(ui.item(QStringLiteral("itemDetailsPage")) != nullptr);
+        // Every label that carries the markup renders it as text, never as rich text: the title and heading, the series link, and the lines the markup shares with other words
+        for (const QString &part :
+             {QStringLiteral(" name"), QStringLiteral(" series"), QStringLiteral(" overview"),
+              QStringLiteral(" tagline"), QStringLiteral(" genre"), QStringLiteral(" person"),
+              QStringLiteral(" role"), QStringLiteral(" chapter"), QStringLiteral(" container"),
+              QStringLiteral(" stream")}) {
+            QTRY_VERIFY2(!ui.itemsWithText(with(part), false).isEmpty(), qPrintable(part));
+            for (QQuickItem *label : ui.itemsWithText(with(part), false)) {
+                QVERIFY(label->property("textFormat").isValid());
+                QCOMPARE(label->property("textFormat").toInt(), int(Qt::PlainText));
+            }
+        }
+        QVERIFY(gWarnings.filter(QStringLiteral("evil.invalid")).isEmpty());
+    }
+
+    void aMissingItemShowsNotFound()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        // The grid lists an episode the details route does not know
+        const QJsonObject episode = QJsonDocument::fromJson(fixture(QStringLiteral("episode_item")))
+                                        .object()
+                                        .value(QStringLiteral("Items"))
+                                        .toArray()
+                                        .first()
+                                        .toObject();
+        ui.server.listingRawBody.insert(QStringLiteral("Items"), envelope(QJsonArray{episode}));
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QTRY_VERIFY(ui.item(QStringLiteral("libraryCard_") + kMovies) != nullptr);
+        QVERIFY(ui.openLibraryTile(kMovies));
+        QQuickItem *card = nullptr;
+        QTRY_VERIFY(
+            (card = Ui::itemIn(ui.item(QStringLiteral("libraryPage")),
+                               QStringLiteral("mediaCard_c2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7")))
+            != nullptr);
+        ui.clickCenter(card);
+        QTRY_VERIFY(ui.item(QStringLiteral("itemDetailsPage")) != nullptr);
+        QTRY_VERIFY(ui.showsText(QStringLiteral("This item is not available")));
+    }
+
+    void aLinkOpensItsItemAfterSignIn()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        // The link arrives before the user is signed in and waits
+        ui.window->setProperty("requestedItemId", kMovieId);
+        QVERIFY(ui.signIn());
+        QTRY_VERIFY(ui.item(QStringLiteral("itemDetailsPage")) != nullptr);
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Arcturus (2012)")));
+        // It is used once
+        QTRY_COMPARE(ui.window->property("requestedItemId").toString(), QString());
+    }
+
+    void lossOfTheSessionClosesTheDetails()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        ui.window->setProperty("requestedItemId", kMovieId);
+        QVERIFY(ui.signIn());
+        QTRY_VERIFY(ui.item(QStringLiteral("itemDetailsPage")) != nullptr);
+        ui.server.denyViews = true;
+        ui.controller.reloadLibraries();
+        QTRY_COMPARE(ui.controller.state(), ConnectionController::NeedsLogin);
+        QTRY_VERIFY(ui.item(QStringLiteral("itemDetailsPage")) == nullptr);
     }
 
     void aFailedHomeRowOffersItsOwnRetry()

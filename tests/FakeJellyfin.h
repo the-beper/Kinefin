@@ -182,7 +182,9 @@ class FakeJellyfin {
     // When >= 0 the Items family is generated from startIndex/limit: `generatedItemTotal` is the TotalRecordCount, `generatedAvailable` (when >= 0) the rows that really exist, so a page past it comes back short; ids, names and image tags follow the row index
     int generatedItemTotal = -1;
     int generatedAvailable = -1;
-    QList<QByteArray> itemsRoutes;                   // every Items request in arrival order
+    QList<QByteArray> itemsRoutes; // every Items request in arrival order
+    // Items by lower-case id, each a JSON object: when not empty, an Items request with `ids=` answers the entries it finds (an empty envelope when none), whatever the listing fixture says
+    QHash<QString, QByteArray> itemsById;
     QHash<QString, QByteArray> lastListingRoute;     // family -> "path?query"
     QHash<QString, QList<QByteArray>> listingRoutes; // family -> every route in arrival order
     QHash<QString, QByteArray> lastListingAuth;      // family -> the Authorization header
@@ -238,6 +240,23 @@ class FakeJellyfin {
     }
 
   private:
+    QByteArray itemsByIdBody(const QByteArray &route) const
+    {
+        const QStringList ids = capturedListingQuery(route)
+                                    .queryItemValue(QStringLiteral("ids"))
+                                    .split(QLatin1Char(','));
+        QJsonArray items;
+        for (const QString &id : ids) {
+            const QByteArray raw = itemsById.value(id.toLower());
+            if (!raw.isEmpty())
+                items.append(QJsonDocument::fromJson(raw).object());
+        }
+        return QJsonDocument(QJsonObject{{QStringLiteral("Items"), items},
+                                         {QStringLiteral("StartIndex"), 0},
+                                         {QStringLiteral("TotalRecordCount"), items.size()}})
+            .toJson(QJsonDocument::Compact);
+    }
+
     QByteArray generatedItemsBody(const QByteArray &route) const
     {
         const QUrlQuery query(QUrl(QString::fromUtf8(route)));
@@ -441,6 +460,9 @@ class FakeJellyfin {
             }
             if (listingStatus.contains(listingFamily)) {
                 respond(socket, listingStatus.value(listingFamily), {});
+            } else if (listingFamily == QLatin1String("Items") && !itemsById.isEmpty()
+                       && route.contains("ids=") && !denyListings && !redirectListings) {
+                respond(socket, 200, itemsByIdBody(route));
             } else if (listingFamily == QLatin1String("Items") && generatedItemTotal >= 0
                        && !denyListings && !redirectListings) {
                 respond(socket, 200, generatedItemsBody(route));

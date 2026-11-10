@@ -156,6 +156,15 @@ Kirigami.ScrollablePage {
         Accessible.role: Accessible.List
         Accessible.name: page.libraryName
 
+        // The tiles are not tab stops: the grid is, and it opens the current item
+        function openCurrent() {
+            if (grid.currentItem?.enabled)
+                page.Window.window.openItem(grid.currentItem.itemId, page);
+        }
+        Keys.onReturnPressed: openCurrent()
+        Keys.onEnterPressed: openCurrent()
+        Keys.onSpacePressed: openCurrent()
+
         Kirigami.LoadingPlaceholder {
             anchors.centerIn: parent
             visible: page.model.status === LibraryItemsModel.Loading && grid.count === 0
@@ -177,6 +186,7 @@ Kirigami.ScrollablePage {
             // The grid is the one tab stop, the arrow keys move inside it
             focusPolicy: Qt.NoFocus
             highlighted: GridView.isCurrentItem && grid.activeFocus
+            onClicked: page.Window.window.openItem(itemId, page)
         }
     }
 }

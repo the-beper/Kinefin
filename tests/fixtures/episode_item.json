@@ -1,0 +1,60 @@
+{
+  "Items": [
+    {
+      "Name": "Weightless",
+      "Id": "c2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7",
+      "Type": "Episode",
+      "SeriesName": "Abyss Station",
+      "SeriesId": "aa11bb22cc33dd44ee55ff6677889900",
+      "SeasonId": "11aa22bb33cc44dd55ee66ff778899aa",
+      "ParentIndexNumber": 2,
+      "IndexNumber": 6,
+      "ProductionYear": 2026,
+      "RunTimeTicks": 16800000000,
+      "Overview": "The crew drifts. Nobody agrees on for how long.",
+      "UserData": {
+        "Key": "ep6",
+        "Played": false,
+        "PlaybackPositionTicks": 0,
+        "PlayCount": 0
+      },
+      "ImageTags": {
+        "Primary": "ep6-primary-tag"
+      },
+      "ParentBackdropItemId": "aa11bb22cc33dd44ee55ff6677889900",
+      "ParentBackdropImageTags": [
+        "abyss-backdrop"
+      ],
+      "ParentLogoItemId": "aa11bb22cc33dd44ee55ff6677889900",
+      "ParentLogoImageTag": "abyss-logo",
+      "People": [
+        {
+          "Name": "Mira Vale",
+          "Id": "a1b2c3d4e5f60718293a4b5c6d7e8f01",
+          "Role": "Captain Sol",
+          "Type": "GuestStar"
+        }
+      ],
+      "MediaSources": [
+        {
+          "Id": "ms-ep6-0001",
+          "Name": "Weightless",
+          "Container": "mkv",
+          "Size": 4000000000,
+          "Bitrate": 5000000,
+          "MediaStreams": [
+            {
+              "Type": "Video",
+              "Codec": "h264",
+              "Width": 1920,
+              "Height": 1080,
+              "IsDefault": true
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "StartIndex": 0,
+  "TotalRecordCount": 1
+}

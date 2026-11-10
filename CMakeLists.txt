@@ -46,6 +46,10 @@ add_library(kinefin_core STATIC
     src/api/PlaybackReport.h
     src/models/HomeRowsModel.cpp
     src/models/HomeRowsModel.h
+    src/models/ItemDetails.cpp
+    src/models/ItemDetails.h
+    src/models/ItemDetailsModel.cpp
+    src/models/ItemDetailsModel.h
     src/models/ItemRowModel.cpp
     src/models/ItemRowModel.h
     src/models/ItemSummary.cpp
@@ -97,7 +101,7 @@ if(mpvqt_BINARY_DIR)
 endif()
 
 # The QML module lives in a static library of its own so that the UI tests can import it like the application does
-foreach(page Main HomePage LibraryPage MediaCard LoginPage MessageBox ServersPage SettingsPage SettingsSectionPage SettingRow AboutPage)
+foreach(page Main HomePage LibraryPage MediaCard CardRow ItemDetailsPage LoginPage MessageBox ServersPage SettingsPage SettingsSectionPage SettingRow AboutPage)
     set_source_files_properties(src/qml/${page}.qml PROPERTIES QT_RESOURCE_ALIAS ${page}.qml)
 endforeach()
 qt_add_library(kinefin_ui STATIC)
@@ -109,6 +113,8 @@ qt_add_qml_module(kinefin_ui
         src/qml/HomePage.qml
         src/qml/LibraryPage.qml
         src/qml/MediaCard.qml
+        src/qml/CardRow.qml
+        src/qml/ItemDetailsPage.qml
         src/qml/LoginPage.qml
         src/qml/MessageBox.qml
         src/qml/ServersPage.qml
@@ -224,6 +230,11 @@ if(BUILD_TESTING)
     target_link_libraries(test_ui_pages PRIVATE kinefin_ui kinefin_uiplugin kinefin_core Qt6::Test Qt6::Gui Qt6::Quick Qt6::Qml KF6::I18n KF6::I18nQml)
     add_test(NAME ui_pages COMMAND test_ui_pages)
     set_tests_properties(ui_pages PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+    add_executable(test_item_details_model tests/test_item_details_model.cpp)
+    target_compile_definitions(test_item_details_model PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    target_link_libraries(test_item_details_model PRIVATE kinefin_core Qt6::Test Qt6::Network)
+    add_test(NAME item_details_model COMMAND test_item_details_model)
 
     add_executable(test_image_network tests/test_image_network.cpp)
     target_compile_definitions(test_image_network PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")

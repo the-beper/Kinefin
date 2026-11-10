@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "ConnectionController.h"
 
+#include "api/MediaSourceSelection.h"
+
 #include <QDesktopServices>
 #include <QHostAddress>
 #include <QJsonArray>
@@ -319,6 +321,13 @@ void ConnectionController::onUserViews(const QJsonArray &items)
     }
     Q_EMIT librariesChanged();
     m_home.load(m_libraries);
+}
+
+ItemDetailsModel *ConnectionController::createItemDetails(const QString &itemId, QObject *owner)
+{
+    if (m_state != Authenticated || !owner || !isValidJellyfinId(itemId))
+        return nullptr;
+    return new ItemDetailsModel(&m_client, itemId, m_nextDetailsChannel++, owner);
 }
 
 void ConnectionController::reloadHome()

@@ -852,27 +852,28 @@ bool JellyfinClient::fetchEpisodes(const QString &seriesId, const QString &seaso
     return true;
 }
 
-bool JellyfinClient::fetchSimilarItems(const QString &itemId, int limit)
+bool JellyfinClient::fetchSimilarItems(const QString &itemId, int limit, int channel)
 {
     if (m_state != State::Authenticated || !isValidJellyfinId(itemId) || limit <= 0)
         return false;
     const QString family = QStringLiteral("Similar");
-    const quint64 serial = supersedeListing(family);
+    const QString key = listingKey(family, channel);
+    const quint64 serial = supersedeListing(key);
     QUrl url = endpoint(QStringLiteral("/Items/") + itemId + QStringLiteral("/Similar"));
     QUrlQuery wire;
     wire.addQueryItem(QStringLiteral("limit"), QString::number(limit));
     wire.addQueryItem(QStringLiteral("userId"), m_userId);
     url.setQuery(wire);
     QNetworkReply *reply = m_network.get(requestFor(url, true));
-    m_listingReplies.insert(family, reply);
-    attach(reply, m_generation, [this, family, serial](QNetworkReply *finished) {
-        if (listingSuperseded(family, serial))
+    m_listingReplies.insert(key, reply);
+    attach(reply, m_generation, [this, family, key, channel, serial](QNetworkReply *finished) {
+        if (listingSuperseded(key, serial))
             return;
         QJsonArray items;
         int total = 0;
-        if (!listingEnvelope(finished, family, 0, &items, &total))
+        if (!listingEnvelope(finished, family, channel, &items, &total))
             return;
-        Q_EMIT similarItemsReady(items, total);
+        Q_EMIT similarItemsReady(items, total, channel);
     });
     return true;
 }
@@ -1242,6 +1243,23 @@ bool JellyfinClient::verifySession()
 QString JellyfinClient::listingKey(const QString &family, int channel)
 {
     return channel == 0 ? family : family + QLatin1Char('#') + QString::number(channel);
+}
+
+void JellyfinClient::releaseListingChannel(int channel)
+{
+    if (channel == 0)
+        return;
+    for (const QString &family :
+         {QStringLiteral("Items"), QStringLiteral("Resume"), QStringLiteral("Latest"),
+          QStringLiteral("NextUp"), QStringLiteral("Similar")}) {
+        const QString key = listingKey(family, channel);
+        if (!m_listingSerials.contains(key))
+            continue;
+        // Bump first, as supersedeListing does: the aborted reply's handler must see itself superseded
+        supersedeListing(key);
+        m_listingSerials.remove(key);
+        m_listingReplies.remove(key);
+    }
 }
 
 quint64 JellyfinClient::supersedeListing(const QString &family)

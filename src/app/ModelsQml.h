@@ -3,6 +3,7 @@
 #pragma once
 
 #include "models/HomeRowsModel.h"
+#include "models/ItemDetailsModel.h"
 #include "models/ItemRowModel.h"
 #include "models/LibraryItemsModel.h"
 
@@ -28,6 +29,13 @@ struct ItemRowModelForeign {
     Q_GADGET
     QML_FOREIGN(Kinefin::ItemRowModel)
     QML_NAMED_ELEMENT(ItemRowModel)
+    QML_UNCREATABLE("Created by the application")
+};
+
+struct ItemDetailsModelForeign {
+    Q_GADGET
+    QML_FOREIGN(Kinefin::ItemDetailsModel)
+    QML_NAMED_ELEMENT(ItemDetailsModel)
     QML_UNCREATABLE("Created by the application")
 };
 } // namespace Kinefin

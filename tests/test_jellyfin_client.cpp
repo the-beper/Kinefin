@@ -1355,6 +1355,31 @@ class TestJellyfinClient : public QObject {
         QCOMPARE(latest.size(), 1);
     }
 
+    void similarItemsTakeAChannel()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        QSignalSpy similar(&client, &Kinefin::JellyfinClient::similarItemsReady);
+        QSignalSpy failures(&client, &Kinefin::JellyfinClient::listingFailed);
+        QVERIFY(
+            client.fetchSimilarItems(QStringLiteral("f0e1d2c3b4a5968778695a4b3c2d1e0f"), 5, 70000));
+        QVERIFY(
+            client.fetchSimilarItems(QStringLiteral("c2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7"), 5, 70001));
+        QTRY_COMPARE(similar.size(), 2);
+        QSet<int> channels;
+        for (const QList<QVariant> &arguments : similar)
+            channels.insert(arguments.at(2).toInt());
+        QCOMPARE(channels, (QSet<int>{70000, 70001}));
+        server.listingStatus.insert(QStringLiteral("Similar"), 500);
+        QVERIFY(
+            client.fetchSimilarItems(QStringLiteral("f0e1d2c3b4a5968778695a4b3c2d1e0f"), 5, 70002));
+        QTRY_COMPARE(failures.size(), 1);
+        QCOMPARE(failures.constFirst().at(0).toString(), QStringLiteral("Similar"));
+        QCOMPARE(failures.constFirst().at(3).toInt(), 70002);
+    }
+
     void listingFailureCarriesItsChannel()
     {
         FakeJellyfin server;

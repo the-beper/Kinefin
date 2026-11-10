@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <QHostAddress>
 #include <QNetworkInterface>
+#include <QPointer>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QtTest>
@@ -150,6 +151,39 @@ class TestConnectionController : public QObject {
         // The Home page's own error is about the libraries only
         QVERIFY(controller->errorText().isEmpty());
         QCOMPARE(controller->state(), ConnectionController::Authenticated);
+    }
+
+    void itemDetailsAreOwnedByTheirPage()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        const QString id = QStringLiteral("f0e1d2c3b4a5968778695a4b3c2d1e0f");
+        auto controller = makeController();
+        QObject page;
+        // Not signed in: nothing is created
+        QVERIFY(controller->createItemDetails(id, &page) == nullptr);
+        controller->connectTo(address(server));
+        QTRY_VERIFY(controller->state() == ConnectionController::NeedsLogin);
+        controller->login(QStringLiteral("fixture-user"), QStringLiteral("fixture-password"));
+        QTRY_VERIFY(controller->state() == ConnectionController::Authenticated);
+        QVERIFY(controller->createItemDetails(QStringLiteral("bad id"), &page) == nullptr);
+        QVERIFY(controller->createItemDetails(id, nullptr) == nullptr);
+        QPointer<Kinefin::ItemDetailsModel> first = controller->createItemDetails(id, &page);
+        QPointer<Kinefin::ItemDetailsModel> second = controller->createItemDetails(id, &page);
+        QVERIFY(first && second);
+        QCOMPARE(first->parent(), &page);
+        QCOMPARE(first->itemId(), id);
+        // Every page has its own listing channel
+        QVERIFY(first.data() != second.data());
+        QVERIFY(first->channel() != second->channel());
+        QVERIFY(first->channel() >= Kinefin::ItemDetailsModel::FirstChannel);
+        // The model lives exactly as long as its page
+        auto *owner = new QObject;
+        QPointer<Kinefin::ItemDetailsModel> owned = controller->createItemDetails(id, owner);
+        QVERIFY(owned);
+        delete owner;
+        QVERIFY(!owned);
+        QVERIFY(first);
     }
 
     void wrongPasswordReturnsToSignInWithAFixedMessage()

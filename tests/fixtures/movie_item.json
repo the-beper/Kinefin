@@ -8,11 +8,22 @@
       "ProductionYear": 2012,
       "RunTimeTicks": 10800000000,
       "Overview": "A survey ship answers a distress call nobody sent — in widescreen.",
-      "Genres": ["Science Fiction", "Mystery"],
+      "Genres": [
+        "Science Fiction",
+        "Mystery"
+      ],
       "CommunityRating": 7.1,
       "OfficialRating": "PG-13",
-      "UserData": { "Key": "arcturus", "Played": false, "PlaybackPositionTicks": 2340000000, "PlayCount": 0 },
-      "ImageTags": { "Primary": "arcturus-primary", "Backdrop": "arcturus-backdrop" },
+      "UserData": {
+        "Key": "arcturus",
+        "Played": false,
+        "PlaybackPositionTicks": 2340000000,
+        "PlayCount": 0
+      },
+      "ImageTags": {
+        "Primary": "arcturus-primary",
+        "Logo": "arcturus-logo"
+      },
       "MediaSources": [
         {
           "Id": "ms-arcturus-0001",
@@ -22,7 +33,90 @@
           "Size": 10148168896,
           "SupportsDirectPlay": true,
           "SupportsDirectStream": true,
-          "SupportsTranscoding": true
+          "SupportsTranscoding": true,
+          "Name": "Arcturus 1080p",
+          "Bitrate": 7500000,
+          "MediaStreams": [
+            {
+              "Type": "Video",
+              "Codec": "hevc",
+              "Width": 1920,
+              "Height": 1080,
+              "BitRate": 6800000,
+              "IsDefault": true,
+              "DisplayTitle": "1080p HEVC"
+            },
+            {
+              "Type": "Audio",
+              "Codec": "eac3",
+              "Language": "eng",
+              "Channels": 6,
+              "BitRate": 640000,
+              "IsDefault": true,
+              "DisplayTitle": "English EAC3 5.1"
+            },
+            {
+              "Type": "Subtitle",
+              "Codec": "subrip",
+              "Language": "ita",
+              "IsForced": false,
+              "IsExternal": true,
+              "DisplayTitle": "Italian SRT"
+            }
+          ]
+        }
+      ],
+      "Taglines": [
+        "In widescreen."
+      ],
+      "BackdropImageTags": [
+        "arcturus-backdrop"
+      ],
+      "People": [
+        {
+          "Name": "Mira Vale",
+          "Id": "a1b2c3d4e5f60718293a4b5c6d7e8f01",
+          "Role": "Captain Sol",
+          "Type": "Actor",
+          "PrimaryImageTag": "mira-primary"
+        },
+        {
+          "Name": "Tomas Reyes",
+          "Id": "a1b2c3d4e5f60718293a4b5c6d7e8f02",
+          "Role": "Navigator",
+          "Type": "Actor"
+        },
+        {
+          "Name": "Odd Id",
+          "Id": "../x",
+          "Role": "Extra",
+          "Type": "Actor",
+          "PrimaryImageTag": "odd"
+        },
+        {
+          "Name": "Ines Okafor",
+          "Id": "a1b2c3d4e5f60718293a4b5c6d7e8f03",
+          "Type": "Director",
+          "PrimaryImageTag": "ines-primary"
+        },
+        {
+          "Name": "Pavel Lund",
+          "Id": "a1b2c3d4e5f60718293a4b5c6d7e8f04",
+          "Type": "Writer"
+        }
+      ],
+      "Chapters": [
+        {
+          "Name": "Distress Call",
+          "StartPositionTicks": 0
+        },
+        {
+          "Name": "The Ship",
+          "StartPositionTicks": 9000000000
+        },
+        {
+          "Name": "Silence",
+          "StartPositionTicks": 54000000000
         }
       ]
     }

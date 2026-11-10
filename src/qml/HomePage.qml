@@ -10,7 +10,6 @@ Kirigami.ScrollablePage {
     objectName: "homePage"
 
     required property ConnectionController connection
-    property string requestedItemId: ""
 
     title: i18n("Home")
 
@@ -18,7 +17,8 @@ Kirigami.ScrollablePage {
         Kirigami.Action {
             text: i18n("Refresh")
             icon.name: "view-refresh"
-            shortcut: StandardKey.Refresh
+            // The details pages bind the same key: only the page in front answers it, the button stays usable
+            shortcut: page.isCurrentPage ? StandardKey.Refresh : ""
             // The libraries come first: their answer reloads the rows
             onTriggered: page.connection.reloadLibraries()
         }
@@ -38,12 +38,6 @@ Kirigami.ScrollablePage {
                     onTriggered: page.connection.reloadLibraries()
                 }
             ]
-        }
-
-        MessageBox {
-            visible: page.requestedItemId.length > 0
-            type: Kirigami.MessageType.Information
-            text: i18n("Requested item: %1", page.requestedItemId)
         }
 
         Kirigami.PlaceholderMessage {
@@ -194,80 +188,33 @@ Kirigami.ScrollablePage {
                     ]
                 }
 
-                Item {
-                    id: listBox
-
-                    Layout.fillWidth: true
-                    // The cards plus the band the horizontal scroll bar takes at the bottom
-                    Layout.preferredHeight: row.cardHeight + scrollBar.implicitHeight
+                CardRow {
                     visible: row.status === HomeRowsModel.Ready
+                    listObjectName: "homeRowList_" + row.index
+                    model: row.items
+                    cardHeight: row.cardHeight
+                    accessibleName: row.title
+                    pageFlickable: page.flickable
 
-                    ListView {
-                        id: list
-                        objectName: "homeRowList_" + row.index
+                    delegate: MediaCard {
+                        required property int seasonNumber
+                        required property int episodeNumber
+                        required property string episodeTitle
 
-                        anchors.fill: parent
-                        orientation: ListView.Horizontal
-                        spacing: Kirigami.Units.largeSpacing
-                        clip: true
-                        boundsBehavior: Flickable.StopAtBounds
-                        activeFocusOnTab: true
-                        keyNavigationEnabled: true
-                        currentIndex: 0
-                        model: row.items
-                        Accessible.role: Accessible.List
-                        Accessible.name: row.title
-
-                        // Up and Down move between the rows, Left and Right inside one
-                        Keys.onUpPressed: {
-                            const target = list.nextItemInFocusChain(false);
-                            if (target && target !== list)
-                                target.forceActiveFocus(Qt.BacktabFocusReason);
-                        }
-                        Keys.onDownPressed: {
-                            const target = list.nextItemInFocusChain(true);
-                            if (target && target !== list)
-                                target.forceActiveFocus(Qt.TabFocusReason);
-                        }
-
-                        Controls.ScrollBar.horizontal: Controls.ScrollBar {
-                            id: scrollBar
-                        }
-
-                        delegate: MediaCard {
-                            required property int seasonNumber
-                            required property int episodeNumber
-                            required property string episodeTitle
-
-                            width: row.cardWidth
-                            height: row.cardHeight
-                            // The list is the one tab stop of its row
-                            focusPolicy: Qt.NoFocus
-                            landscape: row.landscape
-                            loaded: true
-                            highlighted: ListView.isCurrentItem && list.activeFocus
-                            subtitle: {
-                                if (episodeNumber >= 0) {
-                                    const label = seasonNumber >= 0 ? i18nc("season and episode number", "S%1:E%2", seasonNumber, episodeNumber) : i18nc("episode number", "E%1", episodeNumber);
-                                    return episodeTitle.length > 0 ? i18nc("episode label and episode title", "%1 — %2", label, episodeTitle) : label;
-                                }
-                                return year > 0 ? String(year) : "";
+                        width: row.cardWidth
+                        height: row.cardHeight
+                        // The list is the one tab stop of its row
+                        focusPolicy: Qt.NoFocus
+                        landscape: row.landscape
+                        loaded: true
+                        highlighted: ListView.isCurrentItem && ListView.view.activeFocus
+                        onClicked: page.Window.window.openItem(itemId, page)
+                        subtitle: {
+                            if (episodeNumber >= 0) {
+                                const label = seasonNumber >= 0 ? i18nc("season and episode number", "S%1:E%2", seasonNumber, episodeNumber) : i18nc("episode number", "E%1", episodeNumber);
+                                return episodeTitle.length > 0 ? i18nc("episode label and episode title", "%1 — %2", label, episodeTitle) : label;
                             }
-                        }
-                    }
-
-                    // A horizontal list swallows the vertical wheel without using it: this layer above it takes the vertical deltas for the page and leaves the horizontal ones to the list below
-                    Item {
-                        anchors.fill: parent
-                        z: 2
-
-                        WheelHandler {
-                            orientation: Qt.Vertical
-                            onWheel: event => {
-                                const flick = page.flickable;
-                                const step = event.pixelDelta.y !== 0 ? event.pixelDelta.y : event.angleDelta.y / 120 * Kirigami.Units.gridUnit * 3;
-                                flick.contentY = Math.max(flick.originY, Math.min(flick.originY + flick.contentHeight - flick.height, flick.contentY - step));
-                            }
+                            return year > 0 ? String(year) : "";
                         }
                     }
                 }

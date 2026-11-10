@@ -13,6 +13,7 @@
 #include "api/JellyfinClient.h"
 #include "imagecache/ImageOrigin.h"
 #include "models/HomeRowsModel.h"
+#include "models/ItemDetailsModel.h"
 #include "models/LibraryItemsModel.h"
 #include "settings/ServerCredentialSync.h"
 #include "settings/TokenStore.h"
@@ -78,6 +79,8 @@ class ConnectionController : public QObject {
     Q_INVOKABLE void signOut();
     // Loads the items of one of the current `libraries` into `library`; false for an id that is not in the list or whose type cannot be browsed
     Q_INVOKABLE bool openLibrary(const QString &libraryId);
+    // The details of one item for the page `owner`: the model is a child of `owner` and dies with it. Null unless signed in and `owner` exists
+    Q_INVOKABLE Kinefin::ItemDetailsModel *createItemDetails(const QString &itemId, QObject *owner);
     // Loads the home rows again (the libraries are kept)
     Q_INVOKABLE void reloadHome();
     // Asks the server for the libraries again (the Home page's retry)
@@ -115,6 +118,7 @@ class ConnectionController : public QObject {
     ServerCredentialSync m_sync;
     LibraryItemsModel m_library{&m_client};
     HomeRowsModel m_home{&m_client};
+    int m_nextDetailsChannel = ItemDetailsModel::FirstChannel;
     std::shared_ptr<ImageOrigin> m_imageOrigin;
     QTimer m_quickConnectTimer;
     State m_state = Idle;

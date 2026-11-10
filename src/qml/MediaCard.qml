@@ -8,9 +8,11 @@ import org.kde.kirigami as Kirigami
 // A poster tile for one library or home row item: the size comes from the view that places it, the poster takes what the two label lines leave
 Controls.ItemDelegate {
     id: card
-    // A tile does nothing when activated until the item details exist, so it does not answer the pointer either
-    hoverEnabled: false
+    objectName: "mediaCard_" + itemId
+    // A placeholder tile has nothing to open and does not answer the pointer or the keys
+    enabled: loaded
 
+    required property string itemId
     required property string name
     required property int year
     required property url imageUrl
@@ -42,7 +44,7 @@ Controls.ItemDelegate {
         if (!played && unplayedCount > 0)
             parts.push(i18np("%1 unplayed item", "%1 unplayed items", unplayedCount));
         if (inProgress)
-            parts.push(i18n("%1 percent watched", Math.round(playedPercentage)));
+            parts.push(i18np("%1 percent watched", "%1 percent watched", Math.round(playedPercentage)));
         return parts.join(", ");
     }
 

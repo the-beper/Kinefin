@@ -13,6 +13,7 @@ Kirigami.ApplicationWindow {
     property string startupWindowMode: ""
     // "settings" or "about": a page to open right after the shell loads (the smoke test uses it to render pages no server is needed for)
     property string startupPage: ""
+    // An item link from the command line: opened once Home shows, then cleared
     property string requestedItemId: ""
     readonly property bool signedIn: connection.state === ConnectionController.Authenticated
 
@@ -95,11 +96,32 @@ Kirigami.ApplicationWindow {
             break;
         case ConnectionController.Authenticated:
             page = "HomePage.qml";
-            properties.requestedItemId = requestedItemId;
             break;
         }
         pageStack.clear();
-        pageStack.push(Qt.resolvedUrl(page), properties);
+        const shown = pageStack.push(Qt.resolvedUrl(page), properties);
+        openRequestedItem(shown);
+    }
+
+    // The only way to the details of an item: the pages above the one asking give way, and the item already showing is not pushed twice
+    function openItem(itemId, fromPage) {
+        if (connection.state !== ConnectionController.Authenticated)
+            return;
+        if (fromPage)
+            pageStack.pop(fromPage);
+        const current = pageStack.currentItem;
+        if (current?.objectName === "itemDetailsPage" && current.itemId.toLowerCase() === itemId.toLowerCase())
+            return;
+        pageStack.push(Qt.resolvedUrl("ItemDetailsPage.qml"), { connection: connection, itemId: itemId });
+    }
+
+    // A link opens its item above Home once signed in, whether it came before or after the sign-in
+    function openRequestedItem(home) {
+        if (requestedItemId.length === 0 || connection.state !== ConnectionController.Authenticated || home?.objectName !== "homePage")
+            return;
+        const itemId = requestedItemId;
+        requestedItemId = "";
+        openItem(itemId, home);
     }
 
     // The sign-in page keeps its place while the state moves between its own steps
@@ -115,14 +137,15 @@ Kirigami.ApplicationWindow {
             return 0;
         }
     }
-    onPageGroupChanged: showPageForState()
-
-    // A link that arrives while Home is already showing (a second launch) updates that page too
-    onRequestedItemIdChanged: {
-        const home = pageStack.get(0);
-        if (home && home.objectName === "homePage")
-            home.requestedItemId = requestedItemId;
+    onPageGroupChanged: {
+        // A link waiting for a sign-in belongs to the server the user is leaving
+        if (pageGroup === 0)
+            requestedItemId = "";
+        showPageForState();
     }
+
+    // A link that arrives while Home is already showing (a second launch) opens at once
+    onRequestedItemIdChanged: openRequestedItem(pageStack.get(0))
 
     globalDrawer: Kirigami.GlobalDrawer {
         title: "Kinefin"
