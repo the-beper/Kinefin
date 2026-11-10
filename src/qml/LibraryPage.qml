@@ -13,8 +13,6 @@ Kirigami.ScrollablePage {
     property string libraryName: ""
 
     title: libraryName
-    // Take the width Home leaves instead of a fixed column
-    Kirigami.ColumnView.fillWidth: true
 
     // A checkable action whose check mark always follows `current`: a click toggles the check first, then the binding is restored
     component ChoiceAction: Kirigami.Action {
@@ -158,6 +156,11 @@ Kirigami.ScrollablePage {
                 }
             ]
         }
+    }
+
+    // The grid takes the keys as soon as the page shows
+    function focusPrimary() {
+        grid.forceActiveFocus(Qt.TabFocusReason);
     }
 
     GridView {

@@ -135,6 +135,27 @@ class TestConnectionController : public QObject {
         QCOMPARE(controller->library()->rowCount(), 0);
     }
 
+    void libraryNamesAreOneLineOfText()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        const QJsonObject view{
+            {QStringLiteral("Id"), QStringLiteral("e2a1aa11a8d94b5c999a25cf59abcd01")},
+            {QStringLiteral("Name"), QString::fromUtf8("Movies\nSign Out\t \u202eevil  \u2028x")},
+            {QStringLiteral("CollectionType"), QStringLiteral("movies")}};
+        server.viewsRawBody = QJsonDocument(QJsonObject{{QStringLiteral("Items"), QJsonArray{view}},
+                                                        {QStringLiteral("TotalRecordCount"), 1}})
+                                  .toJson(QJsonDocument::Compact);
+        auto controller = makeController();
+        controller->connectTo(address(server));
+        QTRY_VERIFY(controller->state() == ConnectionController::NeedsLogin);
+        controller->login(QStringLiteral("fixture-user"), QStringLiteral("fixture-password"));
+        QTRY_COMPARE(controller->libraries().size(), 1);
+        QCOMPARE(
+            controller->libraries().constFirst().toMap().value(QStringLiteral("name")).toString(),
+            QStringLiteral("Movies Sign Out evil x"));
+    }
+
     void genreRailsFollowTheOpenLibrary()
     {
         FakeJellyfin server;

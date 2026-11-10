@@ -12,6 +12,7 @@ Controls.ItemDelegate {
     // A placeholder tile has nothing to open and does not answer the pointer or the keys
     enabled: loaded
 
+    required property int index
     required property string itemId
     required property string name
     required property int year
@@ -46,6 +47,15 @@ Controls.ItemDelegate {
         if (inProgress)
             parts.push(i18np("%1 percent watched", "%1 percent watched", Math.round(playedPercentage)));
         return parts.join(", ");
+    }
+
+    // A click makes this tile the current one and gives its view the focus, so the focus comes back to this tile after Back
+    onPressed: {
+        const view = ListView.view ?? GridView.view;
+        if (!view)
+            return;
+        view.currentIndex = card.index;
+        view.forceActiveFocus(Qt.MouseFocusReason);
     }
 
     padding: Kirigami.Units.smallSpacing

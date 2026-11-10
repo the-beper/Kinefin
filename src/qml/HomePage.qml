@@ -66,14 +66,7 @@ Kirigami.ScrollablePage {
                     showClickFeedback: true
                     Accessible.name: card.modelData.name
                     Accessible.description: card.modelData.browsable ? "" : i18n("Not supported yet")
-                    onClicked: {
-                        const stack = page.Window.window.pageStack;
-                        // A library already open above Home gives way to the new one: pop it before the shared model switches to the new library
-                        stack.pop(page);
-                        if (!page.connection.openLibrary(card.modelData.id))
-                            return;
-                        stack.push(Qt.resolvedUrl("LibraryPage.qml"), { model: page.connection.library, libraryName: card.modelData.name });
-                    }
+                    onClicked: page.Window.window.openLibrary(card.modelData.id, card.modelData.name)
                     contentItem: ColumnLayout {
                         spacing: Kirigami.Units.smallSpacing
 

@@ -13,7 +13,6 @@ Kirigami.ScrollablePage {
 
     readonly property var rails: connection.genreRails
 
-    Kirigami.ColumnView.fillWidth: true
     title: i18n("Genres")
 
     // The library page that opened this one: its grid shows the genre chosen with Show All

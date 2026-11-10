@@ -7,6 +7,7 @@ import org.kde.kirigami as Kirigami
 
 Kirigami.ScrollablePage {
     id: page
+    objectName: "serversPage"
 
     required property ConnectionController connection
     readonly property bool busy: connection.state === ConnectionController.Connecting

@@ -17,6 +17,7 @@ class LibraryItemsModel final : public PagedItemsModel {
     Q_PROPERTY(Filter filter READ filter WRITE setFilter NOTIFY filterChanged)
     Q_PROPERTY(bool resumableAvailable READ resumableAvailable NOTIFY libraryChanged)
     Q_PROPERTY(QString libraryName READ libraryName NOTIFY libraryChanged)
+    Q_PROPERTY(QString libraryId READ libraryId NOTIFY libraryChanged)
     // The genre ids the grid is filtered by (any of them), chosen among `genreOptions`
     Q_PROPERTY(QStringList genreIds READ genreIds WRITE setGenreIds NOTIFY genreIdsChanged)
     Q_PROPERTY(Kinefin::FilterOptionsModel *genreOptions READ genreOptions CONSTANT)

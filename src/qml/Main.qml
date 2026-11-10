@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Kinefin contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
 import QtQuick
+import QtQml.Models
 import org.kde.kirigami as Kirigami
 
 Kirigami.ApplicationWindow {
@@ -30,6 +31,70 @@ Kirigami.ApplicationWindow {
 
     // Auto resolves to the Breadcrumb header only on mobile in narrow mode, and that one renders titles without plain-text formatting: the pin keeps server-supplied page titles in the toolbar title delegate, which is plain text
     pageStack.globalToolBar.style: Kirigami.ApplicationHeaderStyle.ToolBar
+    // One page at a time: the default switches to side-by-side columns from 40 grid units, which pushes the pages beyond the window
+    pageStack.columnView.columnResizeMode: Kirigami.ColumnView.SingleColumn
+    // Back removes the page it leaves, so its models give their listing channels back
+    pageStack.popHiddenPages: true
+    pageStack.globalToolBar.showNavigationButtons: Kirigami.ApplicationHeaderStyle.ShowBackButton
+
+    // Esc goes back like Alt+Left except on the first page; a dialog or an open modal drawer takes the key first
+    readonly property bool modalDrawerOpen: !!globalDrawer && globalDrawer.modal && globalDrawer.drawerOpen
+    Shortcut {
+        sequences: ["Escape"]
+        enabled: window.pageStack.currentIndex > 0 && window.pageStack.layers.depth <= 1 && !window.modalDrawerOpen
+        onActivated: window.pageStack.goBack()
+    }
+
+    // The page that comes to the front takes the keyboard focus, so Tab and the arrows work without a mouse click first; a page that already focused one of its own fields (sign-in, search) keeps that focus
+    function focusIsIn(page) {
+        for (let item = window.activeFocusItem; item; item = item.parent) {
+            if (item === page)
+                return true;
+        }
+        return false;
+    }
+    // The control each page last had the focus in: Back returns to it, on the tile that was opened; entries of pages that left the stack are dropped
+    readonly property var lastFocus: new Map()
+    function forgetLeftPages() {
+        const pages = new Set();
+        for (let i = 0; i < pageStack.depth; ++i)
+            pages.add(pageStack.get(i));
+        for (const page of Array.from(lastFocus.keys())) {
+            if (!pages.has(page))
+                lastFocus.delete(page);
+        }
+    }
+    onActiveFocusItemChanged: {
+        const page = pageStack.currentItem;
+        if (!page || !activeFocusItem || !focusIsIn(page))
+            return;
+        // The tab stop that holds the focus (a list, a grid, a field), not the tile inside it that comes and goes
+        let control = activeFocusItem;
+        while (control && control !== page && !control.activeFocusOnTab)
+            control = control.parent;
+        if (control && control !== page)
+            lastFocus.set(page, control);
+    }
+    function focusCurrentPage() {
+        forgetLeftPages();
+        const page = pageStack.currentItem;
+        if (!page || modalDrawerOpen)
+            return;
+        // Back goes to the control the page last had the focus in, a new page to its main control, any other page keeps a field it focused itself
+        const remembered = lastFocus.get(page);
+        if (remembered?.visible && remembered.enabled)
+            remembered.forceActiveFocus(Qt.TabFocusReason);
+        else if (page.focusPrimary)
+            page.focusPrimary();
+        else if (!focusIsIn(page))
+            page.forceActiveFocus();
+    }
+    Connections {
+        target: window.pageStack
+        function onCurrentItemChanged() {
+            Qt.callLater(window.focusCurrentPage);
+        }
+    }
 
     Connections {
         target: window.settings
@@ -141,7 +206,8 @@ Kirigami.ApplicationWindow {
         if (connection.state !== ConnectionController.Authenticated)
             return;
         let page = null;
-        for (let i = 0; i < pageStack.depth; ++i) {
+        // A page Back just left stays above the current one until the slide ends: it is not a page to bring back
+        for (let i = 0; i <= pageStack.currentIndex; ++i) {
             if (pageStack.get(i)?.objectName === "searchPage") {
                 page = pageStack.get(i);
                 break;
@@ -202,72 +268,198 @@ Kirigami.ApplicationWindow {
     // A link that arrives while Home is already showing (a second launch) opens at once
     onRequestedItemIdChanged: openRequestedItem(pageStack.get(0))
 
-    globalDrawer: Kirigami.GlobalDrawer {
-        title: "Kinefin"
-        actions: [
-            Kirigami.Action {
-                text: i18n("Home")
-                icon.name: "go-home"
-                visible: window.signedIn
-                onTriggered: window.showPageForState()
-            },
-            Kirigami.Action {
-                text: i18n("Search")
-                icon.name: "system-search"
-                shortcut: StandardKey.Find
-                visible: window.signedIn
-                onTriggered: window.openSearch()
-            },
-            Kirigami.Action {
-                text: i18n("Switch Server")
-                icon.name: "network-server"
-                visible: window.connection.state !== ConnectionController.Idle
-                onTriggered: window.connection.cancel()
-            },
-            Kirigami.Action {
-                text: i18n("Sign Out")
-                icon.name: "system-log-out"
-                visible: window.signedIn
-                onTriggered: window.connection.signOut()
-            },
-            Kirigami.Action {
-                text: i18n("Open Server Web Interface")
-                icon.name: "internet-services"
-                visible: window.signedIn
-                onTriggered: {
-                    if (!window.connection.openServerWebInterface())
-                        window.showPassiveNotification(i18n("The server web interface could not be opened: check the default browser"));
-                }
-            },
-            Kirigami.Action {
-                text: i18n("Settings")
-                icon.name: "configure"
-                onTriggered: window.pushOnce("settingsPage", "SettingsPage.qml", { settings: window.settings })
-            },
-            Kirigami.Action {
-                text: i18n("About Kinefin")
-                icon.name: "help-about"
-                onTriggered: window.pushOnce("aboutPage", "AboutPage.qml", {})
-            },
-            Kirigami.Action {
-                text: i18n("Quit")
-                icon.name: "application-exit"
-                shortcut: StandardKey.Quit
-                onTriggered: window.close()
-            }
-        ]
+    // The section the page in front belongs to: the sidebar marks it; a page opened from a library belongs to that library
+    readonly property string currentSection: {
+        if (!signedIn)
+            return "";
+        for (let i = 0; i <= pageStack.currentIndex; ++i) {
+            if (pageStack.get(i)?.objectName === "libraryPage")
+                return "library:" + connection.library.libraryId;
+        }
+        switch (pageStack.currentItem?.objectName) {
+        case "searchPage":
+            return "search";
+        case "settingsPage":
+        case "settingsSectionPage":
+            return "settings";
+        case "aboutPage":
+            return "about";
+        default:
+            return "home";
+        }
     }
 
-    // Opens a page above the current one unless that page is already showing
-    function pushOnce(name, url, properties) {
-        if (pageStack.currentItem?.objectName !== name)
-            pageStack.push(Qt.resolvedUrl(url), properties);
+    // Home is the first page: everything above it is dropped, and Home keeps its scroll position and focus
+    function goHome() {
+        const home = pageStack.get(0);
+        if (home?.objectName === "homePage")
+            pageStack.pop(home);
+        else
+            showPageForState();
+    }
+
+    // A library above Home: one already open gives way to it, and is popped before the shared model switches to the new library
+    function openLibrary(libraryId, libraryName) {
+        if (!signedIn)
+            return;
+        // The library already open is not opened again: filters, scroll and the pages above it would be lost
+        for (let i = 0; i <= pageStack.currentIndex; ++i) {
+            if (pageStack.get(i)?.objectName === "libraryPage" && connection.library.libraryId === libraryId) {
+                pageStack.pop(pageStack.get(i));
+                return;
+            }
+        }
+        const home = pageStack.get(0);
+        if (home)
+            pageStack.pop(home);
+        if (connection.openLibrary(libraryId))
+            pageStack.push(Qt.resolvedUrl("LibraryPage.qml"), { model: connection.library, libraryName: libraryName });
+    }
+
+    // A library name comes from the server and the sidebar renders an action's text as rich text after the mnemonic pass: a doubled ampersand shows as one, and without any "<" (shown as a single angle quotation mark) there is no tag to interpret
+    function sidebarLabel(name) {
+        // An ampersand that starts something like an entity would turn into a character when Alt is held and the label becomes rich text: it takes the full-width form
+        return name.replace(/&(?=#|[A-Za-z0-9]+;)/g, "\uFF06").replace(/&/g, "&&").replace(/</g, "\u2039");
+    }
+
+    Shortcut {
+        sequences: [StandardKey.Quit]
+        onActivated: window.close()
+    }
+
+    Kirigami.Action {
+        id: homeAction
+        text: i18n("Home")
+        icon.name: "go-home"
+        enabled: window.signedIn
+        checked: window.currentSection === "home"
+        onTriggered: window.goHome()
+    }
+    Kirigami.Action {
+        id: searchAction
+        text: i18n("Search")
+        icon.name: "system-search"
+        shortcut: StandardKey.Find
+        enabled: window.signedIn
+        checked: window.currentSection === "search"
+        onTriggered: window.openSearch()
+    }
+    // One entry per library of the server, below Home and Search
+    property var libraryActions: []
+    // The drawer drops its rows for the old actions first and the actions are destroyed one event later: an action that dies while a row still shows it makes Kirigami's row read a null
+    property var sidebarLibraries: []
+    readonly property var librariesNow: signedIn ? connection.libraries : []
+    onLibrariesNowChanged: {
+        // The same list again (a Home retry) keeps the rows and the focus in them
+        if (JSON.stringify(librariesNow) === JSON.stringify(sidebarLibraries))
+            return;
+        libraryActions = [];
+        Qt.callLater(() => sidebarLibraries = librariesNow);
+    }
+    Instantiator {
+        model: window.sidebarLibraries
+        delegate: Kirigami.Action {
+            required property var modelData
+            text: window.sidebarLabel(modelData.name)
+            icon.name: "folder-video"
+            enabled: modelData.browsable
+            checked: window.currentSection === "library:" + modelData.id
+            onTriggered: window.openLibrary(modelData.id, modelData.name)
+        }
+        onObjectAdded: (index, object) => {
+            const list = window.libraryActions.slice();
+            list.splice(index, 0, object);
+            window.libraryActions = list;
+        }
+        onObjectRemoved: (index, object) => {
+            const list = window.libraryActions.slice();
+            list.splice(index, 1);
+            window.libraryActions = list;
+        }
+    }
+    Kirigami.Action {
+        id: librariesSeparator
+        separator: true
+        visible: window.libraryActions.length > 0
+    }
+    Kirigami.Action {
+        id: settingsAction
+        text: i18n("Settings")
+        icon.name: "configure"
+        checked: window.currentSection === "settings"
+        onTriggered: window.openSection("settingsPage", "SettingsPage.qml", { settings: window.settings })
+    }
+    Kirigami.Action {
+        id: aboutAction
+        text: i18n("About Kinefin")
+        icon.name: "help-about"
+        checked: window.currentSection === "about"
+        onTriggered: window.openSection("aboutPage", "AboutPage.qml", {})
+    }
+    Kirigami.Action {
+        id: serverSeparator
+        separator: true
+        visible: window.connection.state !== ConnectionController.Idle
+    }
+    Kirigami.Action {
+        id: webInterfaceAction
+        text: i18n("Server Web Interface")
+        icon.name: "internet-services"
+        visible: window.signedIn
+        onTriggered: {
+            if (!window.connection.openServerWebInterface())
+                window.showPassiveNotification(i18n("The server web interface could not be opened: check the default browser"));
+        }
+    }
+    Kirigami.Action {
+        id: switchServerAction
+        text: i18n("Switch Server")
+        icon.name: "network-server"
+        visible: window.connection.state !== ConnectionController.Idle
+        onTriggered: window.connection.cancel()
+    }
+    Kirigami.Action {
+        id: signOutAction
+        text: i18n("Sign Out")
+        icon.name: "system-log-out"
+        visible: window.signedIn
+        onTriggered: window.connection.signOut()
+    }
+
+    // The sections sit in a sidebar next to the pages while the window is wide, and in a drawer behind a handle when it is narrow; the width alone decides, so a window launched narrow and one shrunk to it look the same
+    readonly property bool sidebarFits: width >= Kirigami.Units.gridUnit * 36
+    pageStack.leftSidebar: globalDrawer
+    globalDrawer: Kirigami.GlobalDrawer {
+        title: "Kinefin"
+        modal: !window.sidebarFits
+        // Kirigami leaves the focus on the page when a modal drawer opens, and Esc would never reach the drawer
+        focus: modal && drawerOpen
+        // Kirigami's own binding of drawerOpen to the mode is lost once the drawer was opened or closed by hand: the sidebar is open, the drawer closed
+        onModalChanged: {
+            drawerOpen = !modal;
+            Qt.callLater(window.focusCurrentPage);
+        }
+        actions: [homeAction, searchAction, librariesSeparator, ...window.libraryActions, settingsAction, aboutAction, serverSeparator, webInterfaceAction, switchServerAction, signOutAction]
+    }
+
+    // A section opens above the first page: one already in the stack is brought back (what is above it goes), so the stack never grows with every click
+    function openSection(name, url, properties) {
+        for (let i = 0; i <= pageStack.currentIndex; ++i) {
+            if (pageStack.get(i)?.objectName === name) {
+                pageStack.pop(pageStack.get(i));
+                return;
+            }
+        }
+        const base = pageStack.get(0);
+        if (base)
+            pageStack.pop(base);
+        pageStack.push(Qt.resolvedUrl(url), properties);
     }
 
     // Pushing before the window's page row is complete leaves the page outside the scene
     function openStartupPage() {
         if (startupPage === "about") {
-            pushOnce("aboutPage", "AboutPage.qml", {});
+            openSection("aboutPage", "AboutPage.qml", {});
         } else if (startupPage === "settings") {
             const page = pageStack.push(Qt.resolvedUrl("SettingsPage.qml"), { settings: settings });
             for (const entry of page.sections)

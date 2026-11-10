@@ -31,6 +31,34 @@ Item {
         list.forceActiveFocus(reason);
     }
 
+    // The next row of cards above or below along the focus chain, which also lists containers and other controls; no row there, no move
+    function focusNeighbour(forward) {
+        let item = list;
+        // The chain returns to this list; the bound only guards a chain that never does
+        for (let step = 0; step < 1000; ++step) {
+            item = item.nextItemInFocusChain(forward);
+            if (!item || item === list)
+                return;
+            // The chain wraps around: a row above is not the answer to Down
+            if (item.visible && item.enabled && item.isCardRowList === true && (item.mapToItem(null, 0, 0).y - list.mapToItem(null, 0, 0).y) * (forward ? 1 : -1) > 0) {
+                item.forceActiveFocus(forward ? Qt.TabFocusReason : Qt.BacktabFocusReason);
+                item.parent?.scrollIntoView?.();
+                return;
+            }
+        }
+    }
+
+    // The page scrolls so the whole row shows
+    function scrollIntoView() {
+        const flick = root.pageFlickable;
+        const top = root.mapToItem(flick.contentItem, 0, 0).y;
+        const margin = Kirigami.Units.largeSpacing;
+        if (top < flick.contentY)
+            flick.contentY = Math.max(flick.originY, top - margin);
+        else if (top + root.height > flick.contentY + flick.height)
+            flick.contentY = Math.min(flick.originY + flick.contentHeight - flick.height, top + root.height - flick.height + margin);
+    }
+
     ListView {
         id: list
         objectName: root.listObjectName
@@ -40,6 +68,7 @@ Item {
         spacing: Kirigami.Units.largeSpacing
         clip: true
         boundsBehavior: Flickable.StopAtBounds
+        readonly property bool isCardRowList: true
         activeFocusOnTab: true
         keyNavigationEnabled: true
         currentIndex: 0
@@ -50,22 +79,16 @@ Item {
 
         // Up and Down move between the rows, Left and Right inside one
         Keys.onUpPressed: {
-            if (root.externalVerticalNavigation) {
+            if (root.externalVerticalNavigation)
                 root.upRequested();
-                return;
-            }
-            const target = list.nextItemInFocusChain(false);
-            if (target && target !== list)
-                target.forceActiveFocus(Qt.BacktabFocusReason);
+            else
+                root.focusNeighbour(false);
         }
         Keys.onDownPressed: {
-            if (root.externalVerticalNavigation) {
+            if (root.externalVerticalNavigation)
                 root.downRequested();
-                return;
-            }
-            const target = list.nextItemInFocusChain(true);
-            if (target && target !== list)
-                target.forceActiveFocus(Qt.TabFocusReason);
+            else
+                root.focusNeighbour(true);
         }
 
         // The cards are not tab stops: the list is, and it activates the current card

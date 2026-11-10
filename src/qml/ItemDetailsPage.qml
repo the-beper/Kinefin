@@ -65,8 +65,6 @@ Kirigami.ScrollablePage {
     }
 
     title: details.name
-    // Take the width the previous page leaves instead of a fixed column
-    Kirigami.ColumnView.fillWidth: true
 
     // The kinds of crew the server names with its own words, for a person with no role
     function personKind(type) {

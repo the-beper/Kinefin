@@ -19,6 +19,8 @@ KNOWN_NOISE = ("Created graphical object was not placed in the graphics scene",)
 
 # Kirigami.AboutPage (Kirigami 6.31) reports binding loops in the OverlaySheet it builds for the license text, and a plain QML line follows each report; inferred harmless, they come from Kirigami's own files.
 KNOWN_NOISE += ("templates/OverlaySheet.qml", "AboutItem.qml:377:9: QML OverlaySheet: Binding loop")
+# The same sheet reads `parent.Window.window.height` while the page is not in a window yet, and the binding is evaluated again once it is; inferred harmless
+KNOWN_NOISE += ("AboutItem.qml:380: TypeError: Cannot read property 'height' of null",)
 
 
 # KINEFIN_START_PAGE opens one more page at start; None is the plain Servers page.

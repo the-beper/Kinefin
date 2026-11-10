@@ -96,6 +96,8 @@ class FakeJellyfin {
     bool relocatePublicOnSameHost = false;
     bool redirectViewsOffHost = false;
     bool holdViews = false;
+    // A body to answer /UserViews with instead of the fixture
+    QByteArray viewsRawBody;
     bool disableQuickConnect = false;
     bool invalidQuickConnectCode = false;
     bool rejectQuickConnectStatus = false;
@@ -609,7 +611,9 @@ class FakeJellyfin {
             } else if (denyViews) {
                 respond(socket, 401, {});
             } else {
-                respond(socket, 200, fixture(QStringLiteral("user_views")));
+                respond(socket, 200,
+                        viewsRawBody.isEmpty() ? fixture(QStringLiteral("user_views"))
+                                               : viewsRawBody);
             }
             return;
         }

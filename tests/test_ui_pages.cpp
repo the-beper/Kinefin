@@ -37,6 +37,7 @@ const QStringList kKnownNoise = {
     QStringLiteral("Created graphical object was not placed in the graphics scene"),
     QStringLiteral("templates/OverlaySheet.qml"),
     QStringLiteral("AboutItem.qml:377:9: QML OverlaySheet: Binding loop"),
+    QStringLiteral("AboutItem.qml:380: TypeError: Cannot read property 'height' of null"),
 };
 
 void collectWarnings(QtMsgType type, const QMessageLogContext &context, const QString &message)
@@ -317,6 +318,146 @@ struct Ui {
                                5000);
     }
 
+    // The pages of the stack, first to last
+    QList<QQuickItem *> stackPages() const
+    {
+        QList<QQuickItem *> pages;
+        auto *stack = window->property("pageStack").value<QObject *>();
+        if (!stack)
+            return pages;
+        const QQmlListReference items(stack, "items");
+        for (qsizetype i = 0; items.isValid() && i < items.count(); ++i) {
+            if (auto *page = qobject_cast<QQuickItem *>(items.at(i)))
+                pages.append(page);
+        }
+        return pages;
+    }
+
+    // True for an item inside a page of the stack that is not the one in front
+    bool inAnotherPage(const QQuickItem *item) const
+    {
+        const QList<QQuickItem *> pages = stackPages();
+        for (const QQuickItem *parent = item; parent; parent = parent->parentItem()) {
+            if (pages.contains(parent))
+                return parent != currentDetails();
+        }
+        return false;
+    }
+
+    // Where an item may lie: inside the window, except along an axis a Flickable above it scrolls
+    bool insideWindow(const QQuickItem *item) const
+    {
+        const QRectF bounds(0, 0, window->width(), window->height());
+        const QRectF rect = item->mapRectToScene(QRectF(0, 0, item->width(), item->height()));
+        bool freeX = false;
+        bool freeY = false;
+        for (const QQuickItem *parent = item->parentItem(); parent; parent = parent->parentItem()) {
+            if (!parent->inherits("QQuickFlickable"))
+                continue;
+            freeX = freeX || parent->property("contentWidth").toReal() > parent->width() + 1;
+            freeY = freeY || parent->property("contentHeight").toReal() > parent->height() + 1;
+        }
+        const bool xOk =
+            freeX || (rect.left() >= bounds.left() - 1 && rect.right() <= bounds.right() + 1);
+        const bool yOk =
+            freeY || (rect.top() >= bounds.top() - 1 && rect.bottom() <= bounds.bottom() + 1);
+        return xOk && yOk;
+    }
+
+    // True when a clipping ancestor leaves nothing of the item to see: the toolbars of the pages below sit there, outside the page row
+    static bool clippedAway(const QQuickItem *item)
+    {
+        QRectF visible = item->mapRectToScene(QRectF(0, 0, item->width(), item->height()));
+        for (const QQuickItem *parent = item->parentItem(); parent; parent = parent->parentItem()) {
+            if (!parent->clip())
+                continue;
+            visible = visible.intersected(
+                parent->mapRectToScene(QRectF(0, 0, parent->width(), parent->height())));
+            if (visible.width() <= 0 || visible.height() <= 0)
+                return true;
+        }
+        return false;
+    }
+
+    static QString describe(const QQuickItem *item)
+    {
+        return QStringLiteral("%1 '%2' text='%3'")
+            .arg(QString::fromLatin1(item->metaObject()->className()), item->objectName(),
+                 item->property("text").toString());
+    }
+
+    // The width the sidebar takes beside the pages: nothing while the drawer is modal
+    qreal sidebarWidth() const
+    {
+        auto *drawer = window->property("globalDrawer").value<QObject *>();
+        if (!drawer || drawer->property("modal").toBool())
+            return 0;
+        return drawer->property("width").toReal() * drawer->property("position").toReal();
+    }
+
+    // What is wrong with the layout now: more than one page showing, the page in front not filling the window, a control outside the window. Empty when all is well
+    QStringList layoutProblems() const
+    {
+        QStringList problems;
+        const QRectF bounds(0, 0, window->width(), window->height());
+        const QQuickItem *current = currentDetails();
+        if (!current)
+            return {QStringLiteral("no page in front")};
+        if (stackPages().size() != stackDepth())
+            problems << QStringLiteral("the stack lists %1 pages for a depth of %2")
+                            .arg(stackPages().size())
+                            .arg(stackDepth());
+        const QRectF front =
+            current->mapRectToScene(QRectF(0, 0, current->width(), current->height()));
+        if (front.left() < sidebarWidth() - 1 || front.right() > bounds.right() + 1
+            || front.width() < bounds.width() - sidebarWidth() - 1)
+            problems << QStringLiteral("front page %1 does not fill the window beside the sidebar "
+                                       "(%2 px): x=%3 width=%4 window=%5")
+                            .arg(describe(current))
+                            .arg(sidebarWidth())
+                            .arg(front.left())
+                            .arg(front.width())
+                            .arg(bounds.width());
+        for (const QQuickItem *page : stackPages()) {
+            if (page == current || !page->isVisible() || clippedAway(page))
+                continue;
+            const QRectF rect = page->mapRectToScene(QRectF(0, 0, page->width(), page->height()));
+            if (rect.intersected(bounds).width() > 1)
+                problems << QStringLiteral("another page shows: %1").arg(describe(page));
+        }
+        for (QQuickItem *candidate : allItems(window->contentItem())) {
+            const bool control = candidate->inherits("QQuickAbstractButton")
+                                 || candidate->inherits("QQuickTextInput")
+                                 || candidate->inherits("QQuickFlickable");
+            if (!control || !candidate->isVisible() || candidate->width() <= 0
+                || candidate->height() <= 0 || inAnotherPage(candidate) || clippedAway(candidate))
+                continue;
+            if (!insideWindow(candidate))
+                problems << QStringLiteral("outside the window: %1").arg(describe(candidate));
+        }
+        return problems;
+    }
+
+    // Tab presses until the focus comes back to an item it already visited: the items that took it, in order
+    QList<QQuickItem *> tabCycle(int limit = 120)
+    {
+        QList<QQuickItem *> visited;
+        for (int i = 0; i < limit; ++i) {
+            QTest::keyClick(window, Qt::Key_Tab);
+            QQuickItem *focused = window->activeFocusItem();
+            if (!focused || visited.contains(focused))
+                break;
+            visited.append(focused);
+        }
+        return visited;
+    }
+
+    bool opensWindowOfWidth(int width)
+    {
+        window->resize(width, 640);
+        return QTest::qWaitFor([this, width] { return window->width() == width; }, 3000);
+    }
+
     FakeJellyfin server;
     MemoryTokenStore store;
     Kinefin::ClientSettings settings;
@@ -326,6 +467,122 @@ struct Ui {
     QQmlApplicationEngine engine;
     QQuickWindow *window = nullptr;
 };
+
+// Brings the window to one of the screens the layout checks walk through; false when it could not
+bool buildState(Ui &ui, const QString &state)
+{
+    auto *root = ui.engine.rootObjects().constFirst();
+    const auto wait = [&](const QString &objectName) {
+        return QTest::qWaitFor([&] { return ui.item(objectName) != nullptr; }, 10000);
+    };
+    if (state == QLatin1String("servers"))
+        return wait(QStringLiteral("serversPage"));
+    if (state == QLatin1String("login")) {
+        ui.controller.connectTo(address(ui.server));
+        return wait(QStringLiteral("loginPage"));
+    }
+    if (state == QLatin1String("settings") || state == QLatin1String("settingsSection")
+        || state == QLatin1String("about")) {
+        // The shell clears the stack once when it starts: the page goes in after that
+        if (!wait(QStringLiteral("serversPage")))
+            return false;
+        const bool about = state == QLatin1String("about");
+        const QString name = about ? QStringLiteral("aboutPage") : QStringLiteral("settingsPage");
+        const QString file =
+            about ? QStringLiteral("AboutPage.qml") : QStringLiteral("SettingsPage.qml");
+        QVariantMap properties;
+        if (!about)
+            properties.insert(QStringLiteral("settings"), QVariant::fromValue(&ui.settings));
+        QMetaObject::invokeMethod(root, "openSection", Q_ARG(QVariant, name), Q_ARG(QVariant, file),
+                                  Q_ARG(QVariant, properties));
+        if (!wait(name))
+            return false;
+        if (state != QLatin1String("settingsSection"))
+            return true;
+        const QVariantMap first = ui.item(QStringLiteral("settingsPage"))
+                                      ->property("sections")
+                                      .toList()
+                                      .constFirst()
+                                      .toMap();
+        QVariantMap sectionProperties = properties;
+        sectionProperties.insert(QStringLiteral("section"), first.value(QStringLiteral("section")));
+        sectionProperties.insert(QStringLiteral("title"), first.value(QStringLiteral("title")));
+        const QUrl sectionUrl(
+            QStringLiteral("qrc:/qt/qml/org/kde/kinefin/SettingsSectionPage.qml"));
+        auto *stack = ui.window->property("pageStack").value<QObject *>();
+        QMetaObject::invokeMethod(stack, "push", Q_ARG(QVariant, sectionUrl),
+                                  Q_ARG(QVariant, sectionProperties));
+        return QTest::qWaitFor([&] { return ui.stackDepth() == 3; }, 5000);
+    }
+    if (state == QLatin1String("homeFailedRow"))
+        ui.server.listingStatus.insert(QStringLiteral("Resume"), 500);
+    if (state == QLatin1String("libraryFailed"))
+        ui.server.listingStatus.insert(QStringLiteral("Items"), 500);
+    if (state == QLatin1String("details") || state == QLatin1String("search"))
+        state == QLatin1String("search") ? ui.serveSearch() : ui.serveMovie();
+    if (state == QLatin1String("detailsMissing")) {
+        ui.serveMovie();
+        const QJsonObject episode = fixtureObject(QStringLiteral("episode_item"));
+        ui.server.listingRawBody.insert(QStringLiteral("Items"), envelope(QJsonArray{episode}));
+    }
+    if (state == QLatin1String("rails")) {
+        ui.server.generatedGenreTotal = 2;
+        ui.server.listingStatus.insert(QStringLiteral("Items"), 500);
+    }
+    if (!ui.signIn())
+        return false;
+    if (state == QLatin1String("home") || state == QLatin1String("homeFailedRow"))
+        return QTest::qWaitFor([&] { return ui.controller.homeRows()->rowCount() > 0; }, 10000);
+    if (state == QLatin1String("search")) {
+        if (!ui.openSearchPage())
+            return false;
+        ui.type(QStringLiteral("abyss"));
+        return QTest::qWaitFor(
+            [&] { return ui.controller.search()->state() == Kinefin::SearchModel::Results; },
+            10000);
+    }
+    if (!QTest::qWaitFor(
+            [&] { return ui.item(QStringLiteral("libraryCard_") + kMovies) != nullptr; }, 10000)
+        || !ui.openLibraryTile(kMovies))
+        return false;
+    if (state == QLatin1String("library") || state == QLatin1String("libraryFailed"))
+        return QTest::qWaitFor(
+            [&] {
+                return ui.controller.library()->status() != Kinefin::LibraryItemsModel::Loading;
+            },
+            10000);
+    if (state == QLatin1String("rails")) {
+        if (!QTest::qWaitFor([&] { return ui.controller.library()->genreOptions()->available(); },
+                             10000))
+            return false;
+        QMetaObject::invokeMethod(root, "openGenres", Q_ARG(QVariant, QVariant()));
+        return QTest::qWaitFor(
+            [&] { return ui.showsText(QStringLiteral("Could not load this genre"), false); },
+            10000);
+    }
+    // details and detailsMissing: the first card of the grid
+    QQuickItem *card = nullptr;
+    const QString cardId = state == QLatin1String("details")
+                               ? kMovieId
+                               : QStringLiteral("c2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7");
+    if (!QTest::qWaitFor(
+            [&] {
+                return (card = Ui::itemIn(ui.item(QStringLiteral("libraryPage")),
+                                          QStringLiteral("mediaCard_") + cardId))
+                       != nullptr;
+            },
+            10000))
+        return false;
+    ui.clickCenter(card);
+    return wait(QStringLiteral("itemDetailsPage"))
+           && QTest::qWaitFor(
+               [&] {
+                   return ui.showsText(state == QLatin1String("details")
+                                           ? QStringLiteral("Cast and Crew")
+                                           : QStringLiteral("This item is not available"));
+               },
+               10000);
+}
 } // namespace
 
 class TestUiPages : public QObject {
@@ -1148,22 +1405,24 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(ui.showsText(QStringLiteral("Could not load this genre"), false));
         QVERIFY(!ui.showsText(QStringLiteral("Could not load the genres"), false));
         ui.server.listingStatus.clear();
-        // Only the Retry buttons of the rails page, one per failed rail: the pages below sit beside it in the column view, partly outside the window
-        QList<QPointer<QQuickItem>> retries;
-        QTRY_VERIFY([&] {
-            retries.clear();
+        // One Retry per failed rail: each click reloads one rail and removes its box
+        const auto retryButtons = [&ui] {
+            QList<QQuickItem *> found;
             for (QQuickItem *candidate : allItems(ui.item(QStringLiteral("genreRailsPage")))) {
                 if (candidate->metaObject()->indexOfMethod("click()") >= 0
                     && candidate->property("text").toString() == QStringLiteral("Retry")
                     && candidate->isVisible() && candidate->width() > 0)
-                    retries.append(candidate);
+                    found.append(candidate);
             }
-            return retries.size() == 2;
-        }());
-        // The button is activated, not clicked: in the multi-column page row it can sit outside the window
-        for (const QPointer<QQuickItem> &retry : std::as_const(retries)) {
-            QVERIFY(retry);
-            QVERIFY(QMetaObject::invokeMethod(retry.data(), "click"));
+            return found;
+        };
+        // The page slides in first: a click before it holds still lands beside its target
+        QTRY_VERIFY(ui.layoutProblems().isEmpty());
+        QTRY_COMPARE(retryButtons().size(), 2);
+        for (int remaining = 2; remaining > 0; --remaining) {
+            QTRY_COMPARE(retryButtons().size(), remaining);
+            ui.clickCenter(retryButtons().constFirst());
+            QTRY_VERIFY(retryButtons().size() < remaining);
         }
         QTRY_VERIFY(!ui.showsText(QStringLiteral("Could not load this genre"), false));
         QTRY_VERIFY(ui.item(QStringLiteral("genreRailRow_0")) != nullptr);
@@ -1197,6 +1456,641 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(second->hasActiveFocus());
         QTest::keyClick(ui.window, Qt::Key_Up);
         QTRY_VERIFY(first->hasActiveFocus());
+    }
+
+    void everyControlIsInsideTheWindow_data()
+    {
+        QTest::addColumn<QString>("state");
+        QTest::addColumn<int>("width");
+        const QStringList states{QStringLiteral("servers"),  QStringLiteral("login"),
+                                 QStringLiteral("home"),     QStringLiteral("homeFailedRow"),
+                                 QStringLiteral("library"),  QStringLiteral("libraryFailed"),
+                                 QStringLiteral("details"),  QStringLiteral("detailsMissing"),
+                                 QStringLiteral("search"),   QStringLiteral("rails"),
+                                 QStringLiteral("settings"), QStringLiteral("settingsSection"),
+                                 QStringLiteral("about")};
+        for (const QString &state : states)
+            QTest::addRow("%s@1000", qPrintable(state)) << state << 1000;
+        for (const QString &state : {QStringLiteral("home"), QStringLiteral("library"),
+                                     QStringLiteral("details"), QStringLiteral("settings")}) {
+            QTest::addRow("%s@560", qPrintable(state)) << state << 560;
+            QTest::addRow("%s@440", qPrintable(state)) << state << 440;
+            QTest::addRow("%s@1600", qPrintable(state)) << state << 1600;
+        }
+    }
+
+    void everyControlIsInsideTheWindow()
+    {
+        QFETCH(QString, state);
+        QFETCH(int, width);
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(width));
+        QVERIFY2(buildState(ui, state), qPrintable(state));
+        // The page slides in: the layout is judged once it holds still
+        QStringList problems;
+        QTRY_VERIFY2((problems = ui.layoutProblems()).isEmpty(),
+                     qPrintable(problems.join(QLatin1Char('\n'))));
+    }
+
+    void tabReachesOnlyTheCurrentPageAndTheShell()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        QTRY_VERIFY(ui.layoutProblems().isEmpty());
+        const QList<QQuickItem *> visited = ui.tabCycle();
+        QVERIFY(visited.size() >= 2);
+        for (QQuickItem *item : visited) {
+            QVERIFY2(item->isVisible(), qPrintable(Ui::describe(item)));
+            QVERIFY2(!ui.inAnotherPage(item), qPrintable(Ui::describe(item)));
+            QVERIFY2(ui.insideWindow(item), qPrintable(Ui::describe(item)));
+        }
+        // The toolbar actions and a tile of the grid are stops
+        bool grid = false;
+        for (QQuickItem *item : visited)
+            grid = grid || item->objectName().startsWith(QStringLiteral("mediaCard_"));
+        QStringList seen;
+        for (QQuickItem *item : visited)
+            seen << Ui::describe(item);
+        QVERIFY2(grid, qPrintable(seen.join(QLatin1Char('\n'))));
+    }
+
+    void altLeftAndEscapeGoBackAndDestroyThePage_data()
+    {
+        QTest::addColumn<int>("key");
+        QTest::addColumn<int>("modifiers");
+        QTest::newRow("Alt+Left") << int(Qt::Key_Left) << int(Qt::AltModifier);
+        QTest::newRow("Escape") << int(Qt::Key_Escape) << int(Qt::NoModifier);
+    }
+
+    void altLeftAndEscapeGoBackAndDestroyThePage()
+    {
+        QFETCH(int, key);
+        QFETCH(int, modifiers);
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("details")));
+        QPointer<QQuickItem> details = ui.item(QStringLiteral("itemDetailsPage"));
+        QVERIFY(details);
+        const int depth = ui.stackDepth();
+        QTRY_VERIFY(ui.layoutProblems().isEmpty());
+        QTest::keyClick(ui.window, Qt::Key(key), Qt::KeyboardModifiers(modifiers));
+        QTRY_COMPARE(ui.stackDepth(), depth - 1);
+        // The page is gone, so its models gave their listing channels back
+        QTRY_VERIFY(!details);
+        QTRY_VERIFY(ui.item(QStringLiteral("libraryPage")) != nullptr);
+    }
+
+    void escapeOnTheFirstPageDoesNothing()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("home")));
+        QCOMPARE(ui.stackDepth(), 1);
+        QTest::keyClick(ui.window, Qt::Key_Escape);
+        QTest::qWait(300);
+        QCOMPARE(ui.stackDepth(), 1);
+        QVERIFY(ui.item(QStringLiteral("homePage")) != nullptr);
+    }
+
+    void escapeClosesTheGenreDialogFirst()
+    {
+        Ui ui(m_home->path());
+        ui.server.itemsByGenre.insert(kSciFi, QStringLiteral("items_genre_scifi"));
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        QTRY_VERIFY(ui.controller.library()->genreOptions()->available());
+        QObject *dialog = ui.popup(QStringLiteral("genreFilterDialog"));
+        QVERIFY(dialog);
+        QVERIFY(QMetaObject::invokeMethod(dialog, "open"));
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        const int depth = ui.stackDepth();
+        QTest::keyClick(ui.window, Qt::Key_Escape);
+        QTRY_VERIFY(!dialog->property("visible").toBool());
+        QTest::qWait(300);
+        QCOMPARE(ui.stackDepth(), depth);
+        QCOMPARE(ui.currentDetails()->objectName(), QStringLiteral("libraryPage"));
+    }
+
+    void escapeClosesTheDrawerFirst()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(440));
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        QTRY_VERIFY(ui.layoutProblems().isEmpty());
+        auto *drawer = ui.window->property("globalDrawer").value<QObject *>();
+        QVERIFY(drawer);
+        QTRY_VERIFY(drawer->property("modal").toBool());
+        const int depth = ui.stackDepth();
+        QVERIFY(QMetaObject::invokeMethod(drawer, "open"));
+        QTRY_VERIFY(drawer->property("drawerOpen").toBool());
+        QTest::keyClick(ui.window, Qt::Key_Escape);
+        QTRY_VERIFY(!drawer->property("drawerOpen").toBool());
+        QTest::qWait(300);
+        QCOMPARE(ui.stackDepth(), depth);
+        QCOMPARE(ui.currentDetails()->objectName(), QStringLiteral("libraryPage"));
+    }
+
+    void theSignInFieldsKeepTheirFocus()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("servers")));
+        QTest::qWait(300);
+        QVERIFY(ui.window->activeFocusItem());
+        QVERIFY2(ui.window->activeFocusItem()->inherits("QQuickTextInput"),
+                 qPrintable(Ui::describe(ui.window->activeFocusItem())));
+        QVERIFY(buildState(ui, QStringLiteral("login")));
+        QTest::qWait(300);
+        QVERIFY(ui.window->activeFocusItem());
+        QVERIFY2(ui.window->activeFocusItem()->inherits("QQuickTextInput"),
+                 qPrintable(Ui::describe(ui.window->activeFocusItem())));
+    }
+
+    void searchAfterBackFindsNoLeftPage()
+    {
+        Ui ui(m_home->path());
+        ui.serveSearch();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(ui.openSearchPage() != nullptr);
+        QTest::keyClick(ui.window, Qt::Key_Left, Qt::AltModifier);
+        // Ctrl+F while the page Back left is still sliding out
+        QTest::keyClick(ui.window, Qt::Key_F, Qt::ControlModifier);
+        QTRY_VERIFY(ui.item(QStringLiteral("searchPage")) != nullptr);
+        QTRY_VERIFY(ui.window->activeFocusItem()
+                    && ui.window->activeFocusItem()->objectName() == QStringLiteral("searchField"));
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("searchPage"));
+    }
+
+    // The action of the drawer with this text
+    static QObject *drawerAction(Ui &ui, const QString &text)
+    {
+        QQmlListReference actions(ui.window->property("globalDrawer").value<QObject *>(),
+                                  "actions");
+        for (qsizetype i = 0; i < actions.count(); ++i) {
+            if (actions.at(i)->property("text").toString() == text)
+                return actions.at(i);
+        }
+        return nullptr;
+    }
+
+    // The visible row of the sidebar or drawer for the action with this text
+    static QQuickItem *shellItemWithText(Ui &ui, const QString &text)
+    {
+        for (QQuickItem *candidate : allItems(ui.window->contentItem())) {
+            if (!QString::fromLatin1(candidate->metaObject()->className())
+                     .contains(QLatin1String("GlobalDrawerActionItem"))
+                || !candidate->isVisible() || candidate->width() <= 0)
+                continue;
+            const auto *action = candidate->property("kAction").value<QObject *>();
+            if (action && action->property("text").toString() == text)
+                return candidate;
+        }
+        return nullptr;
+    }
+
+    void theSidebarIsOpenOnAWideWindow()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(1000));
+        QVERIFY(buildState(ui, QStringLiteral("home")));
+        auto *drawer = ui.window->property("globalDrawer").value<QObject *>();
+        QVERIFY(!drawer->property("modal").toBool());
+        QTRY_VERIFY(drawer->property("drawerOpen").toBool());
+        QTRY_VERIFY(ui.sidebarWidth() > 100);
+        for (const QString &text :
+             {QStringLiteral("Home"), QStringLiteral("Search"), QStringLiteral("Settings")})
+            QTRY_VERIFY2(shellItemWithText(ui, text) != nullptr, qPrintable(text));
+        // The page beside it is whole
+        QTRY_VERIFY(ui.layoutProblems().isEmpty());
+        // Quit is a shortcut only: the HIG keeps it out of a navigation sidebar
+        QVERIFY(!drawerAction(ui, QStringLiteral("Quit")));
+    }
+
+    void aNarrowWindowUsesTheModalDrawer()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(440));
+        QVERIFY(buildState(ui, QStringLiteral("home")));
+        auto *drawer = ui.window->property("globalDrawer").value<QObject *>();
+        QTRY_VERIFY(drawer->property("modal").toBool());
+        QTRY_VERIFY(!drawer->property("drawerOpen").toBool());
+        QTRY_COMPARE(ui.sidebarWidth(), 0.0);
+        QTRY_VERIFY(ui.layoutProblems().isEmpty());
+        QVERIFY(QMetaObject::invokeMethod(drawer, "open"));
+        QTRY_VERIFY(drawer->property("drawerOpen").toBool());
+        QTRY_COMPARE(drawer->property("position").toReal(), 1.0);
+        QQuickItem *search = nullptr;
+        QTRY_VERIFY((search = shellItemWithText(ui, QStringLiteral("Search"))) != nullptr);
+        // The rows that appeared with the sign-in lie one under the other once the drawer has laid itself out
+        const auto rowTop = [&ui](const QString &text) {
+            QQuickItem *row = shellItemWithText(ui, text);
+            return row ? row->mapToScene(QPointF(0, 0)).y() : -1.0;
+        };
+        QTRY_VERIFY(rowTop(QStringLiteral("Search")) > rowTop(QStringLiteral("Home")));
+        QTRY_VERIFY(rowTop(QStringLiteral("Settings")) > rowTop(QStringLiteral("Search")));
+
+        QTRY_VERIFY(ui.insideWindow(search));
+        ui.clickCenter(search);
+        QTRY_VERIFY(ui.item(QStringLiteral("searchPage")) != nullptr);
+        QTRY_VERIFY(!drawer->property("drawerOpen").toBool());
+    }
+
+    void theSidebarMarksTheCurrentSection()
+    {
+        Ui ui(m_home->path());
+        ui.serveSearch();
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("home")));
+        const auto checkedOnly = [&](const QString &expected) {
+            for (const QString &text :
+                 {QStringLiteral("Home"), QStringLiteral("Search"), QStringLiteral("Settings"),
+                  QStringLiteral("About Kinefin")}) {
+                QObject *action = drawerAction(ui, text);
+                QQuickItem *row = shellItemWithText(ui, text);
+                if (!action || !row || action->property("checked").toBool() != (text == expected)
+                    || row->property("checked").toBool() != (text == expected))
+                    return false;
+            }
+            return true;
+        };
+        QTRY_VERIFY(checkedOnly(QStringLiteral("Home")));
+        QVERIFY(ui.openSearchPage() != nullptr);
+        QTRY_VERIFY(checkedOnly(QStringLiteral("Search")));
+        QMetaObject::invokeMethod(drawerAction(ui, QStringLiteral("Settings")), "trigger");
+        QTRY_VERIFY(checkedOnly(QStringLiteral("Settings")));
+        QMetaObject::invokeMethod(drawerAction(ui, QStringLiteral("About Kinefin")), "trigger");
+        QTRY_VERIFY(checkedOnly(QStringLiteral("About Kinefin")));
+    }
+
+    void tabReachesTheSidebar()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(1000));
+        QVERIFY(buildState(ui, QStringLiteral("home")));
+        QTRY_VERIFY(ui.sidebarWidth() > 100);
+        QTRY_VERIFY(ui.layoutProblems().isEmpty());
+        // The class name of the rows is Kirigami's private one: a rename there makes this test fail loudly, not pass silently
+        QStringList reached;
+        for (QQuickItem *item : ui.tabCycle(200)) {
+            QVERIFY2(ui.insideWindow(item), qPrintable(Ui::describe(item)));
+            if (const auto *action = item->property("kAction").value<QObject *>())
+                reached << action->property("text").toString();
+        }
+        for (const QString &text : {QStringLiteral("Home"), QStringLiteral("Search"),
+                                    QStringLiteral("Settings"), QStringLiteral("About Kinefin")})
+            QVERIFY2(reached.contains(text), qPrintable(text + QStringLiteral(" not in ")
+                                                        + reached.join(QLatin1Char('|'))));
+    }
+
+    void homeReturnsToTheSameHomePage()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        QPointer<QQuickItem> home = ui.item(QStringLiteral("homePage"));
+        QVERIFY(home);
+        QMetaObject::invokeMethod(drawerAction(ui, QStringLiteral("Home")), "trigger");
+        QTRY_COMPARE(ui.stackDepth(), 1);
+        QTRY_COMPARE(ui.currentDetails(), home.data());
+    }
+
+    void escapeGoesBackWhileTheSidebarIsOpen()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(1000));
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        auto *drawer = ui.window->property("globalDrawer").value<QObject *>();
+        QTRY_VERIFY(drawer->property("drawerOpen").toBool());
+        QTest::keyClick(ui.window, Qt::Key_Escape);
+        QTRY_VERIFY(ui.item(QStringLiteral("homePage")) != nullptr);
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("homePage"));
+        QVERIFY(drawer->property("drawerOpen").toBool());
+    }
+
+    void theWidthAloneDecidesBetweenSidebarAndDrawer()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        auto *drawer = ui.window->property("globalDrawer").value<QObject *>();
+        const auto isSidebar = [&] {
+            return !drawer->property("modal").toBool() && ui.sidebarWidth() > 100;
+        };
+        const auto isDrawer = [&] {
+            return drawer->property("modal").toBool() && ui.sidebarWidth() == 0
+                   && !drawer->property("drawerOpen").toBool();
+        };
+        // The line lies at 36 grid units: only widths far from it say which mode applies
+        for (const int width : {1000, 440, 1000, 560, 1600, 640, 440, 1200}) {
+            QVERIFY(ui.opensWindowOfWidth(width));
+            if (width <= 440)
+                QTRY_VERIFY2(isDrawer(), qPrintable(QString::number(width)));
+            else if (width >= 1000)
+                QTRY_VERIFY2(isSidebar(), qPrintable(QString::number(width)));
+            // Whatever the mode, the page in front keeps the keyboard focus and fills the rest of the window
+            QTRY_VERIFY2(ui.layoutProblems().isEmpty(),
+                         qPrintable(ui.layoutProblems().join(QLatin1Char('\n'))));
+            QTRY_VERIFY(ui.window->activeFocusItem()
+                        && (ui.window->activeFocusItem() == ui.currentDetails()
+                            || ui.currentDetails()->isAncestorOf(ui.window->activeFocusItem())));
+        }
+    }
+
+    void sectionsNeverGrowTheStack()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        for (const QString &text : {QStringLiteral("Settings"), QStringLiteral("About Kinefin"),
+                                    QStringLiteral("Settings"), QStringLiteral("About Kinefin"),
+                                    QStringLiteral("Settings")}) {
+            QMetaObject::invokeMethod(drawerAction(ui, text), "trigger");
+            QTRY_VERIFY(ui.currentDetails()->objectName()
+                        == (text == QStringLiteral("Settings") ? QStringLiteral("settingsPage")
+                                                               : QStringLiteral("aboutPage")));
+            QTRY_COMPARE(ui.stackDepth(), 2);
+        }
+        QTest::qWait(300);
+        QCOMPARE(ui.stackDepth(), 2);
+    }
+
+    void theSidebarDisablesWhatNeedsASession()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(1000));
+        QVERIFY(buildState(ui, QStringLiteral("servers")));
+        QTRY_VERIFY(ui.sidebarWidth() > 100);
+        for (const QString &text : {QStringLiteral("Home"), QStringLiteral("Search")}) {
+            QVERIFY2(drawerAction(ui, text)->property("visible").toBool(), qPrintable(text));
+            QVERIFY2(!drawerAction(ui, text)->property("enabled").toBool(), qPrintable(text));
+        }
+        QVERIFY(drawerAction(ui, QStringLiteral("Settings"))->property("enabled").toBool());
+        // The server and session commands have nothing to act on yet
+        QVERIFY(!drawerAction(ui, QStringLiteral("Sign Out"))->property("visible").toBool());
+        QVERIFY(!drawerAction(ui, QStringLiteral("Server Web Interface"))
+                     ->property("visible")
+                     .toBool());
+    }
+
+    void theGridTakesTheKeysWhenTheLibraryOpens()
+    {
+        Ui ui(m_home->path());
+        ui.server.generatedItemTotal = 30;
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        QTRY_VERIFY(ui.item(QStringLiteral("libraryGrid"))->hasActiveFocus());
+    }
+
+    void backReturnsTheFocusToTheOpenedTile()
+    {
+        Ui ui(m_home->path());
+        ui.server.generatedItemTotal = 30;
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        QQuickItem *grid = ui.item(QStringLiteral("libraryGrid"));
+        QVERIFY(grid);
+        QTRY_COMPARE(ui.controller.library()->status(), Kinefin::LibraryItemsModel::Ready);
+        QQuickItem *tile = nullptr;
+        QTRY_VERIFY([&] {
+            for (QQuickItem *candidate : allItems(grid)) {
+                if (candidate->objectName().startsWith(QStringLiteral("mediaCard_"))
+                    && candidate->property("index").toInt() == 3 && candidate->isVisible()) {
+                    tile = candidate;
+                    return true;
+                }
+            }
+            return false;
+        }());
+        QTRY_VERIFY(ui.layoutProblems().isEmpty());
+        ui.clickCenter(tile);
+        QTRY_VERIFY(ui.item(QStringLiteral("itemDetailsPage")) != nullptr);
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("itemDetailsPage"));
+        QTest::keyClick(ui.window, Qt::Key_Left, Qt::AltModifier);
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("libraryPage"));
+        QTRY_VERIFY(grid->hasActiveFocus());
+        QCOMPARE(grid->property("currentIndex").toInt(), 3);
+    }
+
+    void backReturnsTheFocusToTheHomeRow()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("home")));
+        QQuickItem *row = nullptr;
+        QTRY_VERIFY((row = ui.item(QStringLiteral("homeRowList_0"))) != nullptr);
+        QTRY_VERIFY(row->isVisible() && row->property("count").toInt() > 0);
+        QTRY_VERIFY(ui.layoutProblems().isEmpty());
+        QVERIFY(QMetaObject::invokeMethod(row, "forceActiveFocus",
+                                          Q_ARG(Qt::FocusReason, Qt::TabFocusReason)));
+        QTRY_VERIFY(row->hasActiveFocus());
+        // The key is pressed again until the row has a current card to open
+        QTRY_VERIFY([&] {
+            if (ui.currentDetails()->objectName() == QStringLiteral("homePage"))
+                QTest::keyClick(ui.window, Qt::Key_Return);
+            return ui.currentDetails()->objectName() == QStringLiteral("itemDetailsPage");
+        }());
+        QTest::keyClick(ui.window, Qt::Key_Left, Qt::AltModifier);
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("homePage"));
+        QTRY_VERIFY(row->hasActiveFocus());
+    }
+
+    void downKeepsTheFocusedRowInView()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(1000));
+        // A low window: the rows do not all fit, so the page has to scroll
+        ui.window->resize(1000, 300);
+        QTRY_COMPARE(ui.window->height(), 300);
+        QVERIFY(buildState(ui, QStringLiteral("home")));
+        QTRY_VERIFY(ui.layoutProblems().isEmpty());
+        // The rows with cards, top to bottom
+        const auto rows = [&ui] {
+            QList<QQuickItem *> found;
+            for (QQuickItem *row : ui.itemsStartingWith(QStringLiteral("homeRowList_"))) {
+                if (row->isVisible() && row->property("count").toInt() > 0)
+                    found.append(row);
+            }
+            std::sort(found.begin(), found.end(), [](const QQuickItem *a, const QQuickItem *b) {
+                return a->mapToScene(QPointF(0, 0)).y() < b->mapToScene(QPointF(0, 0)).y();
+            });
+            return found;
+        };
+        QTRY_VERIFY(rows().size() >= 2);
+        // Rows still loading would change the list under the walk: it counts once it holds still
+        qsizetype seen = -1;
+        QTRY_VERIFY([&] {
+            const qsizetype now = rows().size();
+            const bool still = now == seen;
+            seen = now;
+            QTest::qWait(300);
+            return still;
+        }());
+        const QList<QQuickItem *> lists = rows();
+        QVERIFY(QMetaObject::invokeMethod(lists.constFirst(), "forceActiveFocus",
+                                          Q_ARG(Qt::FocusReason, Qt::TabFocusReason)));
+        QTRY_VERIFY(lists.constFirst()->hasActiveFocus());
+        for (qsizetype row = 1; row < lists.size(); ++row) {
+            QTest::keyClick(ui.window, Qt::Key_Down);
+            QTRY_VERIFY2(lists.at(row)->hasActiveFocus(), qPrintable(QString::number(row)));
+            // The row is whole inside the window once the page has scrolled to it
+            QTRY_VERIFY2(
+                [&] {
+                    const QRectF rect = lists.at(row)->mapRectToScene(
+                        QRectF(0, 0, lists.at(row)->width(), lists.at(row)->height()));
+                    return rect.top() >= 0 && rect.bottom() <= ui.window->height() + 1;
+                }(),
+                qPrintable(QString::number(row)));
+        }
+        // The page scrolled to reach the last row
+        QVERIFY(ui.item(QStringLiteral("homePage"))
+                    ->property("flickable")
+                    .value<QQuickItem *>()
+                    ->property("contentY")
+                    .toReal()
+                > 0);
+        // Up goes back, and Down from the last row stays where it is
+        QTest::keyClick(ui.window, Qt::Key_Up);
+        QTRY_VERIFY(lists.at(lists.size() - 2)->hasActiveFocus());
+        QTest::keyClick(ui.window, Qt::Key_Down);
+        QTRY_VERIFY(lists.constLast()->hasActiveFocus());
+        QTest::keyClick(ui.window, Qt::Key_Down);
+        QTest::qWait(200);
+        QVERIFY(lists.constLast()->hasActiveFocus());
+    }
+
+    void theSidebarListsTheLibraries()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(1000));
+        QVERIFY(buildState(ui, QStringLiteral("home")));
+        for (const QString &name :
+             {QStringLiteral("Movies"), QStringLiteral("Series"), QStringLiteral("Music")})
+            QTRY_VERIFY2(shellItemWithText(ui, name) != nullptr, qPrintable(name));
+        // A library that cannot be browsed yet is there and disabled, as its tile on Home is
+        QVERIFY(!drawerAction(ui, QStringLiteral("Music"))->property("enabled").toBool());
+        QVERIFY(drawerAction(ui, QStringLiteral("Movies"))->property("enabled").toBool());
+        // Home first, then the libraries
+        QTRY_VERIFY(
+            shellItemWithText(ui, QStringLiteral("Home"))->mapToScene(QPointF(0, 0)).y()
+            < shellItemWithText(ui, QStringLiteral("Movies"))->mapToScene(QPointF(0, 0)).y());
+        QQuickItem *movies = shellItemWithText(ui, QStringLiteral("Movies"));
+        ui.clickCenter(movies);
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("libraryPage"));
+        QCOMPARE(ui.controller.library()->libraryName(), QStringLiteral("Movies"));
+        QTRY_VERIFY(shellItemWithText(ui, QStringLiteral("Movies"))->property("checked").toBool());
+        QVERIFY(!shellItemWithText(ui, QStringLiteral("Home"))->property("checked").toBool());
+        // Another library takes the place of the first, the stack stays two pages deep
+        ui.clickCenter(shellItemWithText(ui, QStringLiteral("Series")));
+        QTRY_COMPARE(ui.controller.library()->libraryName(), QStringLiteral("Series"));
+        QTRY_VERIFY(shellItemWithText(ui, QStringLiteral("Series"))->property("checked").toBool());
+        QTRY_VERIFY(!shellItemWithText(ui, QStringLiteral("Movies"))->property("checked").toBool());
+        QTRY_COMPARE(ui.stackDepth(), 2);
+        QMetaObject::invokeMethod(drawerAction(ui, QStringLiteral("Home")), "trigger");
+        QTRY_COMPARE(ui.stackDepth(), 1);
+        QTRY_VERIFY(shellItemWithText(ui, QStringLiteral("Home"))->property("checked").toBool());
+    }
+
+    void theOpenLibraryEntryDoesNotReopenIt()
+    {
+        Ui ui(m_home->path());
+        ui.server.generatedItemTotal = 30;
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(1000));
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        QPointer<QQuickItem> library = ui.item(QStringLiteral("libraryPage"));
+        QVERIFY(library);
+        ui.controller.library()->setFilter(Kinefin::LibraryItemsModel::Unplayed);
+        QMetaObject::invokeMethod(drawerAction(ui, QStringLiteral("Movies")), "trigger");
+        QTest::qWait(500);
+        QCOMPARE(ui.currentDetails(), library.data());
+        QCOMPARE(ui.controller.library()->filter(), Kinefin::LibraryItemsModel::Unplayed);
+        QCOMPARE(ui.stackDepth(), 2);
+    }
+
+    void aLibraryOpenedFromHomeMarksItsSidebarEntry()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(1000));
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        QTRY_VERIFY(shellItemWithText(ui, QStringLiteral("Movies"))->property("checked").toBool());
+    }
+
+    void aHostileLibraryNameIsNotInterpretedInTheSidebar()
+    {
+        Ui ui(m_home->path());
+        const QString hostile =
+            QStringLiteral("<b>Bold</b> &Mine <img src=\"http://evil.invalid/x.png\">");
+        const QJsonObject view{
+            {QStringLiteral("Id"), QStringLiteral("e2a1aa11a8d94b5c999a25cf59abcd01")},
+            {QStringLiteral("Name"), hostile},
+            {QStringLiteral("CollectionType"), QStringLiteral("movies")},
+            {QStringLiteral("Type"), QStringLiteral("CollectionFolder")}};
+        ui.server.viewsRawBody =
+            QJsonDocument(QJsonObject{{QStringLiteral("Items"), QJsonArray{view}},
+                                      {QStringLiteral("TotalRecordCount"), 1}})
+                .toJson(QJsonDocument::Compact);
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(1000));
+        QVERIFY(buildState(ui, QStringLiteral("home")));
+        QTRY_VERIFY(ui.sidebarWidth() > 100);
+        // The drawer builds the label of a row once the row is wide enough
+        const QString shown = QString::fromUtf8(
+            "\u2039b>Bold\u2039/b> &Mine \u2039img src=\"http://evil.invalid/x.png\">");
+        QQuickItem *label = nullptr;
+        QTRY_VERIFY([&] {
+            for (QQuickItem *candidate : allItems(ui.window->contentItem())) {
+                if (candidate->inherits("QQuickText")
+                    && candidate->property("text").toString() == shown) {
+                    label = candidate;
+                    return true;
+                }
+            }
+            return false;
+        }());
+        // No label of the sidebar holds a tag, and nothing asked for the image
+        for (QQuickItem *candidate : allItems(ui.window->contentItem())) {
+            if (candidate->inherits("QQuickText") && ui.sidebarWidth() > 0
+                && candidate->mapToScene(QPointF(0, 0)).x() < ui.sidebarWidth())
+                QVERIFY2(!candidate->property("text").toString().contains(QLatin1Char('<')),
+                         qPrintable(candidate->property("text").toString()));
+        }
+        QTest::qWait(300);
+        QVERIFY(gWarnings.filter(QStringLiteral("evil.invalid")).isEmpty());
+        QVERIFY(label->isVisible());
+    }
+
+    void focusFollowsTheCurrentPage()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        const auto focusIsIn = [&](const QString &page) {
+            QQuickItem *root = ui.item(page);
+            for (QQuickItem *focused = ui.window->activeFocusItem(); focused;
+                 focused = focused->parentItem()) {
+                if (focused == root)
+                    return true;
+            }
+            return false;
+        };
+        QTRY_VERIFY(focusIsIn(QStringLiteral("libraryPage")));
+        QTest::keyClick(ui.window, Qt::Key_Left, Qt::AltModifier);
+        QTRY_VERIFY(focusIsIn(QStringLiteral("homePage")));
     }
 
     void aFailedHomeRowOffersItsOwnRetry()

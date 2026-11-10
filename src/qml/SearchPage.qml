@@ -15,7 +15,6 @@ Kirigami.ScrollablePage {
     // The groups show only while there is something to show or wait for: a stale group never outlives an empty or too short term
     readonly property bool groupsVisible: searchState === SearchModel.Searching || searchState === SearchModel.Results
 
-    Kirigami.ColumnView.fillWidth: true
     title: i18n("Search")
 
     // The drawer action owns the shortcut and calls this after the page shows

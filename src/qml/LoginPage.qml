@@ -7,6 +7,7 @@ import org.kde.kirigami as Kirigami
 
 Kirigami.ScrollablePage {
     id: page
+    objectName: "loginPage"
 
     required property ConnectionController connection
     readonly property bool signingIn: connection.state === ConnectionController.SigningIn

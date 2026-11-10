@@ -25,6 +25,21 @@ bool isLoopbackHost(const QUrl &url)
     QHostAddress address;
     return address.setAddress(url.host()) && address.isLoopback();
 }
+
+// A name from the server is one line of text: control characters, line separators, zero-width and bidirectional marks become spaces, and whitespace runs one space
+QString singleLine(const QString &name)
+{
+    QString clean;
+    clean.reserve(name.size());
+    for (const QChar c : name) {
+        const char16_t u = c.unicode();
+        const bool control = c.category() == QChar::Other_Control || u == 0x2028 || u == 0x2029
+                             || (u >= 0x200b && u <= 0x200f) || (u >= 0x202a && u <= 0x202e)
+                             || (u >= 0x2066 && u <= 0x2069) || u == 0x061c || u == 0xfeff;
+        clean.append(control ? QLatin1Char(' ') : c);
+    }
+    return clean.simplified();
+}
 } // namespace
 
 ConnectionController::ConnectionController(const QString &profileId, const QString &deviceId,
@@ -317,7 +332,7 @@ void ConnectionController::onUserViews(const QJsonArray &items)
                                 : QString();
         m_libraries.append(QVariantMap{
             {QStringLiteral("id"), id},
-            {QStringLiteral("name"), item.value(QStringLiteral("Name")).toString()},
+            {QStringLiteral("name"), singleLine(item.value(QStringLiteral("Name")).toString())},
             {QStringLiteral("collectionType"), collectionType},
             {QStringLiteral("imageUrl"),
              tag.isEmpty()
