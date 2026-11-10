@@ -8,6 +8,7 @@
 #include "settings/ServerCredentials.h"
 
 #include <QCommandLineParser>
+#include <QDir>
 #include <QFile>
 #include <QLockFile>
 #include <QTemporaryDir>
@@ -175,6 +176,28 @@ class TestProfileCommands : public QObject {
             {QStringLiteral("kinefin"), QStringLiteral("--profile"), QStringLiteral("ghost")});
         QVERIFY(startupProfileId(unknown, &error).isEmpty());
         QVERIFY(error.contains(QStringLiteral("ghost")));
+    }
+
+    void aLockFileLeftBehindNeverBlocksTheProfile()
+    {
+        QVERIFY(addProfile(QStringLiteral("orphan")));
+        // What an earlier run that was killed leaves: a file naming a process that no longer holds anything (inside the Flatpak every run is process 2)
+        const QString file =
+            profileDataDirectory(QStringLiteral("orphan")) + QStringLiteral("/kinefin.lock");
+        QVERIFY(QDir().mkpath(QFileInfo(file).absolutePath()));
+        QFile orphan(file);
+        QVERIFY(orphan.open(QIODevice::WriteOnly));
+        orphan.write("2\nkinefin\nsomewhere\n");
+        orphan.close();
+        QVERIFY(!profileInUse(QStringLiteral("orphan")));
+        {
+            const auto lock = lockProfile(QStringLiteral("orphan"));
+            QVERIFY(lock);
+            QVERIFY(profileInUse(QStringLiteral("orphan")));
+        }
+        // Released with the object
+        QVERIFY(!profileInUse(QStringLiteral("orphan")));
+        QVERIFY(lockProfile(QStringLiteral("orphan")));
     }
 
     void deleteRefusesTheDefaultAndAProfileInUse()

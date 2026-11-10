@@ -16,6 +16,7 @@
 #include "models/HomeRowsModel.h"
 #include "models/ItemDetailsModel.h"
 #include "models/LibraryItemsModel.h"
+#include "models/PlayQueue.h"
 #include "models/SearchModel.h"
 #include "settings/ServerCredentialSync.h"
 #include "settings/TokenStore.h"
@@ -36,6 +37,7 @@ class ConnectionController : public QObject {
     Q_PROPERTY(Kinefin::HomeRowsModel *homeRows READ homeRows CONSTANT)
     Q_PROPERTY(Kinefin::SearchModel *search READ search CONSTANT)
     Q_PROPERTY(Kinefin::GenreRailsModel *genreRails READ genreRails CONSTANT)
+    Q_PROPERTY(Kinefin::PlayQueue *queue READ queue CONSTANT)
 
   public:
     enum State {
@@ -63,6 +65,7 @@ class ConnectionController : public QObject {
     HomeRowsModel *homeRows() { return &m_home; }
     SearchModel *search() { return &m_search; }
     GenreRailsModel *genreRails() { return &m_genreRails; }
+    PlayQueue *queue() { return &m_queue; }
 
     // The place images may be fetched from: the server URL while Authenticated, nothing in every other state. Shared with the image fetcher, which runs on QML's network thread
     void setImageOrigin(std::shared_ptr<ImageOrigin> origin);
@@ -95,8 +98,8 @@ class ConnectionController : public QObject {
     Q_INVOKABLE void reloadLibraries();
     // Removes a stored server; signs out first when it is the active one
     Q_INVOKABLE void removeServer(const QString &serverId);
-    // Opens the active server's own web interface in the host browser (the app's one action for everything server-side). False when there is no server or its address is not an http(s) link
-    Q_INVOKABLE bool openServerWebInterface() const;
+    // Opens the admin dashboard of the active server's web interface in the host browser (the app's one action for everything server-side). False when there is no server or its address is not an http(s) link
+    Q_INVOKABLE bool openAdminDashboard() const;
 
   Q_SIGNALS:
     void stateChanged();
@@ -128,6 +131,7 @@ class ConnectionController : public QObject {
     HomeRowsModel m_home{&m_client};
     SearchModel m_search{&m_client};
     GenreRailsModel m_genreRails{&m_client};
+    PlayQueue m_queue{&m_client};
     int m_nextDetailsChannel = ItemDetailsModel::FirstChannel;
     std::shared_ptr<ImageOrigin> m_imageOrigin;
     QTimer m_quickConnectTimer;

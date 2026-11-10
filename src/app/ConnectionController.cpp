@@ -14,6 +14,7 @@
 
 #include "integration/LinkRouter.h"
 #include "settings/KWalletTokenStore.h"
+#include "settings/ProfilePaths.h"
 
 namespace Kinefin {
 Q_LOGGING_CATEGORY(controllerLog, "kinefin.app.connection")
@@ -52,6 +53,10 @@ ConnectionController::ConnectionController(const QString &profileId, const QStri
     m_identityValid = m_client.setDeviceIdentity(QStringLiteral("Kinefin"), deviceId, version);
     if (!m_identityValid)
         qCWarning(controllerLog) << "the profile's device id or the version is not header-safe";
+    // The queue is kept in the profile's data folder (empty for an id that is not a valid folder name: nothing is kept)
+    const QString dataDirectory = profileDataDirectory(profileId);
+    if (!dataDirectory.isEmpty())
+        m_queue.setStoragePath(dataDirectory + QStringLiteral("/queue.json"));
     m_quickConnectTimer.setInterval(5000);
     connect(&m_quickConnectTimer, &QTimer::timeout, &m_client,
             [this] { m_client.pollQuickConnect(); });
@@ -202,6 +207,8 @@ void ConnectionController::signOut()
     if (m_state == Idle)
         return;
     clearQuickConnect();
+    // Signing out takes the saved queue of this account with it, as it takes the token
+    m_queue.forgetStored(m_client.serverId(), m_client.userId());
     m_sync.signOut();
     m_libraries.clear();
     Q_EMIT librariesChanged();
@@ -210,9 +217,9 @@ void ConnectionController::signOut()
     setState(Idle);
 }
 
-bool ConnectionController::openServerWebInterface() const
+bool ConnectionController::openAdminDashboard() const
 {
-    const auto link = parseWebLink(m_serverUrl);
+    const auto link = adminDashboardUrl(m_serverUrl);
     return link && QDesktopServices::openUrl(*link);
 }
 
@@ -222,6 +229,7 @@ void ConnectionController::removeServer(const QString &serverId)
         signOut();
         return;
     }
+    m_queue.forgetStored(serverId);
     m_sync.forgetServer(serverId);
     refreshServers();
 }
@@ -240,6 +248,7 @@ void ConnectionController::onLoginSucceeded()
     setError({});
     refreshServers();
     setState(Authenticated);
+    m_queue.restoreFor(m_client.serverId(), m_client.userId());
     m_client.fetchUserViews();
 }
 

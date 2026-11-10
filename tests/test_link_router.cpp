@@ -34,6 +34,43 @@ class TestLinkRouter : public QObject {
             QVERIFY2(!Kinefin::parseWebLink(QString::fromLatin1(text)), text);
         }
     }
+
+    void theAdminDashboardIsTheWebClientsDashboardPage_data()
+    {
+        QTest::addColumn<QString>("base");
+        QTest::addColumn<QString>("expected");
+        QTest::newRow("a bare host")
+            << "http://192.168.1.10:8096" << "http://192.168.1.10:8096/web/#/dashboard";
+        QTest::newRow("a trailing slash")
+            << "https://jf.example.com/" << "https://jf.example.com/web/#/dashboard";
+        QTest::newRow("a path prefix")
+            << "https://example.com/jellyfin" << "https://example.com/jellyfin/web/#/dashboard";
+        QTest::newRow("a prefix with a slash")
+            << "https://example.com/jellyfin/" << "https://example.com/jellyfin/web/#/dashboard";
+        QTest::newRow("the web client already")
+            << "https://jf.example.com:8920/web/" << "https://jf.example.com:8920/web/#/dashboard";
+        QTest::newRow("the web client without slash")
+            << "https://jf.example.com/web" << "https://jf.example.com/web/#/dashboard";
+        QTest::newRow("a query and a fragment")
+            << "https://jf.example.com/?x=1#old" << "https://jf.example.com/web/#/dashboard";
+    }
+
+    void theAdminDashboardIsTheWebClientsDashboardPage()
+    {
+        QFETCH(QString, base);
+        QFETCH(QString, expected);
+        const auto url = Kinefin::adminDashboardUrl(base);
+        QVERIFY(url);
+        QCOMPARE(url->toString(), expected);
+    }
+
+    void theAdminDashboardRefusesWhatAWebLinkRefuses()
+    {
+        for (const auto &text :
+             {"file:///etc/passwd", "javascript:alert(1)", "https://user:pass@example.com/",
+              "https:///no-host", "example.com", ""})
+            QVERIFY2(!Kinefin::adminDashboardUrl(QString::fromLatin1(text)), text);
+    }
 };
 QTEST_APPLESS_MAIN(TestLinkRouter)
 #include "test_link_router.moc"

@@ -32,4 +32,20 @@ std::optional<QUrl> parseWebLink(const QString &input)
     }
     return url;
 }
+
+std::optional<QUrl> adminDashboardUrl(const QString &baseUrl)
+{
+    auto link = parseWebLink(baseUrl);
+    if (!link)
+        return std::nullopt;
+    QString path = link->path();
+    while (path.endsWith(QLatin1Char('/')))
+        path.chop(1);
+    if (path.endsWith(QLatin1String("/web"), Qt::CaseInsensitive))
+        path.chop(4);
+    link->setPath(path + QStringLiteral("/web/"));
+    link->setQuery(QString());
+    link->setFragment(QStringLiteral("/dashboard"));
+    return link;
+}
 } // namespace Kinefin

@@ -279,6 +279,8 @@ Kirigami.ApplicationWindow {
         switch (pageStack.currentItem?.objectName) {
         case "searchPage":
             return "search";
+        case "queuePage":
+            return "queue";
         case "settingsPage":
         case "settingsSectionPage":
             return "settings";
@@ -322,6 +324,23 @@ Kirigami.ApplicationWindow {
         return name.replace(/&(?=#|[A-Za-z0-9]+;)/g, "\uFF06").replace(/&/g, "&&").replace(/</g, "\u2039");
     }
 
+    // What the queue did with an add, for the page that asked: the page itself shows nothing
+    Connections {
+        target: window.connection.queue
+        function onAdded(count, truncated) {
+            window.showPassiveNotification(truncated ? i18n("The queue is full: some items were left out, remove some to add more") : i18np("%1 item added to the queue", "%1 items added to the queue", count));
+        }
+        function onNothingToAdd() {
+            window.showPassiveNotification(i18n("There is nothing to play in this item"));
+        }
+        function onSaveFailed() {
+            window.showPassiveNotification(i18n("The queue could not be saved: check the free space and the permissions of the profile folder. It lasts until Kinefin closes"));
+        }
+        function onAddFailed() {
+            window.showPassiveNotification(i18n("Could not add this to the queue: check the connection to the server and try again"));
+        }
+    }
+
     Shortcut {
         sequences: [StandardKey.Quit]
         onActivated: window.close()
@@ -344,9 +363,17 @@ Kirigami.ApplicationWindow {
         checked: window.currentSection === "search"
         onTriggered: window.openSearch()
     }
+    Kirigami.Action {
+        id: queueAction
+        text: i18n("Queue")
+        icon.name: "view-media-playlist"
+        enabled: window.signedIn
+        checked: window.currentSection === "queue"
+        onTriggered: window.openSection("queuePage", "QueuePage.qml", { connection: window.connection })
+    }
     // One entry per library of the server, below Home and Search
     property var libraryActions: []
-    // The drawer drops its rows for the old actions first and the actions are destroyed one event later: an action that dies while a row still shows it makes Kirigami's row read a null
+    // The drawer drops its rows for the old actions first and the actions are destroyed a moment later: an action that dies while a row still shows it makes Kirigami's row read a null
     property var sidebarLibraries: []
     readonly property var librariesNow: signedIn ? connection.libraries : []
     onLibrariesNowChanged: {
@@ -354,7 +381,12 @@ Kirigami.ApplicationWindow {
         if (JSON.stringify(librariesNow) === JSON.stringify(sidebarLibraries))
             return;
         libraryActions = [];
-        Qt.callLater(() => sidebarLibraries = librariesNow);
+        libraryTimer.restart();
+    }
+    Timer {
+        id: libraryTimer
+        interval: 100
+        onTriggered: window.sidebarLibraries = window.librariesNow
     }
     Instantiator {
         model: window.sidebarLibraries
@@ -402,13 +434,13 @@ Kirigami.ApplicationWindow {
         visible: window.connection.state !== ConnectionController.Idle
     }
     Kirigami.Action {
-        id: webInterfaceAction
-        text: i18n("Server Web Interface")
-        icon.name: "internet-services"
+        id: adminDashboardAction
+        text: i18n("Admin Dashboard")
+        icon.name: "preferences-system-network"
         visible: window.signedIn
         onTriggered: {
-            if (!window.connection.openServerWebInterface())
-                window.showPassiveNotification(i18n("The server web interface could not be opened: check the default browser"));
+            if (!window.connection.openAdminDashboard())
+                window.showPassiveNotification(i18n("The admin dashboard could not be opened: check the default browser"));
         }
     }
     Kirigami.Action {
@@ -431,6 +463,8 @@ Kirigami.ApplicationWindow {
     pageStack.leftSidebar: globalDrawer
     globalDrawer: Kirigami.GlobalDrawer {
         title: "Kinefin"
+        // Wide enough for the longest entry without eliding it
+        width: Kirigami.Units.gridUnit * 15
         modal: !window.sidebarFits
         // Kirigami leaves the focus on the page when a modal drawer opens, and Esc would never reach the drawer
         focus: modal && drawerOpen
@@ -439,7 +473,7 @@ Kirigami.ApplicationWindow {
             drawerOpen = !modal;
             Qt.callLater(window.focusCurrentPage);
         }
-        actions: [homeAction, searchAction, librariesSeparator, ...window.libraryActions, settingsAction, aboutAction, serverSeparator, webInterfaceAction, switchServerAction, signOutAction]
+        actions: [homeAction, searchAction, queueAction, librariesSeparator, ...window.libraryActions, settingsAction, aboutAction, serverSeparator, adminDashboardAction, switchServerAction, signOutAction]
     }
 
     // A section opens above the first page: one already in the stack is brought back (what is above it goes), so the stack never grows with every click

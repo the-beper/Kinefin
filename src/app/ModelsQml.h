@@ -9,6 +9,7 @@
 #include "models/ItemDetailsModel.h"
 #include "models/ItemRowModel.h"
 #include "models/LibraryItemsModel.h"
+#include "models/PlayQueue.h"
 #include "models/SearchModel.h"
 #include "models/SeasonEpisodesModel.h"
 
@@ -69,6 +70,13 @@ struct FilterOptionsModelForeign {
     Q_GADGET
     QML_FOREIGN(Kinefin::FilterOptionsModel)
     QML_NAMED_ELEMENT(FilterOptionsModel)
+    QML_UNCREATABLE("Created by the application")
+};
+
+struct PlayQueueForeign {
+    Q_GADGET
+    QML_FOREIGN(Kinefin::PlayQueue)
+    QML_NAMED_ELEMENT(PlayQueue)
     QML_UNCREATABLE("Created by the application")
 };
 

@@ -33,10 +33,15 @@ struct ItemSummary {
     qreal playedPercentage = 0;
     bool played = false;
     bool favorite = false;
+    // An episode the library lists but has no file for (LocationType Virtual)
+    bool virtualItem = false;
     bool valid = false;
 };
 
 ItemSummary parseItemSummary(const QJsonObject &item);
+
+// The item types the player can open directly: the one rule for the details page and the play queue
+bool isPlayableVideo(const QString &type);
 
 // The text of an `Overview` field: capped, with the line breaks the server writes as <br> turned into newlines and any other markup left as literal text (the one rule for every overview the app shows)
 QString overviewText(const QJsonValue &value, int limit);

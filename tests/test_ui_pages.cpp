@@ -12,6 +12,8 @@
 #include <KLocalizedQmlContext>
 
 #include <QElapsedTimer>
+#include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QMutex>
 #include <QMutexLocker>
@@ -195,6 +197,15 @@ struct Ui {
         server.itemsById.insert(kEpisodeId, QJsonDocument(episode).toJson(QJsonDocument::Compact));
         server.listingRawBody.insert(QStringLiteral("Items"),
                                      fixture(QStringLiteral("boxset_children")));
+    }
+
+    // Five played episodes of the fixture season, queued in order
+    void fillQueue()
+    {
+        serveShow();
+        server.generatedEpisodeTotal = 5;
+        server.generatedEpisodesPlayed = 5;
+        controller.queue()->add(kSeasonId, Kinefin::PlayQueue::Last);
     }
 
     // Scrolls the page so the item sits a little under the top of the view, then clicks it
@@ -540,6 +551,20 @@ bool buildState(Ui &ui, const QString &state)
         return QTest::qWaitFor(
             [&] { return ui.controller.search()->state() == Kinefin::SearchModel::Results; },
             10000);
+    }
+    if (state == QLatin1String("queue") || state == QLatin1String("queueEmpty")) {
+        if (state == QLatin1String("queue")) {
+            ui.fillQueue();
+            if (!QTest::qWaitFor([&] { return ui.controller.queue()->count() == 5; }, 10000))
+                return false;
+        }
+        const QVariantMap properties{
+            {QStringLiteral("connection"), QVariant::fromValue(&ui.controller)}};
+        QMetaObject::invokeMethod(root, "openSection", Q_ARG(QVariant, QStringLiteral("queuePage")),
+                                  Q_ARG(QVariant, QStringLiteral("QueuePage.qml")),
+                                  Q_ARG(QVariant, properties));
+        return QTest::qWaitFor([&] { return ui.item(QStringLiteral("queuePage")) != nullptr; },
+                               10000);
     }
     if (!QTest::qWaitFor(
             [&] { return ui.item(QStringLiteral("libraryCard_") + kMovies) != nullptr; }, 10000)
@@ -1462,17 +1487,19 @@ class TestUiPages : public QObject {
     {
         QTest::addColumn<QString>("state");
         QTest::addColumn<int>("width");
-        const QStringList states{QStringLiteral("servers"),  QStringLiteral("login"),
-                                 QStringLiteral("home"),     QStringLiteral("homeFailedRow"),
-                                 QStringLiteral("library"),  QStringLiteral("libraryFailed"),
-                                 QStringLiteral("details"),  QStringLiteral("detailsMissing"),
-                                 QStringLiteral("search"),   QStringLiteral("rails"),
-                                 QStringLiteral("settings"), QStringLiteral("settingsSection"),
-                                 QStringLiteral("about")};
+        const QStringList states{QStringLiteral("servers"),   QStringLiteral("login"),
+                                 QStringLiteral("home"),      QStringLiteral("homeFailedRow"),
+                                 QStringLiteral("library"),   QStringLiteral("libraryFailed"),
+                                 QStringLiteral("details"),   QStringLiteral("detailsMissing"),
+                                 QStringLiteral("search"),    QStringLiteral("rails"),
+                                 QStringLiteral("settings"),  QStringLiteral("settingsSection"),
+                                 QStringLiteral("about"),     QStringLiteral("queue"),
+                                 QStringLiteral("queueEmpty")};
         for (const QString &state : states)
             QTest::addRow("%s@1000", qPrintable(state)) << state << 1000;
-        for (const QString &state : {QStringLiteral("home"), QStringLiteral("library"),
-                                     QStringLiteral("details"), QStringLiteral("settings")}) {
+        for (const QString &state :
+             {QStringLiteral("home"), QStringLiteral("library"), QStringLiteral("details"),
+              QStringLiteral("settings"), QStringLiteral("queue")}) {
             QTest::addRow("%s@560", qPrintable(state)) << state << 560;
             QTest::addRow("%s@440", qPrintable(state)) << state << 440;
             QTest::addRow("%s@1600", qPrintable(state)) << state << 1600;
@@ -1837,9 +1864,7 @@ class TestUiPages : public QObject {
         QVERIFY(drawerAction(ui, QStringLiteral("Settings"))->property("enabled").toBool());
         // The server and session commands have nothing to act on yet
         QVERIFY(!drawerAction(ui, QStringLiteral("Sign Out"))->property("visible").toBool());
-        QVERIFY(!drawerAction(ui, QStringLiteral("Server Web Interface"))
-                     ->property("visible")
-                     .toBool());
+        QVERIFY(!drawerAction(ui, QStringLiteral("Admin Dashboard"))->property("visible").toBool());
     }
 
     void theGridTakesTheKeysWhenTheLibraryOpens()
@@ -2027,7 +2052,10 @@ class TestUiPages : public QObject {
         QVERIFY(ui.load());
         QVERIFY(ui.opensWindowOfWidth(1000));
         QVERIFY(buildState(ui, QStringLiteral("library")));
-        QTRY_VERIFY(shellItemWithText(ui, QStringLiteral("Movies"))->property("checked").toBool());
+        QTRY_VERIFY([&ui] {
+            QQuickItem *row = shellItemWithText(ui, QStringLiteral("Movies"));
+            return row && row->property("checked").toBool();
+        }());
     }
 
     void aHostileLibraryNameIsNotInterpretedInTheSidebar()
@@ -2072,6 +2100,332 @@ class TestUiPages : public QObject {
         QTest::qWait(300);
         QVERIFY(gWarnings.filter(QStringLiteral("evil.invalid")).isEmpty());
         QVERIFY(label->isVisible());
+    }
+
+    // The queue page of a queue holding the five fixture episodes, in front
+    QQuickItem *openQueueWithEpisodes(Ui &ui)
+    {
+        if (!buildState(ui, QStringLiteral("queue")))
+            return nullptr;
+        return ui.item(QStringLiteral("queueList"));
+    }
+
+    void theQueueEntryOpensOnce()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(1000));
+        QVERIFY(buildState(ui, QStringLiteral("home")));
+        for (int i = 0; i < 3; ++i) {
+            QMetaObject::invokeMethod(drawerAction(ui, QStringLiteral("Queue")), "trigger");
+            QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("queuePage"));
+            QTRY_COMPARE(ui.stackDepth(), 2);
+        }
+        QTRY_VERIFY([&ui] {
+            QQuickItem *row = shellItemWithText(ui, QStringLiteral("Queue"));
+            return row && row->property("checked").toBool();
+        }());
+        QTRY_VERIFY(ui.layoutProblems().isEmpty());
+    }
+
+    void anEmptyQueueSaysSo()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("queueEmpty")));
+        QTRY_VERIFY(ui.showsText(QStringLiteral("The queue is empty")));
+        const auto clear = [&ui] {
+            QQmlListReference actions(ui.item(QStringLiteral("queuePage")), "actions");
+            for (qsizetype i = 0; i < actions.count(); ++i) {
+                if (actions.at(i)->property("text").toString() == QStringLiteral("Clear Queue"))
+                    return actions.at(i);
+            }
+            return static_cast<QObject *>(nullptr);
+        };
+        QVERIFY(clear());
+        QVERIFY(!clear()->property("enabled").toBool());
+    }
+
+    void theDetailsPageAddsItsItemToTheQueue()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("details")));
+        QQmlListReference actions(ui.item(QStringLiteral("itemDetailsPage")), "actions");
+        const auto action = [&actions](const QString &text) {
+            for (qsizetype i = 0; i < actions.count(); ++i) {
+                if (actions.at(i)->property("text").toString() == text)
+                    return actions.at(i);
+            }
+            return static_cast<QObject *>(nullptr);
+        };
+        QVERIFY(action(QStringLiteral("Add to Queue")));
+        QVERIFY(action(QStringLiteral("Play Next")));
+        QVERIFY(action(QStringLiteral("Add to Queue"))->property("visible").toBool());
+        QMetaObject::invokeMethod(action(QStringLiteral("Add to Queue")), "trigger");
+        QTRY_COMPARE(ui.controller.queue()->count(), 1);
+        QCOMPARE(ui.controller.queue()
+                     ->data(ui.controller.queue()->index(0), Kinefin::PlayQueue::ItemIdRole)
+                     .toString(),
+                 kMovieId);
+        // Adding it again with Play Next keeps one row
+        QTRY_VERIFY(action(QStringLiteral("Play Next"))->property("enabled").toBool());
+        QMetaObject::invokeMethod(action(QStringLiteral("Play Next")), "trigger");
+        QTRY_VERIFY(!ui.controller.queue()->busy());
+        QCOMPARE(ui.controller.queue()->count(), 1);
+    }
+
+    void aSeriesPageQueuesItsEpisodes()
+    {
+        Ui ui(m_home->path());
+        ui.serveShow();
+        ui.server.generatedEpisodeTotal = 4;
+        ui.server.listingRawBody.insert(QStringLiteral("NextUp"), envelope({}));
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(QMetaObject::invokeMethod(ui.engine.rootObjects().constFirst(), "openItem",
+                                          Q_ARG(QVariant, kSeriesId), Q_ARG(QVariant, QVariant())));
+        QTRY_VERIFY(ui.item(QStringLiteral("itemDetailsPage")) != nullptr);
+        QQmlListReference actions(ui.item(QStringLiteral("itemDetailsPage")), "actions");
+        QObject *playNext = nullptr;
+        QTRY_VERIFY([&] {
+            for (qsizetype i = 0; i < actions.count(); ++i) {
+                if (actions.at(i)->property("text").toString() == QStringLiteral("Play Next")
+                    && actions.at(i)->property("visible").toBool())
+                    playNext = actions.at(i);
+            }
+            return playNext != nullptr;
+        }());
+        QMetaObject::invokeMethod(playNext, "trigger");
+        QTRY_COMPARE(ui.controller.queue()->count(), 4);
+    }
+
+    void aFailedRestoreOffersRetryOnTheQueuePage()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        auto *queue = ui.controller.queue();
+        queue->setSaveDelay(std::chrono::milliseconds(20));
+        QVERIFY(queue->add(kMovieId, Kinefin::PlayQueue::Last));
+        const QString file =
+            m_home->filePath(QStringLiteral("data/kinefin/profiles/default/queue.json"));
+        QTRY_VERIFY(QFileInfo::exists(file));
+        QFile stored(file);
+        QVERIFY(stored.open(QIODevice::ReadOnly));
+        const QJsonObject owner = QJsonDocument::fromJson(stored.readAll()).object();
+        // The restore after the next sign-in fails
+        ui.server.listingStatus.insert(QStringLiteral("Items"), 500);
+        queue->restoreFor(owner.value(QStringLiteral("serverId")).toString(),
+                          owner.value(QStringLiteral("userId")).toString());
+        QTRY_VERIFY(queue->restoreFailed());
+        const QVariantMap properties{
+            {QStringLiteral("connection"), QVariant::fromValue(&ui.controller)}};
+        QMetaObject::invokeMethod(ui.engine.rootObjects().constFirst(), "openSection",
+                                  Q_ARG(QVariant, QStringLiteral("queuePage")),
+                                  Q_ARG(QVariant, QStringLiteral("QueuePage.qml")),
+                                  Q_ARG(QVariant, properties));
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Could not restore the queue"), false));
+        QVERIFY(!ui.showsText(QStringLiteral("The queue is empty")));
+        QTRY_VERIFY(ui.layoutProblems().isEmpty());
+        ui.server.listingStatus.clear();
+        QQuickItem *retry = nullptr;
+        QTRY_VERIFY([&] {
+            for (QQuickItem *candidate : allItems(ui.item(QStringLiteral("queuePage")))) {
+                if (candidate->metaObject()->indexOfMethod("click()") >= 0
+                    && candidate->property("text").toString() == QStringLiteral("Retry")
+                    && candidate->isVisible() && candidate->width() > 0)
+                    retry = candidate;
+            }
+            return retry != nullptr;
+        }());
+        QMetaObject::invokeMethod(retry, "click");
+        QTRY_COMPARE(queue->count(), 1);
+        QTRY_VERIFY(!ui.showsText(QStringLiteral("Could not restore the queue"), false));
+    }
+
+    void theQueueListIsReachedByTabAndKeepsItsKeys()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(1000));
+        QQuickItem *list = openQueueWithEpisodes(ui);
+        QVERIFY(list);
+        QTRY_VERIFY(ui.layoutProblems().isEmpty());
+        // The list has the focus when the page opens and is the one stop of the page
+        QTRY_VERIFY(list->hasActiveFocus());
+        bool reached = false;
+        QStringList stops;
+        for (QQuickItem *item : ui.tabCycle(200)) {
+            reached = reached || item == list || list->isAncestorOf(item);
+            stops << Ui::describe(item);
+        }
+        QVERIFY2(reached, qPrintable(stops.join(QLatin1Char('\n'))));
+    }
+
+    void keyboardReordersAndRemovesRows()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QQuickItem *list = openQueueWithEpisodes(ui);
+        QVERIFY(list);
+        auto *queue = ui.controller.queue();
+        const auto nameAt = [queue](int row) {
+            return queue->data(queue->index(row), Kinefin::PlayQueue::NameRole).toString();
+        };
+        QTRY_VERIFY(list->hasActiveFocus());
+        QCOMPARE(nameAt(0), QStringLiteral("Episode 1"));
+        QTest::keyClick(ui.window, Qt::Key_Down, Qt::ControlModifier);
+        QTRY_COMPARE(nameAt(1), QStringLiteral("Episode 1"));
+        QCOMPARE(list->property("currentIndex").toInt(), 1);
+        QTest::keyClick(ui.window, Qt::Key_Up, Qt::ControlModifier);
+        QTRY_COMPARE(nameAt(0), QStringLiteral("Episode 1"));
+        QCOMPARE(list->property("currentIndex").toInt(), 0);
+        // Ctrl+Up on the first row does nothing
+        QTest::keyClick(ui.window, Qt::Key_Up, Qt::ControlModifier);
+        QCOMPARE(nameAt(0), QStringLiteral("Episode 1"));
+        QTest::keyClick(ui.window, Qt::Key_Delete);
+        QTRY_COMPARE(queue->count(), 4);
+        QCOMPARE(nameAt(0), QStringLiteral("Episode 2"));
+        QCOMPARE(list->property("currentIndex").toInt(), 0);
+    }
+
+    void aRowOpensItsItemAndBackReturnsToIt()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QQuickItem *list = openQueueWithEpisodes(ui);
+        QVERIFY(list);
+        QTRY_VERIFY(list->hasActiveFocus());
+        QTRY_VERIFY(ui.layoutProblems().isEmpty());
+        QTest::keyClick(ui.window, Qt::Key_Down);
+        QTRY_COMPARE(list->property("currentIndex").toInt(), 1);
+        QTest::keyClick(ui.window, Qt::Key_Return);
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("itemDetailsPage"));
+        QTest::keyClick(ui.window, Qt::Key_Left, Qt::AltModifier);
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("queuePage"));
+        QTRY_VERIFY(list->hasActiveFocus());
+        QCOMPARE(list->property("currentIndex").toInt(), 1);
+    }
+
+    void theMenuKeyOpensTheRowMenuAndEscapeClosesItFirst()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QQuickItem *list = openQueueWithEpisodes(ui);
+        QVERIFY(list);
+        QTRY_VERIFY(list->hasActiveFocus());
+        QTRY_VERIFY(ui.layoutProblems().isEmpty());
+        QTest::keyClick(ui.window, Qt::Key_Menu);
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Move Down")));
+        QVERIFY(ui.showsText(QStringLiteral("Remove")));
+        QVERIFY(ui.showsText(QStringLiteral("Go to Item")));
+        const int depth = ui.stackDepth();
+        QTest::keyClick(ui.window, Qt::Key_Escape);
+        QTRY_VERIFY(!ui.showsText(QStringLiteral("Move Down")));
+        QTest::qWait(300);
+        QCOMPARE(ui.stackDepth(), depth);
+        QCOMPARE(ui.currentDetails()->objectName(), QStringLiteral("queuePage"));
+        // Open again and remove the row from the menu with the keyboard
+        QTest::keyClick(ui.window, Qt::Key_Menu);
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Remove")));
+        for (QQuickItem *item : ui.itemsWithText(QStringLiteral("Remove"))) {
+            if (item->isVisible() && item->metaObject()->indexOfMethod("click()") >= 0) {
+                QMetaObject::invokeMethod(item, "click");
+                break;
+            }
+        }
+        QTRY_COMPARE(ui.controller.queue()->count(), 4);
+    }
+
+    void clearAsksFirstAndEscapeCancels()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QQuickItem *list = openQueueWithEpisodes(ui);
+        QVERIFY(list);
+        QTRY_VERIFY(ui.layoutProblems().isEmpty());
+        const auto clearAction = [&ui] {
+            QQmlListReference actions(ui.item(QStringLiteral("queuePage")), "actions");
+            for (qsizetype i = 0; i < actions.count(); ++i) {
+                if (actions.at(i)->property("text").toString() == QStringLiteral("Clear Queue"))
+                    return actions.at(i);
+            }
+            return static_cast<QObject *>(nullptr);
+        };
+        QVERIFY(clearAction());
+        QTRY_VERIFY(clearAction()->property("enabled").toBool());
+        QMetaObject::invokeMethod(clearAction(), "trigger");
+        QObject *dialog = ui.popup(QStringLiteral("clearQueueDialog"));
+        QVERIFY(dialog);
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QTest::keyClick(ui.window, Qt::Key_Escape);
+        QTRY_VERIFY(!dialog->property("visible").toBool());
+        QTest::qWait(300);
+        QCOMPARE(ui.controller.queue()->count(), 5);
+        QCOMPARE(ui.currentDetails()->objectName(), QStringLiteral("queuePage"));
+        QMetaObject::invokeMethod(clearAction(), "trigger");
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        // The dialog's own Clear Queue button sits below the page's toolbar action of the same name
+        QQuickItem *confirm = nullptr;
+        QTRY_VERIFY([&] {
+            confirm = nullptr;
+            for (QQuickItem *item : ui.itemsWithText(QStringLiteral("Clear Queue"))) {
+                if (item->isVisible() && item->width() > 0
+                    && item->metaObject()->indexOfMethod("click()") >= 0
+                    && (!confirm
+                        || item->mapToScene(QPointF(0, 0)).y()
+                               > confirm->mapToScene(QPointF(0, 0)).y()))
+                    confirm = item;
+            }
+            return confirm != nullptr
+                   && confirm->mapToScene(QPointF(0, 0)).y() > ui.window->height() / 4.0;
+        }());
+        QMetaObject::invokeMethod(confirm, "click");
+        QTRY_COMPARE(ui.controller.queue()->count(), 0);
+        QTRY_VERIFY(ui.showsText(QStringLiteral("The queue is empty")));
+    }
+
+    void queueTextStaysPlainText()
+    {
+        Ui ui(m_home->path());
+        const QString hostile =
+            QStringLiteral("<b>Bold</b> <img src=\"http://evil.invalid/x.png\">");
+        ui.serveMovie();
+        const QJsonObject movie{{QStringLiteral("Id"), kMovieId},
+                                {QStringLiteral("Type"), QStringLiteral("Movie")},
+                                {QStringLiteral("Name"), hostile}};
+        ui.server.itemsById.insert(kMovieId, QJsonDocument(movie).toJson(QJsonDocument::Compact));
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(ui.controller.queue()->add(kMovieId, Kinefin::PlayQueue::Last));
+        QTRY_COMPARE(ui.controller.queue()->count(), 1);
+        const QVariantMap properties{
+            {QStringLiteral("connection"), QVariant::fromValue(&ui.controller)}};
+        QMetaObject::invokeMethod(ui.engine.rootObjects().constFirst(), "openSection",
+                                  Q_ARG(QVariant, QStringLiteral("queuePage")),
+                                  Q_ARG(QVariant, QStringLiteral("QueuePage.qml")),
+                                  Q_ARG(QVariant, properties));
+        QTRY_VERIFY(!ui.itemsWithText(hostile, false).isEmpty());
+        for (QQuickItem *label : ui.itemsWithText(hostile, false))
+            QCOMPARE(label->property("textFormat").toInt(), int(Qt::PlainText));
+        QTest::qWait(300);
+        QVERIFY(gWarnings.filter(QStringLiteral("evil.invalid")).isEmpty());
+    }
+
+    void aLostSessionEmptiesTheQueue()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(openQueueWithEpisodes(ui));
+        QTRY_VERIFY(shellItemWithText(ui, QStringLiteral("Movies")) != nullptr);
+        // The rows have their pictures: signing out while they load makes the image fetcher refuse the late requests
+        QTRY_VERIFY(ui.server.imageRequests >= 1);
+        QTest::qWait(500);
+        ui.controller.signOut();
+        QCOMPARE(ui.controller.queue()->count(), 0);
+        QTRY_VERIFY(ui.item(QStringLiteral("serversPage")) != nullptr);
     }
 
     void focusFollowsTheCurrentPage()

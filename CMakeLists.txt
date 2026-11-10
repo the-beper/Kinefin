@@ -48,6 +48,8 @@ add_library(kinefin_core STATIC
     src/models/FilterOptionsModel.h
     src/models/GenreRailsModel.cpp
     src/models/GenreRailsModel.h
+    src/models/PlayQueue.cpp
+    src/models/PlayQueue.h
     src/models/HomeRowsModel.cpp
     src/models/HomeRowsModel.h
     src/models/ItemDetails.cpp
@@ -113,7 +115,7 @@ if(mpvqt_BINARY_DIR)
 endif()
 
 # The QML module lives in a static library of its own so that the UI tests can import it like the application does
-foreach(page Main HomePage LibraryPage MediaCard CardRow EpisodeRow ItemDetailsPage SearchPage GenreFilterDialog GenreRailsPage LoginPage MessageBox ServersPage SettingsPage SettingsSectionPage SettingRow AboutPage)
+foreach(page Main HomePage LibraryPage MediaCard CardRow EpisodeRow ItemDetailsPage SearchPage QueuePage GenreFilterDialog GenreRailsPage LoginPage MessageBox ServersPage SettingsPage SettingsSectionPage SettingRow AboutPage)
     set_source_files_properties(src/qml/${page}.qml PROPERTIES QT_RESOURCE_ALIAS ${page}.qml)
 endforeach()
 qt_add_library(kinefin_ui STATIC)
@@ -129,6 +131,7 @@ qt_add_qml_module(kinefin_ui
         src/qml/EpisodeRow.qml
         src/qml/ItemDetailsPage.qml
         src/qml/SearchPage.qml
+        src/qml/QueuePage.qml
         src/qml/GenreFilterDialog.qml
         src/qml/GenreRailsPage.qml
         src/qml/LoginPage.qml
@@ -251,6 +254,11 @@ if(BUILD_TESTING)
     target_compile_definitions(test_filter_options_model PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(test_filter_options_model PRIVATE kinefin_core Qt6::Test Qt6::Network)
     add_test(NAME filter_options_model COMMAND test_filter_options_model)
+
+    add_executable(test_play_queue tests/test_play_queue.cpp)
+    target_compile_definitions(test_play_queue PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    target_link_libraries(test_play_queue PRIVATE kinefin_core Qt6::Test Qt6::Network)
+    add_test(NAME play_queue COMMAND test_play_queue)
 
     add_executable(test_genre_rails_model tests/test_genre_rails_model.cpp)
     target_compile_definitions(test_genre_rails_model PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")

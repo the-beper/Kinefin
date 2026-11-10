@@ -65,8 +65,7 @@ ItemDetailsModel::~ItemDetailsModel()
 
 bool ItemDetailsModel::playable() const
 {
-    return m_details.type == QLatin1String("Movie") || m_details.type == QLatin1String("Episode")
-           || m_details.type == QLatin1String("Video");
+    return isPlayableVideo(m_details.type);
 }
 
 bool ItemDetailsModel::hasSimilar() const

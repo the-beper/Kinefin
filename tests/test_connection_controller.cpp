@@ -1,6 +1,9 @@
 // SPDX-FileCopyrightText: 2026 Kinefin contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
+#include <QFileInfo>
 #include <QHostAddress>
+#include <QJsonArray>
+#include <QJsonObject>
 #include <QNetworkInterface>
 #include <QPointer>
 #include <QSignalSpy>
@@ -154,6 +157,105 @@ class TestConnectionController : public QObject {
         QCOMPARE(
             controller->libraries().constFirst().toMap().value(QStringLiteral("name")).toString(),
             QStringLiteral("Movies Sign Out evil x"));
+    }
+
+    // The queue file of the test profile
+    QString queueFile() const
+    {
+        return m_home->filePath(QStringLiteral("kinefin/profiles/") + kProfile
+                                + QStringLiteral("/queue.json"));
+    }
+
+    // Signs in against `server` and queues the fixture movie; the queue is saved by the time this returns true
+    bool signInAndQueueTheMovie(ConnectionController &controller, FakeJellyfin &server)
+    {
+        const QString movie = QStringLiteral("f0e1d2c3b4a5968778695a4b3c2d1e0f");
+        server.itemsById.insert(
+            movie, QJsonDocument(QJsonObject{{QStringLiteral("Id"), movie},
+                                             {QStringLiteral("Name"), QStringLiteral("Arcturus")},
+                                             {QStringLiteral("Type"), QStringLiteral("Movie")}})
+                       .toJson(QJsonDocument::Compact));
+        controller.connectTo(address(server));
+        if (!QTest::qWaitFor([&] { return controller.state() == ConnectionController::NeedsLogin; },
+                             10000))
+            return false;
+        controller.login(QStringLiteral("fixture-user"), QStringLiteral("fixture-password"));
+        if (!QTest::qWaitFor(
+                [&] { return controller.state() == ConnectionController::Authenticated; }, 10000))
+            return false;
+        controller.queue()->setSaveDelay(std::chrono::milliseconds(20));
+        QSignalSpy added(controller.queue(), &Kinefin::PlayQueue::added);
+        if (!controller.queue()->add(movie, Kinefin::PlayQueue::Last))
+            return false;
+        return QTest::qWaitFor([&] { return added.size() == 1; }, 10000)
+               && QTest::qWaitFor([this] { return QFileInfo::exists(queueFile()); }, 10000);
+    }
+
+    // Connects to a server the profile already signed in to: the stored session restores itself, otherwise the fixture user signs in
+    bool signInAgain(ConnectionController &controller, FakeJellyfin &server)
+    {
+        controller.connectTo(address(server));
+        if (!QTest::qWaitFor(
+                [&] {
+                    return controller.state() == ConnectionController::Authenticated
+                           || controller.state() == ConnectionController::NeedsLogin;
+                },
+                10000))
+            return false;
+        if (controller.state() == ConnectionController::NeedsLogin)
+            controller.login(QStringLiteral("fixture-user"), QStringLiteral("fixture-password"));
+        return QTest::qWaitFor(
+            [&] { return controller.state() == ConnectionController::Authenticated; }, 10000);
+    }
+
+    void theQueueComesBackAtTheNextSignIn()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        {
+            auto controller = makeController();
+            QVERIFY(signInAndQueueTheMovie(*controller, server));
+        }
+        auto again = makeController();
+        QVERIFY(signInAgain(*again, server));
+        QTRY_COMPARE(again->queue()->count(), 1);
+        QCOMPARE(
+            again->queue()->data(again->queue()->index(0), Kinefin::PlayQueue::NameRole).toString(),
+            QStringLiteral("Arcturus"));
+    }
+
+    void switchingServerKeepsTheQueueFileAndSigningOutRemovesIt()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        auto controller = makeController();
+        QVERIFY(signInAndQueueTheMovie(*controller, server));
+        controller->cancel();
+        QCOMPARE(controller->queue()->count(), 0);
+        QVERIFY(QFileInfo::exists(queueFile()));
+        // Back in, then out: the file goes with the account
+        QVERIFY(signInAgain(*controller, server));
+        QTRY_COMPARE(controller->queue()->count(), 1);
+        controller->signOut();
+        QCOMPARE(controller->queue()->count(), 0);
+        QVERIFY(!QFileInfo::exists(queueFile()));
+    }
+
+    void removingAServerRemovesItsQueueFile()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        auto controller = makeController();
+        QVERIFY(signInAndQueueTheMovie(*controller, server));
+        controller->cancel();
+        QVERIFY(QFileInfo::exists(queueFile()));
+        QTRY_VERIFY(!controller->servers().isEmpty());
+        controller->removeServer(controller->servers()
+                                     .constFirst()
+                                     .toMap()
+                                     .value(QStringLiteral("serverId"))
+                                     .toString());
+        QVERIFY(!QFileInfo::exists(queueFile()));
     }
 
     void genreRailsFollowTheOpenLibrary()

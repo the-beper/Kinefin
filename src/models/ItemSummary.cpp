@@ -39,6 +39,12 @@ QString overviewText(const QJsonValue &value, int limit)
     return text;
 }
 
+bool isPlayableVideo(const QString &type)
+{
+    return type == QLatin1String("Movie") || type == QLatin1String("Episode")
+           || type == QLatin1String("Video");
+}
+
 ItemSummary parseItemSummary(const QJsonObject &item)
 {
     ItemSummary summary;
@@ -97,6 +103,8 @@ ItemSummary parseItemSummary(const QJsonObject &item)
     const QJsonValue backdrops = item.value(QStringLiteral("BackdropImageTags"));
     if (backdrops.isArray() && !backdrops.toArray().isEmpty())
         summary.backdropTag = cappedString(backdrops.toArray().first(), kMaxTokenLength);
+    summary.virtualItem =
+        item.value(QStringLiteral("LocationType")).toString() == QLatin1String("Virtual");
     const QJsonValue data = item.value(QStringLiteral("UserData"));
     if (data.isObject()) {
         const QJsonObject userData = data.toObject();

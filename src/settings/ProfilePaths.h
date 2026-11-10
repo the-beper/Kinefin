@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <QLockFile>
 #include <QString>
 
 #include <memory>
@@ -22,8 +21,24 @@ QString profileLogDirectory(const QString &profileId);
 // Creates `path` (and parents) and makes it owner-only (0700); false with `error` set when it cannot
 bool ensurePrivateDirectory(const QString &path, QString *error = nullptr);
 
+// Writes `data` to `path` as an owner-only file (0600 before the first byte, committed by rename, so a reader sees the old or the new content whole) inside an owner-only directory; false with `error` set when it cannot
+bool writePrivateFile(const QString &path, const QByteArray &data, QString *error = nullptr);
+
+// An advisory lock on a file of the profile, held while the object lives. The kernel drops it when the process ends, so a kill or a crash never leaves the profile locked; a lock file that records a process id cannot promise that, because inside the Flatpak every run is process 2 and an orphaned file looks alive
+class ProfileLock {
+  public:
+    ~ProfileLock();
+    ProfileLock(const ProfileLock &) = delete;
+    ProfileLock &operator=(const ProfileLock &) = delete;
+
+  private:
+    friend std::unique_ptr<ProfileLock> lockProfile(const QString &profileId, QString *error);
+    explicit ProfileLock(int descriptor) : m_descriptor(descriptor) {}
+    int m_descriptor;
+};
+
 // Held for as long as the app runs on the profile, so two sessions sharing one home never share a profile. Null with `error` set when another process holds it or the lock cannot be taken
-std::unique_ptr<QLockFile> lockProfile(const QString &profileId, QString *error = nullptr);
+std::unique_ptr<ProfileLock> lockProfile(const QString &profileId, QString *error = nullptr);
 
 // Whether another process holds the profile's lock right now
 bool profileInUse(const QString &profileId);

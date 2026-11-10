@@ -5,9 +5,14 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
-#include <QLockFile>
 #include <QRegularExpression>
+#include <QSaveFile>
 #include <QStandardPaths>
+
+#include <cerrno>
+#include <fcntl.h>
+#include <sys/file.h>
+#include <unistd.h>
 
 namespace Kinefin {
 bool validProfileId(const QString &profileId)
@@ -63,7 +68,33 @@ bool ensurePrivateDirectory(const QString &path, QString *error)
     return true;
 }
 
-std::unique_ptr<QLockFile> lockProfile(const QString &profileId, QString *error)
+bool writePrivateFile(const QString &path, const QByteArray &data, QString *error)
+{
+    if (!ensurePrivateDirectory(QFileInfo(path).absolutePath(), error))
+        return false;
+    QSaveFile output(path);
+    // Private before the first byte: the commit is a rename of this file
+    if (!output.open(QIODevice::WriteOnly)
+        || !output.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner)) {
+        if (error)
+            *error = QStringLiteral("Could not write a private file");
+        return false;
+    }
+    if (output.write(data) != data.size() || !output.commit()) {
+        if (error)
+            *error = QStringLiteral("Could not finalize a private file");
+        return false;
+    }
+    return true;
+}
+
+ProfileLock::~ProfileLock()
+{
+    // Closing the descriptor releases the lock
+    ::close(m_descriptor);
+}
+
+std::unique_ptr<ProfileLock> lockProfile(const QString &profileId, QString *error)
 {
     const QString directory = profileDataDirectory(profileId);
     if (directory.isEmpty()) {
@@ -73,17 +104,23 @@ std::unique_ptr<QLockFile> lockProfile(const QString &profileId, QString *error)
     }
     if (!ensurePrivateDirectory(directory, error))
         return nullptr;
-    auto lock = std::make_unique<QLockFile>(directory + QStringLiteral("/kinefin.lock"));
-    lock->setStaleLockTime(0);
-    if (!lock->tryLock(0)) {
+    const QByteArray path = QFile::encodeName(directory + QStringLiteral("/kinefin.lock"));
+    const int descriptor = ::open(path.constData(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
+    if (descriptor < 0) {
+        if (error)
+            *error = QStringLiteral("The profile lock cannot be taken");
+        return nullptr;
+    }
+    if (::flock(descriptor, LOCK_EX | LOCK_NB) != 0) {
+        const bool busy = errno == EWOULDBLOCK;
+        ::close(descriptor);
         if (error) {
-            *error = lock->error() == QLockFile::LockFailedError
-                         ? QStringLiteral("The profile is in use by another Kinefin process")
-                         : QStringLiteral("The profile lock cannot be taken");
+            *error = busy ? QStringLiteral("The profile is in use by another Kinefin process")
+                          : QStringLiteral("The profile lock cannot be taken");
         }
         return nullptr;
     }
-    return lock;
+    return std::unique_ptr<ProfileLock>(new ProfileLock(descriptor));
 }
 
 bool profileInUse(const QString &profileId)
@@ -91,8 +128,9 @@ bool profileInUse(const QString &profileId)
     const QString directory = profileDataDirectory(profileId);
     if (directory.isEmpty() || !QFileInfo(directory).isDir())
         return false;
-    QLockFile lock(directory + QStringLiteral("/kinefin.lock"));
-    lock.setStaleLockTime(0);
-    return !lock.tryLock(0);
+    QString error;
+    // Taking the lock and letting it go at once: it is free unless another process holds it
+    return lockProfile(profileId, &error) == nullptr
+           && error.contains(QLatin1String("in use by another"));
 }
 } // namespace Kinefin

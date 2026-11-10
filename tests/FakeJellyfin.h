@@ -198,6 +198,10 @@ class FakeJellyfin {
     QHash<QString, QString> itemsByGenre;
     // When >= 0 the Genres family is generated from startIndex/limit: this is the TotalRecordCount
     int generatedGenreTotal = -1;
+    // An ids= answer in the reverse of the order asked: the server does not promise to keep it
+    bool reverseIdsAnswer = false;
+    // The first this many generated episodes are played
+    int generatedEpisodesPlayed = 0;
     QHash<QString, QByteArray> lastListingRoute;     // family -> "path?query"
     QHash<QString, QList<QByteArray>> listingRoutes; // family -> every route in arrival order
     QHash<QString, QByteArray> lastListingAuth;      // family -> the Authorization header
@@ -286,6 +290,8 @@ class FakeJellyfin {
                 {QStringLiteral("ParentIndexNumber"), 1},
                 {QStringLiteral("IndexNumber"), row + 1},
                 {QStringLiteral("RunTimeTicks"), qint64(18'000'000'000)},
+                {QStringLiteral("UserData"),
+                 QJsonObject{{QStringLiteral("Played"), row < generatedEpisodesPlayed}}},
                 {QStringLiteral("ImageTags"),
                  QJsonObject{{QStringLiteral("Primary"), QStringLiteral("ep%1").arg(row)}}}});
         }
@@ -306,6 +312,12 @@ class FakeJellyfin {
             const QByteArray raw = itemsById.value(id.toLower());
             if (!raw.isEmpty())
                 items.append(QJsonDocument::fromJson(raw).object());
+        }
+        if (reverseIdsAnswer) {
+            QJsonArray reversed;
+            for (qsizetype i = items.size() - 1; i >= 0; --i)
+                reversed.append(items.at(i));
+            items = reversed;
         }
         return QJsonDocument(QJsonObject{{QStringLiteral("Items"), items},
                                          {QStringLiteral("StartIndex"), 0},
