@@ -1,10 +1,11 @@
 // SPDX-FileCopyrightText: 2026 Kinefin contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Hand-written server side of one WebSocket connection (the fallback of websocket-contract.md step 3: FakeJellyfin cannot hand already-buffered bytes to a QWebSocketServer, so the 101 handshake, unmasked server frames and the close-frame echo are written directly). One connection object per accepted upgrade attempt; client frames are always masked. A plain class on purpose: the fake recording is read after deterministic polling, and no test needs a signal.
+// Hand-written server side of one WebSocket connection (the fallback of websocket-contract.md step 3: FakeJellyfin cannot hand already-buffered bytes to a QWebSocketServer, so the 101 handshake, unmasked server frames and the close-frame echo are written directly). One connection object per accepted upgrade attempt; client frames are always masked. A plain class on purpose: the fake recording is read after deterministic polling, and no test needs a signal
 #pragma once
 
 #include <QCryptographicHash>
 #include <QList>
+#include <QPointer>
 #include <QTcpSocket>
 
 class FakeSocketConnection final {
@@ -25,16 +26,16 @@ class FakeSocketConnection final {
         m_socket->flush();
     }
 
-    // One complete text frame; server frames are never masked.
+    // One complete text frame; server frames are never masked
     void sendText(const QString &text) { writeFrame(0x81, text.toUtf8()); }
 
-    // One text frame with a payload of `bytes` letters, in the extended 64-bit length form.
+    // One text frame with a payload of `bytes` letters, in the extended 64-bit length form
     void sendBigText(qint64 bytes)
     {
         writeFrame(0x81, QByteArray(qint64(bytes < 0 ? 0 : bytes), 'a'));
     }
 
-    // A server-initiated close; the client is expected to echo with the same code.
+    // A server-initiated close; the client is expected to echo with the same code
     void sendClose(quint16 code)
     {
         QByteArray payload;
@@ -43,7 +44,7 @@ class FakeSocketConnection final {
         writeFrame(0x88, payload);
     }
 
-    // Abrupt TCP loss without any frame, the network-loss shape.
+    // Abrupt TCP loss without any frame, the network-loss shape
     void kick()
     {
         if (m_socket)
@@ -52,11 +53,11 @@ class FakeSocketConnection final {
 
     bool alive() const { return m_socket && m_socket->state() == QAbstractSocket::ConnectedState; }
 
-    // What the fake received from the client, in arrival order.
+    // What the fake received from the client, in arrival order
     QStringList receivedTexts;
     QList<int> clientCloseCodes;
 
-    // drain() is driven by FakeJellyfin's freshRead between frames; reads track the code and text of everything below.
+    // drain() is driven by FakeJellyfin's freshRead between frames; reads track the code and text of everything below
     void drain()
     {
         if (!m_socket)
@@ -84,7 +85,7 @@ class FakeSocketConnection final {
                     length = qint64((length << 8) | quint8(m_input.at(2 + i)));
                 offset += 8;
             }
-            // Client frames are always masked; a fake is not a server mimic.
+            // Client frames are always masked; a fake is not a server mimic
             if (!masked)
                 return;
             if (m_input.size() < offset + 4)
@@ -144,6 +145,6 @@ class FakeSocketConnection final {
         m_socket->flush();
     }
 
-    QTcpSocket *m_socket = nullptr;
+    QPointer<QTcpSocket> m_socket;
     QByteArray m_input;
 };

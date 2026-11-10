@@ -60,7 +60,7 @@ class TestProfileIdentity : public QObject {
         QCOMPARE(QFileInfo(directory + QStringLiteral("/profile.json")).permissions() & leaked, 0);
     }
 
-    // The id binds the access token: a damaged file is an error, never silently replaced.
+    // The id binds the access token: a damaged file is an error, never silently replaced
     void aMalformedProfileFileIsNotOverwritten()
     {
         QString error;

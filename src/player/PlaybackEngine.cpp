@@ -4,6 +4,8 @@
 
 #include <cmath>
 
+#include <QTimer>
+
 #include <MpvController>
 
 #include "api/JellyfinClient.h"
@@ -12,15 +14,29 @@ Q_LOGGING_CATEGORY(playerLog, "kinefin.player.engine")
 
 namespace Kinefin {
 
-// One tick is 100 ns (server time base, parity §9); mpv reports seconds.
+// One tick is 100 ns (server time base, parity §9); mpv reports seconds
 static qint64 secondsToTicks(double seconds)
 {
     return seconds <= 0.0 ? 0 : static_cast<qint64>(std::llround(seconds * 1e7));
 }
 
+// An eof within this distance of the duration is the item's end: the last time-pos may fall a few ms short, while a dropped connection also ends in eof far from the end and must keep its position
+constexpr qint64 kEofSnapTicks = 5 * 10'000'000;
+// How long a stop() waits for mpv's end-file before the session settles without it
+constexpr int kStopWatchdogMs = 3000;
+
 PlaybackEngine::PlaybackEngine(JellyfinClient &client, PlaybackSession &session, QObject *parent)
     : QObject(parent), m_client(client), m_session(session)
 {
+    m_stopWatchdog.setSingleShot(true);
+    m_stopWatchdog.setInterval(kStopWatchdogMs);
+    // The stream's Stopped report went out on the transition to Stopping: settling here only releases the session when mpv never answers (a refused stop, a dropped end-file reason, mpv gone)
+    connect(&m_stopWatchdog, &QTimer::timeout, this, [this] {
+        if (m_session.state() == PlaybackSession::State::Stopping) {
+            qCWarning(playerLog) << "mpv never ended the stopped file, settling the session";
+            m_session.stopped();
+        }
+    });
 }
 
 PlaybackEngine::~PlaybackEngine() = default;
@@ -31,6 +47,7 @@ bool PlaybackEngine::init(const QStringList &options)
         return false;
     }
     m_controller = new MpvController(this);
+    connect(m_controller, &MpvController::fileStarted, this, &PlaybackEngine::onFileStarted);
     connect(m_controller, &MpvController::fileLoaded, this, [this] {
         qCDebug(playerLog) << "file loaded";
         m_session.opened();
@@ -40,10 +57,7 @@ bool PlaybackEngine::init(const QStringList &options)
             &PlaybackEngine::onPropertyChanged);
     m_controller->init();
 
-    // MpvQt pins vo=libmpv for its QML item; an option from the caller replaces it
-    // (later wins), so the offscreen container gets vo=null/ao=null and P5 attaches
-    // the real window. A bounded network timeout keeps a failed open from hanging
-    // into the injection tests (INT-02).
+    // MpvQt pins vo=libmpv for its QML item; an option from the caller replaces it (later wins), so the offscreen container gets vo=null/ao=null and the windowed route attaches the real window. A bounded network timeout keeps a failed open from hanging into the injection tests
     m_controller->setProperty(QStringLiteral("network-timeout"), 15);
     for (const QString &option : options) {
         const qsizetype equals = option.indexOf(QLatin1Char('='));
@@ -79,22 +93,17 @@ void PlaybackEngine::applyStreamAuthorization()
     if (m_controller == nullptr) {
         return;
     }
-    // One mpv list entry with the full authorization value. The MediaBrowser header
-    // is full of the characters mpv's option list parser treats specially (commas,
-    // quotes): mpv's API string-form set slices the value on every comma (verified
-    // against libmpv 0.41), so the property must be set through a node array of one
-    // entry instead, which stores the whole value uninterpreted. The token lives
-    // only inside this property; neither the URL nor any log line sees it.
+    // One mpv list entry with the full authorization value. The MediaBrowser header is full of the characters mpv's option list parser treats specially (commas, quotes): mpv's API string-form set slices the value on every comma (verified against libmpv 0.41), so the property must be set through a node array of one entry instead, which stores the whole value uninterpreted. The token lives only inside this property; neither the URL nor any log line sees it
     const QByteArray authorization = m_client.streamAuthorization();
     if (authorization.isEmpty()) {
-        // Never leave a stale header behind when the identity went away.
+        // Never leave a stale header behind when the identity went away
         m_controller->setProperty(QStringLiteral("http-header-fields"), QVariantList{});
         return;
     }
     const QByteArray entry = QByteArrayLiteral("Authorization: ") + authorization;
     m_controller->setProperty(QStringLiteral("http-header-fields"),
                               QVariantList{QString::fromUtf8(entry)});
-    // The exact value is never logged (project note: no tokens in URLs, signals or logs).
+    // The exact value is never logged (project note: no tokens in URLs, signals or logs)
 }
 
 bool PlaybackEngine::open(const PlaybackSource &source)
@@ -117,6 +126,17 @@ bool PlaybackEngine::open(const PlaybackSource &source)
     }
     m_positionTicks = 0;
     m_positionKnown = false;
+    m_loadStarted = false;
+    m_stopPending = false;
+    m_stopWatchdog.stop();
+    if (m_durationTicks != 0) {
+        m_durationTicks = 0;
+        Q_EMIT durationChanged(m_durationTicks);
+    }
+    if (m_canSeek) {
+        m_canSeek = false;
+        Q_EMIT canSeekChanged(m_canSeek);
+    }
     applyStreamAuthorization();
     qCDebug(playerLog) << "opening"
                        << (route == PlaybackSession::Route::Transcoded ? "a transcoded stream"
@@ -124,8 +144,7 @@ bool PlaybackEngine::open(const PlaybackSource &source)
     const QVariant load = m_controller->command(
         {QStringLiteral("loadfile"), source.url.toString(QUrl::FullyEncoded)});
     if (load.canConvert<ErrorReturn>()) {
-        // mpv refused the command outright: no stream ever started, so the session
-        // drops the phantom server session without a report (plan P2x gate).
+        // mpv refused the command outright: no stream ever started, so the session drops the phantom server session without a report
         m_session.failed();
         settleFailure();
         return false;
@@ -155,28 +174,23 @@ void PlaybackEngine::stop()
         return;
     }
     switch (m_session.state()) {
-    case PlaybackSession::State::Opening: {
-        // Stopping during the load: mpv answers by going idle WITHOUT an end-file
-        // event while the file never completed its load (verified against libmpv
-        // 0.41), so the session settles here instead of waiting for one. If the
-        // load had already gone through, the follow-up end-file("stop") lands in
-        // an Idle session and is ignored.
+    case PlaybackSession::State::Opening:
+        // A stop sent before mpv began the load is dropped with no end-file at all, while a started load always ends with one (observed against libmpv 0.41): the stop waits for the start-file, and the session stays Stopping until that end-file, so a next open() can never meet a stale event of this load
         m_session.stop();
-        m_session.stopped();
-        m_controller->command({QStringLiteral("stop")});
+        m_stopWatchdog.start();
+        if (m_loadStarted) {
+            sendStop();
+        } else {
+            m_stopPending = true;
+        }
         break;
-    }
     case PlaybackSession::State::Playing:
     case PlaybackSession::State::Paused:
     case PlaybackSession::State::Buffering: {
-        // The file is loaded: mpv answers the stop with end-file("stop") and the
-        // session settles there.
+        // The file is loaded: mpv answers the stop with end-file("stop") and the session settles there
         m_session.stop();
-        const QVariant stopped = m_controller->command({QStringLiteral("stop")});
-        if (stopped.canConvert<ErrorReturn>()) {
-            qCWarning(playerLog) << "mpv refused the stop command:"
-                                 << stopped.value<ErrorReturn>().error;
-        }
+        m_stopWatchdog.start();
+        sendStop();
         break;
     }
     case PlaybackSession::State::Idle:
@@ -208,10 +222,27 @@ void PlaybackEngine::settleFailure()
     if (m_session.state() != PlaybackSession::State::Failed) {
         return;
     }
-    // The best-effort remote stop for the actually started stream is the reporter's
-    // own doing on the Stopping transition; an opening failure reports nothing.
+    // The best-effort remote stop for the actually started stream is the reporter's own doing on the Stopping transition; an opening failure reports nothing
     m_session.stop();
     m_session.stopped();
+}
+
+void PlaybackEngine::sendStop()
+{
+    const QVariant stopped = m_controller->command({QStringLiteral("stop")});
+    if (stopped.canConvert<ErrorReturn>()) {
+        qCWarning(playerLog) << "mpv refused the stop command:"
+                             << stopped.value<ErrorReturn>().error;
+    }
+}
+
+void PlaybackEngine::onFileStarted()
+{
+    m_loadStarted = true;
+    if (m_stopPending) {
+        m_stopPending = false;
+        sendStop();
+    }
 }
 
 void PlaybackEngine::onPropertyChanged(const QString &property, const QVariant &value)
@@ -241,8 +272,7 @@ void PlaybackEngine::onPropertyChanged(const QString &property, const QVariant &
             Q_EMIT canSeekChanged(m_canSeek);
         }
     } else if (property == QLatin1String("paused-for-cache")) {
-        // Cache stalls only mean Buffering around an actually Playing session: the
-        // state machine refuses every other path silently.
+        // Cache stalls only mean Buffering around an actually Playing session: the state machine refuses every other path silently
         if (isFlag && value.toBool()) {
             m_session.buffering();
         } else if (isFlag) {
@@ -259,28 +289,28 @@ void PlaybackEngine::onEndFile(const QString &reason)
     case PlaybackSession::State::Playing:
     case PlaybackSession::State::Paused:
     case PlaybackSession::State::Buffering:
-        // A natural end and a real failure are different reports: the item's end is
-        // the ordinary one-Stop path (parity §9), a dead stream is failed().
-        if (eofish) {
-            m_session.stop();
-        } else {
+        // Only an error is a failure: a natural end and a stop not driven by stop() (an external mpv command) are the ordinary one-Stop path (parity §9)
+        if (reason == QLatin1String("error")) {
             m_session.failed();
+            break;
         }
+        if (eofish && m_positionKnown && m_durationTicks - m_positionTicks <= kEofSnapTicks) {
+            m_positionTicks = m_durationTicks;
+            Q_EMIT positionChanged(m_positionTicks);
+        }
+        m_session.stop();
         break;
     case PlaybackSession::State::Opening:
         if (reason == QLatin1String("stop")) {
-            // Our own stop() drive reached mpv before the stream ever produced a
-            // fileLoaded: an ordinary teardown, not a failure (no server session
-            // was ever opened).
+            // A stop not driven by stop() reached mpv before the stream produced a fileLoaded: an ordinary teardown, not a failure (no server session was ever opened)
             m_session.stop();
         } else {
-            // The load never produced a stream: an opening failure, which the gate
-            // says must not reach the server as a stop report.
+            // The load never produced a stream: an opening failure, which the gate says must not reach the server as a stop report
             m_session.failed();
         }
         break;
     case PlaybackSession::State::Stopping:
-        // A stop() drive was handed to mpv before this; the file is actually gone.
+        // A stop() drive was handed to mpv before this; the file is actually gone
         m_session.stopped();
         break;
     case PlaybackSession::State::Failed:
@@ -292,6 +322,7 @@ void PlaybackEngine::onEndFile(const QString &reason)
     } else {
         settleFailure();
     }
+    m_stopWatchdog.stop();
     Q_EMIT streamEnded(reason);
 }
 } // namespace Kinefin

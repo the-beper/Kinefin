@@ -50,7 +50,7 @@ QString profileDeviceId(const QString &profileId, QString *error)
             return fail(error, QStringLiteral("Could not open the profile file"));
         const QJsonDocument document = QJsonDocument::fromJson(file.readAll());
         const QString id = document.object().value(deviceIdKey).toString();
-        // The API client's own rule for header fields: a bad id must not reach it.
+        // The API client's own rule for header fields: a bad id must not reach it
         if (!document.isObject() || !isValidHeaderField(id))
             return fail(error, QStringLiteral("Malformed profile file"));
         return id;

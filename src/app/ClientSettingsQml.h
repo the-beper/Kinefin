@@ -6,7 +6,7 @@
 
 #include <QtQml/qqmlregistration.h>
 
-// Makes the core library's ClientSettings known to QML without linking the core to QtQml.
+// Makes the core library's ClientSettings known to QML without linking the core to QtQml
 namespace Kinefin {
 struct ClientSettingsForeign {
     Q_GADGET

@@ -79,7 +79,7 @@ bool writeIndex(const ProfileIndexData &data, QString *error)
     return true;
 }
 
-// One lock for every read-modify-write of the file.
+// One lock for every read-modify-write of the file
 class IndexLock {
   public:
     explicit IndexLock(QString *error) : m_lock(profileIndexPath() + QStringLiteral(".lock"))
@@ -126,7 +126,7 @@ bool ensureDefaultProfileIndex(QString *error)
         QString readError;
         if (readLocked(&readError))
             return true;
-        // An index that cannot even be opened is not an invalid one: it stays where it is.
+        // An index that cannot even be opened is not an invalid one: it stays where it is
         if (!QFile(path).open(QIODevice::ReadOnly))
             return fail(error, readError);
         const QString broken = path + QStringLiteral(".broken");

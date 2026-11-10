@@ -101,13 +101,13 @@ class TestProfileCommands : public QObject {
         QVERIFY(ensureDefaultProfileIndex());
         QVERIFY(QFile::exists(profileIndexPath() + QStringLiteral(".broken")));
         QCOMPARE(ids(), QStringList{QStringLiteral("default")});
-        // Valid JSON that does not name a listed default is just as invalid.
+        // Valid JSON that does not name a listed default is just as invalid
         QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
         file.write(R"({"defaultProfile":"ghost","profiles":[{"id":"default","name":"Default"}]})");
         file.close();
         QVERIFY(ensureDefaultProfileIndex());
         QCOMPARE(loadProfileIndex()->defaultId, QStringLiteral("default"));
-        // A valid index is never touched.
+        // A valid index is never touched
         QVERIFY(addProfile(QStringLiteral("kept")));
         QVERIFY(ensureDefaultProfileIndex());
         QVERIFY(ids().contains(QStringLiteral("kept")));
@@ -253,7 +253,7 @@ class TestProfileCommands : public QObject {
                  0);
         QVERIFY(QFile::exists(outside.filePath(QStringLiteral("precious.txt"))));
         QVERIFY(!QFileInfo::exists(data));
-        // A profile directory that is itself a link is refused.
+        // A profile directory that is itself a link is refused
         QVERIFY(addProfile(QStringLiteral("whole")));
         const QString whole = profileDataDirectory(QStringLiteral("whole"));
         QVERIFY(QDir().mkpath(QFileInfo(whole).absolutePath()));
@@ -285,7 +285,7 @@ class TestProfileCommands : public QObject {
         QVERIFY(!addProfile(QStringLiteral("DEFAULT")));
         QVERIFY(addProfile(QStringLiteral("Work")));
         QVERIFY(!addProfile(QStringLiteral("work")));
-        // The display name of the first profile is "Default": --profile finds it by name too.
+        // The display name of the first profile is "Default": --profile finds it by name too
         QCommandLineParser parser;
         addProfileOptions(parser);
         parser.parse(

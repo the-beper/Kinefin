@@ -15,7 +15,7 @@ class PlaybackSession final {
     enum class State { Idle, Opening, Playing, Paused, Buffering, Stopping, Failed };
     enum class Route { Direct, Transcoded, Offline, Cast };
 
-    // Called after every transition that happened, reset() included, with the state it left and the one it entered. Refused calls are silent. The identity is already cleared when a stopped() or reset() lands in Idle, and still set when stop() lands in Stopping. Observers are called in the order they were added and must not call back into the session or add or remove observers.
+    // Called after every transition that happened, reset() included, with the state it left and the one it entered. Refused calls are silent. The identity is already cleared when a stopped() or reset() lands in Idle, and still set when stop() lands in Stopping. Observers are called in the order they were added and must not call back into the session or add or remove observers
     using Observer = std::function<void(State from, State to)>;
 
     struct Identity {
@@ -41,10 +41,9 @@ class PlaybackSession final {
     bool bufferRecovered();
     bool stop();
     bool stopped();
-    // Refused while Stopping: a failure of the teardown must not start a second one, or the server would get two Stopped reports.
+    // Refused while Stopping: a failure of the teardown must not start a second one, or the server would get two Stopped reports
     bool failed();
-    // Clears the local model only. Call stop()/stopped() first for normal teardown;
-    // reset() is an explicit emergency escape hatch for an already reconciled session.
+    // Clears the local model only. Call stop()/stopped() first for normal teardown; reset() is an explicit emergency escape hatch for an already reconciled session
     void reset();
 
     [[nodiscard]] State state() const { return m_state; }

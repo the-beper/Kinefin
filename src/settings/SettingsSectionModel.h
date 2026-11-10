@@ -9,7 +9,7 @@ namespace Kinefin {
 class ClientSettings;
 struct SettingDefinition;
 
-// The visible settings of one section for the Settings page: one row per setting, `value` writable through setData, changes made from C++ arrive as dataChanged of that row only.
+// The visible settings of one section for the Settings page: one row per setting, `value` writable through setData, changes made from C++ arrive as dataChanged of that row only
 class SettingsSectionModel final : public QAbstractListModel {
     Q_OBJECT
 

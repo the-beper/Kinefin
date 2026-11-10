@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Kinefin contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
-// An in-memory TokenStore for tests, with the failure and timing switches the credential paths need. Header-only, like FakeJellyfin.h.
+// An in-memory TokenStore for tests, with the failure and timing switches the credential paths need. Header-only, like FakeJellyfin.h
 #pragma once
 
 #include "settings/TokenStore.h"
@@ -19,7 +19,7 @@ class MemoryTokenStore final : public Kinefin::TokenStore {
     bool failReads = false;
     bool failWrites = false;
     bool failRemoves = false;
-    // Keeps every operation (and its effect) back until release().
+    // Keeps every operation (and its effect) back until release()
     bool hold = false;
     int reads = 0;
     int writes = 0;

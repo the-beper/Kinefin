@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Kinefin contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
-// An in-process fake Jellyfin server and the helpers shared by the API client tests. Header-only on purpose: every test target includes it (KINEFIN_SOURCE_DIR must be defined for the fixtures).
+// An in-process fake Jellyfin server and the helpers shared by the API client tests. Header-only on purpose: every test target includes it (KINEFIN_SOURCE_DIR must be defined for the fixtures)
 #pragma once
 
 #include "api/JellyfinClient.h"
@@ -50,6 +50,8 @@ class FakeJellyfin {
                                  [this, socket] { readRequest(socket); });
                 QObject::connect(socket, &QTcpSocket::disconnected, socket, [this, socket] {
                     m_buffers.remove(socket);
+                    // A later socket may be allocated at this address and must not inherit the WebSocket role
+                    m_wsTaken.remove(socket);
                     socket->deleteLater();
                 });
             }
@@ -68,7 +70,7 @@ class FakeJellyfin {
         return QUrl(QStringLiteral("http://127.0.0.1:%1%2").arg(m_server.serverPort()).arg(base));
     }
 
-    // The login response body, with the access token substituted on later successful logins when rotation is on.
+    // The login response body, with the access token substituted on later successful logins when rotation is on
     QByteArray authenticateBody() const
     {
         auto document = QJsonDocument::fromJson(fixture(QStringLiteral("authenticate_success")));
@@ -104,7 +106,7 @@ class FakeJellyfin {
     int viewRequests = 0;
     QByteArray lastViewsAuth;
     QByteArray lastLoginAuth;
-    // PlaybackInfo: the fixture to answer with, or a status / raw body override.
+    // PlaybackInfo: the fixture to answer with, or a status / raw body override
     QString playbackInfoFixture = QStringLiteral("playbackinfo_direct");
     int playbackInfoStatus = 0;
     QByteArray playbackInfoRawBody;
@@ -115,7 +117,7 @@ class FakeJellyfin {
     QByteArray lastPlaybackInfoAuth;
     QByteArray lastPlaybackInfoBody;
     QByteArray lastPlaybackInfoContentType;
-    // Playback reports: an ordered log of what arrived, a status for all of them, an optional different status for the first Stopped, and a hold that keeps the answers back until releaseHeld().
+    // Playback reports: an ordered log of what arrived, a status for all of them, an optional different status for the first Stopped, and a hold that keeps the answers back until releaseHeld()
     struct ReportLog {
         QByteArray route;
         QByteArray body;
@@ -131,43 +133,38 @@ class FakeJellyfin {
     int capabilitiesRequests = 0;
     QByteArray lastCapabilitiesBody;
     QByteArray lastCapabilitiesAuth;
-    // WebSocket upgrade: the attempt is recorded at the header boundary before any accept decision, so tests assert the handshake itself (`Token` only, never `api_key` or a query).
+    // WebSocket upgrade: the attempt is recorded at the header boundary before any accept decision, so tests assert the handshake itself (`Token` only, never `api_key` or a query)
     int upgradeAttempts = 0;
     QString lastSocketRoute;
     QByteArray lastSocketAuth;
-    // Everything after the '?' of the upgrade request line; must stay empty.
+    // Everything after the '?' of the upgrade request line; must stay empty
     QString lastSocketQuery;
-    // 0 accepts the 101; otherwise the upgrade is answered with this status as plain HTTP.
+    // 0 accepts the 101; otherwise the upgrade is answered with this status as plain HTTP
     int socketUpgradeStatus = 0;
-    // Keep the TCP connection open but answer nothing: the client-side connect timeout shape.
+    // Keep the TCP connection open but answer nothing: the client-side connect timeout shape
     bool holdSocketUpgrade = false;
-    // Login tokens: the fixture one on the first success, a different one on later successes.
+    // Login tokens: the fixture one on the first success, a different one on later successes
     bool rotateSecondLoginToken = false;
     QByteArray secondLoginToken = "f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7";
     int successfulLogins = 0;
-    // GET /Users/Me (the session re-verification): counts and identity, with a deny switch.
+    // GET /Users/Me (the session re-verification): counts and identity, with a deny switch
     int usersMeRequests = 0;
     QByteArray lastUsersMeAuth;
     bool denyUsersMe = false;
 
-    // The P2b listing routes (fetchItems and family). `holdFirstListings` holds that many
-    // next listing replies suppressed until releaseHeld(), `holdListings` holds every one
-    // of them, `denyListings` answers 401, `redirectListings` answers 302 off-host. The
-    // family (a key of the two last* hashes) is classified from the route fragment, so a
-    // test can assert the exact query the client sent. Fixture bodies come from
-    // `listingFixtures` (the ctor fills the defaults; a test may override a family).
+    // The listing routes (fetchItems and family). `holdFirstListings` holds that many next listing replies suppressed until releaseHeld(), `holdListings` holds every one of them, `denyListings` answers 401, `redirectListings` answers 302 off-host. The family (a key of the two last* hashes) is classified from the route fragment, so a test can assert the exact query the client sent. Fixture bodies come from `listingFixtures` (the ctor fills the defaults; a test may override a family)
     int holdFirstListings = 0;
     bool holdListings = false;
     bool denyListings = false;
     bool redirectListings = false;
     QHash<QString, QString> listingFixtures;
-    // Raw body per family, overriding the fixture when set (like playbackInfoRawBody).
+    // Raw body per family, overriding the fixture when set (like playbackInfoRawBody)
     QHash<QString, QByteArray> listingRawBody;
     int listingRequests = 0;
     QHash<QString, QByteArray> lastListingRoute; // family -> "path?query"
     QHash<QString, QByteArray> lastListingAuth;  // family -> the Authorization header
 
-    // The most recent accepted WebSocket connection (nullptr until one handshake completes).
+    // The most recent accepted WebSocket connection (nullptr until one handshake completes)
     FakeSocketConnection *lastConnection() const
     {
         return m_wsConnections.isEmpty() ? nullptr : m_wsConnections.constLast();
@@ -183,8 +180,7 @@ class FakeJellyfin {
         }
     }
 
-    // The listing-family fragment of a request route, or "" when it is not one. The
-    // specific fragments come first so `/Items/Latest` never reads as the generic /Items.
+    // The listing-family fragment of a request route, or "" when it is not one. The specific fragments come first so `/Items/Latest` never reads as the generic /Items
     static QString classifyListingRoute(const QByteArray &route)
     {
         if (route.contains("/UserItems/Resume?"))
@@ -210,7 +206,7 @@ class FakeJellyfin {
         return {};
     }
 
-    // The full query of a captured listing request: tests dissect it with QUrlQuery.
+    // The full query of a captured listing request: tests dissect it with QUrlQuery
     static QUrlQuery capturedListingQuery(const QByteArray &route)
     {
         QByteArray full = QByteArrayLiteral("http://127.0.0.1");
@@ -233,7 +229,7 @@ class FakeJellyfin {
 
     void readRequest(QTcpSocket *socket)
     {
-        // Once a WebSocket handshake is accepted, the bytes belong to the frame parser.
+        // Once a WebSocket handshake is accepted, the bytes belong to the frame parser
         if (FakeSocketConnection *connection = m_wsTaken.value(socket)) {
             connection->drain();
             return;
@@ -278,7 +274,7 @@ class FakeJellyfin {
         const QByteArray body = input.mid(bodyStart, contentLength);
         m_buffers.remove(socket);
         if (upgradeRequest) {
-            // Guard first so bytes arriving while the handshake is written can never leak back into the HTTP parser.
+            // Guard first so bytes arriving while the handshake is written can never leak back into the HTTP parser
             m_wsTaken.insert(socket, nullptr);
             ++upgradeAttempts;
             lastSocketRoute = QString::fromUtf8(route);
@@ -380,9 +376,7 @@ class FakeJellyfin {
             }
             return;
         }
-        // The P2b listing routes classify by fragment; `listingFamily` keeps the order so
-        // the more specific fragments win (/Items/Latest before /Items, /Sessions before
-        // the POST-only playback routes never match a GET).
+        // The listing routes classify by fragment; `listingFamily` keeps the order so the more specific fragments win (/Items/Latest before /Items, /Sessions before the POST-only playback routes never match a GET)
         const QString listingFamily = classifyListingRoute(route);
         if (method == "GET" && !listingFamily.isEmpty()) {
             ++listingRequests;
@@ -470,12 +464,12 @@ class FakeJellyfin {
         respond(socket, 404, {});
     }
 
-    // The server comes last so it is destroyed first: its child sockets may still emit `disconnected` while it dies, and the slots touch the members above.
+    // The server comes last so it is destroyed first: its child sockets may still emit `disconnected` while it dies, and the slots touch the members above
     QHash<QTcpSocket *, QByteArray> m_buffers;
+    QHash<QTcpSocket *, FakeSocketConnection *> m_wsTaken;
     QList<QPointer<QTcpSocket>> m_held;
     QTcpServer m_server;
     QList<FakeSocketConnection *> m_wsConnections;
-    QHash<QTcpSocket *, FakeSocketConnection *> m_wsTaken;
 };
 
 inline bool prepare(Kinefin::JellyfinClient &client, FakeJellyfin &server)
@@ -487,11 +481,11 @@ inline bool prepare(Kinefin::JellyfinClient &client, FakeJellyfin &server)
 }
 
 const QString kPlayItem = QStringLiteral("c7dd3b1ac7dd3b1a9d42f2ab74f8a1b9");
-// The access token of tests/fixtures/authenticate_success.json.
+// The access token of tests/fixtures/authenticate_success.json
 const QByteArray kFixtureToken = "f2f4b7c1ee8a4d0bb2a5f9d1f9e0e2ab";
 const QByteArray kTokenField = QByteArray("Token=\"") + kFixtureToken + QByteArray("\"");
 
-// Connects and logs in; QTRY_* macros cannot live in a helper that returns a value.
+// Connects and logs in; QTRY_* macros cannot live in a helper that returns a value
 inline bool login(Kinefin::JellyfinClient &client, FakeJellyfin &server)
 {
     QSignalSpy ready(&client, &Kinefin::JellyfinClient::serverReady);
@@ -505,15 +499,20 @@ inline bool login(Kinefin::JellyfinClient &client, FakeJellyfin &server)
                    << server.capabilitiesRequests;
         return false;
     }
-    const bool ok =
-        client.authenticate(QStringLiteral("fixture-user"), QStringLiteral("fixture-password"))
-        && QTest::qWaitFor([&] { return loggedIn.size() == 1; }, 5000);
-    if (!ok)
-        qWarning() << "login: authenticate step failed";
-    return ok;
+    if (!client.authenticate(QStringLiteral("fixture-user"), QStringLiteral("fixture-password"))) {
+        qWarning() << "login: authenticate refused by the client";
+        return false;
+    }
+    if (!QTest::qWaitFor([&] { return loggedIn.size() == 1; }, 5000)) {
+        qWarning() << "login: loginSucceeded never arrived; authenticated"
+                   << client.isAuthenticated()
+                   << "logins seen by the fake:" << server.successfulLogins;
+        return false;
+    }
+    return true;
 }
 
-// A valid direct-play response plus a padding field: the only thing wrong with it is its size.
+// A valid direct-play response plus a padding field: the only thing wrong with it is its size
 inline QByteArray paddedPlaybackInfo(int paddingBytes)
 {
     QJsonObject object =

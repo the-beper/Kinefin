@@ -37,8 +37,7 @@ class TestServerCredentials : public QObject {
         qputenv("XDG_DATA_HOME", m_home->path().toUtf8());
     }
 
-    // The whole 0600 contract of the P2a gate: the file never had wider permissions, the
-    // directory is owner-only, and the saved JSON carries exactly the declared fields.
+    // The whole 0600 contract: the file never had wider permissions, the directory is owner-only, and the saved JSON carries exactly the declared fields
     void saveIsPrivateAndRoundTrips()
     {
         QString error;
@@ -51,8 +50,7 @@ class TestServerCredentials : public QObject {
         QVERIFY(path.endsWith(QStringLiteral("profiles/default/servers.json")));
         QFileInfo info(path);
         QVERIFY(info.exists());
-        // Qt reports a POSIX owner-only file with both the Owner and the User flags set
-        // (the same mode bits); the contract is what the group/other bits say.
+        // Qt reports a POSIX owner-only file with both the Owner and the User flags set (the same mode bits); the contract is what the group/other bits say
         const QFileDevice::Permissions leaked = QFileDevice::ReadGroup | QFileDevice::WriteGroup
                                                 | QFileDevice::ExeGroup | QFileDevice::ReadOther
                                                 | QFileDevice::WriteOther | QFileDevice::ExeOther;
@@ -67,7 +65,7 @@ class TestServerCredentials : public QObject {
         QCOMPARE(loaded.size(), 2);
         QVERIFY(loaded == credentials);
 
-        // The declared schema only: no other key can sneak in unnoticed.
+        // The declared schema only: no other key can sneak in unnoticed
         QFile file(path);
         QVERIFY(file.open(QIODevice::ReadOnly));
         const QJsonObject root = QJsonDocument::fromJson(file.readAll()).object();
@@ -87,8 +85,7 @@ class TestServerCredentials : public QObject {
         QList<ServerCredential> credentials{entry(QStringLiteral("a"))};
         QVERIFY(Kinefin::saveServerCredentials(QStringLiteral("default"), credentials, &error));
         const QString path = Kinefin::serverCredentialsPath(QStringLiteral("default"));
-        // An externally widened file is re-secured by the next save: the rename always
-        // lands 0600 again (validate the overwrite path itself).
+        // An externally widened file is re-secured by the next save: the rename always lands 0600 again (validate the overwrite path itself)
         QFile::setPermissions(path, QFileDevice::ReadOwner | QFileDevice::WriteOwner
                                         | QFileDevice::ReadGroup);
         QVERIFY(Kinefin::saveServerCredentials(QStringLiteral("default"), credentials, &error));
@@ -113,7 +110,7 @@ class TestServerCredentials : public QObject {
         QVERIFY(!error.isEmpty());
     }
 
-    // An older snapshot kept the token in this file: it is ignored on load and reported, never returned.
+    // An older snapshot kept the token in this file: it is ignored on load and reported, never returned
     void aLegacyTokenKeyIsIgnoredAndReported()
     {
         const QString path = Kinefin::serverCredentialsPath(QStringLiteral("default"));
@@ -155,7 +152,7 @@ class TestServerCredentials : public QObject {
                  QStringLiteral("b"));
     }
 
-    // The profile id is a path component: nothing that could leave the profiles directory is accepted, and nothing is written for it.
+    // The profile id is a path component: nothing that could leave the profiles directory is accepted, and nothing is written for it
     void invalidProfileIdsNeverTouchTheDisk()
     {
         const QStringList invalid{QString(),

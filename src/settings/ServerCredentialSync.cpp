@@ -26,17 +26,17 @@ ServerCredentialSync::ServerCredentialSync(JellyfinClient *client, TokenStore *s
     if (!error.isEmpty()) {
         m_entries.clear();
         const QString path = serverCredentialsPath(m_profileId);
-        // Messages are fixed strings: never an entry, never a token.
+        // Messages are fixed strings: never an entry, never a token
         qCWarning(credentialsLog) << "server credentials not usable:" << error;
-        // The file is deleted, not kept aside: a login recreates it.
+        // The file is deleted, not kept aside: a login recreates it
         if (path.isEmpty() || (QFile::exists(path) && !QFile::remove(path))) {
             qCWarning(credentialsLog) << "could not remove the unreadable file";
             m_writable = false;
         }
     } else if (legacyToken) {
-        // An older snapshot kept the token in this file: rewrite it without, now.
+        // An older snapshot kept the token in this file: rewrite it without, now
         qCWarning(credentialsLog) << "dropping a token stored in the credentials file";
-        // A rewrite that fails must not leave the plaintext token behind: the file goes.
+        // A rewrite that fails must not leave the plaintext token behind: the file goes
         if (!persist() && !QFile::remove(serverCredentialsPath(m_profileId)))
             qCWarning(credentialsLog)
                 << "could not remove the credentials file with a legacy token";
@@ -61,7 +61,7 @@ void forgetProfileTokens(const QString &profileId, TokenStore &store,
 {
     QString error;
     const QList<ServerCredential> entries = loadServerCredentials(profileId, &error);
-    // An unreadable record may hide servers whose tokens are then left in the store.
+    // An unreadable record may hide servers whose tokens are then left in the store
     const bool listed = error.isEmpty();
     if (entries.isEmpty()) {
         QTimer::singleShot(0, [done = std::move(done), listed] { done(listed); });
@@ -84,15 +84,15 @@ void forgetProfileTokens(const QString &profileId, TokenStore &store,
 
 void ServerCredentialSync::onServerReady(const QString &serverId)
 {
-    // A new probe supersedes any restore still waiting for the store (another server, or a reconnect).
+    // A new probe supersedes any restore still waiting for the store (another server, or a reconnect)
     m_restorePending = false;
     ++m_restoreSerial;
     for (const ServerCredential &entry : std::as_const(m_entries)) {
-        // The token goes only to the server it was issued by: same public id, same resolved base URL (scheme, host, port and path, so a token issued over TLS never travels over plain HTTP and another service on the same host never gets it) and the same device identity.
+        // The token goes only to the server it was issued by: same public id, same resolved base URL (scheme, host, port and path, so a token issued over TLS never travels over plain HTTP and another service on the same host never gets it) and the same device identity
         if (entry.serverId != serverId || entry.deviceId != m_client->deviceId()
             || QUrl(entry.url) != m_client->serverUrl())
             continue;
-        // Nothing to ask the store for when the transport would refuse the token anyway.
+        // Nothing to ask the store for when the transport would refuse the token anyway
         if (!m_client->canSendCredentials())
             return;
         m_restorePending = true;
@@ -102,7 +102,7 @@ void ServerCredentialSync::onServerReady(const QString &serverId)
             if (!self || serial != self->m_restoreSerial)
                 return;
             self->m_restorePending = false;
-            // Whatever happened to the client while the store answered (cancelled, another server, a password login) decides: restoreSession() only accepts the probed state.
+            // Whatever happened to the client while the store answered (cancelled, another server, a password login) decides: restoreSession() only accepts the probed state
             if (ok && self->m_client->serverId() == entry.serverId
                 && QUrl(entry.url) == self->m_client->serverUrl()) {
                 self->m_restoring = true;
@@ -126,7 +126,7 @@ void ServerCredentialSync::onLoginSucceeded()
     if (m_restoring)
         return;
     if (!m_writable) {
-        // Nothing may be stored for this profile (invalid id, or its file cannot be handled): the token never reaches the store either.
+        // Nothing may be stored for this profile (invalid id, or its file cannot be handled): the token never reaches the store either
         Q_EMIT saveFailed();
         return;
     }
@@ -149,12 +149,12 @@ void ServerCredentialSync::onLoginSucceeded()
             return;
         }
         if (epoch != self->m_forgetEpoch.value(entry.serverId)) {
-            // Signed out or revoked while the token was being written: take it out again, unless a newer save of this server owns the key by now.
+            // Signed out or revoked while the token was being written: take it out again, unless a newer save of this server owns the key by now
             if (serial == self->m_saveSerial.value(entry.serverId))
                 self->m_store->remove(key, [](bool) {});
             return;
         }
-        // The last entry is the most recently used one.
+        // The last entry is the most recently used one
         self->m_entries.removeIf(
             [&](const ServerCredential &e) { return e.serverId == entry.serverId; });
         self->m_entries.append(entry);
@@ -190,7 +190,7 @@ void ServerCredentialSync::signOut()
 void ServerCredentialSync::forget(const QString &serverId)
 {
     ++m_forgetEpoch[serverId];
-    // Always asked, even without an entry: a token whose save is still in flight is caught by the epoch, one already stored is removed here.
+    // Always asked, even without an entry: a token whose save is still in flight is caught by the epoch, one already stored is removed here
     m_store->remove(tokenKey(serverId), [](bool ok) {
         if (!ok)
             qCWarning(credentialsLog) << "could not remove the session token from the store";
@@ -199,7 +199,7 @@ void ServerCredentialSync::forget(const QString &serverId)
     m_entries.removeIf([&](const ServerCredential &entry) { return entry.serverId == serverId; });
     if (m_entries.size() == before)
         return;
-    // A forgotten session must not come back: when the rewrite fails the whole file goes.
+    // A forgotten session must not come back: when the rewrite fails the whole file goes
     if (!persist() && !QFile::remove(serverCredentialsPath(m_profileId)))
         qCWarning(credentialsLog) << "could not remove the stored credentials";
     Q_EMIT credentialsChanged();

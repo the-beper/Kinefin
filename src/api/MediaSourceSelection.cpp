@@ -21,7 +21,7 @@ QString errorCodeReason(const QString &code)
         return QStringLiteral("No compatible stream");
     if (code == QStringLiteral("RateLimitExceeded"))
         return QStringLiteral("Playback rate limit exceeded");
-    // Any other value is not echoed back.
+    // Any other value is not echoed back
     return QStringLiteral("Playback refused by the server");
 }
 
@@ -31,7 +31,7 @@ bool flag(const QJsonObject &object, const QString &key)
     return value.isBool() && value.toBool();
 }
 
-// The server base path, still percent-encoded and without a trailing slash, as the prefix of every media path.
+// The server base path, still percent-encoded and without a trailing slash, as the prefix of every media path
 QString basePath(const QUrl &serverBase)
 {
     QString path = serverBase.path(QUrl::FullyEncoded);
@@ -44,7 +44,7 @@ QUrl absoluteUrl(const QUrl &serverBase, const QString &pathAndQuery)
 {
     QUrl url;
     url.setScheme(serverBase.scheme());
-    // Host and port only: user info of the base must never reach a media URL.
+    // Host and port only: user info of the base must never reach a media URL
     url.setHost(serverBase.host());
     url.setPort(serverBase.port());
     url.setPath(basePath(serverBase) + pathAndQuery.section(QLatin1Char('?'), 0, 0),
@@ -75,7 +75,7 @@ bool carriesToken(const QUrl &url, QByteArrayView accessToken)
            || url.toString(QUrl::FullyDecoded).contains(token, Qt::CaseInsensitive);
 }
 
-// A `TranscodingUrl` is root-relative and carries the access token as `ApiKey` (live-verified on 12.4): anything else, an absolute URL, a protocol-relative one, a path with dot segments, is refused, and the token query parameters are dropped.
+// A `TranscodingUrl` is root-relative and carries the access token as `ApiKey` (live-verified on 12.4): anything else, an absolute URL, a protocol-relative one, a path with dot segments, is refused, and the token query parameters are dropped
 std::optional<QUrl> transcodingUrl(const QUrl &serverBase, const QString &raw,
                                    QByteArrayView accessToken)
 {
@@ -83,7 +83,7 @@ std::optional<QUrl> transcodingUrl(const QUrl &serverBase, const QString &raw,
         || raw.contains(QLatin1Char('\\')) || raw.contains(QLatin1Char('#')))
         return std::nullopt;
     const QString path = raw.section(QLatin1Char('?'), 0, 0);
-    // Judge each segment as the server will see it: percent-decoded dot segments, slashes, backslashes and control characters are refused.
+    // Judge each segment as the server will see it: percent-decoded dot segments, slashes, backslashes and control characters are refused
     for (const QString &segment : path.split(QLatin1Char('/'))) {
         const QString decoded = QUrl::fromPercentEncoding(segment.toUtf8());
         if (decoded == QStringLiteral("..") || decoded == QStringLiteral("."))
@@ -136,7 +136,7 @@ SourceSelection selectPlaybackSource(const QJsonObject &response, const QString 
         return failure(QStringLiteral("Invalid server address"));
     if (!isValidJellyfinId(itemId))
         return failure(QStringLiteral("Invalid item id"));
-    // Fail closed: the token check below needs the token, and nothing plays unauthenticated anyway.
+    // Fail closed: the token check below needs the token, and nothing plays unauthenticated anyway
     if (accessToken.isEmpty())
         return failure(QStringLiteral("Not authenticated"));
 
@@ -151,7 +151,7 @@ SourceSelection selectPlaybackSource(const QJsonObject &response, const QString 
         return failure(QStringLiteral("Invalid playback response"));
     const QString playSessionId = session.toString();
 
-    // Live and other sources that must be opened first are out of scope (movies and TV series only).
+    // Live and other sources that must be opened first are out of scope (movies and TV series only)
     QList<QJsonObject> candidates;
     for (const QJsonValue &value : sources.toArray()) {
         const QJsonObject source = value.toObject();
@@ -161,7 +161,7 @@ SourceSelection selectPlaybackSource(const QJsonObject &response, const QString 
             candidates.append(source);
     }
 
-    // Direct play first, across all sources: the static route serves the original file.
+    // Direct play first, across all sources: the static route serves the original file
     for (const QJsonObject &source : candidates) {
         if (!flag(source, QStringLiteral("SupportsDirectPlay")))
             continue;
@@ -179,7 +179,7 @@ SourceSelection selectPlaybackSource(const QJsonObject &response, const QString 
         return {result, {}};
     }
 
-    // Direct stream alone is not used: the static URL would bypass the force-transcode rules, and the server's remux comes back as a TranscodingUrl.
+    // Direct stream alone is not used: the static URL would bypass the force-transcode rules, and the server's remux comes back as a TranscodingUrl
     for (const QJsonObject &source : candidates) {
         if (!flag(source, QStringLiteral("SupportsTranscoding")))
             continue;

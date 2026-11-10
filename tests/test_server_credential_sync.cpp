@@ -17,7 +17,7 @@ using Kinefin::ServerCredentialSync;
 
 namespace {
 const QString kProfile = QStringLiteral("default");
-// The server id of tests/fixtures/system_info_public.json, and the wallet key it gives.
+// The server id of tests/fixtures/system_info_public.json, and the wallet key it gives
 const QString kServerId = QStringLiteral("9c076c52ba5340d59f6baf5b57cf0a5e");
 const QString kKey = kProfile + QStringLiteral("/") + kServerId;
 
@@ -36,7 +36,7 @@ QByteArray credentialsFile()
     return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
 }
 
-// The restart: a fresh client with the same device identity probes the server; returns once the probe answered.
+// The restart: a fresh client with the same device identity probes the server; returns once the probe answered
 bool probe(JellyfinClient &client, FakeJellyfin &server)
 {
     QSignalSpy ready(&client, &JellyfinClient::serverReady);
@@ -45,7 +45,7 @@ bool probe(JellyfinClient &client, FakeJellyfin &server)
     return QTest::qWaitFor([&] { return ready.size() == 1; }, 5000);
 }
 
-// A first run that stores a session, then closes the app.
+// A first run that stores a session, then closes the app
 void storeASession(FakeJellyfin &server, MemoryTokenStore &store)
 {
     JellyfinClient first;
@@ -66,7 +66,7 @@ class TestServerCredentialSync : public QObject {
         qputenv("XDG_DATA_HOME", m_home->path().toUtf8());
     }
 
-    // The token goes to the store; the file only ever holds the record.
+    // The token goes to the store; the file only ever holds the record
     void loginStoresTheTokenInTheStoreAndNeverInTheFile()
     {
         FakeJellyfin server;
@@ -106,7 +106,7 @@ class TestServerCredentialSync : public QObject {
         QCOMPARE(finished.size(), 1);
         QVERIFY(!sync.restorePending());
         QCOMPARE(server.successfulLogins, 1); // no second login happened
-        // The restored session is re-verified with the stored token.
+        // The restored session is re-verified with the stored token
         QTRY_COMPARE(server.usersMeRequests, 1);
         QVERIFY(server.lastUsersMeAuth.contains(kTokenField));
         QCOMPARE(stored().size(), 1);
@@ -218,7 +218,7 @@ class TestServerCredentialSync : public QObject {
         client.disconnectFromServer();
         QCOMPARE(stored().size(), 1);
         QCOMPARE(store.tokens.size(), 1);
-        // Reconnecting restores the kept session.
+        // Reconnecting restores the kept session
         QVERIFY(probe(client, server));
         QTRY_VERIFY(client.isAuthenticated());
         sync.signOut();
@@ -228,7 +228,7 @@ class TestServerCredentialSync : public QObject {
         QTRY_VERIFY(store.tokens.isEmpty());
     }
 
-    // A forget that overtakes a save still in flight leaves nothing behind.
+    // A forget that overtakes a save still in flight leaves nothing behind
     void signingOutBeforeTheSaveFinishedLeavesNothing()
     {
         FakeJellyfin server;
@@ -246,7 +246,7 @@ class TestServerCredentialSync : public QObject {
         QVERIFY(sync.credentials().isEmpty());
     }
 
-    // The sign-out's removal and the second login's save may reach the wallet in any order after a slow unlock: the newer token must survive the older save's cleanup.
+    // The sign-out's removal and the second login's save may reach the wallet in any order after a slow unlock: the newer token must survive the older save's cleanup
     void aNewerSaveSurvivesTheCleanupOfAnOlderOne()
     {
         FakeJellyfin server;
@@ -266,7 +266,7 @@ class TestServerCredentialSync : public QObject {
         QCOMPARE(store.tokens.value(kKey).toUtf8(), server.secondLoginToken);
     }
 
-    // Forgetting another server must not discard this server's save.
+    // Forgetting another server must not discard this server's save
     void forgettingAnotherServerDoesNotDiscardASaveInFlight()
     {
         FakeJellyfin server;
@@ -282,7 +282,7 @@ class TestServerCredentialSync : public QObject {
         QCOMPARE(store.tokens.value(kKey).toUtf8(), kFixtureToken);
     }
 
-    // No plaintext fallback: when the token cannot be stored nothing is persisted and the user is told.
+    // No plaintext fallback: when the token cannot be stored nothing is persisted and the user is told
     void aWalletThatRefusesTheTokenPersistsNothing()
     {
         FakeJellyfin server;
@@ -301,7 +301,7 @@ class TestServerCredentialSync : public QObject {
         QVERIFY(sync.credentials().isEmpty());
     }
 
-    // A login that is not a restore (here: another device id) replaces the entry of the same server.
+    // A login that is not a restore (here: another device id) replaces the entry of the same server
     void aLaterLoginReplacesTheEntryOfTheSameServer()
     {
         FakeJellyfin server;
@@ -327,7 +327,7 @@ class TestServerCredentialSync : public QObject {
         QCOMPARE(stored().size(), 1);
     }
 
-    // The last entry is the most recently used one: a restore moves its entry there.
+    // The last entry is the most recently used one: a restore moves its entry there
     void aRestoreMakesTheServerTheMostRecentlyUsed()
     {
         FakeJellyfin server;
@@ -349,7 +349,7 @@ class TestServerCredentialSync : public QObject {
         QCOMPARE(stored().size(), 2);
     }
 
-    // The token is read and sent only for the server and device it was issued for.
+    // The token is read and sent only for the server and device it was issued for
     void aStoredSessionIsNotRestoredForAnotherHostOrDevice()
     {
         FakeJellyfin server;
@@ -357,7 +357,7 @@ class TestServerCredentialSync : public QObject {
         MemoryTokenStore store;
         storeASession(server, store);
         {
-            // Another device id: not restored, and the wallet is not even asked.
+            // Another device id: not restored, and the wallet is not even asked
             JellyfinClient other;
             ServerCredentialSync sync(&other, &store, kProfile);
             QVERIFY(other.setDeviceIdentity(QStringLiteral("Kinefin test"),
@@ -368,7 +368,7 @@ class TestServerCredentialSync : public QObject {
             QTRY_COMPARE(ready.size(), 1);
             QVERIFY(!other.isAuthenticated());
         }
-        // Same id and device but another host, port, scheme or path in the entry.
+        // Same id and device but another host, port, scheme or path in the entry
         const QStringList others{
             QStringLiteral("http://elsewhere.invalid:8096"),
             server.url(QStringLiteral("/other")).toString(),
@@ -409,7 +409,7 @@ class TestServerCredentialSync : public QObject {
         QTRY_COMPARE(stored().size(), 1);
     }
 
-    // A token left in the file by an older snapshot is rewritten away as soon as the file is read.
+    // A token left in the file by an older snapshot is rewritten away as soon as the file is read
     void aLegacyTokenInTheFileIsDroppedAtOnce()
     {
         const QString path = Kinefin::serverCredentialsPath(kProfile);

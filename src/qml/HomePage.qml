@@ -59,7 +59,7 @@ Kirigami.ScrollablePage {
                     id: card
                     required property var modelData
                     contentItem: Controls.Label {
-                        // Library names come from the server: plain text only.
+                        // Library names come from the server: plain text only
                         textFormat: Text.PlainText
                         elide: Text.ElideRight
                         text: card.modelData.name

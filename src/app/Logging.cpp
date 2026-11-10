@@ -38,7 +38,7 @@ struct State {
 
 State &state()
 {
-    // Never destroyed: a message logged during static destruction must still find a live mutex and file.
+    // Never destroyed: a message logged during static destruction must still find a live mutex and file
     static State *instance = new State;
     return *instance;
 }
@@ -83,14 +83,14 @@ void handleMessage(QtMsgType type, const QMessageLogContext &context, const QStr
 {
     State &s = state();
     QtMessageHandler previous = nullptr;
-    // The access token must not reach any log, the console and the journal included.
+    // The access token must not reach any log, the console and the journal included
     const QString safe = redactSecrets(message);
     {
         QMutexLocker locker(&s.mutex);
         previous = s.previous;
         const LogLevel level = levelOf(type);
         if (s.file.isOpen() && level >= s.fileLevel) {
-            // A message with a newline would otherwise forge extra log lines.
+            // A message with a newline would otherwise forge extra log lines
             QString text = safe;
             text.replace(QLatin1Char('\r'), QStringLiteral("\\r"))
                 .replace(QLatin1Char('\n'), QStringLiteral("\\n"));
@@ -126,7 +126,7 @@ std::optional<LogLevel> parseLogLevel(QStringView name)
 QString redactSecrets(const QString &line)
 {
     constexpr auto flags = QRegularExpression::CaseInsensitiveOption;
-    // `Token="…"` of the MediaBrowser header (also with escaped quotes, unterminated, single-quoted or bare), the Emby token headers, a JSON token field and the api_key query parameter.
+    // `Token="…"` of the MediaBrowser header (also with escaped quotes, unterminated, single-quoted or bare), the Emby token headers, a JSON token field and the api_key query parameter
     static const QRegularExpression doubleQuoted(QStringLiteral(R"re((Token=\\?")[^"\\]*)re"),
                                                  flags);
     static const QRegularExpression singleQuoted(QStringLiteral(R"re((Token=')[^']*)re"), flags);

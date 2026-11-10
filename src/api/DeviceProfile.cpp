@@ -29,7 +29,7 @@ QJsonObject videoCodecProfile(const QJsonArray &conditions, const QString &codec
 
 QString transcodeVideoCodecs(const DeviceProfileOptions &options)
 {
-    // Preferring H.265 has no effect while HEVC transcoding is not allowed.
+    // Preferring H.265 has no effect while HEVC transcoding is not allowed
     if (!options.allowTranscodeToHevc)
         return QStringLiteral("h264,mpeg4,mpeg2video");
     if (options.preferTranscodeToH265)
@@ -53,7 +53,7 @@ QJsonArray transcodingProfiles(const DeviceProfileOptions &options)
         {QStringLiteral("Protocol"), QStringLiteral("hls")},
         {QStringLiteral("AudioCodec"), QStringLiteral("aac,mp3,ac3,opus,vorbis")},
         {QStringLiteral("VideoCodec"), transcodeVideoCodecs(options)},
-        // The server field is a string.
+        // The server field is a string
         {QStringLiteral("MaxAudioChannels"),
          options.channels == QStringLiteral("2.0") ? QStringLiteral("2") : QStringLiteral("6")}};
     const QJsonObject photo{{QStringLiteral("Type"), QStringLiteral("Photo")},
@@ -61,7 +61,7 @@ QJsonArray transcodingProfiles(const DeviceProfileOptions &options)
     return {typeOnly(QStringLiteral("Audio")), video, photo};
 }
 
-// The conditions are server-side requirements: a source that fails one is transcoded. They are sent without IsRequired, which the server reads as true: a source whose property is unknown fails the condition too.
+// The conditions are server-side requirements: a source that fails one is transcoded. They are sent without IsRequired, which the server reads as true: a source whose property is unknown fails the condition too
 QJsonArray codecProfiles(const DeviceProfileOptions &options)
 {
     const QString notEquals = QStringLiteral("NotEquals");
@@ -80,7 +80,7 @@ QJsonArray codecProfiles(const DeviceProfileOptions &options)
         profiles.append(videoCodecProfile(
             {condition(lessThanEqual, QStringLiteral("VideoBitDepth"), QStringLiteral("8"))}));
     }
-    // Width 0 matches no real stream, so every stream of the codec is transcoded.
+    // Width 0 matches no real stream, so every stream of the codec is transcoded
     if (options.forceTranscodeHevc) {
         for (const QString &codec : {QStringLiteral("hevc"), QStringLiteral("h265")})
             profiles.append(

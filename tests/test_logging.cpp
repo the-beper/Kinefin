@@ -44,7 +44,7 @@ class TestLogging : public QObject {
   private Q_SLOTS:
     void initTestCase()
     {
-        // QtTest disables debug output unless asked; these tests need qDebug to reach the handler.
+        // QtTest disables debug output unless asked; these tests need qDebug to reach the handler
         QLoggingCategory::setFilterRules(QStringLiteral("*.debug=true"));
     }
 

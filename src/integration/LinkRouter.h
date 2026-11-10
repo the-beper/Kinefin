@@ -7,8 +7,8 @@
 #include <optional>
 
 namespace Kinefin {
-// Provisional, explicit internal link grammar: jellyfin://item/<32-hex-id>.
+// Provisional, explicit internal link grammar: jellyfin://item/<32-hex-id>
 std::optional<QString> parseItemLink(const QString &input);
-// A link that may be handed to the host browser: absolute http or https with a host and no credentials. Anything else (file:, javascript:, custom schemes, relative text) is refused.
+// A link that may be handed to the host browser: absolute http or https with a host and no credentials. Anything else (file:, javascript:, custom schemes, relative text) is refused
 std::optional<QUrl> parseWebLink(const QString &input);
 } // namespace Kinefin

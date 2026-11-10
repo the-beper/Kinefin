@@ -96,7 +96,7 @@ bool parseArray(QNetworkReply *reply, QJsonArray *array)
     const QJsonDocument document = QJsonDocument::fromJson(bytes, &error);
     if (error.error != QJsonParseError::NoError || !document.isArray())
         return false;
-    // Every entry must be an object: a bare array of anything else is malformed contract.
+    // Every entry must be an object: a bare array of anything else is malformed contract
     for (const QJsonValue &value : document.array()) {
         if (!value.isObject())
             return false;
@@ -1071,7 +1071,7 @@ bool JellyfinClient::reportPlayback(const PlaybackReport &report)
     const std::optional<QJsonObject> body = playbackReportBody(report);
     if (m_state != State::Authenticated || !body)
         return false;
-    // The first queued report is in flight, or waiting for its retry: only the ones behind it may be coalesced.
+    // The first queued report is in flight, or waiting for its retry: only the ones behind it may be coalesced
     const qsizetype waiting = (m_reportBusy || m_reportRetryTimer.isActive()) ? 1 : 0;
     if (report.kind == PlaybackReport::Kind::Stopped) {
         for (qsizetype i = m_reportQueue.size() - 1; i >= waiting; --i) {
@@ -1124,7 +1124,7 @@ void JellyfinClient::finishPlaybackReport(QNetworkReply *reply)
         status >= 200 && status < 300 && reply->error() == QNetworkReply::NoError;
     if (!delivered && current.report.kind == PlaybackReport::Kind::Stopped && current.attempts == 0
         && retryableStatus(status)) {
-        // The one retry of a Stopped: ordering holds, nothing else is sent meanwhile.
+        // The one retry of a Stopped: ordering holds, nothing else is sent meanwhile
         current.attempts = 1;
         m_reportBusy = false;
         m_reportRetryTimer.start(m_reportRetryDelay);
@@ -1203,8 +1203,7 @@ bool JellyfinClient::verifySession()
 
 quint64 JellyfinClient::supersedeListing(const QString &family)
 {
-    // Bump first: abort() fires `finished` synchronously, and the handler of the aborted
-    // reply must already see itself superseded (same order as cancelPlaybackInfo).
+    // Bump first: abort() fires `finished` synchronously, and the handler of the aborted reply must already see itself superseded (same order as cancelPlaybackInfo)
     const quint64 serial = ++m_listingSerials[family];
     if (!m_listingReplies.value(family).isNull())
         m_listingReplies.take(family)->abort();

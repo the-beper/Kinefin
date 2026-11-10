@@ -151,14 +151,14 @@ int deleteProfileCommand(const QString &name, TokenStore &store, QTextStream &ou
                 err, QStringLiteral("A profile directory is a symbolic link; delete it by hand"));
     }
 
-    // Held until the files are gone: nobody can start the profile (or recreate its name and start that) while it is being deleted.
+    // Held until the files are gone: nobody can start the profile (or recreate its name and start that) while it is being deleted
     const auto lock = lockProfile(id, &error);
     if (!lock)
         return failed(err, error);
-    // The index entry goes first: a failure there leaves the profile whole. The wallet entries are found through servers.json, so they go before the files do.
+    // The index entry goes first: a failure there leaves the profile whole. The wallet entries are found through servers.json, so they go before the files do
     if (!removeProfileEntry(id, &error))
         return failed(err, error);
-    // The callback may arrive after the timeout, when this function is gone: it owns its state.
+    // The callback may arrive after the timeout, when this function is gone: it owns its state
     struct Wait {
         bool ok = false;
         QEventLoop loop;
@@ -184,7 +184,7 @@ int deleteProfileCommand(const QString &name, TokenStore &store, QTextStream &ou
         return failed(err, QStringLiteral("Some files of the profile could not be removed"));
     out << "Deleted profile " << id << Qt::endl;
     if (!walletOk) {
-        // The files are gone, so the entries can no longer be found later: say so, and fail.
+        // The files are gone, so the entries can no longer be found later: say so, and fail
         return failed(
             err, QStringLiteral("the session tokens of this profile could not be removed from the "
                                 "wallet; remove the \"")

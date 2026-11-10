@@ -11,7 +11,7 @@ using Kinefin::PlaybackReporter;
 using Kinefin::PlaybackSession;
 
 namespace {
-// What the report log says about one entry: "<last route segment>:<session>:<paused|playing|->".
+// What the report log says about one entry: "<last route segment>:<session>:<paused|playing|->"
 QString describe(const FakeJellyfin::ReportLog &entry)
 {
     const QJsonObject body = QJsonDocument::fromJson(entry.body).object();
@@ -37,7 +37,7 @@ int countOf(const FakeJellyfin &server, const QString &routeSuffix)
 const PlaybackSession::Identity kIdentity{"c7dd3b1ac7dd3b1a9d42f2ab74f8a1b9",
                                           "c1b2a3d4e5f6071829304a5b6c7d8e9f", "s1"};
 
-// A logged-in client, one session, one reporter: the whole chain the player will use.
+// A logged-in client, one session, one reporter: the whole chain the player will use
 struct Chain {
     explicit Chain(std::chrono::milliseconds interval = std::chrono::milliseconds(50))
         : reporter(
@@ -96,7 +96,7 @@ class TestPlaybackReporter : public QObject {
         QVERIFY(chain.session.resume());
         QTRY_COMPARE(chain.server.reportLog.size(), 3);
         QCOMPARE(describe(chain.server.reportLog.at(2)), QStringLiteral("Progress:s1:playing"));
-        // Buffering is not a report.
+        // Buffering is not a report
         QVERIFY(chain.session.buffering());
         QVERIFY(chain.session.bufferRecovered());
         QTest::qWait(100);
@@ -112,7 +112,7 @@ class TestPlaybackReporter : public QObject {
         QTRY_VERIFY(countOf(chain.server, QStringLiteral("/Progress")) >= 2);
         QVERIFY(chain.session.pause());
         const int atPause = countOf(chain.server, QStringLiteral("/Progress"));
-        // Paused sessions keep reporting, or the server would end them after five minutes.
+        // Paused sessions keep reporting, or the server would end them after five minutes
         QTRY_VERIFY(countOf(chain.server, QStringLiteral("/Progress")) >= atPause + 2);
         QCOMPARE(describe(chain.server.reportLog.last()), QStringLiteral("Progress:s1:paused"));
     }
@@ -213,7 +213,7 @@ class TestPlaybackReporter : public QObject {
                     .value(QStringLiteral("Failed"))
                     .toBool());
         QVERIFY(chain.session.stopped());
-        // The next playback is not marked as failed.
+        // The next playback is not marked as failed
         QVERIFY(chain.session.open(kIdentity, PlaybackSession::Route::Direct));
         QVERIFY(chain.session.opened());
         QVERIFY(chain.session.stop());
@@ -232,7 +232,7 @@ class TestPlaybackReporter : public QObject {
         QVERIFY(chain.session.failed());
         QVERIFY(chain.session.stop());
         QVERIFY(chain.session.stopped());
-        // And a cancellation before the first frame.
+        // And a cancellation before the first frame
         QVERIFY(chain.session.open(kIdentity, PlaybackSession::Route::Direct));
         QVERIFY(chain.session.stop());
         QVERIFY(chain.session.stopped());
@@ -305,7 +305,7 @@ class TestPlaybackReporter : public QObject {
         const int atExpiry = chain.server.reportLog.size();
         QTest::qWait(200);
         QCOMPARE(chain.server.reportLog.size(), atExpiry);
-        // Stopping the session is the shell's call: the reporter does not touch it.
+        // Stopping the session is the shell's call: the reporter does not touch it
         QCOMPARE(chain.session.state(), PlaybackSession::State::Playing);
     }
 
@@ -319,7 +319,7 @@ class TestPlaybackReporter : public QObject {
             JellyfinClient client;
             PlaybackReporter reporter(session, client, {});
         }
-        // No dangling observer: transitions after the reporter is gone are harmless, and the other listener is still called.
+        // No dangling observer: transitions after the reporter is gone are harmless, and the other listener is still called
         QVERIFY(session.open(kIdentity, PlaybackSession::Route::Direct));
         QVERIFY(session.opened());
         QVERIFY(session.stop());

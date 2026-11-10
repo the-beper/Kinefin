@@ -6,12 +6,12 @@ import org.kde.kirigami as Kirigami
 Kirigami.ApplicationWindow {
     id: window
 
-    // The connection to the Jellyfin server, created by the application.
+    // The connection to the Jellyfin server, created by the application
     required property ConnectionController connection
     required property ClientSettings settings
-    // "fullscreen" or "windowed" when a command line flag decides this run; empty to follow the setting. Changing the setting from the Settings page ends the override.
+    // "fullscreen" or "windowed" when a command line flag decides this run; empty to follow the setting. Changing the setting from the Settings page ends the override
     property string startupWindowMode: ""
-    // "settings" or "about": a page to open right after the shell loads (the smoke test uses it to render pages no server is needed for).
+    // "settings" or "about": a page to open right after the shell loads (the smoke test uses it to render pages no server is needed for)
     property string startupPage: ""
     property string requestedItemId: ""
     readonly property bool signedIn: connection.state === ConnectionController.Authenticated
@@ -43,7 +43,7 @@ Kirigami.ApplicationWindow {
         }
     }
 
-    // Full screen goes to the output named by "Force Full Screen Display" when that output exists.
+    // Full screen goes to the output named by "Force Full Screen Display" when that output exists
     function applyFullscreen() {
         if (wantsFullscreen) {
             const output = Application.screens.find(screen => screen.name === fullscreenOutput);
@@ -57,12 +57,12 @@ Kirigami.ApplicationWindow {
     onWantsFullscreenChanged: applyFullscreen()
     onFullscreenOutputChanged: if (wantsFullscreen) applyFullscreen()
 
-    // The last window size comes back always; the position only where the compositor lets a client place its window (not Wayland) and only while it still lies on a screen.
+    // The last window size comes back always; the position only where the compositor lets a client place its window (not Wayland) and only while it still lies on a screen
     function restoreGeometry() {
         const saved = settings.windowGeometry();
         if (saved.width <= 0)
             return;
-        // A size saved on a larger screen must not outgrow this one.
+        // A size saved on a larger screen must not outgrow this one
         window.width = Math.min(saved.width, window.screen.desktopAvailableWidth);
         window.height = Math.min(saved.height, window.screen.desktopAvailableHeight);
         if (Qt.platform.pluginName === "wayland")
@@ -75,12 +75,12 @@ Kirigami.ApplicationWindow {
     }
 
     onClosing: {
-        // A full-screen or maximized window has no geometry of its own to keep.
+        // A full-screen or maximized window has no geometry of its own to keep
         if (window.visibility === Window.Windowed)
             settings.setWindowGeometry(Qt.rect(x, y, width, height));
     }
 
-    // The page follows the connection state: Servers until a server is chosen, sign-in until there is a session, Home after.
+    // The page follows the connection state: Servers until a server is chosen, sign-in until there is a session, Home after
     function showPageForState() {
         let page = "ServersPage.qml";
         let properties = { connection: connection };
@@ -99,7 +99,7 @@ Kirigami.ApplicationWindow {
         pageStack.push(Qt.resolvedUrl(page), properties);
     }
 
-    // The sign-in page keeps its place while the state moves between its own steps.
+    // The sign-in page keeps its place while the state moves between its own steps
     readonly property int pageGroup: {
         switch (connection.state) {
         case ConnectionController.NeedsLogin:
@@ -114,7 +114,7 @@ Kirigami.ApplicationWindow {
     }
     onPageGroupChanged: showPageForState()
 
-    // A link that arrives while Home is already showing (a second launch) updates that page too.
+    // A link that arrives while Home is already showing (a second launch) updates that page too
     onRequestedItemIdChanged: {
         const home = pageStack.get(0);
         if (home && home.objectName === "homePage")
@@ -170,13 +170,13 @@ Kirigami.ApplicationWindow {
         ]
     }
 
-    // Opens a page above the current one unless that page is already showing.
+    // Opens a page above the current one unless that page is already showing
     function pushOnce(name, url, properties) {
         if (pageStack.currentItem?.objectName !== name)
             pageStack.push(Qt.resolvedUrl(url), properties);
     }
 
-    // Pushing before the window's page row is complete leaves the page outside the scene.
+    // Pushing before the window's page row is complete leaves the page outside the scene
     function openStartupPage() {
         if (startupPage === "about") {
             pushOnce("aboutPage", "AboutPage.qml", {});

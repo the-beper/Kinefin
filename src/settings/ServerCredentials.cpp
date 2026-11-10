@@ -105,7 +105,7 @@ bool saveServerCredentials(const QString &profileId, const QList<ServerCredentia
             *error = QStringLiteral("Could not write server credentials");
         return false;
     }
-    // Private before the first byte: the commit is a rename of this file.
+    // Private before the first byte: the commit is a rename of this file
     if (!output.setPermissions(ownerOnlyFile())) {
         if (error)
             *error = QStringLiteral("Could not secure server credentials");

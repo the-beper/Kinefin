@@ -115,7 +115,7 @@ class TestClientSettings : public QObject {
                                    QStringLiteral("info"))); // hidden
         QCOMPARE(changed.size(), 0);
         QVERIFY(!QFile::exists(path()));
-        // Numbers that are not finite or do not fit are refused, not converted.
+        // Numbers that are not finite or do not fit are refused, not converted
         QVERIFY(!settings.setValue(QStringLiteral("video"), QStringLiteral("cache"), 1e20));
         QVERIFY(!settings.setValue(QStringLiteral("video"), QStringLiteral("cache"), std::nan("")));
         QVERIFY(!settings.setValue(QStringLiteral("video"),
@@ -123,12 +123,12 @@ class TestClientSettings : public QObject {
         QVERIFY(!settings.setValue(QStringLiteral("video"),
                                    QStringLiteral("default_playback_speed"),
                                    std::numeric_limits<double>::infinity()));
-        // Line breaks only where the setting is multiline.
+        // Line breaks only where the setting is multiline
         QVERIFY(!settings.setValue(QStringLiteral("subtitles"), QStringLiteral("font"),
                                    QStringLiteral("a\nb")));
         QVERIFY(settings.setValue(QStringLiteral("other"), QStringLiteral("other_conf"),
                                   QStringLiteral("a\nb")));
-        // A number from QML arrives as a double.
+        // A number from QML arrives as a double
         QVERIFY(settings.setValue(QStringLiteral("video"), QStringLiteral("cache"), 150.0));
         QCOMPARE(settings.value(QStringLiteral("video"), QStringLiteral("cache")), 150);
     }
@@ -142,7 +142,7 @@ class TestClientSettings : public QObject {
         QCOMPARE(settings.value(QStringLiteral("video"), QStringLiteral("hardwareDecoding")),
                  QStringLiteral("copy"));
         QCOMPARE(settings.value(QStringLiteral("video"), QStringLiteral("deinterlace")), false);
-        // Hidden values are read from the file even though the UI cannot set them.
+        // Hidden values are read from the file even though the UI cannot set them
         QCOMPARE(settings.value(QStringLiteral("main"), QStringLiteral("logLevel")),
                  QStringLiteral("info"));
         QCOMPARE(settings.value(QStringLiteral("main"), QStringLiteral("disablemouse")), true);
@@ -186,7 +186,7 @@ class TestClientSettings : public QObject {
 
     void aNewerFileThatCannotBeMovedIsNeverOverwritten()
     {
-        // A directory where the staging file must go makes the rename fail on every platform.
+        // A directory where the staging file must go makes the rename fail on every platform
         const QByteArray newer = "[General]\nversion=2\n\n[main]\nfullscreen=true\n";
         writeFile(path(), newer);
         QVERIFY(QDir().mkpath(path() + QStringLiteral(".broken.new/keep")));
@@ -195,7 +195,7 @@ class TestClientSettings : public QObject {
             QSignalSpy failed(&settings, &ClientSettings::saveFailed);
             QVERIFY(settings.setValue(QStringLiteral("main"), QStringLiteral("alwaysOnTop"), true));
             QCOMPARE(failed.size(), 1);
-            // The change lives in memory for this session.
+            // The change lives in memory for this session
             QCOMPARE(settings.value(QStringLiteral("main"), QStringLiteral("alwaysOnTop")), true);
         }
         QCOMPARE(readAll(path()), newer);
@@ -267,7 +267,7 @@ class TestClientSettings : public QObject {
         QCOMPARE(settings.value(QStringLiteral("video"), QStringLiteral("deinterlace")), true);
         QVERIFY(
             !model->setData(model->index(rows.value(QStringLiteral("cache")), 0), 3, valueRole));
-        // The same model object serves every request of a section.
+        // The same model object serves every request of a section
         QCOMPARE(settings.sectionModel(QStringLiteral("video")), model);
     }
 
@@ -302,7 +302,7 @@ class TestClientSettings : public QObject {
             QVERIFY(settings.windowGeometry().isEmpty());
             settings.setWindowGeometry(QRect(10, -20, 1280, 720));
             QCOMPARE(settings.windowGeometry(), QRect(10, -20, 1280, 720));
-            // Hidden: the generic setter refuses it.
+            // Hidden: the generic setter refuses it
             QVERIFY(!settings.setValue(QStringLiteral("state"), QStringLiteral("geometry"),
                                        QStringLiteral("0,0,800,600")));
         }

@@ -14,7 +14,7 @@ namespace {
 
 const QString kFixtureUserId = QStringLiteral("d5ed5d4e2e5447b58e9f2b6f7bd5c96a");
 
-// A single sink for every generated log line: the redaction test reads it flow by flow, the rest of the suite runs with capture off (lines still forwarded to the default handler).
+// A single sink for every generated log line: the redaction test reads it flow by flow, the rest of the suite runs with capture off (lines still forwarded to the default handler)
 QStringList *capturedMessages = nullptr;
 QtMessageHandler previousHandler = nullptr;
 void captureHandler(QtMsgType type, const QMessageLogContext &context, const QString &message)
@@ -38,7 +38,7 @@ struct LogCapture {
     QStringList messages;
 };
 
-// Wraps an array or a raw value into a server frame: an object envelope plus MessageType.
+// Wraps an array or a raw value into a server frame: an object envelope plus MessageType
 QString enveloped(const QString &type, const QJsonValue &data)
 {
     const QJsonObject envelope{{QStringLiteral("MessageType"), type},
@@ -69,13 +69,13 @@ class TestJellyfinSocketClient : public QObject {
         QCOMPARE(JellyfinSocketClient::reconnectDelay(1, 1000, 60000, 0.0), qint64(1000));
         QCOMPARE(JellyfinSocketClient::reconnectDelay(1, 1000, 60000, 1.0), qint64(2000));
         QCOMPARE(JellyfinSocketClient::reconnectDelay(5, 1000, 60000, 0.0), qint64(16000));
-        // The cap holds the ceiling: 1000·2ⁿ passes 60000 and stays there for every larger attempt.
+        // The cap holds the ceiling: 1000·2ⁿ passes 60000 and stays there for every larger attempt
         QCOMPARE(JellyfinSocketClient::reconnectDelay(6, 1000, 60000, 0.0), qint64(30000));
         QCOMPARE(JellyfinSocketClient::reconnectDelay(6, 1000, 60000, 1.0), qint64(60000));
         QCOMPARE(JellyfinSocketClient::reconnectDelay(6, 1000, 60000, 0.5), qint64(45000));
         QCOMPARE(JellyfinSocketClient::reconnectDelay(1000, 1000, 60000, 0.0), qint64(30000));
         QCOMPARE(JellyfinSocketClient::reconnectDelay(-3, 1000, 60000, 0.0), qint64(500));
-        // A ceiling beneath the base clamps both draws.
+        // A ceiling beneath the base clamps both draws
         QCOMPARE(JellyfinSocketClient::reconnectDelay(0, 10, 5, 0.0), qint64(2));
         QCOMPARE(JellyfinSocketClient::reconnectDelay(0, 10, 5, 1.0), qint64(5));
     }
@@ -104,12 +104,12 @@ class TestJellyfinSocketClient : public QObject {
         QVERIFY(flow.connectAndAuthenticate());
         FakeSocketConnection *connection = flow.waitConnection();
         QVERIFY(connection);
-        // The server opens the heartbeat with its observed timeout; the answer goes out at once.
+        // The server opens the heartbeat with its observed timeout; the answer goes out at once
         connection->sendText(QString::fromUtf8(fixture(QStringLiteral("ws_force_keepalive"))));
         QTRY_COMPARE(connection->receivedTexts.count(), 1);
         QCOMPARE(connection->receivedTexts.first(),
                  QStringLiteral("{\"MessageType\":\"KeepAlive\"}"));
-        // Then the schedule continues at min(Data/2, 30 s); the override shortens it for the test.
+        // Then the schedule continues at min(Data/2, 30 s); the override shortens it for the test
         flow.socket.setTestTimings(0, 0, 50, 0, 0);
         connection->sendText(QString::fromUtf8(fixture(QStringLiteral("ws_force_keepalive"))));
         QTRY_VERIFY(connection->receivedTexts.count() >= 3);
@@ -123,7 +123,7 @@ class TestJellyfinSocketClient : public QObject {
         QVERIFY(flow.connectAndAuthenticate());
         QVERIFY(flow.waitConnection());
         QCOMPARE(flow.server.upgradeAttempts, 1);
-        // Silence beyond the peer timer, then the same identity returns without a new credential.
+        // Silence beyond the peer timer, then the same identity returns without a new credential
         QTRY_VERIFY(flow.server.upgradeAttempts >= 2);
         QVERIFY(flow.waitState(Kinefin::JellyfinSocketClient::State::Authenticated, 3000));
         QVERIFY(flow.server.lastConnection() && flow.server.lastConnection()->alive());
@@ -134,7 +134,7 @@ class TestJellyfinSocketClient : public QObject {
         ConnectedSocket flow(80);
         flow.server.holdSocketUpgrade = true;
         QVERIFY(flow.connectAndAuthenticate());
-        // The handshake never completes: the timer kills the attempt, the session is re-checked and the ladder advances instead of stopping.
+        // The handshake never completes: the timer kills the attempt, the session is re-checked and the ladder advances instead of stopping
         QTRY_VERIFY(flow.server.upgradeAttempts >= 2);
         QVERIFY(flow.server.usersMeRequests >= 1);
         QCOMPARE(flow.server.lastSocketQuery, QString());
@@ -151,7 +151,7 @@ class TestJellyfinSocketClient : public QObject {
         QSignalSpy library(&flow.socket, &Kinefin::JellyfinSocketClient::libraryChanged);
         connection->sendText(QString::fromUtf8(fixture(QStringLiteral("ws_library_changed"))));
         QTRY_COMPARE(library.count(), 1);
-        // The payload characters are never parsed by the socket: it is a wake-up only.
+        // The payload characters are never parsed by the socket: it is a wake-up only
         QTest::qWait(50);
         QCOMPARE(library.count(), 1);
     }
@@ -169,7 +169,7 @@ class TestJellyfinSocketClient : public QObject {
         QCOMPARE(ids.count(), 2);
         QVERIFY(ids.contains(QStringLiteral("c7dd3b1ac7dd3b1a9d42f2ab74f8a1b9")));
         QVERIFY(ids.contains(QStringLiteral("f9e6e5c39de743d9a19b8cbdf63b1dc1")));
-        // Wrong user, an invalid id and a list beyond the cap are all dropped whole.
+        // Wrong user, an invalid id and a list beyond the cap are all dropped whole
         const QJsonObject wrongUser{
             {QStringLiteral("UserId"), QStringLiteral("00000000000000000000000000000001")},
             {QStringLiteral("ItemsIdList"), QJsonArray{QJsonValue(kPlayItem)}}};
@@ -186,7 +186,7 @@ class TestJellyfinSocketClient : public QObject {
         connection->sendText(enveloped(QStringLiteral("UserDataChanged"), oversizeList));
         QTest::qWait(100);
         QCOMPARE(data.count(), 1);
-        // The connection survived the drops: the next valid frame still routes.
+        // The connection survived the drops: the next valid frame still routes
         connection->sendText(QString::fromUtf8(fixture(QStringLiteral("ws_user_data_changed"))));
         QTRY_COMPARE(data.count(), 2);
         QSignalSpy playstate(&flow.socket, &Kinefin::JellyfinSocketClient::playstateCommand);
@@ -207,7 +207,7 @@ class TestJellyfinSocketClient : public QObject {
         const QList<QVariant> arguments = playstate.takeFirst();
         QCOMPARE(arguments.first().toString(), QStringLiteral("Seek"));
         QCOMPARE(arguments.last().toLongLong(), qint64(12345));
-        // Without ticks the sentinel is -1: still a valid command, unlike the negative, fractional and non-letter ones.
+        // Without ticks the sentinel is -1: still a valid command, unlike the negative, fractional and non-letter ones
         const QJsonObject unticked{{QStringLiteral("Command"), QStringLiteral("Pause")}};
         connection->sendText(enveloped(QStringLiteral("Playstate"), unticked));
         QTRY_COMPARE(playstate.count(), 1);
@@ -243,7 +243,7 @@ class TestJellyfinSocketClient : public QObject {
                  QStringLiteral("Repository restore finished"));
         QCOMPARE(map.value(QStringLiteral("Message")).toString(),
                  QStringLiteral("Media restore completed"));
-        // Every argument must be a string, and the budgets of name, keys and sizes hold.
+        // Every argument must be a string, and the budgets of name, keys and sizes hold
         const QJsonObject nonString{{QStringLiteral("Name"), QStringLiteral("DisplayMessage")},
                                     {QStringLiteral("Arguments"),
                                      QJsonObject{{QStringLiteral("Message"), QJsonValue(12)}}}};
@@ -278,8 +278,7 @@ class TestJellyfinSocketClient : public QObject {
         const auto request = plays.takeFirst().first().value<Kinefin::RemotePlayRequest>();
         QCOMPARE(request.command, QStringLiteral("PlayNow"));
         QCOMPARE(request.itemIds, QStringList{QStringLiteral("c7dd3b1ac7dd3b1a9d42f2ab74f8a1b9")});
-        // The live 12.4 shape carries no start ticks in the controller's default Play; the
-        // earlier fixture with StartPositionTicks stays as a valid variant (checked below).
+        // The live 12.4 shape carries no start ticks in the controller's default Play; the earlier fixture with StartPositionTicks stays as a valid variant (checked below)
         QCOMPARE(request.startPositionTicks, qint64(-1));
         const QJsonObject withTicks{{QStringLiteral("Command"), QStringLiteral("PlayNow")},
                                     {QStringLiteral("ItemIds"), QJsonArray{QJsonValue(kPlayItem)}},
@@ -288,7 +287,7 @@ class TestJellyfinSocketClient : public QObject {
         QTRY_COMPARE(plays.count(), 1);
         QCOMPARE(plays.takeFirst().first().value<Kinefin::RemotePlayRequest>().startPositionTicks,
                  qint64(7));
-        // Silent ticks are a valid variant; empty, invalid and oversized id lists are drops.
+        // Silent ticks are a valid variant; empty, invalid and oversized id lists are drops
         const QJsonObject unticked{{QStringLiteral("Command"), QStringLiteral("PlayNow")},
                                    {QStringLiteral("ItemIds"), QJsonArray{QJsonValue(kPlayItem)}}};
         connection->sendText(enveloped(QStringLiteral("Play"), unticked));
@@ -322,11 +321,11 @@ class TestJellyfinSocketClient : public QObject {
         FakeSocketConnection *connection = flow.waitConnection();
         QVERIFY(connection);
         QSignalSpy sessions(&flow.socket, &Kinefin::JellyfinSocketClient::sessionsUpdated);
-        // Not subscribed: the broadcast arrives and goes nowhere.
+        // Not subscribed: the broadcast arrives and goes nowhere
         connection->sendText(QString::fromUtf8(fixture(QStringLiteral("ws_sessions"))));
         QTest::qWait(100);
         QCOMPARE(sessions.count(), 0);
-        // Subscribing sends the announce frame; one broadcast then routes.
+        // Subscribing sends the announce frame; one broadcast then routes
         flow.socket.setSessionsSubscription(true);
         QTRY_COMPARE(connection->receivedTexts.count(), 1);
         QCOMPARE(connection->receivedTexts.constLast(),
@@ -334,7 +333,7 @@ class TestJellyfinSocketClient : public QObject {
         connection->sendText(QString::fromUtf8(fixture(QStringLiteral("ws_sessions"))));
         QTRY_COMPARE(sessions.count(), 1);
         QCOMPARE(sessions.first().first().value<QJsonArray>().count(), 1);
-        // Unsubscribing announces the stop, then future broadcasts are ignored.
+        // Unsubscribing announces the stop, then future broadcasts are ignored
         flow.socket.setSessionsSubscription(false);
         QTRY_COMPARE(connection->receivedTexts.count(), 2);
         QCOMPARE(connection->receivedTexts.constLast(),
@@ -342,7 +341,7 @@ class TestJellyfinSocketClient : public QObject {
         connection->sendText(QString::fromUtf8(fixture(QStringLiteral("ws_sessions"))));
         QTest::qWait(100);
         QCOMPARE(sessions.count(), 1);
-        // A non-array or non-object payload is a drop, never a close.
+        // A non-array or non-object payload is a drop, never a close
         connection->sendText(enveloped(QStringLiteral("Sessions"), true));
         connection->sendText(enveloped(QStringLiteral("Sessions"), QJsonArray{42}));
         QTest::qWait(100);
@@ -359,7 +358,7 @@ class TestJellyfinSocketClient : public QObject {
         connection->sendText(QString::fromUtf8(fixture(QStringLiteral("ws_user_deleted"))));
         QTRY_VERIFY(flow.server.usersMeRequests >= 1);
         QVERIFY(flow.server.lastUsersMeAuth.contains(QByteArray("Token=")));
-        // Another identity's deletion never touches our session.
+        // Another identity's deletion never touches our session
         const int seen = flow.server.usersMeRequests;
         connection->sendText(enveloped(QStringLiteral("UserDeleted"),
                                        QStringLiteral("00000000000000000000000000000001")));
@@ -374,20 +373,20 @@ class TestJellyfinSocketClient : public QObject {
         QVERIFY(flow.connectAndAuthenticate());
         FakeSocketConnection *connection = flow.waitConnection();
         QVERIFY(connection);
-        // Known-but-ignored and unknown types: no signal of any kind, connection intact.
+        // Known-but-ignored and unknown types: no signal of any kind, connection intact
         connection->sendText(QString::fromUtf8(fixture(QStringLiteral("ws_server_restarting"))));
         connection->sendText(QString::fromUtf8(fixture(QStringLiteral("ws_keepalive_reply"))));
         connection->sendText(
             QStringLiteral("{\"MessageType\":\"SomethingTotallyNew\",\"Data\":{}}"));
         QTest::qWait(100);
-        // Malformed frames: invalid JSON, a non-object, a missing or invalid type, flat data.
+        // Malformed frames: invalid JSON, a non-object, a missing or invalid type, flat data
         connection->sendText(QStringLiteral("not json at all"));
         connection->sendText(QStringLiteral("[1,2,3]"));
         connection->sendText(QStringLiteral("{\"Data\":{}}"));
         connection->sendText(QStringLiteral("{\"MessageType\":\"has$punct_chars\",\"Data\":{}}"));
         connection->sendText(QStringLiteral("{\"MessageType\":\"Playstate\",\"Data\":\"flat\"}"));
         QTest::qWait(100);
-        // Valid traffic afterwards routes as usual, on the same connection.
+        // Valid traffic afterwards routes as usual, on the same connection
         QSignalSpy playstate(&flow.socket, &Kinefin::JellyfinSocketClient::playstateCommand);
         connection->sendText(
             QStringLiteral("{\"MessageType\":\"Playstate\",\"Data\":{\"Command\":\"Seek\"}}"));
@@ -402,11 +401,11 @@ class TestJellyfinSocketClient : public QObject {
         QVERIFY(flow.connectAndAuthenticate());
         FakeSocketConnection *connection = flow.waitConnection();
         QVERIFY(connection);
-        // One frame beyond the 4 MiB budget closes with 1009 and walks the reconnect ladder.
+        // One frame beyond the 4 MiB budget closes with 1009 and walks the reconnect ladder
         connection->sendBigText(qint64(4) * 1024 * 1024 + 1);
         QTRY_COMPARE(connection->clientCloseCodes.count(), 1);
         QCOMPARE(connection->clientCloseCodes.first(), int(1009));
-        // The 1009 close walks the reconnect ladder: the same identity returns.
+        // The 1009 close walks the reconnect ladder: the same identity returns
         QTRY_VERIFY(flow.server.upgradeAttempts >= 2);
         QVERIFY(flow.waitState(Kinefin::JellyfinSocketClient::State::Authenticated, 3000));
         QCOMPARE(flow.socket.state(), Kinefin::JellyfinSocketClient::State::Authenticated);
@@ -418,7 +417,7 @@ class TestJellyfinSocketClient : public QObject {
         flow.server.socketUpgradeStatus = 403;
         flow.server.denyUsersMe = true;
         QVERIFY(flow.connectAndAuthenticate());
-        // The re-check returns 401: the token expires, credentials are cleared and the ladder stops.
+        // The re-check returns 401: the token expires, credentials are cleared and the ladder stops
         QSignalSpy expired(&flow.client, &Kinefin::JellyfinClient::sessionExpired);
         QSignalSpy cleared(&flow.client, &Kinefin::JellyfinClient::credentialsCleared);
         QVERIFY(flow.waitState(Kinefin::JellyfinSocketClient::State::Reconnecting, 3000));
@@ -436,7 +435,7 @@ class TestJellyfinSocketClient : public QObject {
         flow.server.socketUpgradeStatus = 403;
         QVERIFY(flow.connectAndAuthenticate());
         QVERIFY(flow.waitState(Kinefin::JellyfinSocketClient::State::Reconnecting, 3000));
-        // The token survives the re-check, so the ladder keeps climbing instead of stopping.
+        // The token survives the re-check, so the ladder keeps climbing instead of stopping
         QSignalSpy cleared(&flow.client, &Kinefin::JellyfinClient::credentialsCleared);
         QTest::qWaitFor([&flow] { return flow.server.upgradeAttempts >= 3; }, 3000);
         QVERIFY(flow.server.upgradeAttempts >= 3);
@@ -449,7 +448,7 @@ class TestJellyfinSocketClient : public QObject {
         flow.server.socketUpgradeStatus = 302;
         QVERIFY(flow.connectAndAuthenticate());
         QVERIFY(flow.waitState(Kinefin::JellyfinSocketClient::State::Reconnecting, 3000));
-        // The 300 is never upgraded: a new plain attempt happens instead, and still no 101.
+        // The 300 is never upgraded: a new plain attempt happens instead, and still no 101
         QTRY_VERIFY(flow.server.upgradeAttempts >= 2);
         QCOMPARE(flow.server.lastConnection(), nullptr);
         QVERIFY(flow.socket.state() != Kinefin::JellyfinSocketClient::State::Authenticated);
@@ -482,7 +481,7 @@ class TestJellyfinSocketClient : public QObject {
         QVERIFY(flow.waitState(Kinefin::JellyfinSocketClient::State::Disconnected, 3000));
         flow.server.rotateSecondLoginToken = true;
         QVERIFY(login(flow.client, flow.server));
-        // The fresh identity opens with the rotated token, never a stale copy.
+        // The fresh identity opens with the rotated token, never a stale copy
         QTRY_VERIFY(flow.server.upgradeAttempts >= 2);
         QByteArray rotatedToken = QByteArray("Token=\"") + flow.server.secondLoginToken;
         rotatedToken += "\"";
@@ -514,7 +513,7 @@ class TestJellyfinSocketClient : public QObject {
         FakeSocketConnection *connection = flow.waitConnection();
         QVERIFY(connection);
         QCOMPARE(flow.server.upgradeAttempts, 1);
-        // A long scheduled wait stays underneath an explicit user retry.
+        // A long scheduled wait stays underneath an explicit user retry
         flow.socket.setTestTimings(0, 0, 0, 100000, 100000);
         connection->kick();
         QVERIFY(flow.waitState(Kinefin::JellyfinSocketClient::State::Reconnecting, 3000));
@@ -531,7 +530,7 @@ class TestJellyfinSocketClient : public QObject {
         QVERIFY(flow.connectAndAuthenticate());
         FakeSocketConnection *connection = flow.waitConnection();
         QVERIFY(connection);
-        // Exercise every path the logger touches: heartbeat, loss, reconnect, close.
+        // Exercise every path the logger touches: heartbeat, loss, reconnect, close
         connection->sendText(QString::fromUtf8(fixture(QStringLiteral("ws_force_keepalive"))));
         QTest::qWait(150);
         QTRY_VERIFY(flow.server.upgradeAttempts >= 2);
@@ -553,14 +552,14 @@ class TestJellyfinSocketClient : public QObject {
         explicit ConnectedSocket(qint64 testConnectTimeout = 0, qint64 testDeadPeer = 0,
                                  qint64 testBackoffBase = 10, qint64 testBackoffCap = 40)
         {
-            // Every live flow runs on the fast end of the ladder; the overrides land before login: timers already running would keep the production constant.
+            // Every live flow runs on the fast end of the ladder; the overrides land before login: timers already running would keep the production constant
             socket.setTestTimings(testConnectTimeout, testDeadPeer, 0, testBackoffBase,
                                   testBackoffCap);
         }
 
         bool connectAndAuthenticate() { return server.listen() && login(client, server); }
 
-        // The WebSocket handshake is asynchronous: a game of `lastConnection()` before this wait would dereference a null pointer.
+        // The WebSocket handshake is asynchronous: a game of `lastConnection()` before this wait would dereference a null pointer
         FakeSocketConnection *waitConnection(int ms = 5000)
         {
             if (!QTest::qWaitFor(

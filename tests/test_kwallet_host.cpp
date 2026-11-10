@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Kinefin contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Exercises KWalletTokenStore against the real KWallet of the session bus it is started in. It is skipped unless KINEFIN_TEST_KWALLET=1, because it writes a throw-away entry (a random key and a dummy value, removed again) to the user's own wallet, and an unlock prompt may appear.
+// Exercises KWalletTokenStore against the real KWallet of the session bus it is started in. It is skipped unless KINEFIN_TEST_KWALLET=1, because it writes a throw-away entry (a random key and a dummy value, removed again) to the user's own wallet, and an unlock prompt may appear
 #include "settings/KWalletTokenStore.h"
 
 #include <QEventLoop>
@@ -18,7 +18,7 @@ struct Result {
     QString token;
 };
 
-// Runs the event loop until `result` is filled, or fails after the wallet had its time.
+// Runs the event loop until `result` is filled, or fails after the wallet had its time
 bool wait(const Result &result, int timeoutMs = 60000)
 {
     QElapsedTimer timer;
@@ -36,7 +36,7 @@ class TestKWalletHost : public QObject {
 
     bool entryExists() const
     {
-        // Our own throw-away key only: the value of no real entry is read here.
+        // Our own throw-away key only: the value of no real entry is read here
         QScopedPointer<KWallet::Wallet> wallet(KWallet::Wallet::openWallet(
             KWallet::Wallet::LocalWallet(), 0, KWallet::Wallet::Synchronous));
         return wallet && wallet->hasFolder(QStringLiteral("Kinefin"))
@@ -73,7 +73,7 @@ class TestKWalletHost : public QObject {
         store.write(m_key, first, [&](bool ok) { result = {true, ok, {}}; });
         QVERIFY2(wait(result), "the wallet did not answer in time (locked and unanswered prompt?)");
         QVERIFY(result.ok);
-        // The folder and key layout the docs promise: folder `Kinefin`, key `<profile>/<server id>`.
+        // The folder and key layout the docs promise: folder `Kinefin`, key `<profile>/<server id>`
         QVERIFY(entryExists());
 
         result = {};
@@ -102,7 +102,7 @@ class TestKWalletHost : public QObject {
         QVERIFY(!result.ok);
         QVERIFY(result.token.isEmpty());
 
-        // Removing what is not there is a success, as the TokenStore contract says.
+        // Removing what is not there is a success, as the TokenStore contract says
         result = {};
         store.remove(m_key, [&](bool ok) { result = {true, ok, {}}; });
         QVERIFY(wait(result));
@@ -111,7 +111,7 @@ class TestKWalletHost : public QObject {
 
     void operationsQueuedBeforeTheWalletIsOpenRunInOrder()
     {
-        // A fresh store has no open wallet: the three calls wait for it and must keep their order.
+        // A fresh store has no open wallet: the three calls wait for it and must keep their order
         KWalletTokenStore store;
         Result written;
         Result read;

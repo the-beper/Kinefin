@@ -54,7 +54,7 @@ bool ensurePrivateDirectory(const QString &path, QString *error)
             *error = QStringLiteral("Could not create a directory");
         return false;
     }
-    // The directory is private even if a temporary save file is briefly created before its final permissions are set.
+    // The directory is private even if a temporary save file is briefly created before its final permissions are set
     if (QFileInfo(path).permissions() != ownerOnly && !QFile::setPermissions(path, ownerOnly)) {
         if (error)
             *error = QStringLiteral("Could not secure a directory");

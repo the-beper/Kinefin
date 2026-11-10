@@ -20,7 +20,7 @@ std::optional<QJsonObject> playbackReportBody(const PlaybackReport &report)
     }
     body.insert(QStringLiteral("IsPaused"), report.isPaused);
     body.insert(QStringLiteral("CanSeek"), report.canSeek);
-    // DirectStream is never reported: the media source selection never picks it.
+    // DirectStream is never reported: the media source selection never picks it
     body.insert(QStringLiteral("PlayMethod"), report.method == PlaybackSource::Method::Direct
                                                   ? QStringLiteral("DirectPlay")
                                                   : QStringLiteral("Transcode"));

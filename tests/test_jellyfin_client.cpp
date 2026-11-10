@@ -375,7 +375,7 @@ class TestJellyfinClient : public QObject {
         QTRY_COMPARE(ready.size(), 1);
         QCOMPARE(failed.size(), 0);
 
-        // Everything is in the body: no query string, UserId, ticks, bitrate and the golden profile.
+        // Everything is in the body: no query string, UserId, ticks, bitrate and the golden profile
         QCOMPARE(server.lastPlaybackInfoRoute,
                  QByteArray("/jellyfin/Items/" + kPlayItem.toLatin1() + "/PlaybackInfo"));
         QVERIFY(server.lastPlaybackInfoContentType.startsWith("application/json"));
@@ -410,7 +410,7 @@ class TestJellyfinClient : public QObject {
         QTRY_COMPARE(ready.size(), 1);
         const auto source = ready.takeFirst().at(0).value<Kinefin::PlaybackSource>();
         QCOMPARE(source.method, Kinefin::PlaybackSource::Method::Transcode);
-        // The server base path is kept and the ApiKey the fixture embeds is gone.
+        // The server base path is kept and the ApiKey the fixture embeds is gone
         QVERIFY(source.url.path().startsWith(QStringLiteral("/jellyfin/videos/")));
         QVERIFY(!source.url.toString().contains(QString::fromLatin1(kFixtureToken)));
         QVERIFY(!QUrlQuery(source.url).hasQueryItem(QStringLiteral("ApiKey")));
@@ -437,7 +437,7 @@ class TestJellyfinClient : public QObject {
 
     void playbackInfoFailuresKeepTheSession()
     {
-        // 400 is what a 12.4 server answers for an unknown item (observed), 404 is the documented code.
+        // 400 is what a 12.4 server answers for an unknown item (observed), 404 is the documented code
         for (const int status : {400, 404, 500, 302}) {
             FakeJellyfin server;
             QVERIFY(server.listen());
@@ -550,7 +550,7 @@ class TestJellyfinClient : public QObject {
         }
     }
 
-    // A 401 on another call ends a held negotiation with sessionExpired and nothing else.
+    // A 401 on another call ends a held negotiation with sessionExpired and nothing else
     void sessionLostElsewhereEndsPendingPlaybackInfoQuietly()
     {
         FakeJellyfin server;
@@ -604,7 +604,7 @@ class TestJellyfinClient : public QObject {
                  QJsonDocument::fromJson(fixture(QStringLiteral("client_capabilities_request")))
                      .object());
         QVERIFY(server.lastCapabilitiesAuth.contains(kTokenField));
-        // Sent again only on request, never retried by itself.
+        // Sent again only on request, never retried by itself
         QVERIFY(client.reportCapabilities());
         QTRY_COMPARE(server.capabilitiesRequests, 2);
     }
@@ -672,7 +672,7 @@ class TestJellyfinClient : public QObject {
         QTRY_COMPARE(server.reportLog.size(), 1);
         for (qint64 ticks : {1, 2, 3})
             QVERIFY(send(Kinefin::PlaybackReport::Kind::Progress, ticks, QStringLiteral("s1")));
-        // One request at a time: nothing else left while the Start is unanswered.
+        // One request at a time: nothing else left while the Start is unanswered
         QTest::qWait(100);
         QCOMPARE(server.reportLog.size(), 1);
         server.holdReports = false;
@@ -711,7 +711,7 @@ class TestJellyfinClient : public QObject {
         server.holdReports = false;
         server.releaseHeld();
         QTRY_COMPARE(settled.size(), 1);
-        // The old session's Stopped precedes the new session's Start; the queued Progress is gone.
+        // The old session's Stopped precedes the new session's Start; the queued Progress is gone
         QStringList sequence;
         for (const auto &entry : server.reportLog) {
             sequence << QString::fromLatin1(entry.route.mid(entry.route.lastIndexOf('/') + 1))
@@ -866,7 +866,7 @@ class TestJellyfinClient : public QObject {
         QVERIFY(server.listen());
         Kinefin::JellyfinClient client;
         const QJsonObject profile = Kinefin::buildDeviceProfile({});
-        // Not authenticated yet.
+        // Not authenticated yet
         QVERIFY(!client.requestPlaybackInfo(kPlayItem, 0, profile));
         QVERIFY(client.streamAuthorization().isEmpty());
         QVERIFY(login(client, server));
@@ -885,11 +885,11 @@ class TestJellyfinClient : public QObject {
         QVERIFY(server.listen());
         Kinefin::JellyfinClient client;
         QVERIFY(prepare(client, server));
-        // Without a session there is no socket request at all, not even a URL to leak.
+        // Without a session there is no socket request at all, not even a URL to leak
         QVERIFY(client.webSocketRequest().url().isEmpty());
         QVERIFY(login(client, server));
         const QNetworkRequest socketRequest = client.webSocketRequest();
-        // The loopback transport keeps plain ws for the /socket path of the base; the token travels only in the header.
+        // The loopback transport keeps plain ws for the /socket path of the base; the token travels only in the header
         const QUrl expected = QUrl(QStringLiteral("ws://127.0.0.1:%1%2")
                                        .arg(server.url().port())
                                        .arg(QStringLiteral("/jellyfin/socket")));
@@ -909,20 +909,20 @@ class TestJellyfinClient : public QObject {
         QVERIFY(login(client, server));
         QSignalSpy expired(&client, &Kinefin::JellyfinClient::sessionExpired);
         QSignalSpy cleared(&client, &Kinefin::JellyfinClient::credentialsCleared);
-        // Anything but a 401 stays silent.
+        // Anything but a 401 stays silent
         QVERIFY(client.verifySession());
         QTRY_COMPARE(server.usersMeRequests, 1);
         QVERIFY(server.lastUsersMeAuth.contains(kTokenField));
         QVERIFY(client.isAuthenticated());
         QCOMPARE(expired.count(), 0);
-        // The 401 expires the session and forgets the token.
+        // The 401 expires the session and forgets the token
         server.denyUsersMe = true;
         QVERIFY(client.verifySession());
         QTRY_COMPARE(expired.count(), 1);
         QCOMPARE(cleared.count(), 1);
         QVERIFY(!client.isAuthenticated());
         QVERIFY(client.userId().isEmpty());
-        // Without a session the re-check cannot even be sent.
+        // Without a session the re-check cannot even be sent
         QVERIFY(!client.verifySession());
         QVERIFY(client.webSocketRequest().url().isEmpty());
     }
@@ -934,16 +934,16 @@ class TestJellyfinClient : public QObject {
         Kinefin::JellyfinClient client;
         QVERIFY(login(client, server));
         QSignalSpy cleared(&client, &Kinefin::JellyfinClient::credentialsCleared);
-        // Loss 1: a 401 on an authenticated route.
+        // Loss 1: a 401 on an authenticated route
         server.denyViews = true;
         QVERIFY(client.fetchUserViews());
         QTRY_COMPARE(cleared.count(), 1);
-        // Loss 2: an explicit logout.
+        // Loss 2: an explicit logout
         QVERIFY(login(client, server));
         QCOMPARE(cleared.count(), 1); // the fresh login had nothing left to forget
         client.disconnectFromServer();
         QCOMPARE(cleared.count(), 2);
-        // Loss 3: destruction while a token is still held.
+        // Loss 3: destruction while a token is still held
         bool destroyedClear = false;
         connect(&client, &Kinefin::JellyfinClient::credentialsCleared, this,
                 [&destroyedClear] { destroyedClear = true; });
@@ -956,7 +956,7 @@ class TestJellyfinClient : public QObject {
         QVERIFY(destroyedClear);
     }
 
-    // --- P2b listings (browse, home rows, series, search, sessions) ---
+    // --- listings (browse, home rows, series, search, sessions) ---
 
     void browseEnvelopeFailuresFailClosed()
     {
@@ -966,8 +966,7 @@ class TestJellyfinClient : public QObject {
         QVERIFY(login(client, server));
         QSignalSpy ready(&client, &Kinefin::JellyfinClient::itemsReady);
         QSignalSpy failures(&client, &Kinefin::JellyfinClient::requestFailed);
-        // Pagination: a TotalRecordCount smaller than Items.size() is refused, the exact
-        // failure fetchUserViews enforces.
+        // Pagination: a TotalRecordCount smaller than Items.size() is refused, the exact failure fetchUserViews enforces
         server.listingRawBody.insert(
             QStringLiteral("Items"),
             QByteArrayLiteral("{\"Items\":[{\"Id\":\"t1\"}],\"TotalRecordCount\":0}"));
@@ -976,13 +975,13 @@ class TestJellyfinClient : public QObject {
         QCOMPARE(failures.constFirst().at(1).toString(),
                  QStringLiteral("Invalid listing pagination"));
         QCOMPARE(ready.size(), 0);
-        // Malformed payload: an array where the envelope must be.
+        // Malformed payload: an array where the envelope must be
         server.listingRawBody.insert(QStringLiteral("Items"), QByteArrayLiteral("[1,2]"));
         QVERIFY(client.fetchItems(Kinefin::ItemQuery()));
         QTRY_COMPARE(failures.size(), 2);
         QCOMPARE(failures.constLast().at(1).toString(), QStringLiteral("Invalid listing response"));
         QCOMPARE(ready.size(), 0);
-        // A 401 expires the session; the shared failure signal carries fixed English.
+        // A 401 expires the session; the shared failure signal carries fixed English
         server.denyListings = true;
         QSignalSpy expired(&client, &Kinefin::JellyfinClient::sessionExpired);
         QVERIFY(client.fetchItems(Kinefin::ItemQuery()));
@@ -991,7 +990,7 @@ class TestJellyfinClient : public QObject {
         QCOMPARE(failures.constLast().at(0).toInt(), 401);
         QVERIFY(!client.isAuthenticated());
         QCOMPARE(ready.size(), 0);
-        // A redirect is never followed: the identity stays on the resolved base.
+        // A redirect is never followed: the identity stays on the resolved base
         QVERIFY(login(client, server));
         server.redirectListings = true;
         QVERIFY(client.fetchItems(Kinefin::ItemQuery()));
@@ -1008,10 +1007,7 @@ class TestJellyfinClient : public QObject {
         QVERIFY(login(client, server));
         QSignalSpy ready(&client, &Kinefin::JellyfinClient::itemsReady);
         QSignalSpy failures(&client, &Kinefin::JellyfinClient::requestFailed);
-        // The second listing is held after it fully transmitted; the third one supersedes
-        // it by aborting the held reply. (Superseding a request during its connect phase
-        // queues Qt network internals out of the test's control, so the superseded reply
-        // is always one that already went out.)
+        // The second listing is held after it fully transmitted; the third one supersedes it by aborting the held reply. (Superseding a request during its connect phase queues Qt network internals out of the test's control, so the superseded reply is always one that already went out)
         QVERIFY(client.fetchItems(Kinefin::ItemQuery()));
         QTRY_COMPARE(ready.size(), 1); // the unheld first answer
         server.holdFirstListings = 1;
@@ -1023,7 +1019,7 @@ class TestJellyfinClient : public QObject {
         QTest::qWait(100);
         QCOMPARE(ready.size(), 2); // the late aborted reply stays silent
         QCOMPARE(failures.size(), 0);
-        // A different family is not superseded by an Items call: both stay answerable.
+        // A different family is not superseded by an Items call: both stay answerable
         QSignalSpy sessions(&client, &Kinefin::JellyfinClient::sessionsReady);
         QVERIFY(client.fetchSessions(false));
         QVERIFY(client.fetchItems(Kinefin::ItemQuery()));
@@ -1047,7 +1043,7 @@ class TestJellyfinClient : public QObject {
         QTest::qWait(100);
         QCOMPARE(ready.size(), 0);
         QCOMPARE(failures.size(), 0);
-        // Nothing can be listed while disconnected.
+        // Nothing can be listed while disconnected
         QVERIFY(!client.fetchItems(Kinefin::ItemQuery()));
         QVERIFY(!client.fetchSessions(false));
     }
@@ -1062,7 +1058,7 @@ class TestJellyfinClient : public QObject {
         QSignalSpy latest(&client, &Kinefin::JellyfinClient::latestItemsReady);
         QSignalSpy nextUp(&client, &Kinefin::JellyfinClient::nextUpReady);
         QSignalSpy failures(&client, &Kinefin::JellyfinClient::requestFailed);
-        // Continue Watching: /UserItems/Resume with the video media type, upstream shape.
+        // Continue Watching: /UserItems/Resume with the video media type, upstream shape
         QVERIFY(client.fetchResumeItems(12));
         QTRY_COMPARE(resume.size(), 1);
         QJsonArray items = resume.constFirst().constFirst().value<QJsonArray>();
@@ -1075,7 +1071,7 @@ class TestJellyfinClient : public QObject {
         QCOMPARE(wire.queryItemValue(QStringLiteral("limit")), QStringLiteral("12"));
         QVERIFY(wire.queryItemValue(QStringLiteral("userId"))
                     .contains(QStringLiteral("d5ed5d4e2e5447b58e9f2b6f7bd5c96a")));
-        // Recently Added: the bare-array /Items/Latest, per library.
+        // Recently Added: the bare-array /Items/Latest, per library
         QVERIFY(client.fetchLatestItems(QStringLiteral("e2a1aa11a8d94b5c999a25cf59abcd01"), 8));
         QTRY_COMPARE(latest.size(), 1);
         items = latest.constFirst().constFirst().value<QJsonArray>();
@@ -1087,7 +1083,7 @@ class TestJellyfinClient : public QObject {
         QCOMPARE(wire.queryItemValue(QStringLiteral("parentId")),
                  QStringLiteral("e2a1aa11a8d94b5c999a25cf59abcd01"));
         QCOMPARE(wire.queryItemValue(QStringLiteral("limit")), QStringLiteral("8"));
-        // Next Up: /Shows/NextUp with the rewatch and cutoff knobs.
+        // Next Up: /Shows/NextUp with the rewatch and cutoff knobs
         QVERIFY(client.fetchNextUp({}, {}, QStringLiteral("2025-11-10"), false, 15));
         QTRY_COMPARE(nextUp.size(), 1);
         items = nextUp.constFirst().constFirst().value<QJsonArray>();
@@ -1145,7 +1141,7 @@ class TestJellyfinClient : public QObject {
         QCOMPARE(wire.queryItemValue(QStringLiteral("fields")),
                  QStringLiteral("PrimaryImageAspectRatio,Path,MediaSourceCount"));
         QVERIFY(server.lastListingAuth.value(QStringLiteral("Items")).contains(kTokenField));
-        // The auth header never rides in the URL.
+        // The auth header never rides in the URL
         QVERIFY(!QString::fromUtf8(server.lastListingRoute.value(QStringLiteral("Items")))
                      .contains(QLatin1String("Token")));
     }
@@ -1161,8 +1157,7 @@ class TestJellyfinClient : public QObject {
         Kinefin::ItemQuery good;
         QVERIFY(client.fetchItems(good));
         QTRY_COMPARE(ready.size(), 1);
-        // Bad parentId / id shapes, an unknown field and an unknown type are refused
-        // without a request; the server never sees a URL it would answer 400 with.
+        // Bad parentId / id shapes, an unknown field and an unknown type are refused without a request; the server never sees a URL it would answer 400 with
         const auto run = [&](const Kinefin::ItemQuery &query) {
             const int before = server.listingRequests;
             QVERIFY(!client.fetchItems(query));
@@ -1187,8 +1182,7 @@ class TestJellyfinClient : public QObject {
         Kinefin::ItemQuery badFilters = good;
         badFilters.filters = QStringLiteral("IsResumable,IsHaunted");
         run(badFilters);
-        // The ids= form still checks every member against the id shape rule (a URL-safety
-        // guard, not a GUID checker): a space is refused without a request.
+        // The ids= form still checks every member against the id shape rule (a URL-safety guard, not a GUID checker): a space is refused without a request
         Kinefin::ItemQuery badIds = good;
         badIds.itemIds = {QStringLiteral("bad id")};
         run(badIds);
@@ -1218,7 +1212,7 @@ class TestJellyfinClient : public QObject {
         QCOMPARE(
             wire.queryItemValue(QStringLiteral("ids")),
             QStringLiteral("f0e1d2c3b4a5968778695a4b3c2d1e0f,9a8b7c6d5e4f3827160594a3b2c1d0e1"));
-        // The ids= form carries the fields only: the other members must not reach the wire.
+        // The ids= form carries the fields only: the other members must not reach the wire
         QVERIFY(wire.queryItemValue(QStringLiteral("parentId")).isEmpty());
         QVERIFY(wire.queryItemValue(QStringLiteral("searchTerm")).isEmpty());
         QVERIFY(wire.queryItemValue(QStringLiteral("sortBy")).isEmpty());
@@ -1262,8 +1256,7 @@ class TestJellyfinClient : public QObject {
             server.lastListingRoute.value(QStringLiteral("Episodes")));
         QVERIFY(wire.queryItemValue(QStringLiteral("seasonId")).isEmpty());
         QVERIFY(wire.queryItemValue(QStringLiteral("limit")).isEmpty());
-        // Bad ids are refused without a request (the id shape rule, not a GUID check);
-        // a 401 expires the session.
+        // Bad ids are refused without a request (the id shape rule, not a GUID check); a 401 expires the session
         QVERIFY(!client.fetchSeasons(QStringLiteral("no no")));
         QVERIFY(!client.fetchEpisodes(QStringLiteral("aa11bb22cc33dd44ee55ff6677889900"),
                                       QStringLiteral("../x"), 0, 10));
@@ -1321,7 +1314,7 @@ class TestJellyfinClient : public QObject {
         wire = FakeJellyfin::capturedListingQuery(
             server.lastListingRoute.value(QStringLiteral("Sessions")));
         QVERIFY(wire.queryItemValue(QStringLiteral("controllableByUserId")).isEmpty());
-        // The bare-array validation refuses an object or a nested array.
+        // The bare-array validation refuses an object or a nested array
         server.listingRawBody.insert(QStringLiteral("Sessions"), QByteArrayLiteral("{\"x\":1}"));
         QVERIFY(client.fetchSessions(false));
         QTRY_COMPARE(failures.size(), 1);
@@ -1352,7 +1345,7 @@ class TestJellyfinClient : public QObject {
                                           85, QStringLiteral("webp"));
         QCOMPARE(webp.query().contains(QLatin1String("maxWidth=1920")), true);
         QCOMPARE(webp.query().contains(QLatin1String("format=webp")), true);
-        // Refusals: unknown type, bad size, bad tag charset, unknown format, bad id.
+        // Refusals: unknown type, bad size, bad tag charset, unknown format, bad id
         QVERIFY(client
                     .imageUrl(QStringLiteral("f0e1d2c3b4a5968778695a4b3c2d1e0f"),
                               QStringLiteral("Wallpaper"), 360, {})

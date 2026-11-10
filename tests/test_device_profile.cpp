@@ -37,7 +37,7 @@ class TestDeviceProfile : public QObject {
         return buildDeviceProfile(options).value(QStringLiteral("CodecProfiles")).toArray();
     }
 
-    // One Equals/NotEquals/... condition as "Property Condition Value", for compact asserts.
+    // One Equals/NotEquals/... condition as "Property Condition Value", for compact asserts
     static QStringList conditions(const QJsonObject &codecProfile)
     {
         QStringList result;
@@ -56,7 +56,7 @@ class TestDeviceProfile : public QObject {
         const QJsonObject golden = goldenProfile();
         QVERIFY(!golden.isEmpty());
         QCOMPARE(buildDeviceProfile({}), golden);
-        // ResponseProfiles no longer exist in the 12.4 DeviceProfile schema.
+        // ResponseProfiles no longer exist in the 12.4 DeviceProfile schema
         QVERIFY(!buildDeviceProfile({}).contains(QStringLiteral("ResponseProfiles")));
     }
 
@@ -148,7 +148,7 @@ class TestDeviceProfile : public QObject {
         all.forceTranscodeHdr = all.forceTranscodeHi10p = all.forceTranscodeHevc = true;
         all.forceTranscodeAv1 = all.forceTranscode4k = true;
         const QJsonArray profiles = codecProfiles(all);
-        // Parity §3 order: dovi, hdr, hi10p, hevc, h265, av1, 4k.
+        // Parity §3 order: dovi, hdr, hi10p, hevc, h265, av1, 4k
         QStringList sequence;
         int conditionCount = 0;
         for (const QJsonValue &profile : profiles) {

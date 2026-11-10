@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Kinefin contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
-// No Qt headers: this can be compiled with a C++20 host even before KDE SDK exists.
+// No Qt headers: this can be compiled with a C++20 host even before KDE SDK exists
 #include "player/PlaybackSession.h"
 
 #undef NDEBUG // the asserts are the test
@@ -44,7 +44,7 @@ int main()
     }
     assert(session.open({"item", "source", "session"}, PlaybackSession::Route::Transcoded));
     assert(session.failed());
-    // Failure during opening has no active server session, but it is stoppable.
+    // Failure during opening has no active server session, but it is stoppable
     assert(session.stop());
     assert(!session.shouldReportToJellyfin());
     assert(!session.stop());

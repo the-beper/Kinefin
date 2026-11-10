@@ -3,7 +3,7 @@
 import org.kde.coreaddons as Core
 import org.kde.kirigami as Kirigami
 
-// Reads the application's KAboutData (set in main.cpp).
+// Reads the application's KAboutData (set in main.cpp)
 Kirigami.AboutPage {
     objectName: "aboutPage"
     aboutData: Core.AboutData

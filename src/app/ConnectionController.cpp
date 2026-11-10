@@ -31,7 +31,7 @@ ConnectionController::ConnectionController(const QString &profileId, const QStri
     : QObject(parent), m_ownedStore(store ? nullptr : new KWalletTokenStore), m_client(this),
       m_sync(&m_client, store ? store : m_ownedStore.get(), profileId, this)
 {
-    // The sync connects to the client first, so on every shared signal it has already saved, restored or forgotten when the slots below run.
+    // The sync connects to the client first, so on every shared signal it has already saved, restored or forgotten when the slots below run
     m_identityValid = m_client.setDeviceIdentity(QStringLiteral("Kinefin"), deviceId, version);
     if (!m_identityValid)
         qCWarning(controllerLog) << "the profile's device id or the version is not header-safe";
@@ -70,7 +70,7 @@ void ConnectionController::start()
 {
     if (m_state != Idle || m_servers.isEmpty())
         return;
-    // The most recent login is the last entry.
+    // The most recent login is the last entry
     connectTo(m_servers.constLast().toMap().value(QStringLiteral("url")).toString());
 }
 
@@ -103,7 +103,7 @@ void ConnectionController::onServerReady()
     const QUrl base = m_client.serverUrl();
     m_serverUrl = base.toString();
     Q_EMIT serverUrlChanged();
-    // A stored session being read from the wallet keeps this on Connecting until it is known whether it restores.
+    // A stored session being read from the wallet keeps this on Connecting until it is known whether it restores
     if (m_client.isAuthenticated() || m_sync.restorePending())
         return;
     proceedAfterProbe();
@@ -111,7 +111,7 @@ void ConnectionController::onServerReady()
 
 void ConnectionController::onRestoreFinished()
 {
-    // A restored session already made this Authenticated; any other outcome goes on to sign-in.
+    // A restored session already made this Authenticated; any other outcome goes on to sign-in
     if (m_state == Connecting && !m_client.isAuthenticated())
         proceedAfterProbe();
 }
@@ -232,7 +232,7 @@ void ConnectionController::onSessionExpired()
     m_libraries.clear();
     Q_EMIT librariesChanged();
     refreshServers();
-    // The client stays on the probed server, so signing in again needs no new address.
+    // The client stays on the probed server, so signing in again needs no new address
     setError(i18n("Your session has expired. Sign in again"));
     setState(NeedsLogin);
 }
@@ -258,7 +258,7 @@ void ConnectionController::onRequestFailed(int status)
         setState(NeedsLogin);
         break;
     case Authenticated:
-        // A 401 here was already reported as an expired session.
+        // A 401 here was already reported as an expired session
         if (m_client.isAuthenticated()) {
             setError(i18n("Could not load the libraries. Try again"));
             m_libraryError = true; // after setError(), which resets it
@@ -271,7 +271,7 @@ void ConnectionController::onRequestFailed(int status)
 
 void ConnectionController::clearLibraryError()
 {
-    // Only the libraries' own error: a failed token save, say, stays until the user leaves.
+    // Only the libraries' own error: a failed token save, say, stays until the user leaves
     if (m_libraryError) {
         m_libraryError = false;
         setError({});

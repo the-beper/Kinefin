@@ -23,14 +23,7 @@
 #include <QWebSocketProtocol>
 #include <QtTest>
 
-// Opt-in live checks against a real Jellyfin server: the approved websocket-contract.md
-// steps 6-7 and the reporting live checks of plan.md P2a. Every slot SKIPs unless the
-// environment provides the server, so `ctest` under check.sh runs this file as a plain
-// skip everywhere else. Bring:
-//   KINEFIN_LIVE_BASE_URL (e.g. http://192.168.1.251:8096),
-//   KINEFIN_LIVE_USER, KINEFIN_LIVE_PASSWORD.
-// The access token never leaves the process: prints carry names, ids, routes, statuses and
-// raw frames only, and every login uses its own throw-away device id.
+// Opt-in live checks against a real Jellyfin server: the websocket-contract.md live steps and the reporting live checks. Every slot SKIPs unless the environment provides the server, so `ctest` under check.sh runs this file as a plain skip everywhere else. Bring: KINEFIN_LIVE_BASE_URL (e.g. http://192.168.1.251:8096), KINEFIN_LIVE_USER, KINEFIN_LIVE_PASSWORD. The sessionsRoleVisibility slot additionally takes, when an admin account may be used for the comparison: KINEFIN_LIVE_ADMIN_USER/PASSWORD. The access token never leaves the process: prints carry names, ids, routes, statuses and raw frames only, and every login uses its own throw-away device id
 class TestJellyfinLive : public QObject {
     Q_OBJECT
 
@@ -42,90 +35,88 @@ class TestJellyfinLive : public QObject {
         m_password = qEnvironmentVariable("KINEFIN_LIVE_PASSWORD");
         m_live =
             m_base.isValid() && !m_base.isEmpty() && !m_user.isEmpty() && !m_password.isEmpty();
+        m_adminUser = qEnvironmentVariable("KINEFIN_LIVE_ADMIN_USER");
+        m_adminPassword = qEnvironmentVariable("KINEFIN_LIVE_ADMIN_PASSWORD");
+        m_adminLive = !m_adminUser.isEmpty() && !m_adminPassword.isEmpty();
     }
 
   private Q_SLOTS:
-    // REST round trip plus the session identity. ~2 s.
+    // REST round trip plus the session identity. ~2 s
     void authAndSessionSmoke();
 
-    // Live checks 1+2 (~75 s): the QWebSocket handshake with the component's own request, the
-    // exact ForceKeepAlive the server opens with, the client's KeepAlive answer, and a hold
-    // past the 60 s close deadline.
+    // Live checks 1+2 (~75 s): the QWebSocket handshake with the component's own request, the exact ForceKeepAlive the server opens with, the client's KeepAlive answer, and a hold past the 60 s close deadline
     void handshakeAndKeepAliveCycle();
 
-    // The component's full heartbeat cycle (~210 s): authenticated once, then 200 s of pure
-    // waiting with the socket confident the whole time.
+    // The component's full heartbeat cycle (~210 s): authenticated once, then 200 s of pure waiting with the socket confident the whole time
     void componentSurvivesThreeMinutes();
 
-    // Live check 3 (~70 s): during 61 s of client silence the server announces ForceKeepAlive
-    // again, between 45 and 60 s.
+    // Live check 3 (~70 s): during 61 s of client silence the server announces ForceKeepAlive again, between 45 and 60 s
     void forceKeepAliveOnSilence();
 
-    // Live check 9 (~25 s): with the SessionsStart interest out, Sessions frames arrive (or are
-    // proven not to). Either outcome is recorded verbatim for the design to act on.
+    // Live check 9 (~25 s): with the SessionsStart interest out, Sessions frames arrive (or are proven not to). Either outcome is recorded verbatim for the design to act on
     void sessionsWhileSubscribed();
 
-    // Live checks 8+7 (~25 s): a genuine second session of the same user drives Play, a
-    // Playstate and a GeneralCommand at this device's session; the components route them.
+    // Live checks 8+7 (~25 s): a genuine second session of the same user drives Play, a Playstate and a GeneralCommand at this device's session; the components route them
     void commandsFromSecondSession();
 
-    // The raw byte form of the remote-control frames: a direct WebSocket with a capture
-    // socket, the controller drives it from a separate device. ~20 s.
+    // The raw byte form of the remote-control frames: a direct WebSocket with a capture socket, the controller drives it from a separate device. ~20 s
     void rawCommandShapes();
 
-    // Live checks 6+7: the frames a scan wake-up and a user-data change look like on the wire
-    // (this user must hold the LibraryScan task trigger; the marking is undone at the end).
+    // Live checks 6+7: the frames a scan wake-up and a user-data change look like on the wire (this user must hold the LibraryScan task trigger; the marking is undone at the end)
     void rawScanAndUserDataShapes();
 
-    // Live check 4's observed 12.4 equivalent: the token logout (POST /Sessions/Logout, 204)
-    // ends the authenticated socket; a fresh handshake with the dead token is refused and
-    // /Users/Me answers 401. The server-side admin device deletion was not reachable (404).
+    // Live check 4's observed 12.4 equivalent: the token logout (POST /Sessions/Logout, 204) ends the authenticated socket; a fresh handshake with the dead token is refused and /Users/Me answers 401. The server-side admin device deletion was not reachable (404)
     void tokenLogoutClosesEverything();
 
-    // Reporting live checks r1-r3 (~10 s): the pure report bodies the client builder produces,
-    // posted by hand and the server's real answers observed, including a duplicate Stopped.
+    // Reporting live checks r1-r3 (~10 s): the pure report bodies the client builder produces, posted by hand and the server's real answers observed, including a duplicate Stopped
     void reportsAnswer204();
 
-    // Reporting live check r4 (~10 s): a Failed Stopped leaves the user's play state untouched.
+    // Reporting live check r4 (~10 s): a Failed Stopped leaves the user's play state untouched
     void failedStopsLeaveUserDataAlone();
 
-    // Reporting live checks r5+r2 (~25 s): a 4K HDR item forced through the HLS negotiation, a
-    // Transcode marker in the live session record, and a Stopped that ends the server job.
+    // Reporting live checks r5+r2 (~25 s): a 4K HDR item forced through the HLS negotiation, a Transcode marker in the live session record, and a Stopped that ends the server job
     void hlsTranscodeLifecycle();
 
-    // P2x live gate INT-02 (~40 s): a direct-playable movie under the parity profile, the
-    // engine plays the real stream, the server session record carries it, pause/resume/seek/
-    // stop run, and the Stopped clears the play.
+    // Engine live gate INT-02 (~40 s): a direct-playable movie under the parity profile, the engine plays the real stream, the server session record carries it, pause/resume/seek/stop run, and the Stopped clears the play
     void engineDirectPlayLifecycle();
 
-    // P2x live gate INT-03 (~45 s): an HDR item forced to transcode, mpv plays the negotiated
-    // HLS stream, and the Stopped tears the server job down.
+    // Engine live gate INT-03 (~45 s): an HDR item forced to transcode, mpv plays the negotiated HLS stream, and the Stopped tears the server job down
     void engineTranscodeLifecycle();
 
-    // P2x live gate INT-04 (~60 s): >20 s of held-pause reporting, then stop; the server's
-    // user-data record keeps the continue point.
+    // Engine live gate INT-04 (~60 s): >20 s of held-pause reporting, then stop; the server's user-data record keeps the continue point
     void engineProgressAdvancesUserData();
 
-    // P2x live gate INT-06 (~50 s): a byte-forwarding local proxy carries client and stream;
-    // cutting it mid-play gives exactly one Failed->Stopping->Idle path, no second play
-    // identity, and re-authentication on the real base recovers.
+    // Engine live gate INT-06 (~50 s): a byte-forwarding local proxy carries client and stream; cutting it mid-play gives exactly one Failed->Stopping->Idle path, no second play identity, and re-authentication on the real base recovers
     void engineInterruptionSeversAndRecovers();
 
-    // P2x live gate INT-05 (~40 s): local-logout scope (a server-driven expiry needs an
-    // admin action this harness cannot reach). The engine keeps playing through a cleared
-    // credential, the stop needs no server, and no new playback identity forms.
+    // Engine live gate INT-05 (~40 s): local-logout scope (a server-driven expiry needs an admin action this harness cannot reach). The engine keeps playing through a cleared credential, the stop needs no server, and no new playback identity forms
     void engineSurvivesALocalLogout();
 
-    // P2a leftover, BaseUrl handshake round (~15 s): the client's whole loop (probe,
-    // login, WebSocket handshake, one report) through a forwarder that serves the server
-    // under a path prefix, standing in for upstream's `<host>/jellyfin` deployments.
+    // BaseUrl handshake round (~15 s): the client's whole loop (probe, login, WebSocket handshake, one report) through a forwarder that serves the server under a path prefix, standing in for upstream's `<host>/jellyfin` deployments
     void subPathBaseUrlRound();
+
+    // Endpoint-matrix round, auth wire format (~10 s): a raw login carries the exact MediaBrowser header; the echoed token then rides /Users/Me as the full MediaBrowser header (200), and the legacy variants (X-Emby-Token, ?api_key=, ?ApiKey=) are recorded whatever they answer
+    void authHeaderWireEcho();
+
+    // Endpoint-matrix round, listings (~60 s): every browse/search/session fetcher of the component against the real server (compose, ids tunnel, home rows, series navigation, similar incl. the Episode/unknown-id edges, genres, Filters2, sessions), the token-free image route unauthenticated, and the server's echo of an invalid query member
+    void browseListingsLive();
+
+    // Endpoint-matrix round, /Sessions roles (~15 s): the visible set as admin vs non-admin, plus the non-admin substitution of a foreign controllableByUserId. Skips without KINEFIN_LIVE_ADMIN_*
+    void sessionsRoleVisibility();
+
+    // Endpoint-matrix round, trickplay (~15 s): the item's Trickplay field, the tiles.m3u8 ladder and one tile jpg's real dimensions. Skips when no trickplay scan exists on the server
+    void trickplayLayoutProbe();
+
+    // Endpoint-matrix round, PlaybackInfo defaults (~30 s): the body without a bitrate ceiling vs an explicit low one vs no DeviceProfile at all — the TranscodingUrl bitrate the server picks is the fact
+    void playbackInfoDefaultsProbe();
 
   private:
     int deviceSequence = 0;
     static constexpr auto LIVE_FACT = "live-fact:";
     QString sourceDeviceId() const { return m_deviceId; }
     bool authenticate(Kinefin::JellyfinClient &client);
+    bool authenticateAs(Kinefin::JellyfinClient &client, const QString &user,
+                        const QString &password);
     void recordFrame(const QString &frame);
     bool frameSeen(QWebSocket *socket, qint64 ms, qsizetype from, QString *rawMessage,
                    const QByteArray &needle);
@@ -135,6 +126,9 @@ class TestJellyfinLive : public QObject {
     QJsonObject getJson(Kinefin::JellyfinClient &client, const QString &path);
     int postJson(Kinefin::JellyfinClient &client, const QString &path, const QJsonObject &body);
     int deleteRequest(Kinefin::JellyfinClient &client, const QString &path);
+    // Raw GET of any content type with the client's identity (or without it, for the token-free routes and the negative credential probes): the status and the body out, and the Content-Type when asked for
+    int probeRaw(Kinefin::JellyfinClient &client, const QString &path, QByteArray *body,
+                 bool withAuth, QString *contentType = nullptr);
     QString firstItemId(Kinefin::JellyfinClient &client);
     QString ownSessionId(Kinefin::JellyfinClient &client, const QString &ownDeviceId);
     QJsonObject fetchMe(Kinefin::JellyfinClient &client);
@@ -145,7 +139,7 @@ class TestJellyfinLive : public QObject {
                              const QString &itemId);
     QString sessionSnapshot(Kinefin::JellyfinClient &client, const QString &deviceId,
                             const QString &playSessionId);
-    // P2x gate round helpers.
+    // Engine live gate round helpers
     QString hdrItemId(Kinefin::JellyfinClient &client);
     bool findDirectPlayable(Kinefin::JellyfinClient &client, QString *itemId,
                             Kinefin::PlaybackSource *source);
@@ -158,6 +152,9 @@ class TestJellyfinLive : public QObject {
     QString m_user;
     QString m_password;
     bool m_live = false;
+    QString m_adminUser;
+    QString m_adminPassword;
+    bool m_adminLive = false;
     qsizetype m_count = 0;
     QStringList m_frames;
     QString m_deviceId;
@@ -165,8 +162,14 @@ class TestJellyfinLive : public QObject {
 
 int deviceSequence = 0;
 
-// One authenticated client per use; every device id unique so /Sessions entries never mix.
+// One authenticated client per use; every device id unique so /Sessions entries never mix
 bool TestJellyfinLive::authenticate(Kinefin::JellyfinClient &client)
+{
+    return authenticateAs(client, m_user, m_password);
+}
+
+bool TestJellyfinLive::authenticateAs(Kinefin::JellyfinClient &client, const QString &user,
+                                      const QString &password)
 {
     ++deviceSequence;
     const QString deviceId = QStringLiteral("kinefin-live-fiddle-%1").arg(deviceSequence);
@@ -179,8 +182,7 @@ bool TestJellyfinLive::authenticate(Kinefin::JellyfinClient &client)
         qWarning() << "connectToServer refused for" << m_base;
         return false;
     }
-    // The opt-in is scoped to the current server and `connectToServer` resets it: set it now,
-    // while the transport is connecting, so the credentials may travel over plain LAN http.
+    // The opt-in is scoped to the current server and `connectToServer` resets it: set it now, while the transport is connecting, so the credentials may travel over plain LAN http
     client.setAllowInsecureHttp(true);
     QSignalSpy ready(&client, &Kinefin::JellyfinClient::serverReady);
     if (!ready.wait(15000)) {
@@ -188,7 +190,7 @@ bool TestJellyfinLive::authenticate(Kinefin::JellyfinClient &client)
         return false;
     }
     QSignalSpy loggedIn(&client, &Kinefin::JellyfinClient::loginSucceeded);
-    if (!client.authenticate(m_user, m_password)) {
+    if (!client.authenticate(user, password)) {
         qWarning() << "authenticate call refused (client-side)";
         return false;
     }
@@ -200,7 +202,7 @@ void TestJellyfinLive::recordFrame(const QString &frame)
     m_frames.append(frame);
 }
 
-// Whether a frame containing `needle` arrives within `ms` after index `from`; the message is copied out.
+// Whether a frame containing `needle` arrives within `ms` after index `from`; the message is copied out
 bool TestJellyfinLive::frameSeen(QWebSocket *socket, qint64 ms, qsizetype from, QString *rawMessage,
                                  const QByteArray &needle)
 {
@@ -220,7 +222,7 @@ bool TestJellyfinLive::frameSeen(QWebSocket *socket, qint64 ms, qsizetype from, 
     return false;
 }
 
-// Opens the upgrade; nullptr when the handshake is refused.
+// Opens the upgrade; nullptr when the handshake is refused
 QWebSocket *TestJellyfinLive::openSocket(Kinefin::JellyfinClient &client)
 {
     auto *socket = new QWebSocket(QStringLiteral("Kinefin live check"),
@@ -234,8 +236,7 @@ QWebSocket *TestJellyfinLive::openSocket(Kinefin::JellyfinClient &client)
     return socket;
 }
 
-// The QWebSocket handshake with the component's own request: 101 answer, then the first
-// server frame (ForceKeepAlive) inside the first seconds.
+// The QWebSocket handshake with the component's own request: 101 answer, then the first server frame (ForceKeepAlive) inside the first seconds
 bool TestJellyfinLive::socketFirstExchange(QWebSocket *socket)
 {
     QString raw;
@@ -245,7 +246,7 @@ bool TestJellyfinLive::socketFirstExchange(QWebSocket *socket)
     return seen;
 }
 
-// The skip guard lives in every slot itself; QSKIP returns from its caller.
+// The skip guard lives in every slot itself; QSKIP returns from its caller
 void TestJellyfinLive::authAndSessionSmoke()
 {
     if (!m_live)
@@ -267,7 +268,7 @@ void TestJellyfinLive::componentSurvivesThreeMinutes()
     Kinefin::JellyfinClient client;
     Kinefin::JellyfinSocketClient socket(&client);
     QVERIFY(authenticate(client));
-    // Every heartbeat is answered inside the component; the state stays stable while nothing local touches it.
+    // Every heartbeat is answered inside the component; the state stays stable while nothing local touches it
     QTest::qWait(200000);
     QCOMPARE(socket.state(), Kinefin::JellyfinSocketClient::State::Authenticated);
     client.disconnectFromServer();
@@ -340,13 +341,12 @@ void TestJellyfinLive::sessionsWhileSubscribed()
     client.disconnectFromServer();
 }
 
-// Aux REST: a GET with the client's own Authorization header; the URL carries no token. The
-// body may be an object or an array (12.4's /Sessions answers a bare array).
+// Aux REST: a GET with the client's own Authorization header; the URL carries no token. The body may be an object or an array (12.4's /Sessions answers a bare array)
 QJsonDocument TestJellyfinLive::getDocument(Kinefin::JellyfinClient &client, const QString &path)
 {
     QNetworkAccessManager network;
     QUrl url = client.serverUrl();
-    // QUrl::setPath would percent-encode a '?' inside the path: split the query off.
+    // QUrl::setPath would percent-encode a '?' inside the path: split the query off
     const qsizetype queryStart = path.indexOf(QLatin1Char('?'));
     url.setPath(url.path() + (queryStart < 0 ? path : path.left(queryStart)));
     if (queryStart >= 0)
@@ -371,7 +371,7 @@ QJsonDocument TestJellyfinLive::getDocument(Kinefin::JellyfinClient &client, con
     return result;
 }
 
-// Aux REST: a DELETE with the client's own Authorization header; the answer status only.
+// Aux REST: a DELETE with the client's own Authorization header; the answer status only
 int TestJellyfinLive::deleteRequest(Kinefin::JellyfinClient &client, const QString &path)
 {
     QNetworkAccessManager network;
@@ -400,13 +400,43 @@ QJsonObject TestJellyfinLive::getJson(Kinefin::JellyfinClient &client, const QSt
     return getDocument(client, path).object();
 }
 
-// Aux REST: a POST with the client's identity header; the answer status only.
+// Raw GET of any content type: the status out, the body captured; `withAuth` false probes the token-free routes (images) and the negative credential cases
+int TestJellyfinLive::probeRaw(Kinefin::JellyfinClient &client, const QString &path,
+                               QByteArray *body, bool withAuth, QString *contentType)
+{
+    QNetworkAccessManager network;
+    QUrl url = client.serverUrl();
+    const qsizetype queryStart = path.indexOf(QLatin1Char('?'));
+    url.setPath(url.path() + (queryStart < 0 ? path : path.left(queryStart)));
+    if (queryStart >= 0)
+        url.setQuery(QUrlQuery(path.mid(queryStart + 1)));
+    QNetworkRequest request(url);
+    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
+                         QNetworkRequest::ManualRedirectPolicy);
+    if (withAuth) {
+        const QByteArray token = client.streamAuthorization();
+        if (!token.isEmpty())
+            request.setRawHeader(QByteArrayLiteral("Authorization"), token);
+    }
+    QNetworkReply *reply = network.get(request);
+    QSignalSpy done(reply, &QNetworkReply::finished);
+    done.wait(15000);
+    const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    if (body)
+        *body = reply->readAll();
+    if (contentType)
+        *contentType = reply->header(QNetworkRequest::ContentTypeHeader).toString();
+    reply->deleteLater();
+    return status;
+}
+
+// Aux REST: a POST with the client's identity header; the answer status only
 int TestJellyfinLive::postJson(Kinefin::JellyfinClient &client, const QString &path,
                                const QJsonObject &body)
 {
     QNetworkAccessManager network;
     QUrl url = client.serverUrl();
-    // Same split as the GET helper: a path with a query would percent-encode the '?'.
+    // Same split as the GET helper: a path with a query would percent-encode the '?'
     const qsizetype queryStart = path.indexOf(QLatin1Char('?'));
     url.setPath(url.path() + (queryStart < 0 ? path : path.left(queryStart)));
     if (queryStart >= 0)
@@ -440,7 +470,7 @@ QString TestJellyfinLive::firstItemId(Kinefin::JellyfinClient &client)
     return found.first().toObject().value(QStringLiteral("Id")).toString();
 }
 
-// The /Sessions entry (key `Id` — Live fact: 12.4 has no `SessionId` key there) of the given device; remote commands target it.
+// The /Sessions entry (key `Id` — Live fact: 12.4 has no `SessionId` key there) of the given device; remote commands target it
 QString TestJellyfinLive::ownSessionId(Kinefin::JellyfinClient &client, const QString &ownDeviceId)
 {
     const QJsonArray sessions = getDocument(client, QStringLiteral("/Sessions")).array();
@@ -481,8 +511,7 @@ void TestJellyfinLive::commandsFromSecondSession()
 
     const QString movie = firstItemId(controller);
     QVERIFY2(!movie.isEmpty(), "no movie in the library to send Play with");
-    // The 12.4 route carries the play command as query parameters, not in a body: the
-    // body variant answers 400 ("playCommand field is required") even when present.
+    // The 12.4 route carries the play command as query parameters, not in a body: the body variant answers 400 ("playCommand field is required") even when present
     const int playStatus =
         postJson(controller,
                  QStringLiteral("/Sessions/") + sessionId
@@ -562,7 +591,7 @@ void TestJellyfinLive::rawCommandShapes()
     controller.disconnectFromServer();
 }
 
-// Posts a report with the exact body the pure builder produces; the answer status observed.
+// Posts a report with the exact body the pure builder produces; the answer status observed
 int TestJellyfinLive::postReport(Kinefin::JellyfinClient &client,
                                  const Kinefin::PlaybackReport &report)
 {
@@ -595,7 +624,7 @@ void TestJellyfinLive::fill(Kinefin::PlaybackReport &report, const QString &item
     report.method = Kinefin::PlaybackSource::Method::Direct;
 }
 
-// The user-data record of one item through the 12.4 route (`/Users/{id}/Items/{id}/UserData`).
+// The user-data record of one item through the 12.4 route (`/Users/{id}/Items/{id}/UserData`)
 QJsonObject TestJellyfinLive::itemUserData(Kinefin::JellyfinClient &client, const QString &userId,
                                            const QString &itemId)
 {
@@ -603,7 +632,7 @@ QJsonObject TestJellyfinLive::itemUserData(Kinefin::JellyfinClient &client, cons
                                + QStringLiteral("/UserData"));
 }
 
-// The /Sessions record of `deviceId` as 12.4 presents it (the view has no PlaySessionId key at all — the live fact; the play session is only reported, never read back).
+// The /Sessions record of `deviceId` as 12.4 presents it (the view has no PlaySessionId key at all — the live fact; the play session is only reported, never read back)
 QString TestJellyfinLive::sessionSnapshot(Kinefin::JellyfinClient &client, const QString &deviceId,
                                           const QString &playSessionId)
 {
@@ -689,7 +718,7 @@ void TestJellyfinLive::hlsTranscodeLifecycle()
     Kinefin::JellyfinClient client;
     QVERIFY(authenticate(client));
 
-    // 1. Find a movie the parity §3 default profile must transcode (a 4K HDR/DoVi source).
+    // 1. Find a movie the parity §3 default profile must transcode (a 4K HDR/DoVi source)
     const QJsonObject items = getJson(
         client, QStringLiteral(
                     "/Items?IncludeItemTypes=Movie&Recursive=true&Limit=20&Fields=MediaSources"));
@@ -717,8 +746,7 @@ void TestJellyfinLive::hlsTranscodeLifecycle()
     }
     QVERIFY2(!hdrItem.isEmpty(), "no 4K HDR/DoVi movie for the HLS cycle");
 
-    // 2. PlaybackInfo through the real client, with `force transcode HDR` set (parity §2/§3):
-    // a stock profile direct-plays HDR, the setting is the documented forcing.
+    // PlaybackInfo through the real client, with `force transcode HDR` set (parity §2/§3): a stock profile direct-plays HDR, the setting is the documented forcing
     Kinefin::DeviceProfileOptions options;
     options.forceTranscodeHdr = true;
     QSignalSpy ready(&client, &Kinefin::JellyfinClient::playbackInfoReady);
@@ -727,7 +755,7 @@ void TestJellyfinLive::hlsTranscodeLifecycle()
     const Kinefin::PlaybackSource source = ready.first().first().value<Kinefin::PlaybackSource>();
     QCOMPARE(source.itemId, hdrItem);
     QCOMPARE(source.method, Kinefin::PlaybackSource::Method::Transcode);
-    // The token stays out of the URL (api-notes): verify the ApiKey count in the live query.
+    // The token stays out of the URL (api-notes): verify the ApiKey count in the live query
     int apiKeys = 0;
     const QList<QPair<QString, QString>> query = QUrlQuery(source.url).queryItems();
     for (const auto &pair : query)
@@ -737,7 +765,7 @@ void TestJellyfinLive::hlsTranscodeLifecycle()
     qInfo() << LIVE_FACT << "the negotiated media URL path:" << source.url.path() << "scheme"
             << source.url.scheme() << "transcode, token-free query confirmed";
 
-    // 3. Report the player side while the server's ffmpeg owns the HLS stream.
+    // 3. Report the player side while the server's ffmpeg owns the HLS stream
     Kinefin::PlaybackReport start;
     start.kind = Kinefin::PlaybackReport::Kind::Start;
     fill(start, source.itemId, source.playSessionId, qint64(0));
@@ -754,7 +782,7 @@ void TestJellyfinLive::hlsTranscodeLifecycle()
     QCOMPARE(postReport(client, progress), 204);
     QTest::qWait(2000);
 
-    // 4. The Stopped ends the server-side job: the play leaves the session record.
+    // 4. The Stopped ends the server-side job: the play leaves the session record
     Kinefin::PlaybackReport stopped;
     stopped.kind = Kinefin::PlaybackReport::Kind::Stopped;
     fill(stopped, source.itemId, source.playSessionId, qint64(3'000'000));
@@ -778,19 +806,17 @@ void TestJellyfinLive::rawScanAndUserDataShapes()
     QVERIFY2(socket, "the capture handshake did not reach 101");
     QVERIFY(socketFirstExchange(socket));
 
-    // A full-library scan kicks LibraryChanged frames; find the task and run it.
+    // A full-library scan kicks LibraryChanged frames; find the task and run it
     const QJsonArray tasks = getDocument(client, QStringLiteral("/ScheduledTasks")).array();
     if (tasks.isEmpty()) {
-        // The scan-task listing is admin-only here (live 2026-11-10: GET /ScheduledTasks
-        // answers 403 for the non-admin fiddle user): the environment must hold the scan
-        // trigger for this user as in the 2026-11-08 round, where this evidence stands.
+        // The scan-task listing is admin-only here (live 2026-11-10: GET /ScheduledTasks answers 403 for the non-admin fiddle user): the environment must hold the scan trigger for this user as in the 2026-11-08 round, where this evidence stands
         QSKIP("the environment does not grant the scan task trigger on this user");
     }
     QString scanTaskId;
     for (const auto &value : tasks) {
         const QJsonObject task = value.toObject();
         const QString name = task.value(QStringLiteral("Name")).toString();
-        // 12.4: "Scan Media Library" (task key RefreshLibrary); name keys stay readable.
+        // 12.4: "Scan Media Library" (task key RefreshLibrary); name keys stay readable
         if (name.contains(QStringLiteral("Scan Media Library"))) {
             scanTaskId = task.value(QStringLiteral("Id")).toString();
             qInfo() << LIVE_FACT << "the scan task:" << name;
@@ -799,12 +825,10 @@ void TestJellyfinLive::rawScanAndUserDataShapes()
     }
     QVERIFY2(!scanTaskId.isEmpty(), "the library scan task was not found");
 
-    // The scan trigger refreshes every library; 12.4's running route is
-    // `POST /ScheduledTasks/Running/{taskId}` (no `/Begin` suffix: that answers 404).
+    // The scan trigger refreshes every library; 12.4's running route is `POST /ScheduledTasks/Running/{taskId}` (no `/Begin` suffix: that answers 404)
     QCOMPARE(postJson(client, QStringLiteral("/ScheduledTasks/Running/") + scanTaskId, {}), 204);
     QTest::qWait(40000);
-    // The peacetime-largest LibraryChanged measurement finally lands here: the peak byte
-    // size the server emits during a full scan decides the WS-frame table's headroom.
+    // The peacetime-largest LibraryChanged measurement finally lands here: the peak byte size the server emits during a full scan decides the WS-frame table's headroom
     qsizetype peak = 0;
     QString peakRaw;
     qsizetype libraryFrames = 0;
@@ -824,17 +848,17 @@ void TestJellyfinLive::rawScanAndUserDataShapes()
     for (const QString &frame : m_frames)
         qInfo() << LIVE_FACT << "in-scan frame:" << frame;
 
-    // A user-data change needs a marker + its undo: the shapes must both pass by the socket.
+    // A user-data change needs a marker + its undo: the shapes must both pass by the socket
     const QString userId = client.userId();
     const QString movie = firstItemId(client);
-    // Marking plays back HTTP 200 (not 204) in 12.4: adjust the assertion, not the route.
+    // Marking plays back HTTP 200 (not 204) in 12.4: adjust the assertion, not the route
     QCOMPARE(postJson(client,
                       QStringLiteral("/UserPlayedItems/") + movie + QStringLiteral("?userId=")
                           + userId + QStringLiteral("&datePlayed=2026-11-08T21:00:00Z"),
                       {}),
              200);
     QTest::qWait(6000);
-    // The unmark answers 200 as well in 12.4 (mark/unmark behave symmetrically).
+    // The unmark answers 200 as well in 12.4 (mark/unmark behave symmetrically)
     QCOMPARE(deleteRequest(client, QStringLiteral("/UserPlayedItems/") + movie
                                        + QStringLiteral("?userId=") + userId),
              200);
@@ -854,13 +878,13 @@ void TestJellyfinLive::tokenLogoutClosesEverything()
     QVERIFY(authenticate(client));
     QTRY_COMPARE(socket.state(), Kinefin::JellyfinSocketClient::State::Authenticated);
 
-    // The server kills the token; the component follows when the credential clears.
+    // The server kills the token; the component follows when the credential clears
     QCOMPARE(postJson(client, QStringLiteral("/Sessions/Logout"), {}), 204);
     QTRY_COMPARE(socket.state(), Kinefin::JellyfinSocketClient::State::Disconnected);
     QCOMPARE(socket.state(), Kinefin::JellyfinSocketClient::State::Disconnected);
     QVERIFY(!client.isAuthenticated());
 
-    // A fresh handshake with the dead token must be refused (403 upstream → no 101 events).
+    // A fresh handshake with the dead token must be refused (403 upstream → no 101 events)
     QUrl url = client.serverUrl();
     url.setPath(url.path() + QStringLiteral("/socket"));
     url.setScheme(QStringLiteral("ws"));
@@ -880,7 +904,7 @@ void TestJellyfinLive::tokenLogoutClosesEverything()
     if (probeError.count() >= 1)
         qInfo() << LIVE_FACT << "the dead token's handshake ended in the error enum"
                 << int(probeError.first().first().value<QAbstractSocket::SocketError>());
-    // /Users/Me is a bare 401 after the logout; the redaction guard requires no token echo.
+    // /Users/Me is a bare 401 after the logout; the redaction guard requires no token echo
     QCOMPARE(getDocument(client, QStringLiteral("/Users/Me"))
                  .object()
                  .value(QStringLiteral("Id"))
@@ -889,11 +913,9 @@ void TestJellyfinLive::tokenLogoutClosesEverything()
     client.disconnectFromServer();
 }
 
-/* ----- P2x live gate rounds (plan.md steps (4)-(5)); every slot runs a real mpv ----- */
+/* ----- engine live gate rounds; every slot runs a real mpv ----- */
 
-// The first movie among the library's 20 whose PlaybackInfo negotiation under the parity
-// default profile answers a *direct* source. PlaybackInfo runs one request at a time; a
-// failed request just books a live fact and the loop moves on.
+// The first movie among the library's 20 whose PlaybackInfo negotiation under the parity default profile answers a *direct* source. PlaybackInfo runs one request at a time; a failed request just books a live fact and the loop moves on
 bool TestJellyfinLive::findDirectPlayable(Kinefin::JellyfinClient &client, QString *itemId,
                                           Kinefin::PlaybackSource *source)
 {
@@ -930,8 +952,7 @@ bool TestJellyfinLive::findDirectPlayable(Kinefin::JellyfinClient &client, QStri
     return false;
 }
 
-// The first movie among the library's 20 with a video stream that is not SDR (the HDR/DoVi
-// transcode candidate; the same probe the P2a reporting round used live).
+// The first movie among the library's 20 with a video stream that is not SDR (the HDR/DoVi transcode candidate; the same probe the reporting round used live)
 QString TestJellyfinLive::hdrItemId(Kinefin::JellyfinClient &client)
 {
     const QJsonObject items = getJson(
@@ -953,7 +974,7 @@ QString TestJellyfinLive::hdrItemId(Kinefin::JellyfinClient &client)
     return {};
 }
 
-// The token must never ride the media URL (api-notes.md, Media URLs).
+// The token must never ride the media URL (api-notes.md, Media URLs)
 void TestJellyfinLive::assertTokenFreeMediaUrl(const QUrl &url)
 {
     for (const auto &pair : QUrlQuery(url).queryItems())
@@ -961,7 +982,7 @@ void TestJellyfinLive::assertTokenFreeMediaUrl(const QUrl &url)
                  "the media URL carries an ApiKey parameter");
 }
 
-// After the engine reached Playing: the server session record must carry the playing item.
+// After the engine reached Playing: the server session record must carry the playing item
 void TestJellyfinLive::recordAndAssertPlaying(Kinefin::JellyfinClient &client,
                                               const QString &deviceId,
                                               const Kinefin::PlaybackSource &source,
@@ -977,12 +998,11 @@ void TestJellyfinLive::recordAndAssertPlaying(Kinefin::JellyfinClient &client,
                                                                             : "direct")
             << "positionTicks" << engine->positionTicks() << "durationTicks"
             << engine->durationTicks() << "canSeek" << engine->canSeek();
-    // The engine's own probe values must be usable before the record check: mpv answered.
+    // The engine's own probe values must be usable before the record check: mpv answered
     QTRY_VERIFY_WITH_TIMEOUT(engine->positionTicks() > 0, 20000);
     QTRY_VERIFY_WITH_TIMEOUT(engine->durationTicks() > 0, 20000);
 
-    // The Start report must have landed and woven into the server session record; the
-    // snapshot is a QTRY so the cadence race cannot decide this check.
+    // The Start report must have landed and woven into the server session record; the snapshot is a QTRY so the cadence race cannot decide this check
     QTRY_VERIFY_WITH_TIMEOUT(sessionSnapshot(client, deviceId, source.playSessionId)
                                  .contains(QStringLiteral("\"nowPlayingItem\":\"") + source.itemId
                                            + QStringLiteral("\"")),
@@ -1008,7 +1028,7 @@ void TestJellyfinLive::engineDirectPlayLifecycle()
     qInfo() << LIVE_FACT << "INT-02 chosen media source" << source.mediaSourceId << "play session"
             << source.playSessionId << "media path" << source.url.path();
 
-    // Canonical chain: the engine, then the reporter on its session. The container is offscreen; the null outputs are the proven fixture route.
+    // Canonical chain: the engine, then the reporter on its session. The container is offscreen; the null outputs are the proven fixture route
     Kinefin::PlaybackSession session;
     auto *engine = new Kinefin::PlaybackEngine(client, session, this);
     QVERIFY(engine->init({QStringLiteral("vo=null"), QStringLiteral("ao=null")}));
@@ -1021,7 +1041,7 @@ void TestJellyfinLive::engineDirectPlayLifecycle()
     QTRY_VERIFY_WITH_TIMEOUT(session.state() == Kinefin::PlaybackSession::State::Playing, 30000);
     recordAndAssertPlaying(client, deviceId, source, session, engine);
 
-    // Pause holds: the position freezes for real and one in-flight tick is the whole slack.
+    // Pause holds: the position freezes for real and one in-flight tick is the whole slack
     engine->pause();
     QCOMPARE(session.state(), Kinefin::PlaybackSession::State::Paused);
     const qint64 atPause = engine->positionTicks();
@@ -1032,7 +1052,7 @@ void TestJellyfinLive::engineDirectPlayLifecycle()
     QTRY_VERIFY_WITH_TIMEOUT(session.state() == Kinefin::PlaybackSession::State::Playing, 10000);
     QTRY_VERIFY_WITH_TIMEOUT(engine->positionTicks() > atPause, 10000);
 
-    // Absolute seek, once the runtime carries it (the null/null pacing runs fast).
+    // Absolute seek, once the runtime carries it (the null/null pacing runs fast)
     const qint64 duration = engine->durationTicks();
     if (duration > 20 * 60 * 10000000LL) {
         engine->seekTo(duration / 2);
@@ -1046,15 +1066,14 @@ void TestJellyfinLive::engineDirectPlayLifecycle()
                 << engine->positionTicks();
     }
 
-    // Stop: the reporter's Stopped goes out with the teardown; then the record check.
+    // Stop: the reporter's Stopped goes out with the teardown; then the record check
     engine->stop();
     QCOMPARE(session.state(), Kinefin::PlaybackSession::State::Stopping);
     QTRY_VERIFY_WITH_TIMEOUT(session.state() == Kinefin::PlaybackSession::State::Idle, 30000);
     QCOMPARE(ended.size(), 1);
     QCOMPARE(ended.first().first().toString(), QStringLiteral("stop"));
 
-    // The Stopped report carries the teardown into the server record (the r2 semantics,
-    // now produced by the real reporter path).
+    // The Stopped report carries the teardown into the server record (the r2 semantics, now produced by the real reporter path)
     QTRY_VERIFY_WITH_TIMEOUT(sessionSnapshot(client, deviceId, source.playSessionId)
                                  .contains(QStringLiteral("\"nowPlayingType\":\"\"")),
                              15000);
@@ -1103,8 +1122,7 @@ void TestJellyfinLive::engineTranscodeLifecycle()
     QTRY_VERIFY_WITH_TIMEOUT(session.state() == Kinefin::PlaybackSession::State::Idle, 40000);
     QCOMPARE(ended.size(), 1);
     QCOMPARE(ended.first().first().toString(), QStringLiteral("stop"));
-    // The Stopped tears the server job down: the session record loses the play (the ffmpeg
-    // process death itself is verified server-side in the round notes, not by this probe).
+    // The Stopped tears the server job down: the session record loses the play (the ffmpeg process death itself is verified server-side in the round notes, not by this probe)
     QTest::qWait(4000);
     const QString afterStop = sessionSnapshot(client, deviceId, source.playSessionId);
     qInfo() << LIVE_FACT << "server session record after stop:" << afterStop;
@@ -1142,12 +1160,10 @@ void TestJellyfinLive::engineProgressAdvancesUserData()
     QTRY_VERIFY_WITH_TIMEOUT(session.state() == Kinefin::PlaybackSession::State::Playing, 30000);
     recordAndAssertPlaying(client, m_deviceId, source, session, engine);
 
-    // Let the (fast null/null) traverse advance past the低位 sub-second stop the server
-    // would refuse to treat as progress at all (~2 s of wall, seconds of movie time).
+    // Let the (fast null/null) traverse advance past the sub-second stop the server would refuse to treat as progress at all (~2 s of wall, seconds of movie time)
     QTest::qWait(2000);
 
-    // >20 s of *realtime*: mpv is held paused, and the reporter keeps the cadence alive the
-    // whole time (the server must not judge the playback gone).
+    // >20 s of *realtime*: mpv is held paused, and the reporter keeps the cadence alive the whole time (the server must not judge the playback gone)
     engine->pause();
     QCOMPARE(session.state(), Kinefin::PlaybackSession::State::Paused);
     const qint64 pausedAt = engine->positionTicks();
@@ -1168,7 +1184,7 @@ void TestJellyfinLive::engineProgressAdvancesUserData()
     QVERIFY2(ticksA >= 0 && ticksB >= 0, "the session record carried no position ticks");
     qInfo() << LIVE_FACT << "server record position during the held pause:" << ticksA << "->"
             << ticksB << "(the engine paused at" << pausedAt << ")";
-    // The record stays at the pause point (one report cadence may refresh the exact value).
+    // The record stays at the pause point (one report cadence may refresh the exact value)
     QVERIFY2(qAbs(ticksB - ticksA) <= 2 * 10000000LL,
              "the server position moved during a held pause");
 
@@ -1183,9 +1199,7 @@ void TestJellyfinLive::engineProgressAdvancesUserData()
     qInfo() << LIVE_FACT << "INT-04 continue point after the engine's own stop:" << beforeTicks
             << "->" << afterTicks;
     if (afterTicks <= beforeTicks) {
-        // Is the position too small to persist, or does 12.4 not write the continue point
-        // from reports at all? Decisive probe: the same Stopped body with a large position,
-        // posted by hand through the r-round helper.
+        // Is the position too small to persist, or does 12.4 not write the continue point from reports at all? Decisive probe: the same Stopped body with a large position, posted by hand through the r-round helper
         Kinefin::PlaybackReport manualStop;
         manualStop.kind = Kinefin::PlaybackReport::Kind::Stopped;
         fill(manualStop, itemId, source.playSessionId, qint64(240 * 10000000LL));
@@ -1204,11 +1218,7 @@ void TestJellyfinLive::engineProgressAdvancesUserData()
     client.disconnectFromServer();
 }
 
-/* The local byte forwarder behind INT-06 and the subpath BaseUrl round: the client and
- * player both speak to it, it speaks to the real server. With an empty prefix the
- * forwarded bytes leave untouched (cut() drops every connection, both directions). With a
- * prefix it rewrites request line paths DOWN→UP, so a subpath BaseUrl (`<host>/jellyfin`
- * deployments) behaves like the proxy-less case. */
+/* The local byte forwarder behind INT-06 and the subpath BaseUrl round: the client and player both speak to it, it speaks to the real server. With an empty prefix the forwarded bytes leave untouched (cut() drops every connection, both directions). With a prefix it rewrites request line paths DOWN→UP, so a subpath BaseUrl (`<host>/jellyfin` deployments) behaves like the proxy-less case */
 class FixtureProxy : public QObject {
     Q_OBJECT
 
@@ -1231,8 +1241,7 @@ class FixtureProxy : public QObject {
     {
         m_listener.close();
         for (auto *socket : m_sockets) {
-            // Drop this object's own slots first: a queued readyRead must not reach a
-            // socket that is already closed or deleted.
+            // Drop this object's own slots first: a queued readyRead must not reach a socket that is already closed or deleted
             socket->disconnect();
             socket->close();
             socket->abort();
@@ -1242,10 +1251,7 @@ class FixtureProxy : public QObject {
     }
 
   private:
-    // Rewrites only when the chunk is the start of an HTTP request and the request line
-    // carries our prefix; chunked-first-line splits would skew the rewrite, which for the
-    // fixture's single-Qt-write requests does not occur. Upstream responses pass as-is
-    // (the server never learned about the prefix).
+    // Rewrites only when the chunk is the start of an HTTP request and the request line carries our prefix; chunked-first-line splits would skew the rewrite, which for the fixture's single-Qt-write requests does not occur. Upstream responses pass as-is (the server never learned about the prefix)
     static QByteArray stripPrefixFromRequest(QByteArray data, const QByteArray &prefix)
     {
         const qsizetype lineEnd = data.indexOf(QByteArrayLiteral("\r\n"));
@@ -1277,9 +1283,7 @@ class FixtureProxy : public QObject {
             auto *up = new QTcpSocket(this);
             up->connectToHost(m_upstreamHost, m_upstreamPort);
             const auto forward = [this](QTcpSocket *from, QTcpSocket *to, const bool strip) {
-                // Qt buffers these writes while the peer is still connecting; they flush
-                // on the connection, so no guard is needed and none must exist: dropping
-                // the first request bytes here is what broke the earlier round.
+                // Qt buffers these writes while the peer is still connecting; they flush on the connection, so no guard is needed and none must exist: dropping the first request bytes here is what broke the earlier round
                 QObject::connect(from, &QAbstractSocket::readyRead, from, [this, from, to, strip] {
                     QByteArray data = from->readAll();
                     if (strip && !m_prefix.isEmpty())
@@ -1289,9 +1293,7 @@ class FixtureProxy : public QObject {
             };
             forward(down, up, true);
             forward(up, down, false);
-            // Either side's close tears both down together: the survivor must never hold a
-            // dangling peer. removeOne compares pointers only, so a half-destroyed pair is
-            // still safe to unregister.
+            // Either side's close tears both down together: the survivor must never hold a dangling peer. removeOne compares pointers only, so a half-destroyed pair is still safe to unregister
             const auto retire = [this, down, up] {
                 down->close();
                 up->close();
@@ -1333,7 +1335,7 @@ void TestJellyfinLive::engineInterruptionSeversAndRecovers()
     through.setPort(int(proxy.port()));
     qInfo() << LIVE_FACT << "INT-06 forwarder on" << through.toString();
 
-    // The playing side lives entirely behind the proxy; loopback auth needs no opt-in.
+    // The playing side lives entirely behind the proxy; loopback auth needs no opt-in
     Kinefin::JellyfinClient proxyClient;
     ++deviceSequence;
     const QString proxyDeviceId = QStringLiteral("kinefin-live-fiddle-%1").arg(deviceSequence);
@@ -1346,7 +1348,7 @@ void TestJellyfinLive::engineInterruptionSeversAndRecovers()
     QVERIFY(proxyClient.authenticate(m_user, m_password));
     QVERIFY2(loggedIn.wait(20000), "the proxied login did not arrive");
 
-    // The stream goes through the proxy too: the same scheme/host rewrite.
+    // The stream goes through the proxy too: the same scheme/host rewrite
     QSignalSpy ready(&proxyClient, &Kinefin::JellyfinClient::playbackInfoReady);
     QVERIFY(proxyClient.requestPlaybackInfo(itemId, qint64(0), Kinefin::buildDeviceProfile({})));
     QVERIFY2(ready.wait(20000), "no PlaybackInfo answer through the forwarder");
@@ -1356,9 +1358,7 @@ void TestJellyfinLive::engineInterruptionSeversAndRecovers()
 
     Kinefin::PlaybackSession session;
     auto *engine = new Kinefin::PlaybackEngine(proxyClient, session, this);
-    // ffmpeg's http reconnect would silently reopen the cut stream forever, and the
-    // default 150 MiB demuxer cache would outlive the test window: keep the read-ahead
-    // small so the severed stream surfaces as one end-file error quickly.
+    // ffmpeg's http reconnect would silently reopen the cut stream forever, and the default 150 MiB demuxer cache would outlive the test window: keep the read-ahead small so the severed stream surfaces as one end-file error quickly
     QVERIFY(engine->init({QStringLiteral("vo=null"), QStringLiteral("ao=null"),
                           QStringLiteral("stream-lavf-o=reconnect=0,reconnect_streamed=0,"
                                          "reconnect_at_eof=0,reconnect_on_network_error=0"),
@@ -1373,19 +1373,16 @@ void TestJellyfinLive::engineInterruptionSeversAndRecovers()
     qInfo() << LIVE_FACT << "playing through the forwarder; ticks" << engine->positionTicks();
     QTest::qWait(2000);
 
-    // The cut: the player's stream dies; the reporter's queued traffic cannot leave.
+    // The cut: the player's stream dies; the reporter's queued traffic cannot leave
     proxy.cut();
-    // The demuxer cache drains at realtime pace, so the teardown lands after the cache is
-    // consumed; the reading mpv does meanwhile is from the cache alone.
+    // The demuxer cache drains at realtime pace, so the teardown lands after the cache is consumed; the reading mpv does meanwhile is from the cache alone
     QTRY_VERIFY_WITH_TIMEOUT(session.state() == Kinefin::PlaybackSession::State::Idle, 180000);
     QCOMPARE(ended.size(), 1);
-    // A severed wire reads as a premature EOF at mpv's layer (the "Stream ends prematurely"
-    // error path), not as an end-file error; either reason settles the same machine.
+    // A severed wire reads as a premature EOF at mpv's layer (the "Stream ends prematurely" error path), not as an end-file error; either reason settles the same machine
     qInfo() << LIVE_FACT << "the cut surfaced as one end-file" << ended.first().first().toString();
     qInfo() << LIVE_FACT << "after the cut the session is Idle with exactly one streamEnded";
 
-    // One canonical playback identity and a bounded report queue: nothing second-session
-    // formed, and the queue drained itself in bounded attempts (only a Stopped retries, once).
+    // One canonical playback identity and a bounded report queue: nothing second-session formed, and the queue drained itself in bounded attempts (only a Stopped retries, once)
     QTRY_COMPARE_WITH_TIMEOUT(proxyClient.hasPendingPlaybackReports(), false, 30000);
     qInfo() << LIVE_FACT << "the proxy client's report queue is drained";
     const QJsonArray sessions = getDocument(client, QStringLiteral("/Sessions")).array();
@@ -1396,12 +1393,12 @@ void TestJellyfinLive::engineInterruptionSeversAndRecovers()
     QVERIFY2(deviceSessions <= 1, "more than one session record for the interrupted device");
     qInfo() << LIVE_FACT << "sessions recorded for the interrupted device:" << deviceSessions;
 
-    // Recovery is the real base: a fresh client authenticates like an app restart.
+    // Recovery is the real base: a fresh client authenticates like an app restart
     Kinefin::JellyfinClient recover;
     QVERIFY2(authenticate(recover), "re-authentication after the interruption failed");
     recover.disconnectFromServer();
 
-    // The stale header never rides a credential-less open: cleared, then the truth.
+    // The stale header never rides a credential-less open: cleared, then the truth
     engine->deleteLater();
     proxyClient.disconnectFromServer();
     client.disconnectFromServer();
@@ -1433,16 +1430,14 @@ void TestJellyfinLive::engineSurvivesALocalLogout()
     QTest::qWait(1500);
     const qint64 beforeLogout = engine->positionTicks();
 
-    // The local logout (the credential leaves memory; the server keeps the token's own
-    // record until its own death): playback must not depend on the reports or identity.
+    // The local logout (the credential leaves memory; the server keeps the token's own record until its own death): playback must not depend on the reports or identity
     client.disconnectFromServer();
     QCOMPARE(loggedOut.size(), 1);
     QTest::qWait(1500);
     QVERIFY2(engine->positionTicks() > beforeLogout,
              "the engine stopped advancing after the local credential left memory");
 
-    // The stop still closes the session machine; the server-side record is left as the
-    // server knows it, since no further report can carry a stopped state anywhere.
+    // The stop still closes the session machine; the server-side record is left as the server knows it, since no further report can carry a stopped state anywhere
     engine->stop();
     QTRY_VERIFY_WITH_TIMEOUT(session.state() == Kinefin::PlaybackSession::State::Idle, 30000);
     qInfo() << LIVE_FACT << "the playback kept running through the logout and stopped locally at"
@@ -1465,7 +1460,7 @@ void TestJellyfinLive::subPathBaseUrlRound()
     QVERIFY2(through.toString().endsWith(QStringLiteral("/jellyfin-proxy")),
              "the subpath base URL lost its prefix");
 
-    // The whole client loop speaks to a base that carries a path: probe, identity, login.
+    // The whole client loop speaks to a base that carries a path: probe, identity, login
     Kinefin::JellyfinClient client;
     ++deviceSequence;
     const QString deviceId = QStringLiteral("kinefin-live-fiddle-%1").arg(deviceSequence);
@@ -1480,12 +1475,12 @@ void TestJellyfinLive::subPathBaseUrlRound()
     QVERIFY(client.isAuthenticated());
     QVERIFY(!client.webSocketRequest().url().isEmpty());
 
-    // The upgrade comes out of the component's own request and crosses the prefix.
+    // The upgrade comes out of the component's own request and crosses the prefix
     QWebSocket *socket = openSocket(client);
     QVERIFY2(socket, "the QWebSocket handshake through the subpath base did not reach 101");
     QVERIFY(socketFirstExchange(socket));
 
-    // One authenticated report through the prefix (the r1 shape, still 204).
+    // One authenticated report through the prefix (the r1 shape, still 204)
     const QString movie = firstItemId(client);
     QVERIFY2(!movie.isEmpty(), "no movie in the library to report on");
     Kinefin::PlaybackReport start;
@@ -1495,7 +1490,7 @@ void TestJellyfinLive::subPathBaseUrlRound()
     QTest::qWait(2000);
     const QString during = sessionSnapshot(client, deviceId, {});
     QString compact = during;
-    // The snapshot keys the play by the device's session record only.
+    // The snapshot keys the play by the device's session record only
     QVERIFY2(!compact.startsWith(QLatin1Char('(')), "no session record for the subpath device");
     qInfo() << LIVE_FACT << "the subpath session record:" << compact;
     Kinefin::PlaybackReport stopped;
@@ -1505,6 +1500,447 @@ void TestJellyfinLive::subPathBaseUrlRound()
     QTest::qWait(2000);
 
     socket->close(QWebSocketProtocol::CloseCodeNormal);
+    client.disconnectFromServer();
+}
+
+/* ----- endpoint-matrix live rounds ----- */
+
+void TestJellyfinLive::authHeaderWireEcho()
+{
+    if (!m_live)
+        QSKIP("no KINEFIN_LIVE_* environment, skipping the live checks");
+    // A raw throw-away login carrying exactly the header the client sends (MediaBrowser, no Token yet); the echoed AccessToken then probes the accepted wire variants
+    QNetworkAccessManager network;
+    const QByteArray headerWithoutToken =
+        QByteArrayLiteral("MediaBrowser Client=\"Kinefin\", Device=\"wire echo\", "
+                          "DeviceId=\"kinefin-live-fiddle-wire\", Version=\"0.0.1\"");
+    const auto probe = [&](const QString &path, const QByteArray &headerName,
+                           const QByteArray &headerValue) {
+        QUrl url = m_base;
+        url.setPath(url.path() + path);
+        QNetworkRequest request(url);
+        request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
+                             QNetworkRequest::ManualRedirectPolicy);
+        if (!headerName.isEmpty())
+            request.setRawHeader(headerName, headerValue);
+        QNetworkReply *reply = network.get(request);
+        QSignalSpy finished(reply, &QNetworkReply::finished);
+        finished.wait(15000);
+        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        reply->deleteLater();
+        return status;
+    };
+
+    QUrl loginUrl = m_base;
+    loginUrl.setPath(loginUrl.path() + QStringLiteral("/Users/AuthenticateByName"));
+    QNetworkRequest loginRequest(loginUrl);
+    loginRequest.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    loginRequest.setRawHeader(QByteArrayLiteral("Authorization"), headerWithoutToken);
+    QNetworkReply *loginReply =
+        network.post(loginRequest, QJsonDocument(QJsonObject{{QStringLiteral("Username"), m_user},
+                                                             {QStringLiteral("Pw"), m_password}})
+                                       .toJson(QJsonDocument::Compact));
+    QSignalSpy done(loginReply, &QNetworkReply::finished);
+    done.wait(15000);
+    const int loginStatus = loginReply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    const QByteArray loginBody = loginReply->readAll();
+    loginReply->deleteLater();
+    QCOMPARE(loginStatus, 200);
+    const QJsonObject login = QJsonDocument::fromJson(loginBody).object();
+    const QString token = login.value(QStringLiteral("AccessToken")).toString();
+    QVERIFY2(!token.isEmpty(), "the raw login carried no AccessToken");
+    qInfo() << LIVE_FACT << "AuthenticateByName 200 with the plain MediaBrowser header; keys:"
+            << QStringList(login.keys());
+
+    const QByteArray fullHeader = headerWithoutToken + QByteArrayLiteral(", Token=\"")
+                                  + token.toUtf8() + QByteArrayLiteral("\"");
+    QCOMPARE(probe(QStringLiteral("/Users/Me"), QByteArrayLiteral("Authorization"), fullHeader),
+             200);
+    qInfo() << LIVE_FACT << "/Users/Me answers 200 with the full MediaBrowser Token header";
+    qInfo() << LIVE_FACT << "the X-Emby-Token header variant answered"
+            << probe(QStringLiteral("/Users/Me"), QByteArrayLiteral("X-Emby-Token"),
+                     token.toUtf8());
+    qInfo() << LIVE_FACT << "the ?api_key= query variant answered"
+            << probe(QStringLiteral("/Users/Me?api_key=") + token, {}, {});
+    qInfo() << LIVE_FACT << "the ?ApiKey= query variant answered"
+            << probe(QStringLiteral("/Users/Me?ApiKey=") + token, {}, {});
+}
+
+void TestJellyfinLive::browseListingsLive()
+{
+    if (!m_live)
+        QSKIP("no KINEFIN_LIVE_* environment, skipping the live checks");
+    Kinefin::JellyfinClient client;
+    QVERIFY(authenticate(client));
+    const QString userId = client.userId();
+    QSignalSpy listFailed(&client, &Kinefin::JellyfinClient::requestFailed);
+
+    // Real ids to work with: the first library, the first movies, a series
+    const QJsonObject views = getJson(client, QStringLiteral("/UserViews"));
+    const QJsonArray viewItems = views.value(QStringLiteral("Items")).toArray();
+    QVERIFY2(!viewItems.isEmpty(), "no libraries on this server");
+    const QString libraryId = viewItems.first().toObject().value(QStringLiteral("Id")).toString();
+    qInfo() << LIVE_FACT << "the first library:"
+            << viewItems.first().toObject().value(QStringLiteral("Name")).toString() << libraryId;
+
+    const QJsonObject movies = getJson(
+        client, QStringLiteral("/Items?IncludeItemTypes=Movie&Recursive=true&SortBy=Name&Limit=5"));
+    const QJsonArray movieItems = movies.value(QStringLiteral("Items")).toArray();
+    QVERIFY2(!movieItems.isEmpty(), "no movies on this server");
+    const QString movieId = movieItems.first().toObject().value(QStringLiteral("Id")).toString();
+    const QString imageTag = movieItems.first()
+                                 .toObject()
+                                 .value(QStringLiteral("ImageTags"))
+                                 .toObject()
+                                 .value(QStringLiteral("Primary"))
+                                 .toString();
+    qInfo() << LIVE_FACT << "the first movie:" << movieId << "primary image tag:" << imageTag;
+
+    // The composed /Items query through the component
+    Kinefin::ItemQuery query;
+    query.parentId = libraryId;
+    query.includeItemTypes = QStringLiteral("Movie,Series");
+    query.sortBy = QStringLiteral("SortName");
+    query.sortOrder = QStringLiteral("Descending");
+    query.startIndex = 0;
+    query.limit = 7;
+    query.recursive = true;
+    query.fields = {QStringLiteral("PrimaryImageAspectRatio"), QStringLiteral("Path"),
+                    QStringLiteral("MediaSourceCount")};
+    QSignalSpy itemsReady(&client, &Kinefin::JellyfinClient::itemsReady);
+    QVERIFY(client.fetchItems(query));
+    QVERIFY2(itemsReady.wait(15000), "the composed /Items query never answered");
+    qInfo() << LIVE_FACT << "/Items compose:" << itemsReady.first().at(1).toInt() << "total,"
+            << itemsReady.first().constFirst().value<QJsonArray>().size() << "on the page";
+    QCOMPARE(listFailed.size(), 0);
+
+    // The ids= tunnel: two ids resolve to themselves and nothing else
+    Kinefin::ItemQuery idsQuery;
+    const QString idA = movieItems.at(0).toObject().value(QStringLiteral("Id")).toString();
+    const QString idB = movieItems.size() > 1
+                            ? movieItems.at(1).toObject().value(QStringLiteral("Id")).toString()
+                            : idA;
+    idsQuery.itemIds = {idA, idB};
+    QSignalSpy idsReady(&client, &Kinefin::JellyfinClient::itemsReady);
+    QVERIFY(client.fetchItems(idsQuery));
+    QVERIFY2(idsReady.wait(15000), "the ids= resolution never answered");
+    const QJsonArray idItems = idsReady.first().constFirst().value<QJsonArray>();
+    qInfo() << LIVE_FACT << "/Items?ids= (2 ids) answered" << idItems.size() << "items";
+    QVERIFY2(idItems.size() >= 1 && idItems.size() <= 2,
+             "the ids= tunnel returned items outside the requested set");
+
+    // The home rows
+    QSignalSpy resumeReady(&client, &Kinefin::JellyfinClient::resumeItemsReady);
+    QVERIFY(client.fetchResumeItems(12));
+    QVERIFY2(resumeReady.wait(15000), "the Resume row never answered");
+    qInfo() << LIVE_FACT << "/UserItems/Resume:" << resumeReady.first().at(1).toInt() << "total,"
+            << resumeReady.first().constFirst().value<QJsonArray>().size() << "rows";
+
+    QSignalSpy latestReady(&client, &Kinefin::JellyfinClient::latestItemsReady);
+    QVERIFY(client.fetchLatestItems(libraryId, 8));
+    QVERIFY2(latestReady.wait(15000), "the Latest row never answered");
+    const QJsonArray latest = latestReady.first().constFirst().value<QJsonArray>();
+    qInfo() << LIVE_FACT << "/Items/Latest:" << latest.size() << "rows, first Type"
+            << (latest.isEmpty()
+                    ? QString()
+                    : latest.first().toObject().value(QStringLiteral("Type")).toString());
+
+    const QString cutoff = QDate::currentDate().toString(QStringLiteral("yyyy-MM-dd"));
+    QSignalSpy nextUpReady(&client, &Kinefin::JellyfinClient::nextUpReady);
+    QVERIFY(client.fetchNextUp({}, libraryId, cutoff, false, 15));
+    QVERIFY2(nextUpReady.wait(15000), "the NextUp row never answered");
+    qInfo() << LIVE_FACT << "/Shows/NextUp cutoff" << cutoff
+            << "rewatch=false:" << nextUpReady.first().constFirst().value<QJsonArray>().size()
+            << "rows";
+    QVERIFY(client.fetchNextUp({}, libraryId, cutoff, true, 15));
+    QTRY_VERIFY_WITH_TIMEOUT(nextUpReady.size() >= 2, 15000);
+    qInfo() << LIVE_FACT << "/Shows/NextUp rewatch=true:"
+            << nextUpReady.constLast().constFirst().value<QJsonArray>().size() << "rows";
+
+    // Series navigation
+    const QJsonObject series = getJson(
+        client,
+        QStringLiteral("/Items?IncludeItemTypes=Series&Recursive=true&SortBy=Name&Limit=1"));
+    const QJsonArray seriesItems = series.value(QStringLiteral("Items")).toArray();
+    QVERIFY2(!seriesItems.isEmpty(), "no series on this server");
+    const QString seriesId = seriesItems.first().toObject().value(QStringLiteral("Id")).toString();
+    QSignalSpy seasonsReady(&client, &Kinefin::JellyfinClient::seasonsReady);
+    QVERIFY(client.fetchSeasons(seriesId));
+    QVERIFY2(seasonsReady.wait(15000), "the Seasons listing never answered");
+    const QJsonArray seasons = seasonsReady.first().constFirst().value<QJsonArray>();
+    qInfo() << LIVE_FACT << "/Shows/{id}/Seasons:" << seasons.size() << "seasons on the page of"
+            << seasonsReady.first().at(1).toInt();
+    const QString seasonId =
+        seasons.isEmpty() ? QString()
+                          : seasons.first().toObject().value(QStringLiteral("Id")).toString();
+    QSignalSpy episodesReady(&client, &Kinefin::JellyfinClient::episodesReady);
+    QVERIFY(client.fetchEpisodes(seriesId, seasonId, 0, 10));
+    QVERIFY2(episodesReady.wait(15000), "the Episodes listing never answered");
+    qInfo() << LIVE_FACT << "/Shows/{id}/Episodes (first season, page of 10):"
+            << episodesReady.first().constFirst().value<QJsonArray>().size() << "rows of"
+            << episodesReady.first().at(1).toInt();
+    QVERIFY(client.fetchEpisodes(seriesId, {}, -1, -1));
+    QTRY_VERIFY_WITH_TIMEOUT(episodesReady.size() >= 2, 15000);
+    qInfo() << LIVE_FACT << "/Shows/{id}/Episodes (every season, unpaged):"
+            << episodesReady.constLast().constFirst().value<QJsonArray>().size() << "rows";
+
+    // Similar: the movie rail, the Episode edge, the unknown-id edge
+    QSignalSpy similarReady(&client, &Kinefin::JellyfinClient::similarItemsReady);
+    QVERIFY(client.fetchSimilarItems(movieId, 12));
+    QVERIFY2(similarReady.wait(15000), "the Similar listing never answered");
+    qInfo() << LIVE_FACT << "/Items/{id}/Similar:" << similarReady.first().at(1).toInt() << "total,"
+            << similarReady.first().constFirst().value<QJsonArray>().size() << "rows";
+    const QJsonObject episodeProbe =
+        getJson(client, QStringLiteral("/Items?IncludeItemTypes=Episode&Recursive=true&Limit=1"));
+    const QJsonArray episodeItems = episodeProbe.value(QStringLiteral("Items")).toArray();
+    if (!episodeItems.isEmpty()) {
+        QVERIFY(client.fetchSimilarItems(
+            episodeItems.first().toObject().value(QStringLiteral("Id")).toString(), 5));
+        QTRY_VERIFY_WITH_TIMEOUT(similarReady.size() >= 2, 15000);
+        qInfo() << LIVE_FACT << "Similar of an Episode answers"
+                << similarReady.constLast().constFirst().value<QJsonArray>().size()
+                << "rows (upstream: an empty envelope)";
+    } else {
+        qInfo() << LIVE_FACT << "no episode on this server; the Episode Similar edge is skipped";
+    }
+    QVERIFY(client.fetchSimilarItems(QStringLiteral("deadbeefdeadbeefdeadbeefdeadbeef"), 5));
+    QTRY_VERIFY_WITH_TIMEOUT(listFailed.size() >= 1, 15000);
+    qInfo() << LIVE_FACT << "Similar of a shape-valid unknown id answers"
+            << listFailed.constLast().at(0).toInt() << listFailed.constLast().at(1).toString();
+
+    // Genres and the browse filters
+    QSignalSpy genresReady(&client, &Kinefin::JellyfinClient::genresReady);
+    QVERIFY(client.fetchGenres(libraryId, 0, 30));
+    QVERIFY2(genresReady.wait(15000), "the Genres listing never answered");
+    const QJsonArray genres = genresReady.first().constFirst().value<QJsonArray>();
+    qInfo() << LIVE_FACT << "/Genres:" << genres.size() << "of" << genresReady.first().at(1).toInt()
+            << "total; first"
+            << (genres.isEmpty()
+                    ? QString()
+                    : genres.first().toObject().value(QStringLiteral("Name")).toString());
+    QSignalSpy filtersReady(&client, &Kinefin::JellyfinClient::filtersReady);
+    QVERIFY(client.fetchFilters(libraryId));
+    QVERIFY2(filtersReady.wait(15000), "the Filters2 listing never answered");
+    const QJsonObject filters = filtersReady.first().constFirst().value<QJsonObject>();
+    const QJsonArray audioLanguages = filters.value(QStringLiteral("AudioLanguages")).toArray();
+    qInfo() << LIVE_FACT << "/Items/Filters2: Genres"
+            << filters.value(QStringLiteral("Genres")).toArray().size() << "Tags"
+            << filters.value(QStringLiteral("Tags")).toArray().size() << "AudioLanguages"
+            << audioLanguages.size() << "first language row:"
+            << QString::fromUtf8(QJsonDocument(audioLanguages.isEmpty()
+                                                   ? QJsonObject()
+                                                   : audioLanguages.first().toObject())
+                                     .toJson(QJsonDocument::Compact));
+
+    // Sessions: the plain set, the controllable subset, and the substitution probe
+    QSignalSpy sessionsReady(&client, &Kinefin::JellyfinClient::sessionsReady);
+    QVERIFY(client.fetchSessions(false));
+    QVERIFY2(sessionsReady.wait(15000), "the /Sessions listing never answered");
+    qInfo() << LIVE_FACT << "/Sessions (non-admin, plain):"
+            << sessionsReady.first().constFirst().value<QJsonArray>().size() << "entries";
+    QVERIFY(client.fetchSessions(true));
+    QTRY_VERIFY_WITH_TIMEOUT(sessionsReady.size() >= 2, 15000);
+    qInfo() << LIVE_FACT << "/Sessions?controllableByUserId=<self> (non-admin):"
+            << sessionsReady.constLast().constFirst().value<QJsonArray>().size() << "entries";
+    QByteArray foreignBody;
+    const int foreignStatus = probeRaw(
+        client, QStringLiteral("/Sessions?controllableByUserId=11111111111111111111111111111111"),
+        &foreignBody, true);
+    qInfo() << LIVE_FACT << "non-admin foreign controllableByUserId answered" << foreignStatus
+            << "with" << QJsonDocument::fromJson(foreignBody).array().size()
+            << "entries (the substitution fact)";
+
+    // The token-free image route, unauthenticated
+    const QUrl image = client.imageUrl(movieId, QStringLiteral("Primary"), 360, imageTag);
+    QVERIFY2(!image.isEmpty(), "the image URL builder refused a live-valid input");
+    QVERIFY(!image.toString().contains(QLatin1String("Token"), Qt::CaseInsensitive));
+    QString imagePath = image.path();
+    if (image.hasQuery())
+        imagePath += QLatin1Char('?') + image.query();
+    QString contentType;
+    QByteArray imageBytes;
+    const int imageStatus = probeRaw(client, imagePath, &imageBytes, false, &contentType);
+    qInfo() << LIVE_FACT << "the unauthenticated image GET:" << imageStatus << contentType
+            << imageBytes.size() << "bytes; url" << image.toString();
+    QCOMPARE(imageStatus, 200);
+    QVERIFY2(imageBytes.size() > 100, "the unauthenticated image GET returned no real bytes");
+    const QUrl webp = client.imageUrl(movieId, QStringLiteral("Primary"), 360, imageTag, 85,
+                                      QStringLiteral("webp"));
+    QString webpType;
+    QByteArray webpBytes;
+    QString webpPath = webp.path();
+    if (webp.hasQuery())
+        webpPath += QLatin1Char('?') + webp.query();
+    QCOMPARE(probeRaw(client, webpPath, &webpBytes, false, &webpType), 200);
+    qInfo() << LIVE_FACT << "the format=webp variant content-type:" << webpType << webpBytes.size()
+            << "bytes";
+    // A wrong tag is recorded, not asserted: 12.x may serve the fallback image instead
+    const QUrl wrongTag =
+        client.imageUrl(movieId, QStringLiteral("Primary"), 360, QStringLiteral("zz"));
+    QString wrongPath = wrongTag.path();
+    if (wrongTag.hasQuery())
+        wrongPath += QLatin1Char('?') + wrongTag.query();
+    QByteArray wrongBytes;
+    QString wrongType;
+    qInfo() << LIVE_FACT << "the wrong-tag image GET answered"
+            << probeRaw(client, wrongPath, &wrongBytes, false, &wrongType) << wrongType;
+
+    // The server's echo of an invalid query member (the client-side refusals mirror it)
+    QByteArray invalidBody;
+    const int invalidStatus = probeRaw(
+        client, QStringLiteral("/Items?fields=NotAField&userId=") + userId, &invalidBody, true);
+    qInfo() << LIVE_FACT << "GET /Items with fields=NotAField answered" << invalidStatus
+            << QString::fromUtf8(invalidBody.left(300));
+    QCOMPARE(listFailed.size(), 1);
+    client.disconnectFromServer();
+}
+
+void TestJellyfinLive::sessionsRoleVisibility()
+{
+    if (!m_live)
+        QSKIP("no KINEFIN_LIVE_* environment, skipping the live checks");
+    if (!m_adminLive)
+        QSKIP("no KINEFIN_LIVE_ADMIN_* environment: the admin-vs-non-admin /Sessions row "
+              "needs an admin login");
+    Kinefin::JellyfinClient userClient;
+    QVERIFY(authenticate(userClient));
+    const QJsonArray userSessions = getDocument(userClient, QStringLiteral("/Sessions")).array();
+    Kinefin::JellyfinClient adminClient;
+    QVERIFY(authenticateAs(adminClient, m_adminUser, m_adminPassword));
+    const QJsonArray adminSessions = getDocument(adminClient, QStringLiteral("/Sessions")).array();
+    qInfo() << LIVE_FACT << "/Sessions visible sets: non-admin" << userSessions.size()
+            << "entries, admin" << adminSessions.size() << "entries";
+    QVERIFY2(adminSessions.size() >= userSessions.size(),
+             "the non-admin saw more sessions than the admin");
+    // The foreign controllableByUserId through both roles: non-admin substituted, admin literal
+    QByteArray userForeign;
+    QByteArray adminForeign;
+    const int userForeignStatus =
+        probeRaw(userClient,
+                 QStringLiteral("/Sessions?controllableByUserId=11111111111111111111111111111111"),
+                 &userForeign, true);
+    const int adminForeignStatus =
+        probeRaw(adminClient,
+                 QStringLiteral("/Sessions?controllableByUserId=11111111111111111111111111111111"),
+                 &adminForeign, true);
+    qInfo() << LIVE_FACT << "foreign controllableByUserId: non-admin" << userForeignStatus
+            << QJsonDocument::fromJson(userForeign).array().size() << "entries, admin"
+            << adminForeignStatus << QJsonDocument::fromJson(adminForeign).array().size()
+            << "entries";
+    userClient.disconnectFromServer();
+    adminClient.disconnectFromServer();
+}
+
+void TestJellyfinLive::trickplayLayoutProbe()
+{
+    if (!m_live)
+        QSKIP("no KINEFIN_LIVE_* environment, skipping the live checks");
+    Kinefin::JellyfinClient client;
+    QVERIFY(authenticate(client));
+    const QJsonObject movies = getJson(
+        client,
+        QStringLiteral("/Items?IncludeItemTypes=Movie&Recursive=true&Limit=20&Fields=Trickplay"));
+    QString itemId;
+    QString width;
+    QJsonObject trickplay;
+    for (const auto &value : movies.value(QStringLiteral("Items")).toArray()) {
+        const QJsonObject item = value.toObject();
+        const QJsonObject trick = item.value(QStringLiteral("Trickplay")).toObject();
+        if (trick.isEmpty())
+            continue;
+        itemId = item.value(QStringLiteral("Id")).toString();
+        trickplay = trick;
+        width = trick.keys().constFirst();
+        break;
+    }
+    if (itemId.isEmpty())
+        QSKIP("no trickplay scans on this server (trickplay needs the server's image scans)");
+    qInfo() << LIVE_FACT << "the Trickplay field of" << itemId << ":"
+            << QString::fromUtf8(QJsonDocument(trickplay).toJson(QJsonDocument::Compact));
+    QByteArray manifest;
+    const int manifestStatus =
+        probeRaw(client,
+                 QStringLiteral("/Videos/") + itemId + QStringLiteral("/Trickplay/") + width
+                     + QStringLiteral("/tiles.m3u8"),
+                 &manifest, true);
+    QCOMPARE(manifestStatus, 200);
+    qInfo() << LIVE_FACT << "tiles.m3u8 (width" << width
+            << ") body:" << QString::fromUtf8(manifest.left(600));
+    QByteArray tile;
+    const int tileStatus =
+        probeRaw(client,
+                 QStringLiteral("/Videos/") + itemId + QStringLiteral("/Trickplay/") + width
+                     + QStringLiteral("/0.jpg"),
+                 &tile, true);
+    QCOMPARE(tileStatus, 200);
+    const QImage image = QImage::fromData(tile);
+    QVERIFY2(!image.isNull(), "the trickplay tile did not decode as an image");
+    qInfo() << LIVE_FACT << "tile 0.jpg:" << tile.size() << "bytes," << image.width() << "x"
+            << image.height() << "pixels";
+    client.disconnectFromServer();
+}
+
+void TestJellyfinLive::playbackInfoDefaultsProbe()
+{
+    if (!m_live)
+        QSKIP("no KINEFIN_LIVE_* environment, skipping the live checks");
+    Kinefin::JellyfinClient client;
+    QVERIFY(authenticate(client));
+    const QString hdrId = hdrItemId(client);
+    QVERIFY2(!hdrId.isEmpty(), "no HDR/DoVi movie for the defaults probe");
+    const QString userId = client.userId();
+    const QJsonObject profile = Kinefin::buildDeviceProfile({});
+
+    QNetworkAccessManager network;
+    const auto postForBody = [&](const QString &path, const QJsonObject &body) {
+        QUrl url = client.serverUrl();
+        url.setPath(url.path() + path);
+        QNetworkRequest request(url);
+        request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+        const QByteArray token = client.streamAuthorization();
+        if (!token.isEmpty())
+            request.setRawHeader(QByteArrayLiteral("Authorization"), token);
+        QNetworkReply *reply =
+            network.post(request, QJsonDocument(body).toJson(QJsonDocument::Compact));
+        QSignalSpy done(reply, &QNetworkReply::finished);
+        done.wait(20000);
+        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const QByteArray bytes = reply->readAll();
+        reply->deleteLater();
+        return std::pair<int, QJsonObject>{status, QJsonDocument::fromJson(bytes).object()};
+    };
+    const auto recordShape = [](const QString &label, const QJsonObject &answer) {
+        const QJsonArray sources = answer.value(QStringLiteral("MediaSources")).toArray();
+        const QString transcodingUrl =
+            sources.isEmpty()
+                ? QString()
+                : sources.first().toObject().value(QStringLiteral("TranscodingUrl")).toString();
+        const QString bitrate = transcodingUrl.isEmpty()
+                                    ? QString()
+                                    : QUrlQuery(QUrl(transcodingUrl))
+                                          .queryItemValue(QStringLiteral("MaxStreamingBitrate"));
+        qInfo() << LIVE_FACT << label << ": MediaSources" << sources.size() << "PlaySessionId"
+                << !answer.value(QStringLiteral("PlaySessionId")).toString().isEmpty()
+                << "TranscodingUrl" << !transcodingUrl.isEmpty() << "its MaxStreamingBitrate"
+                << bitrate;
+    };
+
+    const QString route = QStringLiteral("/Items/") + hdrId + QStringLiteral("/PlaybackInfo");
+    const auto [defaultsStatus, withDefaults] =
+        postForBody(route, QJsonObject{{QStringLiteral("UserId"), userId},
+                                       {QStringLiteral("DeviceProfile"), profile}});
+    QCOMPARE(defaultsStatus, 200);
+    recordShape(QStringLiteral("the defaults body (no MaxStreamingBitrate)"), withDefaults);
+    const auto [lowStatus, withLow] =
+        postForBody(route, QJsonObject{{QStringLiteral("UserId"), userId},
+                                       {QStringLiteral("MaxStreamingBitrate"), 500000},
+                                       {QStringLiteral("DeviceProfile"), profile}});
+    QCOMPARE(lowStatus, 200);
+    recordShape(QStringLiteral("the 500 kbps ceiling body"), withLow);
+    const auto [bareStatus, bare] =
+        postForBody(route, QJsonObject{{QStringLiteral("UserId"), userId}});
+    QCOMPARE(bareStatus, 200);
+    recordShape(QStringLiteral("no DeviceProfile at all"), bare);
     client.disconnectFromServer();
 }
 

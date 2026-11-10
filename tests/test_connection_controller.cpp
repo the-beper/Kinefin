@@ -18,7 +18,7 @@ namespace {
 const QString kProfile = QStringLiteral("default");
 const QString kDevice = QStringLiteral("test-device");
 
-// The wallet of the current test: shared by every controller of it, like the user's KWallet across restarts.
+// The wallet of the current test: shared by every controller of it, like the user's KWallet across restarts
 std::unique_ptr<MemoryTokenStore> gStore;
 
 std::unique_ptr<ConnectionController> makeController()
@@ -88,7 +88,7 @@ class TestConnectionController : public QObject {
         QVERIFY(!controller->errorText().isEmpty());
         QVERIFY(!controller->errorText().contains(QStringLiteral("pw-canary-7f3")));
         QVERIFY(controller->servers().isEmpty());
-        // An empty field never starts a request.
+        // An empty field never starts a request
         controller->login(QString(), QString());
         QCOMPARE(controller->state(), ConnectionController::NeedsLogin);
         QCOMPARE(server.successfulLogins, 0);
@@ -146,7 +146,7 @@ class TestConnectionController : public QObject {
         QVERIFY(!second->errorText().isEmpty());
         QVERIFY(second->servers().isEmpty());
         QVERIFY(second->libraries().isEmpty());
-        // Signing in again needs no new address.
+        // Signing in again needs no new address
         server.denyUsersMe = false;
         second->login(QStringLiteral("fixture-user"), QStringLiteral("fixture-password"));
         QTRY_VERIFY(second->state() == ConnectionController::Authenticated);
@@ -223,7 +223,7 @@ class TestConnectionController : public QObject {
         QVERIFY(controller->servers().isEmpty());
         QVERIFY(Kinefin::loadServerCredentials(kProfile).isEmpty());
 
-        // Removing a stored server that is not the active one.
+        // Removing a stored server that is not the active one
         controller->connectTo(address(server));
         QTRY_VERIFY(controller->state() == ConnectionController::NeedsLogin);
         controller->login(QStringLiteral("fixture-user"), QStringLiteral("fixture-password"));
@@ -237,7 +237,7 @@ class TestConnectionController : public QObject {
         QVERIFY(Kinefin::loadServerCredentials(kProfile).isEmpty());
     }
 
-    // The wallet may take as long as the user needs to unlock it: the controller keeps connecting, it neither shows the sign-in nor loses the session.
+    // The wallet may take as long as the user needs to unlock it: the controller keeps connecting, it neither shows the sign-in nor loses the session
     void aSlowWalletKeepsConnectingUntilItAnswers()
     {
         FakeJellyfin server;
@@ -296,7 +296,7 @@ class TestConnectionController : public QObject {
         QVERIFY(Kinefin::loadServerCredentials(kProfile).isEmpty());
     }
 
-    // A later library load must not wipe the notice that the token could not be saved.
+    // A later library load must not wipe the notice that the token could not be saved
     void aLibraryLoadKeepsAnUnrelatedError()
     {
         FakeJellyfin server;
@@ -332,7 +332,7 @@ class TestConnectionController : public QObject {
         QVERIFY(Kinefin::loadServerCredentials(kProfile).isEmpty());
     }
 
-    // Late replies of an abandoned request change nothing.
+    // Late replies of an abandoned request change nothing
     void cancelAndSignOutWhileARequestIsInFlightStayIdle()
     {
         FakeJellyfin server;
@@ -380,7 +380,7 @@ class TestConnectionController : public QObject {
         QVERIFY(controller.errorText() != QStringLiteral("Enter a valid server address"));
     }
 
-    // Plain HTTP to a non-loopback host needs the user's explicit opt-in before any credential is sent.
+    // Plain HTTP to a non-loopback host needs the user's explicit opt-in before any credential is sent
     void plainHttpToAnotherHostNeedsConfirmation()
     {
         QHostAddress lan;
@@ -407,7 +407,7 @@ class TestConnectionController : public QObject {
         QTRY_VERIFY(controller->state() == ConnectionController::Authenticated);
         QTRY_COMPARE(controller->servers().size(), 1);
 
-        // A stored plain-HTTP session is not restored behind the user's back: the prompt comes back, and cancelling it returns to Idle with nothing sent.
+        // A stored plain-HTTP session is not restored behind the user's back: the prompt comes back, and cancelling it returns to Idle with nothing sent
         controller->cancel();
         controller->connectTo(
             QStringLiteral("http://%1:%2/jellyfin").arg(lan.toString()).arg(server.url().port()));

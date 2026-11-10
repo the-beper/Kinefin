@@ -12,7 +12,7 @@ class Wallet;
 }
 
 namespace Kinefin {
-// Tokens in the user's default KWallet, folder "Kinefin". The wallet is opened asynchronously on the first operation (so an unlock prompt never blocks the UI and nothing is asked at startup when no token is needed), kept open, and reopened after it was closed. Operations queued while it opens run in order; if KWallet is disabled, missing or refused, they fail.
+// Tokens in the user's default KWallet, folder "Kinefin". The wallet is opened asynchronously on the first operation (so an unlock prompt never blocks the UI and nothing is asked at startup when no token is needed), kept open, and reopened after it was closed. Operations queued while it opens run in order; if KWallet is disabled, missing or refused, they fail
 class KWalletTokenStore final : public TokenStore {
     Q_OBJECT
 

@@ -19,7 +19,7 @@ PlaybackReporter::PlaybackReporter(PlaybackSession &session, JellyfinClient &cli
         if (reportable())
             send(PlaybackReport::Kind::Progress);
     });
-    // Once the session is lost there is nobody to report to.
+    // Once the session is lost there is nobody to report to
     connect(&client, &JellyfinClient::sessionExpired, this, [this] { m_timer.stop(); });
     m_observerId = session.addObserver([this](State from, State to) { onTransition(from, to); });
 }
@@ -49,7 +49,7 @@ void PlaybackReporter::onTransition(State from, State to)
     switch (to) {
     case State::Playing:
         if (from == State::Opening) {
-            // The stream is open (an HLS job exists), so the server records the real PlayMethod.
+            // The stream is open (an HLS job exists), so the server records the real PlayMethod
             if (m_session.shouldReportToJellyfin()) {
                 send(PlaybackReport::Kind::Start);
                 m_timer.start();
@@ -91,7 +91,7 @@ void PlaybackReporter::send(PlaybackReport::Kind kind)
     const PlayerState player = m_player ? m_player() : PlayerState{};
     if (player.positionTicks)
         m_lastPosition = player.positionTicks;
-    // Start and Stopped always go out (they open and close the server's session); a heartbeat without any position would reset the resume point.
+    // Start and Stopped always go out (they open and close the server's session); a heartbeat without any position would reset the resume point
     if (kind == PlaybackReport::Kind::Progress && !m_lastPosition)
         return;
     PlaybackReport report;
@@ -106,7 +106,7 @@ void PlaybackReporter::send(PlaybackReport::Kind kind)
     report.canSeek = player.canSeek;
     report.isPaused = m_session.state() == State::Paused;
     report.failed = m_failed;
-    // The result goes nowhere on purpose: playback never depends on a report.
+    // The result goes nowhere on purpose: playback never depends on a report
     m_client.reportPlayback(report);
 }
 } // namespace Kinefin

@@ -23,9 +23,9 @@ constexpr qint64 kDeadPeerMs = 75000;
 constexpr qint64 kKeepAliveCeilingMs = 30000;
 constexpr qint64 kBackoffBaseMs = 1000;
 constexpr qint64 kBackoffCapMs = 60000;
-// A connection that lasted this long counts as stable, so its loss restarts the backoff ladder.
+// A connection that lasted this long counts as stable, so its loss restarts the backoff ladder
 constexpr qint64 kStableUptimeMs = 30000;
-// Frame and message size limit, to revisit after a live library scan (websocket-contract.md).
+// Frame and message size limit, to revisit after a live library scan (websocket-contract.md)
 constexpr qint64 kMaxFrameBytes = qint64(4) * 1024 * 1024;
 constexpr int kMaxUserDataIds = 10000;
 constexpr int kMaxSessionObjects = 200;
@@ -34,12 +34,12 @@ constexpr int kMaxArgumentKeyChars = 64;
 constexpr int kMaxArgumentValueChars = 8192;
 
 const QString keepAliveMessage = QStringLiteral("{\"MessageType\":\"KeepAlive\"}");
-// Data format inferred: "page,count" (websocket-contract.md, live check 9).
+// Data format inferred: "page,count" (websocket-contract.md, live check 9)
 const QString sessionsStartMessage =
     QStringLiteral("{\"MessageType\":\"SessionsStart\",\"Data\":\"0,1500\"}");
 const QString sessionsStopMessage = QStringLiteral("{\"MessageType\":\"SessionsStop\"}");
 
-// The MessageType must be 1..64 plain letters; a frame that fails any check is dropped and counted, the connection stays open.
+// The MessageType must be 1..64 plain letters; a frame that fails any check is dropped and counted, the connection stays open
 bool lettersOnly(const QString &value, int maxChars)
 {
     if (value.isEmpty() || value.size() > maxChars)
@@ -52,7 +52,7 @@ bool lettersOnly(const QString &value, int maxChars)
     return true;
 }
 
-// JSON integers this component accepts: non-negative, integral and within the range two doubles cannot mangle. Absent or null values must be handled by the caller, never here.
+// JSON integers this component accepts: non-negative, integral and within the range two doubles cannot mangle. Absent or null values must be handled by the caller, never here
 bool nonNegativeIntegral(const QJsonValue &value, qint64 *out)
 {
     if (!value.isDouble())
@@ -93,7 +93,7 @@ JellyfinSocketClient::JellyfinSocketClient(JellyfinClient *client, QObject *pare
     connect(&m_connectTimer, &QTimer::timeout, this, [this] {
         if (m_state != State::Connecting)
             return;
-        // Never leave a half-open attempt behind.
+        // Never leave a half-open attempt behind
         if (m_socket)
             m_socket->abort();
         handleUnexpectedDisconnect(true);
@@ -106,7 +106,7 @@ JellyfinSocketClient::JellyfinSocketClient(JellyfinClient *client, QObject *pare
     connect(&m_reconnectTimer, &QTimer::timeout, this, [this] { beginAttempt(); });
     if (m_client) {
         connect(m_client, &JellyfinClient::loginSucceeded, this, [this] { start(); });
-        // Token loss covers a 401, a logout, a re-connect and profile switching alike.
+        // Token loss covers a 401, a logout, a re-connect and profile switching alike
         connect(m_client, &JellyfinClient::credentialsCleared, this,
                 [this] { stopForCredentialsLoss(); });
         connect(m_client, &QObject::destroyed, this, [this] { stopForCredentialsLoss(); });
@@ -159,7 +159,7 @@ void JellyfinSocketClient::teardown()
     m_reconnectTimer.stop();
     m_uptime.invalidate();
     if (m_socket) {
-        // One QWebSocket per attempt: the bump above already stale-dated every handler, the deleteLater is the teardown.
+        // One QWebSocket per attempt: the bump above already stale-dated every handler, the deleteLater is the teardown
         m_socket->disconnect(this);
         m_socket->close(QWebSocketProtocol::CloseCodeNormal);
         m_socket->deleteLater();
@@ -185,7 +185,7 @@ void JellyfinSocketClient::beginAttempt()
             [this, generation](QAbstractSocket::SocketError error) {
                 if (generation != m_generation)
                     return;
-                // The enum only, never errorString(): a localized message may carry paths or headers.
+                // The enum only, never errorString(): a localized message may carry paths or headers
                 qCWarning(socketLog) << "socket error" << int(error);
             });
     connect(m_socket, &QWebSocket::textMessageReceived, this,
@@ -194,12 +194,12 @@ void JellyfinSocketClient::beginAttempt()
             [this, generation](const QByteArray &) {
                 if (generation != m_generation)
                     return;
-                // Text frames only: an unexpected non-text frame is dropped and counted, the connection stays open.
+                // Text frames only: an unexpected non-text frame is dropped and counted, the connection stays open
                 ++m_droppedFrames;
                 qCWarning(socketLog) << "dropped binary frame" << m_droppedFrames;
                 restartDeadPeer();
             });
-    // A fresh attempt always asks the client for a current request, so a re-used token can never happen.
+    // A fresh attempt always asks the client for a current request, so a re-used token can never happen
     const QNetworkRequest request = m_client->webSocketRequest();
     if (request.url().isEmpty()) {
         stopForCredentialsLoss();
@@ -226,7 +226,7 @@ void JellyfinSocketClient::onDisconnected(quint64 generation)
 {
     if (generation != m_generation)
         return;
-    // The peer closes the connection; there is nothing left to close, but the socket object is ours to free.
+    // The peer closes the connection; there is nothing left to close, but the socket object is ours to free
     if (m_socket) {
         m_socket->deleteLater();
         m_socket = nullptr;
@@ -239,7 +239,7 @@ void JellyfinSocketClient::onDisconnected(quint64 generation)
 
 void JellyfinSocketClient::handleUnexpectedDisconnect(bool connectingPhase)
 {
-    // A stable connection resets the backoff ladder; nothing else does.
+    // A stable connection resets the backoff ladder; nothing else does
     if (!connectingPhase && m_uptime.isValid() && m_uptime.elapsed() >= kStableUptimeMs)
         m_attempt = 0;
     ++m_generation;
@@ -263,7 +263,7 @@ void JellyfinSocketClient::scheduleReconnect()
 {
     const qint64 delay = reconnectDelay(m_attempt, m_backoffBaseMs, m_backoffCapMs, m_random());
     ++m_attempt;
-    // Keep the single-shot timer type safe: the production delays never reach it.
+    // Keep the single-shot timer type safe: the production delays never reach it
     m_reconnectTimer.start(delay <= qint64(std::numeric_limits<int>::max())
                                ? qint32(delay)
                                : std::numeric_limits<int>::max());
@@ -277,7 +277,7 @@ void JellyfinSocketClient::enterState(State next)
     qCInfo(socketLog) << "state" << stateName(m_state);
     if (auto *client = m_client.data()) {
         client->setMediaControlAnnounced(m_state == State::Authenticated);
-        // Every entry into Authenticated announces the capabilities again (live check 8 re-checks).
+        // Every entry into Authenticated announces the capabilities again (live check 8 re-checks)
         if (m_state == State::Authenticated)
             client->reportCapabilities();
     }
@@ -308,7 +308,7 @@ void JellyfinSocketClient::dispatchForceKeepAlive(qint64 dataSeconds)
     const qint64 interval = m_keepAliveOverrideMs > 0
                                 ? m_keepAliveOverrideMs
                                 : qMin(dataSeconds * 500, kKeepAliveCeilingMs);
-    // The heartbeat keeps the session alive; it states nothing about playback.
+    // The heartbeat keeps the session alive; it states nothing about playback
     m_keepAliveTimer.start(interval <= qint64(std::numeric_limits<int>::max())
                                ? qint32(interval)
                                : std::numeric_limits<int>::max());
@@ -333,7 +333,7 @@ void JellyfinSocketClient::onTextMessage(quint64 generation, const QString &text
     if (bytes.size() > kMaxFrameBytes) {
         ++m_oversizeFrames;
         qCWarning(socketLog) << "oversize frame" << m_oversizeFrames;
-        // MessageTooBig (1009); the resulting disconnected drives the reconnect ladder.
+        // MessageTooBig (1009); the resulting disconnected drives the reconnect ladder
         m_socket->close(QWebSocketProtocol::CloseCodeTooMuchData);
         return;
     }
@@ -351,7 +351,7 @@ void JellyfinSocketClient::onTextMessage(quint64 generation, const QString &text
         qCWarning(socketLog) << "dropped frame without type" << m_droppedFrames;
         return;
     }
-    // MessageId is ignored and nothing is deduplicated: the server never duplicates, so clients must not infer exactly-once delivery.
+    // MessageId is ignored and nothing is deduplicated: the server never duplicates, so clients must not infer exactly-once delivery
     const QString type = typeValue.toString();
     if (!lettersOnly(type, 64)) {
         ++m_droppedFrames;
@@ -374,7 +374,7 @@ void JellyfinSocketClient::onTextMessage(quint64 generation, const QString &text
         return;
     }
     if (type == QLatin1String("LibraryChanged")) {
-        // A wake-up only: consumers re-enumerate from REST, `Data.Shape` stays unparsed.
+        // A wake-up only: consumers re-enumerate from REST, `Data.Shape` stays unparsed
         if (!dataValue.isObject()) {
             drop("library-data");
             return;
@@ -393,9 +393,7 @@ void JellyfinSocketClient::onTextMessage(quint64 generation, const QString &text
             drop("user-data-identity");
             return;
         }
-        // The live 12.4 shape carries the changes in Data.UserDataList (each entry with its own
-        // ItemId; the server rows include collection/parent entries, consumers fetch again). The
-        // pre-P2a guess ItemsIdList stays accepted: both must satisfy the id budget.
+        // The live 12.4 shape carries the changes in Data.UserDataList (each entry with its own ItemId; the server rows include collection/parent entries, consumers fetch again). The older ItemsIdList guess stays accepted: both must satisfy the id budget
         QStringList result;
         QSet<QString> seen;
         const QJsonValue listValue = dataValue.toObject().value(QStringLiteral("UserDataList"));
@@ -429,7 +427,7 @@ void JellyfinSocketClient::onTextMessage(quint64 generation, const QString &text
                     drop("user-data-ids");
                     return;
                 }
-                // The server also sends parent items; the consumers fetch again, never trust the payload.
+                // The server also sends parent items; the consumers fetch again, never trust the payload
                 const QString idString = id.toString();
                 if (!seen.contains(idString)) {
                     seen.insert(idString);
@@ -489,7 +487,7 @@ void JellyfinSocketClient::onTextMessage(quint64 generation, const QString &text
                     drop("general-command-arguments");
                     return;
                 }
-                // Strings only: every remote value is text at the boundary, never QML or HTML.
+                // Strings only: every remote value is text at the boundary, never QML or HTML
                 if (!it.value().isString()
                     || it.value().toString().size() > kMaxArgumentValueChars) {
                     drop("general-command-arguments");
@@ -507,8 +505,7 @@ void JellyfinSocketClient::onTextMessage(quint64 generation, const QString &text
             return;
         }
         const QJsonObject data = dataValue.toObject();
-        // Observed on 12.4.0: Data {ItemIds, PlayCommand, ControllingUserId}; the legacy
-        // `Command` name is accepted too, the letter budget identical either way.
+        // Observed on 12.4.0: Data {ItemIds, PlayCommand, ControllingUserId}; the legacy `Command` name is accepted too, the letter budget identical either way
         QString command = data.value(QStringLiteral("PlayCommand")).toString();
         if (command.isEmpty())
             command = data.value(QStringLiteral("Command")).toString();
@@ -565,15 +562,14 @@ void JellyfinSocketClient::onTextMessage(quint64 generation, const QString &text
     }
     if (type == QLatin1String("UserDeleted")) {
         auto *client = m_client.data();
-        // Our user was deleted: the session cannot be trusted any more.
+        // Our user was deleted: the session cannot be trusted any more
         if (client && dataValue.toString() == client->userId())
             client->verifySession();
         else
             drop("user-deleted-identity");
         return;
     }
-    // ServerRestarting, ServerShuttingDown, RestartRequired, UserUpdated, SyncPlay*,
-    // *Timer*, RefreshProgress, ScheduledTask*, Package*, ActivityLog* and unknown names: ignored, never closing the connection.
+    // ServerRestarting, ServerShuttingDown, RestartRequired, UserUpdated, SyncPlay*, *Timer*, RefreshProgress, ScheduledTask*, Package*, ActivityLog* and unknown names: ignored, never closing the connection
 }
 
 qint64 JellyfinSocketClient::reconnectDelay(int attempt, qint64 baseMs, qint64 capMs,

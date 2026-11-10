@@ -26,7 +26,7 @@ QStringList backticked(const QString &cell)
     return tokens;
 }
 
-// The §2.1-§2.5 tables of the parity document. §2.4 and §2.5 have no "Upstream UI" column and every row is implemented.
+// The §2.1-§2.5 tables of the parity document. §2.4 and §2.5 have no "Upstream UI" column and every row is implemented
 QList<ParityRow> parityRows(const QString &text)
 {
     QList<ParityRow> rows;
@@ -100,7 +100,7 @@ class TestSettingsParity : public QObject {
             QVERIFY2(definition->hidden || !definition->label.isEmpty(),
                      qPrintable(name + QStringLiteral(" is visible but has no label")));
         }
-        // The tables of §2.1-§2.5 plus the one §2.6 key the program uses, `state.geometry`.
+        // The tables of §2.1-§2.5 plus the one §2.6 key the program uses, `state.geometry`
         const auto *geometry =
             Kinefin::findSetting(QStringLiteral("state"), QStringLiteral("geometry"));
         QVERIFY(geometry && geometry->hidden && geometry->defaultValue == QStringLiteral(""));

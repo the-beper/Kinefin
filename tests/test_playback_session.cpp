@@ -74,7 +74,7 @@ class TestPlaybackSession : public QObject {
             if (to == State::Idle)
                 identityClearedAtIdle = session.identity().itemId.empty();
         });
-        // Refused calls are silent.
+        // Refused calls are silent
         QVERIFY(!session.open({}, PlaybackSession::Route::Direct));
         QVERIFY(!session.pause());
         QVERIFY(seen.isEmpty());
@@ -100,7 +100,7 @@ class TestPlaybackSession : public QObject {
         QVERIFY(identityAtStopping);
         QVERIFY(identityClearedAtIdle);
 
-        // reset() notifies too, but not when already idle.
+        // reset() notifies too, but not when already idle
         seen.clear();
         session.reset();
         QVERIFY(seen.isEmpty());

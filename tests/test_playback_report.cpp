@@ -53,7 +53,7 @@ class TestPlaybackReport : public QObject {
         const auto body = playbackReportBody(value);
         QVERIFY(body);
         QCOMPARE(*body, golden(QStringLiteral("playback_progress_request")));
-        // The same report, playing and direct, differs only in those two fields.
+        // The same report, playing and direct, differs only in those two fields
         value.method = PlaybackSource::Method::Direct;
         value.isPaused = false;
         QCOMPARE(playbackReportBody(value)->value(QStringLiteral("PlayMethod")).toString(),
@@ -68,7 +68,7 @@ class TestPlaybackReport : public QObject {
         const auto body = playbackReportBody(value);
         QVERIFY(body);
         QCOMPARE(*body, golden(QStringLiteral("playback_stopped_request")));
-        // Position zero is still a position: only a missing key would mark the item as played.
+        // Position zero is still a position: only a missing key would mark the item as played
         value.positionTicks = 0;
         value.failed = true;
         const auto failed = playbackReportBody(value);
@@ -92,7 +92,7 @@ class TestPlaybackReport : public QObject {
                 QVERIFY2(!body->contains(key), qPrintable(key));
             }
         }
-        // Stopped has no pause, seek or method fields.
+        // Stopped has no pause, seek or method fields
         const auto stopped = playbackReportBody(report(PlaybackReport::Kind::Stopped));
         for (const QString &key :
              {QStringLiteral("IsPaused"), QStringLiteral("CanSeek"), QStringLiteral("PlayMethod")})

@@ -59,76 +59,60 @@ class JellyfinClient final : public QObject {
     bool connectToServer(const QUrl &baseUrl);
     bool authenticate(const QString &username, const QString &password);
     bool initiateQuickConnect();
-    // The UI may poll every ~5 seconds; no timers or secrets are exposed here.
+    // The UI may poll every ~5 seconds; no timers or secrets are exposed here
     bool pollQuickConnect();
     void cancelQuickConnect();
     bool isQuickConnectPending() const;
     bool fetchUserViews();
-    // The universal listing of `/Items`: library grids, search and ids= resolution. The
-    // members of `query` are validated and composed into the camelCase query the 12.4
-    // routes accept; the ids better than one item are joined comma-only.
+    // The universal listing of `/Items`: library grids, search and ids= resolution. The members of `query` are validated and composed into the camelCase query the 12.4 routes accept; the ids better than one item are joined comma-only
     bool fetchItems(const ItemQuery &query);
-    // The Continue Watching row: `GET /UserItems/Resume` (the route the upstream resume
-    // section speaks on the 12.x generation), video items, no total record echo demanded
-    // of the user's server policy — the envelope is still validated.
+    // The Continue Watching row: `GET /UserItems/Resume` (the route the upstream resume section speaks on the 12.x generation), video items, no total record echo demanded of the user's server policy — the envelope is still validated
     bool fetchResumeItems(int limit);
-    // One library's Recently Added row: `GET /Items/Latest` — the bare-array endpoint. An
-    // empty `parentId` spans the whole library set.
+    // One library's Recently Added row: `GET /Items/Latest` — the bare-array endpoint. An empty `parentId` spans the whole library set
     bool fetchLatestItems(const QString &parentId, int limit);
-    // The Next Up row: `GET /Shows/NextUp`. An empty `seriesId` spans every series of the
-    // parent (or the whole library). `nextUpDateCutoff` is the upstream user setting's
-    // `yyyy-MM-dd` date string the server should not look behind; `enableRewatching` rides
-    // as 0/1.
+    // The Next Up row: `GET /Shows/NextUp`. An empty `seriesId` spans every series of the parent (or the whole library). `nextUpDateCutoff` is the upstream user setting's `yyyy-MM-dd` date string the server should not look behind; `enableRewatching` rides as 0/1
     bool fetchNextUp(const QString &seriesId, const QString &parentId,
                      const QString &nextUpDateCutoff, bool enableRewatching, int limit);
-    // One series' seasons, and its episodes per season (`seasonId` empty = every season,
-    // paged by `startIndex`/`limit`; `startIndex` < 0 lets the server default).
+    // One series' seasons, and its episodes per season (`seasonId` empty = every season, paged by `startIndex`/`limit`; `startIndex` < 0 lets the server default)
     bool fetchSeasons(const QString &seriesId);
     bool fetchEpisodes(const QString &seriesId, const QString &seasonId, int startIndex, int limit);
-    // Similar items of any item kind (the generic `/Items/{itemId}/Similar` route).
+    // Similar items of any item kind (the generic `/Items/{itemId}/Similar` route)
     bool fetchSimilarItems(const QString &itemId, int limit);
-    // Genre rails: `/Genres` validated as an envelope (the items carry Name and Id).
+    // Genre rails: `/Genres` validated as an envelope (the items carry Name and Id)
     bool fetchGenres(const QString &parentId, int startIndex, int limit);
-    // The browse filter values: `GET /Items/Filters2`. The known arrays (`Genres` rows of
-    // Name/Id, `Tags` strings) and any other QueryFilters member pass through as-is.
+    // The browse filter values: `GET /Items/Filters2`. The known arrays (`Genres` rows of Name/Id, `Tags` strings) and any other QueryFilters member pass through as-is
     bool fetchFilters(const QString &parentId);
-    // The connected sessions of the server (`GET /Sessions`): the Remote page's data. With
-    // `controllableByUserOnly` the server is asked for the sessions this user may control.
+    // The connected sessions of the server (`GET /Sessions`): the Remote page's data. With `controllableByUserOnly` the server is asked for the sessions this user may control
     bool fetchSessions(bool controllableByUserOnly);
-    // The token-free URL of one item image (`GET /Items/{itemId}/Images/{type}` has no
-    // `security` requirement in the 12.4 spec, so the URL carries no credentials and the
-    // image fetch may stay unauthenticated). `imageType` is one of the spec's ImageType
-    // names; `format` may be empty (the server negotiates) or one of "jpg", "gif", "png",
-    // "webp"; `tag` is an opaque alphanumeric cache buster. Invalid input yields an empty
-    // URL, never a partially valid one.
+    // The token-free URL of one item image (`GET /Items/{itemId}/Images/{type}` has no `security` requirement in the 12.4 spec, so the URL carries no credentials and the image fetch may stay unauthenticated). `imageType` is one of the spec's ImageType names; `format` may be empty (the server negotiates) or one of "jpg", "gif", "png", "webp"; `tag` is an opaque alphanumeric cache buster. Invalid input yields an empty URL, never a partially valid one
     QUrl imageUrl(const QString &itemId, const QString &imageType, int maxWidth, const QString &tag,
                   int quality = 90, const QString &format = {}) const;
 
-    // Asks the server how to play `itemId` and emits playbackInfoReady with the chosen source (media URL without the token) or playbackInfoFailed. Everything goes in the JSON body (the query parameters of this route are deprecated in 12.4); `maxStreamingBitrate` must be sent, the server default is 8 Mbps. Exactly one of the two signals follows a request, except that a newer request, cancelPlaybackInfo(), disconnectFromServer() and a session lost elsewhere (a 401 on another call) end it with no signal of its own; a 401 on this very request emits sessionExpired and then playbackInfoFailed. Returns false, without a request, when not authenticated or on invalid input.
+    // Asks the server how to play `itemId` and emits playbackInfoReady with the chosen source (media URL without the token) or playbackInfoFailed. Everything goes in the JSON body (the query parameters of this route are deprecated in 12.4); `maxStreamingBitrate` must be sent, the server default is 8 Mbps. Exactly one of the two signals follows a request, except that a newer request, cancelPlaybackInfo(), disconnectFromServer() and a session lost elsewhere (a 401 on another call) end it with no signal of its own; a 401 on this very request emits sessionExpired and then playbackInfoFailed. Returns false, without a request, when not authenticated or on invalid input
     bool requestPlaybackInfo(const QString &itemId, qint64 startTimeTicks,
                              const QJsonObject &deviceProfile,
                              qint64 maxStreamingBitrate = DefaultMaxStreamingBitrate);
     void cancelPlaybackInfo();
-    // Queues one report for the server, one request at a time and in order (an old session's Stopped always precedes a new session's Start). A newer Progress replaces a queued one, a Stopped drops the queued Progress, only a Stopped is retried (once). Reports never emit a failure signal: playback must not depend on them. Returns false, without a request, when not authenticated or the report is invalid. A 401 expires the session and drops the queue; disconnectFromServer() drops it silently.
+    // Queues one report for the server, one request at a time and in order (an old session's Stopped always precedes a new session's Start). A newer Progress replaces a queued one, a Stopped drops the queued Progress, only a Stopped is retried (once). Reports never emit a failure signal: playback must not depend on them. Returns false, without a request, when not authenticated or the report is invalid. A 401 expires the session and drops the queue; disconnectFromServer() drops it silently
     bool reportPlayback(const PlaybackReport &report);
     bool hasPendingPlaybackReports() const;
-    // For tests; the default is 2 s.
+    // For tests; the default is 2 s
     void setPlaybackReportRetryDelay(std::chrono::milliseconds delay);
-    // Announces this client to the server; sent automatically after every login, never retried.
+    // Announces this client to the server; sent automatically after every login, never retried
     bool reportCapabilities();
-    // The `Authorization` header value the player must send with the media URL; empty unless authenticated. It carries the access token: never log it or put it in a URL, and check that the player does not forward it to another host on redirects.
+    // The `Authorization` header value the player must send with the media URL; empty unless authenticated. It carries the access token: never log it or put it in a URL, and check that the player does not forward it to another host on redirects
     QByteArray streamAuthorization() const;
-    // The request the WebSocket component opens for `<base>/socket` (https→wss, ws only on a transport that may carry credentials): a fresh attempt asks every time, so the token is never copied anywhere. Empty and invalid unless authenticated. The token travels only in the `Authorization` header, never in a query parameter.
+    // The request the WebSocket component opens for `<base>/socket` (https→wss, ws only on a transport that may carry credentials): a fresh attempt asks every time, so the token is never copied anywhere. Empty and invalid unless authenticated. The token travels only in the `Authorization` header, never in a query parameter
     [[nodiscard]] QNetworkRequest webSocketRequest() const;
-    // Re-checks a live session against the server (`GET /Users/Me`): a 401 expires it, everything else is silent. One request in flight at a time. Returns false when it cannot even be sent.
+    // Re-checks a live session against the server (`GET /Users/Me`): a 401 expires it, everything else is silent. One request in flight at a time. Returns false when it cannot even be sent
     bool verifySession();
-    // Reattaches a persisted session without a password: only in the Ready state (the public identity probe succeeded), on a transport that may carry credentials, with a header-safe token. Emits loginSucceeded like a fresh login; the caller should follow with verifySession(), whose 401 expires it. Returns false, changing nothing, otherwise.
+    // Reattaches a persisted session without a password: only in the Ready state (the public identity probe succeeded), on a transport that may carry credentials, with a header-safe token. Emits loginSucceeded like a fresh login; the caller should follow with verifySession(), whose 401 expires it. Returns false, changing nothing, otherwise
     bool restoreSession(const QString &userId, const QString &token);
-    // Whether credentials may be sent to the probed server (HTTPS, loopback, or the explicit insecure-HTTP opt-in): what restoreSession() and authenticate() require of the transport.
+    // Whether credentials may be sent to the probed server (HTTPS, loopback, or the explicit insecure-HTTP opt-in): what restoreSession() and authenticate() require of the transport
     bool canSendCredentials() const;
     void disconnectFromServer();
 
-    // Internal, only the WebSocket component flips it: remote media control is announced while an authenticated socket exists, and every socket entry re-posts the capabilities.
+    // Internal, only the WebSocket component flips it: remote media control is announced while an authenticated socket exists, and every socket entry re-posts the capabilities
     void setMediaControlAnnounced(bool announced);
 
     bool isAuthenticated() const;
@@ -137,28 +121,25 @@ class JellyfinClient final : public QObject {
     QString userId() const;
     QString deviceId() const;
     QString deviceName() const;
-    // For the credential store only (ServerCredentialSync): it is the one place allowed to put the token on disk. Empty unless authenticated; never log it.
+    // For the credential store only (ServerCredentialSync): it is the one place allowed to put the token on disk. Empty unless authenticated; never log it
     QString accessToken() const;
 
   Q_SIGNALS:
     void serverReady(const QString &serverId);
     void loginSucceeded(const QString &userId);
-    // Emitted when an existing access token left memory (401, logout, reconnect, destructor): the WebSocket component closes and stops. It also fires at teardown, so persistence must not forget on it (see ServerCredentialSync).
+    // Emitted when an existing access token left memory (401, logout, reconnect, destructor): the WebSocket component closes and stops. It also fires at teardown, so persistence must not forget on it (see ServerCredentialSync)
     void credentialsCleared();
     void quickConnectCodeReady(const QString &code);
     void quickConnectAwaitingApproval();
     void userViewsReady(const QJsonArray &items, int totalRecordCount);
     void requestFailed(int httpStatus, const QString &reason);
     void sessionExpired();
-    // Emitted once when the last queued report was delivered or dropped and nothing is left to send; not after an abort.
+    // Emitted once when the last queued report was delivered or dropped and nothing is left to send; not after an abort
     void playbackReportsSettled();
     void playbackInfoReady(const Kinefin::PlaybackSource &source);
-    // `reason` is a fixed English string: never a URL, a body or a path from the server.
+    // `reason` is a fixed English string: never a URL, a body or a path from the server
     void playbackInfoFailed(const QString &itemId, int httpStatus, const QString &reason);
-    // The P2b listing results. Envelope families carry the items and the `TotalRecordCount`
-    // the server echoed; the two bare-array families (`/Items/Latest`, `/Sessions`) carry
-    // only the array. Nothing here ever contains an access token or a server-provided
-    // error string.
+    // The listing results: envelope families carry the items and the `TotalRecordCount` the server echoed, the two bare-array families (`/Items/Latest`, `/Sessions`) carry only the array; nothing here ever contains an access token or a server-provided error string
     void itemsReady(const QJsonArray &items, int totalRecordCount);
     void resumeItemsReady(const QJsonArray &items, int totalRecordCount);
     void latestItemsReady(const QJsonArray &items);
@@ -199,15 +180,10 @@ class JellyfinClient final : public QObject {
     QNetworkRequest requestFor(const QUrl &url, bool authenticated) const;
     void attach(QNetworkReply *reply, quint64 generation,
                 const std::function<void(QNetworkReply *)> &handler);
-    // The listing families: one request in flight per family; a new call of the same
-    // family aborts the pending one and arms a fresh serial so its late reply drops
-    // silently. `family` names are the fixed strings the fetchers pass.
+    // The listing families: one request in flight per family; a new call of the same family aborts the pending one and arms a fresh serial so its late reply drops silently. `family` names are the fixed strings the fetchers pass
     quint64 supersedeListing(const QString &family);
     bool listingSuperseded(const QString &family, quint64 serial) const;
-    // The shared response plumbing of the listing families: the status/401 handling with
-    // the fixed `requestFailed` emissions, then the envelope, bare-array or object
-    // paragraph of the endpoint. They return false (with the failure already emitted)
-    // whenever the reply is unusable; the fetcher then emits its Ready signal.
+    // The shared response plumbing of the listing families: the status/401 handling with the fixed `requestFailed` emissions, then the envelope, bare-array or object paragraph of the endpoint. They return false (with the failure already emitted) whenever the reply is unusable; the fetcher then emits its Ready signal
     bool listingEnvelope(QNetworkReply *finished, QJsonArray *items, int *total);
     bool listingArray(QNetworkReply *finished, QJsonArray *items);
     bool listingObject(QNetworkReply *finished, QJsonObject *object);
@@ -238,12 +214,10 @@ class JellyfinClient final : public QObject {
     State m_state = State::Disconnected;
     bool m_allowInsecureHttp = false;
     bool m_quickPollInFlight = false;
-    // Flipped by the WebSocket component while an authenticated socket exists; `reportCapabilities()` carries it.
+    // Flipped by the WebSocket component while an authenticated socket exists; `reportCapabilities()` carries it
     bool m_mediaControlAnnounced = false;
     bool m_verifyInFlight = false;
-    // The P2b listing families: `FetchItems`, `Resume`, `Latest`, `NextUp`, `Seasons`,
-    // `Episodes`, `Similar`, `Genres`, `Filters`, `Sessions` — the serial each accepted
-    // request holds and the reply of the one in flight (for supersede aborts).
+    // The listing families: `FetchItems`, `Resume`, `Latest`, `NextUp`, `Seasons`, `Episodes`, `Similar`, `Genres`, `Filters`, `Sessions` — the serial each accepted request holds and the reply of the one in flight (for supersede aborts)
     QHash<QString, quint64> m_listingSerials;
     QHash<QString, QPointer<QNetworkReply>> m_listingReplies;
 };

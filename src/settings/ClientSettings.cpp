@@ -59,7 +59,7 @@ QVariant parseStored(const SettingDefinition &definition, const QString &text)
 ClientSettings::ClientSettings(const QString &path, QObject *parent) : QObject(parent), m_path(path)
 {
     if (path.isEmpty()) {
-        // Without a path KConfig would write the application's default file.
+        // Without a path KConfig would write the application's default file
         qCWarning(settingsLog) << "no settings file; changes stay in memory";
         return;
     }
@@ -69,10 +69,10 @@ ClientSettings::ClientSettings(const QString &path, QObject *parent) : QObject(p
         m_config = std::move(config);
         return;
     }
-    // Drop the object while it is clean: KConfig writes its dirty data when destroyed.
+    // Drop the object while it is clean: KConfig writes its dirty data when destroyed
     config.reset();
     const QString broken = path + QStringLiteral(".broken");
-    // The older .broken file is replaced only once the newer one has been moved out of the way.
+    // The older .broken file is replaced only once the newer one has been moved out of the way
     const QString staging = broken + QStringLiteral(".new");
     if (QFile::rename(path, staging)) {
         QFile::remove(broken);
@@ -188,7 +188,7 @@ QRect ClientSettings::windowGeometry() const
         if (!ok)
             return {};
     }
-    // Checked before the QRect exists: its right and bottom edges overflow for values near the int limits.
+    // Checked before the QRect exists: its right and bottom edges overflow for values near the int limits
     const auto inRange = [](int number, int low) {
         return number >= low && number <= kMaximumWindowSize;
     };
@@ -204,7 +204,7 @@ void ClientSettings::setWindowGeometry(const QRect &geometry)
         findSetting(QStringLiteral("state"), QStringLiteral("geometry"));
     if (!definition || geometry.isEmpty())
         return;
-    // Written while the window closes: a failure is only logged, nobody would see a notification.
+    // Written while the window closes: a failure is only logged, nobody would see a notification
     store(*definition,
           QStringLiteral("%1,%2,%3,%4")
               .arg(geometry.x())

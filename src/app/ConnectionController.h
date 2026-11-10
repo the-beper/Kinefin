@@ -15,8 +15,7 @@
 #include "settings/TokenStore.h"
 
 namespace Kinefin {
-// What the Servers, sign-in and Home pages render: one active server at a time, the stored servers of the profile, and the state of the connection to the active one. It owns the JellyfinClient and the ServerCredentialSync of the profile and only reports what they report; the pages never talk to the client.
-// `errorText` is translated and fixed: no URL, body or server text ever reaches it. `libraries` entries carry server metadata (`name`): render it as plain text.
+// What the Servers, sign-in and Home pages render: one active server at a time, the stored servers of the profile, and the state of the connection to the active one. It owns the JellyfinClient and the ServerCredentialSync of the profile and only reports what they report; the pages never talk to the client. `errorText` is translated and fixed: no URL, body or server text ever reaches it. `libraries` entries carry server metadata (`name`): render it as plain text
 class ConnectionController : public QObject {
     Q_OBJECT
     QML_ELEMENT
@@ -40,7 +39,7 @@ class ConnectionController : public QObject {
     };
     Q_ENUM(State)
 
-    // `deviceId` is the profile's stable device id (profileDeviceId()). Tokens go to `store`, which must outlive the controller; without one the user's KWallet is used.
+    // `deviceId` is the profile's stable device id (profileDeviceId()). Tokens go to `store`, which must outlive the controller; without one the user's KWallet is used
     ConnectionController(const QString &profileId, const QString &deviceId, const QString &version,
                          TokenStore *store = nullptr, QObject *parent = nullptr);
 
@@ -51,27 +50,27 @@ class ConnectionController : public QObject {
     QVariantList servers() const { return m_servers; }
     QVariantList libraries() const { return m_libraries; }
 
-    // For tests; the default is 5 s.
+    // For tests; the default is 5 s
     void setQuickConnectPollInterval(std::chrono::milliseconds interval);
 
-    // Connects to the most recently used stored server, if there is one (its session is restored by ServerCredentialSync).
+    // Connects to the most recently used stored server, if there is one (its session is restored by ServerCredentialSync)
     Q_INVOKABLE void start();
-    // `address` is what the user typed; without a scheme it is taken as https.
+    // `address` is what the user typed; without a scheme it is taken as https
     Q_INVOKABLE void connectTo(const QString &address);
-    // The user accepted sending credentials over plain HTTP to this server (this connection only).
+    // The user accepted sending credentials over plain HTTP to this server (this connection only)
     Q_INVOKABLE void confirmInsecureHttp();
     Q_INVOKABLE void login(const QString &username, const QString &password);
     Q_INVOKABLE void startQuickConnect();
     Q_INVOKABLE void cancelQuickConnect();
-    // Disconnects the active server and returns to Idle, cancelling what is in flight; the stored session is kept (a later connect restores it).
+    // Disconnects the active server and returns to Idle, cancelling what is in flight; the stored session is kept (a later connect restores it)
     Q_INVOKABLE void cancel();
-    // Forgets the active server's stored session and returns to Idle.
+    // Forgets the active server's stored session and returns to Idle
     Q_INVOKABLE void signOut();
-    // Asks the server for the libraries again (the Home page's retry).
+    // Asks the server for the libraries again (the Home page's retry)
     Q_INVOKABLE void reloadLibraries();
-    // Removes a stored server; signs out first when it is the active one.
+    // Removes a stored server; signs out first when it is the active one
     Q_INVOKABLE void removeServer(const QString &serverId);
-    // Opens the active server's own web interface in the host browser (the app's one action for everything server-side). False when there is no server or its address is not an http(s) link.
+    // Opens the active server's own web interface in the host browser (the app's one action for everything server-side). False when there is no server or its address is not an http(s) link
     Q_INVOKABLE bool openServerWebInterface() const;
 
   Q_SIGNALS:

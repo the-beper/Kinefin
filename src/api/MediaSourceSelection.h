@@ -11,7 +11,7 @@
 #include <optional>
 
 namespace Kinefin {
-// What the player needs to open one item: the chosen media source and a media URL under the server's own base URL. The URL never carries the access token: the caller sends it in an `Authorization` header (api-notes.md, Media URLs).
+// What the player needs to open one item: the chosen media source and a media URL under the server's own base URL. The URL never carries the access token: the caller sends it in an `Authorization` header (api-notes.md, Media URLs)
 struct PlaybackSource {
     enum class Method { Direct, Transcode };
 
@@ -22,16 +22,16 @@ struct PlaybackSource {
     QUrl url;
 };
 
-// Either a source or a short, fixed English reason; never a URL, a body or a path from the server. The reasons are internal: a UI that shows one maps it to a translated string.
+// Either a source or a short, fixed English reason; never a URL, a body or a path from the server. The reasons are internal: a UI that shows one maps it to a translated string
 struct SourceSelection {
     std::optional<PlaybackSource> source;
     QString failure;
 };
 
-// Item and media source ids are interpolated into URLs: only [A-Za-z0-9-], 1 to 64 characters.
+// Item and media source ids are interpolated into URLs: only [A-Za-z0-9-], 1 to 64 characters
 [[nodiscard]] bool isValidJellyfinId(QStringView id);
 
-// Picks the source of a `PlaybackInfoResponse` (parity §3, "Media-source selection"): the first source that direct-plays, else the first one with a safe `TranscodingUrl`. `serverBase` is the authenticated server URL (its path is kept, a server may live under a prefix); `accessToken` is only used to refuse any URL that would still carry it.
+// Picks the source of a `PlaybackInfoResponse` (parity §3, "Media-source selection"): the first source that direct-plays, else the first one with a safe `TranscodingUrl`. `serverBase` is the authenticated server URL (its path is kept, a server may live under a prefix); `accessToken` is only used to refuse any URL that would still carry it
 [[nodiscard]] SourceSelection selectPlaybackSource(const QJsonObject &response,
                                                    const QString &itemId, const QUrl &serverBase,
                                                    QByteArrayView accessToken);

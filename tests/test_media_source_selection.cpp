@@ -16,7 +16,7 @@ namespace {
 const QString kItem = QStringLiteral("c7dd3b1ac7dd3b1a9d42f2ab74f8a1b9");
 const QString kSourceId = QStringLiteral("c1b2a3d4e5f6071829304a5b6c7d8e9f");
 const QString kSession = QStringLiteral("b6c7d8e9f0a1b2c3");
-// The access token of tests/fixtures/authenticate_success.json, embedded as ApiKey by the transcode fixture.
+// The access token of tests/fixtures/authenticate_success.json, embedded as ApiKey by the transcode fixture
 const QByteArray kToken = "f2f4b7c1ee8a4d0bb2a5f9d1f9e0e2ab";
 const QUrl kBase(QStringLiteral("https://jf.example"));
 const QUrl kPrefixedBase(QStringLiteral("https://jf.example:8920/jellyfin/"));
@@ -69,7 +69,7 @@ class TestMediaSourceSelection : public QObject {
             QStringLiteral(
                 "https://jf.example/Videos/%1/stream?static=true&mediaSourceId=%2&playSessionId=%3")
                 .arg(kItem, kSourceId, kSession));
-        // Path is never opened: the URL does not mention the file.
+        // Path is never opened: the URL does not mention the file
         QVERIFY(!selection.source->url.toString().contains(QStringLiteral("Dune")));
     }
 
@@ -87,7 +87,7 @@ class TestMediaSourceSelection : public QObject {
     void transcodeKeepsBasePathAndStripsApiKey()
     {
         const QJsonObject json = fixture(QStringLiteral("playbackinfo_transcode"));
-        // The fixture mirrors the server: the token travels as ApiKey in the query.
+        // The fixture mirrors the server: the token travels as ApiKey in the query
         QVERIFY(json.value(QStringLiteral("MediaSources"))
                     .toArray()
                     .at(0)
@@ -130,7 +130,7 @@ class TestMediaSourceSelection : public QObject {
         QCOMPARE(selection.failure, QStringLiteral("No playable media source"));
     }
 
-    // The shape a 12.4 server returns when nothing is compatible: HTTP 200, no ErrorCode, every Supports* false (observed live).
+    // The shape a 12.4 server returns when nothing is compatible: HTTP 200, no ErrorCode, every Supports* false (observed live)
     void noCompatibleSourceFails()
     {
         const SourceSelection selection =
@@ -165,7 +165,7 @@ class TestMediaSourceSelection : public QObject {
         const SourceSelection unsafe = select(response({source(kSourceId, false, true, url)}));
         QVERIFY2(!unsafe.source, qPrintable(url));
         QCOMPARE(unsafe.failure, QStringLiteral("No playable media source"));
-        // A safe sibling after the unsafe source is still used.
+        // A safe sibling after the unsafe source is still used
         const SourceSelection sibling =
             select(response({source(QStringLiteral("aaaa"), false, true, url),
                              source(QStringLiteral("bbbb"), false, true,
@@ -183,7 +183,7 @@ class TestMediaSourceSelection : public QObject {
         QVERIFY(stripped.source);
         QCOMPARE(stripped.source->url.query(), QStringLiteral("a=1&B=2"));
 
-        // Encoded and bare spellings of the key go too.
+        // Encoded and bare spellings of the key go too
         const SourceSelection spellings = select(
             response({source(kSourceId, false, true,
                              QStringLiteral("/videos/x/master.m3u8?a=1&api%5Fkey=%1&ApiKey&b=2")
@@ -191,14 +191,14 @@ class TestMediaSourceSelection : public QObject {
         QVERIFY(spellings.source);
         QCOMPARE(spellings.source->url.query(), QStringLiteral("a=1&b=2"));
 
-        // The token compare ignores case.
+        // The token compare ignores case
         QVERIFY(!select(response({source(kSourceId, false, true,
                                          QStringLiteral("/videos/x/master.m3u8?foo=%1")
                                              .arg(QString::fromLatin1(kToken).toUpper()))}))
                      .source);
 
-        // The token under any other name is a refusal, raw or percent-encoded.
-        // The ninth character percent-encoded: the same token on the wire.
+        // The token under any other name is a refusal, raw or percent-encoded
+        // The ninth character percent-encoded: the same token on the wire
         const QString plain = QString::fromLatin1(kToken);
         const QString encoded = plain.left(8) + QLatin1Char('%')
                                 + QString::fromLatin1(QByteArray(1, kToken.at(8)).toHex())
@@ -296,7 +296,7 @@ class TestMediaSourceSelection : public QObject {
         QVERIFY(selection.source);
         QCOMPARE(selection.source->url.path(QUrl::FullyEncoded),
                  QStringLiteral("/a%20b/Videos/%1/stream").arg(kItem));
-        // A literal percent in the base path is not decoded a second time.
+        // A literal percent in the base path is not decoded a second time
         const SourceSelection percent =
             select(json, QUrl(QStringLiteral("https://jf.example/a%2541/")));
         QVERIFY(percent.source);

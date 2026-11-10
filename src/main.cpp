@@ -27,15 +27,13 @@ int main(int argc, char *argv[])
 {
     QGuiApplication app(argc, argv);
     QCoreApplication::setApplicationName(QStringLiteral("Kinefin"));
-    // Reversed by KDBusService: io.github.the_beper.Kinefin.
+    // Reversed by KDBusService: io.github.the_beper.Kinefin
     QCoreApplication::setOrganizationDomain(QStringLiteral("the_beper.github.io"));
     QGuiApplication::setDesktopFileName(QStringLiteral("io.github.the_beper.Kinefin"));
     KLocalizedString::setApplicationDomain("kinefin");
     KAboutData aboutData(QStringLiteral("Kinefin"), QStringLiteral("Kinefin"),
                          QStringLiteral(KINEFIN_VERSION));
-    // KAboutData::setApplicationData overwrites QCoreApplication metadata;
-    // set these on aboutData, not only on QCoreApplication, or the D-Bus
-    // service name becomes io.github.the_beper.kinefin (wrong case).
+    // KAboutData::setApplicationData overwrites QCoreApplication metadata; set these on aboutData, not only on QCoreApplication, or the D-Bus service name becomes io.github.the_beper.kinefin (wrong case)
     aboutData.setOrganizationDomain(QByteArrayLiteral("the_beper.github.io"));
     aboutData.setDesktopFileName(QStringLiteral("io.github.the_beper.Kinefin"));
     aboutData.setShortDescription(i18n("A native Jellyfin client for KDE Plasma"));
@@ -94,7 +92,7 @@ int main(int argc, char *argv[])
         QTextStream(stderr) << "kinefin: " << profileError << Qt::endl;
         return 1;
     }
-    // The profile commands run before the single-instance service: they work while the app is open.
+    // The profile commands run before the single-instance service: they work while the app is open
     {
         QTextStream out(stdout);
         QTextStream err(stderr);
@@ -118,7 +116,7 @@ int main(int argc, char *argv[])
     Kinefin::ClientSettings settings(Kinefin::ClientSettings::pathForProfile(profileId));
     const auto settingsLevel = Kinefin::parseLogLevel(
         settings.value(QStringLiteral("main"), QStringLiteral("logLevel")).toString());
-    // Warnings of the settings constructor (a newer-format file moved aside) precede the log file: they reach stderr only, because the log level is itself a setting.
+    // Warnings of the settings constructor (a newer-format file moved aside) precede the log file: they reach stderr only, because the log level is itself a setting
     struct LogGuard {
         ~LogGuard() { Kinefin::removeProfileLog(); }
     } logGuard;
@@ -136,7 +134,7 @@ int main(int argc, char *argv[])
     Kinefin::ConnectionController connection(profileId, deviceId, QStringLiteral(KINEFIN_VERSION));
 
     QQmlApplicationEngine engine;
-    // "fullscreen" or "windowed" when a flag decides this run; empty to follow the setting.
+    // "fullscreen" or "windowed" when a flag decides this run; empty to follow the setting
     const QString windowMode =
         parser.isSet(QStringLiteral("fullscreen")) ? QStringLiteral("fullscreen")
         : parser.isSet(QStringLiteral("windowed")) ? QStringLiteral("windowed")
@@ -146,7 +144,7 @@ int main(int argc, char *argv[])
          {QStringLiteral("settings"), QVariant::fromValue(&settings)},
          {QStringLiteral("startupWindowMode"), windowMode},
          {QStringLiteral("startupPage"), qEnvironmentVariable("KINEFIN_START_PAGE")}});
-    // Register the KI18n QML context so Main.qml can translate its strings.
+    // Register the KI18n QML context so Main.qml can translate its strings
     KLocalization::setupLocalizedContext(&engine);
     engine.loadFromModule(QStringLiteral("org.kde.kinefin"), QStringLiteral("Main"));
     if (engine.rootObjects().isEmpty()) {
@@ -170,8 +168,7 @@ int main(int argc, char *argv[])
     }
     QObject::connect(&service, &KDBusService::activateRequested, &app,
                      [showItem, root](const QStringList &args, const QString &) {
-                         // The forwarded argument list may include argv[0]; ignore unknown
-                         // switches/arguments, and never log inbound URI values or credentials.
+                         // The forwarded argument list may include argv[0]; ignore unknown switches/arguments, and never log inbound URI values or credentials
                          for (const QString &argument : args)
                              showItem(argument);
                          if (auto *window = qobject_cast<QQuickWindow *>(root)) {

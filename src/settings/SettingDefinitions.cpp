@@ -609,7 +609,7 @@ QList<SettingDefinition> buildDefinitions()
          false,
          true,
          kli18n("Manual MPV Configuration")},
-        // Parity §2.6: window geometry, "x,y,width,height".
+        // Parity §2.6: window geometry, "x,y,width,height"
         {QStringLiteral("state"),
          QStringLiteral("geometry"),
          T::String,
@@ -657,7 +657,7 @@ QVariant validatedSettingValue(const SettingDefinition &definition, const QVaria
             converted = value;
         else if (value.canConvert<double>() && value.metaType().id() != QMetaType::QString
                  && value.metaType().id() != QMetaType::Bool) {
-            // QML hands numbers over as doubles.
+            // QML hands numbers over as doubles
             const double number = value.toDouble();
             if (std::isfinite(number) && number >= std::numeric_limits<int>::min()
                 && number <= std::numeric_limits<int>::max() && number == static_cast<int>(number))
@@ -673,7 +673,7 @@ QVariant validatedSettingValue(const SettingDefinition &definition, const QVaria
             converted = {};
         break;
     case T::String:
-        // Only a multiline setting may carry line breaks; the others end up in one mpv property or one config line.
+        // Only a multiline setting may carry line breaks; the others end up in one mpv property or one config line
         if (value.metaType().id() == QMetaType::QString
             && (definition.multiline
                 || !(value.toString().contains(QLatin1Char('\n'))

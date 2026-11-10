@@ -14,7 +14,7 @@ Kirigami.ScrollablePage {
 
     title: i18n("Servers")
 
-    // Host and port of a server address: the only part shown in the confirmation, so no server-controlled markup can reach the dialog text.
+    // Host and port of a server address: the only part shown in the confirmation, so no server-controlled markup can reach the dialog text
     function hostOf(url) {
         return url.replace(/^[a-z]+:\/\//i, "").split("/")[0];
     }

@@ -1,10 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Kinefin contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
-// P2x offline engine tests: the mpv mapping runs on a real mpv (offscreen,
-// vo=null/ao=null) over a generated WAV clip (16-bit mono PCM, a sine). No network,
-// no window, no media files in the repo; the only deliberately broken case is a path
-// that does not exist. The live reproduction of INT-02..06 stays in
-// test_jellyfin_live.cpp, on the real Jellyfin-streamed media URLs.
+// Offline engine tests: the mpv mapping runs on a real mpv (offscreen, vo=null/ao=null) over a generated WAV clip (16-bit mono PCM, a sine). No network, no window, no media files in the repo; the only deliberately broken case is a path that does not exist. The live reproduction of INT-02..06 stays in test_jellyfin_live.cpp, on the real Jellyfin-streamed media URLs
 #include "FakeJellyfin.h"
 
 #include "api/JellyfinClient.h"
@@ -26,10 +22,7 @@ using Kinefin::PlaybackSession;
 using Kinefin::PlaybackSource;
 
 namespace {
-// The fixture is one fixed WAV: PCM data for a sine is what the demuxer reports as
-// the duration, position and seekability; the container's mpv build has no lavfi
-// stream protocol (verified offline 2026-11), so generated media stands in for the
-// synthetic clip cases.
+// The fixture is one fixed WAV: PCM data for a sine is what the demuxer reports as the duration, position and seekability; the container's mpv build has no lavfi stream protocol (verified offline 2026-11), so generated media stands in for the synthetic clip cases
 constexpr int kWavSampleRate = 8000;
 
 QString writeWavClip(const QTemporaryDir &dir, int seconds)
@@ -49,7 +42,7 @@ QString writeWavClip(const QTemporaryDir &dir, int seconds)
     QDataStream stream(&header, QIODevice::WriteOnly);
     stream.setByteOrder(QDataStream::LittleEndian);
     auto ascii = [&stream](const char *text) { stream.writeRawData(text, 4); };
-    // RIFF size = whole rest of the file = data + 36.
+    // RIFF size = whole rest of the file = data + 36
     const quint32 riffSize = quint32(frames * sizeof(qint16)) + 36;
     ascii("RIFF");
     stream << riffSize;
@@ -81,11 +74,9 @@ PlaybackSource directSource(const QString &url)
     return source;
 }
 
-// The whole chain a real play goes through: an authenticated fake-server client, one
-// session and one engine. The `ok` figure follows the reporter test's Chain pattern:
-// prepared in a helper constructor, asserted by the test itself.
+// The whole chain a real play goes through: an authenticated fake-server client, one session and one engine. The `ok` figure follows the reporter test's Chain pattern: prepared in a helper constructor, asserted by the test itself
 struct Chain {
-    // Offscreen basics always apply; `extraOptions` is for case-specific tweaks.
+    // Offscreen basics always apply; `extraOptions` is for case-specific tweaks
     Chain(const QTemporaryDir &dir, int seconds, const QStringList &extraOptions = {})
         : server(), client(), session(), source(directSource(writeWavClip(dir, seconds))),
           engine(client, session)
@@ -126,7 +117,7 @@ class TestPlaybackEngine : public QObject {
 
     void uninitialisedOrBusyRefusals()
     {
-        // Without init, every player call is a refusal that touches nothing.
+        // Without init, every player call is a refusal that touches nothing
         JellyfinClient client;
         PlaybackSession session;
         PlaybackEngine engine(client, session);
@@ -135,13 +126,10 @@ class TestPlaybackEngine : public QObject {
         engine.resume();
         engine.stop();
         QCOMPARE(session.state(), PlaybackSession::State::Idle);
-        // A missing file still passes loadfile's synchronous acceptance: the failure
-        // surfaces through the session machine (the open call itself had nothing to
-        // refuse yet — until mpv's own answer; refusing URLs is MpvQt-agnostic).
-        // Here without init, the whole open is refused before any mpv call.
+        // A missing file still passes loadfile's synchronous acceptance: the failure surfaces through the session machine (the open call itself had nothing to refuse yet — until mpv's own answer; refusing URLs is MpvQt-agnostic). Here without init, the whole open is refused before any mpv call
         QVERIFY(!engine.open(directSource(QStringLiteral("file:///no/such/clip.wav"))));
 
-        // A live-but-busy session refuses a second load, already in Opening.
+        // A live-but-busy session refuses a second load, already in Opening
         Chain chain(dir, 30);
         QVERIFY(chain.ok);
         QVERIFY(chain.engine.open(chain.source));
@@ -158,8 +146,7 @@ class TestPlaybackEngine : public QObject {
         QVERIFY(chain.engine.open(chain.source));
         QCOMPARE(chain.session.state(), PlaybackSession::State::Opening);
         QVERIFY(!chain.engine.knownPositionTicks()); // nothing from mpv yet: not 0
-        // The stream starts: opened() runs on fileLoaded, and the session keeps the
-        // identity while it is Playing.
+        // The stream starts: opened() runs on fileLoaded, and the session keeps the identity while it is Playing
         QTRY_COMPARE(chain.session.state(), PlaybackSession::State::Playing);
         QCOMPARE(QString::fromStdString(chain.session.identity().playSessionId),
                  chain.source.playSessionId);
@@ -172,7 +159,7 @@ class TestPlaybackEngine : public QObject {
         QCOMPARE(chain.session.state(), PlaybackSession::State::Paused);
         const qint64 atPause = chain.engine.positionTicks();
         QTest::qWait(300);
-        // One in-flight mpv tick may still land; nothing past that.
+        // One in-flight mpv tick may still land; nothing past that
         QVERIFY(chain.engine.positionTicks() <= atPause + 2 * 10000000);
 
         chain.engine.resume();
@@ -185,26 +172,85 @@ class TestPlaybackEngine : public QObject {
         QTRY_COMPARE(chain.session.state(), PlaybackSession::State::Idle);
         QCOMPARE(ended.size(), 1);
         QCOMPARE(ended.at(0).at(0).toString(), QStringLiteral("stop"));
-        // The identity is cleared once the session lands in Idle.
+        // The identity is cleared once the session lands in Idle
         QVERIFY(chain.session.identity().itemId.empty());
     }
 
     void clipEndsNaturally()
     {
-        // Realtime two-second clip: eof arrives inside the QTRY window and the
-        // reporting cadence is what interests the live gate. (mpv's untimed option
-        // only exists before init; the engine sets options after mpvqt's init, so
-        // it would be refused: keep realtime.)
+        // Realtime two-second clip: eof arrives inside the QTRY window and the reporting cadence is what interests the live gate. (mpv's untimed option only exists before init; the engine sets options after mpvqt's init, so it would be refused: keep realtime)
         Chain chain(dir, 2);
         QVERIFY(chain.ok);
         QSignalSpy ended(&chain.engine, &PlaybackEngine::streamEnded);
         QVERIFY(chain.engine.open(chain.source));
         QTRY_COMPARE(chain.session.state(), PlaybackSession::State::Playing);
-        // The clip is two seconds long: eof arrives, the session takes the ordinary
-        // one-stop path and lands in Idle without an error.
+        // The clip is two seconds long: eof arrives, the session takes the ordinary one-stop path and lands in Idle without an error
         QTRY_COMPARE(ended.size(), 1);
         QCOMPARE(ended.at(0).at(0).toString(), QStringLiteral("eof"));
         QCOMPARE(chain.session.state(), PlaybackSession::State::Idle);
+        // The item's end reports the duration, not a time-pos a few ms short of it
+        QCOMPARE(chain.engine.positionTicks(), chain.engine.durationTicks());
+    }
+
+    void stopDuringOpeningNeverLeaksIntoTheNextOpen()
+    {
+        Chain chain(dir, 30);
+        QVERIFY(chain.ok);
+        for (int round = 0; round < 10; ++round) {
+            QVERIFY(chain.engine.open(chain.source));
+            chain.engine.stop();
+            QCOMPARE(chain.session.state(), PlaybackSession::State::Stopping);
+            // The load is still ending: a next item is refused instead of meeting a stale mpv event
+            QVERIFY(!chain.engine.open(chain.source));
+            QTRY_COMPARE(chain.session.state(), PlaybackSession::State::Idle);
+        }
+        QVERIFY(chain.engine.open(chain.source));
+        QTRY_COMPARE(chain.session.state(), PlaybackSession::State::Playing);
+        QTest::qWait(300);
+        QCOMPARE(chain.session.state(), PlaybackSession::State::Playing);
+    }
+
+    void stopWithoutEndFileSettlesTheSession()
+    {
+        Chain chain(dir, 30);
+        QVERIFY(chain.ok);
+        QVERIFY(chain.engine.open(chain.source));
+        QTRY_COMPARE(chain.session.state(), PlaybackSession::State::Playing);
+        // mpv's end-file never reaches the engine: the watchdog releases the session
+        chain.engine.controller()->disconnect(&chain.engine);
+        chain.engine.stop();
+        QCOMPARE(chain.session.state(), PlaybackSession::State::Stopping);
+        QTRY_COMPARE_WITH_TIMEOUT(chain.session.state(), PlaybackSession::State::Idle, 6000);
+    }
+
+    void prematureEofKeepsItsPosition()
+    {
+        Chain chain(dir, 30);
+        QVERIFY(chain.ok);
+        QVERIFY(chain.engine.open(chain.source));
+        QTRY_COMPARE(chain.session.state(), PlaybackSession::State::Playing);
+        QTRY_COMPARE(chain.engine.durationTicks(), qint64(30 * 10000000));
+        QTRY_VERIFY(chain.engine.positionTicks() > 0);
+        // A dropped connection ends the file with eof far from the end: the position stays where it was
+        QMetaObject::invokeMethod(chain.engine.controller(), "endFile", Qt::DirectConnection,
+                                  Q_ARG(QString, QStringLiteral("eof")));
+        QCOMPARE(chain.session.state(), PlaybackSession::State::Idle);
+        QVERIFY(chain.engine.positionTicks() < 20 * 10000000);
+    }
+
+    void stopNotDrivenByTheEngineIsNotAFailure()
+    {
+        Chain chain(dir, 30);
+        QVERIFY(chain.ok);
+        bool failed = false;
+        chain.session.addObserver([&failed](PlaybackSession::State, PlaybackSession::State to) {
+            failed = failed || to == PlaybackSession::State::Failed;
+        });
+        QVERIFY(chain.engine.open(chain.source));
+        QTRY_COMPARE(chain.session.state(), PlaybackSession::State::Playing);
+        chain.engine.controller()->command({QStringLiteral("stop")});
+        QTRY_COMPARE(chain.session.state(), PlaybackSession::State::Idle);
+        QVERIFY(!failed);
     }
 
     void failedOpenLandsBackInIdle()
@@ -212,9 +258,7 @@ class TestPlaybackEngine : public QObject {
         Chain chain(dir, 30);
         QVERIFY(chain.ok);
         QSignalSpy ended(&chain.engine, &PlaybackEngine::streamEnded);
-        // The load is accepted by mpv and the missing file is what fails: the session
-        // passes through Failed and settles to Idle with no phantom server report
-        // (plan P2x gate: an opening failure never runs the best-effort remote stop).
+        // The load is accepted by mpv and the missing file is what fails: the session passes through Failed and settles to Idle with no phantom server report (an opening failure never runs the best-effort remote stop)
         QVERIFY(chain.engine.open(directSource(QStringLiteral("file:///no/such/clip.wav"))));
         QTRY_COMPARE(chain.session.state(), PlaybackSession::State::Idle);
         QVERIFY(chain.session.identity().itemId.empty());
@@ -227,16 +271,12 @@ class TestPlaybackEngine : public QObject {
         Chain chain(dir, 6);
         QVERIFY(chain.ok);
         QVERIFY(chain.engine.open(chain.source));
-        // The entry mpv keeps is exactly `Authorization: <streamAuthorization()>`: one
-        // list entry, token included, URL untouched. The node-array path must have
-        // survived the commas and quotes of the MediaBrowser header.
+        // The entry mpv keeps is exactly `Authorization: <streamAuthorization()>`: one list entry, token included, URL untouched. The node-array path must have survived the commas and quotes of the MediaBrowser header
         QCOMPARE(headerEntries(chain.engine).size(), 1);
         const QString expectedEntry = QString::fromUtf8(QByteArrayLiteral("Authorization: ")
                                                         + chain.client.streamAuthorization());
         QCOMPARE(headerEntries(chain.engine).at(0).toString(), expectedEntry);
-        // mpv reports the plain local path once the load has been processed. The
-        // read must sit inside the QTRY itself: capturing it beforehand would freeze
-        // the pre-load (unavailable) result.
+        // mpv reports the plain local path once the load has been processed. The read must sit inside the QTRY itself: capturing it beforehand would freeze the pre-load (unavailable) result
         QTRY_COMPARE(chain.engine.controller()->getProperty(QStringLiteral("path")).toString(),
                      QUrl(chain.source.url).toLocalFile());
     }
@@ -253,16 +293,14 @@ class TestPlaybackEngine : public QObject {
         chain.client.disconnectFromServer();
         QTRY_COMPARE(loggedOut.size(), 1);
 
-        // A stale entry is preseeded; the next open on a client without credentials
-        // must drop it rather than let it ride along.
+        // A stale entry is preseeded; the next open on a client without credentials must drop it rather than let it ride along
         chain.engine.controller()->setProperty(
             QStringLiteral("http-header-fields"),
             QStringList{QStringLiteral("Authorization: MediaBrowser Token=\"STALE\"")});
         QCOMPARE(headerEntries(chain.engine).size(), 1);
         QVERIFY(chain.engine.open(chain.source));
         QCOMPARE(headerEntries(chain.engine).size(), 0);
-        // The header assertion above is the point; the reload may already have
-        // reached Playing by now, so anything but a reset session is fine.
+        // The header assertion above is the point; the reload may already have reached Playing by now, so anything but a reset session is fine
         QVERIFY(chain.session.state() != PlaybackSession::State::Idle);
     }
 
@@ -275,7 +313,7 @@ class TestPlaybackEngine : public QObject {
         QCOMPARE(chain.engine.playbackRate(), 1.0);
         chain.engine.setRate(2.0);
         QTRY_VERIFY(chain.engine.playbackRate() > 1.9);
-        // An absolute seek into the clip: the position takes the new time.
+        // An absolute seek into the clip: the position takes the new time
         chain.engine.seekTo(60'000'000); // six seconds into an eight-second clip
         QTRY_VERIFY(chain.engine.positionTicks() > 50'000'000); // five seconds
         QTest::qWait(200);

@@ -39,7 +39,7 @@ void KWalletTokenStore::enqueue(Operation operation)
 {
     m_queue.append(std::move(operation));
     if (m_ready)
-        // Never run from inside the call: the callback contract is event-loop delivery.
+        // Never run from inside the call: the callback contract is event-loop delivery
         QTimer::singleShot(0, this, [this] { runQueued(); });
     else if (!m_opening)
         openWallet();
@@ -52,7 +52,7 @@ void KWalletTokenStore::openWallet()
         QTimer::singleShot(0, this, [this] { failQueued(); });
         return;
     }
-    // Window id 0: there is no native parent to attach the unlock prompt to.
+    // Window id 0: there is no native parent to attach the unlock prompt to
     m_wallet = KWallet::Wallet::openWallet(KWallet::Wallet::LocalWallet(), 0,
                                            KWallet::Wallet::Asynchronous);
     if (!m_wallet) {
@@ -87,7 +87,7 @@ void KWalletTokenStore::onOpened(bool success)
 
 void KWalletTokenStore::onClosed()
 {
-    // Closed by the user or the daemon: the next operation opens it again. Work still waiting for an open that will not complete now fails instead of waiting forever.
+    // Closed by the user or the daemon: the next operation opens it again. Work still waiting for an open that will not complete now fails instead of waiting forever
     const bool wasOpening = m_opening;
     dropWallet();
     if (wasOpening)
@@ -107,7 +107,7 @@ void KWalletTokenStore::dropWallet()
 
 void KWalletTokenStore::runQueued()
 {
-    // A callback may enqueue more work: take what is queued now.
+    // A callback may enqueue more work: take what is queued now
     const QList<Operation> batch = std::exchange(m_queue, {});
     for (const Operation &operation : batch)
         run(operation);
@@ -116,7 +116,7 @@ void KWalletTokenStore::runQueued()
 void KWalletTokenStore::run(const Operation &operation)
 {
     if (!m_ready || !m_wallet) {
-        // The wallet was closed between queueing and running: open it again for this one.
+        // The wallet was closed between queueing and running: open it again for this one
         m_queue.append(operation);
         if (!m_opening)
             openWallet();
@@ -137,7 +137,7 @@ void KWalletTokenStore::run(const Operation &operation)
         ok = !m_wallet->hasEntry(operation.key) || m_wallet->removeEntry(operation.key) == 0;
         break;
     }
-    // Deferred, whatever happened above: callbacks only ever run from the event loop.
+    // Deferred, whatever happened above: callbacks only ever run from the event loop
     QTimer::singleShot(0, this, [operation, ok, token] {
         if (operation.readDone)
             operation.readDone(ok, token);
