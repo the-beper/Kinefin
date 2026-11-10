@@ -197,8 +197,7 @@ class TestMediaSourceSelection : public QObject {
                                              .arg(QString::fromLatin1(kToken).toUpper()))}))
                      .source);
 
-        // The token under any other name is a refusal, raw or percent-encoded
-        // The ninth character percent-encoded: the same token on the wire
+        // The token under any other name is a refusal, raw or percent-encoded. The ninth character percent-encoded: the same token on the wire
         const QString plain = QString::fromLatin1(kToken);
         const QString encoded = plain.left(8) + QLatin1Char('%')
                                 + QString::fromLatin1(QByteArray(1, kToken.at(8)).toHex())

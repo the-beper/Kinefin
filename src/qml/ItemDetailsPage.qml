@@ -22,7 +22,17 @@ Kirigami.ScrollablePage {
     readonly property bool inView: Kirigami.ColumnView.inViewport
     readonly property bool showSimilar: details.similarStatus === ItemDetailsModel.Loading || details.similarStatus === ItemDetailsModel.Failed || (details.similarStatus === ItemDetailsModel.Ready && details.similar.count > 0)
 
+    // The space the page keeps around its content
+    readonly property real margin: Kirigami.Units.largeSpacing
+    readonly property ItemChildrenModel childModel: details.below
+    // Empty when the series has no episode to continue with
+    readonly property var nextUp: childModel.nextUp
+    readonly property bool showSeriesLink: details.seriesName.length > 0 && details.seriesId.length > 0
+    readonly property bool showSeasonLink: details.seasonId.length > 0
+
     // The poster ratios match MediaCard: the height is the poster plus the two text lines
+    readonly property real posterCardWidth: Kirigami.Units.gridUnit * 8
+    readonly property real posterCardHeight: Math.round((posterCardWidth - Kirigami.Units.smallSpacing * 2) * 3 / 2) + Kirigami.Units.gridUnit * 3.5
     readonly property real personCardWidth: Kirigami.Units.gridUnit * 7
     readonly property real personCardHeight: Math.round((personCardWidth - Kirigami.Units.smallSpacing * 2) * 3 / 2) + Kirigami.Units.gridUnit * 3.5
     readonly property real similarCardWidth: Kirigami.Units.gridUnit * (details.similar.landscape ? 14 : 8)
@@ -30,8 +40,13 @@ Kirigami.ScrollablePage {
 
     readonly property string metaText: {
         const parts = [];
-        if (details.episodeNumber >= 0)
-            parts.push(details.seasonNumber >= 0 ? i18nc("season and episode number", "S%1:E%2", details.seasonNumber, details.episodeNumber) : i18nc("episode number", "E%1", details.episodeNumber));
+        if (details.type !== "Season" && details.episodeNumber >= 0) {
+            const double = details.episodeNumberEnd > details.episodeNumber;
+            if (details.seasonNumber >= 0)
+                parts.push(double ? i18nc("season and episode range", "S%1:E%2–E%3", details.seasonNumber, details.episodeNumber, details.episodeNumberEnd) : i18nc("season and episode number", "S%1:E%2", details.seasonNumber, details.episodeNumber));
+            else
+                parts.push(double ? i18nc("episode number range", "E%1–E%2", details.episodeNumber, details.episodeNumberEnd) : i18nc("episode number", "E%1", details.episodeNumber));
+        }
         if (details.year > 0)
             parts.push(String(details.year));
         if (details.runtimeMinutes > 0)
@@ -137,401 +152,662 @@ Kirigami.ScrollablePage {
         }
     ]
 
-    ColumnLayout {
-        spacing: Kirigami.Units.largeSpacing
+    ListView {
+        id: list
 
-        Kirigami.LoadingPlaceholder {
-            Layout.fillWidth: true
-            visible: page.showLoading
-            text: i18n("Loading…")
+        activeFocusOnTab: count > 0
+        keyNavigationEnabled: true
+        currentIndex: 0
+        objectName: "episodesList"
+        // Only a season has episodes: the header carries the rest of the page
+        model: page.childModel.episodes
+        Accessible.role: Accessible.List
+        // Only a season has episodes: on any other page the list is empty and silent
+        Accessible.name: page.childModel.kind === ItemChildrenModel.Season ? i18n("Episodes") : ""
+        Accessible.ignored: count === 0
+        // The page marks its flickable as a tab stop when it completes, which would undo the binding: set it again afterwards
+        Component.onCompleted: Qt.callLater(() => list.activeFocusOnTab = Qt.binding(() => list.count > 0))
+
+        // The rows are not tab stops: the list is, and it opens the current episode
+        function openCurrent() {
+            if (list.currentItem?.enabled)
+                page.Window.window.openItem(list.currentItem.itemId, page);
         }
+        Keys.onReturnPressed: openCurrent()
+        Keys.onEnterPressed: openCurrent()
+        Keys.onSpacePressed: openCurrent()
 
-        MessageBox {
-            visible: page.details.status === ItemDetailsModel.Failed
-            type: Kirigami.MessageType.Error
-            text: i18n("Could not load this item: check the connection to the server and try again")
-            actions: [
-                Kirigami.Action {
-                    text: i18n("Retry")
-                    icon.name: "view-refresh"
-                    onTriggered: page.details.reload()
-                }
-            ]
-        }
+        header: Item {
+            width: list.width
+            height: headerContent.implicitHeight + page.margin
 
-        Kirigami.PlaceholderMessage {
-            Layout.fillWidth: true
-            visible: page.details.status === ItemDetailsModel.NotFound
-            icon.name: "video-x-generic"
-            text: i18n("This item is not available")
-            explanation: i18n("It may have been removed from the server")
-        }
+            ColumnLayout {
+                id: headerContent
 
-        ColumnLayout {
-            Layout.fillWidth: true
-            visible: page.showContent
-            spacing: Kirigami.Units.largeSpacing
-
-            Rectangle {
-                Layout.fillWidth: true
-                Layout.preferredHeight: Math.min(width * 9 / 16, Kirigami.Units.gridUnit * 20)
-                visible: page.details.backdropUrl.toString().length > 0 || page.details.logoUrl.toString().length > 0
-                color: Kirigami.Theme.alternateBackgroundColor
-                clip: true
-
-                // Only URLs built by JellyfinClient::imageUrl belong here: the image fetcher allows nothing else, but a raw server string must never become a source
-                Image {
-                    anchors.fill: parent
-                    asynchronous: true
-                    fillMode: Image.PreserveAspectCrop
-                    sourceSize.width: width * Screen.devicePixelRatio
-                    source: page.inView ? page.details.backdropUrl : ""
-                    Accessible.ignored: true
-                }
-
-                Image {
-                    anchors {
-                        left: parent.left
-                        bottom: parent.bottom
-                        margins: Kirigami.Units.largeSpacing
-                    }
-                    width: Math.min(parent.width / 2, Kirigami.Units.gridUnit * 16)
-                    height: Math.min(parent.height / 3, Kirigami.Units.gridUnit * 6)
-                    asynchronous: true
-                    fillMode: Image.PreserveAspectFit
-                    horizontalAlignment: Image.AlignLeft
-                    verticalAlignment: Image.AlignBottom
-                    sourceSize.width: width * Screen.devicePixelRatio
-                    source: page.inView ? page.details.logoUrl : ""
-                    Accessible.ignored: true
-                }
-            }
-
-            Kirigami.Heading {
-                Layout.fillWidth: true
-                level: 1
-                wrapMode: Text.Wrap
-                // Item names come from the server: plain text only
-                textFormat: Text.PlainText
-                text: page.details.name
-            }
-
-            Kirigami.LinkButton {
-                Layout.fillWidth: true
-                Layout.maximumWidth: implicitWidth
-                visible: page.details.seriesName.length > 0 && page.details.seriesId.length > 0
-                horizontalAlignment: Text.AlignLeft
-                textFormat: Text.PlainText
-                text: page.details.seriesName
-                onClicked: page.Window.window.openItem(page.details.seriesId, page)
-            }
-
-            Controls.Label {
-                Layout.fillWidth: true
-                visible: page.details.seriesName.length > 0 && page.details.seriesId.length === 0
-                wrapMode: Text.Wrap
-                textFormat: Text.PlainText
-                text: page.details.seriesName
-            }
-
-            Flow {
-                Layout.fillWidth: true
+                x: page.margin
+                y: page.margin
+                width: parent.width - page.margin * 2
                 spacing: Kirigami.Units.largeSpacing
-                visible: metaLabel.visible || ratingRow.visible || stateLabel.visible
 
-                Controls.Label {
-                    id: metaLabel
-                    visible: text.length > 0
-                    textFormat: Text.PlainText
-                    text: page.metaText
+                Kirigami.LoadingPlaceholder {
+                    Layout.fillWidth: true
+                    visible: page.showLoading
+                    text: i18n("Loading…")
                 }
 
-                RowLayout {
-                    id: ratingRow
-                    visible: page.details.communityRating > 0
-                    spacing: Kirigami.Units.smallSpacing
-                    Accessible.role: Accessible.StaticText
-                    Accessible.name: i18n("Community Rating")
-                    Accessible.description: ratingLabel.text
+                MessageBox {
+                    visible: page.details.status === ItemDetailsModel.Failed
+                    type: Kirigami.MessageType.Error
+                    text: i18n("Could not load this item: check the connection to the server and try again")
+                    actions: [
+                        Kirigami.Action {
+                            text: i18n("Retry")
+                            icon.name: "view-refresh"
+                            onTriggered: page.details.reload()
+                        }
+                    ]
+                }
 
-                    Kirigami.Icon {
-                        Layout.preferredWidth: Kirigami.Units.iconSizes.small
-                        Layout.preferredHeight: Kirigami.Units.iconSizes.small
-                        source: "starred-symbolic"
-                        Accessible.ignored: true
+                Kirigami.PlaceholderMessage {
+                    Layout.fillWidth: true
+                    visible: page.details.status === ItemDetailsModel.NotFound
+                    icon.name: "video-x-generic"
+                    text: i18n("This item is not available")
+                    explanation: i18n("It may have been removed from the server")
+                }
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    visible: page.showContent
+                    spacing: Kirigami.Units.largeSpacing
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: Math.min(width * 9 / 16, Kirigami.Units.gridUnit * 20)
+                        visible: page.details.backdropUrl.toString().length > 0 || page.details.logoUrl.toString().length > 0
+                        color: Kirigami.Theme.alternateBackgroundColor
+                        clip: true
+
+                        // Only URLs built by JellyfinClient::imageUrl belong here: the image fetcher allows nothing else, but a raw server string must never become a source
+                        Image {
+                            anchors.fill: parent
+                            asynchronous: true
+                            fillMode: Image.PreserveAspectCrop
+                            sourceSize.width: width * Screen.devicePixelRatio
+                            source: page.inView ? page.details.backdropUrl : ""
+                            Accessible.ignored: true
+                        }
+
+                        Image {
+                            anchors {
+                                left: parent.left
+                                bottom: parent.bottom
+                                margins: Kirigami.Units.largeSpacing
+                            }
+                            width: Math.min(parent.width / 2, Kirigami.Units.gridUnit * 16)
+                            height: Math.min(parent.height / 3, Kirigami.Units.gridUnit * 6)
+                            asynchronous: true
+                            fillMode: Image.PreserveAspectFit
+                            horizontalAlignment: Image.AlignLeft
+                            verticalAlignment: Image.AlignBottom
+                            sourceSize.width: width * Screen.devicePixelRatio
+                            source: page.inView ? page.details.logoUrl : ""
+                            Accessible.ignored: true
+                        }
+                    }
+
+                    Kirigami.Heading {
+                        Layout.fillWidth: true
+                        level: 1
+                        wrapMode: Text.Wrap
+                        // Item names come from the server: plain text only
+                        textFormat: Text.PlainText
+                        text: page.details.name
+                    }
+
+                    Flow {
+                        Layout.fillWidth: true
+                        spacing: Kirigami.Units.largeSpacing
+                        // The data decides, not the links: a child reads back its effective visibility, which follows this Flow
+                        visible: page.showSeriesLink || page.showSeasonLink
+
+                        Kirigami.LinkButton {
+                            id: seriesLink
+                            objectName: "seriesLink"
+                            visible: page.showSeriesLink
+                            textFormat: Text.PlainText
+                            text: page.details.seriesName
+                            onClicked: page.Window.window.openAncestor(page.details.seriesId, page)
+                        }
+
+                        Kirigami.LinkButton {
+                            id: seasonLink
+                            objectName: "seasonLink"
+                            visible: page.showSeasonLink
+                            textFormat: Text.PlainText
+                            text: page.details.seasonNumber > 0 ? i18n("Season %1", page.details.seasonNumber) : (page.details.seasonNumber === 0 ? i18n("Specials") : i18n("Season"))
+                            onClicked: page.Window.window.openAncestor(page.details.seasonId, page)
+                        }
                     }
 
                     Controls.Label {
-                        id: ratingLabel
+                        Layout.fillWidth: true
+                        visible: page.details.seriesName.length > 0 && page.details.seriesId.length === 0
+                        wrapMode: Text.Wrap
                         textFormat: Text.PlainText
-                        text: page.details.communityRating.toLocaleString(Qt.locale(), "f", 1)
+                        text: page.details.seriesName
                     }
-                }
 
-                Controls.Label {
-                    id: stateLabel
-                    visible: text.length > 0
-                    opacity: 0.7
-                    textFormat: Text.PlainText
-                    text: page.stateText
-                }
-            }
-
-            Controls.Label {
-                Layout.fillWidth: true
-                visible: text.length > 0
-                wrapMode: Text.Wrap
-                font.italic: true
-                textFormat: Text.PlainText
-                text: page.details.tagline
-            }
-
-            Controls.Label {
-                Layout.fillWidth: true
-                visible: page.details.directors.length > 0
-                wrapMode: Text.Wrap
-                textFormat: Text.PlainText
-                text: i18np("Director: %2", "Directors: %2", page.details.directors.length, page.details.directors.join(", "))
-            }
-
-            Controls.Label {
-                Layout.fillWidth: true
-                visible: page.details.writers.length > 0
-                wrapMode: Text.Wrap
-                textFormat: Text.PlainText
-                text: i18np("Writer: %2", "Writers: %2", page.details.writers.length, page.details.writers.join(", "))
-            }
-
-            Controls.Label {
-                Layout.fillWidth: true
-                visible: page.details.genres.length > 0
-                wrapMode: Text.Wrap
-                textFormat: Text.PlainText
-                text: i18np("Genre: %2", "Genres: %2", page.details.genres.length, page.details.genres.join(", "))
-            }
-
-            Controls.Label {
-                Layout.fillWidth: true
-                visible: text.length > 0
-                Layout.maximumWidth: Kirigami.Units.gridUnit * 35
-                wrapMode: Text.Wrap
-                textFormat: Text.PlainText
-                text: page.details.overview
-            }
-
-            Kirigami.Heading {
-                Layout.fillWidth: true
-                visible: page.details.people.length > 0
-                level: 2
-                text: i18n("Cast and Crew")
-            }
-
-            CardRow {
-                visible: page.details.people.length > 0
-                model: page.details.people
-                cardHeight: page.personCardHeight
-                accessibleName: i18n("Cast and Crew")
-                pageFlickable: page.flickable
-
-                delegate: Controls.ItemDelegate {
-                    id: person
-
-                    required property var modelData
-
-                    // The role of an actor, or the kind of crew when the server gives no role
-                    readonly property string subtitle: modelData.role.length > 0 ? modelData.role : page.personKind(modelData.type)
-
-                    width: page.personCardWidth
-                    height: page.personCardHeight
-                    // The list is the one tab stop of its row, and a person has nothing to open
-                    focusPolicy: Qt.NoFocus
-                    hoverEnabled: false
-                    highlighted: ListView.isCurrentItem && ListView.view.activeFocus
-                    padding: Kirigami.Units.smallSpacing
-                    Accessible.name: subtitle.length > 0 ? modelData.name + ", " + subtitle : modelData.name
-
-                    contentItem: ColumnLayout {
-                        spacing: 0
-
-                        Rectangle {
-                            Layout.fillWidth: true
-                            Layout.fillHeight: true
-                            Layout.preferredHeight: width * 3 / 2
-                            Layout.bottomMargin: Kirigami.Units.smallSpacing
-                            radius: Kirigami.Units.cornerRadius
-                            color: Kirigami.Theme.alternateBackgroundColor
-
-                            Kirigami.Icon {
-                                anchors.centerIn: parent
-                                width: Kirigami.Units.iconSizes.huge
-                                height: width
-                                source: "user-identity"
-                                visible: photo.status !== Image.Ready
-                            }
-
-                            Kirigami.ShadowedImage {
-                                id: photo
-                                anchors.fill: parent
-                                radius: parent.radius
-                                asynchronous: true
-                                fillMode: Image.PreserveAspectCrop
-                                sourceSize.width: width * Screen.devicePixelRatio
-                                // Only URLs built by JellyfinClient::imageUrl belong here
-                                source: page.inView ? person.modelData.imageUrl : ""
-                                Accessible.ignored: true
-                            }
-                        }
-
-                        // Names and roles come from the server: plain text only
-                        Controls.Label {
-                            Layout.fillWidth: true
-                            elide: Text.ElideRight
-                            maximumLineCount: 1
-                            textFormat: Text.PlainText
-                            text: person.modelData.name
-                        }
-
-                        Controls.Label {
-                            Layout.fillWidth: true
-                            elide: Text.ElideRight
-                            maximumLineCount: 1
-                            opacity: 0.7
-                            textFormat: Text.PlainText
-                            text: person.subtitle
-                        }
-                    }
-                }
-            }
-
-            Kirigami.Heading {
-                Layout.fillWidth: true
-                visible: page.details.chapters.length > 0
-                level: 2
-                text: i18n("Chapters")
-            }
-
-            ColumnLayout {
-                Layout.fillWidth: true
-                visible: page.details.chapters.length > 0
-                spacing: Kirigami.Units.smallSpacing
-
-                Repeater {
-                    model: page.details.chapters
-                    delegate: RowLayout {
-                        id: chapter
-                        required property var modelData
-
+                    Flow {
                         Layout.fillWidth: true
                         spacing: Kirigami.Units.largeSpacing
-                        Accessible.role: Accessible.StaticText
-                        Accessible.name: chapter.modelData.time + " " + chapter.modelData.name
+                        // The data decides, not the children: a child reads back its effective visibility, which follows this Flow
+                        visible: page.metaText.length > 0 || page.details.communityRating > 0 || page.stateText.length > 0
 
                         Controls.Label {
-                            Layout.preferredWidth: Kirigami.Units.gridUnit * 4
+                            id: metaLabel
+                            visible: text.length > 0
+                            textFormat: Text.PlainText
+                            text: page.metaText
+                        }
+
+                        RowLayout {
+                            id: ratingRow
+                            visible: page.details.communityRating > 0
+                            spacing: Kirigami.Units.smallSpacing
+                            Accessible.role: Accessible.StaticText
+                            Accessible.name: i18n("Community Rating")
+                            Accessible.description: ratingLabel.text
+
+                            Kirigami.Icon {
+                                Layout.preferredWidth: Kirigami.Units.iconSizes.small
+                                Layout.preferredHeight: Kirigami.Units.iconSizes.small
+                                source: "starred-symbolic"
+                                Accessible.ignored: true
+                            }
+
+                            Controls.Label {
+                                id: ratingLabel
+                                textFormat: Text.PlainText
+                                text: page.details.communityRating.toLocaleString(Qt.locale(), "f", 1)
+                            }
+                        }
+
+                        Controls.Label {
+                            id: stateLabel
+                            visible: text.length > 0
                             opacity: 0.7
                             textFormat: Text.PlainText
-                            text: chapter.modelData.time
-                        }
-
-                        Controls.Label {
-                            Layout.fillWidth: true
-                            wrapMode: Text.Wrap
-                            textFormat: Text.PlainText
-                            text: chapter.modelData.name
+                            text: page.stateText
                         }
                     }
-                }
-            }
-
-            Kirigami.Heading {
-                Layout.fillWidth: true
-                visible: page.details.mediaSources.length > 0
-                level: 2
-                text: i18n("Media Info")
-            }
-
-            Repeater {
-                model: page.details.mediaSources
-                delegate: ColumnLayout {
-                    id: mediaSource
-                    required property var modelData
-
-                    Layout.fillWidth: true
-                    spacing: Kirigami.Units.smallSpacing
 
                     Controls.Label {
                         Layout.fillWidth: true
                         visible: text.length > 0
                         wrapMode: Text.Wrap
-                        font.bold: true
+                        font.italic: true
                         textFormat: Text.PlainText
-                        text: mediaSource.modelData.name
+                        text: page.details.tagline
                     }
 
-                    Kirigami.FormLayout {
+                    Controls.Label {
                         Layout.fillWidth: true
+                        visible: page.details.directors.length > 0
+                        wrapMode: Text.Wrap
+                        textFormat: Text.PlainText
+                        text: i18np("Director: %2", "Directors: %2", page.details.directors.length, page.details.directors.join(", "))
+                    }
 
-                        Repeater {
-                            model: page.sourceRows(mediaSource.modelData)
-                            delegate: Controls.Label {
-                                required property var modelData
+                    Controls.Label {
+                        Layout.fillWidth: true
+                        visible: page.details.writers.length > 0
+                        wrapMode: Text.Wrap
+                        textFormat: Text.PlainText
+                        text: i18np("Writer: %2", "Writers: %2", page.details.writers.length, page.details.writers.join(", "))
+                    }
 
-                                Kirigami.FormData.label: modelData.label
-                                Kirigami.FormData.labelAlignment: Qt.AlignTop
-                                Layout.fillWidth: true
-                                wrapMode: Text.Wrap
-                                textFormat: Text.PlainText
-                                text: modelData.text
+                    Controls.Label {
+                        Layout.fillWidth: true
+                        visible: page.details.genres.length > 0
+                        wrapMode: Text.Wrap
+                        textFormat: Text.PlainText
+                        text: i18np("Genre: %2", "Genres: %2", page.details.genres.length, page.details.genres.join(", "))
+                    }
+
+                    Controls.Label {
+                        Layout.fillWidth: true
+                        visible: text.length > 0
+                        Layout.maximumWidth: Kirigami.Units.gridUnit * 35
+                        wrapMode: Text.Wrap
+                        textFormat: Text.PlainText
+                        text: page.details.overview
+                    }
+
+                    Kirigami.Heading {
+                        Layout.fillWidth: true
+                        visible: page.childModel.kind === ItemChildrenModel.Series && page.childModel.hasNextUp
+                        level: 2
+                        text: i18n("Next Up")
+                    }
+
+                    EpisodeRow {
+                        Layout.fillWidth: true
+                        visible: page.childModel.kind === ItemChildrenModel.Series && page.childModel.hasNextUp
+                        showSeason: true
+                        itemId: page.nextUp.itemId ?? ""
+                        name: page.nextUp.name ?? ""
+                        seasonNumber: page.nextUp.seasonNumber ?? -1
+                        episodeNumber: page.nextUp.episodeNumber ?? -1
+                        episodeNumberEnd: page.nextUp.episodeNumberEnd ?? -1
+                        runtimeMinutes: page.nextUp.runtimeMinutes ?? -1
+                        overview: page.nextUp.overview ?? ""
+                        imageUrl: page.nextUp.imageUrl ?? ""
+                        played: page.nextUp.played ?? false
+                        playedPercentage: page.nextUp.playedPercentage ?? 0
+                        favorite: page.nextUp.favorite ?? false
+                        loaded: page.nextUp.loaded ?? false
+                        onClicked: page.Window.window.openItem(itemId, page)
+                    }
+
+                    Kirigami.Heading {
+                        Layout.fillWidth: true
+                        visible: page.childModel.kind === ItemChildrenModel.Series && (page.childModel.seasonsStatus === ItemChildrenModel.Loading || page.childModel.seasonsStatus === ItemChildrenModel.Failed || page.childModel.seasons.count > 0)
+                        level: 2
+                        text: i18n("Seasons")
+                    }
+
+                    Controls.BusyIndicator {
+                        Layout.preferredWidth: Kirigami.Units.gridUnit * 2
+                        Layout.preferredHeight: Kirigami.Units.gridUnit * 2
+                        visible: page.childModel.kind === ItemChildrenModel.Series && page.childModel.seasonsStatus === ItemChildrenModel.Loading && page.childModel.seasons.count === 0
+                        running: visible
+                        Accessible.name: i18n("Loading…")
+                    }
+
+                    MessageBox {
+                        visible: page.childModel.kind === ItemChildrenModel.Series && page.childModel.seasonsStatus === ItemChildrenModel.Failed
+                        type: Kirigami.MessageType.Error
+                        text: i18n("Could not load the seasons")
+                        actions: [
+                            Kirigami.Action {
+                                text: i18n("Retry")
+                                icon.name: "view-refresh"
+                                onTriggered: page.childModel.retry()
+                            }
+                        ]
+                    }
+
+                    CardRow {
+                        visible: page.childModel.kind === ItemChildrenModel.Series && page.childModel.seasons.count > 0
+                        model: page.childModel.seasons
+                        listObjectName: "seasonsRow"
+                        cardHeight: page.posterCardHeight
+                        accessibleName: i18n("Seasons")
+                        pageFlickable: page.flickable
+
+                        delegate: MediaCard {
+                            width: page.posterCardWidth
+                            height: page.posterCardHeight
+                            // The list is the one tab stop of its row
+                            focusPolicy: Qt.NoFocus
+                            loaded: true
+                            highlighted: ListView.isCurrentItem && ListView.view.activeFocus
+                            onClicked: page.Window.window.openItem(itemId, page)
+                        }
+                    }
+
+                    Kirigami.Heading {
+                        Layout.fillWidth: true
+                        visible: page.childModel.kind === ItemChildrenModel.BoxSet && (page.childModel.itemsStatus === ItemChildrenModel.Loading || page.childModel.itemsStatus === ItemChildrenModel.Failed || page.childModel.items.count > 0)
+                        level: 2
+                        text: i18n("In This Collection")
+                    }
+
+                    Controls.Label {
+                        Layout.fillWidth: true
+                        visible: page.childModel.kind === ItemChildrenModel.BoxSet && page.childModel.items.count > 0 && page.childModel.itemsTotal > page.childModel.items.count
+                        opacity: 0.7
+                        textFormat: Text.PlainText
+                        text: i18n("%1 of %2 items", page.childModel.items.count, page.childModel.itemsTotal)
+                    }
+
+                    Controls.BusyIndicator {
+                        Layout.preferredWidth: Kirigami.Units.gridUnit * 2
+                        Layout.preferredHeight: Kirigami.Units.gridUnit * 2
+                        visible: page.childModel.kind === ItemChildrenModel.BoxSet && page.childModel.itemsStatus === ItemChildrenModel.Loading && page.childModel.items.count === 0
+                        running: visible
+                        Accessible.name: i18n("Loading…")
+                    }
+
+                    MessageBox {
+                        visible: page.childModel.kind === ItemChildrenModel.BoxSet && page.childModel.itemsStatus === ItemChildrenModel.Failed
+                        type: Kirigami.MessageType.Error
+                        text: i18n("Could not load the items of this collection")
+                        actions: [
+                            Kirigami.Action {
+                                text: i18n("Retry")
+                                icon.name: "view-refresh"
+                                onTriggered: page.childModel.retry()
+                            }
+                        ]
+                    }
+
+                    CardRow {
+                        visible: page.childModel.kind === ItemChildrenModel.BoxSet && page.childModel.items.count > 0
+                        model: page.childModel.items
+                        listObjectName: "collectionRow"
+                        cardHeight: page.childModel.items.landscape ? page.similarCardHeight : page.posterCardHeight
+                        accessibleName: i18n("In This Collection")
+                        pageFlickable: page.flickable
+
+                        delegate: MediaCard {
+                            width: page.childModel.items.landscape ? page.similarCardWidth : page.posterCardWidth
+                            height: page.childModel.items.landscape ? page.similarCardHeight : page.posterCardHeight
+                            // The list is the one tab stop of its row
+                            focusPolicy: Qt.NoFocus
+                            landscape: page.childModel.items.landscape
+                            loaded: true
+                            highlighted: ListView.isCurrentItem && ListView.view.activeFocus
+                            onClicked: page.Window.window.openItem(itemId, page)
+                        }
+                    }
+
+                    Kirigami.Heading {
+                        Layout.fillWidth: true
+                        visible: page.details.people.length > 0
+                        level: 2
+                        text: i18n("Cast and Crew")
+                    }
+
+                    CardRow {
+                        visible: page.details.people.length > 0
+                        model: page.details.people
+                        cardHeight: page.personCardHeight
+                        accessibleName: i18n("Cast and Crew")
+                        pageFlickable: page.flickable
+
+                        delegate: Controls.ItemDelegate {
+                            id: person
+
+                            required property var modelData
+
+                            // The role of an actor, or the kind of crew when the server gives no role
+                            readonly property string subtitle: modelData.role.length > 0 ? modelData.role : page.personKind(modelData.type)
+
+                            width: page.personCardWidth
+                            height: page.personCardHeight
+                            // The list is the one tab stop of its row, and a person has nothing to open
+                            focusPolicy: Qt.NoFocus
+                            hoverEnabled: false
+                            highlighted: ListView.isCurrentItem && ListView.view.activeFocus
+                            padding: Kirigami.Units.smallSpacing
+                            Accessible.name: subtitle.length > 0 ? modelData.name + ", " + subtitle : modelData.name
+
+                            contentItem: ColumnLayout {
+                                spacing: 0
+
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    Layout.fillHeight: true
+                                    Layout.preferredHeight: width * 3 / 2
+                                    Layout.bottomMargin: Kirigami.Units.smallSpacing
+                                    radius: Kirigami.Units.cornerRadius
+                                    color: Kirigami.Theme.alternateBackgroundColor
+
+                                    Kirigami.Icon {
+                                        anchors.centerIn: parent
+                                        width: Kirigami.Units.iconSizes.huge
+                                        height: width
+                                        source: "user-identity"
+                                        visible: photo.status !== Image.Ready
+                                    }
+
+                                    Kirigami.ShadowedImage {
+                                        id: photo
+                                        anchors.fill: parent
+                                        radius: parent.radius
+                                        asynchronous: true
+                                        fillMode: Image.PreserveAspectCrop
+                                        sourceSize.width: width * Screen.devicePixelRatio
+                                        // Only URLs built by JellyfinClient::imageUrl belong here
+                                        source: page.inView ? person.modelData.imageUrl : ""
+                                        Accessible.ignored: true
+                                    }
+                                }
+
+                                // Names and roles come from the server: plain text only
+                                Controls.Label {
+                                    Layout.fillWidth: true
+                                    elide: Text.ElideRight
+                                    maximumLineCount: 1
+                                    textFormat: Text.PlainText
+                                    text: person.modelData.name
+                                }
+
+                                Controls.Label {
+                                    Layout.fillWidth: true
+                                    elide: Text.ElideRight
+                                    maximumLineCount: 1
+                                    opacity: 0.7
+                                    textFormat: Text.PlainText
+                                    text: person.subtitle
+                                }
                             }
                         }
                     }
+
+                    Kirigami.Heading {
+                        Layout.fillWidth: true
+                        visible: page.details.chapters.length > 0
+                        level: 2
+                        text: i18n("Chapters")
+                    }
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        visible: page.details.chapters.length > 0
+                        spacing: Kirigami.Units.smallSpacing
+
+                        Repeater {
+                            model: page.details.chapters
+                            delegate: RowLayout {
+                                id: chapter
+                                required property var modelData
+
+                                Layout.fillWidth: true
+                                spacing: Kirigami.Units.largeSpacing
+                                Accessible.role: Accessible.StaticText
+                                Accessible.name: chapter.modelData.time + " " + chapter.modelData.name
+
+                                Controls.Label {
+                                    Layout.preferredWidth: Kirigami.Units.gridUnit * 4
+                                    opacity: 0.7
+                                    textFormat: Text.PlainText
+                                    text: chapter.modelData.time
+                                }
+
+                                Controls.Label {
+                                    Layout.fillWidth: true
+                                    wrapMode: Text.Wrap
+                                    textFormat: Text.PlainText
+                                    text: chapter.modelData.name
+                                }
+                            }
+                        }
+                    }
+
+                    Kirigami.Heading {
+                        Layout.fillWidth: true
+                        visible: page.details.mediaSources.length > 0
+                        level: 2
+                        text: i18n("Media Info")
+                    }
+
+                    Repeater {
+                        model: page.details.mediaSources
+                        delegate: ColumnLayout {
+                            id: mediaSource
+                            required property var modelData
+
+                            Layout.fillWidth: true
+                            spacing: Kirigami.Units.smallSpacing
+
+                            Controls.Label {
+                                Layout.fillWidth: true
+                                visible: text.length > 0
+                                wrapMode: Text.Wrap
+                                font.bold: true
+                                textFormat: Text.PlainText
+                                text: mediaSource.modelData.name
+                            }
+
+                            Kirigami.FormLayout {
+                                Layout.fillWidth: true
+
+                                Repeater {
+                                    model: page.sourceRows(mediaSource.modelData)
+                                    delegate: Controls.Label {
+                                        required property var modelData
+
+                                        Kirigami.FormData.label: modelData.label
+                                        Kirigami.FormData.labelAlignment: Qt.AlignTop
+                                        Layout.fillWidth: true
+                                        wrapMode: Text.Wrap
+                                        textFormat: Text.PlainText
+                                        text: modelData.text
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Kirigami.Heading {
+                        Layout.fillWidth: true
+                        visible: page.showSimilar
+                        level: 2
+                        text: i18n("More Like This")
+                    }
+
+                    Controls.BusyIndicator {
+                        Layout.preferredWidth: Kirigami.Units.gridUnit * 2
+                        Layout.preferredHeight: Kirigami.Units.gridUnit * 2
+                        visible: page.details.similarStatus === ItemDetailsModel.Loading
+                        running: visible
+                        Accessible.name: i18n("Loading…")
+                    }
+
+                    MessageBox {
+                        visible: page.details.similarStatus === ItemDetailsModel.Failed
+                        type: Kirigami.MessageType.Error
+                        text: i18n("Could not load similar items")
+                        actions: [
+                            Kirigami.Action {
+                                text: i18n("Retry")
+                                icon.name: "view-refresh"
+                                onTriggered: page.details.retrySimilar()
+                            }
+                        ]
+                    }
+
+                    CardRow {
+                        visible: page.details.similar.count > 0
+                        model: page.details.similar
+                        cardHeight: page.similarCardHeight
+                        accessibleName: i18n("More Like This")
+                        pageFlickable: page.flickable
+
+                        delegate: MediaCard {
+                            width: page.similarCardWidth
+                            height: page.similarCardHeight
+                            // The list is the one tab stop of its row
+                            focusPolicy: Qt.NoFocus
+                            landscape: page.details.similar.landscape
+                            loaded: true
+                            highlighted: ListView.isCurrentItem && ListView.view.activeFocus
+                            onClicked: page.Window.window.openItem(itemId, page)
+                        }
+                    }
+
+                    Kirigami.Heading {
+                        Layout.fillWidth: true
+                        visible: page.childModel.kind === ItemChildrenModel.Season
+                        level: 2
+                        text: i18n("Episodes")
+                    }
+
+                    Kirigami.LoadingPlaceholder {
+                        Layout.fillWidth: true
+                        visible: page.childModel.kind === ItemChildrenModel.Season && page.childModel.episodes.status === SeasonEpisodesModel.Loading && list.count === 0
+                        text: i18n("Loading…")
+                    }
+
+                    MessageBox {
+                        visible: page.childModel.kind === ItemChildrenModel.Season && page.childModel.episodes.status === SeasonEpisodesModel.Failed
+                        type: Kirigami.MessageType.Error
+                        text: i18n("Could not load the episodes: check the connection to the server and try again")
+                        actions: [
+                            Kirigami.Action {
+                                text: i18n("Retry")
+                                icon.name: "view-refresh"
+                                onTriggered: page.childModel.episodes.retry()
+                            }
+                        ]
+                    }
+
+                    Kirigami.PlaceholderMessage {
+                        Layout.fillWidth: true
+                        visible: page.childModel.kind === ItemChildrenModel.Season && page.childModel.episodes.status === SeasonEpisodesModel.Ready && page.childModel.episodes.totalCount === 0
+                        icon.name: "video-x-generic"
+                        text: i18n("This season has no episodes")
+                    }
                 }
             }
+        }
 
-            Kirigami.Heading {
-                Layout.fillWidth: true
-                visible: page.showSimilar
-                level: 2
-                text: i18n("More Like This")
-            }
+        delegate: EpisodeRow {
+            x: page.margin
+            width: list.width - page.margin * 2
+            // The list is the one tab stop, the arrow keys move inside it
+            focusPolicy: Qt.NoFocus
+            highlighted: ListView.isCurrentItem && list.activeFocus
+            itemId: model.itemId
+            name: model.name
+            seasonNumber: model.seasonNumber
+            episodeNumber: model.episodeNumber
+            episodeNumberEnd: model.episodeNumberEnd
+            runtimeMinutes: model.runtimeMinutes
+            overview: model.overview
+            imageUrl: model.imageUrl
+            played: model.played
+            playedPercentage: model.playedPercentage
+            favorite: model.favorite
+            loaded: model.loaded
+            onClicked: page.Window.window.openItem(itemId, page)
+        }
 
-            Controls.BusyIndicator {
-                Layout.preferredWidth: Kirigami.Units.gridUnit * 2
-                Layout.preferredHeight: Kirigami.Units.gridUnit * 2
-                visible: page.details.similarStatus === ItemDetailsModel.Loading
-                running: visible
-                Accessible.name: i18n("Loading…")
-            }
+        footer: Item {
+            width: list.width
+            height: footerContent.implicitHeight + page.margin
 
-            MessageBox {
-                visible: page.details.similarStatus === ItemDetailsModel.Failed
-                type: Kirigami.MessageType.Error
-                text: i18n("Could not load similar items")
-                actions: [
-                    Kirigami.Action {
-                        text: i18n("Retry")
-                        icon.name: "view-refresh"
-                        onTriggered: page.details.retrySimilar()
-                    }
-                ]
-            }
+            ColumnLayout {
+                id: footerContent
 
-            CardRow {
-                visible: page.details.similar.count > 0
-                model: page.details.similar
-                cardHeight: page.similarCardHeight
-                accessibleName: i18n("More Like This")
-                pageFlickable: page.flickable
+                x: page.margin
+                y: page.margin
+                width: parent.width - page.margin * 2
 
-                delegate: MediaCard {
-                    width: page.similarCardWidth
-                    height: page.similarCardHeight
-                    // The list is the one tab stop of its row
-                    focusPolicy: Qt.NoFocus
-                    landscape: page.details.similar.landscape
-                    loaded: true
-                    highlighted: ListView.isCurrentItem && ListView.view.activeFocus
-                    onClicked: page.Window.window.openItem(itemId, page)
+                MessageBox {
+                    visible: page.childModel.episodes.pageError && page.childModel.episodes.status !== SeasonEpisodesModel.Failed
+                    type: Kirigami.MessageType.Warning
+                    text: i18n("Some episodes could not be loaded")
+                    actions: [
+                        Kirigami.Action {
+                            text: i18n("Retry")
+                            icon.name: "view-refresh"
+                            onTriggered: page.childModel.episodes.retry()
+                        }
+                    ]
                 }
             }
         }

@@ -1,0 +1,27 @@
+{
+  "Items": [
+    {
+      "Name": "Season 2",
+      "Id": "11aa22bb33cc44dd55ee66ff778899aa",
+      "Type": "Season",
+      "IndexNumber": 2,
+      "SeriesId": "aa11bb22cc33dd44ee55ff6677889900",
+      "SeriesName": "Abyss Station",
+      "SeriesPrimaryImageTag": "abyss-primary",
+      "ParentBackdropItemId": "aa11bb22cc33dd44ee55ff6677889900",
+      "ParentBackdropImageTags": [
+        "abyss-backdrop"
+      ],
+      "UserData": {
+        "Key": "abyssstation-s2",
+        "Played": false,
+        "UnplayedItemCount": 6
+      },
+      "ImageTags": {
+        "Primary": "abyss-s2-tag"
+      }
+    }
+  ],
+  "StartIndex": 0,
+  "TotalRecordCount": 1
+}

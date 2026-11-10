@@ -327,7 +327,9 @@ ItemDetailsModel *ConnectionController::createItemDetails(const QString &itemId,
 {
     if (m_state != Authenticated || !owner || !isValidJellyfinId(itemId))
         return nullptr;
-    return new ItemDetailsModel(&m_client, itemId, m_nextDetailsChannel++, owner);
+    const int channel = m_nextDetailsChannel;
+    m_nextDetailsChannel += ItemDetailsModel::ChannelsPerModel;
+    return new ItemDetailsModel(&m_client, itemId, channel, owner);
 }
 
 void ConnectionController::reloadHome()

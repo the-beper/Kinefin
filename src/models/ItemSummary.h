@@ -3,6 +3,7 @@
 #pragma once
 
 #include <QJsonObject>
+#include <QJsonValue>
 #include <QString>
 
 namespace Kinefin {
@@ -15,13 +16,19 @@ struct ItemSummary {
     QString thumbTag;
     QString backdropTag;
     QString seriesName;
+    QString seriesPrimaryTag;
+    QString overview;
     QString seriesId;
     QString seriesThumbTag;
     QString parentBackdropItemId;
     QString parentBackdropTag;
+    QString parentThumbItemId;
+    QString parentThumbTag;
     int year = 0;
     int seasonNumber = -1;
     int episodeNumber = -1;
+    int episodeNumberEnd = -1;
+    int runtimeMinutes = -1;
     int unplayedCount = -1;
     qreal playedPercentage = 0;
     bool played = false;
@@ -30,4 +37,7 @@ struct ItemSummary {
 };
 
 ItemSummary parseItemSummary(const QJsonObject &item);
+
+// The text of an `Overview` field: capped, with the line breaks the server writes as <br> turned into newlines and any other markup left as literal text (the one rule for every overview the app shows)
+QString overviewText(const QJsonValue &value, int limit);
 } // namespace Kinefin

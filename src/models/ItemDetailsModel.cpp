@@ -41,7 +41,7 @@ QVariantMap streamMap(const StreamSummary &stream)
 ItemDetailsModel::ItemDetailsModel(JellyfinClient *client, const QString &itemId, int channel,
                                    QObject *parent)
     : QObject(parent), m_client(client), m_itemId(itemId), m_channel(channel),
-      m_similar(client, false, this)
+      m_similar(client, false, this), m_below(client, channel + BelowChannelOffset, this)
 {
     if (m_client) {
         connect(m_client, &JellyfinClient::itemsReady, this, &ItemDetailsModel::onItemsReady);
@@ -57,8 +57,10 @@ ItemDetailsModel::ItemDetailsModel(JellyfinClient *client, const QString &itemId
 ItemDetailsModel::~ItemDetailsModel()
 {
     // The page is gone: its requests have nobody to answer, and the client forgets the channel
-    if (m_client)
+    if (m_client) {
         m_client->releaseListingChannel(m_channel);
+        m_client->releaseListingChannel(m_channel + BelowChannelOffset);
+    }
 }
 
 bool ItemDetailsModel::playable() const
@@ -113,6 +115,7 @@ void ItemDetailsModel::onItemsReady(const QJsonArray &items, int, int channel)
         // The item is gone (or never was visible to this user)
         m_details = {};
         m_similar.setItems({});
+        m_below.clear();
         Q_EMIT detailsChanged();
         setSimilarStatus(Idle);
         setStatus(NotFound);
@@ -128,6 +131,7 @@ void ItemDetailsModel::onItemsReady(const QJsonArray &items, int, int channel)
     m_details = parsed;
     Q_EMIT detailsChanged();
     setStatus(Ready);
+    m_below.load(m_details);
     requestSimilar();
 }
 
@@ -153,6 +157,7 @@ void ItemDetailsModel::clear()
 {
     m_details = {};
     m_similar.setItems({});
+    m_below.clear();
     Q_EMIT detailsChanged();
     setSimilarStatus(Idle);
     if (m_status != NotFound)

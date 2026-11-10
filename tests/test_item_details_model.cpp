@@ -158,7 +158,8 @@ class TestItemDetailsModel : public QObject {
             allowed(f, movie->people().at(0).toMap().value(QStringLiteral("imageUrl")).toUrl()));
 
         // An episode shows its parent's backdrop and logo
-        auto episode = f.open(kEpisode, ItemDetailsModel::FirstChannel + 1);
+        auto episode =
+            f.open(kEpisode, ItemDetailsModel::FirstChannel + ItemDetailsModel::ChannelsPerModel);
         QTRY_COMPARE(episode->status(), ItemDetailsModel::Ready);
         QVERIFY(episode->backdropUrl().toString().contains(
             QStringLiteral("/Items/aa11bb22cc33dd44ee55ff6677889900/Images/Backdrop")));
@@ -279,6 +280,23 @@ class TestItemDetailsModel : public QObject {
         QTRY_COMPARE(details->status(), ItemDetailsModel::Ready);
     }
 
+    void aSeasonShowsNoEpisodeNumber()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        const QString season = QStringLiteral("11aa22bb33cc44dd55ee66ff778899aa");
+        f.server.itemsById.insert(season, fixtureItem(QStringLiteral("season_item")));
+        f.server.generatedEpisodeTotal = 3;
+        auto details = f.open(season);
+        QTRY_COMPARE(details->status(), ItemDetailsModel::Ready);
+        // A season's own number is a season number
+        QCOMPARE(details->seasonNumber(), 2);
+        QCOMPARE(details->episodeNumber(), -1);
+        QCOMPARE(details->seriesId(), QStringLiteral("aa11bb22cc33dd44ee55ff6677889900"));
+        QTRY_COMPARE(details->below()->episodes()->status(), Kinefin::PagedItemsModel::Ready);
+        QCOMPARE(details->below()->episodes()->totalCount(), 3);
+    }
+
     void aSeasonSkipsTheSimilarRequest()
     {
         Fixture f;
@@ -301,18 +319,19 @@ class TestItemDetailsModel : public QObject {
     {
         Fixture f;
         QVERIFY(f.ok);
-        QSignalSpy replies(&f.client, &Kinefin::JellyfinClient::itemsReady);
+        // A held request that is answered anyway ends in a failure signal: it stays silent only when the model released its channel
+        QSignalSpy failures(&f.client, &Kinefin::JellyfinClient::listingFailed);
         f.server.holdListings = true;
         {
-            auto details = f.open(kMovie, ItemDetailsModel::FirstChannel + 7);
+            auto details = f.open(kMovie, ItemDetailsModel::FirstChannel + 6);
             QTRY_COMPARE(f.server.itemsRoutes.size(), 1);
         }
-        // The pending request went with its model: nothing is emitted for it
         f.server.holdListings = false;
-        QTest::qWait(200);
-        QCOMPARE(replies.size(), 0);
+        f.server.releaseHeld();
+        QTest::qWait(250);
+        QCOMPARE(failures.size(), 0);
         // And the channel can be used again by another model
-        auto again = f.open(kMovie, ItemDetailsModel::FirstChannel + 7);
+        auto again = f.open(kMovie, ItemDetailsModel::FirstChannel + 6);
         QTRY_COMPARE(again->status(), ItemDetailsModel::Ready);
     }
 
@@ -321,7 +340,8 @@ class TestItemDetailsModel : public QObject {
         Fixture f;
         QVERIFY(f.ok);
         auto movie = f.open(kMovie, ItemDetailsModel::FirstChannel);
-        auto episode = f.open(kEpisode, ItemDetailsModel::FirstChannel + 1);
+        auto episode =
+            f.open(kEpisode, ItemDetailsModel::FirstChannel + ItemDetailsModel::ChannelsPerModel);
         QTRY_COMPARE(movie->status(), ItemDetailsModel::Ready);
         QTRY_COMPARE(episode->status(), ItemDetailsModel::Ready);
         f.server.denyListings = true;
@@ -416,7 +436,8 @@ class TestItemDetailsModel : public QObject {
         Fixture f;
         QVERIFY(f.ok);
         auto movie = f.open(kMovie, ItemDetailsModel::FirstChannel);
-        auto episode = f.open(kEpisode, ItemDetailsModel::FirstChannel + 1);
+        auto episode =
+            f.open(kEpisode, ItemDetailsModel::FirstChannel + ItemDetailsModel::ChannelsPerModel);
         QTRY_COMPARE(movie->status(), ItemDetailsModel::Ready);
         QTRY_COMPARE(episode->status(), ItemDetailsModel::Ready);
         QCOMPARE(movie->name(), QStringLiteral("Arcturus (2012)"));

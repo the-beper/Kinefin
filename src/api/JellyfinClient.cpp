@@ -616,11 +616,17 @@ QUrlQuery listingQuery(const ItemQuery &query, const QString &userId)
 }
 
 // What the home rows ask for besides their own parameters: the image types a card can show, one tag per type, and only the field the tiles need beyond the defaults, like jellyfin-web
-void addRowImageParameters(QUrlQuery &wire)
+void addImageTypeParameters(QUrlQuery &wire)
 {
-    wire.addQueryItem(QStringLiteral("fields"), QStringLiteral("PrimaryImageAspectRatio"));
     wire.addQueryItem(QStringLiteral("enableImageTypes"), QStringLiteral("Primary,Backdrop,Thumb"));
     wire.addQueryItem(QStringLiteral("imageTypeLimit"), QStringLiteral("1"));
+}
+
+void addRowImageParameters(QUrlQuery &wire, const QString &extraFields = QString())
+{
+    wire.addQueryItem(QStringLiteral("fields"),
+                      QStringLiteral("PrimaryImageAspectRatio") + extraFields);
+    addImageTypeParameters(wire);
 }
 
 // Validates an `ItemQuery` against the token vocabularies. Kept with the helpers because both fetchItems and tests rely on the refusal semantics
@@ -778,7 +784,8 @@ bool JellyfinClient::fetchNextUp(const QString &seriesId, const QString &parentI
         wire.addQueryItem(QStringLiteral("nextUpDateCutoff"), cutoff.toString(u"yyyy-MM-dd"));
     wire.addQueryItem(QStringLiteral("enableRewatching"),
                       enableRewatching ? QStringLiteral("true") : QStringLiteral("false"));
-    addRowImageParameters(wire);
+    // One series is the details page asking for its next episode, which shows the overview
+    addRowImageParameters(wire, seriesId.isEmpty() ? QString() : QStringLiteral(",Overview"));
     wire.addQueryItem(QStringLiteral("limit"), QString::number(limit));
     wire.addQueryItem(QStringLiteral("userId"), m_userId);
     url.setQuery(wire);
@@ -796,38 +803,41 @@ bool JellyfinClient::fetchNextUp(const QString &seriesId, const QString &parentI
     return true;
 }
 
-bool JellyfinClient::fetchSeasons(const QString &seriesId)
+bool JellyfinClient::fetchSeasons(const QString &seriesId, int channel)
 {
     if (m_state != State::Authenticated || !isValidJellyfinId(seriesId))
         return false;
     const QString family = QStringLiteral("Seasons");
-    const quint64 serial = supersedeListing(family);
+    const QString key = listingKey(family, channel);
+    const quint64 serial = supersedeListing(key);
     QUrl url = endpoint(QStringLiteral("/Shows/") + seriesId + QStringLiteral("/Seasons"));
     QUrlQuery wire;
+    addImageTypeParameters(wire);
     wire.addQueryItem(QStringLiteral("userId"), m_userId);
     url.setQuery(wire);
     QNetworkReply *reply = m_network.get(requestFor(url, true));
-    m_listingReplies.insert(family, reply);
-    attach(reply, m_generation, [this, family, serial](QNetworkReply *finished) {
-        if (listingSuperseded(family, serial))
+    m_listingReplies.insert(key, reply);
+    attach(reply, m_generation, [this, family, key, channel, serial](QNetworkReply *finished) {
+        if (listingSuperseded(key, serial))
             return;
         QJsonArray items;
         int total = 0;
-        if (!listingEnvelope(finished, family, 0, &items, &total))
+        if (!listingEnvelope(finished, family, channel, &items, &total))
             return;
-        Q_EMIT seasonsReady(items, total);
+        Q_EMIT seasonsReady(items, total, channel);
     });
     return true;
 }
 
 bool JellyfinClient::fetchEpisodes(const QString &seriesId, const QString &seasonId, int startIndex,
-                                   int limit)
+                                   int limit, int channel)
 {
     if (m_state != State::Authenticated || !isValidJellyfinId(seriesId)
         || (!seasonId.isEmpty() && !isValidJellyfinId(seasonId)) || startIndex < -1 || limit < -1)
         return false;
     const QString family = QStringLiteral("Episodes");
-    const quint64 serial = supersedeListing(family);
+    const QString key = listingKey(family, channel);
+    const quint64 serial = supersedeListing(key);
     QUrl url = endpoint(QStringLiteral("/Shows/") + seriesId + QStringLiteral("/Episodes"));
     QUrlQuery wire;
     if (!seasonId.isEmpty())
@@ -836,18 +846,20 @@ bool JellyfinClient::fetchEpisodes(const QString &seriesId, const QString &seaso
         wire.addQueryItem(QStringLiteral("startIndex"), QString::number(startIndex));
     if (limit >= 0)
         wire.addQueryItem(QStringLiteral("limit"), QString::number(limit));
+    wire.addQueryItem(QStringLiteral("fields"), QStringLiteral("Overview"));
+    addImageTypeParameters(wire);
     wire.addQueryItem(QStringLiteral("userId"), m_userId);
     url.setQuery(wire);
     QNetworkReply *reply = m_network.get(requestFor(url, true));
-    m_listingReplies.insert(family, reply);
-    attach(reply, m_generation, [this, family, serial](QNetworkReply *finished) {
-        if (listingSuperseded(family, serial))
+    m_listingReplies.insert(key, reply);
+    attach(reply, m_generation, [this, family, key, channel, serial](QNetworkReply *finished) {
+        if (listingSuperseded(key, serial))
             return;
         QJsonArray items;
         int total = 0;
-        if (!listingEnvelope(finished, family, 0, &items, &total))
+        if (!listingEnvelope(finished, family, channel, &items, &total))
             return;
-        Q_EMIT episodesReady(items, total);
+        Q_EMIT episodesReady(items, total, channel);
     });
     return true;
 }
@@ -1251,7 +1263,8 @@ void JellyfinClient::releaseListingChannel(int channel)
         return;
     for (const QString &family :
          {QStringLiteral("Items"), QStringLiteral("Resume"), QStringLiteral("Latest"),
-          QStringLiteral("NextUp"), QStringLiteral("Similar")}) {
+          QStringLiteral("NextUp"), QStringLiteral("Similar"), QStringLiteral("Seasons"),
+          QStringLiteral("Episodes")}) {
         const QString key = listingKey(family, channel);
         if (!m_listingSerials.contains(key))
             continue;

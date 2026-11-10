@@ -64,8 +64,7 @@ class JellyfinClient final : public QObject {
     void cancelQuickConnect();
     bool isQuickConnectPending() const;
     bool fetchUserViews();
-    // The universal listing of `/Items`: library grids, search and ids= resolution. The members of `query` are validated and composed into the camelCase query the 12.4 routes accept; the ids better than one item are joined comma-only
-    // `channel` names the consumer: a family keeps one request in flight per channel, a new call on the same channel aborts the pending one, and every signal of the call carries the channel back, so independent consumers (the library grid, the home rows) pass distinct channels and ignore the others' replies. Only the five families the browse and details pages use (Items, Resume, Latest, NextUp, Similar) take a channel; the others have the single channel 0
+    // The universal listing of `/Items`: library grids, search and ids= resolution. The members of `query` are validated and composed into the camelCase query the 12.4 routes accept; the ids better than one item are joined comma-only. `channel` names the consumer: a family keeps one request in flight per channel, a new call on the same channel aborts the pending one, and every signal of the call carries the channel back, so independent consumers (the library grid, the home rows) pass distinct channels and ignore the others' replies. Only the seven families the browse and details pages use (Items, Resume, Latest, NextUp, Similar, Seasons, Episodes) take a channel; the others have the single channel 0
     bool fetchItems(const ItemQuery &query, int channel = 0);
     // The Continue Watching row: `GET /UserItems/Resume` (the route the upstream resume section speaks on the 12.x generation), video items; the envelope's total is still required and validated
     bool fetchResumeItems(int limit, int channel = 0);
@@ -76,8 +75,9 @@ class JellyfinClient final : public QObject {
                      const QString &nextUpDateCutoff, bool enableRewatching, int limit,
                      int channel = 0);
     // One series' seasons, and its episodes per season (`seasonId` empty = every season, paged by `startIndex`/`limit`; `startIndex` < 0 lets the server default)
-    bool fetchSeasons(const QString &seriesId);
-    bool fetchEpisodes(const QString &seriesId, const QString &seasonId, int startIndex, int limit);
+    bool fetchSeasons(const QString &seriesId, int channel = 0);
+    bool fetchEpisodes(const QString &seriesId, const QString &seasonId, int startIndex, int limit,
+                       int channel = 0);
     // Similar items of any item kind (the generic `/Items/{itemId}/Similar` route)
     bool fetchSimilarItems(const QString &itemId, int limit, int channel = 0);
     // Drops the pending requests of one channel (silently, like a superseded one) and forgets its bookkeeping: for a consumer that is going away and will not use the channel again. Channel 0 is not releasable
@@ -152,8 +152,8 @@ class JellyfinClient final : public QObject {
     void resumeItemsReady(const QJsonArray &items, int totalRecordCount, int channel);
     void latestItemsReady(const QJsonArray &items, int channel);
     void nextUpReady(const QJsonArray &items, int totalRecordCount, int channel);
-    void seasonsReady(const QJsonArray &items, int totalRecordCount);
-    void episodesReady(const QJsonArray &items, int totalRecordCount);
+    void seasonsReady(const QJsonArray &items, int totalRecordCount, int channel);
+    void episodesReady(const QJsonArray &items, int totalRecordCount, int channel);
     void similarItemsReady(const QJsonArray &items, int totalRecordCount, int channel);
     void genresReady(const QJsonArray &items, int totalRecordCount);
     void filtersReady(const QJsonObject &filters);

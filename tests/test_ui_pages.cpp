@@ -11,6 +11,7 @@
 
 #include <KLocalizedQmlContext>
 
+#include <QElapsedTimer>
 #include <QJsonArray>
 #include <QMutex>
 #include <QMutexLocker>
@@ -20,6 +21,8 @@
 #include <QQuickWindow>
 #include <QTemporaryDir>
 #include <QtTest/QtTest>
+
+#include <functional>
 
 using Kinefin::ConnectionController;
 
@@ -69,6 +72,20 @@ QString address(const FakeJellyfin &server)
 
 const QString kMovies = QStringLiteral("e2a1aa11a8d94b5c999a25cf59abcd01");
 const QString kMovieId = QStringLiteral("f0e1d2c3b4a5968778695a4b3c2d1e0f");
+const QString kSeriesId = QStringLiteral("aa11bb22cc33dd44ee55ff6677889900");
+const QString kSeasonId = QStringLiteral("11aa22bb33cc44dd55ee66ff778899aa");
+const QString kEpisodeId = QStringLiteral("b1b2c3d4e5f64788990a1b2c3d4e5f60");
+const QString kBoxSetId = QStringLiteral("bb11cc22dd33ee44ff5566778899aabb");
+
+QJsonObject fixtureObject(const QString &name)
+{
+    return QJsonDocument::fromJson(fixture(name))
+        .object()
+        .value(QStringLiteral("Items"))
+        .toArray()
+        .first()
+        .toObject();
+}
 
 QByteArray envelope(const QJsonArray &items)
 {
@@ -122,6 +139,63 @@ struct Ui {
         server.itemsById.insert(kMovieId, QJsonDocument(movie).toJson(QJsonDocument::Compact));
         server.listingRawBody.insert(QStringLiteral("Items"), envelope(QJsonArray{movie}));
         server.listingRawBody.insert(QStringLiteral("Resume"), envelope(QJsonArray{movie}));
+    }
+
+    // A series with its season and episodes: the series, the season, the episodes of the fixture page and each episode behind the details route
+    void serveShow()
+    {
+        for (const auto &[id, name] : {std::pair{kSeriesId, QStringLiteral("series_item")},
+                                       std::pair{kSeasonId, QStringLiteral("season_item")},
+                                       std::pair{kBoxSetId, QStringLiteral("boxset_item")}})
+            server.itemsById.insert(
+                id, QJsonDocument(fixtureObject(name)).toJson(QJsonDocument::Compact));
+        QJsonObject episode = fixtureObject(QStringLiteral("episode_item"));
+        server.itemsById.insert(episode.value(QStringLiteral("Id")).toString(),
+                                QJsonDocument(episode).toJson(QJsonDocument::Compact));
+        episode.insert(QStringLiteral("Id"), kEpisodeId);
+        episode.insert(QStringLiteral("Name"), QStringLiteral("The Silent Sea"));
+        server.itemsById.insert(kEpisodeId, QJsonDocument(episode).toJson(QJsonDocument::Compact));
+        server.listingRawBody.insert(QStringLiteral("Items"),
+                                     fixture(QStringLiteral("boxset_children")));
+    }
+
+    // Scrolls the page so the item sits a little under the top of the view, then clicks it
+    void revealAndClick(QQuickItem *page, QQuickItem *target)
+    {
+        auto *flickable = page->property("flickable").value<QQuickItem *>();
+        const qreal itemTop = target->mapToScene(QPointF(0, 0)).y();
+        const qreal viewTop = flickable->mapToScene(QPointF(0, 0)).y();
+        flickable->setProperty("contentY",
+                               flickable->property("contentY").toReal() + itemTop - viewTop - 100);
+        QTest::qWait(100);
+        clickCenter(target);
+    }
+
+    // Reveals and clicks again until `done` holds: under load the layout may still move after the first reveal and the click lands beside its target
+    bool revealAndClickUntil(QQuickItem *page, QQuickItem *target,
+                             const std::function<bool()> &done, int timeoutMs = 8000)
+    {
+        QElapsedTimer timer;
+        timer.start();
+        while (!done()) {
+            if (timer.elapsed() > timeoutMs)
+                return false;
+            revealAndClick(page, target);
+            QTest::qWait(250);
+        }
+        return true;
+    }
+
+    // The details page in front: the last page of the stack
+    QQuickItem *currentDetails() const
+    {
+        auto *stack = window->property("pageStack").value<QObject *>();
+        return stack ? stack->property("currentItem").value<QQuickItem *>() : nullptr;
+    }
+    int stackDepth() const
+    {
+        auto *stack = window->property("pageStack").value<QObject *>();
+        return stack ? stack->property("depth").toInt() : -1;
     }
 
     bool signIn()
@@ -553,6 +627,205 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(ui.item(QStringLiteral("itemDetailsPage")) == nullptr);
     }
 
+    void aSeriesPageListsItsSeasonsAndOpensOne()
+    {
+        Ui ui(m_home->path());
+        ui.serveShow();
+        QVERIFY(ui.load());
+        ui.window->setProperty("requestedItemId", kSeriesId);
+        QVERIFY(ui.signIn());
+        QTRY_VERIFY(ui.item(QStringLiteral("itemDetailsPage")) != nullptr);
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Seasons")));
+        QQuickItem *row = nullptr;
+        QTRY_VERIFY((row = ui.item(QStringLiteral("seasonsRow"))) != nullptr);
+        QTRY_COMPARE(row->property("count").toInt(), 3);
+        // The delegates follow the count by a moment
+        QTRY_VERIFY(Ui::itemIn(ui.currentDetails(), QStringLiteral("mediaCard_") + kSeasonId)
+                    != nullptr);
+        // Return on the second season opens it
+        row->forceActiveFocus();
+        row->setProperty("currentIndex", 1);
+        const int depth = ui.stackDepth();
+        QTest::keyClick(ui.window, Qt::Key_Return);
+        QTRY_COMPARE(ui.stackDepth(), depth + 1);
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Episodes")));
+        QTRY_VERIFY(Ui::itemIn(ui.currentDetails(), QStringLiteral("episodeRow_") + kEpisodeId)
+                    != nullptr);
+        // Back to the series
+        auto *stack = ui.window->property("pageStack").value<QObject *>();
+        QVERIFY(QMetaObject::invokeMethod(stack, "pop", Q_ARG(QVariant, QVariant())));
+        QTRY_COMPARE(ui.stackDepth(), depth);
+    }
+
+    void nextUpOpensItsEpisode()
+    {
+        Ui ui(m_home->path());
+        ui.serveShow();
+        QVERIFY(ui.load());
+        ui.window->setProperty("requestedItemId", kSeriesId);
+        QVERIFY(ui.signIn());
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Next Up")));
+        QQuickItem *page = nullptr;
+        QTRY_VERIFY((page = ui.item(QStringLiteral("itemDetailsPage"))) != nullptr);
+        QQuickItem *entry = nullptr;
+        QTRY_VERIFY((entry = Ui::itemIn(
+                         page, QStringLiteral("episodeRow_c2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7")))
+                    != nullptr);
+        const int depth = ui.stackDepth();
+        QVERIFY(ui.revealAndClickUntil(page, entry, [&] { return ui.stackDepth() == depth + 1; }));
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Weightless")));
+    }
+
+    void aLongSeasonPagesOnlyWhileScrolling()
+    {
+        Ui ui(m_home->path());
+        ui.serveShow();
+        ui.server.generatedEpisodeTotal = 120;
+        QVERIFY(ui.load());
+        ui.window->setProperty("requestedItemId", kSeasonId);
+        QVERIFY(ui.signIn());
+        QQuickItem *list = nullptr;
+        QTRY_VERIFY((list = ui.item(QStringLiteral("episodesList"))) != nullptr);
+        QTRY_COMPARE(list->property("count").toInt(), 120);
+        QTest::qWait(300);
+        // Only the first page until the user scrolls
+        QCOMPARE(ui.server.listingRoutes.value(QStringLiteral("Episodes")).size(), 1);
+        QVERIFY(QMetaObject::invokeMethod(list, "positionViewAtEnd"));
+        QTRY_VERIFY(ui.server.listingRoutes.value(QStringLiteral("Episodes"))
+                        .constLast()
+                        .contains("startIndex=100"));
+    }
+
+    void aCollectionPageListsItsItems()
+    {
+        Ui ui(m_home->path());
+        ui.serveShow();
+        QVERIFY(ui.load());
+        ui.window->setProperty("requestedItemId", kBoxSetId);
+        QVERIFY(ui.signIn());
+        QTRY_VERIFY(ui.showsText(QStringLiteral("In This Collection")));
+        QQuickItem *row = nullptr;
+        QTRY_VERIFY((row = ui.item(QStringLiteral("collectionRow"))) != nullptr);
+        QTRY_COMPARE(row->property("count").toInt(), 3);
+        // The delegates follow the count by a moment
+        QTRY_VERIFY(Ui::itemIn(ui.currentDetails(), QStringLiteral("mediaCard_") + kMovieId)
+                    != nullptr);
+    }
+
+    void episodeTextIsPlainText()
+    {
+        Ui ui(m_home->path());
+        ui.serveShow();
+        const QString hostile =
+            QStringLiteral("<b>bold</b><img src=\"http://evil.invalid/x.png\">");
+        const QJsonObject episode{
+            {QStringLiteral("Id"), kEpisodeId},
+            {QStringLiteral("Type"), QStringLiteral("Episode")},
+            {QStringLiteral("Name"), QString(hostile + QStringLiteral(" title"))},
+            {QStringLiteral("Overview"), QString(hostile + QStringLiteral(" synopsis"))},
+            {QStringLiteral("SeriesId"), kSeriesId},
+            {QStringLiteral("ParentIndexNumber"), 2},
+            {QStringLiteral("IndexNumber"), 5}};
+        ui.server.listingRawBody.insert(QStringLiteral("Episodes"), envelope(QJsonArray{episode}));
+        QVERIFY(ui.load());
+        ui.window->setProperty("requestedItemId", kSeasonId);
+        QVERIFY(ui.signIn());
+        QTRY_VERIFY(ui.item(QStringLiteral("episodesList")) != nullptr);
+        for (const QString &part : {QStringLiteral(" title"), QStringLiteral(" synopsis")}) {
+            QTRY_VERIFY2(!ui.itemsWithText(QString(hostile + part), false).isEmpty(),
+                         qPrintable(part));
+            for (QQuickItem *label : ui.itemsWithText(QString(hostile + part), false)) {
+                QVERIFY(label->property("textFormat").isValid());
+                QCOMPARE(label->property("textFormat").toInt(), int(Qt::PlainText));
+            }
+        }
+        QVERIFY(gWarnings.filter(QStringLiteral("evil.invalid")).isEmpty());
+    }
+
+    void aFailedEpisodesListOffersRetry()
+    {
+        Ui ui(m_home->path());
+        ui.serveShow();
+        ui.server.listingStatus.insert(QStringLiteral("Episodes"), 500);
+        QVERIFY(ui.load());
+        ui.window->setProperty("requestedItemId", kSeasonId);
+        QVERIFY(ui.signIn());
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Could not load the episodes"), false));
+        ui.server.listingStatus.clear();
+        auto *children = ui.currentDetails()->property("childModel").value<QObject *>();
+        QVERIFY(children);
+        auto *episodes = children->property("episodes").value<QObject *>();
+        QVERIFY(episodes);
+        QVERIFY(QMetaObject::invokeMethod(episodes, "retry"));
+        QTRY_VERIFY(!ui.showsText(QStringLiteral("Could not load the episodes"), false));
+        QTRY_VERIFY(Ui::itemIn(ui.currentDetails(), QStringLiteral("episodeRow_") + kEpisodeId)
+                    != nullptr);
+    }
+
+    void theMetaLineIsVisibleOnAnEpisodePage()
+    {
+        Ui ui(m_home->path());
+        ui.serveShow();
+        QVERIFY(ui.load());
+        ui.window->setProperty("requestedItemId", kEpisodeId);
+        QVERIFY(ui.signIn());
+        QTRY_VERIFY(ui.item(QStringLiteral("itemDetailsPage")) != nullptr);
+        // The series link and the metadata are shown, not only present
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Abyss Station")));
+        QTRY_VERIFY(ui.showsText(QStringLiteral("28 min"), false));
+        QTRY_VERIFY(ui.showsText(QStringLiteral("S2:E6"), false));
+    }
+
+    void aSeriesLinkOpensTheSeriesWhenItIsNotBelow()
+    {
+        Ui ui(m_home->path());
+        ui.serveShow();
+        QVERIFY(ui.load());
+        // A deep link straight to an episode: the series is not in the stack
+        ui.window->setProperty("requestedItemId", kEpisodeId);
+        QVERIFY(ui.signIn());
+        QQuickItem *link = nullptr;
+        QTRY_VERIFY((link = Ui::itemIn(ui.currentDetails(), QStringLiteral("seriesLink")))
+                    != nullptr);
+        QTRY_VERIFY(link->isVisible());
+        const int depth = ui.stackDepth();
+        QVERIFY(ui.revealAndClickUntil(ui.currentDetails(), link,
+                                       [&] { return ui.stackDepth() == depth + 1; }));
+        QTRY_COMPARE(ui.currentDetails()->property("itemId").toString(), kSeriesId);
+    }
+
+    void theSeriesLinkGoesBackUpTheStack()
+    {
+        Ui ui(m_home->path());
+        ui.serveShow();
+        QVERIFY(ui.load());
+        ui.window->setProperty("requestedItemId", kSeriesId);
+        QVERIFY(ui.signIn());
+        QQuickItem *row = nullptr;
+        QTRY_VERIFY((row = ui.item(QStringLiteral("seasonsRow"))) != nullptr);
+        QTRY_COMPARE(row->property("count").toInt(), 3);
+        const int seriesDepth = ui.stackDepth();
+        row->forceActiveFocus();
+        row->setProperty("currentIndex", 1);
+        QTest::keyClick(ui.window, Qt::Key_Return);
+        QTRY_COMPARE(ui.stackDepth(), seriesDepth + 1);
+        QQuickItem *episodeRow = nullptr;
+        QTRY_VERIFY((episodeRow = Ui::itemIn(ui.currentDetails(),
+                                             QStringLiteral("episodeRow_") + kEpisodeId))
+                    != nullptr);
+        QQuickItem *seasonList = ui.currentDetails();
+        QVERIFY(ui.revealAndClickUntil(seasonList, episodeRow,
+                                       [&] { return ui.stackDepth() == seriesDepth + 2; }));
+        QQuickItem *link = nullptr;
+        QTRY_VERIFY((link = Ui::itemIn(ui.currentDetails(), QStringLiteral("seriesLink")))
+                    != nullptr);
+        QTRY_VERIFY(link->isVisible());
+        // The series page is already in the stack: the click goes back to it instead of pushing another
+        QVERIFY(ui.revealAndClickUntil(ui.currentDetails(), link,
+                                       [&] { return ui.stackDepth() == seriesDepth; }));
+        QCOMPARE(ui.currentDetails()->property("itemId").toString(), kSeriesId);
+    }
+
     void aFailedHomeRowOffersItsOwnRetry()
     {
         Ui ui(m_home->path());
@@ -608,8 +881,7 @@ class TestUiPages : public QObject {
         QVERIFY(ui.openLibraryTile(kMovies));
         QTRY_COMPARE(ui.controller.library()->status(), Kinefin::LibraryItemsModel::Ready);
         QTRY_VERIFY(ui.itemsWithText(hostile).size() >= 2);
-        // Every label that carries the markup renders it as text, never as rich text
-        // The card's second line carries the markup too, after "S1:E2 - "
+        // Every label that carries the markup renders it as text, never as rich text. The card's second line carries the markup too, after "S1:E2 - "
         const QList<QQuickItem *> labels = ui.itemsWithText(hostile, false);
         QVERIFY(!labels.isEmpty());
         for (QQuickItem *label : labels) {

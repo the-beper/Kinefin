@@ -2,11 +2,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "ItemDetails.h"
 
+#include "ItemSummary.h"
+
 #include "api/MediaSourceSelection.h"
 
 #include <QJsonArray>
 #include <QJsonValue>
-#include <QRegularExpression>
 
 #include <algorithm>
 
@@ -121,11 +122,8 @@ ItemDetails parseItemDetails(const QJsonObject &item)
     details.id = id;
     details.name = text(item.value(QStringLiteral("Name")), ItemDetails::MaxName);
     details.type = text(item.value(QStringLiteral("Type")), kMaxToken);
-    details.overview = text(item.value(QStringLiteral("Overview")), ItemDetails::MaxOverview);
-    // Overviews carry line breaks as <br>: only those become newlines, any other markup stays literal text
-    details.overview.replace(
-        QRegularExpression(QStringLiteral("<br\\s*/?>"), QRegularExpression::CaseInsensitiveOption),
-        QStringLiteral("\n"));
+    details.overview =
+        overviewText(item.value(QStringLiteral("Overview")), ItemDetails::MaxOverview);
     details.tagline =
         stringList(item.value(QStringLiteral("Taglines")), 1, ItemDetails::MaxShort).value(0);
     details.year = boundedInt(item.value(QStringLiteral("ProductionYear")), 1, 9999, 0);
@@ -153,8 +151,17 @@ ItemDetails parseItemDetails(const QJsonObject &item)
 
     details.seriesName = text(item.value(QStringLiteral("SeriesName")), ItemDetails::MaxName);
     details.seriesId = validId(item.value(QStringLiteral("SeriesId")));
+    details.seasonId = validId(item.value(QStringLiteral("SeasonId")));
     details.seasonNumber = boundedInt(item.value(QStringLiteral("ParentIndexNumber")), 0, 9999, -1);
     details.episodeNumber = boundedInt(item.value(QStringLiteral("IndexNumber")), 0, 99999, -1);
+    // A season's own IndexNumber is its number: it is not an episode number
+    details.episodeNumberEnd =
+        boundedInt(item.value(QStringLiteral("IndexNumberEnd")), 0, 99999, -1);
+    if (details.type == QLatin1String("Season")) {
+        details.seasonNumber = details.episodeNumber;
+        details.episodeNumber = -1;
+        details.episodeNumberEnd = -1;
+    }
 
     const QJsonValue tags = item.value(QStringLiteral("ImageTags"));
     const QJsonObject tagObject = tags.isObject() ? tags.toObject() : QJsonObject();

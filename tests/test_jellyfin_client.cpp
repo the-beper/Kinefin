@@ -1230,8 +1230,9 @@ class TestJellyfinClient : public QObject {
         QSignalSpy failures(&client, &Kinefin::JellyfinClient::listingFailed);
         QVERIFY(client.fetchSeasons(QStringLiteral("aa11bb22cc33dd44ee55ff6677889900")));
         QTRY_COMPARE(seasons.size(), 1);
-        QCOMPARE(seasons.constFirst().constFirst().value<QJsonArray>().size(), 2);
-        QCOMPARE(seasons.constFirst().at(1).toInt(), 2);
+        QCOMPARE(seasons.constFirst().constFirst().value<QJsonArray>().size(), 3);
+        QCOMPARE(seasons.constFirst().at(1).toInt(), 3);
+        QCOMPARE(seasons.constFirst().at(2).toInt(), 0); // the default channel
         QUrlQuery wire = FakeJellyfin::capturedListingQuery(
             server.lastListingRoute.value(QStringLiteral("Seasons")));
         QVERIFY(
@@ -1239,6 +1240,9 @@ class TestJellyfinClient : public QObject {
                 .contains(QByteArrayLiteral("/Shows/aa11bb22cc33dd44ee55ff6677889900/Seasons?")));
         QVERIFY(wire.queryItemValue(QStringLiteral("userId"))
                     .contains(QStringLiteral("d5ed5d4e2e5447b58e9f2b6f7bd5c96a")));
+        QVERIFY(wire.queryItemValue(QStringLiteral("enableImageTypes"))
+                    .contains(QStringLiteral("Primary")));
+        QCOMPARE(wire.queryItemValue(QStringLiteral("imageTypeLimit")), QStringLiteral("1"));
         QVERIFY(client.fetchEpisodes(QStringLiteral("aa11bb22cc33dd44ee55ff6677889900"),
                                      QStringLiteral("11aa22bb33cc44dd55ee66ff778899aa"), 6, 40));
         QTRY_COMPARE(episodes.size(), 1);
@@ -1248,6 +1252,11 @@ class TestJellyfinClient : public QObject {
                  QStringLiteral("11aa22bb33cc44dd55ee66ff778899aa"));
         QCOMPARE(wire.queryItemValue(QStringLiteral("startIndex")), QStringLiteral("6"));
         QCOMPARE(wire.queryItemValue(QStringLiteral("limit")), QStringLiteral("40"));
+        // Only the field the rows show beyond the defaults, and the image types the cards use
+        QCOMPARE(wire.queryItemValue(QStringLiteral("fields")), QStringLiteral("Overview"));
+        QVERIFY(wire.queryItemValue(QStringLiteral("enableImageTypes"))
+                    .contains(QStringLiteral("Backdrop")));
+        QCOMPARE(wire.queryItemValue(QStringLiteral("imageTypeLimit")), QStringLiteral("1"));
         // An empty seasonId asks for every season, unpaged:
         QVERIFY(
             client.fetchEpisodes(QStringLiteral("aa11bb22cc33dd44ee55ff6677889900"), {}, -1, -1));
@@ -1267,6 +1276,37 @@ class TestJellyfinClient : public QObject {
         QCOMPARE(failures.constLast().at(1).toInt(), 401);
         QTRY_COMPARE(seasons.size(), 1); // no new ready signal
         QVERIFY(!client.isAuthenticated());
+    }
+
+    void seasonsAndEpisodesKeepOneRequestPerChannel()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        const QString series = QStringLiteral("aa11bb22cc33dd44ee55ff6677889900");
+        QSignalSpy seasons(&client, &Kinefin::JellyfinClient::seasonsReady);
+        QSignalSpy episodes(&client, &Kinefin::JellyfinClient::episodesReady);
+        // Two channels of one family are two requests in flight, each answered with its own channel
+        QVERIFY(client.fetchSeasons(series, 80001));
+        QVERIFY(client.fetchSeasons(series, 80002));
+        QVERIFY(client.fetchEpisodes(series, {}, 0, 10, 80001));
+        QTRY_COMPARE(seasons.size(), 2);
+        QTRY_COMPARE(episodes.size(), 1);
+        QSet<int> channels;
+        for (const QList<QVariant> &arguments : seasons)
+            channels.insert(arguments.at(2).toInt());
+        QCOMPARE(channels, (QSet<int>{80001, 80002}));
+        QCOMPARE(episodes.constFirst().at(2).toInt(), 80001);
+        // A released channel emits nothing for the request it still had
+        seasons.clear();
+        server.holdListings = true;
+        QVERIFY(client.fetchSeasons(series, 80003));
+        QTRY_COMPARE(server.listingRoutes.value(QStringLiteral("Seasons")).size(), 3);
+        client.releaseListingChannel(80003);
+        server.holdListings = false;
+        QTest::qWait(200);
+        QCOMPARE(seasons.size(), 0);
     }
 
     void similarGenresFiltersSessions()

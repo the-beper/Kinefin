@@ -6,8 +6,14 @@
       "SeriesId": "aa11bb22cc33dd44ee55ff6677889900",
       "Type": "Season",
       "IndexNumber": 1,
-      "UserData": { "Key": "abyssstation-s1", "PlayedPercentage": 55, "UnplayedItemCount": 2 },
-      "ImageTags": { "Primary": "abyss-s1-tag" }
+      "UserData": {
+        "Key": "abyssstation-s1",
+        "PlayedPercentage": 55,
+        "UnplayedItemCount": 2
+      },
+      "ImageTags": {
+        "Primary": "abyss-s1-tag"
+      }
     },
     {
       "Name": "Season 2",
@@ -15,10 +21,29 @@
       "SeriesId": "aa11bb22cc33dd44ee55ff6677889900",
       "Type": "Season",
       "IndexNumber": 2,
-      "UserData": { "Key": "abyssstation-s2", "Played": false, "UnplayedItemCount": 6 },
-      "ImageTags": { "Primary": "abyss-s2-tag" }
+      "UserData": {
+        "Key": "abyssstation-s2",
+        "Played": false,
+        "UnplayedItemCount": 6
+      },
+      "ImageTags": {
+        "Primary": "abyss-s2-tag"
+      }
+    },
+    {
+      "Name": "Specials",
+      "Id": "33bb44cc55dd66ee77ff8899aa001122",
+      "SeriesId": "aa11bb22cc33dd44ee55ff6677889900",
+      "Type": "Season",
+      "IndexNumber": 0,
+      "SeriesPrimaryImageTag": "abyss-primary",
+      "UserData": {
+        "Key": "abyssstation-s0",
+        "Played": false,
+        "UnplayedItemCount": 0
+      }
     }
   ],
   "StartIndex": 0,
-  "TotalRecordCount": 2
+  "TotalRecordCount": 3
 }

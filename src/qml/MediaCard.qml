@@ -78,8 +78,7 @@ Controls.ItemDelegate {
                 asynchronous: true
                 fillMode: Image.PreserveAspectCrop
                 sourceSize.width: width * Screen.devicePixelRatio
-                // A placeholder row has no image to fetch
-                // Only URLs built by JellyfinClient::imageUrl belong here: the image fetcher allows nothing else, but a raw server string must never become a source
+                // A placeholder row has no image to fetch. Only URLs built by JellyfinClient::imageUrl belong here: the image fetcher allows nothing else, but a raw server string must never become a source
                 source: card.loaded ? card.imageUrl : ""
             }
 

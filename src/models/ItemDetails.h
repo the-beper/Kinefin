@@ -75,8 +75,10 @@ struct ItemDetails {
     qint64 resumePositionTicks = 0;
     QString seriesName;
     QString seriesId;
+    QString seasonId;
     int seasonNumber = -1;
     int episodeNumber = -1;
+    int episodeNumberEnd = -1;
     QString primaryTag;
     // The image of the item itself, or else the parent's, with the id that owns it
     QString backdropItemId;

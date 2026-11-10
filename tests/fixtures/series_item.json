@@ -1,0 +1,39 @@
+{
+  "Items": [
+    {
+      "Name": "Abyss Station",
+      "Id": "aa11bb22cc33dd44ee55ff6677889900",
+      "Type": "Series",
+      "ProductionYear": 2021,
+      "Overview": "A research station at the bottom of a sea nobody mapped.",
+      "Genres": [
+        "Drama",
+        "Science Fiction"
+      ],
+      "OfficialRating": "TV-14",
+      "CommunityRating": 8.2,
+      "UserData": {
+        "Key": "abyssstation",
+        "Played": false,
+        "UnplayedItemCount": 8
+      },
+      "ImageTags": {
+        "Primary": "abyss-primary"
+      },
+      "BackdropImageTags": [
+        "abyss-backdrop"
+      ],
+      "People": [
+        {
+          "Name": "Mira Vale",
+          "Id": "a1b2c3d4e5f60718293a4b5c6d7e8f01",
+          "Role": "Captain Sol",
+          "Type": "Actor",
+          "PrimaryImageTag": "mira-primary"
+        }
+      ]
+    }
+  ],
+  "StartIndex": 0,
+  "TotalRecordCount": 1
+}

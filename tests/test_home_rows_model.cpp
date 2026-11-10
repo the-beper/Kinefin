@@ -281,6 +281,33 @@ class TestHomeRowsModel : public QObject {
             QStringLiteral("/Items/cccccccccccccccccccccccccccccc03/Images/Primary")));
     }
 
+    void anEpisodeShowsItsParentThumbAsTheServerFillsIt()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        const QString series = QStringLiteral("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb1");
+        const QJsonObject episode{
+            {QStringLiteral("Id"), QStringLiteral("cccccccccccccccccccccccccccccc04")},
+            {QStringLiteral("Type"), QStringLiteral("Episode")},
+            {QStringLiteral("SeriesId"), series},
+            {QStringLiteral("ParentThumbItemId"), series},
+            {QStringLiteral("ParentThumbImageTag"), QStringLiteral("pt")},
+            {QStringLiteral("ParentBackdropItemId"), series},
+            {QStringLiteral("ParentBackdropImageTags"), QJsonArray{QStringLiteral("pb")}},
+            {QStringLiteral("ImageTags"),
+             QJsonObject{{QStringLiteral("Primary"), QStringLiteral("own")}}}};
+        f.server.listingRawBody.insert(QStringLiteral("Resume"),
+                                       Fixture::envelope(QJsonArray{episode}));
+        f.rows.load(libraries());
+        QTRY_VERIFY(f.allSettled());
+        const ItemRowModel *resume = f.items(0);
+        const QString url =
+            resume->data(resume->index(0), ItemRowModel::ImageUrlRole).toUrl().toString();
+        // The parent's thumb comes before the parent's backdrop and the episode's own image
+        QVERIFY(url.contains(QStringLiteral("/Items/") + series + QStringLiteral("/Images/Thumb")));
+        QVERIFY(url.contains(QStringLiteral("tag=pt")));
+    }
+
     void rowRequestsAskForTheImageTypesTheCardsShow()
     {
         Fixture f;

@@ -62,7 +62,9 @@ QUrl ItemRowModel::imageUrlFor(const ItemSummary &item) const
     if (m_landscape) {
         // jellyfin-web's default for wide rows: an episode shows its series' thumb, then its parent's backdrop, and only then its own image; a movie or series shows its own thumb, then its backdrop
         const QList<QUrl> candidates =
-            episode ? QList<QUrl>{url(item.seriesId, QStringLiteral("Thumb"), item.seriesThumbTag),
+            episode ? QList<QUrl>{url(item.parentThumbItemId, QStringLiteral("Thumb"),
+                                      item.parentThumbTag),
+                                  url(item.seriesId, QStringLiteral("Thumb"), item.seriesThumbTag),
                                   url(item.parentBackdropItemId, QStringLiteral("Backdrop"),
                                       item.parentBackdropTag)}
                     : QList<QUrl>{url(item.id, QStringLiteral("Thumb"), item.thumbTag),
@@ -72,6 +74,10 @@ QUrl ItemRowModel::imageUrlFor(const ItemSummary &item) const
                 return candidate;
         }
     }
+    // A season without a poster of its own shows its series' poster
+    if (item.type == QLatin1String("Season") && item.primaryTag.isEmpty()
+        && !item.seriesId.isEmpty())
+        return url(item.seriesId, QStringLiteral("Primary"), item.seriesPrimaryTag);
     return url(item.id, QStringLiteral("Primary"), item.primaryTag);
 }
 

@@ -6,11 +6,15 @@
 
 #include <QJsonArray>
 #include <QJsonValue>
+#include <QRegularExpression>
+
+#include <algorithm>
 
 namespace Kinefin {
 namespace {
 constexpr int kMaxNameLength = 512;
 constexpr int kMaxTokenLength = 64;
+constexpr int kMaxOverview = 2048;
 
 QString cappedString(const QJsonValue &value, int limit)
 {
@@ -25,6 +29,15 @@ int boundedInt(const QJsonValue &value, int minimum, int maximum, int fallback)
     return number < minimum || number > maximum ? fallback : static_cast<int>(number);
 }
 } // namespace
+
+QString overviewText(const QJsonValue &value, int limit)
+{
+    QString text = cappedString(value, limit);
+    static const QRegularExpression lineBreak(QStringLiteral("<br\\s*/?>"),
+                                              QRegularExpression::CaseInsensitiveOption);
+    text.replace(lineBreak, QStringLiteral("\n"));
+    return text;
+}
 
 ItemSummary parseItemSummary(const QJsonObject &item)
 {
@@ -45,6 +58,13 @@ ItemSummary parseItemSummary(const QJsonObject &item)
         cappedString(item.value(QStringLiteral("SeriesThumbImageTag")), kMaxTokenLength);
     const QString parentBackdropItem =
         cappedString(item.value(QStringLiteral("ParentBackdropItemId")), kMaxTokenLength);
+    const QString parentThumbItem =
+        cappedString(item.value(QStringLiteral("ParentThumbItemId")), kMaxTokenLength);
+    if (isValidJellyfinId(parentThumbItem)) {
+        summary.parentThumbItemId = parentThumbItem;
+        summary.parentThumbTag =
+            cappedString(item.value(QStringLiteral("ParentThumbImageTag")), kMaxTokenLength);
+    }
     if (isValidJellyfinId(parentBackdropItem)) {
         summary.parentBackdropItemId = parentBackdropItem;
         const QJsonValue parentTags = item.value(QStringLiteral("ParentBackdropImageTags"));
@@ -53,6 +73,20 @@ ItemSummary parseItemSummary(const QJsonObject &item)
     }
     summary.seasonNumber = boundedInt(item.value(QStringLiteral("ParentIndexNumber")), 0, 9999, -1);
     summary.episodeNumber = boundedInt(item.value(QStringLiteral("IndexNumber")), 0, 99999, -1);
+    summary.episodeNumberEnd =
+        boundedInt(item.value(QStringLiteral("IndexNumberEnd")), 0, 99999, -1);
+    // A season's own IndexNumber is its number: it is not an episode number
+    if (summary.type == QLatin1String("Season")) {
+        summary.seasonNumber = summary.episodeNumber;
+        summary.episodeNumber = -1;
+        summary.episodeNumberEnd = -1;
+    }
+    summary.seriesPrimaryTag =
+        cappedString(item.value(QStringLiteral("SeriesPrimaryImageTag")), kMaxTokenLength);
+    summary.overview = overviewText(item.value(QStringLiteral("Overview")), kMaxOverview);
+    const double ticks = item.value(QStringLiteral("RunTimeTicks")).toDouble(0);
+    if (ticks > 0 && ticks < 1e14)
+        summary.runtimeMinutes = int(std::max(1.0, ticks / 6e8));
     const QJsonValue tags = item.value(QStringLiteral("ImageTags"));
     if (tags.isObject()) {
         const QJsonObject tagObject = tags.toObject();

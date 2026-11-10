@@ -14,6 +14,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QPointer>
+#include <QSet>
 #include <QSignalSpy>
 #include <QTcpServer>
 #include <QTcpSocket>
@@ -171,6 +172,8 @@ class FakeJellyfin {
     // The listing routes (fetchItems and family). `holdFirstListings` holds that many next listing replies suppressed until releaseHeld(), `holdListings` holds every one of them, `denyListings` answers 401, `redirectListings` answers 302 off-host. The family (a key of the two last* hashes) is classified from the route fragment, so a test can assert the exact query the client sent. Fixture bodies come from `listingFixtures` (the ctor fills the defaults; a test may override a family)
     int holdFirstListings = 0;
     bool holdListings = false;
+    // Families whose requests are held like holdListings does, the others are answered
+    QSet<QString> heldFamilies;
     bool denyListings = false;
     bool redirectListings = false;
     QHash<QString, QString> listingFixtures;
@@ -182,6 +185,8 @@ class FakeJellyfin {
     // When >= 0 the Items family is generated from startIndex/limit: `generatedItemTotal` is the TotalRecordCount, `generatedAvailable` (when >= 0) the rows that really exist, so a page past it comes back short; ids, names and image tags follow the row index
     int generatedItemTotal = -1;
     int generatedAvailable = -1;
+    // When >= 0 the Episodes family is generated from startIndex/limit, like generatedItemTotal does for Items: this is the TotalRecordCount
+    int generatedEpisodeTotal = -1;
     QList<QByteArray> itemsRoutes; // every Items request in arrival order
     // Items by lower-case id, each a JSON object: when not empty, an Items request with `ids=` answers the entries it finds (an empty envelope when none), whatever the listing fixture says
     QHash<QString, QByteArray> itemsById;
@@ -240,6 +245,31 @@ class FakeJellyfin {
     }
 
   private:
+    QByteArray generatedEpisodesBody(const QByteArray &route) const
+    {
+        const QUrlQuery query = capturedListingQuery(route);
+        const int start = query.queryItemValue(QStringLiteral("startIndex")).toInt();
+        const int limit = query.queryItemValue(QStringLiteral("limit")).toInt();
+        QJsonArray items;
+        for (int row = start; row < start + limit && row < generatedEpisodeTotal; ++row) {
+            items.append(QJsonObject{
+                {QStringLiteral("Id"), QStringLiteral("%1").arg(row + 1, 32, 16, QLatin1Char('e'))},
+                {QStringLiteral("Name"), QStringLiteral("Episode %1").arg(row + 1)},
+                {QStringLiteral("Type"), QStringLiteral("Episode")},
+                {QStringLiteral("SeriesId"), QStringLiteral("aa11bb22cc33dd44ee55ff6677889900")},
+                {QStringLiteral("ParentIndexNumber"), 1},
+                {QStringLiteral("IndexNumber"), row + 1},
+                {QStringLiteral("RunTimeTicks"), qint64(18'000'000'000)},
+                {QStringLiteral("ImageTags"),
+                 QJsonObject{{QStringLiteral("Primary"), QStringLiteral("ep%1").arg(row)}}}});
+        }
+        return QJsonDocument(
+                   QJsonObject{{QStringLiteral("Items"), items},
+                               {QStringLiteral("StartIndex"), start},
+                               {QStringLiteral("TotalRecordCount"), generatedEpisodeTotal}})
+            .toJson(QJsonDocument::Compact);
+    }
+
     QByteArray itemsByIdBody(const QByteArray &route) const
     {
         const QStringList ids = capturedListingQuery(route)
@@ -454,12 +484,15 @@ class FakeJellyfin {
             lastListingAuth.insert(listingFamily, authorization);
             if (listingFamily == QLatin1String("Items"))
                 itemsRoutes.append(route);
-            if (holdListings || holdFirstListings-- > 0) {
+            if (holdListings || heldFamilies.contains(listingFamily) || holdFirstListings-- > 0) {
                 m_held.append(socket);
                 return;
             }
             if (listingStatus.contains(listingFamily)) {
                 respond(socket, listingStatus.value(listingFamily), {});
+            } else if (listingFamily == QLatin1String("Episodes") && generatedEpisodeTotal >= 0
+                       && !denyListings && !redirectListings) {
+                respond(socket, 200, generatedEpisodesBody(route));
             } else if (listingFamily == QLatin1String("Items") && !itemsById.isEmpty()
                        && route.contains("ids=") && !denyListings && !redirectListings) {
                 respond(socket, 200, itemsByIdBody(route));

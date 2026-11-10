@@ -11,8 +11,15 @@
       "Container": "mkv",
       "PremiereDate": "2026-03-18T20:00:00Z",
       "RunTimeTicks": 17400000000,
-      "UserData": { "Key": "ep5", "Played": false, "PlaybackPositionTicks": 0, "UnplayedItemCount": 1 },
-      "ImageTags": { "Primary": "ep5-primary-tag" },
+      "UserData": {
+        "Key": "ep5",
+        "Played": false,
+        "PlaybackPositionTicks": 0,
+        "UnplayedItemCount": 1
+      },
+      "ImageTags": {
+        "Primary": "ep5-primary-tag"
+      },
       "MediaSources": [
         {
           "Id": "ms-ep5-0001",
@@ -25,7 +32,9 @@
           "SupportsTranscoding": true,
           "IsInfiniteStream": false
         }
-      ]
+      ],
+      "Type": "Episode",
+      "Overview": "The crew listens to the silence. It listens back.<br>Nobody sleeps."
     }
   ],
   "StartIndex": 4,

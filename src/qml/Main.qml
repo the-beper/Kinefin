@@ -110,9 +110,30 @@ Kirigami.ApplicationWindow {
         if (fromPage)
             pageStack.pop(fromPage);
         const current = pageStack.currentItem;
-        if (current?.objectName === "itemDetailsPage" && current.itemId.toLowerCase() === itemId.toLowerCase())
+        if (current?.objectName === "itemDetailsPage" && sameItem(current.itemId, itemId))
             return;
         pageStack.push(Qt.resolvedUrl("ItemDetailsPage.qml"), { connection: connection, itemId: itemId });
+    }
+
+    // Goes back to an item page already in the stack below the one asking, else opens the item like openItem
+    // The same GUID is written with and without dashes, in any case
+    function sameItem(first, second) {
+        return first.replace(/-/g, "").toLowerCase() === second.replace(/-/g, "").toLowerCase();
+    }
+
+    function openAncestor(itemId, fromPage) {
+        if (connection.state !== ConnectionController.Authenticated)
+            return;
+        for (let i = 0; i < pageStack.depth; ++i) {
+            const candidate = pageStack.get(i);
+            if (candidate === fromPage)
+                break;
+            if (candidate?.objectName === "itemDetailsPage" && sameItem(candidate.itemId, itemId)) {
+                pageStack.pop(candidate);
+                return;
+            }
+        }
+        openItem(itemId, fromPage);
     }
 
     // A link opens its item above Home once signed in, whether it came before or after the sign-in

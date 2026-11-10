@@ -3,6 +3,7 @@
 #pragma once
 
 #include "api/JellyfinClient.h"
+#include "models/ItemChildrenModel.h"
 #include "models/ItemDetails.h"
 #include "models/ItemRowModel.h"
 
@@ -38,7 +39,9 @@ class ItemDetailsModel final : public QObject {
     Q_PROPERTY(bool playable READ playable NOTIFY detailsChanged)
     Q_PROPERTY(QString seriesName READ seriesName NOTIFY detailsChanged)
     Q_PROPERTY(QString seriesId READ seriesId NOTIFY detailsChanged)
+    Q_PROPERTY(QString seasonId READ seasonId NOTIFY detailsChanged)
     Q_PROPERTY(int seasonNumber READ seasonNumber NOTIFY detailsChanged)
+    Q_PROPERTY(int episodeNumberEnd READ episodeNumberEnd NOTIFY detailsChanged)
     Q_PROPERTY(int episodeNumber READ episodeNumber NOTIFY detailsChanged)
     Q_PROPERTY(QUrl backdropUrl READ backdropUrl NOTIFY detailsChanged)
     Q_PROPERTY(QUrl logoUrl READ logoUrl NOTIFY detailsChanged)
@@ -50,6 +53,8 @@ class ItemDetailsModel final : public QObject {
     // Entries: id, name, container, size, bitrate, video, audio, subtitles (lists of stream maps: codec, language, title, width, height, channels, bitrate, isDefault, isForced, isExternal)
     Q_PROPERTY(QVariantList mediaSources READ mediaSources NOTIFY detailsChanged)
     Q_PROPERTY(Kinefin::ItemRowModel *similar READ similar CONSTANT)
+    // What hangs below the item: the seasons and next episode of a series, the episodes of a season, the items of a collection
+    Q_PROPERTY(Kinefin::ItemChildrenModel *below READ below CONSTANT)
 
   public:
     enum Status { Idle, Loading, Ready, NotFound, Failed };
@@ -58,6 +63,9 @@ class ItemDetailsModel final : public QObject {
     // The listing channels of details models count up from here
     static constexpr int FirstChannel = 65536;
     static constexpr int SimilarLimit = 12;
+    // A model uses its own channel for the item and the next one for what is below it
+    static constexpr int ChannelsPerModel = 2;
+    static constexpr int BelowChannelOffset = 1;
 
     // `channel` is the model's own listing channel (the controller hands them out); the model starts loading at once
     ItemDetailsModel(JellyfinClient *client, const QString &itemId, int channel,
@@ -91,8 +99,10 @@ class ItemDetailsModel final : public QObject {
     bool playable() const;
     QString seriesName() const { return m_details.seriesName; }
     QString seriesId() const { return m_details.seriesId; }
+    QString seasonId() const { return m_details.seasonId; }
     int seasonNumber() const { return m_details.seasonNumber; }
     int episodeNumber() const { return m_details.episodeNumber; }
+    int episodeNumberEnd() const { return m_details.episodeNumberEnd; }
     QUrl backdropUrl() const;
     QUrl logoUrl() const;
     QUrl posterUrl() const;
@@ -100,6 +110,7 @@ class ItemDetailsModel final : public QObject {
     QVariantList chapters() const;
     QVariantList mediaSources() const;
     ItemRowModel *similar() { return &m_similar; }
+    ItemChildrenModel *below() { return &m_below; }
 
   Q_SIGNALS:
     void statusChanged();
@@ -123,5 +134,6 @@ class ItemDetailsModel final : public QObject {
     Status m_similarStatus = Idle;
     ItemDetails m_details;
     ItemRowModel m_similar;
+    ItemChildrenModel m_below;
 };
 } // namespace Kinefin

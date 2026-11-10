@@ -6,6 +6,7 @@ src/app/ConnectionController.cpp
 src/main.cpp
 src/settings/SettingDefinitions.cpp
 src/qml/HomePage.qml
+src/qml/EpisodeRow.qml
 src/qml/ItemDetailsPage.qml
 src/qml/LibraryPage.qml
 src/qml/MediaCard.qml

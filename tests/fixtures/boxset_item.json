@@ -1,0 +1,23 @@
+{
+  "Items": [
+    {
+      "Name": "Semaphore Collection",
+      "Id": "bb11cc22dd33ee44ff5566778899aabb",
+      "Type": "BoxSet",
+      "ChildCount": 3,
+      "Overview": "Three films about signals nobody sent.",
+      "ImageTags": {
+        "Primary": "semaphore-collection-primary"
+      },
+      "BackdropImageTags": [
+        "semaphore-collection-backdrop"
+      ],
+      "UserData": {
+        "Key": "semaphorecollection",
+        "Played": false
+      }
+    }
+  ],
+  "StartIndex": 0,
+  "TotalRecordCount": 1
+}

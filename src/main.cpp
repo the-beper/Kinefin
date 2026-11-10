@@ -46,7 +46,7 @@ int main(int argc, char *argv[])
     KAboutData::setApplicationData(aboutData);
 
     QCommandLineParser parser;
-    parser.setApplicationDescription(QStringLiteral("Kinefin native Jellyfin client (P0 shell)"));
+    parser.setApplicationDescription(QStringLiteral("Kinefin native Jellyfin client"));
     parser.addHelpOption();
     parser.addVersionOption();
     parser.addPositionalArgument(QStringLiteral("url"),

@@ -3,9 +3,11 @@
 #pragma once
 
 #include "models/HomeRowsModel.h"
+#include "models/ItemChildrenModel.h"
 #include "models/ItemDetailsModel.h"
 #include "models/ItemRowModel.h"
 #include "models/LibraryItemsModel.h"
+#include "models/SeasonEpisodesModel.h"
 
 #include <QtQml/qqmlregistration.h>
 
@@ -36,6 +38,20 @@ struct ItemDetailsModelForeign {
     Q_GADGET
     QML_FOREIGN(Kinefin::ItemDetailsModel)
     QML_NAMED_ELEMENT(ItemDetailsModel)
+    QML_UNCREATABLE("Created by the application")
+};
+
+struct ItemChildrenModelForeign {
+    Q_GADGET
+    QML_FOREIGN(Kinefin::ItemChildrenModel)
+    QML_NAMED_ELEMENT(ItemChildrenModel)
+    QML_UNCREATABLE("Created by the application")
+};
+
+struct SeasonEpisodesModelForeign {
+    Q_GADGET
+    QML_FOREIGN(Kinefin::SeasonEpisodesModel)
+    QML_NAMED_ELEMENT(SeasonEpisodesModel)
     QML_UNCREATABLE("Created by the application")
 };
 } // namespace Kinefin
