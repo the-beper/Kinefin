@@ -579,6 +579,13 @@ void JellyfinClient::clearQuickConnectSecret()
 }
 
 namespace {
+// The image types a card can show, one tag per type, like jellyfin-web asks for them
+void addImageTypeParameters(QUrlQuery &wire)
+{
+    wire.addQueryItem(QStringLiteral("enableImageTypes"), QStringLiteral("Primary,Backdrop,Thumb"));
+    wire.addQueryItem(QStringLiteral("imageTypeLimit"), QStringLiteral("1"));
+}
+
 // The /Items query of one item listing, or when `query.itemIds` is set an ids= resolution that carries only the ids and the fields (the details-refresh form): documented by ItemQuery. `userId` rides along on every listing call
 QUrlQuery listingQuery(const ItemQuery &query, const QString &userId)
 {
@@ -593,7 +600,9 @@ QUrlQuery listingQuery(const ItemQuery &query, const QString &userId)
         if (!query.excludeItemTypes.isEmpty())
             wire.addQueryItem(QStringLiteral("excludeItemTypes"), query.excludeItemTypes);
         if (!query.searchTerm.isEmpty())
-            wire.addQueryItem(QStringLiteral("searchTerm"), query.searchTerm);
+            // Encoded here, once: QUrlQuery keeps a %XX of its input as it is, so a typed "%25" must already be "%2525"
+            wire.addQueryItem(QStringLiteral("searchTerm"),
+                              QString::fromLatin1(QUrl::toPercentEncoding(query.searchTerm)));
         if (!query.sortBy.isEmpty()) {
             wire.addQueryItem(QStringLiteral("sortBy"), query.sortBy);
             wire.addQueryItem(QStringLiteral("sortOrder"), query.sortOrder.isEmpty()
@@ -611,15 +620,10 @@ QUrlQuery listingQuery(const ItemQuery &query, const QString &userId)
     }
     if (!query.fields.isEmpty())
         wire.addQueryItem(QStringLiteral("fields"), query.fields.join(QLatin1Char(',')));
+    if (query.cardImages)
+        addImageTypeParameters(wire);
     wire.addQueryItem(QStringLiteral("userId"), userId);
     return wire;
-}
-
-// What the home rows ask for besides their own parameters: the image types a card can show, one tag per type, and only the field the tiles need beyond the defaults, like jellyfin-web
-void addImageTypeParameters(QUrlQuery &wire)
-{
-    wire.addQueryItem(QStringLiteral("enableImageTypes"), QStringLiteral("Primary,Backdrop,Thumb"));
-    wire.addQueryItem(QStringLiteral("imageTypeLimit"), QStringLiteral("1"));
 }
 
 void addRowImageParameters(QUrlQuery &wire, const QString &extraFields = QString())
@@ -687,7 +691,10 @@ bool JellyfinClient::fetchItems(const ItemQuery &query, int channel)
     const QString key = listingKey(family, channel);
     const quint64 serial = supersedeListing(key);
     QUrl url = endpoint(QStringLiteral("/Items"));
-    url.setQuery(listingQuery(query, m_userId));
+    // The server reads a literal '+' as a space: a typed term such as "C++" must reach it as %2B (a space is already %20)
+    QString encodedQuery = listingQuery(query, m_userId).toString(QUrl::FullyEncoded);
+    encodedQuery.replace(QLatin1Char('+'), QStringLiteral("%2B"));
+    url.setQuery(encodedQuery);
     QNetworkReply *reply = m_network.get(requestFor(url, true));
     m_listingReplies.insert(key, reply);
     attach(reply, m_generation, [this, family, key, channel, serial](QNetworkReply *finished) {

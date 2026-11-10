@@ -190,6 +190,8 @@ class FakeJellyfin {
     QList<QByteArray> itemsRoutes; // every Items request in arrival order
     // Items by lower-case id, each a JSON object: when not empty, an Items request with `ids=` answers the entries it finds (an empty envelope when none), whatever the listing fixture says
     QHash<QString, QByteArray> itemsById;
+    // A search answers by the one type it asks for: `includeItemTypes` value -> fixture name. Only a request with a searchTerm is answered this way
+    QHash<QString, QString> itemsByType;
     QHash<QString, QByteArray> lastListingRoute;     // family -> "path?query"
     QHash<QString, QList<QByteArray>> listingRoutes; // family -> every route in arrival order
     QHash<QString, QByteArray> lastListingAuth;      // family -> the Authorization header
@@ -493,6 +495,12 @@ class FakeJellyfin {
             } else if (listingFamily == QLatin1String("Episodes") && generatedEpisodeTotal >= 0
                        && !denyListings && !redirectListings) {
                 respond(socket, 200, generatedEpisodesBody(route));
+            } else if (listingFamily == QLatin1String("Items") && route.contains("searchTerm=")
+                       && itemsByType.contains(capturedListingQuery(route).queryItemValue(
+                           QStringLiteral("includeItemTypes")))) {
+                respond(socket, 200,
+                        fixture(itemsByType.value(capturedListingQuery(route).queryItemValue(
+                            QStringLiteral("includeItemTypes")))));
             } else if (listingFamily == QLatin1String("Items") && !itemsById.isEmpty()
                        && route.contains("ids=") && !denyListings && !redirectListings) {
                 respond(socket, 200, itemsByIdBody(route));

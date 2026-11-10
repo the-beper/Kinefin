@@ -56,6 +56,8 @@ add_library(kinefin_core STATIC
     src/models/ItemRowModel.h
     src/models/ItemSummary.cpp
     src/models/PagedItemsModel.cpp
+    src/models/SearchModel.cpp
+    src/models/SearchModel.h
     src/models/SeasonEpisodesModel.cpp
     src/models/SeasonEpisodesModel.h
     src/models/PagedItemsModel.h
@@ -107,7 +109,7 @@ if(mpvqt_BINARY_DIR)
 endif()
 
 # The QML module lives in a static library of its own so that the UI tests can import it like the application does
-foreach(page Main HomePage LibraryPage MediaCard CardRow EpisodeRow ItemDetailsPage LoginPage MessageBox ServersPage SettingsPage SettingsSectionPage SettingRow AboutPage)
+foreach(page Main HomePage LibraryPage MediaCard CardRow EpisodeRow ItemDetailsPage SearchPage LoginPage MessageBox ServersPage SettingsPage SettingsSectionPage SettingRow AboutPage)
     set_source_files_properties(src/qml/${page}.qml PROPERTIES QT_RESOURCE_ALIAS ${page}.qml)
 endforeach()
 qt_add_library(kinefin_ui STATIC)
@@ -122,6 +124,7 @@ qt_add_qml_module(kinefin_ui
         src/qml/CardRow.qml
         src/qml/EpisodeRow.qml
         src/qml/ItemDetailsPage.qml
+        src/qml/SearchPage.qml
         src/qml/LoginPage.qml
         src/qml/MessageBox.qml
         src/qml/ServersPage.qml
@@ -237,6 +240,11 @@ if(BUILD_TESTING)
     target_link_libraries(test_ui_pages PRIVATE kinefin_ui kinefin_uiplugin kinefin_core Qt6::Test Qt6::Gui Qt6::Quick Qt6::Qml KF6::I18n KF6::I18nQml)
     add_test(NAME ui_pages COMMAND test_ui_pages)
     set_tests_properties(ui_pages PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+    add_executable(test_search_model tests/test_search_model.cpp)
+    target_compile_definitions(test_search_model PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    target_link_libraries(test_search_model PRIVATE kinefin_core Qt6::Test Qt6::Network)
+    add_test(NAME search_model COMMAND test_search_model)
 
     add_executable(test_item_children_model tests/test_item_children_model.cpp)
     target_compile_definitions(test_item_children_model PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")

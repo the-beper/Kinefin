@@ -7,6 +7,7 @@
 #include "models/ItemDetailsModel.h"
 #include "models/ItemRowModel.h"
 #include "models/LibraryItemsModel.h"
+#include "models/SearchModel.h"
 #include "models/SeasonEpisodesModel.h"
 
 #include <QtQml/qqmlregistration.h>
@@ -52,6 +53,13 @@ struct SeasonEpisodesModelForeign {
     Q_GADGET
     QML_FOREIGN(Kinefin::SeasonEpisodesModel)
     QML_NAMED_ELEMENT(SeasonEpisodesModel)
+    QML_UNCREATABLE("Created by the application")
+};
+
+struct SearchModelForeign {
+    Q_GADGET
+    QML_FOREIGN(Kinefin::SearchModel)
+    QML_NAMED_ELEMENT(SearchModel)
     QML_UNCREATABLE("Created by the application")
 };
 } // namespace Kinefin

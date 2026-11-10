@@ -1,0 +1,33 @@
+{
+  "Items": [
+    {
+      "Name": "Abyss Station",
+      "Id": "aa11bb22cc33dd44ee55ff6677889900",
+      "Type": "Series",
+      "ProductionYear": 2021,
+      "UserData": {
+        "Key": "abyssstation",
+        "Played": false,
+        "UnplayedItemCount": 8
+      },
+      "ImageTags": {
+        "Primary": "abyss-primary"
+      }
+    },
+    {
+      "Name": "Kestrel Season",
+      "Id": "7d8e7f6a5b4c39281706f5e4d3c2b1a0",
+      "Type": "Series",
+      "ProductionYear": 2025,
+      "UserData": {
+        "Key": "kestrelseason",
+        "Played": false
+      },
+      "ImageTags": {
+        "Primary": "kestrel-primary"
+      }
+    }
+  ],
+  "StartIndex": 0,
+  "TotalRecordCount": 2
+}

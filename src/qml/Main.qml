@@ -136,6 +136,29 @@ Kirigami.ApplicationWindow {
         openItem(itemId, fromPage);
     }
 
+    // The search page is the one place the term lives: an open one is brought back as it is, a new one starts from an empty term above Home
+    function openSearch() {
+        if (connection.state !== ConnectionController.Authenticated)
+            return;
+        let page = null;
+        for (let i = 0; i < pageStack.depth; ++i) {
+            if (pageStack.get(i)?.objectName === "searchPage") {
+                page = pageStack.get(i);
+                break;
+            }
+        }
+        if (page) {
+            pageStack.pop(page);
+        } else {
+            const first = pageStack.get(0);
+            if (first)
+                pageStack.pop(first);
+            connection.search.clear();
+            page = pageStack.push(Qt.resolvedUrl("SearchPage.qml"), { connection: connection });
+        }
+        Qt.callLater(() => page?.focusSearchField());
+    }
+
     // A link opens its item above Home once signed in, whether it came before or after the sign-in
     function openRequestedItem(home) {
         if (requestedItemId.length === 0 || connection.state !== ConnectionController.Authenticated || home?.objectName !== "homePage")
@@ -176,6 +199,13 @@ Kirigami.ApplicationWindow {
                 icon.name: "go-home"
                 visible: window.signedIn
                 onTriggered: window.showPageForState()
+            },
+            Kirigami.Action {
+                text: i18n("Search")
+                icon.name: "system-search"
+                shortcut: StandardKey.Find
+                visible: window.signedIn
+                onTriggered: window.openSearch()
             },
             Kirigami.Action {
                 text: i18n("Switch Server")

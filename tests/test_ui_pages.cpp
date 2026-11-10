@@ -141,6 +141,42 @@ struct Ui {
         server.listingRawBody.insert(QStringLiteral("Resume"), envelope(QJsonArray{movie}));
     }
 
+    // Search results by type, and the fixture movie behind the details route; the debounce is short
+    void serveSearch()
+    {
+        serveMovie();
+        server.itemsByType.insert(QStringLiteral("Movie"), QStringLiteral("items_page"));
+        server.itemsByType.insert(QStringLiteral("Series"), QStringLiteral("search_series"));
+        server.itemsByType.insert(QStringLiteral("Episode"), QStringLiteral("episodes_page"));
+        server.itemsByType.insert(QStringLiteral("BoxSet"), QStringLiteral("boxset_children"));
+        controller.search()->setDebounceInterval(30);
+    }
+
+    // Types ASCII text into whatever has the focus, one key at a time
+    void type(const QString &text)
+    {
+        for (const QChar c : text)
+            QTest::keyClick(window, c.toLatin1());
+    }
+
+    // Ctrl+F from the signed-in window, then the search page with its field in focus
+    QQuickItem *openSearchPage()
+    {
+        QTest::keyClick(window, Qt::Key_F, Qt::ControlModifier);
+        if (!QTest::qWaitFor([this] { return item(QStringLiteral("searchPage")) != nullptr; },
+                             5000))
+            return nullptr;
+        QQuickItem *field = nullptr;
+        if (!QTest::qWaitFor(
+                [&] {
+                    field = item(QStringLiteral("searchField"));
+                    return field && field->hasActiveFocus();
+                },
+                5000))
+            return nullptr;
+        return field;
+    }
+
     // A series with its season and episodes: the series, the season, the episodes of the fixture page and each episode behind the details route
     void serveShow()
     {
@@ -824,6 +860,135 @@ class TestUiPages : public QObject {
         QVERIFY(ui.revealAndClickUntil(ui.currentDetails(), link,
                                        [&] { return ui.stackDepth() == seriesDepth; }));
         QCOMPARE(ui.currentDetails()->property("itemId").toString(), kSeriesId);
+    }
+
+    void ctrlFOpensTheSearchPageWithTheFieldInFocusAndOnlyOnce()
+    {
+        Ui ui(m_home->path());
+        ui.serveSearch();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(ui.openSearchPage() != nullptr);
+        QCOMPARE(ui.controller.search()->state(), Kinefin::SearchModel::Empty);
+        QVERIFY(ui.showsText(QStringLiteral("Search your libraries")));
+        // A second Ctrl+F does not stack another page and keeps the field in focus (an ambiguous shortcut would be a warning, and a failure)
+        const int depth = ui.stackDepth();
+        QTest::keyClick(ui.window, Qt::Key_F, Qt::ControlModifier);
+        QTest::qWait(300);
+        QCOMPARE(ui.stackDepth(), depth);
+        QVERIFY(ui.item(QStringLiteral("searchField"))->hasActiveFocus());
+    }
+
+    void typingShowsTheGroupedResults()
+    {
+        Ui ui(m_home->path());
+        ui.serveSearch();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *field = ui.openSearchPage();
+        QVERIFY(field);
+        ui.type(QStringLiteral("a"));
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Keep typing")));
+        ui.type(QStringLiteral("byss"));
+        QTRY_COMPARE(ui.controller.search()->state(), Kinefin::SearchModel::Results);
+        for (const QString &heading : {QStringLiteral("Movies"), QStringLiteral("Series"),
+                                       QStringLiteral("Episodes"), QStringLiteral("Collections")})
+            QTRY_VERIFY2(ui.showsText(heading), qPrintable(heading));
+        QTRY_VERIFY(Ui::itemIn(ui.item(QStringLiteral("searchPage")),
+                               QStringLiteral("mediaCard_") + kMovieId)
+                    != nullptr);
+        QCOMPARE(ui.controller.search()->term(), QStringLiteral("abyss"));
+    }
+
+    void downThenReturnOpensTheResultAndBackKeepsTheResults()
+    {
+        Ui ui(m_home->path());
+        ui.serveSearch();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(ui.openSearchPage() != nullptr);
+        ui.type(QStringLiteral("arc"));
+        QTRY_COMPARE(ui.controller.search()->state(), Kinefin::SearchModel::Results);
+        QQuickItem *row = nullptr;
+        QTRY_VERIFY((row = ui.item(QStringLiteral("searchRow_0"))) != nullptr);
+        QTRY_VERIFY(row->property("count").toInt() > 0);
+        const int depth = ui.stackDepth();
+        QTest::keyClick(ui.window, Qt::Key_Down);
+        QTRY_VERIFY(row->hasActiveFocus());
+        QTest::keyClick(ui.window, Qt::Key_Return);
+        QTRY_COMPARE(ui.stackDepth(), depth + 1);
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Arcturus (2012)")));
+        // Back to the same results: the term and the groups belong to the controller
+        auto *stack = ui.window->property("pageStack").value<QObject *>();
+        QVERIFY(QMetaObject::invokeMethod(stack, "pop", Q_ARG(QVariant, QVariant())));
+        QTRY_COMPARE(ui.stackDepth(), depth);
+        QVERIFY(ui.item(QStringLiteral("searchPage")) != nullptr);
+        QCOMPARE(ui.controller.search()->term(), QStringLiteral("arc"));
+        QCOMPARE(ui.controller.search()->state(), Kinefin::SearchModel::Results);
+    }
+
+    void markupInResultsAndInTheTermIsPlainText()
+    {
+        Ui ui(m_home->path());
+        ui.serveSearch();
+        const QString hostile =
+            QStringLiteral("<b>bold</b><img src=\"http://evil.invalid/x.png\">");
+        const QJsonObject movie{
+            {QStringLiteral("Id"), kMovieId},
+            {QStringLiteral("Type"), QStringLiteral("Movie")},
+            {QStringLiteral("Name"), QString(hostile + QStringLiteral(" result"))}};
+        ui.server.itemsByType.clear();
+        ui.server.listingRawBody.insert(QStringLiteral("Items"), envelope(QJsonArray{movie}));
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(ui.openSearchPage() != nullptr);
+        // The term itself carries the markup
+        ui.type(hostile);
+        QTRY_COMPARE(ui.controller.search()->state(), Kinefin::SearchModel::Results);
+        QTRY_VERIFY(
+            !ui.itemsWithText(QString(hostile + QStringLiteral(" result")), false).isEmpty());
+        for (QQuickItem *label :
+             ui.itemsWithText(QString(hostile + QStringLiteral(" result")), false))
+            QCOMPARE(label->property("textFormat").toInt(), int(Qt::PlainText));
+        // The typed term is never echoed into a label: only the field itself holds it
+        for (QQuickItem *holder : ui.itemsWithText(QStringLiteral("evil.invalid"), false)) {
+            const bool isTitleOfResult =
+                holder->property("text").toString().contains(QStringLiteral(" result"));
+            QVERIFY2(isTitleOfResult || holder->inherits("QQuickTextField")
+                         || holder->inherits("QQuickTextInput"),
+                     holder->metaObject()->className());
+        }
+        QVERIFY(gWarnings.filter(QStringLiteral("evil.invalid")).isEmpty());
+    }
+
+    void anEmptyResultShowsNoResults()
+    {
+        Ui ui(m_home->path());
+        ui.serveSearch();
+        ui.server.itemsByType.clear();
+        ui.server.listingRawBody.insert(QStringLiteral("Items"), envelope({}));
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(ui.openSearchPage() != nullptr);
+        ui.type(QStringLiteral("zzzz"));
+        QTRY_VERIFY(ui.showsText(QStringLiteral("No results")));
+    }
+
+    void lossOfTheSessionDuringASearchReturnsToSignIn()
+    {
+        Ui ui(m_home->path());
+        ui.serveSearch();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(ui.openSearchPage() != nullptr);
+        ui.type(QStringLiteral("abyss"));
+        QTRY_COMPARE(ui.controller.search()->state(), Kinefin::SearchModel::Results);
+        ui.server.denyViews = true;
+        ui.controller.reloadLibraries();
+        QTRY_COMPARE(ui.controller.state(), ConnectionController::NeedsLogin);
+        QTRY_VERIFY(ui.item(QStringLiteral("searchPage")) == nullptr);
+        QCOMPARE(ui.controller.search()->state(), Kinefin::SearchModel::Empty);
+        QCOMPARE(ui.controller.search()->term(), QString());
     }
 
     void aFailedHomeRowOffersItsOwnRetry()

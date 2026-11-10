@@ -40,6 +40,8 @@ struct ItemQuery {
     bool recursive = false;
     QString filters;    // comma-separated ItemFilter tokens (e.g. "IsResumable")
     QStringList fields; // ItemFields tokens
+    // Also ask for the image types a card shows (one tag per type)
+    bool cardImages = false;
 };
 
 class JellyfinClient final : public QObject {
@@ -80,7 +82,7 @@ class JellyfinClient final : public QObject {
                        int channel = 0);
     // Similar items of any item kind (the generic `/Items/{itemId}/Similar` route)
     bool fetchSimilarItems(const QString &itemId, int limit, int channel = 0);
-    // Drops the pending requests of one channel (silently, like a superseded one) and forgets its bookkeeping: for a consumer that is going away and will not use the channel again. Channel 0 is not releasable
+    // Drops the pending requests of one channel (silently, like a superseded one) and forgets its bookkeeping: for a consumer that is going away, or one that abandons what it asked for and may use the channel again later. Channel 0 is not releasable
     void releaseListingChannel(int channel);
     // Genre rails: `/Genres` validated as an envelope (the items carry Name and Id)
     bool fetchGenres(const QString &parentId, int startIndex, int limit);

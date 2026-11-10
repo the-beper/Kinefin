@@ -1420,6 +1420,63 @@ class TestJellyfinClient : public QObject {
         QCOMPARE(failures.constFirst().at(3).toInt(), 70002);
     }
 
+    void aTypedTermReachesTheServerPercentEncoded()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        Kinefin::ItemQuery query;
+        query.searchTerm = QStringLiteral("C++ & #1 100% é");
+        query.cardImages = true;
+        QSignalSpy ready(&client, &Kinefin::JellyfinClient::itemsReady);
+        QVERIFY(client.fetchItems(query, 5));
+        QTRY_COMPARE(ready.size(), 1);
+        const QString route = QString::fromUtf8(server.itemsRoutes.constFirst());
+        // A '+' would be read as a space by the server, and & # % would cut or break the query
+        QVERIFY2(
+            route.contains(QStringLiteral("searchTerm=C%2B%2B%20%26%20%231%20100%25%20%C3%A9")),
+            qPrintable(route));
+        QVERIFY(!route.contains(QLatin1Char('+')));
+        // A typed %25 or %00 is text, not an escape: the percent sign itself is encoded
+        Kinefin::ItemQuery escapes;
+        escapes.searchTerm = QStringLiteral("100%25 ab%00 %0D%0A");
+        QVERIFY(client.fetchItems(escapes, 5));
+        QTRY_COMPARE(ready.size(), 2);
+        const QString escaped = QString::fromUtf8(server.itemsRoutes.constLast());
+        QVERIFY2(escaped.contains(QStringLiteral("searchTerm=100%2525%20ab%2500%20%250D%250A")),
+                 qPrintable(escaped));
+        // The server decodes it back to the typed term
+        const QUrlQuery wire = FakeJellyfin::capturedListingQuery(server.itemsRoutes.constFirst());
+        QCOMPARE(wire.queryItemValue(QStringLiteral("searchTerm"), QUrl::FullyDecoded),
+                 query.searchTerm);
+        // Card images ask for one tag of each image type
+        QCOMPARE(wire.queryItemValue(QStringLiteral("imageTypeLimit")), QStringLiteral("1"));
+        QVERIFY(wire.queryItemValue(QStringLiteral("enableImageTypes"))
+                    .contains(QStringLiteral("Primary")));
+    }
+
+    void aReleasedChannelCanBeUsedAgainWithoutAStaleAnswer()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        QSignalSpy ready(&client, &Kinefin::JellyfinClient::itemsReady);
+        QSignalSpy failed(&client, &Kinefin::JellyfinClient::listingFailed);
+        server.holdFirstListings = 1;
+        QVERIFY(client.fetchItems(Kinefin::ItemQuery(), 7));
+        QTRY_COMPARE(server.itemsRoutes.size(), 1);
+        client.releaseListingChannel(7);
+        // The same channel again answers once; the first request's late answer finds nothing waiting
+        QVERIFY(client.fetchItems(Kinefin::ItemQuery(), 7));
+        QTRY_COMPARE(ready.size(), 1);
+        server.releaseHeld();
+        QTest::qWait(250);
+        QCOMPARE(ready.size(), 1);
+        QCOMPARE(failed.size(), 0);
+    }
+
     void listingFailureCarriesItsChannel()
     {
         FakeJellyfin server;

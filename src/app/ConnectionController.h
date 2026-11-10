@@ -15,6 +15,7 @@
 #include "models/HomeRowsModel.h"
 #include "models/ItemDetailsModel.h"
 #include "models/LibraryItemsModel.h"
+#include "models/SearchModel.h"
 #include "settings/ServerCredentialSync.h"
 #include "settings/TokenStore.h"
 
@@ -32,6 +33,7 @@ class ConnectionController : public QObject {
     Q_PROPERTY(QVariantList libraries READ libraries NOTIFY librariesChanged)
     Q_PROPERTY(Kinefin::LibraryItemsModel *library READ library CONSTANT)
     Q_PROPERTY(Kinefin::HomeRowsModel *homeRows READ homeRows CONSTANT)
+    Q_PROPERTY(Kinefin::SearchModel *search READ search CONSTANT)
 
   public:
     enum State {
@@ -57,6 +59,7 @@ class ConnectionController : public QObject {
     QVariantList libraries() const { return m_libraries; }
     LibraryItemsModel *library() { return &m_library; }
     HomeRowsModel *homeRows() { return &m_home; }
+    SearchModel *search() { return &m_search; }
 
     // The place images may be fetched from: the server URL while Authenticated, nothing in every other state. Shared with the image fetcher, which runs on QML's network thread
     void setImageOrigin(std::shared_ptr<ImageOrigin> origin);
@@ -118,6 +121,7 @@ class ConnectionController : public QObject {
     ServerCredentialSync m_sync;
     LibraryItemsModel m_library{&m_client};
     HomeRowsModel m_home{&m_client};
+    SearchModel m_search{&m_client};
     int m_nextDetailsChannel = ItemDetailsModel::FirstChannel;
     std::shared_ptr<ImageOrigin> m_imageOrigin;
     QTimer m_quickConnectTimer;
