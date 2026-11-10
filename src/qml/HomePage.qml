@@ -14,6 +14,16 @@ Kirigami.ScrollablePage {
 
     title: i18n("Home")
 
+    actions: [
+        Kirigami.Action {
+            text: i18n("Refresh")
+            icon.name: "view-refresh"
+            shortcut: StandardKey.Refresh
+            // The libraries come first: their answer reloads the rows
+            onTriggered: page.connection.reloadLibraries()
+        }
+    ]
+
     ColumnLayout {
         spacing: Kirigami.Units.largeSpacing
 
@@ -40,7 +50,6 @@ Kirigami.ScrollablePage {
             Layout.fillWidth: true
             visible: page.connection.libraries.length === 0
             text: i18n("No libraries to show")
-            explanation: i18n("Library browsing is not implemented yet")
             icon.name: "folder-video"
         }
 
@@ -58,11 +67,208 @@ Kirigami.ScrollablePage {
                 delegate: Kirigami.AbstractCard {
                     id: card
                     required property var modelData
-                    contentItem: Controls.Label {
-                        // Library names come from the server: plain text only
-                        textFormat: Text.PlainText
-                        elide: Text.ElideRight
-                        text: card.modelData.name
+                    objectName: "libraryCard_" + modelData.id
+                    enabled: card.modelData.browsable
+                    showClickFeedback: true
+                    Accessible.name: card.modelData.name
+                    Accessible.description: card.modelData.browsable ? "" : i18n("Not supported yet")
+                    onClicked: {
+                        const stack = page.Window.window.pageStack;
+                        // A library already open above Home gives way to the new one: pop it before the shared model switches to the new library
+                        stack.pop(page);
+                        if (!page.connection.openLibrary(card.modelData.id))
+                            return;
+                        stack.push(Qt.resolvedUrl("LibraryPage.qml"), { model: page.connection.library, libraryName: card.modelData.name });
+                    }
+                    contentItem: ColumnLayout {
+                        spacing: Kirigami.Units.smallSpacing
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: width * 9 / 16
+                            color: Kirigami.Theme.alternateBackgroundColor
+                            clip: true
+
+                            Kirigami.Icon {
+                                anchors.centerIn: parent
+                                width: Kirigami.Units.iconSizes.huge
+                                height: width
+                                source: "folder-video"
+                                visible: image.status !== Image.Ready
+                            }
+
+                            Image {
+                                id: image
+                                anchors.fill: parent
+                                asynchronous: true
+                                fillMode: Image.PreserveAspectCrop
+                                sourceSize.width: width * Screen.devicePixelRatio
+                                // Only URLs built by JellyfinClient::imageUrl belong here: the image fetcher allows nothing else, but a raw server string must never become a source
+                                source: card.modelData.imageUrl
+                            }
+                        }
+
+                        Controls.Label {
+                            Layout.fillWidth: true
+                            // Library names come from the server: plain text only
+                            textFormat: Text.PlainText
+                            elide: Text.ElideRight
+                            text: card.modelData.name
+                        }
+
+                        Controls.Label {
+                            Layout.fillWidth: true
+                            visible: !card.modelData.browsable
+                            opacity: 0.7
+                            textFormat: Text.PlainText
+                            text: i18n("Not supported yet")
+                        }
+                    }
+                }
+            }
+        }
+
+        Repeater {
+            model: page.connection.homeRows
+            delegate: ColumnLayout {
+                id: row
+                objectName: "homeRow_" + index
+
+                required property int index
+                required property int kind
+                required property string libraryName
+                required property int status
+                required property var items
+                required property bool landscape
+                required property bool shown
+
+                // The poster ratios match MediaCard: the height is the poster plus the two text lines
+                readonly property real cardWidth: Kirigami.Units.gridUnit * (landscape ? 14 : 8)
+                readonly property real cardHeight: Math.round((cardWidth - Kirigami.Units.smallSpacing * 2) * (landscape ? 9 / 16 : 3 / 2)) + Kirigami.Units.gridUnit * 3.5
+                readonly property string title: {
+                    switch (kind) {
+                    case HomeRowsModel.ContinueWatching:
+                        return i18n("Continue Watching");
+                    case HomeRowsModel.NextUp:
+                        return i18n("Next Up");
+                    default:
+                        return i18n("Recently Added in %1", libraryName);
+                    }
+                }
+
+                Layout.fillWidth: true
+                visible: shown
+                spacing: Kirigami.Units.smallSpacing
+
+                Kirigami.Heading {
+                    Layout.fillWidth: true
+                    level: 2
+                    // Library names come from the server: plain text only
+                    textFormat: Text.PlainText
+                    elide: Text.ElideRight
+                    text: row.title
+                }
+
+                Item {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: Kirigami.Units.gridUnit * 4
+                    visible: row.status === HomeRowsModel.Loading
+
+                    Controls.BusyIndicator {
+                        anchors.centerIn: parent
+                        running: parent.visible
+                        Accessible.name: i18n("Loading…")
+                    }
+                }
+
+                MessageBox {
+                    visible: row.status === HomeRowsModel.Failed
+                    type: Kirigami.MessageType.Error
+                    text: i18n("Could not load this row: check the connection to the server and try again")
+                    actions: [
+                        Kirigami.Action {
+                            text: i18n("Retry")
+                            icon.name: "view-refresh"
+                            onTriggered: page.connection.homeRows.retry(row.index)
+                        }
+                    ]
+                }
+
+                Item {
+                    id: listBox
+
+                    Layout.fillWidth: true
+                    // The cards plus the band the horizontal scroll bar takes at the bottom
+                    Layout.preferredHeight: row.cardHeight + scrollBar.implicitHeight
+                    visible: row.status === HomeRowsModel.Ready
+
+                    ListView {
+                        id: list
+                        objectName: "homeRowList_" + row.index
+
+                        anchors.fill: parent
+                        orientation: ListView.Horizontal
+                        spacing: Kirigami.Units.largeSpacing
+                        clip: true
+                        boundsBehavior: Flickable.StopAtBounds
+                        activeFocusOnTab: true
+                        keyNavigationEnabled: true
+                        currentIndex: 0
+                        model: row.items
+                        Accessible.role: Accessible.List
+                        Accessible.name: row.title
+
+                        // Up and Down move between the rows, Left and Right inside one
+                        Keys.onUpPressed: {
+                            const target = list.nextItemInFocusChain(false);
+                            if (target && target !== list)
+                                target.forceActiveFocus(Qt.BacktabFocusReason);
+                        }
+                        Keys.onDownPressed: {
+                            const target = list.nextItemInFocusChain(true);
+                            if (target && target !== list)
+                                target.forceActiveFocus(Qt.TabFocusReason);
+                        }
+
+                        Controls.ScrollBar.horizontal: Controls.ScrollBar {
+                            id: scrollBar
+                        }
+
+                        delegate: MediaCard {
+                            required property int seasonNumber
+                            required property int episodeNumber
+                            required property string episodeTitle
+
+                            width: row.cardWidth
+                            height: row.cardHeight
+                            // The list is the one tab stop of its row
+                            focusPolicy: Qt.NoFocus
+                            landscape: row.landscape
+                            loaded: true
+                            highlighted: ListView.isCurrentItem && list.activeFocus
+                            subtitle: {
+                                if (episodeNumber >= 0) {
+                                    const label = seasonNumber >= 0 ? i18nc("season and episode number", "S%1:E%2", seasonNumber, episodeNumber) : i18nc("episode number", "E%1", episodeNumber);
+                                    return episodeTitle.length > 0 ? i18nc("episode label and episode title", "%1 — %2", label, episodeTitle) : label;
+                                }
+                                return year > 0 ? String(year) : "";
+                            }
+                        }
+                    }
+
+                    // A horizontal list swallows the vertical wheel without using it: this layer above it takes the vertical deltas for the page and leaves the horizontal ones to the list below
+                    Item {
+                        anchors.fill: parent
+                        z: 2
+
+                        WheelHandler {
+                            orientation: Qt.Vertical
+                            onWheel: event => {
+                                const flick = page.flickable;
+                                const step = event.pixelDelta.y !== 0 ? event.pixelDelta.y : event.angleDelta.y / 120 * Kirigami.Units.gridUnit * 3;
+                                flick.contentY = Math.max(flick.originY, Math.min(flick.originY + flick.contentHeight - flick.height, flick.contentY - step));
+                            }
+                        }
                     }
                 }
             }

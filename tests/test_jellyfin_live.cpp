@@ -1573,7 +1573,7 @@ void TestJellyfinLive::browseListingsLive()
     Kinefin::JellyfinClient client;
     QVERIFY(authenticate(client));
     const QString userId = client.userId();
-    QSignalSpy listFailed(&client, &Kinefin::JellyfinClient::requestFailed);
+    QSignalSpy listFailed(&client, &Kinefin::JellyfinClient::listingFailed);
 
     // Real ids to work with: the first library, the first movies, a series
     const QJsonObject views = getJson(client, QStringLiteral("/UserViews"));
@@ -1706,7 +1706,7 @@ void TestJellyfinLive::browseListingsLive()
     QVERIFY(client.fetchSimilarItems(QStringLiteral("deadbeefdeadbeefdeadbeefdeadbeef"), 5));
     QTRY_VERIFY_WITH_TIMEOUT(listFailed.size() >= 1, 15000);
     qInfo() << LIVE_FACT << "Similar of a shape-valid unknown id answers"
-            << listFailed.constLast().at(0).toInt() << listFailed.constLast().at(1).toString();
+            << listFailed.constLast().at(1).toInt() << listFailed.constLast().at(2).toString();
 
     // Genres and the browse filters
     QSignalSpy genresReady(&client, &Kinefin::JellyfinClient::genresReady);

@@ -45,7 +45,7 @@ qml_sources=$(find src/qml -name '*.qml' 2>/dev/null || true)
 for qml in $qml_sources; do
     grep -q "$qml" CMakeLists.txt || { echo "$qml is not registered in CMakeLists.txt" >&2; exit 1; }
 done
-cmake --build "$bdir" --target kinefin_qmllint
+cmake --build "$bdir" --target kinefin_ui_qmllint
 
 step "Metainfo and desktop file"
 xmllint --noout data/*.metainfo.xml

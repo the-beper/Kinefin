@@ -27,6 +27,9 @@ Kirigami.ApplicationWindow {
     title: "Kinefin"
     flags: alwaysOnTopSetting ? (Qt.Window | Qt.WindowStaysOnTopHint) : Qt.Window
 
+    // Auto resolves to the Breadcrumb header only on mobile in narrow mode, and that one renders titles without plain-text formatting: the pin keeps server-supplied page titles in the toolbar title delegate, which is plain text
+    pageStack.globalToolBar.style: Kirigami.ApplicationHeaderStyle.ToolBar
+
     Connections {
         target: window.settings
         function onValueChanged(section, key) {

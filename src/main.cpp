@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Kinefin contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/ConnectionController.h"
+#include "app/ImageNetworkFactory.h"
 #include "app/Logging.h"
 #include "app/ProfileCommands.h"
 #include "integration/LinkRouter.h"
@@ -21,6 +22,7 @@
 #include <KDBusService>
 #include <KLocalizedQmlContext>
 #include <KLocalizedString>
+#include <memory>
 #include <optional>
 
 int main(int argc, char *argv[])
@@ -133,7 +135,13 @@ int main(int argc, char *argv[])
     }
     Kinefin::ConnectionController connection(profileId, deviceId, QStringLiteral(KINEFIN_VERSION));
 
+    const auto imageOrigin = std::make_shared<Kinefin::ImageOrigin>();
+    connection.setImageOrigin(imageOrigin);
+    // The factory is not owned by the engine: it is declared first so it outlives it
+    Kinefin::ImageNetworkFactory imageFactory(imageOrigin, Kinefin::profileCacheDirectory(profileId)
+                                                               + QStringLiteral("/images"));
     QQmlApplicationEngine engine;
+    engine.setNetworkAccessManagerFactory(&imageFactory);
     // "fullscreen" or "windowed" when a flag decides this run; empty to follow the setting
     const QString windowMode =
         parser.isSet(QStringLiteral("fullscreen")) ? QStringLiteral("fullscreen")

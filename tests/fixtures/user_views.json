@@ -4,6 +4,7 @@
       "Name": "Movies",
       "Id": "e2a1aa11a8d94b5c999a25cf59abcd01",
       "CollectionType": "movies",
+      "ImageTags": { "Primary": "movies-primary" },
       "PrimaryImageAspectRatio": 1.5,
       "ChildCount": 1820
     },

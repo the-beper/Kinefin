@@ -44,6 +44,18 @@ add_library(kinefin_core STATIC
     src/api/MediaSourceSelection.h
     src/api/PlaybackReport.cpp
     src/api/PlaybackReport.h
+    src/models/HomeRowsModel.cpp
+    src/models/HomeRowsModel.h
+    src/models/ItemRowModel.cpp
+    src/models/ItemRowModel.h
+    src/models/ItemSummary.cpp
+    src/models/ItemSummary.h
+    src/models/LibraryItemsModel.cpp
+    src/models/LibraryItemsModel.h
+    src/imagecache/ImageNetworkAccess.cpp
+    src/imagecache/ImageNetworkAccess.h
+    src/imagecache/ImageOrigin.cpp
+    src/imagecache/ImageOrigin.h
     src/player/PlaybackReporter.cpp
     src/player/PlaybackReporter.h
     src/player/PlaybackSession.cpp
@@ -84,26 +96,19 @@ if(mpvqt_BINARY_DIR)
     target_include_directories(kinefin_player PRIVATE ${mpvqt_BINARY_DIR}/src)
 endif()
 
-add_executable(kinefin src/main.cpp)
-target_link_libraries(kinefin PRIVATE
-    kinefin_core
-    Qt6::Core Qt6::Gui Qt6::Quick Qt6::Qml Qt6::QuickControls2 Qt6::DBus
-    KF6::CoreAddons KF6::I18n KF6::I18nQml KF6::DBusAddons
-)
-
-target_include_directories(kinefin PRIVATE src/app)
-target_compile_definitions(kinefin PRIVATE KINEFIN_VERSION="${PROJECT_VERSION}" TRANSLATION_DOMAIN="kinefin")
-ki18n_install(po)
-
-foreach(page Main HomePage LoginPage MessageBox ServersPage SettingsPage SettingsSectionPage SettingRow AboutPage)
+# The QML module lives in a static library of its own so that the UI tests can import it like the application does
+foreach(page Main HomePage LibraryPage MediaCard LoginPage MessageBox ServersPage SettingsPage SettingsSectionPage SettingRow AboutPage)
     set_source_files_properties(src/qml/${page}.qml PROPERTIES QT_RESOURCE_ALIAS ${page}.qml)
 endforeach()
-qt_add_qml_module(kinefin
+qt_add_library(kinefin_ui STATIC)
+qt_add_qml_module(kinefin_ui
     URI org.kde.kinefin
     VERSION 1.0
     QML_FILES
         src/qml/Main.qml
         src/qml/HomePage.qml
+        src/qml/LibraryPage.qml
+        src/qml/MediaCard.qml
         src/qml/LoginPage.qml
         src/qml/MessageBox.qml
         src/qml/ServersPage.qml
@@ -115,7 +120,27 @@ qt_add_qml_module(kinefin
         src/app/ClientSettingsQml.h
         src/app/ConnectionController.cpp
         src/app/ConnectionController.h
+        src/app/ImageNetworkFactory.cpp
+        src/app/ImageNetworkFactory.h
+        src/app/ModelsQml.h
 )
+target_include_directories(kinefin_ui PUBLIC src/app)
+target_compile_definitions(kinefin_ui PRIVATE TRANSLATION_DOMAIN="kinefin")
+target_link_libraries(kinefin_ui PUBLIC
+    kinefin_core
+    Qt6::Gui Qt6::Quick Qt6::Qml Qt6::QuickControls2
+    KF6::I18n KF6::I18nQml
+)
+
+add_executable(kinefin src/main.cpp)
+target_link_libraries(kinefin PRIVATE
+    kinefin_ui kinefin_uiplugin kinefin_core
+    Qt6::Core Qt6::Gui Qt6::Quick Qt6::Qml Qt6::QuickControls2 Qt6::DBus
+    KF6::CoreAddons KF6::I18n KF6::I18nQml KF6::DBusAddons
+)
+target_include_directories(kinefin PRIVATE src/app)
+target_compile_definitions(kinefin PRIVATE KINEFIN_VERSION="${PROJECT_VERSION}" TRANSLATION_DOMAIN="kinefin")
+ki18n_install(po)
 
 install(TARGETS kinefin ${KDE_INSTALL_TARGETS_DEFAULT_ARGS})
 install(FILES data/io.github.the_beper.Kinefin.desktop DESTINATION ${KDE_INSTALL_APPDIR})
@@ -184,10 +209,31 @@ if(BUILD_TESTING)
     target_link_libraries(test_profile_identity PRIVATE kinefin_core Qt6::Test)
     add_test(NAME profile_identity COMMAND test_profile_identity)
 
-    add_executable(test_connection_controller tests/test_connection_controller.cpp src/app/ConnectionController.cpp)
+    add_executable(test_connection_controller tests/test_connection_controller.cpp)
     target_compile_definitions(test_connection_controller PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}" TRANSLATION_DOMAIN="kinefin")
-    target_link_libraries(test_connection_controller PRIVATE kinefin_core Qt6::Test Qt6::Gui Qt6::Qml KF6::I18n)
+    target_link_libraries(test_connection_controller PRIVATE kinefin_ui kinefin_core Qt6::Test Qt6::Gui Qt6::Qml KF6::I18n)
     add_test(NAME connection_controller COMMAND test_connection_controller)
+
+    add_executable(test_home_rows_model tests/test_home_rows_model.cpp)
+    target_compile_definitions(test_home_rows_model PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    target_link_libraries(test_home_rows_model PRIVATE kinefin_core Qt6::Test Qt6::Network)
+    add_test(NAME home_rows_model COMMAND test_home_rows_model)
+
+    add_executable(test_ui_pages tests/test_ui_pages.cpp)
+    target_compile_definitions(test_ui_pages PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}" TRANSLATION_DOMAIN="kinefin")
+    target_link_libraries(test_ui_pages PRIVATE kinefin_ui kinefin_uiplugin kinefin_core Qt6::Test Qt6::Gui Qt6::Quick Qt6::Qml KF6::I18n KF6::I18nQml)
+    add_test(NAME ui_pages COMMAND test_ui_pages)
+    set_tests_properties(ui_pages PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+    add_executable(test_image_network tests/test_image_network.cpp)
+    target_compile_definitions(test_image_network PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    target_link_libraries(test_image_network PRIVATE kinefin_core Qt6::Test Qt6::Network)
+    add_test(NAME image_network COMMAND test_image_network)
+
+    add_executable(test_library_items_model tests/test_library_items_model.cpp)
+    target_compile_definitions(test_library_items_model PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    target_link_libraries(test_library_items_model PRIVATE kinefin_core Qt6::Test Qt6::Network)
+    add_test(NAME library_items_model COMMAND test_library_items_model)
 
     add_executable(test_server_credentials tests/test_server_credentials.cpp)
     target_link_libraries(test_server_credentials PRIVATE kinefin_core Qt6::Test)

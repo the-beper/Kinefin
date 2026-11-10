@@ -11,11 +11,14 @@
 #include <memory>
 
 #include "api/JellyfinClient.h"
+#include "imagecache/ImageOrigin.h"
+#include "models/HomeRowsModel.h"
+#include "models/LibraryItemsModel.h"
 #include "settings/ServerCredentialSync.h"
 #include "settings/TokenStore.h"
 
 namespace Kinefin {
-// What the Servers, sign-in and Home pages render: one active server at a time, the stored servers of the profile, and the state of the connection to the active one. It owns the JellyfinClient and the ServerCredentialSync of the profile and only reports what they report; the pages never talk to the client. `errorText` is translated and fixed: no URL, body or server text ever reaches it. `libraries` entries carry server metadata (`name`): render it as plain text
+// What the Servers, sign-in and Home pages render: one active server at a time, the stored servers of the profile, and the state of the connection to the active one. It owns the JellyfinClient and the ServerCredentialSync of the profile and only reports what they report; the pages never talk to the client. `errorText` is translated and fixed: no URL, body or server text ever reaches it. `libraries` entries (`id`, `name`, `collectionType`, `imageUrl`, `browsable`) carry server metadata: render it as plain text
 class ConnectionController : public QObject {
     Q_OBJECT
     QML_ELEMENT
@@ -26,6 +29,8 @@ class ConnectionController : public QObject {
     Q_PROPERTY(QString quickConnectCode READ quickConnectCode NOTIFY quickConnectCodeChanged)
     Q_PROPERTY(QVariantList servers READ servers NOTIFY serversChanged)
     Q_PROPERTY(QVariantList libraries READ libraries NOTIFY librariesChanged)
+    Q_PROPERTY(Kinefin::LibraryItemsModel *library READ library CONSTANT)
+    Q_PROPERTY(Kinefin::HomeRowsModel *homeRows READ homeRows CONSTANT)
 
   public:
     enum State {
@@ -49,6 +54,11 @@ class ConnectionController : public QObject {
     QString quickConnectCode() const { return m_quickConnectCode; }
     QVariantList servers() const { return m_servers; }
     QVariantList libraries() const { return m_libraries; }
+    LibraryItemsModel *library() { return &m_library; }
+    HomeRowsModel *homeRows() { return &m_home; }
+
+    // The place images may be fetched from: the server URL while Authenticated, nothing in every other state. Shared with the image fetcher, which runs on QML's network thread
+    void setImageOrigin(std::shared_ptr<ImageOrigin> origin);
 
     // For tests; the default is 5 s
     void setQuickConnectPollInterval(std::chrono::milliseconds interval);
@@ -66,6 +76,10 @@ class ConnectionController : public QObject {
     Q_INVOKABLE void cancel();
     // Forgets the active server's stored session and returns to Idle
     Q_INVOKABLE void signOut();
+    // Loads the items of one of the current `libraries` into `library`; false for an id that is not in the list or whose type cannot be browsed
+    Q_INVOKABLE bool openLibrary(const QString &libraryId);
+    // Loads the home rows again (the libraries are kept)
+    Q_INVOKABLE void reloadHome();
     // Asks the server for the libraries again (the Home page's retry)
     Q_INVOKABLE void reloadLibraries();
     // Removes a stored server; signs out first when it is the active one
@@ -90,6 +104,7 @@ class ConnectionController : public QObject {
     void onRequestFailed(int status);
     void onUserViews(const QJsonArray &items);
     void setState(State state);
+    void updateImageOrigin();
     void setError(const QString &text);
     void clearQuickConnect();
     void clearLibraryError();
@@ -98,6 +113,9 @@ class ConnectionController : public QObject {
     std::unique_ptr<TokenStore> m_ownedStore; // KWallet, unless a store was passed in
     JellyfinClient m_client;
     ServerCredentialSync m_sync;
+    LibraryItemsModel m_library{&m_client};
+    HomeRowsModel m_home{&m_client};
+    std::shared_ptr<ImageOrigin> m_imageOrigin;
     QTimer m_quickConnectTimer;
     State m_state = Idle;
     QString m_errorText;

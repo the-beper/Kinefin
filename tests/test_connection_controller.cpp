@@ -72,7 +72,84 @@ class TestConnectionController : public QObject {
         QTRY_COMPARE(controller->libraries().size(), 3);
         const QVariantMap first = controller->libraries().first().toMap();
         QCOMPARE(first.value(QStringLiteral("name")).toString(), QStringLiteral("Movies"));
-        QCOMPARE(first.value(QStringLiteral("type")).toString(), QStringLiteral("movies"));
+        QCOMPARE(first.value(QStringLiteral("collectionType")).toString(),
+                 QStringLiteral("movies"));
+    }
+
+    void librariesCarryTheImageAndWhetherTheyCanBeBrowsed()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        auto controller = makeController();
+        auto origin = std::make_shared<Kinefin::ImageOrigin>();
+        controller->setImageOrigin(origin);
+        QVERIFY(origin->get().isEmpty());
+        controller->connectTo(address(server));
+        QTRY_VERIFY(controller->state() == ConnectionController::NeedsLogin);
+        controller->login(QStringLiteral("fixture-user"), QStringLiteral("fixture-password"));
+        QTRY_COMPARE(controller->libraries().size(), 3);
+        // Images may be fetched from the server while signed in, and from nowhere else
+        QCOMPARE(origin->get().host(), QStringLiteral("127.0.0.1"));
+        const QVariantMap movies = controller->libraries().at(0).toMap();
+        QVERIFY(movies.value(QStringLiteral("browsable")).toBool());
+        QCOMPARE(movies.value(QStringLiteral("collectionType")).toString(),
+                 QStringLiteral("movies"));
+        QVERIFY(movies.value(QStringLiteral("imageUrl"))
+                    .toString()
+                    .contains(QStringLiteral("/Items/")
+                              + movies.value(QStringLiteral("id")).toString()
+                              + QStringLiteral("/Images/Primary")));
+        // No image tag: no URL
+        QVERIFY(controller->libraries()
+                    .at(1)
+                    .toMap()
+                    .value(QStringLiteral("imageUrl"))
+                    .toString()
+                    .isEmpty());
+        QVERIFY(!controller->libraries().at(2).toMap().value(QStringLiteral("browsable")).toBool());
+        controller->cancel();
+        QVERIFY(origin->get().isEmpty());
+    }
+
+    void openLibraryOnlyAcceptsBrowsableListedLibraries()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        server.generatedItemTotal = 5;
+        auto controller = makeController();
+        controller->connectTo(address(server));
+        QTRY_VERIFY(controller->state() == ConnectionController::NeedsLogin);
+        controller->login(QStringLiteral("fixture-user"), QStringLiteral("fixture-password"));
+        QTRY_COMPARE(controller->libraries().size(), 3);
+        QVERIFY(!controller->openLibrary(QStringLiteral("ffffffffffffffffffffffffffffffff")));
+        // The music library is listed but not browsable
+        QVERIFY(!controller->openLibrary(QStringLiteral("2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f")));
+        QCOMPARE(controller->library()->status(), Kinefin::LibraryItemsModel::Idle);
+        QVERIFY(controller->openLibrary(QStringLiteral("e2a1aa11a8d94b5c999a25cf59abcd01")));
+        QTRY_COMPARE(controller->library()->status(), Kinefin::LibraryItemsModel::Ready);
+        QCOMPARE(controller->library()->rowCount(), 5);
+        // Leaving the session empties the model
+        controller->cancel();
+        QCOMPARE(controller->library()->status(), Kinefin::LibraryItemsModel::Idle);
+        QCOMPARE(controller->library()->rowCount(), 0);
+    }
+
+    void aLibraryPageFailureKeepsErrorTextEmpty()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        server.generatedItemTotal = 250;
+        auto controller = makeController();
+        controller->connectTo(address(server));
+        QTRY_VERIFY(controller->state() == ConnectionController::NeedsLogin);
+        controller->login(QStringLiteral("fixture-user"), QStringLiteral("fixture-password"));
+        QTRY_COMPARE(controller->libraries().size(), 3);
+        server.listingStatus.insert(QStringLiteral("Items"), 500);
+        QVERIFY(controller->openLibrary(QStringLiteral("e2a1aa11a8d94b5c999a25cf59abcd01")));
+        QTRY_COMPARE(controller->library()->status(), Kinefin::LibraryItemsModel::Failed);
+        // The Home page's own error is about the libraries only
+        QVERIFY(controller->errorText().isEmpty());
+        QCOMPARE(controller->state(), ConnectionController::Authenticated);
     }
 
     void wrongPasswordReturnsToSignInWithAFixedMessage()

@@ -269,6 +269,20 @@ void ConnectionController::onRequestFailed(int status)
     }
 }
 
+bool ConnectionController::openLibrary(const QString &libraryId)
+{
+    for (const QVariant &entry : std::as_const(m_libraries)) {
+        const QVariantMap library = entry.toMap();
+        if (library.value(QStringLiteral("id")).toString() != libraryId)
+            continue;
+        return library.value(QStringLiteral("browsable")).toBool()
+               && m_library.open(libraryId,
+                                 library.value(QStringLiteral("collectionType")).toString(),
+                                 library.value(QStringLiteral("name")).toString());
+    }
+    return false;
+}
+
 void ConnectionController::clearLibraryError()
 {
     // Only the libraries' own error: a failed token save, say, stays until the user leaves
@@ -284,12 +298,34 @@ void ConnectionController::onUserViews(const QJsonArray &items)
     m_libraries.clear();
     for (const QJsonValue &value : items) {
         const QJsonObject item = value.toObject();
+        const QString id = item.value(QStringLiteral("Id")).toString();
+        const QString collectionType = item.value(QStringLiteral("CollectionType")).toString();
+        const QJsonValue tags = item.value(QStringLiteral("ImageTags"));
+        const QString tag = tags.isObject()
+                                ? tags.toObject().value(QStringLiteral("Primary")).toString()
+                                : QString();
         m_libraries.append(QVariantMap{
-            {QStringLiteral("id"), item.value(QStringLiteral("Id")).toString()},
+            {QStringLiteral("id"), id},
             {QStringLiteral("name"), item.value(QStringLiteral("Name")).toString()},
-            {QStringLiteral("type"), item.value(QStringLiteral("CollectionType")).toString()}});
+            {QStringLiteral("collectionType"), collectionType},
+            {QStringLiteral("imageUrl"),
+             tag.isEmpty()
+                 ? QString()
+                 : m_client
+                       .imageUrl(id, QStringLiteral("Primary"), LibraryItemsModel::ImageWidth, tag)
+                       .toString(QUrl::FullyEncoded)},
+            {QStringLiteral("browsable"),
+             LibraryItemsModel::browseQuery(collectionType).has_value()}});
     }
     Q_EMIT librariesChanged();
+    m_home.load(m_libraries);
+}
+
+void ConnectionController::reloadHome()
+{
+    if (m_state != Authenticated)
+        return;
+    m_home.reload();
 }
 
 void ConnectionController::setState(State state)
@@ -297,7 +333,24 @@ void ConnectionController::setState(State state)
     if (m_state == state)
         return;
     m_state = state;
+    updateImageOrigin();
     Q_EMIT stateChanged();
+}
+
+void ConnectionController::setImageOrigin(std::shared_ptr<ImageOrigin> origin)
+{
+    m_imageOrigin = std::move(origin);
+    updateImageOrigin();
+}
+
+void ConnectionController::updateImageOrigin()
+{
+    if (!m_imageOrigin)
+        return;
+    if (m_state == Authenticated)
+        m_imageOrigin->set(m_client.serverUrl());
+    else
+        m_imageOrigin->clear();
 }
 
 void ConnectionController::setError(const QString &text)

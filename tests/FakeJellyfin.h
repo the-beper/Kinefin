@@ -10,6 +10,7 @@
 #include <QFile>
 #include <QHash>
 #include <QHostAddress>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QPointer>
@@ -20,6 +21,11 @@
 #include <QtTest>
 
 namespace {
+
+// A valid 1x1 PNG, the body of every image route
+const QByteArray kTinyPng =
+    QByteArray::fromBase64("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwG"
+                           "A60e6kgAAAABJRU5ErkJggg==");
 
 inline QByteArray fixture(const QString &name)
 {
@@ -104,6 +110,16 @@ class FakeJellyfin {
     QByteArray lastQuickPollAuth;
     QString lastQuickPollSecret;
     int viewRequests = 0;
+    // Images: GET .../Images/... answers a 1x1 PNG, or imageStatus, or a redirect off the host
+    int imageRequests = 0;
+    int imageStatus = 200;
+    bool redirectImages = false;
+    QByteArray imageBody; // overrides the PNG when not empty
+    QByteArray lastImageRoute;
+    QByteArray lastImageAuth;
+    QByteArray lastImageCookie;
+    // Every plain HTTP request that was parsed, whatever the route (a refused image request must leave this at 0)
+    int requestCount = 0;
     QByteArray lastViewsAuth;
     QByteArray lastLoginAuth;
     // PlaybackInfo: the fixture to answer with, or a status / raw body override
@@ -161,8 +177,15 @@ class FakeJellyfin {
     // Raw body per family, overriding the fixture when set (like playbackInfoRawBody)
     QHash<QString, QByteArray> listingRawBody;
     int listingRequests = 0;
-    QHash<QString, QByteArray> lastListingRoute; // family -> "path?query"
-    QHash<QString, QByteArray> lastListingAuth;  // family -> the Authorization header
+    // Status per family answered instead of the body (a 5xx for a failing page)
+    QHash<QString, int> listingStatus;
+    // When >= 0 the Items family is generated from startIndex/limit: `generatedItemTotal` is the TotalRecordCount, `generatedAvailable` (when >= 0) the rows that really exist, so a page past it comes back short; ids, names and image tags follow the row index
+    int generatedItemTotal = -1;
+    int generatedAvailable = -1;
+    QList<QByteArray> itemsRoutes;                   // every Items request in arrival order
+    QHash<QString, QByteArray> lastListingRoute;     // family -> "path?query"
+    QHash<QString, QList<QByteArray>> listingRoutes; // family -> every route in arrival order
+    QHash<QString, QByteArray> lastListingAuth;      // family -> the Authorization header
 
     // The most recent accepted WebSocket connection (nullptr until one handshake completes)
     FakeSocketConnection *lastConnection() const
@@ -215,6 +238,29 @@ class FakeJellyfin {
     }
 
   private:
+    QByteArray generatedItemsBody(const QByteArray &route) const
+    {
+        const QUrlQuery query(QUrl(QString::fromUtf8(route)));
+        const int start = query.queryItemValue(QStringLiteral("startIndex")).toInt();
+        const int limit = query.queryItemValue(QStringLiteral("limit")).toInt();
+        const int available = generatedAvailable >= 0 ? generatedAvailable : generatedItemTotal;
+        QJsonArray items;
+        for (int row = start; row < start + limit && row < available; ++row) {
+            // A 32-digit hex id built from the row index
+            items.append(QJsonObject{
+                {QStringLiteral("Id"), QStringLiteral("%1").arg(row + 1, 32, 16, QLatin1Char('0'))},
+                {QStringLiteral("Name"), QStringLiteral("Item %1").arg(row)},
+                {QStringLiteral("Type"), QStringLiteral("Movie")},
+                {QStringLiteral("ProductionYear"), 2000 + row % 25},
+                {QStringLiteral("ImageTags"),
+                 QJsonObject{{QStringLiteral("Primary"), QStringLiteral("tag%1").arg(row)}}}});
+        }
+        return QJsonDocument(QJsonObject{{QStringLiteral("Items"), items},
+                                         {QStringLiteral("StartIndex"), start},
+                                         {QStringLiteral("TotalRecordCount"), generatedItemTotal}})
+            .toJson(QJsonDocument::Compact);
+    }
+
     static void respond(QTcpSocket *socket, int status, const QByteArray &body,
                         const QByteArray &extraHeaders = {})
     {
@@ -245,6 +291,7 @@ class FakeJellyfin {
         const QList<QByteArray> lines = headers.split('\n');
         int contentLength = 0;
         QByteArray authorization;
+        QByteArray cookie;
         QByteArray contentType;
         QByteArray websocketKey;
         bool upgradeRequest = false;
@@ -254,6 +301,8 @@ class FakeJellyfin {
                 contentLength = line.mid(15).trimmed().toInt();
             if (line.toLower().startsWith("authorization:"))
                 authorization = line.mid(14).trimmed();
+            if (line.toLower().startsWith("cookie:"))
+                cookie = line.mid(7).trimmed();
             if (line.toLower().startsWith("content-type:"))
                 contentType = line.mid(13).trimmed();
             if (line.toLower().startsWith("sec-websocket-key:"))
@@ -273,6 +322,7 @@ class FakeJellyfin {
         const QByteArray method = lines.constFirst().trimmed().split(' ').value(0);
         const QByteArray body = input.mid(bodyStart, contentLength);
         m_buffers.remove(socket);
+        ++requestCount;
         if (upgradeRequest) {
             // Guard first so bytes arriving while the handshake is written can never leak back into the HTTP parser
             m_wsTaken.insert(socket, nullptr);
@@ -381,12 +431,20 @@ class FakeJellyfin {
         if (method == "GET" && !listingFamily.isEmpty()) {
             ++listingRequests;
             lastListingRoute.insert(listingFamily, route);
+            listingRoutes[listingFamily].append(route);
             lastListingAuth.insert(listingFamily, authorization);
+            if (listingFamily == QLatin1String("Items"))
+                itemsRoutes.append(route);
             if (holdListings || holdFirstListings-- > 0) {
                 m_held.append(socket);
                 return;
             }
-            if (redirectListings) {
+            if (listingStatus.contains(listingFamily)) {
+                respond(socket, listingStatus.value(listingFamily), {});
+            } else if (listingFamily == QLatin1String("Items") && generatedItemTotal >= 0
+                       && !denyListings && !redirectListings) {
+                respond(socket, 200, generatedItemsBody(route));
+            } else if (redirectListings) {
                 respond(socket, 302, {},
                         QByteArrayLiteral("Location: https://unexpected.invalid/") + route.mid(1)
                             + QByteArrayLiteral("\r\n"));
@@ -458,6 +516,22 @@ class FakeJellyfin {
                 respond(socket, 401, {});
             } else {
                 respond(socket, 200, fixture(QStringLiteral("user_views")));
+            }
+            return;
+        }
+        if (method == "GET" && route.contains("/Images/")) {
+            ++imageRequests;
+            lastImageRoute = route;
+            lastImageAuth = authorization;
+            lastImageCookie = cookie;
+            if (redirectImages) {
+                respond(socket, 302, {}, "Location: https://unexpected.invalid/image.png\r\n");
+            } else if (imageStatus != 200) {
+                respond(socket, imageStatus, {});
+            } else {
+                // Cache-Control mirrors what the server sends for a tagged image
+                respond(socket, 200, imageBody.isEmpty() ? kTinyPng : imageBody,
+                        "Cache-Control: public, max-age=31536000\r\n");
             }
             return;
         }
