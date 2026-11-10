@@ -1,0 +1,27 @@
+{
+  "Items": [
+    {
+      "Name": "Hollow Interval",
+      "Id": "9a8b7c6d5e4f3827160594a3b2c1d0e1",
+      "Type": "Movie",
+      "Container": "mkv",
+      "ProductionYear": 2019,
+      "RunTimeTicks": 9600000000,
+      "PrimaryImageAspectRatio": 1.5,
+      "UserData": { "Key": "hollowinterval", "Played": false, "PlaybackPositionTicks": 2700000000, "PlayCount": 0 }
+    },
+    {
+      "Name": "S02E05 - The Silent Sea",
+      "SeriesName": "Abyss Station",
+      "Id": "b1b2c3d4e5f64788990a1b2c3d4e5f60",
+      "SeriesId": "aa11bb22cc33dd44ee55ff6677889900",
+      "Type": "Episode",
+      "Container": "mkv",
+      "RunTimeTicks": 17400000000,
+      "PrimaryImageAspectRatio": 1.7777778,
+      "UserData": { "Key": "ep5", "Played": false, "PlaybackPositionTicks": 900000000, "PlayCount": 0 }
+    }
+  ],
+  "StartIndex": 0,
+  "TotalRecordCount": 2
+}

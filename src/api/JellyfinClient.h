@@ -25,21 +25,34 @@ class QNetworkReply;
 
 namespace Kinefin {
 
-// An asynchronous P2a REST client: bootstrap, login, Quick Connect, library views and PlaybackInfo negotiation. It also owns the ordered queue of playback reports and the capabilities POST. It does not own profile persistence or the WebSocket. The Quick Connect pairing secret and access token remain in memory, never in logs or signals.
-// The rule the client applies to every identity field it puts into an Authorization header (no control characters, quotes or backslashes, at most 128 characters).
 bool isValidHeaderField(const QString &field);
+
+struct ItemQuery {
+    QString parentId;
+    QString includeItemTypes; // comma-separated BaseItemKind tokens
+    QString excludeItemTypes;
+    QStringList itemIds;
+    QString searchTerm;
+    QString sortBy;    // comma-separated sorting keys (shape-checked letters/digits/underscores)
+    QString sortOrder; // "Ascending" or "Descending"
+    int startIndex = -1;
+    int limit = -1;
+    bool recursive = false;
+    QString filters;    // comma-separated ItemFilter tokens (e.g. "IsResumable")
+    QStringList fields; // ItemFields tokens
+};
 
 class JellyfinClient final : public QObject {
     Q_OBJECT
 
   public:
-    // No limit: the same value as the profile's MaxStaticBitrate (parity §3).
+    // No limit: the same value as the profile's MaxStaticBitrate
     static constexpr qint64 DefaultMaxStreamingBitrate = 1'000'000'000;
 
     explicit JellyfinClient(QObject *parent = nullptr);
     ~JellyfinClient() override;
 
-    // A stable DeviceId must be supplied by the profile layer, not generated afresh on every login. Reject fields that could inject auth directives.
+    // A stable DeviceId must be supplied by the profile layer, not generated afresh on every login. Reject fields that could inject auth directives
     bool setDeviceIdentity(const QString &name, const QString &id, const QString &version);
     void setAllowInsecureHttp(bool allowed); // explicit user opt-in for non-loopback HTTP
 
@@ -51,6 +64,46 @@ class JellyfinClient final : public QObject {
     void cancelQuickConnect();
     bool isQuickConnectPending() const;
     bool fetchUserViews();
+    // The universal listing of `/Items`: library grids, search and ids= resolution. The
+    // members of `query` are validated and composed into the camelCase query the 12.4
+    // routes accept; the ids better than one item are joined comma-only.
+    bool fetchItems(const ItemQuery &query);
+    // The Continue Watching row: `GET /UserItems/Resume` (the route the upstream resume
+    // section speaks on the 12.x generation), video items, no total record echo demanded
+    // of the user's server policy — the envelope is still validated.
+    bool fetchResumeItems(int limit);
+    // One library's Recently Added row: `GET /Items/Latest` — the bare-array endpoint. An
+    // empty `parentId` spans the whole library set.
+    bool fetchLatestItems(const QString &parentId, int limit);
+    // The Next Up row: `GET /Shows/NextUp`. An empty `seriesId` spans every series of the
+    // parent (or the whole library). `nextUpDateCutoff` is the upstream user setting's
+    // `yyyy-MM-dd` date string the server should not look behind; `enableRewatching` rides
+    // as 0/1.
+    bool fetchNextUp(const QString &seriesId, const QString &parentId,
+                     const QString &nextUpDateCutoff, bool enableRewatching, int limit);
+    // One series' seasons, and its episodes per season (`seasonId` empty = every season,
+    // paged by `startIndex`/`limit`; `startIndex` < 0 lets the server default).
+    bool fetchSeasons(const QString &seriesId);
+    bool fetchEpisodes(const QString &seriesId, const QString &seasonId, int startIndex, int limit);
+    // Similar items of any item kind (the generic `/Items/{itemId}/Similar` route).
+    bool fetchSimilarItems(const QString &itemId, int limit);
+    // Genre rails: `/Genres` validated as an envelope (the items carry Name and Id).
+    bool fetchGenres(const QString &parentId, int startIndex, int limit);
+    // The browse filter values: `GET /Items/Filters2`. The known arrays (`Genres` rows of
+    // Name/Id, `Tags` strings) and any other QueryFilters member pass through as-is.
+    bool fetchFilters(const QString &parentId);
+    // The connected sessions of the server (`GET /Sessions`): the Remote page's data. With
+    // `controllableByUserOnly` the server is asked for the sessions this user may control.
+    bool fetchSessions(bool controllableByUserOnly);
+    // The token-free URL of one item image (`GET /Items/{itemId}/Images/{type}` has no
+    // `security` requirement in the 12.4 spec, so the URL carries no credentials and the
+    // image fetch may stay unauthenticated). `imageType` is one of the spec's ImageType
+    // names; `format` may be empty (the server negotiates) or one of "jpg", "gif", "png",
+    // "webp"; `tag` is an opaque alphanumeric cache buster. Invalid input yields an empty
+    // URL, never a partially valid one.
+    QUrl imageUrl(const QString &itemId, const QString &imageType, int maxWidth, const QString &tag,
+                  int quality = 90, const QString &format = {}) const;
+
     // Asks the server how to play `itemId` and emits playbackInfoReady with the chosen source (media URL without the token) or playbackInfoFailed. Everything goes in the JSON body (the query parameters of this route are deprecated in 12.4); `maxStreamingBitrate` must be sent, the server default is 8 Mbps. Exactly one of the two signals follows a request, except that a newer request, cancelPlaybackInfo(), disconnectFromServer() and a session lost elsewhere (a 401 on another call) end it with no signal of its own; a 401 on this very request emits sessionExpired and then playbackInfoFailed. Returns false, without a request, when not authenticated or on invalid input.
     bool requestPlaybackInfo(const QString &itemId, qint64 startTimeTicks,
                              const QJsonObject &deviceProfile,
@@ -102,6 +155,20 @@ class JellyfinClient final : public QObject {
     void playbackInfoReady(const Kinefin::PlaybackSource &source);
     // `reason` is a fixed English string: never a URL, a body or a path from the server.
     void playbackInfoFailed(const QString &itemId, int httpStatus, const QString &reason);
+    // The P2b listing results. Envelope families carry the items and the `TotalRecordCount`
+    // the server echoed; the two bare-array families (`/Items/Latest`, `/Sessions`) carry
+    // only the array. Nothing here ever contains an access token or a server-provided
+    // error string.
+    void itemsReady(const QJsonArray &items, int totalRecordCount);
+    void resumeItemsReady(const QJsonArray &items, int totalRecordCount);
+    void latestItemsReady(const QJsonArray &items);
+    void nextUpReady(const QJsonArray &items, int totalRecordCount);
+    void seasonsReady(const QJsonArray &items, int totalRecordCount);
+    void episodesReady(const QJsonArray &items, int totalRecordCount);
+    void similarItemsReady(const QJsonArray &items, int totalRecordCount);
+    void genresReady(const QJsonArray &items, int totalRecordCount);
+    void filtersReady(const QJsonObject &filters);
+    void sessionsReady(const QJsonArray &sessions);
 
   private:
     enum class State {
@@ -132,6 +199,18 @@ class JellyfinClient final : public QObject {
     QNetworkRequest requestFor(const QUrl &url, bool authenticated) const;
     void attach(QNetworkReply *reply, quint64 generation,
                 const std::function<void(QNetworkReply *)> &handler);
+    // The listing families: one request in flight per family; a new call of the same
+    // family aborts the pending one and arms a fresh serial so its late reply drops
+    // silently. `family` names are the fixed strings the fetchers pass.
+    quint64 supersedeListing(const QString &family);
+    bool listingSuperseded(const QString &family, quint64 serial) const;
+    // The shared response plumbing of the listing families: the status/401 handling with
+    // the fixed `requestFailed` emissions, then the envelope, bare-array or object
+    // paragraph of the endpoint. They return false (with the failure already emitted)
+    // whenever the reply is unusable; the fetcher then emits its Ready signal.
+    bool listingEnvelope(QNetworkReply *finished, QJsonArray *items, int *total);
+    bool listingArray(QNetworkReply *finished, QJsonArray *items);
+    bool listingObject(QNetworkReply *finished, QJsonObject *object);
 
     QNetworkAccessManager m_network;
     QSet<QNetworkReply *> m_pending;
@@ -162,6 +241,11 @@ class JellyfinClient final : public QObject {
     // Flipped by the WebSocket component while an authenticated socket exists; `reportCapabilities()` carries it.
     bool m_mediaControlAnnounced = false;
     bool m_verifyInFlight = false;
+    // The P2b listing families: `FetchItems`, `Resume`, `Latest`, `NextUp`, `Seasons`,
+    // `Episodes`, `Similar`, `Genres`, `Filters`, `Sessions` — the serial each accepted
+    // request holds and the reply of the one in flight (for supersede aborts).
+    QHash<QString, quint64> m_listingSerials;
+    QHash<QString, QPointer<QNetworkReply>> m_listingReplies;
 };
 
 } // namespace Kinefin

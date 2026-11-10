@@ -1,0 +1,45 @@
+[
+  {
+    "Id": "11111111222233334444555566667777",
+    "UserId": "d5ed5d4e2e5447b58e9f2b6f7bd5c96a",
+    "UserName": "fixture-user",
+    "Client": "Kinefin",
+    "DeviceName": "Kinefin test",
+    "DeviceId": "stable-test-id",
+    "ApplicationVersion": "0.0.1",
+    "LastActivityDate": "2026-11-08T21:12:00.0000000Z",
+    "PlayableMediaTypes": ["Video"],
+    "SupportsMediaControl": true,
+    "SupportsRemoteControl": true,
+    "NowPlayingItem": {
+      "Name": "Arcturus (2012)",
+      "Id": "f0e1d2c3b4a5968778695a4b3c2d1e0f",
+      "SeriesName": null,
+      "RunTimeTicks": 10800000000,
+      "Type": "Movie",
+      "PlaySessionId": "3000000000000000000000000000feed"
+    },
+    "PlayState": {
+      "PositionTicks": 3200000000,
+      "CanSeek": true,
+      "IsPaused": false,
+      "IsMuted": false,
+      "PlayMethod": "DirectPlay"
+    },
+    "TranscodingInfo": null,
+    "AdditionalUsers": []
+  },
+  {
+    "Id": "88888888999900001111222233334444",
+    "UserId": "d5ed5d4e2e5447b58e9f2b6f7bd5c96a",
+    "UserName": "fixture-user",
+    "Client": "Jellyfin Web",
+    "DeviceName": "Firefox",
+    "DeviceId": "twb-web-interface",
+    "ApplicationVersion": "12.4.0",
+    "LastActivityDate": "2026-11-08T18:00:00.0000000Z",
+    "PlayableMediaTypes": ["Video", "Audio"],
+    "SupportsMediaControl": true,
+    "SupportsRemoteControl": false
+  }
+]

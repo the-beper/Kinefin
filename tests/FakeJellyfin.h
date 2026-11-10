@@ -34,6 +34,16 @@ class FakeJellyfin {
   public:
     FakeJellyfin()
     {
+        listingFixtures.insert(QStringLiteral("Items"), QStringLiteral("items_page"));
+        listingFixtures.insert(QStringLiteral("Resume"), QStringLiteral("user_items_resume"));
+        listingFixtures.insert(QStringLiteral("Latest"), QStringLiteral("items_latest"));
+        listingFixtures.insert(QStringLiteral("NextUp"), QStringLiteral("shows_next_up"));
+        listingFixtures.insert(QStringLiteral("Seasons"), QStringLiteral("shows_seasons"));
+        listingFixtures.insert(QStringLiteral("Episodes"), QStringLiteral("episodes_page"));
+        listingFixtures.insert(QStringLiteral("Similar"), QStringLiteral("items_similar"));
+        listingFixtures.insert(QStringLiteral("Genres"), QStringLiteral("genres_page"));
+        listingFixtures.insert(QStringLiteral("Filters"), QStringLiteral("items_filters2"));
+        listingFixtures.insert(QStringLiteral("Sessions"), QStringLiteral("sessions_list"));
         QObject::connect(&m_server, &QTcpServer::newConnection, &m_server, [this] {
             while (QTcpSocket *socket = m_server.nextPendingConnection()) {
                 QObject::connect(socket, &QTcpSocket::readyRead, socket,
@@ -140,6 +150,23 @@ class FakeJellyfin {
     QByteArray lastUsersMeAuth;
     bool denyUsersMe = false;
 
+    // The P2b listing routes (fetchItems and family). `holdFirstListings` holds that many
+    // next listing replies suppressed until releaseHeld(), `holdListings` holds every one
+    // of them, `denyListings` answers 401, `redirectListings` answers 302 off-host. The
+    // family (a key of the two last* hashes) is classified from the route fragment, so a
+    // test can assert the exact query the client sent. Fixture bodies come from
+    // `listingFixtures` (the ctor fills the defaults; a test may override a family).
+    int holdFirstListings = 0;
+    bool holdListings = false;
+    bool denyListings = false;
+    bool redirectListings = false;
+    QHash<QString, QString> listingFixtures;
+    // Raw body per family, overriding the fixture when set (like playbackInfoRawBody).
+    QHash<QString, QByteArray> listingRawBody;
+    int listingRequests = 0;
+    QHash<QString, QByteArray> lastListingRoute; // family -> "path?query"
+    QHash<QString, QByteArray> lastListingAuth;  // family -> the Authorization header
+
     // The most recent accepted WebSocket connection (nullptr until one handshake completes).
     FakeSocketConnection *lastConnection() const
     {
@@ -154,6 +181,41 @@ class FakeJellyfin {
             if (socket)
                 respond(socket, reportStatus, {});
         }
+    }
+
+    // The listing-family fragment of a request route, or "" when it is not one. The
+    // specific fragments come first so `/Items/Latest` never reads as the generic /Items.
+    static QString classifyListingRoute(const QByteArray &route)
+    {
+        if (route.contains("/UserItems/Resume?"))
+            return QStringLiteral("Resume");
+        if (route.contains("/Items/Latest?"))
+            return QStringLiteral("Latest");
+        if (route.contains("/Shows/NextUp?"))
+            return QStringLiteral("NextUp");
+        if (route.contains("/Seasons?"))
+            return QStringLiteral("Seasons");
+        if (route.contains("/Episodes?"))
+            return QStringLiteral("Episodes");
+        if (route.contains("/Similar?"))
+            return QStringLiteral("Similar");
+        if (route.contains("/Genres?"))
+            return QStringLiteral("Genres");
+        if (route.contains("/Filters2?"))
+            return QStringLiteral("Filters");
+        if (route.endsWith("/Sessions") || route.contains("/Sessions?"))
+            return QStringLiteral("Sessions");
+        if (route.contains("/Items?"))
+            return QStringLiteral("Items");
+        return {};
+    }
+
+    // The full query of a captured listing request: tests dissect it with QUrlQuery.
+    static QUrlQuery capturedListingQuery(const QByteArray &route)
+    {
+        QByteArray full = QByteArrayLiteral("http://127.0.0.1");
+        full += route;
+        return QUrlQuery(QUrl::fromEncoded(full));
     }
 
   private:
@@ -315,6 +377,31 @@ class FakeJellyfin {
                 respond(socket, 200,
                         "{\"Id\":\"d5ed5d4e2e5447b58e9f2b6f7bd5c96a\",\"Name\":\"bepi\","
                         "\"Policy\":{\"IsAdministrator\":false},\"Configuration\":{}}");
+            }
+            return;
+        }
+        // The P2b listing routes classify by fragment; `listingFamily` keeps the order so
+        // the more specific fragments win (/Items/Latest before /Items, /Sessions before
+        // the POST-only playback routes never match a GET).
+        const QString listingFamily = classifyListingRoute(route);
+        if (method == "GET" && !listingFamily.isEmpty()) {
+            ++listingRequests;
+            lastListingRoute.insert(listingFamily, route);
+            lastListingAuth.insert(listingFamily, authorization);
+            if (holdListings || holdFirstListings-- > 0) {
+                m_held.append(socket);
+                return;
+            }
+            if (redirectListings) {
+                respond(socket, 302, {},
+                        QByteArrayLiteral("Location: https://unexpected.invalid/") + route.mid(1)
+                            + QByteArrayLiteral("\r\n"));
+            } else if (denyListings) {
+                respond(socket, 401, {});
+            } else if (listingRawBody.contains(listingFamily)) {
+                respond(socket, 200, listingRawBody.value(listingFamily));
+            } else {
+                respond(socket, 200, fixture(listingFixtures.value(listingFamily)));
             }
             return;
         }

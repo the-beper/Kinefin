@@ -1,0 +1,9 @@
+{
+  "Items": [
+    { "Name": "Science Fiction", "Id": "aa00000000000000000000000000ff01", "Type": "Genre" },
+    { "Name": "Mystery", "Id": "bb00000000000000000000000000ff02", "Type": "Genre" },
+    { "Name": "Drama", "Id": "cc00000000000000000000000000ff03", "Type": "Genre" }
+  ],
+  "StartIndex": 0,
+  "TotalRecordCount": 3
+}

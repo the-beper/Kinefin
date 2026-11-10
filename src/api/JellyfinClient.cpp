@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "JellyfinClient.h"
 
+#include <QDate>
 #include <QHostAddress>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -45,7 +46,7 @@ QUrl normalizedBase(QUrl url)
     return url;
 }
 
-// Public discovery is unauthenticated, so a scheme/port upgrade is safe on the same hostname. Never accept a different host or a TLS downgrade.
+// Public discovery is unauthenticated, so a scheme/port upgrade is safe on the same hostname. Never accept a different host or a TLS downgrade
 bool allowedPublicRedirect(const QUrl &from, const QUrl &to)
 {
     if (!validServerUrl(to) || from.host().compare(to.host(), Qt::CaseInsensitive) != 0)
@@ -85,6 +86,211 @@ bool parseObject(QNetworkReply *reply, QJsonObject *object)
     *object = document.object();
     return true;
 }
+
+bool parseArray(QNetworkReply *reply, QJsonArray *array)
+{
+    const QByteArray bytes = reply->read(MaxResponseBytes + 1);
+    if (bytes.size() > MaxResponseBytes)
+        return false;
+    QJsonParseError error;
+    const QJsonDocument document = QJsonDocument::fromJson(bytes, &error);
+    if (error.error != QJsonParseError::NoError || !document.isArray())
+        return false;
+    // Every entry must be an object: a bare array of anything else is malformed contract.
+    for (const QJsonValue &value : document.array()) {
+        if (!value.isObject())
+            return false;
+    }
+    *array = document.array();
+    return true;
+}
+
+// The query token vocabularies: exactly the 12.4 OpenAPI enums (ItemFields, BaseItemKind, ImageType) plus the upstream ItemFilter enum the `filters` parameter rides (the spec leaves it a plain string). A member outside its set is refused without a request
+bool isValidTokenFromSet(const QString &token, std::initializer_list<QStringView> set)
+{
+    for (QStringView name : set) {
+        if (QStringView(token.constData(), qsizetype(token.size())) == name)
+            return true;
+    }
+    return false;
+}
+
+bool isValidItemFieldToken(const QString &token)
+{
+    return isValidTokenFromSet(token, {
+                                          u"AirTime",
+                                          u"CanDelete",
+                                          u"CanDownload",
+                                          u"ChannelInfo",
+                                          u"Chapters",
+                                          u"Trickplay",
+                                          u"ChildCount",
+                                          u"CumulativeRunTimeTicks",
+                                          u"CustomRating",
+                                          u"DateCreated",
+                                          u"DateLastMediaAdded",
+                                          u"DisplayPreferencesId",
+                                          u"Etag",
+                                          u"ExternalUrls",
+                                          u"Genres",
+                                          u"ItemCounts",
+                                          u"MediaSourceCount",
+                                          u"MediaSources",
+                                          u"OriginalTitle",
+                                          u"Overview",
+                                          u"ParentId",
+                                          u"Path",
+                                          u"People",
+                                          u"PlayAccess",
+                                          u"ProductionLocations",
+                                          u"ProviderIds",
+                                          u"PrimaryImageAspectRatio",
+                                          u"RecursiveItemCount",
+                                          u"Settings",
+                                          u"SeriesStudio",
+                                          u"SortName",
+                                          u"SpecialEpisodeNumbers",
+                                          u"Studios",
+                                          u"Taglines",
+                                          u"Tags",
+                                          u"RemoteTrailers",
+                                          u"MediaStreams",
+                                          u"SeasonUserData",
+                                          u"DateLastRefreshed",
+                                          u"DateLastSaved",
+                                          u"RefreshState",
+                                          u"ChannelImage",
+                                          u"EnableMediaSourceDisplay",
+                                          u"Width",
+                                          u"Height",
+                                          u"ExtraIds",
+                                          u"LocalTrailerCount",
+                                          u"IsHD",
+                                          u"SpecialFeatureCount",
+                                      });
+}
+
+bool isValidBaseItemKindToken(const QString &token)
+{
+    return isValidTokenFromSet(token, {
+                                          u"AggregateFolder",
+                                          u"Audio",
+                                          u"AudioBook",
+                                          u"BasePluginFolder",
+                                          u"Book",
+                                          u"BoxSet",
+                                          u"Channel",
+                                          u"ChannelFolderItem",
+                                          u"CollectionFolder",
+                                          u"Episode",
+                                          u"Folder",
+                                          u"Genre",
+                                          u"ManualPlaylistsFolder",
+                                          u"Movie",
+                                          u"LiveTvChannel",
+                                          u"LiveTvProgram",
+                                          u"MusicAlbum",
+                                          u"MusicArtist",
+                                          u"MusicGenre",
+                                          u"MusicVideo",
+                                          u"Person",
+                                          u"Photo",
+                                          u"PhotoAlbum",
+                                          u"Playlist",
+                                          u"PlaylistsFolder",
+                                          u"Program",
+                                          u"Recording",
+                                          u"Season",
+                                          u"Series",
+                                          u"Studio",
+                                          u"Trailer",
+                                          u"TvChannel",
+                                          u"TvProgram",
+                                          u"UserRootFolder",
+                                          u"UserView",
+                                          u"Video",
+                                          u"Year",
+                                      });
+}
+
+bool isValidItemFilterToken(const QString &token)
+{
+    return isValidTokenFromSet(token, {
+                                          u"IsFolder",
+                                          u"IsNotFolder",
+                                          u"IsUnplayed",
+                                          u"IsPlayed",
+                                          u"IsFavorite",
+                                          u"IsResumable",
+                                          u"Likes",
+                                          u"Dislikes",
+                                          u"IsFavoriteOrLikes",
+                                      });
+}
+
+bool isValidSortOrderToken(const QString &token)
+{
+    return token == QLatin1String("Ascending") || token == QLatin1String("Descending");
+}
+
+bool isValidSortByToken(const QString &token)
+{
+    // The spec leaves sortBy a free string; the shape rule keeps query injection out
+    if (token.isEmpty() || token.size() > 64)
+        return false;
+    for (const QChar c : token) {
+        if (!c.isLetterOrNumber() && c != QLatin1Char('_'))
+            return false;
+    }
+    return true;
+}
+
+bool isValidImageTypeToken(const QString &token)
+{
+    return isValidTokenFromSet(token, {
+                                          u"Primary",
+                                          u"Art",
+                                          u"Backdrop",
+                                          u"Banner",
+                                          u"Logo",
+                                          u"Thumb",
+                                          u"Disc",
+                                          u"Box",
+                                          u"Screenshot",
+                                          u"Menu",
+                                          u"Chapter",
+                                          u"BoxRear",
+                                          u"Profile",
+                                      });
+}
+
+bool isValidImageFormatToken(const QString &token)
+{
+    return token == QLatin1String("jpg") || token == QLatin1String("gif")
+           || token == QLatin1String("png") || token == QLatin1String("webp");
+}
+
+bool isValidImageTagToken(const QString &token)
+{
+    if (token.size() > 64)
+        return false;
+    for (const QChar c : token) {
+        if (!c.isLetterOrNumber() && c != QLatin1Char('-'))
+            return false;
+    }
+    return true;
+}
+
+// Splits a comma-separated query value into tokens, refusing empty members
+bool splitTokenList(const QString &value, QList<QString> *tokens)
+{
+    *tokens = value.split(QLatin1Char(','), Qt::KeepEmptyParts);
+    for (const QString &token : *tokens) {
+        if (token.isEmpty() || token.trimmed() != token)
+            return false;
+    }
+    return true;
+}
 } // namespace
 
 bool isValidHeaderField(const QString &field)
@@ -120,7 +326,7 @@ bool JellyfinClient::setDeviceIdentity(const QString &name, const QString &id,
 
 void JellyfinClient::setAllowInsecureHttp(bool allowed)
 {
-    // This opt-in is scoped to the current server and resets on disconnect.
+    // This opt-in is scoped to the current server and resets on disconnect
     if (m_state == State::Disconnected || m_state == State::Probing || m_state == State::Ready)
         m_allowInsecureHttp = allowed;
 }
@@ -217,7 +423,7 @@ bool JellyfinClient::initiateQuickConnect()
 {
     if (m_state != State::Ready || m_deviceId.isEmpty())
         return false;
-    // Both the eventual bearer token and the Quick Connect secret are credentials.
+    // Both the eventual bearer token and the Quick Connect secret are credentials
     if (!transportAllowsAuthentication()) {
         Q_EMIT requestFailed(
             0, QStringLiteral("Quick Connect requires HTTPS or an explicit insecure-HTTP opt-in"));
@@ -253,7 +459,7 @@ bool JellyfinClient::initiateQuickConnect()
         }
         m_quickConnectSecret = secret.toUtf8();
         m_state = State::QuickPending;
-        // Expose only the short user-facing pairing code, never the secret.
+        // Expose only the short user-facing pairing code, never the secret
         Q_EMIT quickConnectCodeReady(code);
     });
     return true;
@@ -370,6 +576,390 @@ void JellyfinClient::clearQuickConnectSecret()
     m_quickConnectSecret.fill('\0');
     m_quickConnectSecret.clear();
     m_quickPollInFlight = false;
+}
+
+namespace {
+// The /Items query of one item listing, or when `query.itemIds` is set an ids= resolution that carries only the ids and the fields (the details-refresh form): documented by ItemQuery. `userId` rides along on every listing call
+QUrlQuery listingQuery(const ItemQuery &query, const QString &userId)
+{
+    QUrlQuery wire;
+    if (!query.itemIds.isEmpty()) {
+        wire.addQueryItem(QStringLiteral("ids"), query.itemIds.join(QLatin1Char(',')));
+    } else {
+        if (!query.parentId.isEmpty())
+            wire.addQueryItem(QStringLiteral("parentId"), query.parentId);
+        if (!query.includeItemTypes.isEmpty())
+            wire.addQueryItem(QStringLiteral("includeItemTypes"), query.includeItemTypes);
+        if (!query.excludeItemTypes.isEmpty())
+            wire.addQueryItem(QStringLiteral("excludeItemTypes"), query.excludeItemTypes);
+        if (!query.searchTerm.isEmpty())
+            wire.addQueryItem(QStringLiteral("searchTerm"), query.searchTerm);
+        if (!query.sortBy.isEmpty()) {
+            wire.addQueryItem(QStringLiteral("sortBy"), query.sortBy);
+            wire.addQueryItem(QStringLiteral("sortOrder"), query.sortOrder.isEmpty()
+                                                               ? QStringLiteral("Ascending")
+                                                               : query.sortOrder);
+        }
+        if (query.recursive)
+            wire.addQueryItem(QStringLiteral("recursive"), QStringLiteral("true"));
+        if (!query.filters.isEmpty())
+            wire.addQueryItem(QStringLiteral("filters"), query.filters);
+        if (query.startIndex >= 0)
+            wire.addQueryItem(QStringLiteral("startIndex"), QString::number(query.startIndex));
+        if (query.limit >= 0)
+            wire.addQueryItem(QStringLiteral("limit"), QString::number(query.limit));
+    }
+    if (!query.fields.isEmpty())
+        wire.addQueryItem(QStringLiteral("fields"), query.fields.join(QLatin1Char(',')));
+    wire.addQueryItem(QStringLiteral("userId"), userId);
+    return wire;
+}
+
+// Validates an `ItemQuery` against the token vocabularies. Kept with the helpers because both fetchItems and tests rely on the refusal semantics
+bool validListingQuery(const ItemQuery &query)
+{
+    QList<QString> tokens;
+    if (!query.parentId.isEmpty() && !isValidJellyfinId(query.parentId))
+        return false;
+    for (const QString &value : {query.includeItemTypes, query.excludeItemTypes}) {
+        if (value.isEmpty())
+            continue;
+        if (!splitTokenList(value, &tokens))
+            return false;
+        for (const QString &token : tokens) {
+            if (!isValidBaseItemKindToken(token))
+                return false;
+        }
+    }
+    for (const QString &id : query.itemIds) {
+        if (!isValidJellyfinId(id))
+            return false;
+    }
+    if (!query.searchTerm.isEmpty() && query.searchTerm.size() > 512)
+        return false;
+    if (!query.sortBy.isEmpty()) {
+        if (!splitTokenList(query.sortBy, &tokens))
+            return false;
+        for (const QString &token : tokens) {
+            if (!isValidSortByToken(token))
+                return false;
+        }
+    }
+    if (!query.sortOrder.isEmpty() && !isValidSortOrderToken(query.sortOrder))
+        return false;
+    if (query.startIndex < -1 || query.limit < -1)
+        return false;
+    if (!query.filters.isEmpty()) {
+        if (!splitTokenList(query.filters, &tokens))
+            return false;
+        for (const QString &token : tokens) {
+            if (!isValidItemFilterToken(token))
+                return false;
+        }
+    }
+    for (const QString &field : query.fields) {
+        if (!isValidItemFieldToken(field))
+            return false;
+    }
+    return true;
+}
+} // namespace
+
+bool JellyfinClient::fetchItems(const ItemQuery &query)
+{
+    if (m_state != State::Authenticated || !validListingQuery(query))
+        return false;
+    const QString family = QStringLiteral("Items");
+    const quint64 serial = supersedeListing(family);
+    QUrl url = endpoint(QStringLiteral("/Items"));
+    url.setQuery(listingQuery(query, m_userId));
+    QNetworkReply *reply = m_network.get(requestFor(url, true));
+    m_listingReplies.insert(family, reply);
+    attach(reply, m_generation, [this, family, serial](QNetworkReply *finished) {
+        if (listingSuperseded(family, serial))
+            return;
+        QJsonArray items;
+        int total = 0;
+        if (!listingEnvelope(finished, &items, &total))
+            return;
+        Q_EMIT itemsReady(items, total);
+    });
+    return true;
+}
+
+bool JellyfinClient::fetchResumeItems(int limit)
+{
+    if (m_state != State::Authenticated || limit <= 0)
+        return false;
+    const QString family = QStringLiteral("Resume");
+    const quint64 serial = supersedeListing(family);
+    QUrl url = endpoint(QStringLiteral("/UserItems/Resume"));
+    QUrlQuery wire;
+    wire.addQueryItem(QStringLiteral("mediaTypes"), QStringLiteral("Video"));
+    wire.addQueryItem(QStringLiteral("limit"), QString::number(limit));
+    wire.addQueryItem(QStringLiteral("userId"), m_userId);
+    url.setQuery(wire);
+    QNetworkReply *reply = m_network.get(requestFor(url, true));
+    m_listingReplies.insert(family, reply);
+    attach(reply, m_generation, [this, family, serial](QNetworkReply *finished) {
+        if (listingSuperseded(family, serial))
+            return;
+        QJsonArray items;
+        int total = 0;
+        if (!listingEnvelope(finished, &items, &total))
+            return;
+        Q_EMIT resumeItemsReady(items, total);
+    });
+    return true;
+}
+
+bool JellyfinClient::fetchLatestItems(const QString &parentId, int limit)
+{
+    if (m_state != State::Authenticated || limit <= 0
+        || (!parentId.isEmpty() && !isValidJellyfinId(parentId)))
+        return false;
+    const QString family = QStringLiteral("Latest");
+    const quint64 serial = supersedeListing(family);
+    QUrl url = endpoint(QStringLiteral("/Items/Latest"));
+    QUrlQuery wire;
+    if (!parentId.isEmpty())
+        wire.addQueryItem(QStringLiteral("parentId"), parentId);
+    wire.addQueryItem(QStringLiteral("limit"), QString::number(limit));
+    wire.addQueryItem(QStringLiteral("userId"), m_userId);
+    url.setQuery(wire);
+    QNetworkReply *reply = m_network.get(requestFor(url, true));
+    m_listingReplies.insert(family, reply);
+    attach(reply, m_generation, [this, family, serial](QNetworkReply *finished) {
+        if (listingSuperseded(family, serial))
+            return;
+        QJsonArray items;
+        if (!listingArray(finished, &items))
+            return;
+        Q_EMIT latestItemsReady(items);
+    });
+    return true;
+}
+
+bool JellyfinClient::fetchNextUp(const QString &seriesId, const QString &parentId,
+                                 const QString &nextUpDateCutoff, bool enableRewatching, int limit)
+{
+    const QDate cutoff = nextUpDateCutoff.isEmpty()
+                             ? QDate{}
+                             : QDate::fromString(nextUpDateCutoff, QStringLiteral("yyyy-MM-dd"));
+    if (m_state != State::Authenticated || limit <= 0
+        || (!seriesId.isEmpty() && !isValidJellyfinId(seriesId))
+        || (!parentId.isEmpty() && !isValidJellyfinId(parentId))
+        || (!nextUpDateCutoff.isEmpty() && !cutoff.isValid()))
+        return false;
+    const QString family = QStringLiteral("NextUp");
+    const quint64 serial = supersedeListing(family);
+    QUrl url = endpoint(QStringLiteral("/Shows/NextUp"));
+    QUrlQuery wire;
+    if (!seriesId.isEmpty())
+        wire.addQueryItem(QStringLiteral("seriesId"), seriesId);
+    if (!parentId.isEmpty())
+        wire.addQueryItem(QStringLiteral("parentId"), parentId);
+    if (cutoff.isValid())
+        wire.addQueryItem(QStringLiteral("nextUpDateCutoff"), cutoff.toString(u"yyyy-MM-dd"));
+    wire.addQueryItem(QStringLiteral("enableRewatching"),
+                      enableRewatching ? QStringLiteral("true") : QStringLiteral("false"));
+    wire.addQueryItem(QStringLiteral("limit"), QString::number(limit));
+    wire.addQueryItem(QStringLiteral("userId"), m_userId);
+    url.setQuery(wire);
+    QNetworkReply *reply = m_network.get(requestFor(url, true));
+    m_listingReplies.insert(family, reply);
+    attach(reply, m_generation, [this, family, serial](QNetworkReply *finished) {
+        if (listingSuperseded(family, serial))
+            return;
+        QJsonArray items;
+        int total = 0;
+        if (!listingEnvelope(finished, &items, &total))
+            return;
+        Q_EMIT nextUpReady(items, total);
+    });
+    return true;
+}
+
+bool JellyfinClient::fetchSeasons(const QString &seriesId)
+{
+    if (m_state != State::Authenticated || !isValidJellyfinId(seriesId))
+        return false;
+    const QString family = QStringLiteral("Seasons");
+    const quint64 serial = supersedeListing(family);
+    QUrl url = endpoint(QStringLiteral("/Shows/") + seriesId + QStringLiteral("/Seasons"));
+    QUrlQuery wire;
+    wire.addQueryItem(QStringLiteral("userId"), m_userId);
+    url.setQuery(wire);
+    QNetworkReply *reply = m_network.get(requestFor(url, true));
+    m_listingReplies.insert(family, reply);
+    attach(reply, m_generation, [this, family, serial](QNetworkReply *finished) {
+        if (listingSuperseded(family, serial))
+            return;
+        QJsonArray items;
+        int total = 0;
+        if (!listingEnvelope(finished, &items, &total))
+            return;
+        Q_EMIT seasonsReady(items, total);
+    });
+    return true;
+}
+
+bool JellyfinClient::fetchEpisodes(const QString &seriesId, const QString &seasonId, int startIndex,
+                                   int limit)
+{
+    if (m_state != State::Authenticated || !isValidJellyfinId(seriesId)
+        || (!seasonId.isEmpty() && !isValidJellyfinId(seasonId)) || startIndex < -1 || limit < -1)
+        return false;
+    const QString family = QStringLiteral("Episodes");
+    const quint64 serial = supersedeListing(family);
+    QUrl url = endpoint(QStringLiteral("/Shows/") + seriesId + QStringLiteral("/Episodes"));
+    QUrlQuery wire;
+    if (!seasonId.isEmpty())
+        wire.addQueryItem(QStringLiteral("seasonId"), seasonId);
+    if (startIndex >= 0)
+        wire.addQueryItem(QStringLiteral("startIndex"), QString::number(startIndex));
+    if (limit >= 0)
+        wire.addQueryItem(QStringLiteral("limit"), QString::number(limit));
+    wire.addQueryItem(QStringLiteral("userId"), m_userId);
+    url.setQuery(wire);
+    QNetworkReply *reply = m_network.get(requestFor(url, true));
+    m_listingReplies.insert(family, reply);
+    attach(reply, m_generation, [this, family, serial](QNetworkReply *finished) {
+        if (listingSuperseded(family, serial))
+            return;
+        QJsonArray items;
+        int total = 0;
+        if (!listingEnvelope(finished, &items, &total))
+            return;
+        Q_EMIT episodesReady(items, total);
+    });
+    return true;
+}
+
+bool JellyfinClient::fetchSimilarItems(const QString &itemId, int limit)
+{
+    if (m_state != State::Authenticated || !isValidJellyfinId(itemId) || limit <= 0)
+        return false;
+    const QString family = QStringLiteral("Similar");
+    const quint64 serial = supersedeListing(family);
+    QUrl url = endpoint(QStringLiteral("/Items/") + itemId + QStringLiteral("/Similar"));
+    QUrlQuery wire;
+    wire.addQueryItem(QStringLiteral("limit"), QString::number(limit));
+    wire.addQueryItem(QStringLiteral("userId"), m_userId);
+    url.setQuery(wire);
+    QNetworkReply *reply = m_network.get(requestFor(url, true));
+    m_listingReplies.insert(family, reply);
+    attach(reply, m_generation, [this, family, serial](QNetworkReply *finished) {
+        if (listingSuperseded(family, serial))
+            return;
+        QJsonArray items;
+        int total = 0;
+        if (!listingEnvelope(finished, &items, &total))
+            return;
+        Q_EMIT similarItemsReady(items, total);
+    });
+    return true;
+}
+
+bool JellyfinClient::fetchGenres(const QString &parentId, int startIndex, int limit)
+{
+    if (m_state != State::Authenticated || (!parentId.isEmpty() && !isValidJellyfinId(parentId))
+        || startIndex < -1 || limit < -1)
+        return false;
+    const QString family = QStringLiteral("Genres");
+    const quint64 serial = supersedeListing(family);
+    QUrl url = endpoint(QStringLiteral("/Genres"));
+    QUrlQuery wire;
+    if (!parentId.isEmpty())
+        wire.addQueryItem(QStringLiteral("parentId"), parentId);
+    if (startIndex >= 0)
+        wire.addQueryItem(QStringLiteral("startIndex"), QString::number(startIndex));
+    if (limit >= 0)
+        wire.addQueryItem(QStringLiteral("limit"), QString::number(limit));
+    wire.addQueryItem(QStringLiteral("userId"), m_userId);
+    url.setQuery(wire);
+    QNetworkReply *reply = m_network.get(requestFor(url, true));
+    m_listingReplies.insert(family, reply);
+    attach(reply, m_generation, [this, family, serial](QNetworkReply *finished) {
+        if (listingSuperseded(family, serial))
+            return;
+        QJsonArray items;
+        int total = 0;
+        if (!listingEnvelope(finished, &items, &total))
+            return;
+        Q_EMIT genresReady(items, total);
+    });
+    return true;
+}
+
+bool JellyfinClient::fetchFilters(const QString &parentId)
+{
+    if (m_state != State::Authenticated || (!parentId.isEmpty() && !isValidJellyfinId(parentId)))
+        return false;
+    const QString family = QStringLiteral("Filters");
+    const quint64 serial = supersedeListing(family);
+    QUrl url = endpoint(QStringLiteral("/Items/Filters2"));
+    QUrlQuery wire;
+    if (!parentId.isEmpty())
+        wire.addQueryItem(QStringLiteral("parentId"), parentId);
+    wire.addQueryItem(QStringLiteral("userId"), m_userId);
+    url.setQuery(wire);
+    QNetworkReply *reply = m_network.get(requestFor(url, true));
+    m_listingReplies.insert(family, reply);
+    attach(reply, m_generation, [this, family, serial](QNetworkReply *finished) {
+        if (listingSuperseded(family, serial))
+            return;
+        QJsonObject filters;
+        if (!listingObject(finished, &filters))
+            return;
+        Q_EMIT filtersReady(filters);
+    });
+    return true;
+}
+
+bool JellyfinClient::fetchSessions(bool controllableByUserOnly)
+{
+    if (m_state != State::Authenticated)
+        return false;
+    const QString family = QStringLiteral("Sessions");
+    const quint64 serial = supersedeListing(family);
+    QUrl url = endpoint(QStringLiteral("/Sessions"));
+    QUrlQuery wire;
+    if (controllableByUserOnly)
+        wire.addQueryItem(QStringLiteral("controllableByUserId"), m_userId);
+    url.setQuery(wire);
+    QNetworkReply *reply = m_network.get(requestFor(url, true));
+    m_listingReplies.insert(family, reply);
+    attach(reply, m_generation, [this, family, serial](QNetworkReply *finished) {
+        if (listingSuperseded(family, serial))
+            return;
+        QJsonArray sessions;
+        if (!listingArray(finished, &sessions))
+            return;
+        Q_EMIT sessionsReady(sessions);
+    });
+    return true;
+}
+
+QUrl JellyfinClient::imageUrl(const QString &itemId, const QString &imageType, int maxWidth,
+                              const QString &tag, int quality, const QString &format) const
+{
+    if (m_base.isEmpty() || !isValidJellyfinId(itemId) || !isValidImageTypeToken(imageType)
+        || maxWidth <= 0 || maxWidth > 4096 || quality < 1 || quality > 100
+        || (!format.isEmpty() && !isValidImageFormatToken(format))
+        || (!tag.isEmpty() && !isValidImageTagToken(tag)))
+        return {};
+    QUrl url =
+        endpoint(QStringLiteral("/Items/") + itemId + QStringLiteral("/Images/") + imageType);
+    QUrlQuery wire;
+    wire.addQueryItem(QStringLiteral("maxWidth"), QString::number(maxWidth));
+    wire.addQueryItem(QStringLiteral("quality"), QString::number(quality));
+    if (!tag.isEmpty())
+        wire.addQueryItem(QStringLiteral("tag"), tag);
+    if (!format.isEmpty())
+        wire.addQueryItem(QStringLiteral("format"), format);
+    url.setQuery(wire);
+    return url;
 }
 
 bool JellyfinClient::fetchUserViews()
@@ -509,7 +1099,7 @@ void JellyfinClient::setPlaybackReportRetryDelay(std::chrono::milliseconds delay
 
 void JellyfinClient::sendNextPlaybackReport()
 {
-    // One request at a time, and nothing while the first report waits for its retry.
+    // One request at a time, and nothing while the first report waits for its retry
     if (m_state != State::Authenticated || m_reportQueue.isEmpty() || m_reportBusy
         || m_reportRetryTimer.isActive())
         return;
@@ -567,7 +1157,7 @@ bool JellyfinClient::reportCapabilities()
 
 void JellyfinClient::cancelPlaybackInfo()
 {
-    // Bumping the serial makes the handler of the aborted reply a no-op: no signal for a dropped request.
+    // Bumping the serial makes the handler of the aborted reply a no-op: no signal for a dropped request
     ++m_playbackSerial;
     if (m_playbackReply)
         m_playbackReply->abort();
@@ -587,7 +1177,7 @@ QNetworkRequest JellyfinClient::webSocketRequest() const
         return {};
     QUrl url = m_base;
     url.setPath(m_base.path() + QStringLiteral("/socket"));
-    // The authenticated transport convention: https upgrades, and plain ws only where credentials may travel in the clear (loopback or the explicit opt-in). Authentication itself is impossible otherwise.
+    // The authenticated transport convention: https upgrades, and plain ws only where credentials may travel in the clear (loopback or the explicit opt-in). Authentication itself is impossible otherwise
     url.setScheme(url.scheme() == QLatin1String("https") ? QStringLiteral("wss")
                                                          : QStringLiteral("ws"));
     if (url.scheme() == QLatin1String("ws") && !transportAllowsAuthentication())
@@ -611,6 +1201,86 @@ bool JellyfinClient::verifySession()
     return true;
 }
 
+quint64 JellyfinClient::supersedeListing(const QString &family)
+{
+    // Bump first: abort() fires `finished` synchronously, and the handler of the aborted
+    // reply must already see itself superseded (same order as cancelPlaybackInfo).
+    const quint64 serial = ++m_listingSerials[family];
+    if (!m_listingReplies.value(family).isNull())
+        m_listingReplies.take(family)->abort();
+    return serial;
+}
+
+bool JellyfinClient::listingSuperseded(const QString &family, quint64 serial) const
+{
+    return m_listingSerials.value(family) != serial;
+}
+
+bool JellyfinClient::listingEnvelope(QNetworkReply *finished, QJsonArray *items, int *total)
+{
+    const int status = finished->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    if (status == 401) {
+        invalidateSession();
+        Q_EMIT requestFailed(status, QStringLiteral("Authentication expired"));
+        return false;
+    }
+    if (status != 200 || finished->error() != QNetworkReply::NoError) {
+        Q_EMIT requestFailed(status, QStringLiteral("Listing request failed"));
+        return false;
+    }
+    QJsonObject data;
+    if (!parseObject(finished, &data) || !data.value(QStringLiteral("Items")).isArray()
+        || !data.value(QStringLiteral("TotalRecordCount")).isDouble()) {
+        Q_EMIT requestFailed(status, QStringLiteral("Invalid listing response"));
+        return false;
+    }
+    *total = data.value(QStringLiteral("TotalRecordCount")).toInt(-1);
+    *items = data.value(QStringLiteral("Items")).toArray();
+    if (*total < items->size()) {
+        Q_EMIT requestFailed(status, QStringLiteral("Invalid listing pagination"));
+        return false;
+    }
+    return true;
+}
+
+bool JellyfinClient::listingArray(QNetworkReply *finished, QJsonArray *items)
+{
+    const int status = finished->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    if (status == 401) {
+        invalidateSession();
+        Q_EMIT requestFailed(status, QStringLiteral("Authentication expired"));
+        return false;
+    }
+    if (status != 200 || finished->error() != QNetworkReply::NoError) {
+        Q_EMIT requestFailed(status, QStringLiteral("Listing request failed"));
+        return false;
+    }
+    if (!parseArray(finished, items)) {
+        Q_EMIT requestFailed(status, QStringLiteral("Invalid listing response"));
+        return false;
+    }
+    return true;
+}
+
+bool JellyfinClient::listingObject(QNetworkReply *finished, QJsonObject *object)
+{
+    const int status = finished->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    if (status == 401) {
+        invalidateSession();
+        Q_EMIT requestFailed(status, QStringLiteral("Authentication expired"));
+        return false;
+    }
+    if (status != 200 || finished->error() != QNetworkReply::NoError) {
+        Q_EMIT requestFailed(status, QStringLiteral("Listing request failed"));
+        return false;
+    }
+    if (!parseObject(finished, object)) {
+        Q_EMIT requestFailed(status, QStringLiteral("Invalid listing response"));
+        return false;
+    }
+    return true;
+}
+
 void JellyfinClient::attach(QNetworkReply *reply, quint64 generation,
                             const std::function<void(QNetworkReply *)> &handler)
 {
@@ -626,7 +1296,7 @@ void JellyfinClient::attach(QNetworkReply *reply, quint64 generation,
 void JellyfinClient::abortPending()
 {
     ++m_generation;
-    // Reports die with the pending requests, quietly: the generation bump keeps their handlers from running. The same goes for a session re-check whose flag would otherwise stay set forever.
+    // Reports die with the pending requests, quietly: the generation bump keeps their handlers from running. The same goes for a session re-check whose flag would otherwise stay set forever
     m_reportQueue.clear();
     m_reportBusy = false;
     m_reportRetryTimer.stop();
@@ -694,7 +1364,7 @@ QUrl JellyfinClient::endpoint(const QString &path) const
 QNetworkRequest JellyfinClient::requestFor(const QUrl &url, bool authenticated) const
 {
     QNetworkRequest request(url);
-    // Tokens are never propagated by Qt's automatic redirect handling.
+    // Tokens are never propagated by Qt's automatic redirect handling
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
                          QNetworkRequest::ManualRedirectPolicy);
     request.setTransferTimeout(15000);

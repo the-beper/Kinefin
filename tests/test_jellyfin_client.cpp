@@ -955,6 +955,423 @@ class TestJellyfinClient : public QObject {
         }
         QVERIFY(destroyedClear);
     }
+
+    // --- P2b listings (browse, home rows, series, search, sessions) ---
+
+    void browseEnvelopeFailuresFailClosed()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        QSignalSpy ready(&client, &Kinefin::JellyfinClient::itemsReady);
+        QSignalSpy failures(&client, &Kinefin::JellyfinClient::requestFailed);
+        // Pagination: a TotalRecordCount smaller than Items.size() is refused, the exact
+        // failure fetchUserViews enforces.
+        server.listingRawBody.insert(
+            QStringLiteral("Items"),
+            QByteArrayLiteral("{\"Items\":[{\"Id\":\"t1\"}],\"TotalRecordCount\":0}"));
+        QVERIFY(client.fetchItems(Kinefin::ItemQuery()));
+        QTRY_COMPARE(failures.size(), 1);
+        QCOMPARE(failures.constFirst().at(1).toString(),
+                 QStringLiteral("Invalid listing pagination"));
+        QCOMPARE(ready.size(), 0);
+        // Malformed payload: an array where the envelope must be.
+        server.listingRawBody.insert(QStringLiteral("Items"), QByteArrayLiteral("[1,2]"));
+        QVERIFY(client.fetchItems(Kinefin::ItemQuery()));
+        QTRY_COMPARE(failures.size(), 2);
+        QCOMPARE(failures.constLast().at(1).toString(), QStringLiteral("Invalid listing response"));
+        QCOMPARE(ready.size(), 0);
+        // A 401 expires the session; the shared failure signal carries fixed English.
+        server.denyListings = true;
+        QSignalSpy expired(&client, &Kinefin::JellyfinClient::sessionExpired);
+        QVERIFY(client.fetchItems(Kinefin::ItemQuery()));
+        QTRY_COMPARE(expired.size(), 1);
+        QCOMPARE(failures.size(), 3);
+        QCOMPARE(failures.constLast().at(0).toInt(), 401);
+        QVERIFY(!client.isAuthenticated());
+        QCOMPARE(ready.size(), 0);
+        // A redirect is never followed: the identity stays on the resolved base.
+        QVERIFY(login(client, server));
+        server.redirectListings = true;
+        QVERIFY(client.fetchItems(Kinefin::ItemQuery()));
+        QTRY_COMPARE(failures.size(), 4);
+        QCOMPARE(failures.constLast().at(0).toInt(), 302);
+        QCOMPARE(ready.size(), 0);
+    }
+
+    void browseSupersedeKeepsOneOutstandingReply()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        QSignalSpy ready(&client, &Kinefin::JellyfinClient::itemsReady);
+        QSignalSpy failures(&client, &Kinefin::JellyfinClient::requestFailed);
+        // The second listing is held after it fully transmitted; the third one supersedes
+        // it by aborting the held reply. (Superseding a request during its connect phase
+        // queues Qt network internals out of the test's control, so the superseded reply
+        // is always one that already went out.)
+        QVERIFY(client.fetchItems(Kinefin::ItemQuery()));
+        QTRY_COMPARE(ready.size(), 1); // the unheld first answer
+        server.holdFirstListings = 1;
+        QVERIFY(client.fetchItems(Kinefin::ItemQuery()));
+        QTRY_COMPARE(server.listingRequests, 2); // the held request fully sent
+        QVERIFY(client.fetchItems(Kinefin::ItemQuery()));
+        QTRY_COMPARE(ready.size(), 2); // the third, immediate answer
+        server.releaseHeld();
+        QTest::qWait(100);
+        QCOMPARE(ready.size(), 2); // the late aborted reply stays silent
+        QCOMPARE(failures.size(), 0);
+        // A different family is not superseded by an Items call: both stay answerable.
+        QSignalSpy sessions(&client, &Kinefin::JellyfinClient::sessionsReady);
+        QVERIFY(client.fetchSessions(false));
+        QVERIFY(client.fetchItems(Kinefin::ItemQuery()));
+        QTRY_COMPARE(sessions.size(), 1);
+        QTRY_COMPARE(ready.size(), 3); // a new Items listing is not superseded
+    }
+
+    void browseDisconnectCancelsListingsQuietly()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        QSignalSpy ready(&client, &Kinefin::JellyfinClient::itemsReady);
+        QSignalSpy failures(&client, &Kinefin::JellyfinClient::requestFailed);
+        server.holdListings = true;
+        QVERIFY(client.fetchItems(Kinefin::ItemQuery()));
+        QVERIFY(client.fetchSessions(false));
+        client.disconnectFromServer();
+        server.releaseHeld();
+        QTest::qWait(100);
+        QCOMPARE(ready.size(), 0);
+        QCOMPARE(failures.size(), 0);
+        // Nothing can be listed while disconnected.
+        QVERIFY(!client.fetchItems(Kinefin::ItemQuery()));
+        QVERIFY(!client.fetchSessions(false));
+    }
+
+    void homeRowsResumeLatestNextUp()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        QSignalSpy resume(&client, &Kinefin::JellyfinClient::resumeItemsReady);
+        QSignalSpy latest(&client, &Kinefin::JellyfinClient::latestItemsReady);
+        QSignalSpy nextUp(&client, &Kinefin::JellyfinClient::nextUpReady);
+        QSignalSpy failures(&client, &Kinefin::JellyfinClient::requestFailed);
+        // Continue Watching: /UserItems/Resume with the video media type, upstream shape.
+        QVERIFY(client.fetchResumeItems(12));
+        QTRY_COMPARE(resume.size(), 1);
+        QJsonArray items = resume.constFirst().constFirst().value<QJsonArray>();
+        QCOMPARE(items.size(), 2);
+        QCOMPARE(items.at(1).toObject().value(QStringLiteral("SeriesId")).toString(),
+                 QStringLiteral("aa11bb22cc33dd44ee55ff6677889900"));
+        QUrlQuery wire = FakeJellyfin::capturedListingQuery(
+            server.lastListingRoute.value(QStringLiteral("Resume")));
+        QCOMPARE(wire.queryItemValue(QStringLiteral("mediaTypes")), QStringLiteral("Video"));
+        QCOMPARE(wire.queryItemValue(QStringLiteral("limit")), QStringLiteral("12"));
+        QVERIFY(wire.queryItemValue(QStringLiteral("userId"))
+                    .contains(QStringLiteral("d5ed5d4e2e5447b58e9f2b6f7bd5c96a")));
+        // Recently Added: the bare-array /Items/Latest, per library.
+        QVERIFY(client.fetchLatestItems(QStringLiteral("e2a1aa11a8d94b5c999a25cf59abcd01"), 8));
+        QTRY_COMPARE(latest.size(), 1);
+        items = latest.constFirst().constFirst().value<QJsonArray>();
+        QCOMPARE(items.size(), 3);
+        QCOMPARE(items.at(0).toObject().value(QStringLiteral("Type")).toString(),
+                 QStringLiteral("Series")); // upstream's groupItems shape: series first
+        wire = FakeJellyfin::capturedListingQuery(
+            server.lastListingRoute.value(QStringLiteral("Latest")));
+        QCOMPARE(wire.queryItemValue(QStringLiteral("parentId")),
+                 QStringLiteral("e2a1aa11a8d94b5c999a25cf59abcd01"));
+        QCOMPARE(wire.queryItemValue(QStringLiteral("limit")), QStringLiteral("8"));
+        // Next Up: /Shows/NextUp with the rewatch and cutoff knobs.
+        QVERIFY(client.fetchNextUp({}, {}, QStringLiteral("2025-11-10"), false, 15));
+        QTRY_COMPARE(nextUp.size(), 1);
+        items = nextUp.constFirst().constFirst().value<QJsonArray>();
+        QCOMPARE(items.size(), 1);
+        QCOMPARE(items.at(0).toObject().value(QStringLiteral("IndexNumber")).toInt(), 6);
+        wire = FakeJellyfin::capturedListingQuery(
+            server.lastListingRoute.value(QStringLiteral("NextUp")));
+        QCOMPARE(wire.queryItemValue(QStringLiteral("nextUpDateCutoff")),
+                 QStringLiteral("2025-11-10"));
+        QCOMPARE(wire.queryItemValue(QStringLiteral("enableRewatching")), QStringLiteral("false"));
+        QVERIFY(wire.queryItemValue(QStringLiteral("seriesId")).isEmpty());
+        QCOMPARE(failures.size(), 0);
+    }
+
+    void browseItemsComposeAndAnswer()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        QSignalSpy ready(&client, &Kinefin::JellyfinClient::itemsReady);
+        QSignalSpy failures(&client, &Kinefin::JellyfinClient::requestFailed);
+        Kinefin::ItemQuery query;
+        query.parentId = QStringLiteral("e2a1aa11a8d94b5c999a25cf59abcd01");
+        query.includeItemTypes = QStringLiteral("Movie,Series");
+        query.sortBy = QStringLiteral("SortName");
+        query.sortOrder = QStringLiteral("Descending");
+        query.startIndex = 24;
+        query.limit = 12;
+        query.searchTerm = QStringLiteral("hollow interval");
+        query.recursive = true;
+        query.fields = {QStringLiteral("PrimaryImageAspectRatio"), QStringLiteral("Path"),
+                        QStringLiteral("MediaSourceCount")};
+        QVERIFY(client.fetchItems(query));
+        QTRY_COMPARE(ready.size(), 1);
+        QCOMPARE(failures.size(), 0);
+        const QJsonArray items = ready.constFirst().constFirst().value<QJsonArray>();
+        QCOMPARE(items.size(), 2);
+        QCOMPARE(ready.constFirst().at(1).toInt(), 42);
+        QCOMPARE(items.at(0).toObject().value(QStringLiteral("Type")).toString(),
+                 QStringLiteral("Movie"));
+        const QUrlQuery wire = FakeJellyfin::capturedListingQuery(
+            server.lastListingRoute.value(QStringLiteral("Items")));
+        QCOMPARE(wire.queryItemValue(QStringLiteral("parentId")),
+                 QStringLiteral("e2a1aa11a8d94b5c999a25cf59abcd01"));
+        QCOMPARE(wire.queryItemValue(QStringLiteral("includeItemTypes")),
+                 QStringLiteral("Movie,Series"));
+        QCOMPARE(wire.queryItemValue(QStringLiteral("sortBy")), QStringLiteral("SortName"));
+        QCOMPARE(wire.queryItemValue(QStringLiteral("sortOrder")), QStringLiteral("Descending"));
+        QCOMPARE(wire.queryItemValue(QStringLiteral("startIndex")), QStringLiteral("24"));
+        QCOMPARE(wire.queryItemValue(QStringLiteral("limit")), QStringLiteral("12"));
+        QCOMPARE(wire.queryItemValue(QStringLiteral("recursive")), QStringLiteral("true"));
+        QCOMPARE(wire.queryItemValue(QStringLiteral("searchTerm")),
+                 QStringLiteral("hollow interval"));
+        QCOMPARE(wire.queryItemValue(QStringLiteral("fields")),
+                 QStringLiteral("PrimaryImageAspectRatio,Path,MediaSourceCount"));
+        QVERIFY(server.lastListingAuth.value(QStringLiteral("Items")).contains(kTokenField));
+        // The auth header never rides in the URL.
+        QVERIFY(!QString::fromUtf8(server.lastListingRoute.value(QStringLiteral("Items")))
+                     .contains(QLatin1String("Token")));
+    }
+
+    void browseItemsRefuseInvalidQueries()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        QSignalSpy ready(&client, &Kinefin::JellyfinClient::itemsReady);
+        QSignalSpy failures(&client, &Kinefin::JellyfinClient::requestFailed);
+        Kinefin::ItemQuery good;
+        QVERIFY(client.fetchItems(good));
+        QTRY_COMPARE(ready.size(), 1);
+        // Bad parentId / id shapes, an unknown field and an unknown type are refused
+        // without a request; the server never sees a URL it would answer 400 with.
+        const auto run = [&](const Kinefin::ItemQuery &query) {
+            const int before = server.listingRequests;
+            QVERIFY(!client.fetchItems(query));
+            QCOMPARE(server.listingRequests, before);
+        };
+        Kinefin::ItemQuery badParent = good;
+        badParent.parentId = QStringLiteral("../etc/passwd");
+        run(badParent);
+        Kinefin::ItemQuery badType = good;
+        badType.includeItemTypes = QStringLiteral("Movie,EvilType");
+        run(badType);
+        Kinefin::ItemQuery badField = good;
+        badField.fields = {QStringLiteral("Path"), QStringLiteral("UserData")};
+        run(badField); // UserData is not an ItemFields token on 12.4
+        Kinefin::ItemQuery badSortOrder = good;
+        badSortOrder.sortBy = QStringLiteral("SortName");
+        badSortOrder.sortOrder = QStringLiteral("sideways");
+        run(badSortOrder);
+        Kinefin::ItemQuery badSortBy = good;
+        badSortBy.sortBy = QStringLiteral("Sort,Na~me");
+        run(badSortBy);
+        Kinefin::ItemQuery badFilters = good;
+        badFilters.filters = QStringLiteral("IsResumable,IsHaunted");
+        run(badFilters);
+        // The ids= form still checks every member against the id shape rule (a URL-safety
+        // guard, not a GUID checker): a space is refused without a request.
+        Kinefin::ItemQuery badIds = good;
+        badIds.itemIds = {QStringLiteral("bad id")};
+        run(badIds);
+        QCOMPARE(failures.size(), 0);
+        QCOMPARE(ready.size(), 1);
+    }
+
+    void browseItemsResolveIdsAndDropTheRest()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        server.listingFixtures.insert(QStringLiteral("Items"), QStringLiteral("movie_item"));
+        QSignalSpy ready(&client, &Kinefin::JellyfinClient::itemsReady);
+        Kinefin::ItemQuery query;
+        query.parentId = QStringLiteral("e2a1aa11a8d94b5c999a25cf59abcd01");
+        query.searchTerm = QStringLiteral("arcturus");
+        query.sortBy = QStringLiteral("SortName");
+        query.itemIds = {QStringLiteral("f0e1d2c3b4a5968778695a4b3c2d1e0f"),
+                         QStringLiteral("9a8b7c6d5e4f3827160594a3b2c1d0e1")};
+        query.limit = 5;
+        QVERIFY(client.fetchItems(query));
+        QTRY_COMPARE(ready.size(), 1);
+        const QUrlQuery wire = FakeJellyfin::capturedListingQuery(
+            server.lastListingRoute.value(QStringLiteral("Items")));
+        QCOMPARE(
+            wire.queryItemValue(QStringLiteral("ids")),
+            QStringLiteral("f0e1d2c3b4a5968778695a4b3c2d1e0f,9a8b7c6d5e4f3827160594a3b2c1d0e1"));
+        // The ids= form carries the fields only: the other members must not reach the wire.
+        QVERIFY(wire.queryItemValue(QStringLiteral("parentId")).isEmpty());
+        QVERIFY(wire.queryItemValue(QStringLiteral("searchTerm")).isEmpty());
+        QVERIFY(wire.queryItemValue(QStringLiteral("sortBy")).isEmpty());
+        QVERIFY(wire.queryItemValue(QStringLiteral("limit")).isEmpty());
+    }
+
+    void seriesNavigationSeasonsAndEpisodes()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        QSignalSpy seasons(&client, &Kinefin::JellyfinClient::seasonsReady);
+        QSignalSpy episodes(&client, &Kinefin::JellyfinClient::episodesReady);
+        QSignalSpy failures(&client, &Kinefin::JellyfinClient::requestFailed);
+        QVERIFY(client.fetchSeasons(QStringLiteral("aa11bb22cc33dd44ee55ff6677889900")));
+        QTRY_COMPARE(seasons.size(), 1);
+        QCOMPARE(seasons.constFirst().constFirst().value<QJsonArray>().size(), 2);
+        QCOMPARE(seasons.constFirst().at(1).toInt(), 2);
+        QUrlQuery wire = FakeJellyfin::capturedListingQuery(
+            server.lastListingRoute.value(QStringLiteral("Seasons")));
+        QVERIFY(
+            server.lastListingRoute.value(QStringLiteral("Seasons"))
+                .contains(QByteArrayLiteral("/Shows/aa11bb22cc33dd44ee55ff6677889900/Seasons?")));
+        QVERIFY(wire.queryItemValue(QStringLiteral("userId"))
+                    .contains(QStringLiteral("d5ed5d4e2e5447b58e9f2b6f7bd5c96a")));
+        QVERIFY(client.fetchEpisodes(QStringLiteral("aa11bb22cc33dd44ee55ff6677889900"),
+                                     QStringLiteral("11aa22bb33cc44dd55ee66ff778899aa"), 6, 40));
+        QTRY_COMPARE(episodes.size(), 1);
+        wire = FakeJellyfin::capturedListingQuery(
+            server.lastListingRoute.value(QStringLiteral("Episodes")));
+        QCOMPARE(wire.queryItemValue(QStringLiteral("seasonId")),
+                 QStringLiteral("11aa22bb33cc44dd55ee66ff778899aa"));
+        QCOMPARE(wire.queryItemValue(QStringLiteral("startIndex")), QStringLiteral("6"));
+        QCOMPARE(wire.queryItemValue(QStringLiteral("limit")), QStringLiteral("40"));
+        // An empty seasonId asks for every season, unpaged:
+        QVERIFY(
+            client.fetchEpisodes(QStringLiteral("aa11bb22cc33dd44ee55ff6677889900"), {}, -1, -1));
+        QTRY_COMPARE(episodes.size(), 2);
+        wire = FakeJellyfin::capturedListingQuery(
+            server.lastListingRoute.value(QStringLiteral("Episodes")));
+        QVERIFY(wire.queryItemValue(QStringLiteral("seasonId")).isEmpty());
+        QVERIFY(wire.queryItemValue(QStringLiteral("limit")).isEmpty());
+        // Bad ids are refused without a request (the id shape rule, not a GUID check);
+        // a 401 expires the session.
+        QVERIFY(!client.fetchSeasons(QStringLiteral("no no")));
+        QVERIFY(!client.fetchEpisodes(QStringLiteral("aa11bb22cc33dd44ee55ff6677889900"),
+                                      QStringLiteral("../x"), 0, 10));
+        QCOMPARE(failures.size(), 0);
+        server.denyListings = true;
+        QVERIFY(client.fetchSeasons(QStringLiteral("aa11bb22cc33dd44ee55ff6677889900")));
+        QTRY_COMPARE(failures.size(), 1);
+        QCOMPARE(failures.constLast().at(0).toInt(), 401);
+        QTRY_COMPARE(seasons.size(), 1); // no new ready signal
+        QVERIFY(!client.isAuthenticated());
+    }
+
+    void similarGenresFiltersSessions()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        QSignalSpy similar(&client, &Kinefin::JellyfinClient::similarItemsReady);
+        QSignalSpy genres(&client, &Kinefin::JellyfinClient::genresReady);
+        QSignalSpy filters(&client, &Kinefin::JellyfinClient::filtersReady);
+        QSignalSpy sessions(&client, &Kinefin::JellyfinClient::sessionsReady);
+        QSignalSpy failures(&client, &Kinefin::JellyfinClient::requestFailed);
+        QVERIFY(client.fetchSimilarItems(QStringLiteral("f0e1d2c3b4a5968778695a4b3c2d1e0f"), 12));
+        QTRY_COMPARE(similar.size(), 1);
+        QCOMPARE(similar.constFirst().at(1).toInt(), 2);
+        QVERIFY(
+            server.lastListingRoute.value(QStringLiteral("Similar"))
+                .contains(QByteArrayLiteral("/Items/f0e1d2c3b4a5968778695a4b3c2d1e0f/Similar?")));
+        QVERIFY(!client.fetchSimilarItems(QStringLiteral("bad id"), 10));
+        QVERIFY(client.fetchGenres(QStringLiteral("e2a1aa11a8d94b5c999a25cf59abcd01"), 0, 30));
+        QTRY_COMPARE(genres.size(), 1);
+        const QJsonArray genreItems = genres.constFirst().constFirst().value<QJsonArray>();
+        QCOMPARE(genreItems.size(), 3);
+        QCOMPARE(genreItems.at(0).toObject().value(QStringLiteral("Name")).toString(),
+                 QStringLiteral("Science Fiction"));
+        QUrlQuery wire = FakeJellyfin::capturedListingQuery(
+            server.lastListingRoute.value(QStringLiteral("Genres")));
+        QCOMPARE(wire.queryItemValue(QStringLiteral("limit")), QStringLiteral("30"));
+        QVERIFY(client.fetchFilters(QStringLiteral("e2a1aa11a8d94b5c999a25cf59abcd01")));
+        QTRY_COMPARE(filters.size(), 1);
+        const QJsonObject filterObject = filters.constFirst().constFirst().value<QJsonObject>();
+        QCOMPARE(filterObject.value(QStringLiteral("Genres")).toArray().size(), 3);
+        QCOMPARE(filterObject.value(QStringLiteral("Tags")).toArray().size(), 3);
+        QCOMPARE(filterObject.value(QStringLiteral("AudioLanguages")).toArray().size(), 2);
+        QCOMPARE(filterObject.value(QStringLiteral("SubtitleLanguages")).toArray().size(), 1);
+        QVERIFY(client.fetchSessions(true));
+        QTRY_COMPARE(sessions.size(), 1);
+        const QJsonArray sessionItems = sessions.constFirst().constFirst().value<QJsonArray>();
+        QCOMPARE(sessionItems.size(), 2);
+        QVERIFY(server.lastListingRoute.value(QStringLiteral("Sessions"))
+                    .contains(QByteArrayLiteral("controllableByUserId=")));
+        QVERIFY(client.fetchSessions(false));
+        QTRY_COMPARE(sessions.size(), 2);
+        wire = FakeJellyfin::capturedListingQuery(
+            server.lastListingRoute.value(QStringLiteral("Sessions")));
+        QVERIFY(wire.queryItemValue(QStringLiteral("controllableByUserId")).isEmpty());
+        // The bare-array validation refuses an object or a nested array.
+        server.listingRawBody.insert(QStringLiteral("Sessions"), QByteArrayLiteral("{\"x\":1}"));
+        QVERIFY(client.fetchSessions(false));
+        QTRY_COMPARE(failures.size(), 1);
+        QCOMPARE(sessions.size(), 2);
+        server.listingRawBody.insert(QStringLiteral("Sessions"),
+                                     QByteArrayLiteral("[{},{\"a\":[]},1]"));
+        QVERIFY(client.fetchSessions(false));
+        QTRY_COMPARE(failures.size(), 2);
+        QCOMPARE(sessions.size(), 2);
+    }
+
+    void imageUrlsAreTokenFreeAndValidated()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(prepare(client, server)); // unauthenticated is fine: the URL stays token-free
+        const QUrl url =
+            client.imageUrl(QStringLiteral("f0e1d2c3b4a5968778695a4b3c2d1e0f"),
+                            QStringLiteral("Primary"), 360, QStringLiteral("arcturus-primary"));
+        QCOMPARE(url, QUrl(server.url(QStringLiteral(
+                          "/jellyfin/Items/f0e1d2c3b4a5968778695a4b3c2d1e0f/"
+                          "Images/Primary?maxWidth=360&quality=90&tag=arcturus-primary"))));
+        QVERIFY(!url.toString().contains(QLatin1String("Token"), Qt::CaseInsensitive));
+        // Explicit quality and format:
+        const QUrl webp = client.imageUrl(QStringLiteral("f0e1d2c3b4a5968778695a4b3c2d1e0f"),
+                                          QStringLiteral("Backdrop"), 1920, QStringLiteral("ab"),
+                                          85, QStringLiteral("webp"));
+        QCOMPARE(webp.query().contains(QLatin1String("maxWidth=1920")), true);
+        QCOMPARE(webp.query().contains(QLatin1String("format=webp")), true);
+        // Refusals: unknown type, bad size, bad tag charset, unknown format, bad id.
+        QVERIFY(client
+                    .imageUrl(QStringLiteral("f0e1d2c3b4a5968778695a4b3c2d1e0f"),
+                              QStringLiteral("Wallpaper"), 360, {})
+                    .isEmpty());
+        QVERIFY(client
+                    .imageUrl(QStringLiteral("f0e1d2c3b4a5968778695a4b3c2d1e0f"),
+                              QStringLiteral("Primary"), 0, {})
+                    .isEmpty());
+        QVERIFY(client
+                    .imageUrl(QStringLiteral("f0e1d2c3b4a5968778695a4b3c2d1e0f"),
+                              QStringLiteral("Primary"), 360, QStringLiteral("tag?x"))
+                    .isEmpty());
+        QVERIFY(client
+                    .imageUrl(QStringLiteral("f0e1d2c3b4a5968778695a4b3c2d1e0f"),
+                              QStringLiteral("Primary"), 360, {}, 90, QStringLiteral("bpg"))
+                    .isEmpty());
+        QVERIFY(client.imageUrl(QStringLiteral("no token"), QStringLiteral("Primary"), 360, {})
+                    .isEmpty());
+    }
 };
 
 QTEST_GUILESS_MAIN(TestJellyfinClient)
