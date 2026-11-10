@@ -18,9 +18,18 @@ Item {
     required property Item pageFlickable
     // The object name of the inner list, for the tests
     property string listObjectName: ""
+    // A page that builds its rows lazily moves between them itself: Up and Down then emit the signals below instead of moving the focus
+    property bool externalVerticalNavigation: false
+
+    signal upRequested
+    signal downRequested
 
     Layout.fillWidth: true
     implicitHeight: cardHeight + scrollBar.implicitHeight
+
+    function focusList(reason) {
+        list.forceActiveFocus(reason);
+    }
 
     ListView {
         id: list
@@ -41,11 +50,19 @@ Item {
 
         // Up and Down move between the rows, Left and Right inside one
         Keys.onUpPressed: {
+            if (root.externalVerticalNavigation) {
+                root.upRequested();
+                return;
+            }
             const target = list.nextItemInFocusChain(false);
             if (target && target !== list)
                 target.forceActiveFocus(Qt.BacktabFocusReason);
         }
         Keys.onDownPressed: {
+            if (root.externalVerticalNavigation) {
+                root.downRequested();
+                return;
+            }
             const target = list.nextItemInFocusChain(true);
             if (target && target !== list)
                 target.forceActiveFocus(Qt.TabFocusReason);

@@ -599,6 +599,8 @@ QUrlQuery listingQuery(const ItemQuery &query, const QString &userId)
             wire.addQueryItem(QStringLiteral("includeItemTypes"), query.includeItemTypes);
         if (!query.excludeItemTypes.isEmpty())
             wire.addQueryItem(QStringLiteral("excludeItemTypes"), query.excludeItemTypes);
+        if (!query.genreIds.isEmpty())
+            wire.addQueryItem(QStringLiteral("genreIds"), query.genreIds.join(QLatin1Char('|')));
         if (!query.searchTerm.isEmpty())
             // Encoded here, once: QUrlQuery keeps a %XX of its input as it is, so a typed "%25" must already be "%2525"
             wire.addQueryItem(QStringLiteral("searchTerm"),
@@ -633,6 +635,19 @@ void addRowImageParameters(QUrlQuery &wire, const QString &extraFields = QString
     addImageTypeParameters(wire);
 }
 
+// A comma-separated list of BaseItemKind tokens
+bool validKindList(const QString &kinds)
+{
+    QList<QString> tokens;
+    if (!splitTokenList(kinds, &tokens))
+        return false;
+    for (const QString &token : tokens) {
+        if (!isValidBaseItemKindToken(token))
+            return false;
+    }
+    return true;
+}
+
 // Validates an `ItemQuery` against the token vocabularies. Kept with the helpers because both fetchItems and tests rely on the refusal semantics
 bool validListingQuery(const ItemQuery &query)
 {
@@ -640,16 +655,16 @@ bool validListingQuery(const ItemQuery &query)
     if (!query.parentId.isEmpty() && !isValidJellyfinId(query.parentId))
         return false;
     for (const QString &value : {query.includeItemTypes, query.excludeItemTypes}) {
-        if (value.isEmpty())
-            continue;
-        if (!splitTokenList(value, &tokens))
+        if (!value.isEmpty() && !validKindList(value))
             return false;
-        for (const QString &token : tokens) {
-            if (!isValidBaseItemKindToken(token))
-                return false;
-        }
     }
     for (const QString &id : query.itemIds) {
+        if (!isValidJellyfinId(id))
+            return false;
+    }
+    if (query.genreIds.size() > MaxGenreIds)
+        return false;
+    for (const QString &id : query.genreIds) {
         if (!isValidJellyfinId(id))
             return false;
     }
@@ -897,10 +912,12 @@ bool JellyfinClient::fetchSimilarItems(const QString &itemId, int limit, int cha
     return true;
 }
 
-bool JellyfinClient::fetchGenres(const QString &parentId, int startIndex, int limit)
+bool JellyfinClient::fetchGenres(const QString &parentId, int startIndex, int limit,
+                                 const QString &includeItemTypes)
 {
     if (m_state != State::Authenticated || (!parentId.isEmpty() && !isValidJellyfinId(parentId))
-        || startIndex < -1 || limit < -1)
+        || startIndex < -1 || limit < -1
+        || (!includeItemTypes.isEmpty() && !validKindList(includeItemTypes)))
         return false;
     const QString family = QStringLiteral("Genres");
     const quint64 serial = supersedeListing(family);
@@ -908,6 +925,8 @@ bool JellyfinClient::fetchGenres(const QString &parentId, int startIndex, int li
     QUrlQuery wire;
     if (!parentId.isEmpty())
         wire.addQueryItem(QStringLiteral("parentId"), parentId);
+    if (!includeItemTypes.isEmpty())
+        wire.addQueryItem(QStringLiteral("includeItemTypes"), includeItemTypes);
     if (startIndex >= 0)
         wire.addQueryItem(QStringLiteral("startIndex"), QString::number(startIndex));
     if (limit >= 0)
@@ -928,9 +947,10 @@ bool JellyfinClient::fetchGenres(const QString &parentId, int startIndex, int li
     return true;
 }
 
-bool JellyfinClient::fetchFilters(const QString &parentId)
+bool JellyfinClient::fetchFilters(const QString &parentId, const QString &includeItemTypes)
 {
-    if (m_state != State::Authenticated || (!parentId.isEmpty() && !isValidJellyfinId(parentId)))
+    if (m_state != State::Authenticated || (!parentId.isEmpty() && !isValidJellyfinId(parentId))
+        || (!includeItemTypes.isEmpty() && !validKindList(includeItemTypes)))
         return false;
     const QString family = QStringLiteral("Filters");
     const quint64 serial = supersedeListing(family);
@@ -938,6 +958,11 @@ bool JellyfinClient::fetchFilters(const QString &parentId)
     QUrlQuery wire;
     if (!parentId.isEmpty())
         wire.addQueryItem(QStringLiteral("parentId"), parentId);
+    if (!includeItemTypes.isEmpty()) {
+        // The kinds of a library sit below its folders: ask the whole tree
+        wire.addQueryItem(QStringLiteral("includeItemTypes"), includeItemTypes);
+        wire.addQueryItem(QStringLiteral("recursive"), QStringLiteral("true"));
+    }
     wire.addQueryItem(QStringLiteral("userId"), m_userId);
     url.setQuery(wire);
     QNetworkReply *reply = m_network.get(requestFor(url, true));

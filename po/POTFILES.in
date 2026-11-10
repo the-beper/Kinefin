@@ -10,6 +10,8 @@ src/qml/EpisodeRow.qml
 src/qml/ItemDetailsPage.qml
 src/qml/LibraryPage.qml
 src/qml/SearchPage.qml
+src/qml/GenreFilterDialog.qml
+src/qml/GenreRailsPage.qml
 src/qml/MediaCard.qml
 src/qml/LoginPage.qml
 src/qml/Main.qml

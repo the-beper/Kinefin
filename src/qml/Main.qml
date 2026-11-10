@@ -159,6 +159,17 @@ Kirigami.ApplicationWindow {
         Qt.callLater(() => page?.focusSearchField());
     }
 
+    // The genre rails of the open library go above the library page that asks, which stays below
+    function openGenres(fromPage) {
+        if (connection.state !== ConnectionController.Authenticated)
+            return;
+        if (!connection.openGenreRails())
+            return;
+        if (fromPage)
+            pageStack.pop(fromPage);
+        pageStack.push(Qt.resolvedUrl("GenreRailsPage.qml"), { connection: connection });
+    }
+
     // A link opens its item above Home once signed in, whether it came before or after the sign-in
     function openRequestedItem(home) {
         if (requestedItemId.length === 0 || connection.state !== ConnectionController.Authenticated || home?.objectName !== "homePage")

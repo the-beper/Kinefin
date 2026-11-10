@@ -104,8 +104,29 @@ Kirigami.ScrollablePage {
                 current: page.model.filter === LibraryItemsModel.Favorites
                 onChosen: page.model.filter = LibraryItemsModel.Favorites
             }
+            Kirigami.Action {
+                separator: true
+                visible: page.model.genreOptions.available
+            }
+            ChoiceAction {
+                text: i18n("Filter by Genre…")
+                visible: page.model.genreOptions.available
+                current: page.model.genreIds.length > 0
+                onChosen: genreDialog.open()
+            }
+        },
+        Kirigami.Action {
+            text: i18n("Browse by Genre")
+            icon.name: "view-list-details"
+            visible: page.model.genreOptions.available
+            onTriggered: page.Window.window.openGenres(page)
         }
     ]
+
+    GenreFilterDialog {
+        id: genreDialog
+        library: page.model
+    }
 
     header: ColumnLayout {
         spacing: 0
@@ -177,7 +198,7 @@ Kirigami.ScrollablePage {
             visible: page.model.status === LibraryItemsModel.Ready && page.model.totalCount === 0
             icon.name: "folder-video"
             text: i18n("No items")
-            explanation: page.model.filter === LibraryItemsModel.All ? i18n("This library has no items yet") : i18n("No item matches the selected filter")
+            explanation: page.model.filtered ? i18n("No item matches the selected filter") : i18n("This library has no items yet")
         }
 
         delegate: MediaCard {

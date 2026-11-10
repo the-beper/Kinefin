@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "models/FilterOptionsModel.h"
+#include "models/GenreRailsModel.h"
 #include "models/HomeRowsModel.h"
 #include "models/ItemChildrenModel.h"
 #include "models/ItemDetailsModel.h"
@@ -60,6 +62,20 @@ struct SearchModelForeign {
     Q_GADGET
     QML_FOREIGN(Kinefin::SearchModel)
     QML_NAMED_ELEMENT(SearchModel)
+    QML_UNCREATABLE("Created by the application")
+};
+
+struct FilterOptionsModelForeign {
+    Q_GADGET
+    QML_FOREIGN(Kinefin::FilterOptionsModel)
+    QML_NAMED_ELEMENT(FilterOptionsModel)
+    QML_UNCREATABLE("Created by the application")
+};
+
+struct GenreRailsModelForeign {
+    Q_GADGET
+    QML_FOREIGN(Kinefin::GenreRailsModel)
+    QML_NAMED_ELEMENT(GenreRailsModel)
     QML_UNCREATABLE("Created by the application")
 };
 } // namespace Kinefin

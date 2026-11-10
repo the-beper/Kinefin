@@ -135,6 +135,31 @@ class TestConnectionController : public QObject {
         QCOMPARE(controller->library()->rowCount(), 0);
     }
 
+    void genreRailsFollowTheOpenLibrary()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        server.generatedItemTotal = 5;
+        auto controller = makeController();
+        QVERIFY(!controller->openGenreRails());
+        controller->connectTo(address(server));
+        QTRY_VERIFY(controller->state() == ConnectionController::NeedsLogin);
+        controller->login(QStringLiteral("fixture-user"), QStringLiteral("fixture-password"));
+        QTRY_COMPARE(controller->libraries().size(), 3);
+        QVERIFY(controller->openLibrary(QStringLiteral("e2a1aa11a8d94b5c999a25cf59abcd01")));
+        QVERIFY(controller->openGenreRails());
+        QTRY_COMPARE(controller->genreRails()->status(), Kinefin::GenreRailsModel::Ready);
+        QCOMPARE(controller->genreRails()->rowCount(), 3);
+        // Another library, or the end of the session, drops the rails
+        QVERIFY(controller->openLibrary(QStringLiteral("e2a1aa11a8d94b5c999a25cf59abcd01")));
+        QCOMPARE(controller->genreRails()->rowCount(), 0);
+        QCOMPARE(controller->genreRails()->status(), Kinefin::GenreRailsModel::Idle);
+        QVERIFY(controller->openGenreRails());
+        QTRY_COMPARE(controller->genreRails()->status(), Kinefin::GenreRailsModel::Ready);
+        controller->cancel();
+        QCOMPARE(controller->genreRails()->rowCount(), 0);
+    }
+
     void aLibraryPageFailureKeepsErrorTextEmpty()
     {
         FakeJellyfin server;

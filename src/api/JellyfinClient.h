@@ -27,6 +27,9 @@ namespace Kinefin {
 
 bool isValidHeaderField(const QString &field);
 
+// The most genre ids one query may carry
+constexpr int MaxGenreIds = 50;
+
 struct ItemQuery {
     QString parentId;
     QString includeItemTypes; // comma-separated BaseItemKind tokens
@@ -42,6 +45,8 @@ struct ItemQuery {
     QStringList fields; // ItemFields tokens
     // Also ask for the image types a card shows (one tag per type)
     bool cardImages = false;
+    // Genre ids (hex ids from /Genres or Items/Filters2, never names): an item matches any of them. Written pipe-delimited, at most MaxGenreIds
+    QStringList genreIds;
 };
 
 class JellyfinClient final : public QObject {
@@ -85,9 +90,10 @@ class JellyfinClient final : public QObject {
     // Drops the pending requests of one channel (silently, like a superseded one) and forgets its bookkeeping: for a consumer that is going away, or one that abandons what it asked for and may use the channel again later. Channel 0 is not releasable
     void releaseListingChannel(int channel);
     // Genre rails: `/Genres` validated as an envelope (the items carry Name and Id)
-    bool fetchGenres(const QString &parentId, int startIndex, int limit);
+    bool fetchGenres(const QString &parentId, int startIndex, int limit,
+                     const QString &includeItemTypes = QString());
     // The browse filter values: `GET /Items/Filters2`. The known arrays (`Genres` rows of Name/Id, `Tags` strings) and any other QueryFilters member pass through as-is
-    bool fetchFilters(const QString &parentId);
+    bool fetchFilters(const QString &parentId, const QString &includeItemTypes = QString());
     // The connected sessions of the server (`GET /Sessions`): the Remote page's data. With `controllableByUserOnly` the server is asked for the sessions this user may control
     bool fetchSessions(bool controllableByUserOnly);
     // The token-free URL of one item image (`GET /Items/{itemId}/Images/{type}` has no `security` requirement in the 12.4 spec, so the URL carries no credentials and the image fetch may stay unauthenticated). `imageType` is one of the spec's ImageType names; `format` may be empty (the server negotiates) or one of "jpg", "gif", "png", "webp"; `tag` is an opaque alphanumeric cache buster. Invalid input yields an empty URL, never a partially valid one

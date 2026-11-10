@@ -3,6 +3,7 @@
 #pragma once
 
 #include "api/JellyfinClient.h"
+#include "models/FilterOptionsModel.h"
 #include "models/PagedItemsModel.h"
 
 #include <optional>
@@ -16,6 +17,11 @@ class LibraryItemsModel final : public PagedItemsModel {
     Q_PROPERTY(Filter filter READ filter WRITE setFilter NOTIFY filterChanged)
     Q_PROPERTY(bool resumableAvailable READ resumableAvailable NOTIFY libraryChanged)
     Q_PROPERTY(QString libraryName READ libraryName NOTIFY libraryChanged)
+    // The genre ids the grid is filtered by (any of them), chosen among `genreOptions`
+    Q_PROPERTY(QStringList genreIds READ genreIds WRITE setGenreIds NOTIFY genreIdsChanged)
+    Q_PROPERTY(Kinefin::FilterOptionsModel *genreOptions READ genreOptions CONSTANT)
+    // Whether any filter or genre narrows the list (the empty-state text depends on it)
+    Q_PROPERTY(bool filtered READ filtered NOTIFY filteredChanged)
 
   public:
     enum SortKey { Name, DateAdded, ReleaseDate, CommunityRating, DatePlayed, Runtime };
@@ -56,6 +62,12 @@ class LibraryItemsModel final : public PagedItemsModel {
     Filter filter() const { return m_filter; }
     bool resumableAvailable() const { return m_collectionType == QLatin1String("movies"); }
     QString libraryName() const { return m_libraryName; }
+    QString libraryId() const { return m_libraryId; }
+    QString collectionType() const { return m_collectionType; }
+    QStringList genreIds() const { return m_genreIds; }
+    FilterOptionsModel *genreOptions() { return &m_genreOptions; }
+    bool filtered() const { return m_filter != All || !m_genreIds.isEmpty(); }
+    void setGenreIds(const QStringList &ids);
     void setSortKey(SortKey key);
     void setDescending(bool descending);
     void setFilter(Filter filter);
@@ -67,6 +79,8 @@ class LibraryItemsModel final : public PagedItemsModel {
     void descendingChanged();
     void filterChanged();
     void libraryChanged();
+    void genreIdsChanged();
+    void filteredChanged();
 
   protected:
     bool sendPage(int start, int limit) override;
@@ -86,5 +100,7 @@ class LibraryItemsModel final : public PagedItemsModel {
     SortKey m_sortKey = Name;
     bool m_descending = false;
     Filter m_filter = All;
+    QStringList m_genreIds;
+    FilterOptionsModel m_genreOptions;
 };
 } // namespace Kinefin

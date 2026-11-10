@@ -1309,6 +1309,64 @@ class TestJellyfinClient : public QObject {
         QCOMPARE(seasons.size(), 0);
     }
 
+    void genreIdsRideThePipeDelimitedAndBadOnesAreRefused()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        QSignalSpy ready(&client, &Kinefin::JellyfinClient::itemsReady);
+        const QString sciFi = QStringLiteral("aa00000000000000000000000000ff01");
+        const QString mystery = QStringLiteral("bb00000000000000000000000000ff02");
+        Kinefin::ItemQuery query;
+        query.genreIds = {sciFi, mystery};
+        QVERIFY(client.fetchItems(query));
+        QTRY_COMPARE(ready.size(), 1);
+        const QUrlQuery wire = FakeJellyfin::capturedListingQuery(
+            server.lastListingRoute.value(QStringLiteral("Items")));
+        QCOMPARE(wire.queryItemValue(QStringLiteral("genreIds"), QUrl::FullyDecoded),
+                 sciFi + QLatin1Char('|') + mystery);
+        const auto run = [&](const QStringList &ids) {
+            const int before = server.listingRequests;
+            Kinefin::ItemQuery bad;
+            bad.genreIds = ids;
+            QVERIFY(!client.fetchItems(bad));
+            QCOMPARE(server.listingRequests, before);
+        };
+        run({sciFi, QStringLiteral("Science Fiction")});
+        run({QStringLiteral("a|b")});
+        QStringList tooMany;
+        for (int i = 0; i < Kinefin::MaxGenreIds + 1; ++i)
+            tooMany.append(QStringLiteral("%1").arg(i + 1, 32, 16, QLatin1Char('e')));
+        run(tooMany);
+    }
+
+    void genresAndFiltersCarryTheItemKindsOfALibrary()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        QSignalSpy genres(&client, &Kinefin::JellyfinClient::genresReady);
+        QSignalSpy filters(&client, &Kinefin::JellyfinClient::filtersReady);
+        const QString library = QStringLiteral("e2a1aa11a8d94b5c999a25cf59abcd01");
+        QVERIFY(client.fetchGenres(library, 0, 20, QStringLiteral("Series")));
+        QTRY_COMPARE(genres.size(), 1);
+        QUrlQuery wire = FakeJellyfin::capturedListingQuery(
+            server.lastListingRoute.value(QStringLiteral("Genres")));
+        QCOMPARE(wire.queryItemValue(QStringLiteral("includeItemTypes")), QStringLiteral("Series"));
+        QVERIFY(client.fetchFilters(library, QStringLiteral("Movie")));
+        QTRY_COMPARE(filters.size(), 1);
+        wire = FakeJellyfin::capturedListingQuery(
+            server.lastListingRoute.value(QStringLiteral("Filters")));
+        QCOMPARE(wire.queryItemValue(QStringLiteral("includeItemTypes")), QStringLiteral("Movie"));
+        QCOMPARE(wire.queryItemValue(QStringLiteral("recursive")), QStringLiteral("true"));
+        const int before = server.listingRequests;
+        QVERIFY(!client.fetchGenres(library, 0, 20, QStringLiteral("Movie,EvilType")));
+        QVERIFY(!client.fetchFilters(library, QStringLiteral("Movie,EvilType")));
+        QCOMPARE(server.listingRequests, before);
+    }
+
     void similarGenresFiltersSessions()
     {
         FakeJellyfin server;

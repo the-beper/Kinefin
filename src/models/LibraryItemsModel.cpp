@@ -50,8 +50,25 @@ QString filtersFor(LibraryItemsModel::Filter filter)
 } // namespace
 
 LibraryItemsModel::LibraryItemsModel(JellyfinClient *client, QObject *parent)
-    : PagedItemsModel(PageSize, parent), m_client(client)
+    : PagedItemsModel(PageSize, parent), m_client(client), m_genreOptions(client, this)
 {
+    // The options decide which of the selected genres still exist: the others are dropped, all of them when the options cannot be loaded (the menu that clears them is hidden then)
+    connect(&m_genreOptions, &FilterOptionsModel::statusChanged, this, [this] {
+        if (m_genreIds.isEmpty())
+            return;
+        if (m_genreOptions.status() == FilterOptionsModel::Failed) {
+            setGenreIds({});
+            return;
+        }
+        if (m_genreOptions.status() != FilterOptionsModel::Ready)
+            return;
+        QStringList kept;
+        for (const QString &id : std::as_const(m_genreIds)) {
+            if (m_genreOptions.contains(id))
+                kept.append(id);
+        }
+        setGenreIds(kept);
+    });
     if (m_client) {
         connect(m_client, &JellyfinClient::itemsReady, this, &LibraryItemsModel::onItemsReady);
         connect(m_client, &JellyfinClient::listingFailed, this,
@@ -96,12 +113,14 @@ bool LibraryItemsModel::open(const QString &libraryId, const QString &collection
         setFilterQuietly(All);
     Q_EMIT libraryChanged();
     restartPaging();
+    m_genreOptions.load(libraryId, base->includeItemTypes);
     return true;
 }
 
 void LibraryItemsModel::clear()
 {
     const bool hadLibrary = !m_libraryId.isEmpty();
+    m_genreOptions.clear();
     clearPaging();
     m_libraryId.clear();
     m_collectionType.clear();
@@ -121,6 +140,12 @@ void LibraryItemsModel::resetOrderAndFilter()
         Q_EMIT descendingChanged();
     }
     setFilterQuietly(All);
+    // Genres belong to a library: another one starts without any
+    if (!m_genreIds.isEmpty()) {
+        m_genreIds.clear();
+        Q_EMIT genreIdsChanged();
+        Q_EMIT filteredChanged();
+    }
 }
 
 void LibraryItemsModel::setFilterQuietly(Filter filter)
@@ -129,6 +154,7 @@ void LibraryItemsModel::setFilterQuietly(Filter filter)
         return;
     m_filter = filter;
     Q_EMIT filterChanged();
+    Q_EMIT filteredChanged();
 }
 
 void LibraryItemsModel::setSortKey(SortKey key)
@@ -157,6 +183,27 @@ void LibraryItemsModel::setFilter(Filter filter)
         return;
     m_filter = filter;
     Q_EMIT filterChanged();
+    Q_EMIT filteredChanged();
+    if (!m_libraryId.isEmpty())
+        restartPaging();
+}
+
+void LibraryItemsModel::setGenreIds(const QStringList &ids)
+{
+    // Valid ids only, each once, at most as many as a query may carry
+    QStringList clean;
+    for (const QString &id : ids) {
+        if (isValidJellyfinId(id) && !clean.contains(id, Qt::CaseInsensitive)
+            && clean.size() < MaxGenreIds)
+            clean.append(id);
+    }
+    if (clean == m_genreIds)
+        return;
+    const bool wasFiltered = filtered();
+    m_genreIds = clean;
+    Q_EMIT genreIdsChanged();
+    if (filtered() != wasFiltered)
+        Q_EMIT filteredChanged();
     if (!m_libraryId.isEmpty())
         restartPaging();
 }
@@ -213,6 +260,7 @@ bool LibraryItemsModel::sendPage(int start, int limit)
     query.sortBy = sortByFor(m_sortKey);
     query.sortOrder = m_descending ? QStringLiteral("Descending") : QStringLiteral("Ascending");
     query.filters = filtersFor(m_filter);
+    query.genreIds = m_genreIds;
     query.startIndex = start;
     query.limit = limit;
     return m_client && m_client->fetchItems(query, Channel);

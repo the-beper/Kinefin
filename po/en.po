@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: kinefin 0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-11-10 14:51+0000\n"
+"POT-Creation-Date: 2026-11-10 15:16+0000\n"
 "PO-Revision-Date: 2026-11-07 00:00+0000\n"
 "Last-Translator: the-beper\n"
 "Language: en\n"
@@ -334,7 +334,7 @@ msgstr "Font"
 msgid "Manual MPV Configuration"
 msgstr "Manual MPV Configuration"
 
-#: src/qml/HomePage.qml:14 src/qml/Main.qml:198
+#: src/qml/HomePage.qml:14 src/qml/Main.qml:209
 msgid "Home"
 msgstr "Home"
 
@@ -346,8 +346,9 @@ msgstr "Refresh"
 #: src/qml/ItemDetailsPage.qml:204 src/qml/ItemDetailsPage.qml:434
 #: src/qml/ItemDetailsPage.qml:489 src/qml/ItemDetailsPage.qml:706
 #: src/qml/ItemDetailsPage.qml:751 src/qml/ItemDetailsPage.qml:806
-#: src/qml/LibraryPage.qml:120 src/qml/LibraryPage.qml:134
+#: src/qml/LibraryPage.qml:141 src/qml/LibraryPage.qml:155
 #: src/qml/SearchPage.qml:77 src/qml/SearchPage.qml:179
+#: src/qml/GenreRailsPage.qml:96 src/qml/GenreRailsPage.qml:192
 msgid "Retry"
 msgstr "Retry"
 
@@ -378,7 +379,8 @@ msgstr "Recently Added in %1"
 #: src/qml/HomePage.qml:174 src/qml/ItemDetailsPage.qml:195
 #: src/qml/ItemDetailsPage.qml:425 src/qml/ItemDetailsPage.qml:480
 #: src/qml/ItemDetailsPage.qml:697 src/qml/ItemDetailsPage.qml:742
-#: src/qml/LibraryPage.qml:171 src/qml/SearchPage.qml:169
+#: src/qml/LibraryPage.qml:192 src/qml/SearchPage.qml:169
+#: src/qml/GenreRailsPage.qml:78 src/qml/GenreRailsPage.qml:182
 msgid "Loading…"
 msgstr "Loading…"
 
@@ -390,18 +392,20 @@ msgstr ""
 
 #: src/qml/HomePage.qml:214 src/qml/EpisodeRow.qml:38
 #: src/qml/ItemDetailsPage.qml:46 src/qml/SearchPage.qml:210
+#: src/qml/GenreRailsPage.qml:226
 msgctxt "season and episode number"
 msgid "S%1:E%2"
 msgstr "S%1:E%2"
 
 #: src/qml/HomePage.qml:214 src/qml/EpisodeRow.qml:41
 #: src/qml/ItemDetailsPage.qml:48 src/qml/SearchPage.qml:210
+#: src/qml/GenreRailsPage.qml:226
 msgctxt "episode number"
 msgid "E%1"
 msgstr "E%1"
 
 #: src/qml/HomePage.qml:215 src/qml/EpisodeRow.qml:48
-#: src/qml/SearchPage.qml:211
+#: src/qml/SearchPage.qml:211 src/qml/GenreRailsPage.qml:227
 msgctxt "episode label and episode title"
 msgid "%1 — %2"
 msgstr "%1 — %2"
@@ -686,29 +690,37 @@ msgstr "Resumable"
 msgid "Favorites"
 msgstr "Favorites"
 
-#: src/qml/LibraryPage.qml:117
+#: src/qml/LibraryPage.qml:112
+msgid "Filter by Genre…"
+msgstr "Filter by Genre…"
+
+#: src/qml/LibraryPage.qml:119
+msgid "Browse by Genre"
+msgstr "Browse by Genre"
+
+#: src/qml/LibraryPage.qml:138
 msgid ""
 "Could not load this library: check the connection to the server and try again"
 msgstr ""
 "Could not load this library: check the connection to the server and try again"
 
-#: src/qml/LibraryPage.qml:131
+#: src/qml/LibraryPage.qml:152
 msgid "Some items could not be loaded"
 msgstr "Some items could not be loaded"
 
-#: src/qml/LibraryPage.qml:179
+#: src/qml/LibraryPage.qml:200
 msgid "No items"
 msgstr "No items"
 
-#: src/qml/LibraryPage.qml:180
-msgid "This library has no items yet"
-msgstr "This library has no items yet"
-
-#: src/qml/LibraryPage.qml:180
+#: src/qml/LibraryPage.qml:201
 msgid "No item matches the selected filter"
 msgstr "No item matches the selected filter"
 
-#: src/qml/SearchPage.qml:19 src/qml/Main.qml:204
+#: src/qml/LibraryPage.qml:201
+msgid "This library has no items yet"
+msgstr "This library has no items yet"
+
+#: src/qml/SearchPage.qml:19 src/qml/Main.qml:215
 msgid "Search"
 msgstr "Search"
 
@@ -716,7 +728,9 @@ msgstr "Search"
 msgid ""
 "Could not load these results: check the connection to the server and try "
 "again"
-msgstr "Could not load these results: check the connection to the server and try again"
+msgstr ""
+"Could not load these results: check the connection to the server and try "
+"again"
 
 #: src/qml/SearchPage.qml:95
 msgid "Keep typing"
@@ -755,6 +769,47 @@ msgstr "Series"
 #: src/qml/SearchPage.qml:144
 msgid "Collections"
 msgstr "Collections"
+
+#: src/qml/GenreFilterDialog.qml:17
+msgid "Filter by Genre"
+msgstr "Filter by Genre"
+
+#: src/qml/GenreFilterDialog.qml:22
+msgid "Clear"
+msgstr "Clear"
+
+#: src/qml/GenreFilterDialog.qml:54 src/qml/GenreRailsPage.qml:17
+msgid "Genres"
+msgstr "Genres"
+
+#: src/qml/GenreRailsPage.qml:93
+msgid ""
+"Could not load the genres: check the connection to the server and try again"
+msgstr "Could not load the genres: check the connection to the server and try again"
+
+#: src/qml/GenreRailsPage.qml:109
+msgid "No genres"
+msgstr "No genres"
+
+#: src/qml/GenreRailsPage.qml:110
+msgid "This library has no genres"
+msgstr "This library has no genres"
+
+#: src/qml/GenreRailsPage.qml:159
+msgid "Show All"
+msgstr "Show All"
+
+#: src/qml/GenreRailsPage.qml:161
+msgctxt ""
+"accessible name of the button that opens the grid of one genre, %1 is the "
+"genre"
+msgid "Show All in %1"
+msgstr "Show All in %1"
+
+#: src/qml/GenreRailsPage.qml:189
+msgid ""
+"Could not load this genre: check the connection to the server and try again"
+msgstr "Could not load this genre: check the connection to the server and try again"
 
 #: src/qml/MediaCard.qml:45
 msgid "%1 unplayed item"
@@ -823,32 +878,32 @@ msgstr ""
 "The settings could not be saved: check the free space and the permissions of "
 "the profile folder. Changes last until Kinefin closes"
 
-#: src/qml/Main.qml:211
+#: src/qml/Main.qml:222
 msgid "Switch Server"
 msgstr "Switch Server"
 
-#: src/qml/Main.qml:217
+#: src/qml/Main.qml:228
 msgid "Sign Out"
 msgstr "Sign Out"
 
-#: src/qml/Main.qml:223
+#: src/qml/Main.qml:234
 msgid "Open Server Web Interface"
 msgstr "Open Server Web Interface"
 
-#: src/qml/Main.qml:228
+#: src/qml/Main.qml:239
 msgid "The server web interface could not be opened: check the default browser"
 msgstr ""
 "The server web interface could not be opened: check the default browser"
 
-#: src/qml/Main.qml:232 src/qml/SettingsPage.qml:14
+#: src/qml/Main.qml:243 src/qml/SettingsPage.qml:14
 msgid "Settings"
 msgstr "Settings"
 
-#: src/qml/Main.qml:237
+#: src/qml/Main.qml:248
 msgid "About Kinefin"
 msgstr "About Kinefin"
 
-#: src/qml/Main.qml:242
+#: src/qml/Main.qml:253
 msgid "Quit"
 msgstr "Quit"
 

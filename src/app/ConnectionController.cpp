@@ -271,8 +271,17 @@ void ConnectionController::onRequestFailed(int status)
     }
 }
 
+bool ConnectionController::openGenreRails()
+{
+    if (m_library.libraryId().isEmpty())
+        return false;
+    return m_genreRails.open(m_library.libraryId(), m_library.collectionType());
+}
+
 bool ConnectionController::openLibrary(const QString &libraryId)
 {
+    // Rails belong to the library they were opened for
+    m_genreRails.clear();
     for (const QVariant &entry : std::as_const(m_libraries)) {
         const QVariantMap library = entry.toMap();
         if (library.value(QStringLiteral("id")).toString() != libraryId)

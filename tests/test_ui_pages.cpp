@@ -71,6 +71,7 @@ QString address(const FakeJellyfin &server)
 }
 
 const QString kMovies = QStringLiteral("e2a1aa11a8d94b5c999a25cf59abcd01");
+const QString kSciFi = QStringLiteral("aa00000000000000000000000000ff01");
 const QString kMovieId = QStringLiteral("f0e1d2c3b4a5968778695a4b3c2d1e0f");
 const QString kSeriesId = QStringLiteral("aa11bb22cc33dd44ee55ff6677889900");
 const QString kSeasonId = QStringLiteral("11aa22bb33cc44dd55ee66ff778899aa");
@@ -255,6 +256,11 @@ struct Ui {
                 return candidate;
         }
         return nullptr;
+    }
+    // A popup is no item: it is found among the QObject children of the window's root
+    QObject *popup(const QString &objectName) const
+    {
+        return engine.rootObjects().constFirst()->findChild<QObject *>(objectName);
     }
     // The item below `root` with this object name: the Home page lists the same cards as a library page under it
     static QQuickItem *itemIn(QQuickItem *root, const QString &objectName)
@@ -989,6 +995,208 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(ui.item(QStringLiteral("searchPage")) == nullptr);
         QCOMPARE(ui.controller.search()->state(), Kinefin::SearchModel::Empty);
         QCOMPARE(ui.controller.search()->term(), QString());
+    }
+
+    void theGenreDialogFiltersTheGrid()
+    {
+        Ui ui(m_home->path());
+        ui.server.itemsByGenre.insert(kSciFi, QStringLiteral("items_genre_scifi"));
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QTRY_VERIFY(ui.item(QStringLiteral("libraryCard_") + kMovies) != nullptr);
+        QVERIFY(ui.openLibraryTile(kMovies));
+        auto *library = ui.controller.library();
+        QTRY_VERIFY(library->genreOptions()->available());
+        QObject *dialog = ui.popup(QStringLiteral("genreFilterDialog"));
+        QVERIFY(dialog);
+        QVERIFY(QMetaObject::invokeMethod(dialog, "open"));
+        QQuickItem *option = nullptr;
+        QTRY_VERIFY((option = ui.item(QStringLiteral("genreOption_") + kSciFi)) != nullptr);
+        QTRY_VERIFY(option->isVisible() && option->width() > 0);
+        QVERIFY(ui.showsText(QStringLiteral("Science Fiction")));
+        ui.clickCenter(option);
+        QTRY_COMPARE(library->genreIds(), QStringList({kSciFi}));
+        QTRY_COMPARE(library->rowCount(), 2);
+        QCOMPARE(option->property("selected").toBool(), true);
+        // The list is the focus: Space on the current row toggles it back
+        QQuickItem *list = ui.item(QStringLiteral("genreOptionsList"));
+        QVERIFY(list);
+        list->forceActiveFocus();
+        QTest::keyClick(ui.window, Qt::Key_Space);
+        QTRY_VERIFY(library->genreIds().isEmpty());
+        QTRY_VERIFY(!library->filtered());
+    }
+
+    void genreActionsAreHiddenWhenTheLibraryHasNoGenres()
+    {
+        Ui ui(m_home->path());
+        ui.server.listingRawBody.insert(QStringLiteral("Filters"),
+                                        QByteArrayLiteral("{\"Genres\":[]}"));
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QTRY_VERIFY(ui.item(QStringLiteral("libraryCard_") + kMovies) != nullptr);
+        QVERIFY(ui.openLibraryTile(kMovies));
+        auto *library = ui.controller.library();
+        QTRY_COMPARE(library->genreOptions()->status(), Kinefin::FilterOptionsModel::Ready);
+        QTRY_COMPARE(library->status(), Kinefin::LibraryItemsModel::Ready);
+        QVERIFY(!library->genreOptions()->available());
+        QVERIFY(!ui.showsText(QStringLiteral("Browse by Genre")));
+        QVERIFY(!ui.showsText(QStringLiteral("Filter by Genre…")));
+    }
+
+    void genreNamesStayPlainText()
+    {
+        Ui ui(m_home->path());
+        const QString hostile =
+            QStringLiteral("<b>Noir</b> & <img src=\"http://evil.invalid/x.png\">");
+        const QJsonArray genres{
+            QJsonObject{{QStringLiteral("Id"), kSciFi}, {QStringLiteral("Name"), hostile}}};
+        ui.server.listingRawBody.insert(
+            QStringLiteral("Filters"),
+            QJsonDocument(QJsonObject{{QStringLiteral("Genres"), genres}})
+                .toJson(QJsonDocument::Compact));
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QTRY_VERIFY(ui.item(QStringLiteral("libraryCard_") + kMovies) != nullptr);
+        QVERIFY(ui.openLibraryTile(kMovies));
+        QTRY_VERIFY(ui.controller.library()->genreOptions()->available());
+        QVERIFY(QMetaObject::invokeMethod(ui.popup(QStringLiteral("genreFilterDialog")), "open"));
+        QTRY_VERIFY(!ui.itemsWithText(hostile).isEmpty());
+        for (QQuickItem *label : ui.itemsWithText(hostile))
+            QCOMPARE(label->property("textFormat").toInt(), int(Qt::PlainText));
+        QTest::qWait(300);
+        QVERIFY(gWarnings.filter(QStringLiteral("evil.invalid")).isEmpty());
+        // The genre name never lands in a control's own text, where a mnemonic or markup could apply
+        for (QQuickItem *holder : ui.itemsWithText(hostile))
+            QVERIFY2(holder->inherits("QQuickText"), holder->metaObject()->className());
+    }
+
+    void genreRailsLoadAsTheyScrollAndShowAllFiltersTheGrid()
+    {
+        Ui ui(m_home->path());
+        ui.server.generatedGenreTotal = 40;
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QTRY_VERIFY(ui.item(QStringLiteral("libraryCard_") + kMovies) != nullptr);
+        QVERIFY(ui.openLibraryTile(kMovies));
+        auto *library = ui.controller.library();
+        QTRY_VERIFY(library->genreOptions()->available());
+        const int libraryDepth = ui.stackDepth();
+        QQuickItem *browse = nullptr;
+        QTRY_VERIFY((browse = [&]() -> QQuickItem * {
+                        for (QQuickItem *candidate :
+                             ui.itemsWithText(QStringLiteral("Browse by Genre"))) {
+                            if (candidate->isVisible() && candidate->width() > 0)
+                                return candidate;
+                        }
+                        return nullptr;
+                    }())
+                    != nullptr);
+        ui.clickCenter(browse);
+        QTRY_VERIFY(ui.item(QStringLiteral("genreRailsPage")) != nullptr);
+        QCOMPARE(ui.stackDepth(), libraryDepth + 1);
+        auto *rails = ui.controller.genreRails();
+        QTRY_COMPARE(rails->status(), Kinefin::GenreRailsModel::Ready);
+        QTRY_VERIFY(ui.item(QStringLiteral("genreRail_0")) != nullptr);
+        // Only the rails in view ask for their items: the first page of genres is 20, the view shows a few
+        QTRY_VERIFY(ui.server.itemsRoutes.size() >= 1);
+        QTest::qWait(300);
+        const int firstRoutes = ui.server.itemsRoutes.size();
+        QVERIFY2(firstRoutes < 20, qPrintable(QString::number(firstRoutes)));
+        QQuickItem *railList = ui.item(QStringLiteral("genreRailsList"));
+        QVERIFY(railList);
+        QVERIFY(QMetaObject::invokeMethod(railList, "positionViewAtEnd"));
+        QTRY_VERIFY(ui.server.itemsRoutes.size() > firstRoutes);
+        // The next page of genres follows the end of the list
+        QTRY_VERIFY(rails->rowCount() > 20);
+        // Show All on the first rail returns to the grid filtered by that genre
+        QVERIFY(QMetaObject::invokeMethod(railList, "positionViewAtBeginning"));
+        QQuickItem *showAll = nullptr;
+        QTRY_VERIFY((showAll = [&]() -> QQuickItem * {
+                        for (QQuickItem *candidate : ui.itemsWithText(QStringLiteral("Show All"))) {
+                            if (candidate->isVisible() && candidate->width() > 0
+                                && candidate->mapToScene(QPointF(0, 0)).y() > 0)
+                                return candidate;
+                        }
+                        return nullptr;
+                    }())
+                    != nullptr);
+        const QString firstGenre =
+            rails->data(rails->index(0), Kinefin::GenreRailsModel::GenreIdRole).toString();
+        QVERIFY(ui.revealAndClickUntil(ui.item(QStringLiteral("genreRailsPage")), showAll,
+                                       [&] { return ui.stackDepth() == libraryDepth; }));
+        QTRY_COMPARE(library->genreIds(), QStringList({firstGenre}));
+        QVERIFY(ui.item(QStringLiteral("libraryPage")) != nullptr);
+        // The library page is current again and its toolbar builds its items: tearing the window down meanwhile makes Kirigami warn
+        QTest::qWait(1000);
+    }
+
+    void aFailedRailShowsItsOwnRetry()
+    {
+        Ui ui(m_home->path());
+        ui.server.generatedGenreTotal = 2;
+        ui.server.listingStatus.insert(QStringLiteral("Items"), 500);
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QTRY_VERIFY(ui.item(QStringLiteral("libraryCard_") + kMovies) != nullptr);
+        ui.server.listingStatus.remove(QStringLiteral("Items"));
+        QVERIFY(ui.openLibraryTile(kMovies));
+        QTRY_VERIFY(ui.controller.library()->genreOptions()->available());
+        ui.server.listingStatus.insert(QStringLiteral("Items"), 500);
+        QVERIFY(QMetaObject::invokeMethod(ui.engine.rootObjects().constFirst(), "openGenres",
+                                          Q_ARG(QVariant, QVariant())));
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Could not load this genre"), false));
+        QVERIFY(!ui.showsText(QStringLiteral("Could not load the genres"), false));
+        ui.server.listingStatus.clear();
+        // Only the Retry buttons of the rails page, one per failed rail: the pages below sit beside it in the column view, partly outside the window
+        QList<QPointer<QQuickItem>> retries;
+        QTRY_VERIFY([&] {
+            retries.clear();
+            for (QQuickItem *candidate : allItems(ui.item(QStringLiteral("genreRailsPage")))) {
+                if (candidate->metaObject()->indexOfMethod("click()") >= 0
+                    && candidate->property("text").toString() == QStringLiteral("Retry")
+                    && candidate->isVisible() && candidate->width() > 0)
+                    retries.append(candidate);
+            }
+            return retries.size() == 2;
+        }());
+        // The button is activated, not clicked: in the multi-column page row it can sit outside the window
+        for (const QPointer<QQuickItem> &retry : std::as_const(retries)) {
+            QVERIFY(retry);
+            QVERIFY(QMetaObject::invokeMethod(retry.data(), "click"));
+        }
+        QTRY_VERIFY(!ui.showsText(QStringLiteral("Could not load this genre"), false));
+        QTRY_VERIFY(ui.item(QStringLiteral("genreRailRow_0")) != nullptr);
+    }
+
+    void downWalksTheGenreRails()
+    {
+        Ui ui(m_home->path());
+        ui.server.generatedGenreTotal = 6;
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QTRY_VERIFY(ui.item(QStringLiteral("libraryCard_") + kMovies) != nullptr);
+        QVERIFY(ui.openLibraryTile(kMovies));
+        QVERIFY(ui.controller.openGenreRails());
+        QVERIFY(QMetaObject::invokeMethod(ui.engine.rootObjects().constFirst(), "openGenres",
+                                          Q_ARG(QVariant, QVariant())));
+        QQuickItem *first = nullptr;
+        QTRY_VERIFY((first = ui.item(QStringLiteral("genreRailRow_0"))) != nullptr);
+        QTRY_COMPARE(ui.controller.genreRails()
+                         ->data(ui.controller.genreRails()->index(1),
+                                Kinefin::GenreRailsModel::RailStatusRole)
+                         .toInt(),
+                     int(Kinefin::GenreRailsModel::RailReady));
+        QTRY_VERIFY(ui.item(QStringLiteral("genreRailRow_1")) != nullptr);
+        QVERIFY(QMetaObject::invokeMethod(first, "forceActiveFocus",
+                                          Q_ARG(Qt::FocusReason, Qt::TabFocusReason)));
+        QTRY_VERIFY(first->hasActiveFocus());
+        QTest::keyClick(ui.window, Qt::Key_Down);
+        QQuickItem *second = ui.item(QStringLiteral("genreRailRow_1"));
+        QVERIFY(second);
+        QTRY_VERIFY(second->hasActiveFocus());
+        QTest::keyClick(ui.window, Qt::Key_Up);
+        QTRY_VERIFY(first->hasActiveFocus());
     }
 
     void aFailedHomeRowOffersItsOwnRetry()

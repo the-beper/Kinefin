@@ -1,0 +1,32 @@
+{
+  "Items": [
+    {
+      "Name": "Arcturus (2012)",
+      "Id": "f0e1d2c3b4a5968778695a4b3c2d1e0f",
+      "Type": "Movie",
+      "ProductionYear": 2012,
+      "UserData": {
+        "Key": "arcturus",
+        "Played": true
+      },
+      "ImageTags": {
+        "Primary": "arcturus-primary"
+      }
+    },
+    {
+      "Name": "Semaphore Drift (2024)",
+      "Id": "5c4d3e2f1a0b99988776655443322110",
+      "Type": "Movie",
+      "ProductionYear": 2024,
+      "UserData": {
+        "Key": "semaphoredrift",
+        "Played": false
+      },
+      "ImageTags": {
+        "Primary": "semaphore-primary"
+      }
+    }
+  ],
+  "StartIndex": 0,
+  "TotalRecordCount": 2
+}

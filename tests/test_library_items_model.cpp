@@ -15,6 +15,8 @@ using Kinefin::LibraryItemsModel;
 
 namespace {
 const QString kMoviesLibrary = QStringLiteral("e2a1aa11a8d94b5c999a25cf59abcd01");
+const QString kSciFi = QStringLiteral("aa00000000000000000000000000ff01");
+const QString kMystery = QStringLiteral("bb00000000000000000000000000ff02");
 
 struct Fixture {
     Fixture()
@@ -295,6 +297,105 @@ class TestLibraryItemsModel : public QObject {
         QVERIFY(!f.model.descending());
         QCOMPARE(f.model.filter(), LibraryItemsModel::All);
         QVERIFY(!f.model.resumableAvailable());
+    }
+
+    void genreJoinsTheFilterAndTheWire()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        f.server.itemsByGenre.insert(kSciFi, QStringLiteral("items_genre_scifi"));
+        QVERIFY(f.openMovies());
+        QTRY_COMPARE(f.model.status(), LibraryItemsModel::Ready);
+        QTRY_VERIFY(f.model.genreOptions()->available());
+        QVERIFY(!f.model.filtered());
+        QSignalSpy filtered(&f.model, &LibraryItemsModel::filteredChanged);
+        f.model.setFilter(LibraryItemsModel::Unplayed);
+        f.model.setGenreIds({kSciFi, kMystery});
+        QCOMPARE(f.model.genreIds(), QStringList({kSciFi, kMystery}));
+        QVERIFY(f.model.filtered());
+        QCOMPARE(filtered.size(), 1);
+        QTRY_COMPARE(f.model.status(), LibraryItemsModel::Ready);
+        const QString route = QString::fromUtf8(f.server.itemsRoutes.constLast());
+        QVERIFY2(
+            route.contains(QStringLiteral("genreIds=") + kSciFi + QStringLiteral("%7C") + kMystery)
+                || route.contains(QStringLiteral("genreIds=") + kSciFi + QLatin1Char('|')
+                                  + kMystery),
+            qPrintable(route));
+        QVERIFY(route.contains(QStringLiteral("filters=IsUnplayed")));
+        f.model.setGenreIds({});
+        f.model.setFilter(LibraryItemsModel::All);
+        QVERIFY(!f.model.filtered());
+    }
+
+    void genreIdsAreCleanedAndBounded()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        f.model.setGenreIds(
+            {kSciFi, kSciFi.toUpper(), QStringLiteral("../etc"), QString(), kMystery});
+        QCOMPARE(f.model.genreIds(), QStringList({kSciFi, kMystery}));
+        QStringList many;
+        for (int i = 0; i < 80; ++i)
+            many.append(QStringLiteral("%1").arg(i + 1, 32, 16, QLatin1Char('e')));
+        f.model.setGenreIds(many);
+        QCOMPARE(f.model.genreIds().size(), Kinefin::MaxGenreIds);
+    }
+
+    void aFailedOptionsLoadDropsTheGenres()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        QVERIFY(f.openMovies());
+        QTRY_VERIFY(f.model.genreOptions()->available());
+        f.model.setGenreIds({kSciFi});
+        f.server.listingStatus.insert(QStringLiteral("Filters"), 500);
+        QVERIFY(f.openMovies());
+        QTRY_COMPARE(f.model.genreOptions()->status(), Kinefin::FilterOptionsModel::Failed);
+        // The menu that clears the genres is hidden while the options are unavailable: the filter goes with them
+        QVERIFY(f.model.genreIds().isEmpty());
+        QVERIFY(!f.model.filtered());
+    }
+
+    void anotherLibraryDropsTheGenreAndTheSameKeepsIt()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        QVERIFY(f.openMovies());
+        QTRY_COMPARE(f.model.status(), LibraryItemsModel::Ready);
+        QTRY_VERIFY(f.model.genreOptions()->available());
+        f.model.setGenreIds({kSciFi});
+        QVERIFY(f.openMovies());
+        QCOMPARE(f.model.genreIds(), QStringList({kSciFi}));
+        QTRY_COMPARE(f.model.genreOptions()->status(), Kinefin::FilterOptionsModel::Ready);
+        QCOMPARE(f.model.genreIds(), QStringList({kSciFi}));
+        QVERIFY(f.model.open(QStringLiteral("7f1b8f4b3e2148c5a8f2b7c9d0e1f2a3"),
+                             QStringLiteral("tvshows"), QStringLiteral("Series")));
+        QVERIFY(f.model.genreIds().isEmpty());
+        QVERIFY(!f.model.filtered());
+    }
+
+    void optionsPruneAGenreTheLibraryNoLongerHas()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        QVERIFY(f.openMovies());
+        QTRY_VERIFY(f.model.genreOptions()->available());
+        const QString gone = QStringLiteral("dd00000000000000000000000000ff09");
+        f.model.setGenreIds({kSciFi, gone});
+        QCOMPARE(f.model.genreIds().size(), 2);
+        QVERIFY(f.openMovies());
+        QTRY_COMPARE(f.model.genreIds(), QStringList({kSciFi}));
+    }
+
+    void clearDropsTheOptions()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        QVERIFY(f.openMovies());
+        QTRY_VERIFY(f.model.genreOptions()->available());
+        f.model.clear();
+        QVERIFY(!f.model.genreOptions()->available());
+        QCOMPARE(f.model.genreOptions()->status(), Kinefin::FilterOptionsModel::Idle);
     }
 
     void totalIsClamped()
