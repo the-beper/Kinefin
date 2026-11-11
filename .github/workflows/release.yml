@@ -4,7 +4,7 @@ name: Release
 #
 # validate       the tag names the version of the sources and the commit, which is on main ci-gate        the CI run for that commit, pushed to main, finished green build-flatpak  build and smoke-test the bundle verify         the exact SHA256SUMS publish        draft release, asset, then publish; rebuilds nothing and can be re-run after a failure
 #
-# TODO (before the first release): pin the build image by digest (images.yml, Digest summary) and port KuickShare's signed-OSTree-repository release pipeline in case of self-hosting (Flathub submissions do not need it).
+# The release image must be selected by its immutable SHA-256 digest (repository variable KINEFIN_RELEASE_FLATPAK_DIGEST). Port KuickShare's signed OSTree repository pipeline only if self-hosting (Flathub does not need it).
 on:
   push:
     tags: ["v*"]
@@ -92,14 +92,14 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
 
-      # By digest before the first release too; until pinned, CI tests the image that the fedora45 tag points to now.
-      - name: Pull the build image
+      # Fail closed when the approved digest has not been configured. The
+      # mutable :fedora45 image is used by CI only, never by a release.
+      - name: Pull the pinned Flatpak release image
         env:
           GHCR_TOKEN: ${{ github.token }}
-        run: |
-          echo "$GHCR_TOKEN" | podman login ghcr.io -u "${{ github.actor }}" --password-stdin
-          podman pull ghcr.io/the-beper/kinefin-flatpak:fedora45
-          podman tag ghcr.io/the-beper/kinefin-flatpak:fedora45 localhost/kinefin-flatpak:fedora45
+          GHCR_USER: ${{ github.actor }}
+          KINEFIN_RELEASE_FLATPAK_DIGEST: ${{ vars.KINEFIN_RELEASE_FLATPAK_DIGEST }}
+        run: build/release/pull-pinned-image.sh
 
       - name: Build the Flatpak
         run: build/flatpak/build-flatpak.sh

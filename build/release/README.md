@@ -53,6 +53,37 @@ Run its portable regression tests with:
 python3 -m unittest discover -s tests -p 'test_release_verify.py' -v
 ```
 
+
+## Pin the release build image
+
+Before a tag build, open the successful **Images** workflow run on `main` in
+GitHub Actions. Its **Digest** step prints a line resembling
+`ghcr.io/the-beper/kinefin-flatpak:fedora45@sha256:<64 hex digits>`. Review
+that build, then set the GitHub Actions **repository variable**
+`KINEFIN_RELEASE_FLATPAK_DIGEST` to the `sha256:<64 lowercase hex digits>`
+portion, without the image name or tag. This is a non-secret repository
+variable, not an Actions secret. An absent, malformed, or uppercase value
+blocks the release build before any network or Podman operation.
+
+`release.yml` pulls `ghcr.io/the-beper/kinefin-flatpak@sha256:...` and gives
+the verified image the local name expected by `build-flatpak.sh`. It never
+pulls `:fedora45` during a release. CI may continue testing the moving tag,
+but that tag cannot silently change the image used by an individual release
+build. The actual digest is recorded in the job summary for review. Keep the
+repository variable unchanged while retrying a release to reproduce its
+build environment; updating it for the next release requires maintainer
+review. **The digest cannot be inferred from this repository** because the
+GHCR image is private; it must come from the trusted Images workflow.
+
+Portable tests, using a fake `podman` command rather than a network pull:
+
+```sh
+python3 -m unittest discover -s tests -p 'test_release_image_pin.py' -v
+```
+
+This guard is independent of the KDE runtime commit pins in
+`build/flatpak/build-flatpak.sh`; those still need their own release review.
+
 ## Restartable GitHub publication
 
 The `publish` job in `.github/workflows/release.yml` runs
