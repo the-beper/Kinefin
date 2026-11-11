@@ -4241,6 +4241,33 @@ class TestUiPages : public QObject {
         QVERIFY(!clear()->property("enabled").toBool());
     }
 
+    void theDetailsPageCanMarkAMovieWatchedAndUnwatched()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("details")));
+        QQmlListReference actions(ui.item(QStringLiteral("itemDetailsPage")), "actions");
+        const auto action = [&actions](const QString &name) -> QObject * {
+            for (qsizetype i = 0; i < actions.count(); ++i) {
+                if (actions.at(i)->objectName() == name)
+                    return actions.at(i);
+            }
+            return nullptr;
+        };
+        QObject *mark = action(QStringLiteral("togglePlayedAction"));
+        QVERIFY(mark);
+        QTRY_COMPARE(mark->property("text").toString(), QStringLiteral("Mark as Watched"));
+        QVERIFY(mark->property("visible").toBool());
+        QVERIFY(mark->property("enabled").toBool());
+        QMetaObject::invokeMethod(mark, "trigger");
+        QTRY_COMPARE(ui.server.playedWrites.size(), 1);
+        QTRY_COMPARE(mark->property("text").toString(), QStringLiteral("Mark as Unwatched"));
+        QTRY_VERIFY(mark->property("enabled").toBool());
+        QMetaObject::invokeMethod(mark, "trigger");
+        QTRY_COMPARE(ui.server.playedWrites.size(), 2);
+        QTRY_COMPARE(mark->property("text").toString(), QStringLiteral("Mark as Watched"));
+    }
+
     void theDetailsPageAddsItsItemToTheQueue()
     {
         Ui ui(m_home->path());

@@ -2363,3 +2363,15 @@ msgstr "Remove from Favorites"
 #: src/qml/ItemDetailsPage.qml
 msgid "Could not update Favorites. Check the connection and try again"
 msgstr "Could not update Favorites. Check the connection and try again"
+
+#: src/qml/ItemDetailsPage.qml
+msgid "Mark as Watched"
+msgstr "Mark as Watched"
+
+#: src/qml/ItemDetailsPage.qml
+msgid "Mark as Unwatched"
+msgstr "Mark as Unwatched"
+
+#: src/qml/ItemDetailsPage.qml
+msgid "Could not update watched status. Check the connection and try again"
+msgstr "Could not update watched status. Check the connection and try again"

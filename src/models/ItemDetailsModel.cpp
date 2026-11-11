@@ -77,6 +77,39 @@ ItemDetailsModel::ItemDetailsModel(JellyfinClient *client, const QString &itemId
                     m_favoriteError = true;
                     Q_EMIT favoriteWriteStateChanged();
                 });
+        // The same item may be visible on multiple detail pages at once.
+        connect(m_client, &JellyfinClient::itemPlayedUpdated, this,
+                [this](const QString &id, bool played) {
+                    const auto canonical = [](QString value) {
+                        return value.remove(QLatin1Char('-')).toLower();
+                    };
+                    if (canonical(id) != canonical(m_itemId))
+                        return;
+                    if (m_details.valid) {
+                        m_details.played = played;
+                        // A manual watched-state change invalidates any old resume point.
+                        // The next Refresh fetches the server's authoritative user data.
+                        m_details.resumePositionTicks = 0;
+                        if (playable())
+                            m_details.playedPercentage = played ? 100 : 0;
+                        Q_EMIT detailsChanged();
+                    }
+                    if (m_playedBusy || m_playedError) {
+                        m_playedBusy = false;
+                        m_playedError = false;
+                        Q_EMIT playedWriteStateChanged();
+                    }
+                });
+        connect(m_client, &JellyfinClient::itemPlayedUpdateFailed, this,
+                [this](const QString &id, bool, int) {
+                    if (!m_playedBusy
+                        || QString(id).remove(QLatin1Char('-')).toLower()
+                               != QString(m_itemId).remove(QLatin1Char('-')).toLower())
+                        return;
+                    m_playedBusy = false;
+                    m_playedError = true;
+                    Q_EMIT playedWriteStateChanged();
+                });
         // A 401, a disconnect, a server switch and a sign-out all end with this signal
         connect(m_client, &JellyfinClient::credentialsCleared, this, [this] { clear(); });
     }
@@ -133,6 +166,24 @@ bool ItemDetailsModel::toggleFavorite()
         m_favoriteBusy = false;
         m_favoriteError = true;
         Q_EMIT favoriteWriteStateChanged();
+        return false;
+    }
+    return true;
+}
+
+bool ItemDetailsModel::togglePlayed()
+{
+    // Parent series/seasons have aggregated watched state. Do not pretend that
+    // marking the parent alone marks all child episodes as watched.
+    if (!m_client || m_status != Ready || !m_details.valid || !playable() || m_playedBusy)
+        return false;
+    m_playedBusy = true;
+    m_playedError = false;
+    Q_EMIT playedWriteStateChanged();
+    if (!m_client->setItemPlayed(m_itemId, !m_details.played)) {
+        m_playedBusy = false;
+        m_playedError = true;
+        Q_EMIT playedWriteStateChanged();
         return false;
     }
     return true;
@@ -203,6 +254,11 @@ void ItemDetailsModel::clear()
         m_favoriteBusy = false;
         m_favoriteError = false;
         Q_EMIT favoriteWriteStateChanged();
+    }
+    if (m_playedBusy || m_playedError) {
+        m_playedBusy = false;
+        m_playedError = false;
+        Q_EMIT playedWriteStateChanged();
     }
     m_details = {};
     m_similar.setItems({});

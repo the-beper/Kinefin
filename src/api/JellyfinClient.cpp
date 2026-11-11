@@ -1438,6 +1438,51 @@ bool JellyfinClient::setItemFavorite(const QString &itemId, bool favorite)
     return true;
 }
 
+bool JellyfinClient::setItemPlayed(const QString &itemId, bool played)
+{
+    if (!isAuthenticated() || !isValidJellyfinId(itemId) || !isValidJellyfinId(m_userId))
+        return false;
+    const QString key = QString(itemId).remove(QLatin1Char('-')).toLower();
+    if (m_playedPending.contains(key))
+        return false;
+    m_playedPending.insert(key);
+
+    QUrl url = endpoint(QStringLiteral("/UserPlayedItems/") + itemId);
+    QUrlQuery query;
+    query.addQueryItem(QStringLiteral("userId"), m_userId);
+    url.setQuery(query);
+    const QNetworkRequest request = requestFor(url, true);
+    QNetworkReply *reply = played
+                               ? m_network.post(request, QByteArray())
+                               : m_network.sendCustomRequest(request, QByteArrayLiteral("DELETE"));
+    attach(reply, m_generation, [this, itemId, key, played](QNetworkReply *finished) {
+        m_playedPending.remove(key);
+        const int status = finished->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (status == 401) {
+            invalidateSession();
+            return;
+        }
+        // Jellyfin 12.4 answers 200 with UserItemDataDto; accept empty 204 too,
+        // but never treat a 200 with a malformed/mismatching body as success.
+        bool valid = finished->error() == QNetworkReply::NoError && status == 204;
+        if (status == 200 && finished->error() == QNetworkReply::NoError) {
+            QJsonObject data;
+            if (parseObject(finished, &data) && data.value(QStringLiteral("Played")).isBool()
+                && data.value(QStringLiteral("Played")).toBool() == played) {
+                const QJsonValue id = data.value(QStringLiteral("ItemId"));
+                valid = id.isUndefined()
+                        || (id.isString()
+                            && QString(id.toString()).remove(QLatin1Char('-')).toLower() == key);
+            }
+        }
+        if (valid)
+            Q_EMIT itemPlayedUpdated(itemId, played);
+        else
+            Q_EMIT itemPlayedUpdateFailed(itemId, played, status);
+    });
+    return true;
+}
+
 QUrl JellyfinClient::imageUrl(const QString &itemId, const QString &imageType, int maxWidth,
                               const QString &tag, int quality, const QString &format) const
 {
@@ -2070,6 +2115,7 @@ void JellyfinClient::abortPending()
 {
     ++m_generation;
     m_favoritePending.clear();
+    m_playedPending.clear();
     // Reports die with the pending requests, quietly: the generation bump keeps their handlers from running. The same goes for a session re-check whose flag would otherwise stay set forever
     m_reportQueue.clear();
     m_reportBusy = false;

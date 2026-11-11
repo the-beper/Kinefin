@@ -164,6 +164,10 @@ class JellyfinClient final : public QObject {
     // item may be in flight; 401 expires the session and all other failures
     // leave the displayed state unchanged. Replies after logout are ignored.
     bool setItemFavorite(const QString &itemId, bool favorite);
+    // Mark/unmark a video as watched for the authenticated user. Deduplicate
+    // writes by canonical GUID; the state changes only after a confirmed reply.
+    // The endpoint requires userId on 12.4, not the legacy /Users/... route.
+    bool setItemPlayed(const QString &itemId, bool played);
     // The token-free URL of one item image (`GET /Items/{itemId}/Images/{type}` has no `security` requirement in the 12.4 spec, so the URL carries no credentials and the image fetch may stay unauthenticated). `imageType` is one of the spec's ImageType names; `format` may be empty (the server negotiates) or one of "jpg", "gif", "png", "webp"; `tag` is an opaque alphanumeric cache buster. Invalid input yields an empty URL, never a partially valid one
     QUrl imageUrl(const QString &itemId, const QString &imageType, int maxWidth, const QString &tag,
                   int quality = 90, const QString &format = {}) const;
@@ -282,6 +286,8 @@ class JellyfinClient final : public QObject {
     void sessionPlaystateFailed(const QString &sessionId, const QString &command, int httpStatus);
     void itemFavoriteUpdated(const QString &itemId, bool favorite);
     void itemFavoriteUpdateFailed(const QString &itemId, bool favorite, int httpStatus);
+    void itemPlayedUpdated(const QString &itemId, bool played);
+    void itemPlayedUpdateFailed(const QString &itemId, bool played, int httpStatus);
 
   private:
     enum class State {
@@ -330,6 +336,7 @@ class JellyfinClient final : public QObject {
     QNetworkAccessManager m_network;
     QSet<QNetworkReply *> m_pending;
     QSet<QString> m_favoritePending;
+    QSet<QString> m_playedPending;
     QUrl m_base;
     QString m_serverId;
     QString m_userId;

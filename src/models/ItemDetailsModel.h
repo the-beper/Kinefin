@@ -35,6 +35,8 @@ class ItemDetailsModel final : public QObject {
     Q_PROPERTY(bool favorite READ favorite NOTIFY detailsChanged)
     Q_PROPERTY(bool favoriteBusy READ favoriteBusy NOTIFY favoriteWriteStateChanged)
     Q_PROPERTY(bool favoriteError READ favoriteError NOTIFY favoriteWriteStateChanged)
+    Q_PROPERTY(bool playedBusy READ playedBusy NOTIFY playedWriteStateChanged)
+    Q_PROPERTY(bool playedError READ playedError NOTIFY playedWriteStateChanged)
     Q_PROPERTY(qreal playedPercentage READ playedPercentage NOTIFY detailsChanged)
     Q_PROPERTY(int unplayedCount READ unplayedCount NOTIFY detailsChanged)
     Q_PROPERTY(bool canResume READ canResume NOTIFY detailsChanged)
@@ -78,6 +80,7 @@ class ItemDetailsModel final : public QObject {
     Q_INVOKABLE void reload();
     Q_INVOKABLE void retrySimilar();
     Q_INVOKABLE bool toggleFavorite();
+    Q_INVOKABLE bool togglePlayed();
 
     QString itemId() const { return m_itemId; }
     int channel() const { return m_channel; }
@@ -98,6 +101,8 @@ class ItemDetailsModel final : public QObject {
     bool favorite() const { return m_details.favorite; }
     bool favoriteBusy() const { return m_favoriteBusy; }
     bool favoriteError() const { return m_favoriteError; }
+    bool playedBusy() const { return m_playedBusy; }
+    bool playedError() const { return m_playedError; }
     qreal playedPercentage() const { return m_details.playedPercentage; }
     int unplayedCount() const { return m_details.unplayedCount; }
     bool canResume() const { return m_details.resumePositionTicks > 0 && playable(); }
@@ -122,6 +127,7 @@ class ItemDetailsModel final : public QObject {
     void similarStatusChanged();
     void detailsChanged();
     void favoriteWriteStateChanged();
+    void playedWriteStateChanged();
 
   private:
     void onItemsReady(const QJsonArray &items, int total, int channel);
@@ -141,6 +147,8 @@ class ItemDetailsModel final : public QObject {
     ItemDetails m_details;
     bool m_favoriteBusy = false;
     bool m_favoriteError = false;
+    bool m_playedBusy = false;
+    bool m_playedError = false;
     ItemRowModel m_similar;
     ItemChildrenModel m_below;
 };

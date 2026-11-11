@@ -63,6 +63,122 @@ class TestItemDetailsModel : public QObject {
     Q_OBJECT
 
   private Q_SLOTS:
+    void watchedStateCanBeChangedAndSharedWithAnotherDetailsPage()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        auto movie = f.open(kMovie);
+        auto second = f.open(kMovie, ItemDetailsModel::FirstChannel + 2);
+        QTRY_COMPARE(movie->status(), ItemDetailsModel::Ready);
+        QTRY_COMPARE(second->status(), ItemDetailsModel::Ready);
+        QVERIFY(!movie->played());
+        QVERIFY(movie->canResume());
+        QSignalSpy updated(&f.client, &Kinefin::JellyfinClient::itemPlayedUpdated);
+
+        QVERIFY(movie->togglePlayed());
+        QVERIFY(movie->playedBusy());
+        QVERIFY(!movie->togglePlayed());
+        QTRY_VERIFY(!movie->playedBusy());
+        QCOMPARE(updated.size(), 1);
+        QVERIFY(!movie->playedError());
+        QVERIFY(movie->played());
+        QVERIFY(second->played());
+        QVERIFY(!movie->canResume());
+        QCOMPARE(f.server.playedWrites.size(), 1);
+        QCOMPARE(f.server.playedWrites.constFirst().method, QByteArrayLiteral("POST"));
+        const QByteArray route = f.server.playedWrites.constFirst().route;
+        QVERIFY(route.startsWith(QByteArrayLiteral("/jellyfin/UserPlayedItems/")
+                                 + kMovie.toLatin1() + QByteArrayLiteral("?")));
+        QCOMPARE(FakeJellyfin::capturedListingQuery(route)
+                     .queryItemValue(QStringLiteral("userId")),
+                 f.client.userId());
+        QVERIFY(f.server.playedWrites.constFirst().authorization.startsWith("MediaBrowser "));
+        QVERIFY(!route.contains("token"));
+
+        movie->reload();
+        QTRY_COMPARE(movie->status(), ItemDetailsModel::Ready);
+        QVERIFY(movie->played());
+        QVERIFY(!movie->canResume());
+        QVERIFY(second->togglePlayed());
+        QTRY_VERIFY(!second->playedBusy());
+        QVERIFY(!second->playedError());
+        QVERIFY(!second->played());
+        QVERIFY(!movie->played());
+        QCOMPARE(updated.size(), 2);
+        QCOMPARE(f.server.playedWrites.size(), 2);
+        QCOMPARE(f.server.playedWrites.constLast().method, QByteArrayLiteral("DELETE"));
+    }
+
+    void watchedFailuresDoNotChangeStateAndCanBeRetried()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        auto details = f.open(kMovie);
+        QTRY_COMPARE(details->status(), ItemDetailsModel::Ready);
+
+        f.server.playedWriteStatus = 500;
+        QVERIFY(details->togglePlayed());
+        QTRY_VERIFY(!details->playedBusy());
+        QVERIFY(details->playedError());
+        QVERIFY(!details->played());
+
+        f.server.playedWriteStatus = 200;
+        f.server.redirectPlayedWrites = true;
+        QVERIFY(details->togglePlayed());
+        QTRY_VERIFY(!details->playedBusy());
+        QVERIFY(details->playedError());
+        QVERIFY(!details->played());
+
+        f.server.redirectPlayedWrites = false;
+        for (const QByteArray &response :
+             {QByteArrayLiteral("not-json"), QByteArrayLiteral("{\"Played\":false}"),
+              QByteArrayLiteral("{\"Played\":true,\"ItemId\":\"bad\"}")}) {
+            f.server.playedWriteRawBody = response;
+            QVERIFY(details->togglePlayed());
+            QTRY_VERIFY(!details->playedBusy());
+            QVERIFY(details->playedError());
+            QVERIFY(!details->played());
+        }
+        f.server.playedWriteRawBody.clear();
+        f.server.playedWriteStatus = 204;
+        QVERIFY(details->togglePlayed());
+        QTRY_VERIFY(!details->playedBusy());
+        QVERIFY(!details->playedError());
+        QVERIFY(details->played());
+    }
+
+    void watchedWriteDeduplicatesGuidSpellingsAndExpiresWithSession()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        QVERIFY(!f.client.setItemPlayed(QStringLiteral("../bad/path"), true));
+        QVERIFY(!f.client.setItemPlayed(QString(), false));
+        QCOMPARE(f.server.playedWrites.size(), 0);
+        f.server.holdPlayedWrites = true;
+        QVERIFY(f.client.setItemPlayed(kMovie, true));
+        QTRY_COMPARE(f.server.playedWrites.size(), 1);
+        const QString dashed = QStringLiteral("f0e1d2c3-b4a5-9687-7869-5a4b3c2d1e0f");
+        QVERIFY(!f.client.setItemPlayed(dashed, false));
+        QCOMPARE(f.server.playedWrites.size(), 1);
+        QSignalSpy updated(&f.client, &Kinefin::JellyfinClient::itemPlayedUpdated);
+        f.client.forgetSession();
+        f.server.releaseHeld();
+        QTest::qWait(100);
+        QVERIFY(updated.isEmpty());
+        QVERIFY(!f.client.setItemPlayed(kMovie, false));
+
+        Fixture g;
+        QVERIFY(g.ok);
+        auto details = g.open(kMovie);
+        QTRY_COMPARE(details->status(), ItemDetailsModel::Ready);
+        g.server.playedWriteStatus = 401;
+        QVERIFY(details->togglePlayed());
+        QTRY_COMPARE(details->status(), ItemDetailsModel::Idle);
+        QVERIFY(!details->playedBusy());
+        QVERIFY(!details->playedError());
+        QVERIFY(!g.client.isAuthenticated());
+    }
+
     void favoriteCanBeAddedRemovedAndSharedWithAnotherDetailsPage()
     {
         Fixture f;

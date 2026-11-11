@@ -13,6 +13,11 @@ ResumeItemsModel::ResumeItemsModel(JellyfinClient *client, QObject *parent)
         connect(m_client, &JellyfinClient::resumeItemsReady, this,
                 &ResumeItemsModel::onResumeReady);
         connect(m_client, &JellyfinClient::listingFailed, this, &ResumeItemsModel::onListingFailed);
+        // A manual watched-state edit can remove an entry from Continue Watching.
+        connect(m_client, &JellyfinClient::itemPlayedUpdated, this, [this] {
+            if (m_open)
+                restartPaging();
+        });
         // A 401, a disconnect, a server switch and a sign-out all end with this signal
         connect(m_client, &JellyfinClient::credentialsCleared, this, [this] { close(); });
     }

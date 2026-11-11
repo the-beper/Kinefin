@@ -81,6 +81,13 @@ FavoritesModel::FavoritesModel(JellyfinClient *client, QObject *parent)
             else
                 discardSnapshot();
         });
+        // Watched badges in the Favorites snapshot must also reflect manual changes.
+        connect(m_client, &JellyfinClient::itemPlayedUpdated, this, [this] {
+            if (m_active)
+                startLoad();
+            else
+                discardSnapshot();
+        });
         // A 401, a disconnect, a server switch and a sign-out all end with this signal
         connect(m_client, &JellyfinClient::credentialsCleared, this, [this] { clear(); });
     }

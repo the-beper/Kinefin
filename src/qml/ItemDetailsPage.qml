@@ -158,6 +158,14 @@ Kirigami.ScrollablePage {
             onTriggered: page.connection.queue.add(page.details.itemId, PlayQueue.Last)
         },
         Kirigami.Action {
+            objectName: "togglePlayedAction"
+            text: page.details.played ? i18n("Mark as Unwatched") : i18n("Mark as Watched")
+            icon.name: page.details.played ? "view-refresh" : "emblem-checked"
+            visible: page.details.status === ItemDetailsModel.Ready && page.details.playable
+            enabled: !page.details.playedBusy
+            onTriggered: page.details.togglePlayed()
+        },
+        Kirigami.Action {
             objectName: "toggleFavoriteAction"
             text: page.details.favorite ? i18n("Remove from Favorites") : i18n("Add to Favorites")
             icon.name: "emblem-favorite"
@@ -239,6 +247,19 @@ Kirigami.ScrollablePage {
                             text: i18n("Retry")
                             icon.name: "view-refresh"
                             onTriggered: page.details.toggleFavorite()
+                        }
+                    ]
+                }
+
+                MessageBox {
+                    visible: page.details.playedError && page.details.status === ItemDetailsModel.Ready
+                    type: Kirigami.MessageType.Error
+                    text: i18n("Could not update watched status. Check the connection and try again")
+                    actions: [
+                        Kirigami.Action {
+                            text: i18n("Retry")
+                            icon.name: "view-refresh"
+                            onTriggered: page.details.togglePlayed()
                         }
                     ]
                 }

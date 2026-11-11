@@ -33,6 +33,11 @@ HomeRowsModel::HomeRowsModel(JellyfinClient *client, QObject *parent)
             [this](const QString &family, int, const QString &, int channel) {
                 fail(family, channel);
             });
+    // Continue Watching, Next Up and Recently Added depend on the played flag.
+    connect(m_client, &JellyfinClient::itemPlayedUpdated, this, [this] {
+        if (!m_rows.empty())
+            reload();
+    });
     // A 401, a disconnect, a server switch and a sign-out all end with this signal
     connect(m_client, &JellyfinClient::credentialsCleared, this, [this] { clear(); });
 }

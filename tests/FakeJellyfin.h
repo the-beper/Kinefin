@@ -216,6 +216,16 @@ class FakeJellyfin {
     QByteArray favoriteWriteRawBody;
     bool holdFavoriteWrites = false;
     bool redirectFavoriteWrites = false;
+    struct PlayedWrite {
+        QByteArray method;
+        QByteArray route;
+        QByteArray authorization;
+    };
+    QList<PlayedWrite> playedWrites;
+    int playedWriteStatus = 200;
+    QByteArray playedWriteRawBody;
+    bool holdPlayedWrites = false;
+    bool redirectPlayedWrites = false;
     int firstStoppedStatus = 0;
     int stoppedRequests = 0;
     bool holdReports = false;
@@ -836,6 +846,45 @@ class FakeJellyfin {
                 respond(socket, 200,
                         QJsonDocument(QJsonObject{{QStringLiteral("ItemId"), id},
                                                   {QStringLiteral("IsFavorite"), isFavorite}})
+                            .toJson(QJsonDocument::Compact));
+            }
+            return;
+        }
+        if ((method == "POST" || method == "DELETE")
+            && route.contains("/UserPlayedItems/")) {
+            playedWrites.append({method, route, authorization});
+            if (holdPlayedWrites) {
+                m_held.append(socket);
+                return;
+            }
+            if (redirectPlayedWrites) {
+                respond(socket, 302, {}, "Location: https://unexpected.invalid/played\r\n");
+                return;
+            }
+            if (playedWriteStatus != 200 && playedWriteStatus != 204) {
+                respond(socket, playedWriteStatus, {});
+                return;
+            }
+            const QString id = QString::fromUtf8(route.split('?').first().split('/').last())
+                                   .toLower();
+            const bool isPlayed = method == "POST";
+            if (itemsById.contains(id)) {
+                QJsonObject item = QJsonDocument::fromJson(itemsById.value(id)).object();
+                QJsonObject userData = item.value(QStringLiteral("UserData")).toObject();
+                userData.insert(QStringLiteral("Played"), isPlayed);
+                userData.insert(QStringLiteral("PlaybackPositionTicks"), 0);
+                userData.insert(QStringLiteral("PlayedPercentage"), isPlayed ? 100 : 0);
+                item.insert(QStringLiteral("UserData"), userData);
+                itemsById.insert(id, QJsonDocument(item).toJson(QJsonDocument::Compact));
+            }
+            if (playedWriteStatus == 204) {
+                respond(socket, 204, {});
+            } else if (!playedWriteRawBody.isEmpty()) {
+                respond(socket, 200, playedWriteRawBody);
+            } else {
+                respond(socket, 200,
+                        QJsonDocument(QJsonObject{{QStringLiteral("ItemId"), id},
+                                                  {QStringLiteral("Played"), isPlayed}})
                             .toJson(QJsonDocument::Compact));
             }
             return;
