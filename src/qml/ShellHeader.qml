@@ -68,6 +68,8 @@ Item {
         id: menuButton
         objectName: "mainMenuButton"
 
+        // The tab bar fills the header and is declared after this button: without a z above it the bar covers the button, which neither shows nor takes the clicks (the Tab order follows the declaration, not z)
+        z: 1
         anchors {
             left: parent.left
             leftMargin: Kirigami.Units.smallSpacing

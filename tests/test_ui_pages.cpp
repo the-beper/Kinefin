@@ -3317,6 +3317,23 @@ class TestUiPages : public QObject {
         QVERIFY(tabChecked(0, false));
     }
 
+    void theMainMenuButtonIsNotCoveredByTheTabBar()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("home")));
+        QQuickItem *button = ui.item(QStringLiteral("mainMenuButton"));
+        QVERIFY(button);
+        // A real click at its center must reach it: the tab bar fills the header and sits above whatever is declared before it
+        QVERIFY(ui.insideWindow(button));
+        ui.clickCenter(button);
+        QObject *menu = ui.popup(QStringLiteral("mainMenu"));
+        QVERIFY(menu);
+        QTRY_VERIFY(menu->property("opened").toBool());
+        QTest::keyClick(ui.window, Qt::Key_Escape);
+        QTRY_VERIFY(!menu->property("opened").toBool());
+    }
+
     void theMouseBackButtonGoesBack()
     {
         Ui ui(m_home->path());

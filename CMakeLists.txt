@@ -179,6 +179,8 @@ qt_add_qml_module(kinefin_ui
         src/app/ImageNetworkFactory.cpp
         src/app/ImageNetworkFactory.h
         src/app/ModelsQml.h
+        src/app/MouseNavigation.cpp
+        src/app/MouseNavigation.h
 )
 target_include_directories(kinefin_ui PUBLIC src/app)
 target_compile_definitions(kinefin_ui PRIVATE TRANSLATION_DOMAIN="kinefin")

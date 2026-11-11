@@ -65,36 +65,28 @@ Kirigami.ApplicationWindow {
         shell: window
     }
 
-    // The back button of the mouse goes back like Esc; the missing forward button is a deliberate exception. The column view of the pages moves to the previous page on that button by itself but leaves the page it left in the stack (and its models open), so the page is popped here once that has happened
-    Item {
-        objectName: "mouseBackArea"
-        anchors.fill: parent
-
-        TapHandler {
-            objectName: "mouseBackHandler"
-            acceptedButtons: Qt.BackButton
-            onTapped: {
-                const index = window.pageStack.currentIndex;
-                if (index < 1 || window.pageStack.layers.depth > 1)
-                    return;
-                const target = window.pageStack.get(index - 1);
-                const leaving = window.pageStack.get(index);
-                if (leaving?.hasUnsavedChanges) {
-                    // The column view moves back by itself: the page returns to the front before it asks
-                    Qt.callLater(() => {
-                        if (window.pageStack.get(index) !== leaving)
-                            return;
-                        window.pageStack.currentIndex = index;
-                        leaving.askBeforeLeaving(() => window.pageStack.goBack());
-                    });
-                    return;
-                }
-                Qt.callLater(() => {
-                    if (window.pageStack.depth > 1 && window.pageStack.get(window.pageStack.depth - 1) !== target)
-                        window.pageStack.pop(target);
-                });
-            }
-        }
+    // The back button of the mouse goes back like Esc; the missing forward button is a deliberate exception
+    MouseNavigation {
+        objectName: "mouseNavigation"
+        target: window
+        onBackRequested: window.goBackFromMouse()
+    }
+    function goBackFromMouse() {
+        const index = pageStack.currentIndex;
+        if (index < 1 || pageStack.layers.depth > 1)
+            return;
+        const leaving = pageStack.get(index);
+        // The page leaves the stack at once: going back by moving the index leaves it there until a scroll animation ends
+        const target = pageStack.get(index - 1);
+        const leave = () => {
+            if (pageStack.get(index) === leaving)
+                pageStack.pop(target);
+        };
+        // A page with unsaved changes asks first, as it does for Esc
+        if (leaving?.hasUnsavedChanges)
+            leaving.askBeforeLeaving(leave);
+        else
+            leave();
     }
 
     // Esc goes back like Alt+Left except on the first page; an open dialog takes the key first
