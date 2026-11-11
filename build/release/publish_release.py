@@ -6,7 +6,8 @@
 GitHub's release creation, asset uploads and publication are separate requests.
 Keep the release as a draft until both assets match the local SHA256 digests.
 This script can resume a draft after an interrupted upload, but never changes
-an already-published release.
+an already-published release. Check the remote tag target against the exact
+workflow commit before any write and again immediately before publication.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ ASSET_NAMES = (BUNDLE, SUMS)
 TAG_RE = re.compile(r"v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\Z")
 REPO_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*\Z")
 SUMS_RE = re.compile(rf"([0-9a-f]{{64}})  {re.escape(BUNDLE)}\n\Z")
+COMMIT_RE = re.compile(r"[0-9a-f]{40}\Z")
 
 
 class ReleasePublishError(Exception):
@@ -91,6 +93,60 @@ def gh(*args: str) -> str:
 GhRunner = Callable[..., str]
 
 
+def github_json(runner: GhRunner, endpoint: str, description: str) -> dict:
+    try:
+        data = json.loads(runner("api", endpoint))
+    except (ValueError, TypeError) as error:
+        raise ReleasePublishError(f"GitHub returned invalid {description} JSON") from error
+    if not isinstance(data, dict):
+        raise ReleasePublishError(f"GitHub returned an invalid {description}")
+    return data
+
+
+def remote_tag_commit(tag: str, repo: str, runner: GhRunner) -> str:
+    """Resolve lightweight and annotated GitHub tag refs, never branch names.
+
+    git/ref/tags/<tag> returns the ref object; annotated tags have an object
+    of type 'tag', which must be dereferenced via git/tags/<sha> until a
+    commit is reached. GitHub release target_commitish is not authoritative
+    for an existing tag, so it is intentionally not used here.
+    """
+    ref = github_json(runner, f"repos/{repo}/git/ref/tags/{tag}", "tag reference")
+    if ref.get("ref") != f"refs/tags/{tag}":
+        raise ReleasePublishError("GitHub tag reference does not match the release tag")
+
+    target = ref.get("object")
+    visited: set[str] = set()
+    for _ in range(8):
+        if not isinstance(target, dict):
+            raise ReleasePublishError("GitHub tag reference is missing its object")
+        kind = target.get("type")
+        sha = target.get("sha")
+        if not isinstance(sha, str) or not COMMIT_RE.fullmatch(sha) or sha == "0" * 40:
+            raise ReleasePublishError("GitHub tag reference has an invalid object SHA")
+        if kind == "commit":
+            return sha
+        if kind != "tag":
+            raise ReleasePublishError(f"GitHub tag points to unsupported object type: {kind!r}")
+        if sha in visited:
+            raise ReleasePublishError("GitHub annotated tag contains a reference cycle")
+        visited.add(sha)
+        annotation = github_json(runner, f"repos/{repo}/git/tags/{sha}", "annotated tag")
+        if annotation.get("sha") != sha:
+            raise ReleasePublishError("GitHub annotated tag object SHA does not match the request")
+        target = annotation.get("object")
+    raise ReleasePublishError("GitHub annotated tag chain is too deep")
+
+
+def require_release_commit(tag: str, repo: str, expected_commit: str, runner: GhRunner) -> None:
+    actual = remote_tag_commit(tag, repo, runner)
+    if actual != expected_commit:
+        raise ReleasePublishError(
+            f"remote release tag {tag} points to {actual}, "
+            f"not the workflow commit {expected_commit}; refusing publication"
+        )
+
+
 def get_release(tag: str, repo: str, runner: GhRunner) -> dict:
     output = runner("api", f"repos/{repo}/releases/tags/{tag}")
     try:
@@ -125,12 +181,17 @@ def missing_or_mismatched(release: dict, assets: dict[str, Asset]) -> list[str]:
     ]
 
 
-def publish(tag: str, directory: Path, repo: str, runner: GhRunner = gh) -> str:
+def publish(tag: str, directory: Path, repo: str, expected_commit: str, runner: GhRunner = gh) -> str:
     if not TAG_RE.fullmatch(tag):
         raise ReleasePublishError("release tag must be stable vX.Y.Z")
     if not REPO_RE.fullmatch(repo) or ".." in repo or repo.endswith("."):
         raise ReleasePublishError("GITHUB_REPOSITORY must be a valid owner/repository")
+    if not isinstance(expected_commit, str) or not COMMIT_RE.fullmatch(expected_commit) or expected_commit == "0" * 40:
+        raise ReleasePublishError("RELEASE_COMMIT must be a full, nonzero lowercase Git commit SHA")
     assets = local_assets(directory)
+    # The server's tag ref may have changed since the workflow was triggered.
+    # Refuse even creating a draft if the released tag is not the built commit.
+    require_release_commit(tag, repo, expected_commit, runner)
 
     # A re-run cannot create the same release twice. Attempt an unpublished
     # draft first; if it exists already, fetch its state and resume safely.
@@ -175,6 +236,10 @@ def publish(tag: str, directory: Path, repo: str, runner: GhRunner = gh) -> str:
     if unverified:
         raise ReleasePublishError(f"release remains draft: unverified assets: {', '.join(unverified)}")
 
+    # Re-check after uploads: a force-pushed tag must not cause publishing a
+    # valid bundle against a different revision. Tag protection is still
+    # required to avoid a race between this query and the release edit.
+    require_release_commit(tag, repo, expected_commit, runner)
     runner("release", "edit", tag, "--draft=false", "--repo", repo)
     final = get_release(tag, repo, runner)
     if final["draft"] is not False or missing_or_mismatched(final, assets):
@@ -188,7 +253,10 @@ def main() -> int:
     parser.add_argument("assets_dir", type=Path, help="directory containing the bundle and SHA256SUMS")
     args = parser.parse_args()
     try:
-        message = publish(args.tag, args.assets_dir, os.environ.get("GITHUB_REPOSITORY", ""))
+        message = publish(
+            args.tag, args.assets_dir, os.environ.get("GITHUB_REPOSITORY", ""),
+            os.environ.get("RELEASE_COMMIT", ""),
+        )
     except (ReleasePublishError, OSError) as error:
         print(f"release-publish: {error}", file=sys.stderr)
         return 1

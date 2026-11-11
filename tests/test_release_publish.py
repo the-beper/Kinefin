@@ -17,6 +17,11 @@ sys.path.insert(0, str(ROOT / "build" / "release"))
 import publish_release as sut  # noqa: E402
 
 
+EXPECTED_COMMIT = "a" * 40
+MOVED_COMMIT = "b" * 40
+ANNOTATED_SHA = "c" * 40
+
+
 class FakeGitHub:
     def __init__(self) -> None:
         self.release: dict | None = None
@@ -26,6 +31,12 @@ class FakeGitHub:
         self.omit_digest = False
         self.fail_create = False
         self.fail_api = False
+        self.fail_tag_api = False
+        self.change_tag_after_upload = False
+        self.ref_object: dict = {"type": "commit", "sha": EXPECTED_COMMIT}
+        self.ref_name = "refs/tags/v1.2.3"
+        self.tag_objects: dict[str, dict] = {}
+        self.ref_override: object | None = None
 
     @staticmethod
     def asset(path: Path) -> dict:
@@ -47,6 +58,18 @@ class FakeGitHub:
             self.release = {"tag_name": args[2], "draft": True, "assets": []}
             return ""
         if args[0] == "api":
+            endpoint = args[1]
+            if "/git/ref/tags/" in endpoint:
+                if self.fail_tag_api:
+                    raise sut.ReleasePublishError("tag ref missing")
+                if self.ref_override is not None:
+                    return json.dumps(self.ref_override)
+                return json.dumps({"ref": self.ref_name, "object": self.ref_object})
+            if "/git/tags/" in endpoint:
+                tag_sha = endpoint.rsplit("/", 1)[-1]
+                if tag_sha not in self.tag_objects:
+                    raise sut.ReleasePublishError("annotated tag not found")
+                return json.dumps(self.tag_objects[tag_sha])
             if self.fail_api or self.release is None:
                 raise sut.ReleasePublishError("release not found")
             state = json.loads(json.dumps(self.release))
@@ -67,6 +90,8 @@ class FakeGitHub:
                     if existing["name"] != asset["name"]
                 ]
                 self.release["assets"].append(asset)
+            if self.change_tag_after_upload:
+                self.ref_object = {"type": "commit", "sha": MOVED_COMMIT}
             return ""
         if args[:2] == ("release", "edit"):
             if self.fail_publish:
@@ -93,10 +118,101 @@ class ReleasePublishTest(unittest.TestCase):
         self.sums.write_text(f"{digest}  {sut.BUNDLE}\n", encoding="ascii")
 
     def publish(self, tag: str = "v1.2.3", repo: str = "the-beper/Kinefin") -> str:
-        return sut.publish(tag, self.root, repo, self.gh)
+        return sut.publish(tag, self.root, repo, EXPECTED_COMMIT, self.gh)
 
     def asset_calls(self, action: str) -> list[tuple[str, ...]]:
         return [call for call in self.gh.calls if call[:2] == ("release", action)]
+
+    def test_lightweight_tag_must_match_workflow_commit(self) -> None:
+        self.gh.ref_object = {"type": "commit", "sha": MOVED_COMMIT}
+        with self.assertRaisesRegex(sut.ReleasePublishError, "not the workflow commit"):
+            self.publish()
+        self.assertIsNone(self.gh.release)
+        self.assertFalse(self.asset_calls("create"))
+        self.assertFalse(self.asset_calls("upload"))
+
+    def test_annotated_tag_is_dereferenced_to_commit(self) -> None:
+        self.gh.ref_object = {"type": "tag", "sha": ANNOTATED_SHA}
+        self.gh.tag_objects[ANNOTATED_SHA] = {
+            "sha": ANNOTATED_SHA,
+            "object": {"type": "commit", "sha": EXPECTED_COMMIT},
+        }
+        self.assertIn("Published release", self.publish())
+        self.assertEqual(len([call for call in self.gh.calls if "/git/tags/" in call[-1]]), 2)
+
+    def test_nested_annotated_tags_are_dereferenced(self) -> None:
+        nested = "d" * 40
+        self.gh.ref_object = {"type": "tag", "sha": ANNOTATED_SHA}
+        self.gh.tag_objects[ANNOTATED_SHA] = {
+            "sha": ANNOTATED_SHA, "object": {"type": "tag", "sha": nested},
+        }
+        self.gh.tag_objects[nested] = {
+            "sha": nested, "object": {"type": "commit", "sha": EXPECTED_COMMIT},
+        }
+        self.assertIn("Published release", self.publish())
+
+    def test_deleted_remote_tag_ref_fails_closed(self) -> None:
+        self.gh.fail_tag_api = True
+        with self.assertRaisesRegex(sut.ReleasePublishError, "tag ref missing"):
+            self.publish()
+        self.assertIsNone(self.gh.release)
+
+    def test_changed_tag_during_upload_leaves_draft_unpublished(self) -> None:
+        self.gh.change_tag_after_upload = True
+        with self.assertRaisesRegex(sut.ReleasePublishError, "not the workflow commit"):
+            self.publish()
+        self.assertIsNotNone(self.gh.release)
+        self.assertTrue(self.gh.release["draft"])
+        self.assertFalse(self.asset_calls("edit"))
+
+    def test_matching_existing_draft_rechecks_tag_before_publication(self) -> None:
+        self.gh.release = {
+            "tag_name": "v1.2.3", "draft": True,
+            "assets": [self.gh.asset(self.bundle), self.gh.asset(self.sums)],
+        }
+        # The second API ref lookup sees a force-pushed commit.
+        lookups = 0
+        def moving_runner(*args: str) -> str:
+            nonlocal lookups
+            if args[0] == "api" and "/git/ref/tags/" in args[1]:
+                lookups += 1
+                if lookups == 2:
+                    self.gh.ref_object = {"type": "commit", "sha": MOVED_COMMIT}
+            return self.gh(*args)
+
+        with self.assertRaisesRegex(sut.ReleasePublishError, "not the workflow commit"):
+            sut.publish("v1.2.3", self.root, "the-beper/Kinefin", EXPECTED_COMMIT, moving_runner)
+        self.assertTrue(self.gh.release["draft"])
+        self.assertFalse(self.asset_calls("edit"))
+
+    def test_malformed_tag_json_and_cycles_are_rejected(self) -> None:
+        for invalid in (
+            {"ref": "refs/tags/else", "object": {"type": "commit", "sha": EXPECTED_COMMIT}},
+            {"ref": "refs/tags/v1.2.3", "object": {"type": "tree", "sha": EXPECTED_COMMIT}},
+            {"ref": "refs/tags/v1.2.3", "object": {"type": "commit", "sha": "no"}},
+            [1, 2],
+        ):
+            with self.subTest(invalid=invalid):
+                self.gh = FakeGitHub()
+                self.gh.ref_override = invalid
+                with self.assertRaises(sut.ReleasePublishError):
+                    self.publish()
+                self.assertFalse(self.asset_calls("create"))
+        self.gh = FakeGitHub()
+        self.gh.ref_object = {"type": "tag", "sha": ANNOTATED_SHA}
+        self.gh.tag_objects[ANNOTATED_SHA] = {
+            "sha": ANNOTATED_SHA, "object": {"type": "tag", "sha": ANNOTATED_SHA},
+        }
+        with self.assertRaisesRegex(sut.ReleasePublishError, "cycle"):
+            self.publish()
+        self.assertFalse(self.asset_calls("create"))
+
+    def test_commit_validation_precedes_network(self) -> None:
+        for invalid in ("", "HEAD", "0" * 40, "A" * 40, "f" * 39, "a" * 41):
+            with self.subTest(invalid=invalid):
+                with self.assertRaisesRegex(sut.ReleasePublishError, "RELEASE_COMMIT"):
+                    sut.publish("v1.2.3", self.root, "the-beper/Kinefin", invalid, self.gh)
+        self.assertEqual(self.gh.calls, [])
 
     def test_new_release_stays_draft_until_both_asset_digests_match(self) -> None:
         result = self.publish()
@@ -112,7 +228,7 @@ class ReleasePublishTest(unittest.TestCase):
         self.assertEqual(set(upload[3:upload.index("--clobber")]), {str(self.bundle), str(self.sums)})
         self.assertEqual(len(self.asset_calls("edit")), 1)
         self.assertLess(self.gh.calls.index(upload), self.gh.calls.index(self.asset_calls("edit")[0]))
-        self.assertEqual(sum(1 for call in self.gh.calls if call[0] == "api"), 3)
+        self.assertEqual(sum(1 for call in self.gh.calls if call[0] == "api"), 5)
 
     def test_retry_after_interrupted_upload(self) -> None:
         self.gh.fail_upload_once = True
@@ -262,6 +378,7 @@ class ReleasePublishTest(unittest.TestCase):
     def test_workflow_does_not_publish_before_remote_sha_check(self) -> None:
         workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
         self.assertIn('python3 -I build/release/publish_release.py "$RELEASE_TAG" release-assets', workflow)
+        self.assertIn('RELEASE_COMMIT: ${{ github.sha }}', workflow)
         publish_job = workflow.split("  publish:\n", 1)[1]
         self.assertIn("actions/checkout@", publish_job)
         self.assertIn("persist-credentials: false", publish_job)

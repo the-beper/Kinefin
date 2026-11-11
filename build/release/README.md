@@ -100,6 +100,16 @@ upload, both remote asset digests and sizes must match the local artifacts
 before the draft is published. GitHub supplies the digest of each uploaded
 asset through its release API; a missing digest fails closed.
 
+Publication also verifies the **current remote Git tag** resolves to the
+exact `RELEASE_COMMIT` from the workflow (`github.sha`). This supports both
+lightweight and annotated tags. It checks before creating a draft and again
+after uploading, immediately before publishing. A tag that has been moved,
+deleted, or points to a different object **blocks publication**; a draft
+remains unpublished on failure. GitHub release `target_commitish` is not
+reliable evidence of a pre-existing tag's target and is not used. Protect
+release tags against force-pushes: no sequence of API queries can prevent a
+tag from changing in the instant after the final check.
+
 An interrupted upload or publication can be retried by rerunning the job with
 its original artifacts. A release that is already published is treated as
 successful **only** when both assets still match; the helper never replaces a

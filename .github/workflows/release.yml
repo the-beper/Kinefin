@@ -211,4 +211,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}
+          # The publisher resolves the current remote Git tag and requires it
+          # to still point at the commit whose Flatpak was built in this run.
+          RELEASE_COMMIT: ${{ github.sha }}
         run: python3 -I build/release/publish_release.py "$RELEASE_TAG" release-assets
