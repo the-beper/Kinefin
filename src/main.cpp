@@ -14,6 +14,7 @@
 #include <QCommandLineParser>
 #include <QCoreApplication>
 #include <QGuiApplication>
+#include <QPointer>
 #include <QQmlApplicationEngine>
 #include <QQuickWindow>
 #include <QTextStream>
@@ -50,7 +51,7 @@ int main(int argc, char *argv[])
     parser.addHelpOption();
     parser.addVersionOption();
     parser.addPositionalArgument(QStringLiteral("url"),
-                                 QStringLiteral("Provisional jellyfin://item/<id> URL"),
+                                 QStringLiteral("jellyfin://item/<32-hex-id> URL"),
                                  QStringLiteral("[url]"));
     parser.addOption(
         {QStringLiteral("log-level"),
@@ -108,7 +109,35 @@ int main(int argc, char *argv[])
         return 2;
     }
 
+    // Register the activation handler before creating the shell. A second launch
+    // may arrive while the first is still restoring its profile or loading QML.
+    // Keep only the latest item request, without ever logging its URI.
+    QPointer<QQuickWindow> window;
+    std::optional<QString> pendingItemId;
+    if (!parser.positionalArguments().isEmpty())
+        pendingItemId = Kinefin::parseItemLink(parser.positionalArguments().first());
+    auto showItem = [&window, &pendingItemId](const QString &itemId) {
+        if (!window) {
+            pendingItemId = itemId;
+            return;
+        }
+        window->setProperty("requestedItemId", QVariant(itemId));
+        window->show();
+        window->raise();
+        window->requestActivate();
+    };
     KDBusService service(KDBusService::Unique);
+    QObject::connect(&service, &KDBusService::activateRequested, &app,
+                     [&window, showItem](const QStringList &args, const QString &) {
+                         if (const auto item = Kinefin::itemFromActivationArguments(args)) {
+                             showItem(*item);
+                         } else if (window) {
+                             // Plain second launch: raise without changing pages.
+                             window->show();
+                             window->raise();
+                             window->requestActivate();
+                         }
+                     });
 
     const auto profileLock = Kinefin::lockProfile(profileId, &profileError);
     if (!profileLock) {
@@ -159,31 +188,15 @@ int main(int argc, char *argv[])
         qCritical("Could not load the Kinefin QML shell");
         return 1;
     }
-    QObject *root = engine.rootObjects().constFirst();
-    auto showItem = [root](const QString &argument) {
-        const auto itemId = Kinefin::parseItemLink(argument);
-        if (!itemId)
-            return;
-        root->setProperty("requestedItemId", QVariant(*itemId));
-        if (auto *window = qobject_cast<QQuickWindow *>(root)) {
-            window->show();
-            window->raise();
-            window->requestActivate();
-        }
-    };
-    if (!parser.positionalArguments().isEmpty()) {
-        showItem(parser.positionalArguments().first());
+    window = qobject_cast<QQuickWindow *>(engine.rootObjects().constFirst());
+    if (!window) {
+        qCritical("The QML root is not a window");
+        return 1;
     }
-    QObject::connect(&service, &KDBusService::activateRequested, &app,
-                     [showItem, root](const QStringList &args, const QString &) {
-                         // The forwarded argument list may include argv[0]; ignore unknown switches/arguments, and never log inbound URI values or credentials
-                         for (const QString &argument : args)
-                             showItem(argument);
-                         if (auto *window = qobject_cast<QQuickWindow *>(root)) {
-                             window->show();
-                             window->raise();
-                             window->requestActivate();
-                         }
-                     });
+    if (pendingItemId) {
+        const QString itemId = *pendingItemId;
+        pendingItemId.reset();
+        showItem(itemId);
+    }
     return app.exec();
 }

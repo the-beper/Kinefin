@@ -15,6 +15,8 @@ Kirigami.ApplicationWindow {
     property string startupPage: ""
     // An item link from the command line: opened once Home shows, then cleared
     property string requestedItemId: ""
+    // Invalidates deferred link navigation when an account changes or a newer link arrives
+    property int itemRequestGeneration: 0
     readonly property bool signedIn: connection.state === ConnectionController.Authenticated
     // A server is chosen while its sign-in or a session is in progress: the account menu shows for it
     readonly property bool serverChosen: connection.state !== ConnectionController.Idle
@@ -438,13 +440,26 @@ Kirigami.ApplicationWindow {
         onOpenRequested: targetId => window.openItem(targetId, window.pageStack.currentItem)
     }
 
-    // A link opens its item above Home once signed in, whether it came before or after the sign-in
+    // A link opens above the active root tab after sign-in. Incoming links must not bypass the
+    // unsaved-preferences prompt. A cancelled request is consumed, so an identical
+    // link delivered later can trigger a fresh prompt.
     function openRequestedItem(home) {
-        if (requestedItemId.length === 0 || connection.state !== ConnectionController.Authenticated || home?.objectName !== "homePage")
+        if (requestedItemId.length === 0 || connection.state !== ConnectionController.Authenticated
+                || (home?.objectName !== "homePage" && home?.objectName !== "libraryPage"))
             return;
         const itemId = requestedItemId;
         requestedItemId = "";
-        openItem(itemId, home);
+        const request = ++itemRequestGeneration;
+        const navigate = () => {
+            if (request !== itemRequestGeneration || connection.state !== ConnectionController.Authenticated)
+                return;
+            const base = pageStack.get(0);
+            if (base?.objectName === "homePage" || base?.objectName === "libraryPage")
+                openItem(itemId, base);
+        };
+        if (askBeforeLeaving(navigate))
+            return;
+        navigate();
     }
 
     // The sign-in page keeps its place while the state moves between its own steps, and so does the user picker
@@ -463,6 +478,10 @@ Kirigami.ApplicationWindow {
         }
     }
     onPageGroupChanged: {
+        // An earlier link awaiting an unsaved-changes decision cannot cross users.
+        // Do not invalidate an item still queued for the initial sign-in.
+        if (pageGroup !== 2)
+            itemRequestGeneration++;
         // A link waiting for a sign-in belongs to the server the user is leaving
         if (pageGroup === 0)
             requestedItemId = "";

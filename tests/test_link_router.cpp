@@ -19,9 +19,45 @@ class TestLinkRouter : public QObject {
                                 "jellyfin://item/../admin", "jellyfin://item/xyz",
                                 "jellyfin://item/abcdef0123456789abcdef0123456789?api_key=secret",
                                 "jellyfin://u:p@item/abcdef0123456789abcdef0123456789",
-                                "jellyfin://item/abcdef0123456789abcdef0123456789#fragment"}) {
+                                "jellyfin://item/abcdef0123456789abcdef0123456789#fragment",
+                                "jellyfin://item/abcdef0123456789abcdef0123456789/",
+                                "jellyfin://item//abcdef0123456789abcdef0123456789",
+                                "jellyfin://item:80/abcdef0123456789abcdef0123456789",
+                                "jellyfin://item/%61bcdef0123456789abcdef0123456789",
+                                "jellyfin://item/abcdef0123456789abcdef0123456789%2f",
+                                " jellyfin://item/abcdef0123456789abcdef0123456789",
+                                "jellyfin://item/abcdef0123456789abcdef0123456789\n"}) {
             QVERIFY2(!Kinefin::parseItemLink(QString::fromLatin1(url)), url);
         }
+        // RFC 3986 scheme and hostname are case-insensitive, IDs are normalized.
+        const auto mixed = Kinefin::parseItemLink(
+            QStringLiteral("JELLYFIN://ITEM/ABCDEF0123456789ABCDEF0123456789"));
+        QVERIFY(mixed);
+        QCOMPARE(*mixed, QStringLiteral("abcdef0123456789abcdef0123456789"));
+    }
+
+    void forwardedActivationAcceptsOnePositionalLink()
+    {
+        const QString uri = QStringLiteral("jellyfin://item/ABCDEF0123456789ABCDEF0123456789");
+        const QString id = QStringLiteral("abcdef0123456789abcdef0123456789");
+        const auto forwarded = Kinefin::itemFromActivationArguments(
+            {QStringLiteral("/usr/bin/kinefin"), QStringLiteral("--profile"),
+             QStringLiteral("home"), QStringLiteral("--fullscreen"), uri});
+        QVERIFY(forwarded);
+        QCOMPARE(*forwarded, id);
+        const auto afterDelimiter = Kinefin::itemFromActivationArguments(
+            {QStringLiteral("kinefin"), QStringLiteral("--"), uri});
+        QVERIFY(afterDelimiter);
+        QCOMPARE(*afterDelimiter, id);
+        QVERIFY(!Kinefin::itemFromActivationArguments(
+            {QStringLiteral("kinefin"), QStringLiteral("--log-level"), uri}));
+        QVERIFY(!Kinefin::itemFromActivationArguments(
+            {QStringLiteral("kinefin"), QStringLiteral("--profile"), uri}));
+        QVERIFY(!Kinefin::itemFromActivationArguments(
+            {QStringLiteral("kinefin"), uri, uri}));
+        QVERIFY(!Kinefin::itemFromActivationArguments(
+            {QStringLiteral("kinefin"), QStringLiteral("jellyfin://item/../admin")}));
+        QVERIFY(!Kinefin::itemFromActivationArguments({QStringLiteral("kinefin")}));
     }
     void webLinksAreHttpOrHttpsWithoutCredentials()
     {

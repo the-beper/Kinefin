@@ -8,18 +8,51 @@
 namespace Kinefin {
 std::optional<QString> parseItemLink(const QString &input)
 {
-    const QUrl url(input, QUrl::StrictMode);
-    if (!url.isValid() || url.scheme() != QStringLiteral("jellyfin")
-        || url.host() != QStringLiteral("item") || !url.userInfo().isEmpty()
-        || !url.query().isEmpty() || !url.fragment().isEmpty() || url.port() != -1) {
+    // Match the source text, not a decoded/normalized QUrl path: percent escapes,
+    // dot segments, a trailing slash, and attached userinfo must all be refused.
+    static const QRegularExpression pattern(
+        QStringLiteral(R"(\Ajellyfin://item/([a-f0-9]{32})\z)"),
+        QRegularExpression::CaseInsensitiveOption);
+    const auto match = pattern.match(input);
+    if (!match.hasMatch())
         return std::nullopt;
+    return match.captured(1).toLower();
+}
+
+std::optional<QString> itemFromActivationArguments(const QStringList &arguments)
+{
+    // Those switches take a value as a separate argv entry when not written as
+    // --name=value. An option value is never a desktop link, even if it looks
+    // like one; only a genuine positional argument can navigate.
+    static const QStringList valueOptions{
+        QStringLiteral("--profile"), QStringLiteral("--log-level"),
+        QStringLiteral("--create-profile"), QStringLiteral("--set-default-profile"),
+        QStringLiteral("--delete-profile")};
+    bool skipValue = false;
+    bool positionalOnly = false;
+    std::optional<QString> found;
+    for (const auto &argument : arguments) {
+        if (skipValue) {
+            skipValue = false;
+            continue;
+        }
+        if (!positionalOnly && argument == QLatin1String("--")) {
+            positionalOnly = true;
+            continue;
+        }
+        if (!positionalOnly && argument.startsWith(QLatin1Char('-'))) {
+            skipValue = valueOptions.contains(argument);
+            continue;
+        }
+        const auto item = parseItemLink(argument);
+        if (!item)
+            continue;
+        // A forwarded activation must not navigate to two arbitrary items.
+        if (found)
+            return std::nullopt;
+        found = item;
     }
-    const QString path = url.path();
-    static const QRegularExpression idPattern(QStringLiteral("^/[a-fA-F0-9]{32}$"));
-    if (!idPattern.match(path).hasMatch()) {
-        return std::nullopt;
-    }
-    return path.mid(1).toLower();
+    return found;
 }
 
 std::optional<QUrl> parseWebLink(const QString &input)

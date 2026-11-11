@@ -11,6 +11,7 @@ Exec=kinefin %u
 Icon=io.github.the_beper.Kinefin
 Terminal=false
 Categories=AudioVideo;Video;Music;Player;Qt;
+MimeType=x-scheme-handler/jellyfin;
 Keywords=jellyfin;media;video;music;
 SingleMainWindow=true
 StartupNotify=true

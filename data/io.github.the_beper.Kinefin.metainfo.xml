@@ -41,5 +41,6 @@
   </requires>
   <provides>
     <binary>kinefin</binary>
+    <mediatype>x-scheme-handler/jellyfin</mediatype>
   </provides>
 </component>

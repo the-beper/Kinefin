@@ -28,10 +28,14 @@ class PlanningConsistency(unittest.TestCase):
         self.assertNotIn("  - --filesystem=home", manifest)
         self.assertNotIn("  - --system-talk-name=org.freedesktop.Avahi", manifest)
 
-    def test_unverified_mime_not_advertised(self) -> None:
+    def test_jellyfin_uri_handler_is_declared_consistently(self) -> None:
         desktop = content("data/io.github.the_beper.Kinefin.desktop")
-        # P3 has only an experimental parser, no verified Jellyfin link grammar.
-        self.assertNotIn("MimeType=x-scheme-handler/jellyfin;", desktop)
+        metainfo = content("data/io.github.the_beper.Kinefin.metainfo.xml")
+        self.assertIn("MimeType=x-scheme-handler/jellyfin;", desktop)
+        self.assertIn("Exec=kinefin %u", desktop)
+        self.assertIn("<mediatype>x-scheme-handler/jellyfin</mediatype>", metainfo)
+        self.assertNotIn("x-scheme-handler/http;", desktop)
+        self.assertNotIn("x-scheme-handler/https;", desktop)
 
     def test_all_qml_messages_are_in_committed_catalogs(self) -> None:
         potfiles = set(content("po/POTFILES.in").splitlines())

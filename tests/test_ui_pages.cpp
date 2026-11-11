@@ -1788,6 +1788,72 @@ class TestUiPages : public QObject {
         QTRY_COMPARE(ui.window->property("requestedItemId").toString(), QString());
     }
 
+    void aLinkArrivingWhileSignedInOpensAndReplacesDetails()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        ui.window->setProperty("requestedItemId", kMovieId);
+        QTRY_VERIFY(ui.item(QStringLiteral("itemDetailsPage")) != nullptr);
+        QTRY_VERIFY(ui.currentDetails()
+                    && ui.currentDetails()->property("itemId").toString() == kMovieId);
+        QTRY_COMPARE(ui.window->property("requestedItemId").toString(), QString());
+        QCOMPARE(ui.stackDepth(), 2);
+        // A warm launch of the same link leaves the stack unchanged.
+        ui.window->setProperty("requestedItemId", kMovieId);
+        QTRY_COMPARE(ui.window->property("requestedItemId").toString(), QString());
+        QCOMPARE(ui.stackDepth(), 2);
+        // A different link replaces the old detail page rather than nesting it.
+        ui.window->setProperty("requestedItemId", kSeriesId);
+        QTRY_VERIFY(ui.currentDetails()
+                    && ui.currentDetails()->property("itemId").toString() == kSeriesId);
+        QCOMPARE(ui.stackDepth(), 2);
+        // The same external link also works when a type tab is the root.
+        QVERIFY(ui.clickTab(QStringLiteral("Movies")));
+        QTRY_COMPARE(ui.rootTab(), QStringLiteral("movies"));
+        ui.window->setProperty("requestedItemId", kMovieId);
+        QTRY_VERIFY(ui.currentDetails()
+                    && ui.currentDetails()->property("itemId").toString() == kMovieId);
+        QCOMPARE(ui.stackDepth(), 2);
+        QCOMPARE(ui.rootTab(), QStringLiteral("movies"));
+    }
+
+    void aLinkDoesNotDiscardUnsavedPreferences()
+    {
+        Ui ui(m_home->path());
+        RemotePreferences remote(ui);
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(openPreferences(ui) != nullptr);
+        auto *prefs = ui.controller.userConfiguration();
+        prefs->setSubtitleMode(QStringLiteral("Always"));
+        QTRY_VERIFY(prefs->dirty());
+        QObject *dialog = ui.popup(QStringLiteral("unsavedChangesDialog"));
+        QVERIFY(dialog);
+        ui.window->setProperty("requestedItemId", kMovieId);
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QCOMPARE(ui.stackDepth(), 2);
+        QVERIFY(ui.item(QStringLiteral("itemDetailsPage")) == nullptr);
+        QVERIFY(clickInDialog(ui, QStringLiteral("unsavedChangesDialog"),
+                              QStringLiteral("Cancel")));
+        QTRY_VERIFY(!dialog->property("visible").toBool());
+        QVERIFY(prefs->dirty());
+        QVERIFY(ui.item(QStringLiteral("userPreferencesPage")) != nullptr);
+        // The same URL can be delivered again after Cancel.
+        ui.window->setProperty("requestedItemId", kMovieId);
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QVERIFY(clickInDialog(ui, QStringLiteral("unsavedChangesDialog"),
+                              QStringLiteral("Discard")));
+        QTRY_VERIFY(ui.item(QStringLiteral("itemDetailsPage")) != nullptr);
+        QTRY_VERIFY(ui.currentDetails()
+                    && ui.currentDetails()->property("itemId").toString() == kMovieId);
+        QCOMPARE(ui.stackDepth(), 2);
+        QVERIFY(!prefs->dirty());
+        QVERIFY(remote.posts.isEmpty());
+    }
+
     void lossOfTheSessionClosesTheDetails()
     {
         Ui ui(m_home->path());
