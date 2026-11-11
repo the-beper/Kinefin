@@ -96,6 +96,8 @@ add_library(kinefin_core STATIC
     src/player/PlaybackReporter.h
     src/player/PlaybackSession.cpp
     src/integration/LinkRouter.cpp
+    src/integration/UpdateChecker.cpp
+    src/integration/UpdateChecker.h
     src/settings/BrowseStateStore.cpp
     src/settings/BrowseStateStore.h
     src/settings/ClientSettings.cpp
@@ -177,6 +179,7 @@ qt_add_qml_module(kinefin_ui
         src/qml/AboutPage.qml
     SOURCES
         src/app/ClientSettingsQml.h
+        src/app/UpdateCheckerQml.h
         src/app/ConnectionController.cpp
         src/app/ConnectionController.h
         src/app/ImageNetworkFactory.cpp
@@ -257,6 +260,10 @@ if(BUILD_TESTING)
     add_executable(test_jellyfin_live tests/test_jellyfin_live.cpp)
     target_link_libraries(test_jellyfin_live PRIVATE kinefin_player kinefin_core Qt6::Test Qt6::Network Qt6::WebSockets)
     add_test(NAME jellyfin_live COMMAND test_jellyfin_live)
+
+    add_executable(test_update_checker tests/test_update_checker.cpp)
+    target_link_libraries(test_update_checker PRIVATE kinefin_core Qt6::Test Qt6::Network)
+    add_test(NAME update_checker COMMAND test_update_checker)
 
     add_executable(test_link_router tests/test_link_router.cpp)
     target_link_libraries(test_link_router PRIVATE kinefin_core Qt6::Test)

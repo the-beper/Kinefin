@@ -3469,6 +3469,33 @@ class TestUiPages : public QObject {
         QTRY_COMPARE(ui.rootTab(), QStringLiteral("home"));
     }
 
+    void theUpdateCheckMenuFollowsTheProfileSetting()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.settings.setValue(QStringLiteral("main"),
+                                     QStringLiteral("checkForUpdates"), false));
+        QVERIFY(ui.load());
+        QObject *action = ui.shellAction(QStringLiteral("updateCheckAction"));
+        QObject *entry = ui.popup(QStringLiteral("menuUpdateItem"));
+        QObject *checker = ui.popup(QStringLiteral("updateChecker"));
+        QVERIFY(action);
+        QVERIFY(entry);
+        QVERIFY(checker);
+        QVERIFY(!action->property("visible").toBool());
+        QVERIFY(!entry->property("visible").toBool());
+        QVERIFY(!checker->property("checking").toBool());
+
+        QVERIFY(ui.settings.setValue(QStringLiteral("main"),
+                                     QStringLiteral("checkForUpdates"), true));
+        QTRY_VERIFY(action->property("visible").toBool());
+        QTRY_VERIFY(entry->property("visible").toBool());
+        QVERIFY(ui.settings.setValue(QStringLiteral("main"),
+                                     QStringLiteral("checkForUpdates"), false));
+        QTRY_VERIFY(!action->property("visible").toBool());
+        QTRY_VERIFY(!entry->property("visible").toBool());
+        QVERIFY(!checker->property("checking").toBool());
+    }
+
     void theMainMenuButtonIsNotCoveredByTheTabBar()
     {
         Ui ui(m_home->path());

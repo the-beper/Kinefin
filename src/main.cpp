@@ -45,6 +45,7 @@ int main(int argc, char *argv[])
     aboutData.setHomepage(QStringLiteral("https://github.com/the-beper/Kinefin"));
     aboutData.setBugAddress("https://github.com/the-beper/Kinefin/issues");
     KAboutData::setApplicationData(aboutData);
+    QCoreApplication::setApplicationVersion(QStringLiteral(KINEFIN_VERSION));
 
     QCommandLineParser parser;
     parser.setApplicationDescription(QStringLiteral("Kinefin native Jellyfin client"));

@@ -2390,3 +2390,34 @@ msgstr "Segna come non visto"
 #: src/qml/ItemDetailsPage.qml
 msgid "Could not update watched status. Check the connection and try again"
 msgstr "Impossibile aggiornare lo stato di visione. Controlla la connessione e riprova"
+
+#: src/qml/ShellHeader.qml
+msgctxt "@action:inmenu"
+msgid "Check for Updates"
+msgstr "Controlla aggiornamenti"
+
+#: src/qml/ShellHeader.qml
+msgctxt "@title:window"
+msgid "Update Available"
+msgstr "Aggiornamento disponibile"
+
+#: src/qml/ShellHeader.qml
+msgctxt "@action:button"
+msgid "Open Release Page"
+msgstr "Apri pagina della versione"
+
+#: src/qml/ShellHeader.qml
+msgid "Kinefin is up to date"
+msgstr "Kinefin è aggiornato"
+
+#: src/qml/ShellHeader.qml
+msgid "Could not check for updates. Check the internet connection"
+msgstr "Impossibile controllare gli aggiornamenti. Verifica la connessione Internet"
+
+#: src/qml/ShellHeader.qml
+msgid "Could not open the release page in the browser"
+msgstr "Impossibile aprire la pagina della versione nel browser"
+
+#: src/qml/ShellHeader.qml
+msgid "Kinefin %1 is available. Open its release page in your browser?"
+msgstr "È disponibile Kinefin %1. Aprire la pagina della versione nel browser?"

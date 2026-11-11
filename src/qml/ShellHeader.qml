@@ -28,6 +28,69 @@ Item {
         return signedIn && userId.length > 0 ? connection.users.find(user => user.id === userId) ?? null : null;
     }
 
+    // A settings.value() call is not a reactive QML property: keep the menu
+    // visibility and the automatic check in sync with edits in Settings.
+    property bool updateChecksEnabled: shell.settings.value("main", "checkForUpdates")
+    property bool manualUpdateCheck: false
+
+    UpdateChecker {
+        id: updateChecker
+        objectName: "updateChecker"
+
+        onUpdateAvailable: (version, releaseUrl) => {
+            if (!root.updateChecksEnabled)
+                return;
+            root.manualUpdateCheck = false;
+            updateDialog.version = version;
+            updateDialog.releaseUrl = releaseUrl;
+            updateNotificationTimer.restart();
+        }
+        onUpToDate: {
+            if (root.manualUpdateCheck)
+                shell.showPassiveNotification(i18n("Kinefin is up to date"));
+            root.manualUpdateCheck = false;
+        }
+        onCheckFailed: {
+            // An automatic check without network access must be silent.
+            if (root.manualUpdateCheck)
+                shell.showPassiveNotification(i18n("Could not check for updates. Check the internet connection"));
+            root.manualUpdateCheck = false;
+        }
+    }
+
+    Timer {
+        id: automaticUpdateTimer
+        interval: 3000
+        repeat: false
+        running: root.updateChecksEnabled && Qt.application.version.length > 0
+        onTriggered: updateChecker.check()
+    }
+
+    Timer {
+        id: updateNotificationTimer
+        interval: 3000
+        repeat: false
+        onTriggered: {
+            if (root.updateChecksEnabled)
+                updateDialog.open();
+        }
+    }
+
+    Connections {
+        target: root.shell.settings
+        function onValueChanged(section, key) {
+            if (section !== "main" || key !== "checkForUpdates")
+                return;
+            root.updateChecksEnabled = root.shell.settings.value("main", "checkForUpdates");
+            if (!root.updateChecksEnabled) {
+                root.manualUpdateCheck = false;
+                updateChecker.cancel();
+                updateNotificationTimer.stop();
+                updateDialog.close();
+            }
+        }
+    }
+
     implicitHeight: bar.implicitHeight
 
     // Ctrl+F focuses the box and selects what is in it
@@ -392,6 +455,19 @@ Item {
         onTriggered: shell.openSection("aboutPage", "AboutPage.qml", {})
     }
     Kirigami.Action {
+        id: updateCheckAction
+        objectName: "updateCheckAction"
+
+        text: i18nc("@action:inmenu", "Check for Updates")
+        icon.name: "software-update-available"
+        visible: root.updateChecksEnabled
+        enabled: !updateChecker.checking
+        onTriggered: {
+            root.manualUpdateCheck = true;
+            updateChecker.check();
+        }
+    }
+    Kirigami.Action {
         id: adminDashboardAction
         objectName: "adminDashboardAction"
 
@@ -526,6 +602,11 @@ Item {
             action: aboutAction
         }
         QQC2.MenuItem {
+            objectName: "menuUpdateItem"
+            visible: root.updateChecksEnabled
+            action: updateCheckAction
+        }
+        QQC2.MenuItem {
             objectName: "menuRemoteItem"
             visible: root.signedIn
             action: remoteAction
@@ -572,6 +653,35 @@ Item {
             objectName: "switchServerItem"
             visible: root.serverChosen
             action: switchServerAction
+        }
+    }
+
+    Kirigami.PromptDialog {
+        id: updateDialog
+        objectName: "updateAvailableDialog"
+
+        property string version: ""
+        property url releaseUrl: ""
+
+        title: i18nc("@title:window", "Update Available")
+        standardButtons: Kirigami.Dialog.Cancel
+        customFooterActions: [
+            Kirigami.Action {
+                text: i18nc("@action:button", "Open Release Page")
+                icon.name: "internet-web-browser"
+                onTriggered: {
+                    updateDialog.close();
+                    if (!Qt.openUrlExternally(updateDialog.releaseUrl))
+                        shell.showPassiveNotification(i18n("Could not open the release page in the browser"));
+                }
+            }
+        ]
+
+        QQC2.Label {
+            Layout.fillWidth: true
+            wrapMode: Text.Wrap
+            textFormat: Text.PlainText
+            text: i18n("Kinefin %1 is available. Open its release page in your browser?", updateDialog.version)
         }
     }
 
