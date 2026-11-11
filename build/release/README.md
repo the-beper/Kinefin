@@ -52,3 +52,34 @@ Run its portable regression tests with:
 ```sh
 python3 -m unittest discover -s tests -p 'test_release_verify.py' -v
 ```
+
+## Restartable GitHub publication
+
+The `publish` job in `.github/workflows/release.yml` runs
+`build/release/publish_release.py` **only after** the CI and Flatpak artifact
+verification gates pass. The job checks out the tagged source commit because
+this helper is part of the repository; `GITHUB_REPOSITORY` and `GH_TOKEN` come
+from GitHub Actions.
+
+The helper requires a non-empty `Kinefin-x86_64.flatpak` and a canonical,
+single-entry `SHA256SUMS` in the supplied assets directory. It checks the local
+checksum before contacting GitHub, then creates a **draft** release or resumes
+an existing one. Only missing or mismatched draft assets are uploaded. After
+upload, both remote asset digests and sizes must match the local artifacts
+before the draft is published. GitHub supplies the digest of each uploaded
+asset through its release API; a missing digest fails closed.
+
+An interrupted upload or publication can be retried by rerunning the job with
+its original artifacts. A release that is already published is treated as
+successful **only** when both assets still match; the helper never replaces a
+published asset. Extra or duplicated release assets require manual review.
+
+The workflow **does not** create or push tags outside the prevalidated tag
+trigger. This helper does not replace the main-ancestry, build-image pin,
+Flatpak smoke-test or manual release gates.
+
+Portable tests (including a fake GitHub release lifecycle):
+
+```sh
+python3 -m unittest discover -s tests -p 'test_release_publish.py' -v
+```
