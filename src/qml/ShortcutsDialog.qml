@@ -17,6 +17,8 @@ Kirigami.Dialog {
         ["Ctrl+1", i18nc("@item:intable shortcut action", "Home")],
         ["Ctrl+2", i18nc("@item:intable shortcut action", "Movies")],
         ["Ctrl+3", i18nc("@item:intable shortcut action", "TV Shows")],
+        ["Ctrl+PgUp", i18nc("@item:intable shortcut action", "Previous Tab")],
+        ["Ctrl+PgDown", i18nc("@item:intable shortcut action", "Next Tab")],
         ["Menu", i18nc("@item:intable shortcut action", "Open Item Menu")],
         ["Shift+F10", i18nc("@item:intable shortcut action", "Open Item Menu")],
         ["Ctrl+,", i18nc("@item:intable shortcut action", "Settings")],

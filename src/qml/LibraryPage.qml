@@ -780,16 +780,17 @@ Kirigami.Page {
                     ownerPage: page
                     accessibleName: page.title
                     emptyText: page.emptyText
-                    canClear: filterDialog.chips.length > 0 || listContent.heldModel.alphabet.length > 0 || listContent.heldModel.resolvingFacets
+                    canClear: filterDialog.chips.length > 0 || listContent.heldModel.alphabet.length > 0 || listContent.heldModel.searchTerm.length > 0 || listContent.heldModel.resolvingFacets
                     onClearRequested: {
                         listContent.heldModel.clearFilters();
                         listContent.heldModel.alphabet = "";
+                        listContent.heldModel.searchTerm = "";
                     }
                     // A model of another list shows from its first item
                     onListModelChanged: {
-                if (ready)
-                    Qt.callLater(scrollToStart);
-            }
+                        if (ready)
+                            Qt.callLater(scrollToStart);
+                    }
                 }
             }
 

@@ -50,6 +50,9 @@ class ConnectionController : public QObject {
     // The id of the signed-in user, empty while nobody is (also during a restore that has not landed yet): the page matches it against the `id` of `users`
     Q_PROPERTY(QString currentUserId READ currentUserId NOTIFY currentUserIdChanged)
     Q_PROPERTY(QVariantList libraries READ libraries NOTIFY librariesChanged)
+    // True only after a successful /UserViews response in this session; an
+    // empty list before that is loading or a failed request, not an empty library.
+    Q_PROPERTY(bool librariesLoaded READ librariesLoaded NOTIFY homeProjectionChanged)
     // The libraries of each tab type (the `libraries` entries whose `tab` is "movies" or "tvshows"); a tab shows only when its list is not empty
     Q_PROPERTY(QVariantList movieLibraries READ movieLibraries NOTIFY librariesChanged)
     Q_PROPERTY(QVariantList showLibraries READ showLibraries NOTIFY librariesChanged)
@@ -101,6 +104,7 @@ class ConnectionController : public QObject {
     QString currentUserId() const { return m_client.userId(); }
     bool hasSavedUsers() const { return !m_users.isEmpty(); }
     QVariantList libraries() const { return m_libraries; }
+    bool librariesLoaded() const { return m_librariesLoaded; }
     QVariantList movieLibraries() const { return typeLibraries(QStringLiteral("movies")); }
     QVariantList showLibraries() const { return typeLibraries(QStringLiteral("tvshows")); }
     // The `libraries` entries of a tab type ("movies" or "tvshows"); empty for another type

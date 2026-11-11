@@ -1220,6 +1220,20 @@ msgctxt "@title:tab"
 msgid "TV Shows"
 msgstr "Serie TV"
 
+#: src/qml/SettingRow.qml:41
+msgid "Items added within the last 7 days are marked New until they are played"
+msgstr "Gli elementi aggiunti negli ultimi 7 giorni sono contrassegnati come nuovi finché non vengono riprodotti"
+
+#: src/qml/ShortcutsDialog.qml:21
+msgctxt "@item:intable shortcut action"
+msgid "Previous Tab"
+msgstr "Scheda precedente"
+
+#: src/qml/ShortcutsDialog.qml:22
+msgctxt "@item:intable shortcut action"
+msgid "Next Tab"
+msgstr "Scheda successiva"
+
 #: src/qml/ShellHeader.qml:332
 msgctxt "@action:inmenu"
 msgid "Settings"

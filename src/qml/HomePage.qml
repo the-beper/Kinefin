@@ -55,7 +55,7 @@ Kirigami.ScrollablePage {
 
         Kirigami.PlaceholderMessage {
             Layout.fillWidth: true
-            visible: page.connection.libraries.length === 0
+            visible: page.connection.librariesLoaded && page.connection.libraries.length === 0 && page.connection.errorText.length === 0
             text: i18n("No libraries to show")
             icon.name: "folder-video"
         }
@@ -139,7 +139,7 @@ Kirigami.ScrollablePage {
                         text: row.title
                     }
 
-                    Controls.ToolButton {
+                    Controls.Button {
                         objectName: "homeRowSeeAll_" + row.index
                         visible: row.hasSeeAll && row.status === HomeRowsModel.Ready
                         text: i18n("See All")

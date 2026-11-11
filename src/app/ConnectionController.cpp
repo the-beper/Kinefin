@@ -1040,6 +1040,7 @@ void ConnectionController::onUserViews(const QJsonArray &items)
     }
     m_userConfiguration.setLibraries(options);
     m_librariesLoaded = true;
+    Q_EMIT homeProjectionChanged();
     // Without the configuration's answer the rows wait for it (applyPreferences loads them then)
     if (m_preferencesSettled)
         m_home.load(recentLibraries(), hidePlayedInLatest());

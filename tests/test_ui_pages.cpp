@@ -1316,21 +1316,30 @@ bool selectSubtab(const Ui &ui, const QString &id)
     return QMetaObject::invokeMethod(button, "click");
 }
 
-// Clicks the real, visible footer button, not the QAction. Kirigami's
-// customFooterActions delegates do not always attach their action through
-// QQuickAbstractButton.action; the visible button's text is still the text of
-// the named action. This verifies the actual clickable UI without depending on
-// an ActionToolBar implementation detail.
+// A Qt Quick Controls Popup may put its visual content in a separate popup window;
+// walking the application window's contentItem can then see the header tabs but
+// none of the dialog's buttons. The footer property points to the actual item
+// regardless of the popup's rendering mode.
+QList<QQuickItem *> filterFooterItems(const Ui &ui)
+{
+    const QObject *dialog = ui.popup(QStringLiteral("filterDialog"));
+    return dialog ? allItems(dialog->property("footer").value<QQuickItem *>())
+                  : QList<QQuickItem *>{};
+}
+
+// Click a visible, enabled button in the dialog footer, not the action itself.
+// Matching the label as well as the action handles Kirigami versions that do
+// not forward customFooterActions to QQuickAbstractButton.action.
 bool clickActionButton(const Ui &ui, const QString &actionName)
 {
     QObject *action = ui.popup(actionName);
     if (!action)
         return false;
     const QString label = action->property("text").toString();
-    for (QQuickItem *button : allItems(ui.window->contentItem())) {
+    for (QQuickItem *button : filterFooterItems(ui)) {
         if (!button->inherits("QQuickAbstractButton") || !button->isVisible()
             || !button->isEnabled() || button->width() <= 0 || button->height() <= 0
-            || !ui.insideWindow(button) || Ui::clippedAway(button))
+            || Ui::clippedAway(button))
             continue;
         const QObject *bound = button->property("action").value<QObject *>();
         if (bound == action || (!label.isEmpty() && button->property("text").toString() == label))
@@ -1345,12 +1354,12 @@ bool clickActionButtonWhenReady(const Ui &ui, const QString &actionName)
     return QTest::qWaitFor([&] { return clickActionButton(ui, actionName); }, 5000);
 }
 
-// Full diagnostic, including buttons that Kirigami creates without setting
-// their QQuickAbstractButton.action (the cause of the former false failure).
+// Report the buttons in the actual footer, including buttons without a bound
+// action, rather than unrelated toolbar buttons in the application window.
 QString describeButtons(const Ui &ui)
 {
     QStringList parts;
-    for (QQuickItem *button : allItems(ui.window->contentItem())) {
+    for (QQuickItem *button : filterFooterItems(ui)) {
         if (!button->inherits("QQuickAbstractButton"))
             continue;
         const QObject *action = button->property("action").value<QObject *>();
@@ -1362,7 +1371,7 @@ QString describeButtons(const Ui &ui)
                      .arg(button->width())
                      .arg(button->property("text").toString());
     }
-    return parts.isEmpty() ? QStringLiteral("no abstract button exists")
+    return parts.isEmpty() ? QStringLiteral("no abstract button exists in the filter dialog footer")
                            : parts.join(QStringLiteral("; "));
 }
 } // namespace
@@ -1417,6 +1426,25 @@ class TestUiPages : public QObject {
         QQuickItem *list = ui.item(QStringLiteral("homeRowList_0"));
         QVERIFY(list);
         QTRY_COMPARE(list->property("count").toInt(), 2);
+    }
+
+    void homeOnlyReportsNoLibrariesAfterTheListingSucceeds()
+    {
+        Ui ui(m_home->path());
+        ui.server.holdViews = true;
+        ui.serveViews({});
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(!ui.controller.librariesLoaded());
+        QVERIFY(!ui.showsText(QStringLiteral("No libraries to show")));
+
+        // The empty response is not a request failure: only now is the
+        // placeholder correct. The first held request must not settle it.
+        ui.server.holdViews = false;
+        ui.controller.reloadLibraries();
+        QTRY_VERIFY(ui.controller.librariesLoaded());
+        QTRY_VERIFY(ui.showsText(QStringLiteral("No libraries to show")));
+        QVERIFY(ui.controller.errorText().isEmpty());
     }
 
     // MyMediaExcludes hides a tile only, LatestItemsExcludes a Recently Added row only, OrderedViews orders the tiles that stay
@@ -2677,6 +2705,32 @@ class TestUiPages : public QObject {
         QVERIFY(!ui.item(QStringLiteral("libraryFilteredEmpty"))->isVisible());
     }
 
+    void anEmptyLocalSearchCanBeClearedFromThePlaceholder()
+    {
+        Ui ui(m_home->path());
+        ui.server.generatedItemTotal = 0;
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        auto *movies = ui.controller.movies();
+        movies->setSearchTerm(QStringLiteral("no matching film"));
+        QTRY_VERIFY(shownItem(ui, QStringLiteral("libraryFilteredEmpty")) != nullptr);
+        QQuickItem *clear = nullptr;
+        QTRY_VERIFY((clear = [&]() -> QQuickItem * {
+                        for (QQuickItem *candidate :
+                             allItems(ui.item(QStringLiteral("libraryFilteredEmpty")))) {
+                            if (candidate->property("text").toString()
+                                    == QStringLiteral("Clear Filters")
+                                && candidate->isVisible() && candidate->isEnabled()
+                                && candidate->width() > 0)
+                                return candidate;
+                        }
+                        return nullptr;
+                    }()) != nullptr);
+        QVERIFY(QMetaObject::invokeMethod(clear, "click"));
+        QTRY_COMPARE(movies->searchTerm(), QString());
+        QTRY_VERIFY(shownItem(ui, QStringLiteral("libraryEmpty")) != nullptr);
+    }
+
     void aFailedFacetShowsRetryAndKeepsTheSelection()
     {
         Ui ui(m_home->path());
@@ -3315,6 +3369,38 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(tabChecked(2, true));
         QVERIFY(tabChecked(1, false));
         QVERIFY(tabChecked(0, false));
+    }
+
+    void theNextAndPreviousTabShortcutsSkipMissingTypes()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("home")));
+        QTest::keyClick(ui.window, Qt::Key_PageDown, Qt::ControlModifier);
+        QTRY_COMPARE(ui.rootTab(), QStringLiteral("movies"));
+        QTest::keyClick(ui.window, Qt::Key_PageDown, Qt::ControlModifier);
+        QTRY_COMPARE(ui.rootTab(), QStringLiteral("tvshows"));
+        QTest::keyClick(ui.window, Qt::Key_PageDown, Qt::ControlModifier);
+        QTRY_COMPARE(ui.rootTab(), QStringLiteral("home"));
+        QTest::keyClick(ui.window, Qt::Key_PageUp, Qt::ControlModifier);
+        QTRY_COMPARE(ui.rootTab(), QStringLiteral("tvshows"));
+
+        // The selected root still counts when another page is in front.
+        QVERIFY(QMetaObject::invokeMethod(ui.shellAction(QStringLiteral("settingsAction")),
+                                          "trigger"));
+        QTRY_VERIFY(ui.item(QStringLiteral("settingsPage")) != nullptr);
+        QTest::keyClick(ui.window, Qt::Key_PageUp, Qt::ControlModifier);
+        QTRY_COMPARE(ui.rootTab(), QStringLiteral("movies"));
+        QTRY_VERIFY(ui.item(QStringLiteral("settingsPage")) == nullptr);
+
+        ui.serveViews({{kSeries, QStringLiteral("Series"), QStringLiteral("tvshows")}});
+        ui.controller.reloadLibraries();
+        QTRY_COMPARE(ui.tabNames(), QStringList({QStringLiteral("Home"),
+                                                   QStringLiteral("TV Shows")}));
+        QTest::keyClick(ui.window, Qt::Key_PageDown, Qt::ControlModifier);
+        QTRY_COMPARE(ui.rootTab(), QStringLiteral("tvshows"));
+        QTest::keyClick(ui.window, Qt::Key_PageUp, Qt::ControlModifier);
+        QTRY_COMPARE(ui.rootTab(), QStringLiteral("home"));
     }
 
     void theMainMenuButtonIsNotCoveredByTheTabBar()

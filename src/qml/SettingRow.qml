@@ -10,6 +10,7 @@ Loader {
     id: row
 
     required property var model
+    required property string key
     required property string label
     required property string kind
     required property var options
@@ -37,6 +38,7 @@ Loader {
         id: switchDelegate
         FormCard.FormSwitchDelegate {
             text: row.label
+            description: row.key === "newBadge" ? i18n("Items added within the last 7 days are marked New until they are played") : ""
             checked: row.value
             onToggled: row.model.value = checked
         }

@@ -41,6 +41,25 @@ Item {
         searchField.forceActiveFocus(Qt.TabFocusReason);
     }
 
+    // Move between the root tabs in their visible order (a library type may
+    // be absent). Detail pages belong to their root tab; using the shortcut
+    // returns to the selected tab, just like clicking its header button.
+    function switchRelativeTab(step) {
+        if (!signedIn)
+            return;
+        const tabs = [homeAction];
+        if (moviesAction.visible)
+            tabs.push(moviesAction);
+        if (tvShowsAction.visible)
+            tabs.push(tvShowsAction);
+        if (tabs.length < 2)
+            return;
+        const current = shell.rootTab === "movies" && moviesAction.visible
+            ? tabs.indexOf(moviesAction)
+            : (shell.rootTab === "tvshows" && tvShowsAction.visible ? tabs.indexOf(tvShowsAction) : 0);
+        tabs[(current + step + tabs.length) % tabs.length].trigger();
+    }
+
     // The list the box searches: the model of the type tab at the root of the stack; on any other page the box feeds the global search
     readonly property var localModel: {
         // The user preferences and Favorites pages opened over a tab are no part of it: the box searches the whole server there
@@ -328,6 +347,21 @@ Item {
         onCheckedChanged: Qt.callLater(root.syncTabs)
         shortcut: visible ? (moviesAction.visible ? "Ctrl+3" : "Ctrl+2") : ""
         onTriggered: shell.openTab("tvshows")
+    }
+
+    // PageUp/PageDown are the KDE tab navigation conventions. They work even
+    // when a detail page is on top; absent Movies/TV types are skipped.
+    Shortcut {
+        sequence: "Ctrl+PgUp"
+        context: Qt.WindowShortcut
+        enabled: root.signedIn
+        onActivated: root.switchRelativeTab(-1)
+    }
+    Shortcut {
+        sequence: "Ctrl+PgDown"
+        context: Qt.WindowShortcut
+        enabled: root.signedIn
+        onActivated: root.switchRelativeTab(1)
     }
 
     // The shortcuts live on the actions, not on the menu items, so they work with the menu closed
