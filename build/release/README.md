@@ -92,13 +92,26 @@ verification gates pass. The job checks out the tagged source commit because
 this helper is part of the repository; `GITHUB_REPOSITORY` and `GH_TOKEN` come
 from GitHub Actions.
 
-The helper requires a non-empty `Kinefin-x86_64.flatpak` and a canonical,
-single-entry `SHA256SUMS` in the supplied assets directory. It checks the local
-checksum before contacting GitHub, then creates a **draft** release or resumes
-an existing one. Only missing or mismatched draft assets are uploaded. After
-upload, both remote asset digests and sizes must match the local artifacts
-before the draft is published. GitHub supplies the digest of each uploaded
-asset through its release API; a missing digest fails closed.
+The release now contains three assets: `Kinefin-x86_64.flatpak`,
+`PROVENANCE.json` and `SHA256SUMS`. The build job provides the **actual**
+image digest it pulled and the bundle's SHA-256 as job outputs. The downstream
+`verify` job compares the downloaded bundle with that SHA-256 before writing
+a deterministic `PROVENANCE.json`. This record names the release tag, exact
+source commit, GitHub repository and Actions run ID, pinned GHCR image digest,
+and the resulting bundle's SHA-256 and byte size. `SHA256SUMS` includes the
+Flatpak and the provenance file, in that order.
+
+The publisher validates both local checksums and the provenance schema against
+`RELEASE_COMMIT`, `GITHUB_RUN_ID` and the digest output of the original build
+job (`RELEASE_IMAGE_DIGEST`) **before** contacting GitHub. It then creates a
+**draft** release or resumes an existing one, uploading only missing or
+mismatched draft assets. All three remote asset SHA-256 digests and sizes must
+match before publication. A missing remote digest fails closed.
+
+`PROVENANCE.json` is **self-reported release metadata, not a cryptographically
+signed attestation**. It improves auditability and reproducibility but does
+not prove who built the bundle or substitute for GitHub's own artifact
+attestations, CI branch protection or an independent reproducible-build check.
 
 Publication also verifies the **current remote Git tag** resolves to the
 exact `RELEASE_COMMIT` from the workflow (`github.sha`). This supports both
@@ -112,7 +125,7 @@ tag from changing in the instant after the final check.
 
 An interrupted upload or publication can be retried by rerunning the job with
 its original artifacts. A release that is already published is treated as
-successful **only** when both assets still match; the helper never replaces a
+successful **only** when all three assets still match; the helper never replaces a
 published asset. Extra or duplicated release assets require manual review.
 
 The workflow **does not** create or push tags outside the prevalidated tag
@@ -123,6 +136,7 @@ Portable tests (including a fake GitHub release lifecycle):
 
 ```sh
 python3 -m unittest discover -s tests -p 'test_release_publish.py' -v
+python3 -m unittest discover -s tests -p 'test_release_provenance.py' -v
 ```
 
 ## Audit immutable Flatpak source pins

@@ -110,15 +110,37 @@ class ReleasePublishTest(unittest.TestCase):
         self.bundle = self.root / sut.BUNDLE
         self.sums = self.root / sut.SUMS
         self.bundle.write_bytes(b"fake Flatpak bundle\n" * 200)
+        self.provenance = self.root / sut.PROVENANCE
+        self.write_provenance()
         self.write_sums()
         self.gh = FakeGitHub()
 
+    def write_provenance(self) -> None:
+        self.provenance.write_text(json.dumps({
+            "schema_version": 1,
+            "repository": "the-beper/Kinefin",
+            "source": {"tag": "v1.2.3", "commit": EXPECTED_COMMIT},
+            "build": {
+                "github_run_id": "12345",
+                "image": "ghcr.io/the-beper/kinefin-flatpak@sha256:" + "b" * 64,
+            },
+            "artifact": {
+                "name": sut.BUNDLE,
+                "sha256": hashlib.sha256(self.bundle.read_bytes()).hexdigest(),
+                "size": self.bundle.stat().st_size,
+            },
+        }, sort_keys=True) + "\n", encoding="utf-8")
+
     def write_sums(self) -> None:
-        digest = hashlib.sha256(self.bundle.read_bytes()).hexdigest()
-        self.sums.write_text(f"{digest}  {sut.BUNDLE}\n", encoding="ascii")
+        bundle_sha = hashlib.sha256(self.bundle.read_bytes()).hexdigest()
+        provenance_sha = hashlib.sha256(self.provenance.read_bytes()).hexdigest()
+        self.sums.write_text(
+            f"{bundle_sha}  {sut.BUNDLE}\n{provenance_sha}  {sut.PROVENANCE}\n",
+            encoding="ascii",
+        )
 
     def publish(self, tag: str = "v1.2.3", repo: str = "the-beper/Kinefin") -> str:
-        return sut.publish(tag, self.root, repo, EXPECTED_COMMIT, self.gh)
+        return sut.publish(tag, self.root, repo, EXPECTED_COMMIT, "12345", "sha256:" + "b" * 64, self.gh)
 
     def asset_calls(self, action: str) -> list[tuple[str, ...]]:
         return [call for call in self.gh.calls if call[:2] == ("release", action)]
@@ -168,7 +190,7 @@ class ReleasePublishTest(unittest.TestCase):
     def test_matching_existing_draft_rechecks_tag_before_publication(self) -> None:
         self.gh.release = {
             "tag_name": "v1.2.3", "draft": True,
-            "assets": [self.gh.asset(self.bundle), self.gh.asset(self.sums)],
+            "assets": [self.gh.asset(self.bundle), self.gh.asset(self.provenance), self.gh.asset(self.sums)],
         }
         # The second API ref lookup sees a force-pushed commit.
         lookups = 0
@@ -181,7 +203,7 @@ class ReleasePublishTest(unittest.TestCase):
             return self.gh(*args)
 
         with self.assertRaisesRegex(sut.ReleasePublishError, "not the workflow commit"):
-            sut.publish("v1.2.3", self.root, "the-beper/Kinefin", EXPECTED_COMMIT, moving_runner)
+            sut.publish("v1.2.3", self.root, "the-beper/Kinefin", EXPECTED_COMMIT, "12345", "sha256:" + "b" * 64, moving_runner)
         self.assertTrue(self.gh.release["draft"])
         self.assertFalse(self.asset_calls("edit"))
 
@@ -211,10 +233,10 @@ class ReleasePublishTest(unittest.TestCase):
         for invalid in ("", "HEAD", "0" * 40, "A" * 40, "f" * 39, "a" * 41):
             with self.subTest(invalid=invalid):
                 with self.assertRaisesRegex(sut.ReleasePublishError, "RELEASE_COMMIT"):
-                    sut.publish("v1.2.3", self.root, "the-beper/Kinefin", invalid, self.gh)
+                    sut.publish("v1.2.3", self.root, "the-beper/Kinefin", invalid, "12345", "sha256:" + "b" * 64, self.gh)
         self.assertEqual(self.gh.calls, [])
 
-    def test_new_release_stays_draft_until_both_asset_digests_match(self) -> None:
+    def test_new_release_stays_draft_until_all_asset_digests_match(self) -> None:
         result = self.publish()
         self.assertIn("Published release v1.2.3", result)
         self.assertFalse(self.gh.release["draft"])
@@ -225,7 +247,10 @@ class ReleasePublishTest(unittest.TestCase):
         self.assertIn("--repo", create)
         self.assertEqual(create[-1], "the-beper/Kinefin")
         upload, = self.asset_calls("upload")
-        self.assertEqual(set(upload[3:upload.index("--clobber")]), {str(self.bundle), str(self.sums)})
+        self.assertEqual(
+            set(upload[3:upload.index("--clobber")]),
+            {str(self.bundle), str(self.provenance), str(self.sums)},
+        )
         self.assertEqual(len(self.asset_calls("edit")), 1)
         self.assertLess(self.gh.calls.index(upload), self.gh.calls.index(self.asset_calls("edit")[0]))
         self.assertEqual(sum(1 for call in self.gh.calls if call[0] == "api"), 5)
@@ -242,17 +267,27 @@ class ReleasePublishTest(unittest.TestCase):
     def test_retry_uploads_only_the_missing_asset(self) -> None:
         self.gh.release = {
             "tag_name": "v1.2.3", "draft": True,
-            "assets": [self.gh.asset(self.sums)],
+            "assets": [self.gh.asset(self.provenance), self.gh.asset(self.sums)],
         }
         self.publish()
         upload, = self.asset_calls("upload")
         self.assertEqual(upload[3:upload.index("--clobber")], (str(self.bundle),))
         self.assertEqual(len(self.asset_calls("edit")), 1)
 
+    def test_retry_uploads_only_missing_provenance(self) -> None:
+        self.gh.release = {
+            "tag_name": "v1.2.3", "draft": True,
+            "assets": [self.gh.asset(self.bundle), self.gh.asset(self.sums)],
+        }
+        self.publish()
+        upload, = self.asset_calls("upload")
+        self.assertEqual(upload[3:upload.index("--clobber")], (str(self.provenance),))
+        self.assertEqual(len(self.asset_calls("edit")), 1)
+
     def test_matching_complete_draft_publishes_without_reupload(self) -> None:
         self.gh.release = {
             "tag_name": "v1.2.3", "draft": True,
-            "assets": [self.gh.asset(self.sums), self.gh.asset(self.bundle)],
+            "assets": [self.gh.asset(self.sums), self.gh.asset(self.bundle), self.gh.asset(self.provenance)],
         }
         self.publish()
         self.assertFalse(self.asset_calls("upload"))
@@ -263,7 +298,7 @@ class ReleasePublishTest(unittest.TestCase):
         bad_bundle["digest"] = "sha256:" + "0" * 64
         self.gh.release = {
             "tag_name": "v1.2.3", "draft": True,
-            "assets": [self.gh.asset(self.sums), bad_bundle],
+            "assets": [self.gh.asset(self.sums), self.gh.asset(self.provenance), bad_bundle],
         }
         self.publish()
         upload, = self.asset_calls("upload")
@@ -273,7 +308,7 @@ class ReleasePublishTest(unittest.TestCase):
     def test_matching_published_release_is_a_noop(self) -> None:
         self.gh.release = {
             "tag_name": "v1.2.3", "draft": False,
-            "assets": [self.gh.asset(self.bundle), self.gh.asset(self.sums)],
+            "assets": [self.gh.asset(self.bundle), self.gh.asset(self.provenance), self.gh.asset(self.sums)],
         }
         message = self.publish()
         self.assertIn("already published", message)
@@ -285,7 +320,7 @@ class ReleasePublishTest(unittest.TestCase):
         bad_bundle["digest"] = "sha256:" + "f" * 64
         self.gh.release = {
             "tag_name": "v1.2.3", "draft": False,
-            "assets": [bad_bundle, self.gh.asset(self.sums)],
+            "assets": [bad_bundle, self.gh.asset(self.provenance), self.gh.asset(self.sums)],
         }
         with self.assertRaisesRegex(sut.ReleasePublishError, "refusing to change published assets"):
             self.publish()
@@ -298,7 +333,7 @@ class ReleasePublishTest(unittest.TestCase):
                 self.gh = FakeGitHub()
                 self.gh.release = {
                     "tag_name": "v1.2.3", "draft": True,
-                    "assets": [self.gh.asset(self.bundle), self.gh.asset(self.sums), extra],
+                    "assets": [self.gh.asset(self.bundle), self.gh.asset(self.provenance), self.gh.asset(self.sums), extra],
                 }
                 with self.assertRaises(sut.ReleasePublishError):
                     self.publish()
@@ -373,6 +408,97 @@ class ReleasePublishTest(unittest.TestCase):
         with self.assertRaisesRegex(sut.ReleasePublishError, "could not create draft"):
             self.publish()
         self.assertFalse(self.asset_calls("upload"))
+        self.assertFalse(self.asset_calls("edit"))
+
+    def test_build_identity_validation_precedes_network(self) -> None:
+        for run_id, digest, message in (
+            ("0", "sha256:" + "b" * 64, "GITHUB_RUN_ID"),
+            ("12346", "sha256:" + "b" * 64, "differs from the build job"),
+            ("12345", "sha256:" + "c" * 64, "differs from the build job"),
+            ("12345", "sha256:" + "0" * 64, "RELEASE_IMAGE_DIGEST"),
+        ):
+            with self.subTest(run_id=run_id, digest=digest[:15]):
+                with self.assertRaisesRegex(sut.ReleasePublishError, message):
+                    sut.publish("v1.2.3", self.root, "the-beper/Kinefin", EXPECTED_COMMIT,
+                                run_id, digest, self.gh)
+                self.assertEqual(self.gh.calls, [])
+
+    def test_missing_provenance_aborts_before_network(self) -> None:
+        self.provenance.unlink()
+        with self.assertRaisesRegex(sut.ReleasePublishError, "missing or symlinked"):
+            self.publish()
+        self.assertEqual(self.gh.calls, [])
+
+    def test_symlinked_provenance_aborts_before_network(self) -> None:
+        original = self.provenance.read_bytes()
+        outside = self.root / "external-metadata.json"
+        outside.write_bytes(original)
+        self.provenance.unlink()
+        self.provenance.symlink_to(outside)
+        with self.assertRaisesRegex(sut.ReleasePublishError, "symlinked"):
+            self.publish()
+        self.assertEqual(self.gh.calls, [])
+
+    def test_provenance_drift_rejected_even_with_matching_checksums(self) -> None:
+        cases = (
+            ("repository", None, "someone-else/Kinefin", "provenance repository"),
+            ("schema_version", None, 2, "schema version"),
+            ("source", "commit", MOVED_COMMIT, "tag or commit"),
+            ("source", "tag", "v1.2.4", "tag or commit"),
+            ("build", "image", "ghcr.io/the-beper/kinefin-flatpak:fedora45", "differs from the build job"),
+            ("build", "github_run_id", "", "run ID"),
+            ("artifact", "sha256", "f" * 64, "bundle identity"),
+            ("artifact", "size", 1, "bundle identity"),
+            ("artifact", "size", True, "bundle identity"),
+            ("artifact", "name", "other.flatpak", "bundle identity"),
+        )
+        original = self.provenance.read_text(encoding="utf-8")
+        for section, field, altered, error in cases:
+            with self.subTest(section=section, field=field, altered=altered):
+                data = json.loads(original)
+                if field is None:
+                    data[section] = altered
+                else:
+                    data[section][field] = altered
+                self.provenance.write_text(json.dumps(data) + "\n", encoding="utf-8")
+                self.write_sums()
+                with self.assertRaisesRegex(sut.ReleasePublishError, error):
+                    self.publish()
+                self.assertEqual(self.gh.calls, [])
+        self.provenance.write_text(original, encoding="utf-8")
+        self.write_sums()
+
+    def test_invalid_provenance_json_aborts_before_network(self) -> None:
+        original = self.provenance.read_text(encoding="utf-8")
+        for corrupted in ("{broken", "{}", '{"schema_version": 1, "schema_version": 1}',
+                          original.replace('"schema_version": 1', '"schema_version": true'),
+                          original + " " * 20000):
+            with self.subTest(corrupted=corrupted[:40]):
+                self.provenance.write_text(corrupted, encoding="utf-8")
+                self.write_sums()
+                with self.assertRaises(sut.ReleasePublishError):
+                    self.publish()
+                self.assertEqual(self.gh.calls, [])
+
+    def test_provenance_missing_from_published_release_is_not_modified(self) -> None:
+        self.gh.release = {
+            "tag_name": "v1.2.3", "draft": False,
+            "assets": [self.gh.asset(self.bundle), self.gh.asset(self.sums)],
+        }
+        with self.assertRaisesRegex(sut.ReleasePublishError, "refusing to change published assets"):
+            self.publish()
+        self.assertFalse(self.asset_calls("upload"))
+        self.assertFalse(self.asset_calls("edit"))
+
+    def test_unverified_provenance_asset_keeps_draft(self) -> None:
+        self.gh.release = {
+            "tag_name": "v1.2.3", "draft": True,
+            "assets": [self.gh.asset(self.bundle), self.gh.asset(self.sums)],
+        }
+        self.gh.omit_digest = True
+        with self.assertRaisesRegex(sut.ReleasePublishError, "unverified assets"):
+            self.publish()
+        self.assertTrue(self.gh.release["draft"])
         self.assertFalse(self.asset_calls("edit"))
 
     def test_workflow_does_not_publish_before_remote_sha_check(self) -> None:

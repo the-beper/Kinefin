@@ -127,6 +127,7 @@ jobs:
     outputs:
       # Read by the `verify` job to compare against its downloaded copy.
       flatpak_sha256: ${{ steps.hash.outputs.flatpak }}
+      image_digest: ${{ steps.pull.outputs.digest }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -136,11 +137,16 @@ jobs:
       # Fail closed when the approved digest has not been configured. The
       # mutable :fedora45 image is used by CI only, never by a release.
       - name: Pull the pinned Flatpak release image
+        id: pull
         env:
           GHCR_TOKEN: ${{ github.token }}
           GHCR_USER: ${{ github.actor }}
           KINEFIN_RELEASE_FLATPAK_DIGEST: ${{ vars.KINEFIN_RELEASE_FLATPAK_DIGEST }}
-        run: build/release/pull-pinned-image.sh
+        run: |
+          build/release/pull-pinned-image.sh
+          # Record exactly the digest used by the build, even if repository
+          # variables change before the downstream verify job starts.
+          printf 'digest=%s\n' "$KINEFIN_RELEASE_FLATPAK_DIGEST" >> "$GITHUB_OUTPUT"
 
       - name: Build the Flatpak
         run: build/flatpak/build-flatpak.sh
@@ -169,18 +175,38 @@ jobs:
     permissions:
       contents: read
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: asset-flatpak
           path: release-assets
 
-      - name: Write and check SHA256SUMS
+      - name: Record build provenance and verify both checksums
         env:
           EXPECT_SHA256_FLATPAK: ${{ needs.build-flatpak.outputs.flatpak_sha256 }}
+          RELEASE_IMAGE_DIGEST: ${{ needs.build-flatpak.outputs.image_digest }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_COMMIT: ${{ github.sha }}
+          RELEASE_REPOSITORY: ${{ github.repository }}
+          RELEASE_RUN_ID: ${{ github.run_id }}
         run: |
-          cd release-assets
-          sha256sum Kinefin-x86_64.flatpak > SHA256SUMS
-          echo "$EXPECT_SHA256_FLATPAK  Kinefin-x86_64.flatpak" | sha256sum -c -
+          # Validate the downloaded bundle against the digest produced by
+          # the build job, before producing or uploading any provenance.
+          echo "$EXPECT_SHA256_FLATPAK  release-assets/Kinefin-x86_64.flatpak" | sha256sum -c -
+          python3 -I build/release/create_provenance.py \
+            --tag "$RELEASE_TAG" --commit "$RELEASE_COMMIT" \
+            --repository "$RELEASE_REPOSITORY" --run-id "$RELEASE_RUN_ID" \
+            --image-digest "$RELEASE_IMAGE_DIGEST" \
+            --bundle release-assets/Kinefin-x86_64.flatpak \
+            --expected-sha256 "$EXPECT_SHA256_FLATPAK" \
+            --output release-assets/PROVENANCE.json
+          (cd release-assets && \
+            sha256sum Kinefin-x86_64.flatpak PROVENANCE.json > SHA256SUMS && \
+            sha256sum -c SHA256SUMS)
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -191,7 +217,7 @@ jobs:
           compression-level: 0
 
   publish:
-    needs: [ci-gate, verify]
+    needs: [ci-gate, verify, build-flatpak]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -214,4 +240,5 @@ jobs:
           # The publisher resolves the current remote Git tag and requires it
           # to still point at the commit whose Flatpak was built in this run.
           RELEASE_COMMIT: ${{ github.sha }}
+          RELEASE_IMAGE_DIGEST: ${{ needs.build-flatpak.outputs.image_digest }}
         run: python3 -I build/release/publish_release.py "$RELEASE_TAG" release-assets
