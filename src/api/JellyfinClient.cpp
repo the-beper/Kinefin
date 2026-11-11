@@ -1396,6 +1396,48 @@ bool JellyfinClient::sendSessionPlaystate(const QString &sessionId, const QStrin
     return true;
 }
 
+bool JellyfinClient::setItemFavorite(const QString &itemId, bool favorite)
+{
+    if (!isAuthenticated() || !isValidJellyfinId(itemId))
+        return false;
+    // A GUID may be written dashed or dashless, and in either case.
+    const QString key = QString(itemId).remove(QLatin1Char('-')).toLower();
+    if (m_favoritePending.contains(key))
+        return false;
+    m_favoritePending.insert(key);
+
+    const QNetworkRequest request =
+        requestFor(endpoint(QStringLiteral("/UserFavoriteItems/") + itemId), true);
+    QNetworkReply *reply = favorite
+                               ? m_network.post(request, QByteArray())
+                               : m_network.sendCustomRequest(request, QByteArrayLiteral("DELETE"));
+    attach(reply, m_generation, [this, itemId, key, favorite](QNetworkReply *finished) {
+        m_favoritePending.remove(key);
+        const int status = finished->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (status == 401) {
+            invalidateSession();
+            return;
+        }
+        bool valid = finished->error() == QNetworkReply::NoError && status == 204;
+        if (status == 200 && finished->error() == QNetworkReply::NoError) {
+            QJsonObject data;
+            if (parseObject(finished, &data)
+                && data.value(QStringLiteral("IsFavorite")).isBool()
+                && data.value(QStringLiteral("IsFavorite")).toBool() == favorite) {
+                const QJsonValue id = data.value(QStringLiteral("ItemId"));
+                valid = id.isUndefined()
+                        || (id.isString()
+                            && QString(id.toString()).remove(QLatin1Char('-')).toLower() == key);
+            }
+        }
+        if (valid)
+            Q_EMIT itemFavoriteUpdated(itemId, favorite);
+        else
+            Q_EMIT itemFavoriteUpdateFailed(itemId, favorite, status);
+    });
+    return true;
+}
+
 QUrl JellyfinClient::imageUrl(const QString &itemId, const QString &imageType, int maxWidth,
                               const QString &tag, int quality, const QString &format) const
 {
@@ -2027,6 +2069,7 @@ void JellyfinClient::attach(QNetworkReply *reply, quint64 generation,
 void JellyfinClient::abortPending()
 {
     ++m_generation;
+    m_favoritePending.clear();
     // Reports die with the pending requests, quietly: the generation bump keeps their handlers from running. The same goes for a session re-check whose flag would otherwise stay set forever
     m_reportQueue.clear();
     m_reportBusy = false;

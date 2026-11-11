@@ -206,6 +206,16 @@ class FakeJellyfin {
     int remoteCommandStatus = 204;
     bool redirectRemoteCommands = false;
     bool holdRemoteCommands = false;
+    struct FavoriteWrite {
+        QByteArray method;
+        QByteArray route;
+        QByteArray authorization;
+    };
+    QList<FavoriteWrite> favoriteWrites;
+    int favoriteWriteStatus = 200;
+    QByteArray favoriteWriteRawBody;
+    bool holdFavoriteWrites = false;
+    bool redirectFavoriteWrites = false;
     int firstStoppedStatus = 0;
     int stoppedRequests = 0;
     bool holdReports = false;
@@ -791,6 +801,43 @@ class FakeJellyfin {
             lastCapabilitiesBody = body;
             lastCapabilitiesAuth = authorization;
             respond(socket, 204, {});
+            return;
+        }
+        if ((method == "POST" || method == "DELETE")
+            && route.contains("/UserFavoriteItems/")) {
+            favoriteWrites.append({method, route, authorization});
+            if (holdFavoriteWrites) {
+                m_held.append(socket);
+                return;
+            }
+            if (redirectFavoriteWrites) {
+                respond(socket, 302, {}, "Location: https://unexpected.invalid/favorite\r\n");
+                return;
+            }
+            if (favoriteWriteStatus != 200 && favoriteWriteStatus != 204) {
+                respond(socket, favoriteWriteStatus, {});
+                return;
+            }
+            const QByteArray encodedId = route.split('/').last();
+            const QString id = QString::fromUtf8(encodedId).toLower();
+            const bool isFavorite = method == "POST";
+            if (itemsById.contains(id)) {
+                QJsonObject item = QJsonDocument::fromJson(itemsById.value(id)).object();
+                QJsonObject userData = item.value(QStringLiteral("UserData")).toObject();
+                userData.insert(QStringLiteral("IsFavorite"), isFavorite);
+                item.insert(QStringLiteral("UserData"), userData);
+                itemsById.insert(id, QJsonDocument(item).toJson(QJsonDocument::Compact));
+            }
+            if (favoriteWriteStatus == 204) {
+                respond(socket, 204, {});
+            } else if (!favoriteWriteRawBody.isEmpty()) {
+                respond(socket, 200, favoriteWriteRawBody);
+            } else {
+                respond(socket, 200,
+                        QJsonDocument(QJsonObject{{QStringLiteral("ItemId"), id},
+                                                  {QStringLiteral("IsFavorite"), isFavorite}})
+                            .toJson(QJsonDocument::Compact));
+            }
             return;
         }
         if (method == "POST"

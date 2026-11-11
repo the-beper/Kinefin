@@ -158,6 +158,14 @@ Kirigami.ScrollablePage {
             onTriggered: page.connection.queue.add(page.details.itemId, PlayQueue.Last)
         },
         Kirigami.Action {
+            objectName: "toggleFavoriteAction"
+            text: page.details.favorite ? i18n("Remove from Favorites") : i18n("Add to Favorites")
+            icon.name: "emblem-favorite"
+            visible: page.details.status === ItemDetailsModel.Ready
+            enabled: !page.details.favoriteBusy
+            onTriggered: page.details.toggleFavorite()
+        },
+        Kirigami.Action {
             text: i18n("Refresh")
             icon.name: "view-refresh"
             // Home binds the same key: only the page in front answers it, the button stays usable
@@ -218,6 +226,19 @@ Kirigami.ScrollablePage {
                             text: i18n("Retry")
                             icon.name: "view-refresh"
                             onTriggered: page.details.reload()
+                        }
+                    ]
+                }
+
+                MessageBox {
+                    visible: page.details.favoriteError && page.details.status === ItemDetailsModel.Ready
+                    type: Kirigami.MessageType.Error
+                    text: i18n("Could not update Favorites. Check the connection and try again")
+                    actions: [
+                        Kirigami.Action {
+                            text: i18n("Retry")
+                            icon.name: "view-refresh"
+                            onTriggered: page.details.toggleFavorite()
                         }
                     ]
                 }

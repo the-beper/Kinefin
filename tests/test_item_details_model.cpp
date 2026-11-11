@@ -63,6 +63,148 @@ class TestItemDetailsModel : public QObject {
     Q_OBJECT
 
   private Q_SLOTS:
+    void favoriteCanBeAddedRemovedAndSharedWithAnotherDetailsPage()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        auto movie = f.open(kMovie);
+        auto second = f.open(kMovie, ItemDetailsModel::FirstChannel + 2);
+        QTRY_COMPARE(movie->status(), ItemDetailsModel::Ready);
+        QTRY_COMPARE(second->status(), ItemDetailsModel::Ready);
+        QVERIFY(!movie->favorite());
+
+        QVERIFY(movie->toggleFavorite());
+        QVERIFY(movie->favoriteBusy());
+        QVERIFY(!movie->toggleFavorite()); // only one write per item
+        QTRY_VERIFY(!movie->favoriteBusy());
+        QVERIFY(!movie->favoriteError());
+        QVERIFY(movie->favorite());
+        QVERIFY(second->favorite());
+        QCOMPARE(f.server.favoriteWrites.size(), 1);
+        QCOMPARE(f.server.favoriteWrites.constFirst().method, QByteArrayLiteral("POST"));
+        QCOMPARE(f.server.favoriteWrites.constFirst().route,
+                 QByteArrayLiteral("/jellyfin/UserFavoriteItems/") + kMovie.toLatin1());
+        QVERIFY(f.server.favoriteWrites.constFirst().authorization.startsWith("MediaBrowser "));
+        QVERIFY(!f.server.favoriteWrites.constFirst().route.contains("token"));
+
+        // A detail reload uses the value persisted by the server.
+        movie->reload();
+        QTRY_COMPARE(movie->status(), ItemDetailsModel::Ready);
+        QVERIFY(movie->favorite());
+
+        QVERIFY(second->toggleFavorite());
+        QTRY_VERIFY(!second->favoriteBusy());
+        QVERIFY(!second->favoriteError());
+        QVERIFY(!second->favorite());
+        QVERIFY(!movie->favorite());
+        QCOMPARE(f.server.favoriteWrites.size(), 2);
+        QCOMPARE(f.server.favoriteWrites.constLast().method, QByteArrayLiteral("DELETE"));
+        QCOMPARE(f.server.favoriteWrites.constLast().route,
+                 QByteArrayLiteral("/jellyfin/UserFavoriteItems/") + kMovie.toLatin1());
+    }
+
+    void favoriteWriteFailureLeavesOldStateAndCanRetry()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        auto details = f.open(kMovie);
+        QTRY_COMPARE(details->status(), ItemDetailsModel::Ready);
+
+        f.server.favoriteWriteStatus = 500;
+        QVERIFY(details->toggleFavorite());
+        QTRY_VERIFY(!details->favoriteBusy());
+        QVERIFY(details->favoriteError());
+        QVERIFY(!details->favorite());
+
+        f.server.favoriteWriteStatus = 200;
+        f.server.redirectFavoriteWrites = true;
+        QVERIFY(details->toggleFavorite());
+        QTRY_VERIFY(!details->favoriteBusy());
+        QVERIFY(details->favoriteError());
+        QVERIFY(!details->favorite());
+
+        f.server.redirectFavoriteWrites = false;
+        QVERIFY(details->toggleFavorite());
+        QTRY_VERIFY(!details->favoriteBusy());
+        QVERIFY(!details->favoriteError());
+        QVERIFY(details->favorite());
+        QCOMPARE(f.server.favoriteWrites.size(), 3);
+    }
+
+    void favoriteRejectsInvalidOrMismatchedSuccessPayload()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        auto details = f.open(kMovie);
+        QTRY_COMPARE(details->status(), ItemDetailsModel::Ready);
+
+        for (const QByteArray &response :
+             {QByteArrayLiteral("not-json"), QByteArrayLiteral("{\"IsFavorite\":false}"),
+              QByteArrayLiteral("{\"IsFavorite\":true,\"ItemId\":\"bad\"}")}) {
+            f.server.favoriteWriteRawBody = response;
+            QVERIFY(details->toggleFavorite());
+            QTRY_VERIFY(!details->favoriteBusy());
+            QVERIFY(details->favoriteError());
+            QVERIFY(!details->favorite());
+        }
+        f.server.favoriteWriteRawBody.clear();
+        f.server.favoriteWriteStatus = 204;
+        QVERIFY(details->toggleFavorite());
+        QTRY_VERIFY(!details->favoriteBusy());
+        QVERIFY(details->favorite());
+        QVERIFY(!details->favoriteError());
+    }
+
+    void favoriteRejectsInvalidIdsAndDeduplicatesGuidSpellings()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        QVERIFY(!f.client.setItemFavorite(QStringLiteral("../bad/path"), true));
+        QVERIFY(!f.client.setItemFavorite(QString(), false));
+        QCOMPARE(f.server.favoriteWrites.size(), 0);
+
+        f.server.holdFavoriteWrites = true;
+        QVERIFY(f.client.setItemFavorite(kMovie, true));
+        QTRY_COMPARE(f.server.favoriteWrites.size(), 1);
+        const QString dashed = QStringLiteral("f0e1d2c3-b4a5-9687-7869-5a4b3c2d1e0f");
+        QVERIFY(!f.client.setItemFavorite(dashed, false));
+        QCOMPARE(f.server.favoriteWrites.size(), 1);
+        f.server.releaseHeld();
+    }
+
+    void favoriteWriteExpiryDiscardsStateAndStaleReplies()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        auto details = f.open(kMovie);
+        QTRY_COMPARE(details->status(), ItemDetailsModel::Ready);
+
+        f.server.favoriteWriteStatus = 401;
+        QVERIFY(details->toggleFavorite());
+        QTRY_COMPARE(details->status(), ItemDetailsModel::Idle);
+        QVERIFY(!details->favoriteBusy());
+        QVERIFY(!details->favoriteError());
+        QVERIFY(!f.client.isAuthenticated());
+        QVERIFY(!f.client.setItemFavorite(kMovie, false));
+
+        // A new login plus a late reply from an old session must not mutate the
+        // new user's page or emit an update to Favorites.
+        Fixture g;
+        QVERIFY(g.ok);
+        auto newPage = g.open(kMovie);
+        QTRY_COMPARE(newPage->status(), ItemDetailsModel::Ready);
+        QSignalSpy successful(&g.client, &Kinefin::JellyfinClient::itemFavoriteUpdated);
+        g.server.holdFavoriteWrites = true;
+        QVERIFY(newPage->toggleFavorite());
+        QTRY_COMPARE(g.server.favoriteWrites.size(), 1);
+        g.client.forgetSession();
+        QCOMPARE(newPage->status(), ItemDetailsModel::Idle);
+        g.server.releaseHeld();
+        QTest::qWait(100);
+        QVERIFY(successful.isEmpty());
+        QVERIFY(!newPage->favoriteBusy());
+    }
+
     void parsesTheMovieFixture()
     {
         Fixture f;

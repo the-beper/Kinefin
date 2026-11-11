@@ -33,6 +33,8 @@ class ItemDetailsModel final : public QObject {
     Q_PROPERTY(QStringList writers READ writers NOTIFY detailsChanged)
     Q_PROPERTY(bool played READ played NOTIFY detailsChanged)
     Q_PROPERTY(bool favorite READ favorite NOTIFY detailsChanged)
+    Q_PROPERTY(bool favoriteBusy READ favoriteBusy NOTIFY favoriteWriteStateChanged)
+    Q_PROPERTY(bool favoriteError READ favoriteError NOTIFY favoriteWriteStateChanged)
     Q_PROPERTY(qreal playedPercentage READ playedPercentage NOTIFY detailsChanged)
     Q_PROPERTY(int unplayedCount READ unplayedCount NOTIFY detailsChanged)
     Q_PROPERTY(bool canResume READ canResume NOTIFY detailsChanged)
@@ -75,6 +77,7 @@ class ItemDetailsModel final : public QObject {
 
     Q_INVOKABLE void reload();
     Q_INVOKABLE void retrySimilar();
+    Q_INVOKABLE bool toggleFavorite();
 
     QString itemId() const { return m_itemId; }
     int channel() const { return m_channel; }
@@ -93,6 +96,8 @@ class ItemDetailsModel final : public QObject {
     QStringList writers() const { return m_details.writers; }
     bool played() const { return m_details.played; }
     bool favorite() const { return m_details.favorite; }
+    bool favoriteBusy() const { return m_favoriteBusy; }
+    bool favoriteError() const { return m_favoriteError; }
     qreal playedPercentage() const { return m_details.playedPercentage; }
     int unplayedCount() const { return m_details.unplayedCount; }
     bool canResume() const { return m_details.resumePositionTicks > 0 && playable(); }
@@ -116,6 +121,7 @@ class ItemDetailsModel final : public QObject {
     void statusChanged();
     void similarStatusChanged();
     void detailsChanged();
+    void favoriteWriteStateChanged();
 
   private:
     void onItemsReady(const QJsonArray &items, int total, int channel);
@@ -133,6 +139,8 @@ class ItemDetailsModel final : public QObject {
     Status m_status = Idle;
     Status m_similarStatus = Idle;
     ItemDetails m_details;
+    bool m_favoriteBusy = false;
+    bool m_favoriteError = false;
     ItemRowModel m_similar;
     ItemChildrenModel m_below;
 };

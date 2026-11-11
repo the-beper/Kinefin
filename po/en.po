@@ -2351,3 +2351,15 @@ msgstr "The remote command failed. Refresh the devices and try again"
 #: src/qml/RemotePage.qml
 msgid "Unknown device"
 msgstr "Unknown device"
+
+#: src/qml/ItemDetailsPage.qml
+msgid "Add to Favorites"
+msgstr "Add to Favorites"
+
+#: src/qml/ItemDetailsPage.qml
+msgid "Remove from Favorites"
+msgstr "Remove from Favorites"
+
+#: src/qml/ItemDetailsPage.qml
+msgid "Could not update Favorites. Check the connection and try again"
+msgstr "Could not update Favorites. Check the connection and try again"

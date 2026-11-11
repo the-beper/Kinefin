@@ -48,6 +48,35 @@ ItemDetailsModel::ItemDetailsModel(JellyfinClient *client, const QString &itemId
         connect(m_client, &JellyfinClient::similarItemsReady, this,
                 &ItemDetailsModel::onSimilarReady);
         connect(m_client, &JellyfinClient::listingFailed, this, &ItemDetailsModel::onListingFailed);
+        connect(m_client, &JellyfinClient::itemFavoriteUpdated, this,
+                [this](const QString &id, bool favorite) {
+                    const auto canonical = [](QString value) {
+                        return value.remove(QLatin1Char('-')).toLower();
+                    };
+                    if (canonical(id) != canonical(m_itemId))
+                        return;
+                    if (m_details.valid) {
+                        const bool changed = m_details.favorite != favorite;
+                        m_details.favorite = favorite;
+                        if (changed)
+                            Q_EMIT detailsChanged();
+                    }
+                    if (m_favoriteBusy || m_favoriteError) {
+                        m_favoriteBusy = false;
+                        m_favoriteError = false;
+                        Q_EMIT favoriteWriteStateChanged();
+                    }
+                });
+        connect(m_client, &JellyfinClient::itemFavoriteUpdateFailed, this,
+                [this](const QString &id, bool, int) {
+                    if (!m_favoriteBusy
+                        || QString(id).remove(QLatin1Char('-')).toLower()
+                               != QString(m_itemId).remove(QLatin1Char('-')).toLower())
+                        return;
+                    m_favoriteBusy = false;
+                    m_favoriteError = true;
+                    Q_EMIT favoriteWriteStateChanged();
+                });
         // A 401, a disconnect, a server switch and a sign-out all end with this signal
         connect(m_client, &JellyfinClient::credentialsCleared, this, [this] { clear(); });
     }
@@ -91,6 +120,22 @@ void ItemDetailsModel::retrySimilar()
 {
     if (m_status == Ready && m_similarStatus == Failed)
         requestSimilar();
+}
+
+bool ItemDetailsModel::toggleFavorite()
+{
+    if (!m_client || m_status != Ready || !m_details.valid || m_favoriteBusy)
+        return false;
+    m_favoriteBusy = true;
+    m_favoriteError = false;
+    Q_EMIT favoriteWriteStateChanged();
+    if (!m_client->setItemFavorite(m_itemId, !m_details.favorite)) {
+        m_favoriteBusy = false;
+        m_favoriteError = true;
+        Q_EMIT favoriteWriteStateChanged();
+        return false;
+    }
+    return true;
 }
 
 void ItemDetailsModel::requestSimilar()
@@ -154,6 +199,11 @@ void ItemDetailsModel::onListingFailed(const QString &family, int, const QString
 
 void ItemDetailsModel::clear()
 {
+    if (m_favoriteBusy || m_favoriteError) {
+        m_favoriteBusy = false;
+        m_favoriteError = false;
+        Q_EMIT favoriteWriteStateChanged();
+    }
     m_details = {};
     m_similar.setItems({});
     m_below.clear();

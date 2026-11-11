@@ -73,6 +73,14 @@ FavoritesModel::FavoritesModel(JellyfinClient *client, QObject *parent)
     if (m_client) {
         connect(m_client, &JellyfinClient::itemsReady, this, &FavoritesModel::onItemsReady);
         connect(m_client, &JellyfinClient::listingFailed, this, &FavoritesModel::onListingFailed);
+        // The scan is a snapshot. A successful write from an item page makes it
+        // stale, including the groupings built from it.
+        connect(m_client, &JellyfinClient::itemFavoriteUpdated, this, [this] {
+            if (m_active)
+                startLoad();
+            else
+                discardSnapshot();
+        });
         // A 401, a disconnect, a server switch and a sign-out all end with this signal
         connect(m_client, &JellyfinClient::credentialsCleared, this, [this] { clear(); });
     }

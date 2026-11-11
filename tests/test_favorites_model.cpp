@@ -204,6 +204,38 @@ class TestFavoritesModel : public QObject {
     Q_OBJECT
 
   private Q_SLOTS:
+    void favoriteWriteRefreshesOpenPageAndInvalidatesClosedSnapshot()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        f.favorites[kMovies] = movies(1, 1);
+        f.start({library(kMovies, QStringLiteral("Movies"))});
+        QTRY_COMPARE(f.model.status(), FavoritesModel::Complete);
+        QCOMPARE(f.model.count(), 1);
+        QCOMPARE(f.groups.count(), 1);
+
+        f.favorites[kMovies] = QJsonArray{};
+        QVERIFY(f.client.setItemFavorite(idOf(1), false));
+        QTRY_COMPARE(f.server.favoriteWrites.size(), 1);
+        QTRY_COMPARE(f.server.itemsRoutes.size(), 2); // exactly one rescan
+        QTRY_COMPARE(f.model.status(), FavoritesModel::Complete);
+        QTRY_COMPARE(f.model.count(), 0);
+        QCOMPARE(f.groups.count(), 0);
+
+        f.model.close();
+        f.favorites[kMovies] = movies(2, 1);
+        QVERIFY(f.client.setItemFavorite(idOf(2), true));
+        QTRY_COMPARE(f.server.favoriteWrites.size(), 2);
+        QTRY_COMPARE(f.model.status(), FavoritesModel::Idle);
+        QCOMPARE(f.model.count(), 0);
+        QCOMPARE(f.server.itemsRoutes.size(), 2); // closed pages do not poll
+
+        f.model.load();
+        QTRY_COMPARE(f.model.status(), FavoritesModel::Complete);
+        QCOMPARE(f.model.count(), 1);
+        QCOMPARE(f.itemIds(), QStringList{idOf(2)});
+    }
+
     void scansLibrariesInTurnOnePageAtATime()
     {
         Fixture f;
