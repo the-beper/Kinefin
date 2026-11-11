@@ -109,9 +109,12 @@ mismatched draft assets. All three remote asset SHA-256 digests and sizes must
 match before publication. A missing remote digest fails closed.
 
 `PROVENANCE.json` is **self-reported release metadata, not a cryptographically
-signed attestation**. It improves auditability and reproducibility but does
-not prove who built the bundle or substitute for GitHub's own artifact
-attestations, CI branch protection or an independent reproducible-build check.
+signed attestation**. Separately, the build job signs a SLSA provenance
+attestation for the exact Flatpak bytes with GitHub Actions' OIDC identity and
+stores it in GitHub's attestation service. Both `verify` and `publish` check
+that signature and the trusted repository, tag, source commit and signer
+workflow. A missing or invalid attestation blocks publication. This does
+not substitute for CI branch protection or an independent reproducible build.
 
 Publication also verifies the **current remote Git tag** resolves to the
 exact `RELEASE_COMMIT` from the workflow (`github.sha`). This supports both
@@ -175,6 +178,47 @@ known build inputs before uploading the three assets. Offline tests:
 
 ```sh
 python3 -m unittest discover -s tests -p 'test_release_assets_audit.py' -v
+```
+
+## Verify the GitHub-signed Flatpak attestation
+
+The release **build-flatpak** job uses the SHA-pinned `actions/attest` action to
+create a Sigstore-signed SLSA provenance attestation for the Flatpak bundle.
+GitHub stores this attestation **separately** from the three files on the
+release page; it is not included in `SHA256SUMS`. Both **verify** and **publish**
+require successful cryptographic verification before uploading or publishing.
+On retries, the publisher checks the attestation again.
+
+To verify a downloaded release using the trusted Kinefin source commit and tag,
+install GitHub CLI (`gh`) and use a network connection:
+
+```sh
+python3 -I build/release/verify_attestation.py \
+  /path/to/Kinefin-x86_64.flatpak \
+  --repository the-beper/Kinefin \
+  --commit <trusted-40-character-git-commit> \
+  --tag v1.2.3
+```
+
+The command checks the signature, bundle digest, repository identity, **only**
+`.github/workflows/release.yml` as signer, the full source commit and the
+exact `refs/tags/vX.Y.Z` source ref. Obtain the commit/tag from a trusted source,
+not solely from the unsigned downloaded `PROVENANCE.json`. The verifier requires
+GitHub attestation API access (`GH_TOKEN` may be needed for private repos) and
+will fail if `gh` is missing, GitHub is unreachable, or a signed attestation is
+missing or inconsistent. The existing `verify_release_assets.py` remains a
+separate offline integrity check; it **does not** verify signatures.
+
+A valid signed workflow attestation proves the signed build's recorded GitHub
+identity and the artifact's SHA-256, **not** that the workflow was uncompromised,
+that all dependencies were independently reproduced, or that the GitHub token
+and branch/tag protection are correctly configured. The attestation action and
+CLI must also be available to test the complete release on GitHub Actions.
+
+Offline regression tests (the `gh` call is replaced with a fake executable):
+
+```sh
+python3 -m unittest discover -s tests -p 'test_release_attestation.py' -v
 ```
 
 ## Audit immutable Flatpak source pins

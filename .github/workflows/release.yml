@@ -124,6 +124,10 @@ jobs:
       contents: read
       # The flatpak image is private on ghcr: log podman into it with this token.
       packages: read
+      # Sign the exact built Flatpak with an OIDC-bound Sigstore identity.
+      id-token: write
+      attestations: write
+      artifact-metadata: write
     outputs:
       # Read by the `verify` job to compare against its downloaded copy.
       flatpak_sha256: ${{ steps.hash.outputs.flatpak }}
@@ -160,6 +164,13 @@ jobs:
         id: hash
         run: echo "flatpak=$(sha256sum dist/Kinefin-x86_64.flatpak | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
+      # Record a signed provenance for the exact bundle bytes. GitHub stores
+      # the Sigstore attestation separately from the three release assets.
+      - name: Attest the built Flatpak
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: dist/Kinefin-x86_64.flatpak
+
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: asset-flatpak
@@ -174,6 +185,7 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
+      attestations: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -184,6 +196,18 @@ jobs:
         with:
           name: asset-flatpak
           path: release-assets
+
+      - name: Verify signed build attestation
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_REPOSITORY: ${{ github.repository }}
+          RELEASE_COMMIT: ${{ github.sha }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python3 -I build/release/verify_attestation.py \
+            release-assets/Kinefin-x86_64.flatpak \
+            --repository "$RELEASE_REPOSITORY" \
+            --commit "$RELEASE_COMMIT" --tag "$RELEASE_TAG"
 
       - name: Record build provenance and verify both checksums
         env:
@@ -229,6 +253,7 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: write
+      attestations: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -239,6 +264,19 @@ jobs:
         with:
           name: release-assets
           path: release-assets
+
+      # Rerun verification on retries, including existing draft releases.
+      - name: Verify signed release attestation before publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_REPOSITORY: ${{ github.repository }}
+          RELEASE_COMMIT: ${{ github.sha }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python3 -I build/release/verify_attestation.py \
+            release-assets/Kinefin-x86_64.flatpak \
+            --repository "$RELEASE_REPOSITORY" \
+            --commit "$RELEASE_COMMIT" --tag "$RELEASE_TAG"
 
       - name: Publish only after verifying both uploaded assets
         env:
