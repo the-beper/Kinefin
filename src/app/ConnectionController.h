@@ -23,6 +23,7 @@
 #include "models/LibrarySubtabController.h"
 #include "models/PlayQueue.h"
 #include "models/ResumeItemsModel.h"
+#include "models/RemoteSessionsModel.h"
 #include "models/SearchModel.h"
 #include "models/UserConfigurationModel.h"
 #include "settings/BrowseStateStore.h"
@@ -65,6 +66,7 @@ class ConnectionController : public QObject {
     // The sub-tabs of the Movies and TV Shows pages and the data of the one showing; it follows openType (opened for the scope the tab opens, closed with the Home tab and the session) and drives `genreRails` while its Genres sub-tab shows
     Q_PROPERTY(Kinefin::LibrarySubtabController *subtabs READ subtabs CONSTANT)
     Q_PROPERTY(Kinefin::ResumeItemsModel *resumeItems READ resumeItems CONSTANT)
+    Q_PROPERTY(Kinefin::RemoteSessionsModel *remoteSessions READ remoteSessions CONSTANT)
     Q_PROPERTY(Kinefin::PlayQueue *queue READ queue CONSTANT)
     // The editor of the signed-in user's server-side preferences (the user preferences page); it follows the session and is fed the `libraries` ids and names
     Q_PROPERTY(Kinefin::UserConfigurationModel *userConfiguration READ userConfiguration CONSTANT)
@@ -117,6 +119,7 @@ class ConnectionController : public QObject {
     GenreRailsModel *genreRails() { return &m_genreRails; }
     LibrarySubtabController *subtabs() { return &m_subtabs; }
     ResumeItemsModel *resumeItems() { return &m_resumeItems; }
+    RemoteSessionsModel *remoteSessions() { return &m_remoteSessions; }
     PlayQueue *queue() { return &m_queue; }
     UserConfigurationModel *userConfiguration() { return &m_userConfiguration; }
     QVariantList homeLibraries() const;
@@ -272,6 +275,7 @@ class ConnectionController : public QObject {
     // After the client and the rails it drives (its destructor clears them)
     LibrarySubtabController m_subtabs{&m_client, &m_genreRails};
     ResumeItemsModel m_resumeItems{&m_client};
+    RemoteSessionsModel m_remoteSessions{&m_client};
     // The collection type the rails were opened for: re-scoping another type leaves them alone
     QString m_genreRailsType;
     PlayQueue m_queue{&m_client};

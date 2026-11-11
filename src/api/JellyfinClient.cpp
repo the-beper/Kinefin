@@ -1375,6 +1375,27 @@ bool JellyfinClient::fetchSessions(bool controllableByUserOnly)
     return true;
 }
 
+bool JellyfinClient::sendSessionPlaystate(const QString &sessionId, const QString &command)
+{
+    if (m_state != State::Authenticated || !isValidJellyfinId(sessionId)
+        || (command != QLatin1String("Pause") && command != QLatin1String("Unpause")
+            && command != QLatin1String("Stop")))
+        return false;
+    const QUrl url = endpoint(QStringLiteral("/Sessions/") + sessionId
+                              + QStringLiteral("/Playing/") + command);
+    QNetworkReply *reply = m_network.post(requestFor(url, true), QByteArray());
+    attach(reply, m_generation, [this, sessionId, command](QNetworkReply *finished) {
+        const int status = finished->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (status == 401)
+            invalidateSession();
+        if ((status == 204 || status == 200) && finished->error() == QNetworkReply::NoError)
+            Q_EMIT sessionPlaystateSucceeded(sessionId, command);
+        else
+            Q_EMIT sessionPlaystateFailed(sessionId, command, status);
+    });
+    return true;
+}
+
 QUrl JellyfinClient::imageUrl(const QString &itemId, const QString &imageType, int maxWidth,
                               const QString &tag, int quality, const QString &format) const
 {

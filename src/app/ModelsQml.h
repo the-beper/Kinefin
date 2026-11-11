@@ -15,6 +15,7 @@
 #include "models/PlayQueue.h"
 #include "models/RecommendationRowsModel.h"
 #include "models/ResumeItemsModel.h"
+#include "models/RemoteSessionsModel.h"
 #include "models/SearchModel.h"
 #include "models/SeasonEpisodesModel.h"
 #include "models/UserConfigurationModel.h"
@@ -104,6 +105,13 @@ struct GenreRailsModelForeign {
     Q_GADGET
     QML_FOREIGN(Kinefin::GenreRailsModel)
     QML_NAMED_ELEMENT(GenreRailsModel)
+    QML_UNCREATABLE("Created by the application")
+};
+
+struct RemoteSessionsModelForeign {
+    Q_GADGET
+    QML_FOREIGN(Kinefin::RemoteSessionsModel)
+    QML_NAMED_ELEMENT(RemoteSessionsModel)
     QML_UNCREATABLE("Created by the application")
 };
 

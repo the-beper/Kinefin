@@ -200,6 +200,12 @@ class FakeJellyfin {
     };
     QList<ReportLog> reportLog;
     int reportStatus = 204;
+    // Remote playstate commands: authenticated POSTs to a listed session.
+    QList<QByteArray> remoteCommandRoutes;
+    QList<QByteArray> remoteCommandAuthorizations;
+    int remoteCommandStatus = 204;
+    bool redirectRemoteCommands = false;
+    bool holdRemoteCommands = false;
     int firstStoppedStatus = 0;
     int stoppedRequests = 0;
     bool holdReports = false;
@@ -806,6 +812,19 @@ class FakeJellyfin {
             } else {
                 respond(socket, reportStatus, {});
             }
+            return;
+        }
+        if (method == "POST" && route.contains("/Sessions/")
+            && (route.endsWith("/Playing/Pause") || route.endsWith("/Playing/Unpause")
+                || route.endsWith("/Playing/Stop"))) {
+            remoteCommandRoutes.append(route);
+            remoteCommandAuthorizations.append(authorization);
+            if (holdRemoteCommands)
+                m_held.append(socket);
+            else if (redirectRemoteCommands)
+                respond(socket, 302, {}, "Location: https://unexpected.invalid/remote\r\n");
+            else
+                respond(socket, remoteCommandStatus, {});
             return;
         }
         if (method == "POST" && route.endsWith("/PlaybackInfo")) {

@@ -79,6 +79,8 @@ add_library(kinefin_core STATIC
     src/models/PagedItemsModel.h
     src/models/ResumeItemsModel.cpp
     src/models/ResumeItemsModel.h
+    src/models/RemoteSessionsModel.cpp
+    src/models/RemoteSessionsModel.h
     src/models/ItemSummary.h
     src/models/LibraryItemsModel.cpp
     src/models/LibraryItemsModel.h
@@ -133,7 +135,7 @@ if(mpvqt_BINARY_DIR)
 endif()
 
 # The QML module lives in a static library of its own so that the UI tests can import it like the application does
-foreach(page Main ShellHeader ShortcutsDialog HomePage LibraryTile LibraryPage ResumeItemsPage MediaCard CardMenu CardRow EpisodeRow ItemDetailsPage SearchPage QueuePage FilterDialog GenreRailsView GenreRailsPage LibraryContent ItemListRow ItemRowGrid LoginPage UserPickerPage MessageBox ServersPage SettingsPage SettingsSectionPage SettingRow UserPreferencesPage FavoritesPage FavoritesGroupPage AboutPage)
+foreach(page Main ShellHeader ShortcutsDialog RemotePage HomePage LibraryTile LibraryPage ResumeItemsPage MediaCard CardMenu CardRow EpisodeRow ItemDetailsPage SearchPage QueuePage FilterDialog GenreRailsView GenreRailsPage LibraryContent ItemListRow ItemRowGrid LoginPage UserPickerPage MessageBox ServersPage SettingsPage SettingsSectionPage SettingRow UserPreferencesPage FavoritesPage FavoritesGroupPage AboutPage)
     set_source_files_properties(src/qml/${page}.qml PROPERTIES QT_RESOURCE_ALIAS ${page}.qml)
 endforeach()
 qt_add_library(kinefin_ui STATIC)
@@ -144,6 +146,7 @@ qt_add_qml_module(kinefin_ui
         src/qml/Main.qml
         src/qml/ShellHeader.qml
         src/qml/ShortcutsDialog.qml
+        src/qml/RemotePage.qml
         src/qml/HomePage.qml
         src/qml/LibraryTile.qml
         src/qml/LibraryPage.qml
@@ -341,6 +344,11 @@ if(BUILD_TESTING)
     target_compile_definitions(test_favorites_model PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(test_favorites_model PRIVATE kinefin_core Qt6::Test Qt6::Network)
     add_test(NAME favorites_model COMMAND test_favorites_model)
+
+    add_executable(test_remote_sessions_model tests/test_remote_sessions_model.cpp)
+    target_compile_definitions(test_remote_sessions_model PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    target_link_libraries(test_remote_sessions_model PRIVATE kinefin_core Qt6::Test Qt6::Network)
+    add_test(NAME remote_sessions_model COMMAND test_remote_sessions_model)
 
     add_executable(test_resume_items_model tests/test_resume_items_model.cpp)
     target_compile_definitions(test_resume_items_model PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")

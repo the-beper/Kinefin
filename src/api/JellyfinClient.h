@@ -156,6 +156,10 @@ class JellyfinClient final : public QObject {
                       int limit, int channel = 0);
     // The connected sessions of the server (`GET /Sessions`): the Remote page's data. With `controllableByUserOnly` the server is asked for the sessions this user may control
     bool fetchSessions(bool controllableByUserOnly);
+    // Control another session returned by /Sessions. The session id uses the same
+    // bounded path-token grammar as other Jellyfin ids; the command is restricted
+    // to Pause, Unpause and Stop. No arbitrary path, URL or JSON reaches the wire.
+    bool sendSessionPlaystate(const QString &sessionId, const QString &command);
     // The token-free URL of one item image (`GET /Items/{itemId}/Images/{type}` has no `security` requirement in the 12.4 spec, so the URL carries no credentials and the image fetch may stay unauthenticated). `imageType` is one of the spec's ImageType names; `format` may be empty (the server negotiates) or one of "jpg", "gif", "png", "webp"; `tag` is an opaque alphanumeric cache buster. Invalid input yields an empty URL, never a partially valid one
     QUrl imageUrl(const QString &itemId, const QString &imageType, int maxWidth, const QString &tag,
                   int quality = 90, const QString &format = {}) const;
@@ -270,6 +274,8 @@ class JellyfinClient final : public QObject {
     void upcomingReady(const QJsonArray &items, int totalRecordCount, int channel);
     void studiosReady(const QJsonArray &items, int totalRecordCount, int channel);
     void sessionsReady(const QJsonArray &sessions);
+    void sessionPlaystateSucceeded(const QString &sessionId, const QString &command);
+    void sessionPlaystateFailed(const QString &sessionId, const QString &command, int httpStatus);
 
   private:
     enum class State {

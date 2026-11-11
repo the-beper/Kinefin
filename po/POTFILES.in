@@ -11,6 +11,7 @@ src/qml/ItemDetailsPage.qml
 src/qml/LibraryPage.qml
 src/qml/LibraryTile.qml
 src/qml/ResumeItemsPage.qml
+src/qml/RemotePage.qml
 src/qml/SearchPage.qml
 src/qml/QueuePage.qml
 src/qml/FilterDialog.qml

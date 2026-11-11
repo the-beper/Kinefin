@@ -2300,3 +2300,65 @@ msgid "The preferences of %1 library that is not available are kept"
 msgid_plural "The preferences of %1 libraries that are not available are kept"
 msgstr[0] "Le preferenze di %1 libreria non disponibile vengono conservate"
 msgstr[1] "Le preferenze di %1 librerie non disponibili vengono conservate"
+
+#: src/qml/RemotePage.qml
+msgid "Could not load connected devices. Try again"
+msgstr "Impossibile caricare i dispositivi connessi. Riprova"
+
+#: src/qml/RemotePage.qml
+msgid "Devices connected to this server"
+msgstr "Dispositivi connessi a questo server"
+
+#: src/qml/RemotePage.qml
+msgid "No connected devices found"
+msgstr "Nessun dispositivo connesso trovato"
+
+#: src/qml/RemotePage.qml
+msgid "Nothing playing"
+msgstr "Nessuna riproduzione in corso"
+
+#: src/qml/RemotePage.qml
+msgid "Only the first 100 connected devices are shown"
+msgstr "Vengono mostrati soltanto i primi 100 dispositivi connessi"
+
+#: src/qml/RemotePage.qml
+msgctxt "@action:button"
+msgid "Pause"
+msgstr "Pausa"
+
+#: src/qml/RemotePage.qml
+msgid "Playing: %1"
+msgstr "In riproduzione: %1"
+
+#: src/qml/RemotePage.qml
+msgctxt "@action:button"
+msgid "Refresh"
+msgstr "Aggiorna"
+
+#: src/qml/ShellHeader.qml
+msgctxt "@action:inmenu"
+msgid "Remote"
+msgstr "Controllo remoto"
+
+#: src/qml/RemotePage.qml
+msgctxt "@title:window"
+msgid "Remote"
+msgstr "Controllo remoto"
+
+#: src/qml/RemotePage.qml
+msgctxt "@action:button"
+msgid "Resume"
+msgstr "Riprendi"
+
+#: src/qml/RemotePage.qml
+msgctxt "@action:button"
+msgid "Stop"
+msgstr "Ferma"
+
+#: src/qml/RemotePage.qml
+msgid "The remote command failed. Refresh the devices and try again"
+msgstr "Comando remoto non riuscito. Aggiorna i dispositivi e riprova"
+
+#: src/qml/RemotePage.qml
+msgid "Unknown device"
+msgstr "Dispositivo sconosciuto"

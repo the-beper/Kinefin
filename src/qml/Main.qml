@@ -497,6 +497,8 @@ Kirigami.ApplicationWindow {
             return "search";
         case "queuePage":
             return "queue";
+        case "remotePage":
+            return "remote";
         case "userPreferencesPage":
             return "userPreferences";
         }
@@ -524,7 +526,7 @@ Kirigami.ApplicationWindow {
             return false;
         for (let i = 1; i < pageStack.depth; ++i) {
             const name = pageStack.get(i)?.objectName;
-            if (name === "userPreferencesPage" || name === "favoritesPage")
+            if (name === "userPreferencesPage" || name === "favoritesPage" || name === "remotePage")
                 return true;
         }
         return false;

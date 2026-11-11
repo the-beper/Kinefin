@@ -63,7 +63,7 @@ Item {
     // The list the box searches: the model of the type tab at the root of the stack; on any other page the box feeds the global search
     readonly property var localModel: {
         // The user preferences and Favorites pages opened over a tab are no part of it: the box searches the whole server there
-        if (shell.globalSearchPage)
+        if (shell.globalSearchPage || shell.currentSection === "remote")
             return null;
         switch (shell.rootTab) {
         case "movies":
@@ -99,7 +99,7 @@ Item {
         // Only the icon; the text is for screen readers
         display: QQC2.AbstractButton.IconOnly
         // The menu marks where its entries lead while one of them shows
-        down: shell.currentSection === "settings" || shell.currentSection === "about"
+        down: shell.currentSection === "settings" || shell.currentSection === "about" || shell.currentSection === "remote"
         onClicked: mainMenu.popup(menuButton, 0, menuButton.height)
     }
 
@@ -437,6 +437,16 @@ Item {
         onTriggered: shell.openSection("queuePage", "QueuePage.qml", { connection: shell.connection })
     }
 
+    Kirigami.Action {
+        id: remoteAction
+        objectName: "remoteAction"
+
+        text: i18nc("@action:inmenu", "Remote")
+        icon.name: "network-wireless"
+        visible: root.signedIn
+        onTriggered: shell.openSection("remotePage", "RemotePage.qml", { connection: shell.connection })
+    }
+
     // The account menu: what a session can lose, and what a chosen server can still be left for
     Kirigami.Action {
         id: userPreferencesAction
@@ -514,6 +524,11 @@ Item {
         QQC2.MenuItem {
             objectName: "menuAboutItem"
             action: aboutAction
+        }
+        QQC2.MenuItem {
+            objectName: "menuRemoteItem"
+            visible: root.signedIn
+            action: remoteAction
         }
         QQC2.MenuItem {
             objectName: "menuAdminItem"
