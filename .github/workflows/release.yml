@@ -50,12 +50,23 @@ jobs:
       - name: Verify pinned Flatpak runtimes
         run: python3 -I build/release/verify_runtime_pins.py
 
+      - name: Verify immutable Flatpak sources
+        run: python3 -I build/release/verify_flatpak_sources.py
+
       # Review artifact for a future Flathub submission. This never publishes
       # anything and is independent of the GitHub Flatpak bundle release.
       - name: Prepare commit-pinned Flathub manifest
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: python3 -I build/release/prepare_flathub.py "$RELEASE_TAG"
+
+      - name: Verify generated Flathub sources
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python3 -I build/release/verify_flatpak_sources.py \
+            --manifest "dist/flathub/$RELEASE_TAG/io.github.the_beper.Kinefin.yml" \
+            --flathub-tag "$RELEASE_TAG" --flathub-commit "$(git rev-parse HEAD)"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

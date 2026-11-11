@@ -55,6 +55,9 @@ jobs:
       - name: Verify pinned Flatpak runtimes
         run: python3 -I build/release/verify_runtime_pins.py
 
+      - name: Verify immutable Flatpak sources
+        run: python3 -I build/release/verify_flatpak_sources.py
+
       - name: shellcheck
         run: |
           shellcheck --version

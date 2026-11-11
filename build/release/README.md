@@ -115,6 +115,31 @@ Portable tests (including a fake GitHub release lifecycle):
 python3 -m unittest discover -s tests -p 'test_release_publish.py' -v
 ```
 
+## Audit immutable Flatpak source pins
+
+Before submitting a release, validate **all** downloadable `sources:` entries in
+`build/flatpak/io.github.the_beper.Kinefin.yml` and the generated Flathub
+manifest. Git sources must include an immutable full commit ID; downloaded
+archives and files must have a nonzero SHA-256 checksum and use HTTPS.
+Mutable branches, missing hashes, additional local directory sources and
+unreviewed YAML source layouts are rejected. The single `type: dir` source for
+Kinefin's checkout is allowed **only** in the local/CI manifest.
+
+```sh
+python3 -I build/release/verify_flatpak_sources.py
+python3 -I build/release/verify_flatpak_sources.py \
+  --manifest dist/flathub/v0.0.2/io.github.the_beper.Kinefin.yml \
+  --flathub-tag v0.0.2 --flathub-commit "$(git rev-parse HEAD)"
+python3 -m unittest discover -s tests -p 'test_flatpak_sources.py' -v
+```
+
+CI runs the local-source audit, while the release validation job checks both
+the local source tree and the generated Flathub artifact before uploading it.
+This is an **offline source pinning audit**, not a network or archive-content
+verification. The Flatpak builder still downloads and verifies the referenced
+commits/checksums. Any new source format must be reviewed and explicitly
+supported by the audit, rather than silently skipped.
+
 ## Keep KDE runtime pins consistent
 
 The Flatpak builder and the offscreen smoke test both load the **same**
