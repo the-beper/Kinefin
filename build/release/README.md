@@ -139,6 +139,44 @@ python3 -m unittest discover -s tests -p 'test_release_publish.py' -v
 python3 -m unittest discover -s tests -p 'test_release_provenance.py' -v
 ```
 
+## Verify downloaded release assets offline
+
+The published Flatpak release contains three files: `Kinefin-x86_64.flatpak`,
+`SHA256SUMS` and `PROVENANCE.json`. To check a downloaded set **without GitHub
+credentials or network access**, use a trusted copy of this repository's
+verifier and supply the expected full Git commit SHA independently (not taken
+from the downloaded `PROVENANCE.json`):
+
+```sh
+python3 -I build/release/verify_release_assets.py v1.2.3 /path/to/downloads \
+  --commit <trusted-40-character-git-commit> \
+  --expected-sha256 <independently-trusted-flatpak-sha256>
+```
+
+The optional `--expected-sha256` provides an external reference for the bundle
+hash. If supplied, it must be obtained from a trusted, independent channel.
+`--run-id` and `--image-digest` can also be provided to compare against known
+workflow values; otherwise they are checked only as claims in the manifest.
+The repository defaults to `the-beper/Kinefin`; pass `--repository owner/name`
+when auditing a different publisher. The tool rejects missing, symlinked,
+changed or inconsistent assets, malformed JSON, incorrect checksums and a
+mismatched tag, repository or commit. It only reads the release files.
+
+**This is an integrity check, not authentication.** Both `SHA256SUMS` and
+`PROVENANCE.json` are **unsigned**. Anyone able to replace the release files
+could rewrite all of them consistently. A matching commit identifier in the
+manifest is not cryptographic evidence that the commit built the Flatpak.
+Compare the bundle's SHA-256 against an independently trusted checksum and
+verify the origin of the release before installation. The check does not inspect
+Flatpak contents or perform reproducible-build verification.
+
+The release workflow now runs this same offline audit with its independently
+known build inputs before uploading the three assets. Offline tests:
+
+```sh
+python3 -m unittest discover -s tests -p 'test_release_assets_audit.py' -v
+```
+
 ## Audit immutable Flatpak source pins
 
 Before submitting a release, validate **all** downloadable `sources:` entries in

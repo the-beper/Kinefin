@@ -207,6 +207,13 @@ jobs:
           (cd release-assets && \
             sha256sum Kinefin-x86_64.flatpak PROVENANCE.json > SHA256SUMS && \
             sha256sum -c SHA256SUMS)
+          # Verify the downloadable three-file set with the same strict
+          # offline audit documented for users, before uploading it.
+          python3 -I build/release/verify_release_assets.py \
+            "$RELEASE_TAG" release-assets \
+            --commit "$RELEASE_COMMIT" --repository "$RELEASE_REPOSITORY" \
+            --run-id "$RELEASE_RUN_ID" --image-digest "$RELEASE_IMAGE_DIGEST" \
+            --expected-sha256 "$EXPECT_SHA256_FLATPAK"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
