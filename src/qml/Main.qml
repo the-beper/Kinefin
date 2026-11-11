@@ -9,6 +9,8 @@ Kirigami.ApplicationWindow {
     // The connection to the Jellyfin server, created by the application
     required property ConnectionController connection
     required property ClientSettings settings
+    // Provided by the executable; optional for shell tests that have no mpv renderer.
+    property var player: null
     // "fullscreen" or "windowed" when a command line flag decides this run; empty to follow the setting. Changing the setting from the Settings page ends the override
     property string startupWindowMode: ""
     // "settings" or "about": a page to open right after the shell loads (the smoke test uses it to render pages no server is needed for)
@@ -63,6 +65,7 @@ Kirigami.ApplicationWindow {
     // The bar with the menus and the Home tab; it spans the window above the pages
     header: ShellHeader {
         id: shellHeader
+        visible: !window.playbackPageShowing
 
         shell: window
     }
@@ -264,6 +267,39 @@ Kirigami.ApplicationWindow {
     }
 
     // The only way to the details of an item: the pages above the one asking give way, and the item already showing is not pushed twice
+    readonly property bool playbackPageShowing: pageStack.currentItem?.objectName === "playerPage"
+
+    function showPlayerPage() {
+        if (!window.signedIn || !window.player)
+            return false;
+        if (playbackPageShowing)
+            return true;
+        return !!pageStack.push(Qt.resolvedUrl("PlayerPage.qml"), {
+            player: window.player, connection: connection
+        });
+    }
+
+    function playItem(itemId, resumeTicks, title) {
+        if (!window.signedIn || !window.player || !window.player.playItem(itemId, resumeTicks || 0, title || ""))
+            return false;
+        if (!showPlayerPage()) { window.player.stop(); return false; }
+        return true;
+    }
+
+    function playQueue(index) {
+        if (!window.signedIn || !window.player || !window.player.playQueue(index))
+            return false;
+        if (!showPlayerPage()) { window.player.stop(); return false; }
+        return true;
+    }
+
+    function resumeQueue() {
+        if (!window.signedIn || !window.player || !window.player.resumeQueue())
+            return false;
+        if (!showPlayerPage()) { window.player.stop(); return false; }
+        return true;
+    }
+
     function openItem(itemId, fromPage) {
         if (connection.state !== ConnectionController.Authenticated)
             return;

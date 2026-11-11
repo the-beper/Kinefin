@@ -121,6 +121,7 @@ class ConnectionController : public QObject {
     ResumeItemsModel *resumeItems() { return &m_resumeItems; }
     RemoteSessionsModel *remoteSessions() { return &m_remoteSessions; }
     PlayQueue *queue() { return &m_queue; }
+    JellyfinClient &playbackClient() { return m_client; }
     UserConfigurationModel *userConfiguration() { return &m_userConfiguration; }
     QVariantList homeLibraries() const;
     QVariantList recentLibraries() const;
@@ -205,6 +206,7 @@ class ConnectionController : public QObject {
     void librariesChanged();
     // `homeLibraries` or `recentLibraries` may have changed (also with every librariesChanged)
     void homeProjectionChanged();
+    void aboutToLeaveSession();
 
   private:
     void onServerReady();
@@ -221,6 +223,7 @@ class ConnectionController : public QObject {
     void forgetUserData(const QString &userId);
     // The session is gone, the server stays probed: no libraries, nothing pending
     void leaveSession();
+    void preparePlaybackDisconnect();
     void onLoginSucceeded();
     void onSessionExpired(const QString &userId);
     void onRequestFailed(int status);

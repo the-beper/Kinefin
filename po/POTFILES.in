@@ -3,6 +3,7 @@
 # The check gate requires every i18n-bearing source to be listed; entries below are
 # extracted with xgettext and compared against the committed catalogs.
 src/app/ConnectionController.cpp
+src/player/PlayerController.cpp
 src/main.cpp
 src/settings/SettingDefinitions.cpp
 src/qml/HomePage.qml
@@ -25,6 +26,7 @@ src/qml/CardMenu.qml
 src/qml/LoginPage.qml
 src/qml/UserPickerPage.qml
 src/qml/Main.qml
+src/qml/PlayerPage.qml
 src/qml/ShellHeader.qml
 src/qml/ShortcutsDialog.qml
 src/qml/ServersPage.qml

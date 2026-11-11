@@ -129,15 +129,22 @@ target_link_libraries(kinefin_core PUBLIC Qt6::Core Qt6::Network Qt6::WebSockets
 add_library(kinefin_player STATIC
     src/player/PlaybackEngine.cpp
     src/player/PlaybackEngine.h
+    src/player/PlayerController.cpp
+    src/player/PlayerController.h
+    src/player/PlayerSettings.cpp
+    src/player/PlayerSettings.h
+    src/player/Trickplay.cpp
+    src/player/Trickplay.h
 )
+target_compile_definitions(kinefin_player PRIVATE TRANSLATION_DOMAIN="kinefin")
 target_include_directories(kinefin_player PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_link_libraries(kinefin_player PUBLIC kinefin_core MpvQt::MpvQt)
+target_link_libraries(kinefin_player PUBLIC kinefin_core MpvQt::MpvQt Qt6::Gui)
 if(mpvqt_BINARY_DIR)
     target_include_directories(kinefin_player PRIVATE ${mpvqt_BINARY_DIR}/src)
 endif()
 
 # The QML module lives in a static library of its own so that the UI tests can import it like the application does
-foreach(page Main ShellHeader ShortcutsDialog RemotePage HomePage LibraryTile LibraryPage ResumeItemsPage MediaCard CardMenu CardRow EpisodeRow ItemDetailsPage SearchPage QueuePage FilterDialog GenreRailsView GenreRailsPage LibraryContent ItemListRow ItemRowGrid LoginPage UserPickerPage MessageBox ServersPage SettingsPage SettingsSectionPage SettingRow UserPreferencesPage FavoritesPage FavoritesGroupPage AboutPage)
+foreach(page Main PlayerPage ShellHeader ShortcutsDialog RemotePage HomePage LibraryTile LibraryPage ResumeItemsPage MediaCard CardMenu CardRow EpisodeRow ItemDetailsPage SearchPage QueuePage FilterDialog GenreRailsView GenreRailsPage LibraryContent ItemListRow ItemRowGrid LoginPage UserPickerPage MessageBox ServersPage SettingsPage SettingsSectionPage SettingRow UserPreferencesPage FavoritesPage FavoritesGroupPage AboutPage)
     set_source_files_properties(src/qml/${page}.qml PROPERTIES QT_RESOURCE_ALIAS ${page}.qml)
 endforeach()
 qt_add_library(kinefin_ui STATIC)
@@ -146,6 +153,7 @@ qt_add_qml_module(kinefin_ui
     VERSION 1.0
     QML_FILES
         src/qml/Main.qml
+        src/qml/PlayerPage.qml
         src/qml/ShellHeader.qml
         src/qml/ShortcutsDialog.qml
         src/qml/RemotePage.qml
@@ -187,18 +195,20 @@ qt_add_qml_module(kinefin_ui
         src/app/ModelsQml.h
         src/app/MouseNavigation.cpp
         src/app/MouseNavigation.h
+        src/app/MpvVideoItem.cpp
+        src/app/MpvVideoItem.h
 )
 target_include_directories(kinefin_ui PUBLIC src/app)
 target_compile_definitions(kinefin_ui PRIVATE TRANSLATION_DOMAIN="kinefin")
 target_link_libraries(kinefin_ui PUBLIC
-    kinefin_core
+    kinefin_core kinefin_player MpvQt::MpvQt
     Qt6::Gui Qt6::Quick Qt6::Qml Qt6::QuickControls2
     KF6::I18n KF6::I18nQml
 )
 
 add_executable(kinefin src/main.cpp)
 target_link_libraries(kinefin PRIVATE
-    kinefin_ui kinefin_uiplugin kinefin_core
+    kinefin_ui kinefin_uiplugin kinefin_core kinefin_player
     Qt6::Core Qt6::Gui Qt6::Quick Qt6::Qml Qt6::QuickControls2 Qt6::DBus
     KF6::CoreAddons KF6::I18n KF6::I18nQml KF6::DBusAddons
 )
@@ -246,6 +256,10 @@ if(BUILD_TESTING)
     target_compile_definitions(test_playback_reporter PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(test_playback_reporter PRIVATE kinefin_core Qt6::Test)
     add_test(NAME playback_reporter COMMAND test_playback_reporter)
+
+    add_executable(test_trickplay tests/test_trickplay.cpp)
+    target_link_libraries(test_trickplay PRIVATE kinefin_player Qt6::Test)
+    add_test(NAME trickplay COMMAND test_trickplay)
 
     add_executable(test_playback_engine tests/test_playback_engine.cpp)
     target_compile_definitions(test_playback_engine PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")

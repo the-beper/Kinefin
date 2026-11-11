@@ -4,6 +4,7 @@
 
 #include <QJsonArray>
 #include <QJsonValue>
+#include <QRegularExpression>
 #include <QUrlQuery>
 
 namespace Kinefin {
@@ -109,6 +110,43 @@ std::optional<QUrl> transcodingUrl(const QUrl &serverBase, const QString &raw,
         return std::nullopt;
     return url;
 }
+
+void addExternalSubtitles(PlaybackSource &playback, const QJsonObject &mediaSource,
+                          const QUrl &serverBase, QByteArrayView token)
+{
+    const QJsonArray streams = mediaSource.value(QStringLiteral("MediaStreams")).toArray();
+    for (const QJsonValue &value : streams) {
+        if (playback.externalSubtitles.size() == 32)
+            return;
+        const QJsonObject stream = value.toObject();
+        if (stream.value(QStringLiteral("Type")).toString() != QLatin1String("Subtitle")
+            || !flag(stream, QStringLiteral("IsExternal"))
+            || !flag(stream, QStringLiteral("IsTextSubtitleStream"))
+            || stream.value(QStringLiteral("DeliveryMethod")).toString() != QLatin1String("External"))
+            continue;
+        const int index = stream.value(QStringLiteral("Index")).toInt(-1);
+        if (index < 0 || index >= 4096)
+            continue;
+        const QString raw = stream.value(QStringLiteral("DeliveryUrl")).toString();
+        const std::optional<QUrl> url = transcodingUrl(serverBase, raw, token);
+        const QString allowed = serverBase.path().remove(QRegularExpression(QStringLiteral("/+$")))
+                                + QStringLiteral("/Videos/");
+        if (!url || !url->path().startsWith(allowed) || url->hasQuery())
+            continue;
+        ExternalSubtitle subtitle;
+        subtitle.index = index;
+        subtitle.url = *url;
+        subtitle.language = stream.value(QStringLiteral("Language")).toString().left(32);
+        subtitle.label = stream.value(QStringLiteral("DisplayTitle")).toString().left(100);
+        if (subtitle.label.isEmpty()) subtitle.label = subtitle.language;
+        const QString extension = url->path().section(QLatin1Char('.'), -1).toLower();
+        if (extension != QLatin1String("vtt") && extension != QLatin1String("srt")
+            && extension != QLatin1String("ass") && extension != QLatin1String("ssa"))
+            continue;
+        subtitle.format = extension;
+        playback.externalSubtitles.append(subtitle);
+    }
+}
 } // namespace
 
 bool isValidJellyfinId(QStringView id)
@@ -176,6 +214,7 @@ SourceSelection selectPlaybackSource(const QJsonObject &response, const QString 
         PlaybackSource result =
             baseSource(itemId, mediaSourceId, playSessionId, PlaybackSource::Method::Direct);
         result.url = url;
+        addExternalSubtitles(result, source, serverBase, accessToken);
         return {result, {}};
     }
 
@@ -192,6 +231,7 @@ SourceSelection selectPlaybackSource(const QJsonObject &response, const QString 
         PlaybackSource result = baseSource(itemId, source.value(QStringLiteral("Id")).toString(),
                                            playSessionId, PlaybackSource::Method::Transcode);
         result.url = *url;
+        addExternalSubtitles(result, source, serverBase, accessToken);
         return {result, {}};
     }
     return failure(QStringLiteral("No playable media source"));

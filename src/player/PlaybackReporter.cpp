@@ -107,6 +107,14 @@ void PlaybackReporter::send(PlaybackReport::Kind kind)
     report.canSeek = player.canSeek;
     report.isPaused = m_session.state() == State::Paused;
     report.failed = m_failed;
+    report.audioStreamIndex = player.audioStreamIndex;
+    report.subtitleStreamIndex = player.subtitleStreamIndex;
+    report.volumeLevel = player.volume;
+    report.muted = player.muted;
+    report.nowPlayingQueue = player.nowPlayingQueue;
+    report.playlistItemId = player.playlistItemId;
+    report.repeatMode = player.repeatMode;
+    report.shuffle = player.shuffle;
     // The result goes nowhere on purpose: playback never depends on a report
     m_client.reportPlayback(report);
 }

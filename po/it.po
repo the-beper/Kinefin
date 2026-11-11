@@ -2421,3 +2421,199 @@ msgstr "Impossibile aprire la pagina della versione nel browser"
 #: src/qml/ShellHeader.qml
 msgid "Kinefin %1 is available. Open its release page in your browser?"
 msgstr "È disponibile Kinefin %1. Aprire la pagina della versione nel browser?"
+
+#: src/qml/PlayerPage.qml:338
+msgid "%1 minutes"
+msgstr "%1 minuti"
+
+#: src/qml/PlayerPage.qml:310
+msgid "AV Sync"
+msgstr "Sincronizzazione audio/video"
+
+#: src/qml/PlayerPage.qml:254
+msgid "Audio and Subtitles"
+msgstr "Audio e sottotitoli"
+
+#: src/qml/PlayerPage.qml:314
+msgid "Audio delay: %1 s"
+msgstr "Ritardo audio: %1 s"
+
+#: src/qml/PlayerPage.qml:315
+msgid "Audio earlier (-0.1 s)"
+msgstr "Anticipa audio (-0,1 s)"
+
+#: src/qml/PlayerPage.qml:316
+msgid "Audio later (+0.1 s)"
+msgstr "Ritarda audio (+0,1 s)"
+
+#: src/player/PlayerController.cpp:548
+msgid "Audio track %1"
+msgstr "Traccia audio %1"
+
+#: src/qml/PlayerPage.qml:255
+msgid "Audio tracks"
+msgstr "Tracce audio"
+
+#: src/qml/PlayerPage.qml:85
+msgid "Close Player"
+msgstr "Chiudi il player"
+
+#: src/player/PlayerController.cpp:84
+msgid "Could not download the subtitle."
+msgstr "Impossibile scaricare i sottotitoli."
+
+#: src/qml/PlayerPage.qml:282
+msgid "Download external subtitles"
+msgstr "Scarica sottotitoli esterni"
+
+#: src/player/PlayerController.cpp:349
+msgid "External subtitle %1"
+msgstr "Sottotitolo esterno %1"
+
+#: src/qml/PlayerPage.qml:235
+msgid "Mute"
+msgstr "Disattiva audio"
+
+#: src/qml/PlayerPage.qml:217
+msgid "Next"
+msgstr "Successivo"
+
+#: src/qml/PlayerPage.qml:268
+msgid "No subtitles"
+msgstr "Nessun sottotitolo"
+
+#: src/qml/PlayerPage.qml:13 src/qml/PlayerPage.qml:153 src/qml/PlayerPage.qml:325
+msgid "Now Playing"
+msgstr "In riproduzione"
+
+#: src/qml/PlayerPage.qml:379
+msgid "Now Playing Queue"
+msgstr "Coda di riproduzione"
+
+#: src/qml/PlayerPage.qml:338
+msgid "Off"
+msgstr "Disattivato"
+
+#: src/qml/PlayerPage.qml:81
+msgid "Opening video…"
+msgstr "Apertura del video…"
+
+#: src/qml/PlayerPage.qml:205
+msgid "Pause"
+msgstr "Pausa"
+
+#: src/qml/QueuePage.qml:209 src/qml/QueuePage.qml:265
+msgid "Play From Here"
+msgstr "Riproduci da qui"
+
+#: src/qml/CardMenu.qml:34
+msgid "Play Now"
+msgstr "Riproduci ora"
+
+#: src/qml/PlayerPage.qml:187
+msgid "Playback position"
+msgstr "Posizione di riproduzione"
+
+#: src/qml/PlayerPage.qml:306
+msgid "Playback speed"
+msgstr "Velocità di riproduzione"
+
+#: src/qml/PlayerPage.qml:199
+msgid "Previous"
+msgstr "Precedente"
+
+#: src/qml/PlayerPage.qml:229
+msgid "Repeat All"
+msgstr "Ripeti tutto"
+
+#: src/qml/PlayerPage.qml:229
+msgid "Repeat Off"
+msgstr "Disattiva ripetizione"
+
+#: src/qml/PlayerPage.qml:229
+msgid "Repeat One"
+msgstr "Ripeti uno"
+
+#: src/qml/QueuePage.qml:202
+msgid "Resume Queue"
+msgstr "Riprendi la coda"
+
+#: src/qml/PlayerPage.qml:347
+msgid "Screenshot"
+msgstr "Schermata"
+
+#: src/qml/PlayerPage.qml:362
+msgid "Screenshot saved to %1"
+msgstr "Schermata salvata in %1"
+
+#: src/qml/PlayerPage.qml:224
+msgid "Shuffle"
+msgstr "Riproduzione casuale"
+
+#: src/player/PlayerController.cpp:651
+msgid "Skip intro"
+msgstr "Salta introduzione"
+
+#: src/player/PlayerController.cpp:653
+msgid "Skip outro"
+msgstr "Salta conclusione"
+
+#: src/player/PlayerController.cpp:652
+msgid "Skip recap"
+msgstr "Salta riepilogo"
+
+#: src/qml/PlayerPage.qml:329
+msgid "Sleep Timer"
+msgstr "Timer di arresto"
+
+#: src/qml/PlayerPage.qml:329
+msgid "Sleep: %1 min"
+msgstr "Arresto fra %1 min"
+
+#: src/qml/PlayerPage.qml:212
+msgid "Stop"
+msgstr "Interrompi"
+
+#: src/player/PlayerController.cpp:548
+msgid "Subtitle %1"
+msgstr "Sottotitolo %1"
+
+#: src/qml/PlayerPage.qml:318
+msgid "Subtitle delay: %1 s"
+msgstr "Ritardo sottotitoli: %1 s"
+
+#: src/qml/PlayerPage.qml:319
+msgid "Subtitles earlier (-0.1 s)"
+msgstr "Anticipa sottotitoli (-0,1 s)"
+
+#: src/qml/PlayerPage.qml:320
+msgid "Subtitles later (+0.1 s)"
+msgstr "Ritarda sottotitoli (+0,1 s)"
+
+#: src/player/PlayerController.cpp:352
+msgid "The selected media source could not be opened."
+msgstr "Impossibile aprire la sorgente multimediale selezionata."
+
+#: src/player/PlayerController.cpp:127
+msgid "The video could not be opened. Try again."
+msgstr "Impossibile aprire il video. Riprova."
+
+#: src/qml/PlayerPage.qml:249
+msgid "Tracks"
+msgstr "Tracce"
+
+#: src/player/PlayerController.cpp:331
+msgid "Unable to request playback from the server."
+msgstr "Impossibile richiedere la riproduzione al server."
+
+#: src/qml/PlayerPage.qml:235
+msgid "Unmute"
+msgstr "Riattiva audio"
+
+#: src/qml/PlayerPage.qml:246
+msgid "Volume"
+msgstr "Volume"
+
+#: src/player/PlayerController.cpp:634
+msgid "Could not save the screenshot."
+msgstr "Impossibile salvare lo screenshot."

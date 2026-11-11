@@ -40,6 +40,7 @@ class ItemDetailsModel final : public QObject {
     Q_PROPERTY(qreal playedPercentage READ playedPercentage NOTIFY detailsChanged)
     Q_PROPERTY(int unplayedCount READ unplayedCount NOTIFY detailsChanged)
     Q_PROPERTY(bool canResume READ canResume NOTIFY detailsChanged)
+    Q_PROPERTY(qint64 resumePositionTicks READ resumePositionTicks NOTIFY detailsChanged)
     Q_PROPERTY(bool playable READ playable NOTIFY detailsChanged)
     Q_PROPERTY(QString seriesName READ seriesName NOTIFY detailsChanged)
     Q_PROPERTY(QString seriesId READ seriesId NOTIFY detailsChanged)
@@ -106,6 +107,7 @@ class ItemDetailsModel final : public QObject {
     qreal playedPercentage() const { return m_details.playedPercentage; }
     int unplayedCount() const { return m_details.unplayedCount; }
     bool canResume() const { return m_details.resumePositionTicks > 0 && playable(); }
+    qint64 resumePositionTicks() const { return m_details.resumePositionTicks; }
     bool playable() const;
     QString seriesName() const { return m_details.seriesName; }
     QString seriesId() const { return m_details.seriesId; }

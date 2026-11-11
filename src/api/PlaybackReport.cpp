@@ -14,6 +14,34 @@ std::optional<QJsonObject> playbackReportBody(const PlaybackReport &report)
                      {QStringLiteral("MediaSourceId"), report.mediaSourceId},
                      {QStringLiteral("PlaySessionId"), report.playSessionId},
                      {QStringLiteral("PositionTicks"), report.positionTicks}};
+    if (report.audioStreamIndex && *report.audioStreamIndex >= 0)
+        body.insert(QStringLiteral("AudioStreamIndex"), *report.audioStreamIndex);
+    if (report.subtitleStreamIndex && *report.subtitleStreamIndex >= -1)
+        body.insert(QStringLiteral("SubtitleStreamIndex"), *report.subtitleStreamIndex);
+    if (report.volumeLevel && *report.volumeLevel >= 0 && *report.volumeLevel <= 100)
+        body.insert(QStringLiteral("VolumeLevel"), *report.volumeLevel);
+    if (report.muted)
+        body.insert(QStringLiteral("IsMuted"), *report.muted);
+    if (!report.playlistItemId.isEmpty() && isValidJellyfinId(report.playlistItemId))
+        body.insert(QStringLiteral("PlaylistItemId"), report.playlistItemId);
+    if (report.repeatMode >= 0 && report.repeatMode <= 2) {
+        const QStringList tokens{QStringLiteral("RepeatNone"),
+                                 QStringLiteral("RepeatAll"), QStringLiteral("RepeatOne")};
+        body.insert(QStringLiteral("RepeatMode"), tokens.at(report.repeatMode));
+    }
+    if (report.shuffle)
+        body.insert(QStringLiteral("PlaybackOrder"), *report.shuffle
+                    ? QStringLiteral("Shuffle") : QStringLiteral("Default"));
+    if (!report.nowPlayingQueue.isEmpty()) {
+        QJsonArray queue;
+        for (const QString &id : report.nowPlayingQueue) {
+            if (!isValidJellyfinId(id) || queue.size() == 500)
+                break;
+            queue.append(QJsonObject{{QStringLiteral("Id"), id}});
+        }
+        if (!queue.isEmpty())
+            body.insert(QStringLiteral("NowPlayingQueue"), queue);
+    }
     if (report.kind == PlaybackReport::Kind::Stopped) {
         body.insert(QStringLiteral("Failed"), report.failed);
         return body;

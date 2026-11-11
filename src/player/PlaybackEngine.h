@@ -15,6 +15,7 @@
 #include "player/PlaybackSession.h"
 
 class MpvController;
+class MpvAbstractItem;
 
 Q_DECLARE_LOGGING_CATEGORY(playerLog)
 
@@ -41,6 +42,14 @@ class PlaybackEngine final : public QObject {
 
     // One-time muster: builds the mpv handle and the property observations. `options` are name=value mpv options set after MpvQt's own defaults (vo=libmpv there), e.g. "vo=null" and "ao=null" for the offscreen test container. Refuses a second init; a static libmpv that cannot be created would abort inside mpvqt
     bool init(const QStringList &options = QStringList());
+    // Bind to the renderer-owned mpv instance on its worker thread. MpvAbstractItem
+    // forwards all mutations to that thread; never make direct calls on its controller.
+    bool attach(MpvAbstractItem *item, MpvController *controller);
+    void detach(MpvAbstractItem *item);
+    void setMpvProperty(const QString &name, const QVariant &value);
+    QVariant mpvProperty(const QString &name) const;
+    // Returns false when mpv rejects the command (or is unavailable).
+    bool mpvCommand(const QStringList &arguments);
     [[nodiscard]] bool isInitialized() const { return m_controller != nullptr; }
 
     // Opens one negotiated source: the session first (Idle → Opening), then mpv's loadfile; the header lands before the load. A synchronous loadfile refusal is an opening failure: session.failed() and straight back to Idle (no server session was ever built to close). Asynchronous failures surface through `streamEnded("error")` and the session machine. Refuses a busy session
@@ -76,9 +85,13 @@ class PlaybackEngine final : public QObject {
     void rateChanged(qreal rate);
     // mpv's end-file reason unchanged ("eof", "stop", "error"): a literal of mpv's own vocabulary, never a server-built string, so nothing secret can ride along
     void streamEnded(const QString &reason);
+    void fileLoaded();
 
   private:
     void applyStreamAuthorization();
+    void wireController();
+    QVariant command(const QStringList &arguments);
+    void setProperty(const QString &name, const QVariant &value);
     // The terminal wrap-up mpv's own teardown cannot finish: a Failed session goes through the ordinary Stopping → Idle so the reporter sends its one best-effort Stopped report (or nothing, for an opening failure)
     void settleFailure();
     void sendStop();
@@ -89,6 +102,8 @@ class PlaybackEngine final : public QObject {
     JellyfinClient &m_client;
     PlaybackSession &m_session;
     MpvController *m_controller = nullptr;
+    MpvAbstractItem *m_renderer = nullptr;
+    bool m_standalone = false;
     qint64 m_positionTicks = 0;
     bool m_positionKnown = false;
     bool m_loadStarted = false;

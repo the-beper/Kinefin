@@ -118,6 +118,50 @@ class TestPlaybackReport : public QObject {
         }
     }
 
+    void reportsPlayerQueueAndTrackMetadata()
+    {
+        PlaybackReport value = report(PlaybackReport::Kind::Progress);
+        value.audioStreamIndex = 2;
+        value.subtitleStreamIndex = -1;
+        value.volumeLevel = 64;
+        value.muted = false;
+        value.nowPlayingQueue = {value.itemId, QStringLiteral("abc123")};
+        value.playlistItemId = value.itemId;
+        value.repeatMode = 1;
+        value.shuffle = true;
+        const auto body = playbackReportBody(value);
+        QVERIFY(body);
+        QCOMPARE(body->value(QStringLiteral("AudioStreamIndex")).toInt(), 2);
+        QCOMPARE(body->value(QStringLiteral("SubtitleStreamIndex")).toInt(), -1);
+        QCOMPARE(body->value(QStringLiteral("VolumeLevel")).toInt(), 64);
+        QCOMPARE(body->value(QStringLiteral("IsMuted")).toBool(), false);
+        QCOMPARE(body->value(QStringLiteral("RepeatMode")).toString(), QStringLiteral("RepeatAll"));
+        QCOMPARE(body->value(QStringLiteral("PlaybackOrder")).toString(), QStringLiteral("Shuffle"));
+        QCOMPARE(body->value(QStringLiteral("NowPlayingQueue")).toArray().size(), 2);
+        QCOMPARE(body->value(QStringLiteral("PlaylistItemId")).toString(), value.itemId);
+        value.kind = PlaybackReport::Kind::Stopped;
+        const auto stopped = playbackReportBody(value);
+        QVERIFY(stopped);
+        QVERIFY(stopped->contains(QStringLiteral("NowPlayingQueue")));
+        QVERIFY(stopped->contains(QStringLiteral("PlaylistItemId")));
+    }
+
+    void dropsUnsafeOptionalMetadata()
+    {
+        PlaybackReport value = report(PlaybackReport::Kind::Progress);
+        value.volumeLevel = 101;
+        value.repeatMode = 9;
+        value.audioStreamIndex = -1;
+        value.nowPlayingQueue = {QStringLiteral("../bad")};
+        value.playlistItemId = QStringLiteral("bad/id");
+        const auto body = playbackReportBody(value);
+        QVERIFY(body);
+        for (const QString &key : {QStringLiteral("VolumeLevel"), QStringLiteral("RepeatMode"),
+                                   QStringLiteral("AudioStreamIndex"), QStringLiteral("NowPlayingQueue"),
+                                   QStringLiteral("PlaylistItemId")})
+            QVERIFY2(!body->contains(key), qPrintable(key));
+    }
+
     void capabilitiesMatchGolden()
     {
         QVERIFY(!golden(QStringLiteral("client_capabilities_request")).isEmpty());

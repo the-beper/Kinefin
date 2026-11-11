@@ -143,6 +143,11 @@ QStringList PlayQueue::itemIds() const
     return ids;
 }
 
+void PlayQueue::setCurrentPlaybackItemId(const QString &id)
+{
+    m_currentPlaybackItemId = isValidJellyfinId(id) ? id.toLower() : QString();
+}
+
 bool PlayQueue::add(const QString &itemId, Placement placement)
 {
     if (!m_client || m_op.active || m_restore.active || !isValidJellyfinId(itemId))
@@ -385,7 +390,15 @@ void PlayQueue::insert(std::vector<ItemSummary> items, Placement placement, bool
             endRemoveRows();
         }
     }
-    const int first = placement == Next ? 0 : count();
+    int first = placement == Next ? 0 : count();
+    if (placement == Next && !m_currentPlaybackItemId.isEmpty()) {
+        const auto playing = std::find_if(m_items.begin(), m_items.end(),
+            [this](const ItemSummary &item) {
+                return idKey(item.id) == idKey(m_currentPlaybackItemId);
+            });
+        if (playing != m_items.end())
+            first = int(std::distance(m_items.begin(), playing)) + 1;
+    }
     beginInsertRows(QModelIndex(), first, first + int(unique.size()) - 1);
     m_items.insert(m_items.begin() + first, unique.begin(), unique.end());
     endInsertRows();
@@ -609,6 +622,7 @@ void PlayQueue::endRestore()
 
 void PlayQueue::restoreFor(const QString &serverId, const QString &userId)
 {
+    m_currentPlaybackItemId.clear();
     // What was edited under the previous owner goes to its file before another is read
     flush();
     endRestore();

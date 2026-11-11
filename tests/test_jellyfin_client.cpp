@@ -79,6 +79,92 @@ class TestJellyfinClient : public QObject {
         QVERIFY(client.userId().isEmpty());
     }
 
+    void mediaSegmentsFilterInvalidAndUnsupportedServers()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        server.mediaSegmentsBody = QJsonDocument(QJsonObject{
+            {QStringLiteral("Items"), QJsonArray{
+                QJsonObject{{QStringLiteral("Type"), QStringLiteral("Intro")},
+                            {QStringLiteral("StartTicks"), qint64(10'000'000)},
+                            {QStringLiteral("EndTicks"), qint64(30'000'000)}},
+                QJsonObject{{QStringLiteral("Type"), QStringLiteral("Recap")},
+                            {QStringLiteral("StartTicks"), qint64(-1)},
+                            {QStringLiteral("EndTicks"), qint64(30'000'000)}},
+                QJsonObject{{QStringLiteral("Type"), QStringLiteral("Invalid")},
+                            {QStringLiteral("StartTicks"), qint64(0)},
+                            {QStringLiteral("EndTicks"), qint64(30'000'000)}}}}}).toJson();
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        QSignalSpy segments(&client, &Kinefin::JellyfinClient::mediaSegmentsReady);
+        QVERIFY(client.fetchMediaSegments(kPlayItem));
+        QTRY_COMPARE(segments.size(), 1);
+        const auto rows = segments.takeFirst().at(1).toJsonArray();
+        QCOMPARE(rows.size(), 1);
+        QCOMPARE(rows.first().toObject().value(QStringLiteral("type")).toString(),
+                 QStringLiteral("Intro"));
+        QVERIFY(server.mediaSegmentsAuth.contains(kTokenField));
+        server.mediaSegmentsStatus = 404;
+        QVERIFY(client.fetchMediaSegments(kPlayItem));
+        QTRY_COMPARE(server.mediaSegmentsRequests, 2);
+        QCOMPARE(segments.size(), 0);
+        QVERIFY(!client.fetchMediaSegments(QStringLiteral("a/b")));
+    }
+
+    void subtitleDownloadRequiresSameOriginAndNeverFollowsRedirect()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        const QUrl allowed = server.url(QStringLiteral("/jellyfin/Videos/%1/Subtitles/3/0/Stream.srt").arg(kPlayItem));
+        QSignalSpy downloaded(&client, &Kinefin::JellyfinClient::externalSubtitleDownloaded);
+        QSignalSpy failed(&client, &Kinefin::JellyfinClient::externalSubtitleFailed);
+        QVERIFY(client.downloadExternalSubtitle(allowed));
+        QTRY_COMPARE(downloaded.size(), 1);
+        QCOMPARE(downloaded.takeFirst().at(1).toByteArray(), server.subtitleDownloadBody);
+        QVERIFY(server.subtitleDownloadAuth.contains(kTokenField));
+        const int count = server.subtitleDownloadRequests;
+        QVERIFY(!client.downloadExternalSubtitle(QUrl(QStringLiteral("https://evil.invalid/Videos/id/Subtitles/0/Stream.srt"))));
+        QVERIFY(!client.downloadExternalSubtitle(server.url(QStringLiteral("/jellyfin/Users/Me"))));
+        QCOMPARE(server.subtitleDownloadRequests, count);
+        server.redirectSubtitleDownload = true;
+        QVERIFY(client.downloadExternalSubtitle(allowed));
+        QTRY_COMPARE(failed.size(), 1);
+        QCOMPARE(downloaded.size(), 0);
+        QCOMPARE(server.subtitleDownloadRequests, count + 1);
+    }
+
+    void trickplayMetadataAndTileAreAuthenticated()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        const QJsonObject thumbnail{{QStringLiteral("Width"), 320},
+                                    {QStringLiteral("Height"), 180},
+                                    {QStringLiteral("TileWidth"), 5},
+                                    {QStringLiteral("TileHeight"), 4},
+                                    {QStringLiteral("ThumbnailCount"), 40},
+                                    {QStringLiteral("Interval"), 10000}};
+        const QJsonObject widths{{QStringLiteral("320"), thumbnail}};
+        const QJsonObject indexed{{kPlayItem, widths}};
+        server.trickplayMetadataBody = QJsonDocument(QJsonObject{
+            {QStringLiteral("Trickplay"), indexed}}).toJson();
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        QSignalSpy info(&client, &Kinefin::JellyfinClient::trickplayInfoReady);
+        QSignalSpy tile(&client, &Kinefin::JellyfinClient::trickplayTileReady);
+        QVERIFY(client.fetchTrickplayInfo(kPlayItem));
+        QTRY_COMPARE(info.size(), 1);
+        QVERIFY(info.takeFirst().at(1).toJsonObject().contains(QStringLiteral("Trickplay")));
+        QVERIFY(client.fetchTrickplayTile(kPlayItem, kPlayItem, 320, 2));
+        QTRY_COMPARE(tile.size(), 1);
+        QCOMPARE(tile.takeFirst().at(3).toByteArray(), server.trickplayTileBody);
+        QVERIFY(server.trickplayTileAuth.contains(kTokenField));
+        QVERIFY(!client.fetchTrickplayTile(kPlayItem, QStringLiteral("id?bad"), 320, 2));
+        QVERIFY(!client.fetchTrickplayTile(kPlayItem, kPlayItem, 5000, 2));
+        QCOMPARE(server.trickplayTileRequests, 1);
+    }
+
     void rejectsUnsafeAddressesAndIdentityHeaders()
     {
         Kinefin::JellyfinClient client;

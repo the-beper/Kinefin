@@ -1677,6 +1677,167 @@ bool JellyfinClient::requestPlaybackInfo(const QString &itemId, qint64 startTime
     return true;
 }
 
+bool JellyfinClient::fetchMediaSegments(const QString &itemId)
+{
+    if (m_state != State::Authenticated || !isValidJellyfinId(itemId))
+        return false;
+    const quint64 serial = ++m_segmentsSerial;
+    QUrl url = endpoint(QStringLiteral("/MediaSegments/") + itemId);
+    QUrlQuery query;
+    query.addQueryItem(QStringLiteral("includeSegmentTypes"),
+                       QStringLiteral("Intro,Recap,Outro"));
+    url.setQuery(query);
+    QNetworkReply *reply = m_network.get(requestFor(url, true));
+    attach(reply, m_generation, [this, itemId, serial](QNetworkReply *finished) {
+        if (serial != m_segmentsSerial)
+            return;
+        const int status = finished->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (status == 401) {
+            invalidateSession();
+            return;
+        }
+        if (status != 200 || finished->error() != QNetworkReply::NoError)
+            return; // Older servers without MediaSegments simply offer no Skip button.
+        QJsonObject root;
+        if (!parseObject(finished, &root))
+            return;
+        const QJsonArray raw = root.value(QStringLiteral("Items")).toArray();
+        QJsonArray safe;
+        for (const QJsonValue &entry : raw) {
+            if (safe.size() == 100)
+                break;
+            const QJsonObject item = entry.toObject();
+            const QString type = item.value(QStringLiteral("Type")).toString();
+            if (type != QLatin1String("Intro") && type != QLatin1String("Recap")
+                && type != QLatin1String("Outro"))
+                continue;
+            const qint64 start = item.value(QStringLiteral("StartTicks")).toVariant().toLongLong();
+            const qint64 end = item.value(QStringLiteral("EndTicks")).toVariant().toLongLong();
+            if (start < 0 || end <= start || end > 24LL * 60 * 60 * 10'000'000)
+                continue;
+            safe.append(QJsonObject{{QStringLiteral("type"), type},
+                                    {QStringLiteral("start"), start},
+                                    {QStringLiteral("end"), end}});
+        }
+        Q_EMIT mediaSegmentsReady(itemId, safe);
+    });
+    return true;
+}
+
+
+namespace {
+// The API must never use the access token on an untrusted or redirected URL.
+// Subtitle URLs are supplied solely by MediaSourceSelection after it has
+// stripped token query parameters and validated the relative route.
+bool allowedPlayerFile(const QUrl &base, const QUrl &url)
+{
+    QString prefix = base.path();
+    while (prefix.endsWith(QLatin1Char('/'))) prefix.chop(1);
+    prefix += QStringLiteral("/Videos/");
+    return url.isValid() && url.scheme() == base.scheme()
+           && url.host().compare(base.host(), Qt::CaseInsensitive) == 0
+           && url.port() == base.port() && url.userInfo().isEmpty()
+           && !url.hasQuery() && !url.hasFragment()
+           && url.path().startsWith(prefix)
+           && !url.path().contains(QStringLiteral("/../"));
+}
+}
+
+bool JellyfinClient::downloadExternalSubtitle(const QUrl &url)
+{
+    if (m_state != State::Authenticated || !allowedPlayerFile(m_base, url)
+        || !url.path().contains(QStringLiteral("/Subtitles/")))
+        return false;
+    const quint64 serial = ++m_subtitleSerial;
+    if (m_subtitleReply) m_subtitleReply->abort();
+    QNetworkRequest request = requestFor(url, true);
+    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
+                         QNetworkRequest::ManualRedirectPolicy);
+    QNetworkReply *reply = m_network.get(request);
+    m_subtitleReply = reply;
+    attach(reply, m_generation, [this, url, serial](QNetworkReply *finished) {
+        if (serial != m_subtitleSerial) return;
+        m_subtitleReply.clear();
+        const int status = finished->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (status == 401) { invalidateSession(); return; }
+        if (status != 200 || finished->error() != QNetworkReply::NoError
+            || finished->bytesAvailable() > 1024 * 1024) {
+            Q_EMIT externalSubtitleFailed(url);
+            return;
+        }
+        const QByteArray bytes = finished->read(1024 * 1024 + 1);
+        if (bytes.isEmpty() || bytes.size() > 1024 * 1024 || bytes.contains('\0')) {
+            Q_EMIT externalSubtitleFailed(url);
+            return;
+        }
+        Q_EMIT externalSubtitleDownloaded(url, bytes);
+    });
+    return true;
+}
+
+bool JellyfinClient::fetchTrickplayInfo(const QString &itemId)
+{
+    if (m_state != State::Authenticated || !isValidJellyfinId(itemId))
+        return false;
+    const quint64 serial = ++m_trickplayInfoSerial;
+    QUrl url = endpoint(QStringLiteral("/Users/") + m_userId
+                        + QStringLiteral("/Items/") + itemId);
+    QUrlQuery query;
+    query.addQueryItem(QStringLiteral("fields"), QStringLiteral("Trickplay"));
+    url.setQuery(query);
+    QNetworkReply *reply = m_network.get(requestFor(url, true));
+    attach(reply, m_generation, [this, itemId, serial](QNetworkReply *finished) {
+        if (serial != m_trickplayInfoSerial) return;
+        const int status = finished->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (status == 401) { invalidateSession(); return; }
+        QJsonObject item;
+        if (status == 200 && finished->error() == QNetworkReply::NoError
+            && parseObject(finished, &item))
+            Q_EMIT trickplayInfoReady(itemId, item);
+    });
+    return true;
+}
+
+bool JellyfinClient::fetchTrickplayTile(const QString &itemId, const QString &mediaSourceId,
+                                        int width, int tileIndex)
+{
+    if (m_state != State::Authenticated || !isValidJellyfinId(itemId)
+        || !isValidJellyfinId(mediaSourceId) || width < 16 || width > 640
+        || tileIndex < 0 || tileIndex > 100'000)
+        return false;
+    const quint64 serial = ++m_trickplayTileSerial;
+    if (m_trickplayTileReply) m_trickplayTileReply->abort();
+    QUrl url = endpoint(QStringLiteral("/Videos/") + itemId
+                        + QStringLiteral("/Trickplay/") + QString::number(width)
+                        + QLatin1Char('/') + QString::number(tileIndex) + QStringLiteral(".jpg"));
+    QUrlQuery query;
+    query.addQueryItem(QStringLiteral("mediaSourceId"), mediaSourceId);
+    url.setQuery(query);
+    QNetworkRequest request = requestFor(url, true);
+    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
+                         QNetworkRequest::ManualRedirectPolicy);
+    QNetworkReply *reply = m_network.get(request);
+    m_trickplayTileReply = reply;
+    attach(reply, m_generation, [this, itemId, width, tileIndex, serial](QNetworkReply *finished) {
+        if (serial != m_trickplayTileSerial) return;
+        m_trickplayTileReply.clear();
+        const int status = finished->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (status == 401) { invalidateSession(); return; }
+        if (status != 200 || finished->error() != QNetworkReply::NoError
+            || finished->bytesAvailable() > 2 * 1024 * 1024) {
+            Q_EMIT trickplayTileFailed(itemId, width, tileIndex);
+            return;
+        }
+        const QByteArray bytes = finished->read(2 * 1024 * 1024 + 1);
+        if (bytes.size() > 4 && bytes.size() <= 2 * 1024 * 1024
+            && bytes.startsWith(QByteArray::fromHex("ffd8")))
+            Q_EMIT trickplayTileReady(itemId, width, tileIndex, bytes);
+        else
+            Q_EMIT trickplayTileFailed(itemId, width, tileIndex);
+    });
+    return true;
+}
+
 namespace {
 QString reportRoute(PlaybackReport::Kind kind)
 {

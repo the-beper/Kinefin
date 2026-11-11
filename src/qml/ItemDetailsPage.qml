@@ -140,8 +140,9 @@ Kirigami.ScrollablePage {
             text: page.details.canResume ? i18n("Resume") : i18n("Play")
             icon.name: "media-playback-start"
             visible: page.details.playable
-            enabled: false
-            tooltip: i18n("Playback is not available yet")
+            enabled: page.details.status === ItemDetailsModel.Ready && !!page.Window.window?.player
+            onTriggered: page.Window.window.playItem(page.details.itemId,
+                page.details.canResume ? page.details.resumePositionTicks : 0, page.details.name)
         },
         Kirigami.Action {
             text: i18n("Play Next")

@@ -6,6 +6,8 @@
 
 #include <QDesktopServices>
 #include <QHostAddress>
+#include <QEventLoop>
+#include <QTimer>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QLoggingCategory>
@@ -497,6 +499,8 @@ void ConnectionController::cancel()
 {
     if (m_state == Idle)
         return;
+    if (m_state == Authenticated)
+        preparePlaybackDisconnect();
     clearQuickConnect();
     m_sync.cancelRestore();
     m_client.disconnectFromServer(); // keeps the stored session: only a 401 or sign-out forgets
@@ -508,8 +512,30 @@ void ConnectionController::cancel()
     setState(Idle);
 }
 
+void ConnectionController::preparePlaybackDisconnect()
+{
+    // Connected directly from main.cpp: this queues the one Stopped report before
+    // credentials, network requests and the playback queue can be destroyed.
+    Q_EMIT aboutToLeaveSession();
+    if (!m_client.hasPendingPlaybackReports())
+        return;
+    // A bounded drain: JellyfinClient serialises reports and may retry Stopped
+    // once. Exclude user input so a second logout cannot reenter this sequence.
+    QEventLoop wait;
+    QTimer deadline;
+    deadline.setSingleShot(true);
+    deadline.setInterval(5000);
+    connect(&m_client, &JellyfinClient::playbackReportsSettled,
+            &wait, &QEventLoop::quit);
+    connect(&deadline, &QTimer::timeout, &wait, &QEventLoop::quit);
+    deadline.start();
+    if (m_client.hasPendingPlaybackReports())
+        wait.exec(QEventLoop::ExcludeUserInputEvents);
+}
+
 void ConnectionController::leaveSession()
 {
+    preparePlaybackDisconnect();
     clearQuickConnect();
     m_client.forgetSession();
     // The draft and the libraries of the preferences belong to the session that ended (the model also clears on credentialsCleared, which a session without a token does not emit)
@@ -643,6 +669,8 @@ void ConnectionController::removeServer(const QString &serverId)
     m_queue.forgetStored(serverId);
     m_sync.forgetServer(serverId);
     if (active) {
+        if (m_state == Authenticated)
+            preparePlaybackDisconnect();
         clearQuickConnect();
         m_sync.cancelRestore();
         m_client.disconnectFromServer();

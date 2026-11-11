@@ -7,6 +7,7 @@
 #include <QTimer>
 
 #include <MpvController>
+#include <MpvAbstractItem>
 
 #include "api/JellyfinClient.h"
 
@@ -47,18 +48,11 @@ bool PlaybackEngine::init(const QStringList &options)
         return false;
     }
     m_controller = new MpvController(this);
-    connect(m_controller, &MpvController::fileStarted, this, &PlaybackEngine::onFileStarted);
-    connect(m_controller, &MpvController::fileLoaded, this, [this] {
-        qCDebug(playerLog) << "file loaded";
-        m_session.opened();
-    });
-    connect(m_controller, &MpvController::endFile, this, &PlaybackEngine::onEndFile);
-    connect(m_controller, &MpvController::propertyChanged, this,
-            &PlaybackEngine::onPropertyChanged);
+    m_standalone = true;
     m_controller->init();
-
-    // MpvQt pins vo=libmpv for its QML item; an option from the caller replaces it (later wins), so the offscreen container gets vo=null/ao=null and the windowed route attaches the real window. A bounded network timeout keeps a failed open from hanging into the injection tests
-    m_controller->setProperty(QStringLiteral("network-timeout"), 15);
+    wireController();
+    // Standalone playback is used by the headless engine integration tests.
+    setProperty(QStringLiteral("network-timeout"), 15);
     for (const QString &option : options) {
         const qsizetype equals = option.indexOf(QLatin1Char('='));
         if (equals <= 0) {
@@ -67,11 +61,85 @@ bool PlaybackEngine::init(const QStringList &options)
         }
         const QString name = option.left(equals);
         const QString value = option.mid(equals + 1);
-        if (const int error = m_controller->setProperty(name, value); error < 0) {
-            qCWarning(playerLog) << "mpv option" << name << "was refused:" << error;
-        }
+        setProperty(name, value);
     }
+    return true;
+}
 
+bool PlaybackEngine::attach(MpvAbstractItem *item, MpvController *controller)
+{
+    if (!item || !controller || m_controller || m_session.state() != PlaybackSession::State::Idle)
+        return false;
+    m_renderer = item;
+    m_controller = controller;
+    wireController();
+    setProperty(QStringLiteral("network-timeout"), 15);
+    return true;
+}
+
+void PlaybackEngine::detach(MpvAbstractItem *item)
+{
+    if (!item || item != m_renderer)
+        return;
+    // The renderer's controller dies on its worker thread when the page closes.
+    // Report Stopped before it does and do not keep its raw pointer afterwards.
+    if (m_session.state() != PlaybackSession::State::Idle) {
+        m_session.stop();
+        m_session.stopped();
+    }
+    m_stopWatchdog.stop();
+    disconnect(m_controller, nullptr, this, nullptr);
+    m_controller = nullptr;
+    m_renderer = nullptr;
+}
+
+void PlaybackEngine::setProperty(const QString &name, const QVariant &value)
+{
+    if (!m_controller)
+        return;
+    if (m_renderer)
+        m_renderer->setProperty(name, value);
+    else
+        m_controller->setProperty(name, value);
+}
+
+void PlaybackEngine::setMpvProperty(const QString &name, const QVariant &value)
+{
+    // Names are supplied exclusively by the local settings map and player UI,
+    // not by the server or the external deep-link parser.
+    setProperty(name, value);
+}
+
+QVariant PlaybackEngine::mpvProperty(const QString &name) const
+{
+    if (!m_controller)
+        return {};
+    return m_renderer ? m_renderer->getProperty(name) : m_controller->getProperty(name);
+}
+
+QVariant PlaybackEngine::command(const QStringList &arguments)
+{
+    if (!m_controller)
+        return {};
+    return m_renderer ? m_renderer->commandBlocking(arguments) : m_controller->command(arguments);
+}
+
+bool PlaybackEngine::mpvCommand(const QStringList &arguments)
+{
+    return m_controller && !command(arguments).canConvert<ErrorReturn>();
+}
+
+void PlaybackEngine::wireController()
+{
+    connect(m_controller, &MpvController::fileStarted, this, &PlaybackEngine::onFileStarted);
+    connect(m_controller, &MpvController::fileLoaded, this, [this] {
+        qCDebug(playerLog) << "file loaded";
+        m_session.opened();
+        Q_EMIT fileLoaded();
+    });
+    connect(m_controller, &MpvController::endFile, this, &PlaybackEngine::onEndFile);
+    connect(m_controller, &MpvController::propertyChanged, this,
+            &PlaybackEngine::onPropertyChanged);
     struct Observed {
         const char *name = nullptr;
         mpv_format format = MPV_FORMAT_NONE;
@@ -83,9 +151,12 @@ bool PlaybackEngine::init(const QStringList &options)
         {"speed", MPV_FORMAT_DOUBLE, 5},
     };
     for (const Observed &entry : observed) {
-        m_controller->observeProperty(QString::fromLatin1(entry.name), entry.format, entry.id);
+        if (m_renderer)
+            m_renderer->observeProperty(QString::fromLatin1(entry.name), entry.format, entry.id);
+        else
+            m_controller->observeProperty(QString::fromLatin1(entry.name), entry.format, entry.id);
     }
-    return true;
+    // This function wires both the standalone controller and the video renderer.
 }
 
 void PlaybackEngine::applyStreamAuthorization()
@@ -97,11 +168,11 @@ void PlaybackEngine::applyStreamAuthorization()
     const QByteArray authorization = m_client.streamAuthorization();
     if (authorization.isEmpty()) {
         // Never leave a stale header behind when the identity went away
-        m_controller->setProperty(QStringLiteral("http-header-fields"), QVariantList{});
+        setProperty(QStringLiteral("http-header-fields"), QVariantList{});
         return;
     }
     const QByteArray entry = QByteArrayLiteral("Authorization: ") + authorization;
-    m_controller->setProperty(QStringLiteral("http-header-fields"),
+    setProperty(QStringLiteral("http-header-fields"),
                               QVariantList{QString::fromUtf8(entry)});
     // The exact value is never logged (project note: no tokens in URLs, signals or logs)
 }
@@ -141,7 +212,7 @@ bool PlaybackEngine::open(const PlaybackSource &source)
     qCDebug(playerLog) << "opening"
                        << (route == PlaybackSession::Route::Transcoded ? "a transcoded stream"
                                                                        : "a direct stream");
-    const QVariant load = m_controller->command(
+    const QVariant load = command(
         {QStringLiteral("loadfile"), source.url.toString(QUrl::FullyEncoded)});
     if (load.canConvert<ErrorReturn>()) {
         // mpv refused the command outright: no stream ever started, so the session drops the phantom server session without a report
@@ -157,7 +228,7 @@ void PlaybackEngine::pause()
     if (m_controller == nullptr || !m_session.pause()) {
         return;
     }
-    m_controller->setProperty(QStringLiteral("pause"), true);
+    setProperty(QStringLiteral("pause"), true);
 }
 
 void PlaybackEngine::resume()
@@ -165,7 +236,7 @@ void PlaybackEngine::resume()
     if (m_controller == nullptr || !m_session.resume()) {
         return;
     }
-    m_controller->setProperty(QStringLiteral("pause"), false);
+    setProperty(QStringLiteral("pause"), false);
 }
 
 void PlaybackEngine::stop()
@@ -203,7 +274,7 @@ void PlaybackEngine::stop()
 void PlaybackEngine::setRate(qreal rate)
 {
     if (m_controller != nullptr) {
-        m_controller->setProperty(QStringLiteral("speed"), rate);
+        setProperty(QStringLiteral("speed"), rate);
     }
 }
 
@@ -213,7 +284,7 @@ void PlaybackEngine::seekTo(qint64 ticks)
         return;
     }
     const double seconds = static_cast<double>(ticks) / 1e7;
-    m_controller->command(
+    command(
         {QStringLiteral("seek"), QString::number(seconds, 'f', 3), QStringLiteral("absolute")});
 }
 
@@ -229,7 +300,7 @@ void PlaybackEngine::settleFailure()
 
 void PlaybackEngine::sendStop()
 {
-    const QVariant stopped = m_controller->command({QStringLiteral("stop")});
+    const QVariant stopped = command({QStringLiteral("stop")});
     if (stopped.canConvert<ErrorReturn>()) {
         qCWarning(playerLog) << "mpv refused the stop command:"
                              << stopped.value<ErrorReturn>().error;

@@ -15,6 +15,8 @@ Controls.Menu {
     // The series of an episode or season; empty for anything else
     property string seriesId: ""
 
+    readonly property bool playable: ["Movie", "Episode", "Video"].indexOf(itemType) >= 0
+
     // The kinds the play queue takes, as on the details page: keep the two lists in step
     readonly property bool queueable: ["Movie", "Episode", "Video", "Season", "Series", "BoxSet"].indexOf(itemType) >= 0
 
@@ -26,6 +28,15 @@ Controls.Menu {
         text: i18n("Open")
         icon.name: "document-open"
         onTriggered: menu.openRequested(menu.itemId)
+    }
+    Controls.MenuItem {
+        objectName: "cardMenuPlayNow"
+        text: i18n("Play Now")
+        icon.name: "media-playback-start"
+        visible: menu.playable
+        height: visible ? implicitHeight : 0
+        enabled: !!menu.Window.window?.player
+        onTriggered: menu.Window.window.playItem(menu.itemId)
     }
     Controls.MenuItem {
         objectName: "cardMenuPlayNext"

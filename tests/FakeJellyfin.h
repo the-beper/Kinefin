@@ -191,6 +191,22 @@ class FakeJellyfin {
     QByteArray lastPlaybackInfoAuth;
     QByteArray lastPlaybackInfoBody;
     QByteArray lastPlaybackInfoContentType;
+    // Optional player endpoints, with controllable failure and redirect responses.
+    int mediaSegmentsRequests = 0;
+    int mediaSegmentsStatus = 200;
+    QByteArray mediaSegmentsBody = "{\"Items\":[]}";
+    QByteArray mediaSegmentsAuth;
+    int subtitleDownloadRequests = 0;
+    QByteArray subtitleDownloadAuth;
+    QByteArray subtitleDownloadBody = "1\n00:00:00,000 --> 00:00:01,000\nHello\n";
+    int subtitleDownloadStatus = 200;
+    bool redirectSubtitleDownload = false;
+    int trickplayMetadataRequests = 0;
+    QByteArray trickplayMetadataBody = "{\"Trickplay\":{}}";
+    int trickplayTileRequests = 0;
+    QByteArray trickplayTileAuth;
+    QByteArray trickplayTileBody = QByteArray::fromHex("ffd8ffe00010ffd9");
+    int trickplayTileStatus = 200;
     // Playback reports: an ordered log of what arrived, a status for all of them, an optional different status for the first Stopped, and a hold that keeps the answers back until releaseHeld()
     struct ReportLog {
         QByteArray route;
@@ -921,6 +937,36 @@ class FakeJellyfin {
                 respond(socket, 302, {}, "Location: https://unexpected.invalid/remote\r\n");
             else
                 respond(socket, remoteCommandStatus, {});
+            return;
+        }
+        if (method == "GET" && route.contains("/MediaSegments/")) {
+            ++mediaSegmentsRequests;
+            mediaSegmentsAuth = authorization;
+            respond(socket, mediaSegmentsStatus,
+                    mediaSegmentsStatus == 200 ? mediaSegmentsBody : QByteArray());
+            return;
+        }
+        if (method == "GET" && route.contains("/Videos/") && route.contains("/Subtitles/")) {
+            ++subtitleDownloadRequests;
+            subtitleDownloadAuth = authorization;
+            if (redirectSubtitleDownload)
+                respond(socket, 302, {}, "Location: https://unexpected.invalid/leak.srt\r\n");
+            else
+                respond(socket, subtitleDownloadStatus,
+                        subtitleDownloadStatus == 200 ? subtitleDownloadBody : QByteArray());
+            return;
+        }
+        if (method == "GET" && route.contains("/Videos/") && route.contains("/Trickplay/")) {
+            ++trickplayTileRequests;
+            trickplayTileAuth = authorization;
+            respond(socket, trickplayTileStatus,
+                    trickplayTileStatus == 200 ? trickplayTileBody : QByteArray());
+            return;
+        }
+        if (method == "GET" && route.contains("/Users/") && route.contains("/Items/")
+            && route.contains("fields=Trickplay")) {
+            ++trickplayMetadataRequests;
+            respond(socket, 200, trickplayMetadataBody);
             return;
         }
         if (method == "POST" && route.endsWith("/PlaybackInfo")) {

@@ -332,6 +332,54 @@ class TestMediaSourceSelection : public QObject {
         QCOMPARE(selection.source->mediaSourceId, QStringLiteral("bbbb"));
     }
 
+    void authenticatesAndBoundsExternalSubtitleRoutes()
+    {
+        const QJsonObject stream{{QStringLiteral("Type"), QStringLiteral("Subtitle")},
+                                 {QStringLiteral("IsExternal"), true},
+                                 {QStringLiteral("IsTextSubtitleStream"), true},
+                                 {QStringLiteral("DeliveryMethod"), QStringLiteral("External")},
+                                 {QStringLiteral("Index"), 3},
+                                 {QStringLiteral("DisplayTitle"), QStringLiteral("Italian subtitles")},
+                                 {QStringLiteral("DeliveryUrl"),
+                                  QStringLiteral("/Videos/%1/Subtitles/3/0/Stream.srt?ApiKey=%2")
+                                      .arg(kItem, QString::fromLatin1(kToken))}};
+        QJsonObject mediaSource = source(kSourceId, true, true);
+        mediaSource.insert(QStringLiteral("MediaStreams"), QJsonArray{stream});
+        const auto selected = select(response({mediaSource}), kPrefixedBase);
+        QVERIFY(selected.source);
+        QCOMPARE(selected.source->externalSubtitles.size(), 1);
+        const auto &subtitle = selected.source->externalSubtitles.constFirst();
+        QCOMPARE(subtitle.index, 3);
+        QCOMPARE(subtitle.format, QStringLiteral("srt"));
+        QCOMPARE(subtitle.label, QStringLiteral("Italian subtitles"));
+        QCOMPARE(subtitle.url.host(), QStringLiteral("jf.example"));
+        QCOMPARE(subtitle.url.path(),
+                 QStringLiteral("/jellyfin/Videos/%1/Subtitles/3/0/Stream.srt").arg(kItem));
+        QVERIFY(!subtitle.url.hasQuery());
+        QVERIFY(!subtitle.url.toString().contains(QString::fromLatin1(kToken)));
+    }
+
+    void rejectsUnsafeExternalSubtitles()
+    {
+        for (const QString &raw : {QStringLiteral("//evil.invalid/Videos/id/Subtitles/0/Stream.srt"),
+                                  QStringLiteral("/Videos/../Users/Me.srt"),
+                                  QStringLiteral("/Videos/id/Subtitles/0/Stream.exe"),
+                                  QStringLiteral("/Videos/id/Subtitles/0/Stream.srt?Other=1"),
+                                  QStringLiteral("/Videos/id/Subtitles/0/Stream.srt#secret")}) {
+            QJsonObject stream{{QStringLiteral("Type"), QStringLiteral("Subtitle")},
+                               {QStringLiteral("IsExternal"), true},
+                               {QStringLiteral("IsTextSubtitleStream"), true},
+                               {QStringLiteral("DeliveryMethod"), QStringLiteral("External")},
+                               {QStringLiteral("Index"), 1},
+                               {QStringLiteral("DeliveryUrl"), raw}};
+            QJsonObject mediaSource = source(kSourceId, true, true);
+            mediaSource.insert(QStringLiteral("MediaStreams"), QJsonArray{stream});
+            const auto selection = select(response({mediaSource}));
+            QVERIFY2(selection.source, qPrintable(raw));
+            QVERIFY2(selection.source->externalSubtitles.isEmpty(), qPrintable(raw));
+        }
+    }
+
     void jellyfinIdGrammar()
     {
         QVERIFY(isValidJellyfinId(u"c7dd3b1ac7dd3b1a9d42f2ab74f8a1b9"));

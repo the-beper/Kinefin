@@ -4,6 +4,7 @@
 #include "app/ImageNetworkFactory.h"
 #include "app/Logging.h"
 #include "app/ProfileCommands.h"
+#include "player/PlayerController.h"
 #include "integration/LinkRouter.h"
 #include "settings/ClientSettings.h"
 #include "settings/KWalletTokenStore.h"
@@ -17,6 +18,7 @@
 #include <QPointer>
 #include <QQmlApplicationEngine>
 #include <QQuickWindow>
+#include <QSGRendererInterface>
 #include <QTextStream>
 #include <QVariant>
 #include <KAboutData>
@@ -28,6 +30,9 @@
 
 int main(int argc, char *argv[])
 {
+    // mpvqt uses QQuickFramebufferObject, which requires Qt Quick's OpenGL
+    // graphics API. Select it before any QQuickWindow is constructed.
+    QQuickWindow::setGraphicsApi(QSGRendererInterface::OpenGL);
     QGuiApplication app(argc, argv);
     QCoreApplication::setApplicationName(QStringLiteral("Kinefin"));
     // Reversed by KDBusService: io.github.the_beper.Kinefin
@@ -164,6 +169,15 @@ int main(int argc, char *argv[])
         return 1;
     }
     Kinefin::ConnectionController connection(profileId, deviceId, QStringLiteral(KINEFIN_VERSION));
+    Kinefin::PlayerController player(connection.playbackClient(), *connection.queue(),
+                                     settings, profileId);
+    QObject::connect(&connection, &Kinefin::ConnectionController::aboutToLeaveSession,
+                     &player, &Kinefin::PlayerController::onAccountLeaving);
+    QObject::connect(&connection, &Kinefin::ConnectionController::stateChanged, &player,
+                     [&connection, &player] {
+                         if (connection.state() != Kinefin::ConnectionController::Authenticated)
+                             player.onAccountLeaving();
+                     });
 
     const auto imageOrigin = std::make_shared<Kinefin::ImageOrigin>();
     connection.setImageOrigin(imageOrigin);
@@ -180,6 +194,7 @@ int main(int argc, char *argv[])
     engine.setInitialProperties(
         {{QStringLiteral("connection"), QVariant::fromValue(&connection)},
          {QStringLiteral("settings"), QVariant::fromValue(&settings)},
+         {QStringLiteral("player"), QVariant::fromValue(&player)},
          {QStringLiteral("startupWindowMode"), windowMode},
          {QStringLiteral("startupPage"), qEnvironmentVariable("KINEFIN_START_PAGE")}});
     // Register the KI18n QML context so Main.qml can translate its strings

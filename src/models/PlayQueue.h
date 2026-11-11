@@ -77,6 +77,9 @@ class PlayQueue final : public QAbstractListModel {
 
     // Entries in order
     QStringList itemIds() const;
+    // When a queue item is playing, Next inserts immediately after that item.
+    // An empty id restores the traditional insert-at-front behavior.
+    void setCurrentPlaybackItemId(const QString &id);
 
     // Where the queues are kept: ids only, one file per server and user in the `queues` folder next to `path`, which itself is the one-file queue of earlier versions (read and moved to its owner's file at that owner's first `restoreFor`). Empty, the default, keeps nothing. Writes are debounced and a pending one is flushed when the queue is destroyed or loses its credentials
     void setStoragePath(const QString &path);
@@ -169,6 +172,7 @@ class PlayQueue final : public QAbstractListModel {
     Operation m_op;
     Restore m_restore;
     QString m_path;
+    QString m_currentPlaybackItemId;
     QString m_serverId;
     QString m_userId;
     QTimer m_saveTimer;

@@ -3,6 +3,7 @@
 #pragma once
 
 #include <QJsonObject>
+#include <QStringList>
 #include <QString>
 #include <optional>
 
@@ -25,6 +26,18 @@ struct PlaybackReport {
     bool canSeek = true;
     // Stopped only: the playback ended in an error, the server leaves the user's data alone
     bool failed = false;
+    // Optional player-derived values. Never invent stream indexes when mpv's
+    // mapping to the container stream is unknown.
+    std::optional<int> audioStreamIndex;
+    std::optional<int> subtitleStreamIndex;
+    std::optional<int> volumeLevel;
+    std::optional<bool> muted;
+    // The play queue is a snapshot of authenticated, validated Jellyfin ids.
+    QStringList nowPlayingQueue;
+    QString playlistItemId;
+    // -1 means unavailable, otherwise 0=off, 1=all, 2=one.
+    int repeatMode = -1;
+    std::optional<bool> shuffle;
 };
 
 // The JSON body of the report, or nullopt for an invalid id or a negative position. Fields that this slice cannot fill correctly are omitted on purpose (parity §9): the server owns `Item` and `SessionId`, track indexes wait for the mpv track mapping

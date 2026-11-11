@@ -198,6 +198,20 @@ Kirigami.ScrollablePage {
 
     actions: [
         Kirigami.Action {
+            objectName: "resumeQueueAction"
+            text: i18n("Resume Queue")
+            icon.name: "media-playback-start"
+            enabled: page.queue.count > 0 && !page.queue.busy && !!page.Window.window?.player
+            onTriggered: page.Window.window.resumeQueue()
+        },
+        Kirigami.Action {
+            objectName: "playQueueAction"
+            text: i18n("Play From Here")
+            icon.name: "media-playback-start"
+            enabled: page.queue.count > 0 && !page.queue.busy && !!page.Window.window?.player
+            onTriggered: page.Window.window.playQueue(Math.max(0, list.currentIndex))
+        },
+        Kirigami.Action {
             objectName: "undoQueueAction"
             text: i18n("Undo")
             icon.name: "edit-undo"
@@ -247,6 +261,12 @@ Kirigami.ScrollablePage {
         property int row: -1
         property string itemId: ""
 
+        Controls.MenuItem {
+            text: i18n("Play From Here")
+            icon.name: "media-playback-start"
+            enabled: !!page.Window.window?.player
+            onTriggered: if (page.menuRowIsCurrent()) page.Window.window.playQueue(menu.row)
+        }
         Controls.MenuItem {
             text: i18n("Move Up")
             icon.name: "arrow-up"

@@ -5,6 +5,7 @@
 #include <QByteArrayView>
 #include <QJsonObject>
 #include <QMetaType>
+#include <QList>
 #include <QString>
 #include <QStringView>
 #include <QUrl>
@@ -12,6 +13,14 @@
 
 namespace Kinefin {
 // What the player needs to open one item: the chosen media source and a media URL under the server's own base URL. The URL never carries the access token: the caller sends it in an `Authorization` header (api-notes.md, Media URLs)
+struct ExternalSubtitle {
+    int index = -1;
+    QString language;
+    QString label;
+    QString format;
+    QUrl url;
+};
+
 struct PlaybackSource {
     enum class Method { Direct, Transcode };
 
@@ -20,6 +29,7 @@ struct PlaybackSource {
     QString playSessionId;
     Method method = Method::Direct;
     QUrl url;
+    QList<ExternalSubtitle> externalSubtitles;
 };
 
 // Either a source or a short, fixed English reason; never a URL, a body or a path from the server. The reasons are internal: a UI that shows one maps it to a translated string

@@ -4,6 +4,7 @@
 
 #include <QObject>
 #include <QTimer>
+#include <QStringList>
 
 #include <chrono>
 #include <functional>
@@ -24,6 +25,14 @@ class PlaybackReporter final : public QObject {
         // 100 ns ticks; at the end of the file, the duration. Empty while the player does not know (no stream yet, unloaded, before the resume seek): the reporter then repeats the last known value and skips a Progress it has none for, because the server stores a reported 0 as the resume point
         std::optional<qint64> positionTicks;
         bool canSeek = true;
+        std::optional<int> audioStreamIndex;
+        std::optional<int> subtitleStreamIndex;
+        std::optional<int> volume;
+        std::optional<bool> muted;
+        QStringList nowPlayingQueue;
+        QString playlistItemId;
+        int repeatMode = -1;
+        std::optional<bool> shuffle;
     };
     using PlayerProbe = std::function<PlayerState()>;
 

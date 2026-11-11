@@ -2410,3 +2410,199 @@ msgstr "Could not open the release page in the browser"
 #: src/qml/ShellHeader.qml
 msgid "Kinefin %1 is available. Open its release page in your browser?"
 msgstr "Kinefin %1 is available. Open its release page in your browser?"
+
+#: src/qml/PlayerPage.qml:338
+msgid "%1 minutes"
+msgstr "%1 minutes"
+
+#: src/qml/PlayerPage.qml:310
+msgid "AV Sync"
+msgstr "AV Sync"
+
+#: src/qml/PlayerPage.qml:254
+msgid "Audio and Subtitles"
+msgstr "Audio and Subtitles"
+
+#: src/qml/PlayerPage.qml:314
+msgid "Audio delay: %1 s"
+msgstr "Audio delay: %1 s"
+
+#: src/qml/PlayerPage.qml:315
+msgid "Audio earlier (-0.1 s)"
+msgstr "Audio earlier (-0.1 s)"
+
+#: src/qml/PlayerPage.qml:316
+msgid "Audio later (+0.1 s)"
+msgstr "Audio later (+0.1 s)"
+
+#: src/player/PlayerController.cpp:548
+msgid "Audio track %1"
+msgstr "Audio track %1"
+
+#: src/qml/PlayerPage.qml:255
+msgid "Audio tracks"
+msgstr "Audio tracks"
+
+#: src/qml/PlayerPage.qml:85
+msgid "Close Player"
+msgstr "Close Player"
+
+#: src/player/PlayerController.cpp:84
+msgid "Could not download the subtitle."
+msgstr "Could not download the subtitle."
+
+#: src/qml/PlayerPage.qml:282
+msgid "Download external subtitles"
+msgstr "Download external subtitles"
+
+#: src/player/PlayerController.cpp:349
+msgid "External subtitle %1"
+msgstr "External subtitle %1"
+
+#: src/qml/PlayerPage.qml:235
+msgid "Mute"
+msgstr "Mute"
+
+#: src/qml/PlayerPage.qml:217
+msgid "Next"
+msgstr "Next"
+
+#: src/qml/PlayerPage.qml:268
+msgid "No subtitles"
+msgstr "No subtitles"
+
+#: src/qml/PlayerPage.qml:13 src/qml/PlayerPage.qml:153 src/qml/PlayerPage.qml:325
+msgid "Now Playing"
+msgstr "Now Playing"
+
+#: src/qml/PlayerPage.qml:379
+msgid "Now Playing Queue"
+msgstr "Now Playing Queue"
+
+#: src/qml/PlayerPage.qml:338
+msgid "Off"
+msgstr "Off"
+
+#: src/qml/PlayerPage.qml:81
+msgid "Opening video…"
+msgstr "Opening video…"
+
+#: src/qml/PlayerPage.qml:205
+msgid "Pause"
+msgstr "Pause"
+
+#: src/qml/QueuePage.qml:209 src/qml/QueuePage.qml:265
+msgid "Play From Here"
+msgstr "Play From Here"
+
+#: src/qml/CardMenu.qml:34
+msgid "Play Now"
+msgstr "Play Now"
+
+#: src/qml/PlayerPage.qml:187
+msgid "Playback position"
+msgstr "Playback position"
+
+#: src/qml/PlayerPage.qml:306
+msgid "Playback speed"
+msgstr "Playback speed"
+
+#: src/qml/PlayerPage.qml:199
+msgid "Previous"
+msgstr "Previous"
+
+#: src/qml/PlayerPage.qml:229
+msgid "Repeat All"
+msgstr "Repeat All"
+
+#: src/qml/PlayerPage.qml:229
+msgid "Repeat Off"
+msgstr "Repeat Off"
+
+#: src/qml/PlayerPage.qml:229
+msgid "Repeat One"
+msgstr "Repeat One"
+
+#: src/qml/QueuePage.qml:202
+msgid "Resume Queue"
+msgstr "Resume Queue"
+
+#: src/qml/PlayerPage.qml:347
+msgid "Screenshot"
+msgstr "Screenshot"
+
+#: src/qml/PlayerPage.qml:362
+msgid "Screenshot saved to %1"
+msgstr "Screenshot saved to %1"
+
+#: src/qml/PlayerPage.qml:224
+msgid "Shuffle"
+msgstr "Shuffle"
+
+#: src/player/PlayerController.cpp:651
+msgid "Skip intro"
+msgstr "Skip intro"
+
+#: src/player/PlayerController.cpp:653
+msgid "Skip outro"
+msgstr "Skip outro"
+
+#: src/player/PlayerController.cpp:652
+msgid "Skip recap"
+msgstr "Skip recap"
+
+#: src/qml/PlayerPage.qml:329
+msgid "Sleep Timer"
+msgstr "Sleep Timer"
+
+#: src/qml/PlayerPage.qml:329
+msgid "Sleep: %1 min"
+msgstr "Sleep: %1 min"
+
+#: src/qml/PlayerPage.qml:212
+msgid "Stop"
+msgstr "Stop"
+
+#: src/player/PlayerController.cpp:548
+msgid "Subtitle %1"
+msgstr "Subtitle %1"
+
+#: src/qml/PlayerPage.qml:318
+msgid "Subtitle delay: %1 s"
+msgstr "Subtitle delay: %1 s"
+
+#: src/qml/PlayerPage.qml:319
+msgid "Subtitles earlier (-0.1 s)"
+msgstr "Subtitles earlier (-0.1 s)"
+
+#: src/qml/PlayerPage.qml:320
+msgid "Subtitles later (+0.1 s)"
+msgstr "Subtitles later (+0.1 s)"
+
+#: src/player/PlayerController.cpp:352
+msgid "The selected media source could not be opened."
+msgstr "The selected media source could not be opened."
+
+#: src/player/PlayerController.cpp:127
+msgid "The video could not be opened. Try again."
+msgstr "The video could not be opened. Try again."
+
+#: src/qml/PlayerPage.qml:249
+msgid "Tracks"
+msgstr "Tracks"
+
+#: src/player/PlayerController.cpp:331
+msgid "Unable to request playback from the server."
+msgstr "Unable to request playback from the server."
+
+#: src/qml/PlayerPage.qml:235
+msgid "Unmute"
+msgstr "Unmute"
+
+#: src/qml/PlayerPage.qml:246
+msgid "Volume"
+msgstr "Volume"
+
+#: src/player/PlayerController.cpp:634
+msgid "Could not save the screenshot."
+msgstr "Could not save the screenshot."

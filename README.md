@@ -1,6 +1,6 @@
 # Kinefin
 
-A native KDE Plasma 6 client for Jellyfin servers: Kirigami interface, its own REST client and a libmpv playback engine, without WebEngine. The complete player UI and other v1 features are still in development; this is **not yet a release-ready client**.
+A native KDE Plasma 6 client for Jellyfin servers: Kirigami interface, its own REST client and a libmpv playback engine, without WebEngine. The native player UI is implemented in source, but Qt/KF6 builds, real playback on Jellyfin/Plasma and other v1 features still require acceptance; this is **not yet a release-ready client**.
 
 ## Building
 
