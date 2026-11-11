@@ -42,6 +42,21 @@ Kirigami.ScrollablePage {
         list.currentIndex = queue.count > 0 ? Math.min(row, queue.count - 1) : -1;
     }
 
+    function undoLastEdit() {
+        const row = list.currentIndex;
+        if (!queue.undo())
+            return;
+        list.currentIndex = queue.count > 0 ? Math.max(0, Math.min(row, queue.count - 1)) : -1;
+        list.forceActiveFocus(Qt.TabFocusReason);
+    }
+
+    Shortcut {
+        sequences: [StandardKey.Undo]
+        enabled: page.Window.window?.pageStack.currentItem === page
+                 && page.queue.canUndo && !page.queue.busy && !clearQueueDialog.visible
+        onActivated: page.undoLastEdit()
+    }
+
     function openRow(itemId) {
         page.Window.window.openItem(itemId, page);
     }
@@ -182,6 +197,13 @@ Kirigami.ScrollablePage {
     }
 
     actions: [
+        Kirigami.Action {
+            objectName: "undoQueueAction"
+            text: i18n("Undo")
+            icon.name: "edit-undo"
+            enabled: page.queue.canUndo && !page.queue.busy
+            onTriggered: page.undoLastEdit()
+        },
         Kirigami.Action {
             text: i18n("Clear Queue")
             icon.name: "edit-clear-all"

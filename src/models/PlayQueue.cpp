@@ -373,6 +373,7 @@ void PlayQueue::insert(std::vector<ItemSummary> items, Placement placement, bool
     *joined = int(unique.size());
     if (unique.empty())
         return;
+    rememberEdit();
     // What is queued and survives the cut leaves its row first and joins at the new place
     QSet<QString> incoming;
     for (const ItemSummary &item : unique)
@@ -401,6 +402,7 @@ bool PlayQueue::move(int from, int to)
     // beginMoveRows names the row the item goes in front of
     if (!beginMoveRows(QModelIndex(), from, from, QModelIndex(), to > from ? to + 1 : to))
         return false;
+    rememberEdit();
     ItemSummary item = std::move(m_items[size_t(from)]);
     m_items.erase(m_items.begin() + from);
     m_items.insert(m_items.begin() + to, std::move(item));
@@ -413,6 +415,7 @@ bool PlayQueue::remove(int row)
 {
     if (row < 0 || row >= count())
         return false;
+    rememberEdit();
     beginRemoveRows(QModelIndex(), row, row);
     m_items.erase(m_items.begin() + row);
     endRemoveRows();
@@ -427,6 +430,7 @@ void PlayQueue::clear()
     endOperation();
     if (m_items.empty())
         return;
+    rememberEdit();
     beginResetModel();
     m_items.clear();
     endResetModel();
@@ -434,8 +438,48 @@ void PlayQueue::clear()
     Q_EMIT edited();
 }
 
+void PlayQueue::rememberEdit()
+{
+    // Keep at most one snapshot (500 bounded ItemSummary objects), not a history
+    // of server responses or a second copy of the persisted queue.
+    m_undoItems = m_items;
+    if (!m_canUndo) {
+        m_canUndo = true;
+        Q_EMIT canUndoChanged();
+    }
+}
+
+void PlayQueue::forgetUndo()
+{
+    m_undoItems.clear();
+    if (m_canUndo) {
+        m_canUndo = false;
+        Q_EMIT canUndoChanged();
+    }
+}
+
+bool PlayQueue::undo()
+{
+    // A pending expansion could insert stale rows after the undo; a failed
+    // restore must not be overwritten with an edited local queue.
+    if (!m_canUndo || busy() || m_restore.failed)
+        return false;
+    const int oldCount = count();
+    std::vector<ItemSummary> previous = std::move(m_undoItems);
+    forgetUndo();
+    beginResetModel();
+    m_items = std::move(previous);
+    endResetModel();
+    if (count() != oldCount)
+        Q_EMIT countChanged();
+    Q_EMIT edited(); // Persist the reverted order, including an empty queue.
+    return true;
+}
+
 void PlayQueue::dropMemory()
 {
+    // Even an empty queue may have a previous non-empty snapshot (after Clear).
+    forgetUndo();
     if (m_items.empty())
         return;
     beginResetModel();

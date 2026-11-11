@@ -4577,6 +4577,35 @@ class TestUiPages : public QObject {
         QCOMPARE(list->property("currentIndex").toInt(), 0);
     }
 
+    void theQueueUndoesTheLastRemovalWithCtrlZ()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QQuickItem *list = openQueueWithEpisodes(ui);
+        QVERIFY(list);
+        auto *queue = ui.controller.queue();
+        QTRY_COMPARE(queue->count(), 5);
+        QTRY_VERIFY(list->hasActiveFocus());
+        QQmlListReference actions(ui.item(QStringLiteral("queuePage")), "actions");
+        QObject *undo = nullptr;
+        for (qsizetype i = 0; i < actions.count(); ++i) {
+            if (actions.at(i)->objectName() == QStringLiteral("undoQueueAction")) {
+                undo = actions.at(i);
+                break;
+            }
+        }
+        QVERIFY(undo);
+        QVERIFY(undo->property("enabled").toBool());
+        QTest::keyClick(ui.window, Qt::Key_Delete);
+        QTRY_COMPARE(queue->count(), 4);
+        QTest::keyClick(ui.window, Qt::Key_Z, Qt::ControlModifier);
+        QTRY_COMPARE(queue->count(), 5);
+        QCOMPARE(queue->data(queue->index(0), Kinefin::PlayQueue::NameRole).toString(),
+                 QStringLiteral("Episode 1"));
+        QTRY_VERIFY(!undo->property("enabled").toBool());
+        QCOMPARE(list->property("currentIndex").toInt(), 0);
+    }
+
     void aRowOpensItsItemAndBackReturnsToIt()
     {
         Ui ui(m_home->path());
@@ -4671,6 +4700,19 @@ class TestUiPages : public QObject {
         QMetaObject::invokeMethod(confirm, "click");
         QTRY_COMPARE(ui.controller.queue()->count(), 0);
         QTRY_VERIFY(ui.showsText(QStringLiteral("The queue is empty")));
+        QQmlListReference actions(ui.item(QStringLiteral("queuePage")), "actions");
+        QObject *undo = nullptr;
+        for (qsizetype i = 0; i < actions.count(); ++i) {
+            if (actions.at(i)->objectName() == QStringLiteral("undoQueueAction")) {
+                undo = actions.at(i);
+                break;
+            }
+        }
+        QVERIFY(undo);
+        QVERIFY(undo->property("enabled").toBool());
+        QVERIFY(QMetaObject::invokeMethod(undo, "trigger"));
+        QTRY_COMPARE(ui.controller.queue()->count(), 5);
+        QTRY_VERIFY(!undo->property("enabled").toBool());
     }
 
     void queueTextStaysPlainText()

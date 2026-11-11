@@ -328,6 +328,115 @@ class TestPlayQueue : public QObject {
         QVERIFY(added.constFirst().at(1).toBool());
     }
 
+    void undoRestoresTheLastReorderOrRemovalOnlyOnce()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        f.server.generatedEpisodeTotal = 5;
+        QVERIFY(f.addAndWait(kSeason, PlayQueue::Last));
+        const QStringList original = f.queue.itemIds();
+
+        QVERIFY(f.queue.move(0, 3));
+        QVERIFY(f.queue.canUndo());
+        QVERIFY(!f.queue.move(0, 8)); // An invalid edit does not replace the snapshot.
+        QVERIFY(f.queue.undo());
+        QCOMPARE(f.queue.itemIds(), original);
+        QVERIFY(!f.queue.canUndo());
+        QVERIFY(!f.queue.undo()); // One level, without redo.
+
+        QVERIFY(f.queue.remove(2));
+        QCOMPARE(f.queue.count(), 4);
+        QVERIFY(f.queue.canUndo());
+        QVERIFY(!f.queue.remove(20));
+        QVERIFY(f.queue.undo());
+        QCOMPARE(f.queue.itemIds(), original);
+        QCOMPARE(f.name(2), QStringLiteral("Episode 3"));
+        QVERIFY(!f.queue.canUndo());
+    }
+
+    void undoRevertsAdditionsWithoutFetchingAgain()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        QVERIFY(f.addAndWait(kMovie, PlayQueue::Last));
+        const int requests = f.server.listingRequests;
+        QVERIFY(f.queue.canUndo());
+        QVERIFY(f.queue.undo());
+        QCOMPARE(f.queue.count(), 0);
+        QCOMPARE(f.server.listingRequests, requests);
+        QVERIFY(!f.queue.canUndo());
+
+        QVERIFY(f.addAndWait(kMovie, PlayQueue::Last));
+        f.server.generatedEpisodeTotal = 3;
+        QVERIFY(f.addAndWait(kSeason, PlayQueue::Next));
+        QCOMPARE(f.queue.count(), 4);
+        QVERIFY(f.queue.undo());
+        QCOMPARE(f.queue.itemIds(), QStringList{kMovie});
+    }
+
+    void undoRestoresClearAndPersistsTheRevertedQueue()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        f.own();
+        f.server.generatedEpisodeTotal = 5;
+        QVERIFY(f.addAndWait(kSeason, PlayQueue::Last));
+        const QStringList original = f.queue.itemIds();
+        QTRY_VERIFY(!f.stored().isEmpty());
+        const int requests = f.server.listingRequests;
+
+        f.queue.clear();
+        QCOMPARE(f.queue.count(), 0);
+        QVERIFY(f.queue.canUndo());
+        QTRY_VERIFY(!QFileInfo::exists(f.path));
+        QVERIFY(f.queue.undo());
+        QCOMPARE(f.queue.itemIds(), original);
+        QCOMPARE(f.server.listingRequests, requests);
+        QTRY_VERIFY(!f.stored().isEmpty());
+        QCOMPARE(QJsonDocument::fromJson(f.stored())
+                     .object()
+                     .value(QStringLiteral("items"))
+                     .toArray()
+                     .size(),
+                 int(original.size()));
+        QVERIFY(!f.queue.canUndo());
+    }
+
+    void undoIsUnavailableWhileExpandingAndDoesNotSurviveAnOwnerChange()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        f.own();
+        QVERIFY(f.addAndWait(kMovie, PlayQueue::Last));
+        f.server.generatedEpisodeTotal = 3;
+        f.server.holdListings = true;
+        QVERIFY(f.queue.add(kSeason, PlayQueue::Next));
+        QVERIFY(f.queue.busy());
+        QVERIFY(!f.queue.undo()); // The pending addition must not follow a rollback.
+        QCOMPARE(f.queue.itemIds(), QStringList{kMovie});
+        QSignalSpy added(&f.queue, &PlayQueue::added);
+        f.server.holdListings = false;
+        f.server.releaseHeld();
+        QTRY_COMPARE(added.size(), 1);
+        QCOMPARE(f.queue.count(), 4);
+        QVERIFY(f.queue.undo());
+        QCOMPARE(f.queue.itemIds(), QStringList{kMovie});
+
+        f.queue.clear();
+        QVERIFY(f.queue.canUndo()); // Clear from nonempty is itself undoable.
+        f.queue.restoreFor(f.client.serverId(), f.client.userId());
+        QVERIFY(!f.queue.canUndo());
+        QVERIFY(!f.queue.undo());
+        QTRY_COMPARE(f.queue.count(), 0);
+
+        QVERIFY(f.addAndWait(kMovie, PlayQueue::Last));
+        QVERIFY(f.queue.canUndo());
+        f.client.disconnectFromServer();
+        QCOMPARE(f.queue.count(), 0);
+        QVERIFY(!f.queue.canUndo());
+        QVERIFY(!f.queue.undo());
+    }
+
     void movingRemovingAndClearing()
     {
         Fixture f;

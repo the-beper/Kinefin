@@ -870,6 +870,10 @@ msgstr "%1, %2 di %3"
 msgid "Clear Queue"
 msgstr "Svuota coda"
 
+#: src/qml/QueuePage.qml
+msgid "Undo"
+msgstr "Annulla"
+
 #: src/qml/QueuePage.qml:197
 msgid "Remove all items from the queue?"
 msgstr "Rimuovere tutti gli elementi dalla coda?"

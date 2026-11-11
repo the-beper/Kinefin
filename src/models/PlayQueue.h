@@ -22,6 +22,7 @@ class PlayQueue final : public QAbstractListModel {
     Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
     Q_PROPERTY(bool restoring READ restoring NOTIFY restoringChanged)
     Q_PROPERTY(bool restoreFailed READ restoreFailed NOTIFY restoringChanged)
+    Q_PROPERTY(bool canUndo READ canUndo NOTIFY canUndoChanged)
 
   public:
     enum Placement { Last, Next };
@@ -59,12 +60,16 @@ class PlayQueue final : public QAbstractListModel {
     bool busy() const { return m_op.active || m_restore.active; }
     bool restoring() const { return m_restore.active; }
     bool restoreFailed() const { return m_restore.failed; }
+    bool canUndo() const { return m_canUndo; }
 
     // Queues the item (and what it stands for) at the end or at the top; false, with nothing sent, when the id is not valid, an expansion is running or the client is not signed in. The outcome comes as `added` or `addFailed`
     Q_INVOKABLE bool add(const QString &itemId, Kinefin::PlayQueue::Placement placement);
     Q_INVOKABLE bool move(int from, int to);
     Q_INVOKABLE bool remove(int row);
     Q_INVOKABLE void clear();
+    // Revert the most recent edit to this owner's queue, without refetching rows.
+    // A restore, logout or owner change discards the snapshot; there is no redo.
+    Q_INVOKABLE bool undo();
 
     int rowCount(const QModelIndex &parent = QModelIndex()) const override;
     QVariant data(const QModelIndex &index, int role) const override;
@@ -94,6 +99,7 @@ class PlayQueue final : public QAbstractListModel {
     void nothingToAdd();
     // The rows changed by a user edit or an add (not by a session loss or a restore)
     void edited();
+    void canUndoChanged();
     void restoringChanged();
     // A write failed (once per streak of failures)
     void saveFailed();
@@ -151,11 +157,15 @@ class PlayQueue final : public QAbstractListModel {
     void finishRestore();
     void endRestore();
     void dropMemory();
+    void rememberEdit();
+    void forgetUndo();
     void scheduleSave();
     void flush();
 
     QPointer<JellyfinClient> m_client;
     std::vector<ItemSummary> m_items;
+    std::vector<ItemSummary> m_undoItems;
+    bool m_canUndo = false;
     Operation m_op;
     Restore m_restore;
     QString m_path;

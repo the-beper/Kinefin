@@ -866,6 +866,10 @@ msgstr "%1, %2 of %3"
 msgid "Clear Queue"
 msgstr "Clear Queue"
 
+#: src/qml/QueuePage.qml
+msgid "Undo"
+msgstr "Undo"
+
 #: src/qml/QueuePage.qml:197
 msgid "Remove all items from the queue?"
 msgstr "Remove all items from the queue?"
