@@ -224,3 +224,25 @@ that the **Images** workflow rebuilt `kinefin-flatpak:fedora45`, and set the
 release digest variable to the new approved image digest before tagging a
 release. Reusing the old image will fail the smoke test because Python is
 missing. No auto-update or publication is performed by this gate.
+
+## Verify immutable GitHub Actions dependencies
+
+Before merging workflow edits or preparing a release, run:
+
+```sh
+python3 -I build/release/verify_action_pins.py
+python3 -m unittest discover -s tests -p 'test_action_pins.py' -v
+```
+
+The CI lint job and release validation job both reject external `uses:` entries
+that point to mutable tags, branches, short SHAs or expressions. Ordinary GitHub
+Actions must use a full, nonzero, lowercase 40-character Git commit hash.
+`docker://` actions must use an explicit nonzero SHA-256 image digest. Local
+composite actions and reusable workflows must resolve to files inside
+`.github/`. The audit also checks composite action definitions under
+`.github/actions/` and rejects YAML aliases and ambiguous `uses:` syntax.
+
+This offline audit is a guard against accidental dependency drift, **not**
+a signature or provenance verification. `actionlint` still validates workflow
+syntax separately. When changing an action, review the upstream release and
+resolve its published tag to an actual commit before updating the pinned SHA.
