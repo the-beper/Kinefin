@@ -163,8 +163,8 @@ Kirigami.ScrollablePage {
                         if (!libraryPage)
                             return;
                         // The rail ignores the grid's filter: the grid starts from the genre alone
-                        page.connection.library.filter = LibraryItemsModel.All;
-                        page.connection.library.genreIds = [row.genreId];
+                        libraryPage.model.filter = LibraryItemsModel.All;
+                        libraryPage.model.genreIds = [row.genreId];
                         page.Window.window.pageStack.pop(libraryPage);
                     }
                 }

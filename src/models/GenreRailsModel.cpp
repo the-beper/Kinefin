@@ -26,14 +26,17 @@ GenreRailsModel::GenreRailsModel(JellyfinClient *client, QObject *parent)
 GenreRailsModel::~GenreRailsModel()
 {
     releaseSlots();
+    if (m_client)
+        m_client->releaseListingChannel(ListChannel);
 }
 
-bool GenreRailsModel::open(const QString &libraryId, const QString &collectionType)
+bool GenreRailsModel::open(const QString &collectionType, const QString &libraryId)
 {
     const auto base = LibraryItemsModel::browseQuery(collectionType);
     clear();
-    if (!base || !isValidJellyfinId(libraryId))
+    if (!base || (!libraryId.isEmpty() && !isValidJellyfinId(libraryId)))
         return false;
+    m_open = true;
     m_libraryId = libraryId;
     m_includeTypes = base->includeItemTypes;
     Q_EMIT libraryChanged();
@@ -44,6 +47,8 @@ bool GenreRailsModel::open(const QString &libraryId, const QString &collectionTy
 void GenreRailsModel::clear()
 {
     releaseSlots();
+    if (m_client)
+        m_client->releaseListingChannel(ListChannel);
     if (!m_rails.empty()) {
         beginResetModel();
         const std::vector<Rail> old = std::move(m_rails);
@@ -56,7 +61,8 @@ void GenreRailsModel::clear()
     m_wanted.clear();
     m_more = false;
     m_nextStart = 0;
-    const bool hadLibrary = !m_libraryId.isEmpty();
+    const bool hadLibrary = m_open;
+    m_open = false;
     m_libraryId.clear();
     m_includeTypes.clear();
     setStatus(Idle);
@@ -77,7 +83,8 @@ void GenreRailsModel::requestGenres()
 {
     setStatus(Loading);
     if (!m_client
-        || !m_client->fetchGenres(m_libraryId, m_nextStart, GenresPerPage, m_includeTypes))
+        || !m_client->fetchGenres(m_libraryId, m_nextStart, GenresPerPage, m_includeTypes,
+                                  ListChannel))
         setStatus(Failed);
 }
 
@@ -89,13 +96,13 @@ void GenreRailsModel::loadMore()
 
 void GenreRailsModel::retryList()
 {
-    if (m_status == Failed && !m_libraryId.isEmpty())
+    if (m_status == Failed && m_open)
         requestGenres();
 }
 
-void GenreRailsModel::onGenresReady(const QJsonArray &items, int total)
+void GenreRailsModel::onGenresReady(const QJsonArray &items, int total, int channel)
 {
-    if (m_status != Loading)
+    if (channel != ListChannel || m_status != Loading)
         return;
     QSet<QString> seen;
     for (const Rail &rail : m_rails)
@@ -227,7 +234,7 @@ void GenreRailsModel::onListingFailed(const QString &family, int, const QString 
 {
     const int slot = channel - FirstSlotChannel;
     const int row = rowForSlot(slot);
-    if (family == QLatin1String("Genres") && channel == 0 && m_status == Loading) {
+    if (family == QLatin1String("Genres") && channel == ListChannel && m_status == Loading) {
         setStatus(Failed);
         return;
     }

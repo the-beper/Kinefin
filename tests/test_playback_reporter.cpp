@@ -309,6 +309,26 @@ class TestPlaybackReporter : public QObject {
         QCOMPARE(chain.session.state(), PlaybackSession::State::Playing);
     }
 
+    void clearedCredentialsEndTheHeartbeat()
+    {
+        Chain chain(std::chrono::milliseconds(40));
+        QVERIFY(chain.ok);
+        QVERIFY(chain.session.open(kIdentity, PlaybackSession::Route::Direct));
+        QVERIFY(chain.session.opened());
+        QTRY_VERIFY(countOf(chain.server, QStringLiteral("/Progress")) >= 2);
+        // A user switch drops the session's credentials without expiring them; the next user signs in while the stream is still playing
+        QSignalSpy loggedIn(&chain.client, &JellyfinClient::loginSucceeded);
+        chain.client.forgetSession();
+        QVERIFY(chain.client.authenticate(QStringLiteral("fixture-user"),
+                                          QStringLiteral("fixture-password")));
+        QTRY_COMPARE(loggedIn.size(), 1);
+        QTest::qWait(60);
+        const int atSwitch = countOf(chain.server, QStringLiteral("/Progress"));
+        QTest::qWait(250);
+        QCOMPARE(countOf(chain.server, QStringLiteral("/Progress")), atSwitch);
+        QCOMPARE(chain.session.state(), PlaybackSession::State::Playing);
+    }
+
     void theObserverIsReleasedWithTheReporterAndOthersSurvive()
     {
         PlaybackSession session;

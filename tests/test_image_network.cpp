@@ -206,6 +206,64 @@ class TestImageNetwork : public QObject {
         QVERIFY(cleared->error() != QNetworkReply::NoError);
         QCOMPARE(server.imageRequests, 1);
     }
+
+    void userImageIsFetchedAnonymouslyAndForeignOnesAreRefused()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        const QString withAvatar = QStringLiteral("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1");
+        const QString withoutAvatar = QStringLiteral("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb2");
+        server.users = {{withAvatar, "ta", QStringLiteral("Alice"), QStringLiteral("tag1")},
+                        {withoutAvatar, "tb", QStringLiteral("Bob"), {}}};
+        const QUrl base = server.url(QStringLiteral("/jellyfin"));
+        auto origin = std::make_shared<Kinefin::ImageOrigin>();
+        origin->set(base);
+        Kinefin::ImageNetworkAccess network(origin);
+        Kinefin::JellyfinClient client;
+        QSignalSpy ready(&client, &Kinefin::JellyfinClient::serverReady);
+        QVERIFY(prepare(client, server));
+        QTRY_COMPARE(ready.size(), 1);
+
+        QNetworkRequest request(client.userImageUrl(withAvatar, QStringLiteral("tag1")));
+        request.setRawHeader("Authorization", "MediaBrowser Token=\"secret\"");
+        std::unique_ptr<QNetworkReply> reply(network.get(request));
+        QSignalSpy finished(reply.get(), &QNetworkReply::finished);
+        QTRY_COMPARE(finished.size(), 1);
+        QCOMPARE(reply->error(), QNetworkReply::NoError);
+        QCOMPARE(reply->readAll(), kTinyPng);
+        QCOMPARE(server.userImageRequests, 1);
+        QVERIFY(server.lastUserImageAuth.isEmpty());
+
+        // A user without an avatar is a plain 404
+        std::unique_ptr<QNetworkReply> missing(
+            network.get(QNetworkRequest(client.userImageUrl(withoutAvatar, {}))));
+        QSignalSpy missingFinished(missing.get(), &QNetworkReply::finished);
+        QTRY_COMPARE(missingFinished.size(), 1);
+        QCOMPARE(missing->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt(), 404);
+
+        // Another host, an extra path segment, a POST and a stray query key never leave the process
+        const int served = server.requestCount;
+        QUrl otherHost = client.userImageUrl(withAvatar, QStringLiteral("tag1"));
+        otherHost.setHost(QStringLiteral("localhost"));
+        QUrl extraPath = client.userImageUrl(withAvatar, QStringLiteral("tag1"));
+        extraPath.setPath(base.path() + QStringLiteral("/UserImage/x"));
+        const QUrl strayKey(client.userImageUrl(withAvatar, QStringLiteral("tag1")).toString()
+                            + QStringLiteral("&api_key=secret"));
+        for (const QUrl &url : {otherHost, extraPath, strayKey}) {
+            std::unique_ptr<QNetworkReply> refused(network.get(QNetworkRequest(url)));
+            QSignalSpy refusedFinished(refused.get(), &QNetworkReply::finished);
+            QTRY_COMPARE(refusedFinished.size(), 1);
+            QCOMPARE(refused->error(), QNetworkReply::ProtocolFailure);
+        }
+        std::unique_ptr<QNetworkReply> post(
+            network.post(QNetworkRequest(client.userImageUrl(withAvatar, QStringLiteral("tag1"))),
+                         QByteArray("x")));
+        QSignalSpy postFinished(post.get(), &QNetworkReply::finished);
+        QTRY_COMPARE(postFinished.size(), 1);
+        QCOMPARE(post->error(), QNetworkReply::ProtocolFailure);
+        QCOMPARE(server.requestCount, served);
+        QCOMPARE(server.userImageRequests, 2);
+    }
 };
 
 QTEST_GUILESS_MAIN(TestImageNetwork)

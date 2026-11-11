@@ -609,6 +609,17 @@ QList<SettingDefinition> buildDefinitions()
          false,
          true,
          kli18n("Manual MPV Configuration")},
+        // Parity §2.7: a Kinefin addition
+        {QStringLiteral("library"),
+         QStringLiteral("newBadge"),
+         T::Bool,
+         QVariant(true),
+         {},
+         0,
+         0,
+         false,
+         false,
+         kli18n("Show New Badge on Recently Added Items")},
         // Parity §2.6: window geometry, "x,y,width,height"
         {QStringLiteral("state"),
          QStringLiteral("geometry"),

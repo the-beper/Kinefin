@@ -10,6 +10,7 @@
 #include "models/ItemRowModel.h"
 #include "models/LibraryItemsModel.h"
 #include "models/PlayQueue.h"
+#include "models/ResumeItemsModel.h"
 #include "models/SearchModel.h"
 #include "models/SeasonEpisodesModel.h"
 
@@ -84,6 +85,13 @@ struct GenreRailsModelForeign {
     Q_GADGET
     QML_FOREIGN(Kinefin::GenreRailsModel)
     QML_NAMED_ELEMENT(GenreRailsModel)
+    QML_UNCREATABLE("Created by the application")
+};
+
+struct ResumeItemsModelForeign {
+    Q_GADGET
+    QML_FOREIGN(Kinefin::ResumeItemsModel)
+    QML_NAMED_ELEMENT(ResumeItemsModel)
     QML_UNCREATABLE("Created by the application")
 };
 } // namespace Kinefin

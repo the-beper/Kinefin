@@ -26,7 +26,7 @@ struct Fixture {
 
     FakeJellyfin server;
     Kinefin::JellyfinClient client;
-    FilterOptionsModel options{&client};
+    FilterOptionsModel options{&client, 6};
     bool ok = false;
 };
 } // namespace
@@ -131,6 +131,48 @@ class TestFilterOptionsModel : public QObject {
         QCOMPARE(f.options.status(), FilterOptionsModel::Loading);
         QTRY_COMPARE(f.options.status(), FilterOptionsModel::Ready);
         QVERIFY(f.options.available());
+    }
+
+    void anotherChannelsFiltersAreIgnored()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        QSignalSpy answers(&f.client, &Kinefin::JellyfinClient::filtersReady);
+        QSignalSpy failures(&f.client, &Kinefin::JellyfinClient::listingFailed);
+        f.server.holdFirstListings = 1;
+        f.options.load(kLibrary, QStringLiteral("Movie"));
+        QTRY_COMPARE(f.server.listingRoutes.value(QStringLiteral("Filters")).size(), 1);
+        // Another consumer's answer and failure do not reach this model
+        QVERIFY(f.client.fetchFilters(kLibrary, QStringLiteral("Movie"), 7));
+        QTRY_COMPARE(answers.size(), 1);
+        f.server.listingStatus.insert(QStringLiteral("Filters"), 500);
+        QVERIFY(f.client.fetchFilters(kLibrary, QStringLiteral("Movie"), 7));
+        QTRY_COMPARE(failures.size(), 1);
+        QCOMPARE(f.options.status(), FilterOptionsModel::Loading);
+        QCOMPARE(f.options.rowCount(), 0);
+        // Its own channel is the one that counts
+        f.server.listingStatus.clear();
+        QVERIFY(f.client.fetchFilters(kLibrary, QStringLiteral("Movie"), 6));
+        QTRY_COMPARE(f.options.status(), FilterOptionsModel::Ready);
+        QCOMPARE(f.options.rowCount(), 3);
+    }
+
+    void retryWithoutParentId()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        f.server.listingStatus.insert(QStringLiteral("Filters"), 500);
+        f.options.load(QString(), QStringLiteral("Movie"));
+        QTRY_COMPARE(f.options.status(), FilterOptionsModel::Failed);
+        f.server.listingStatus.clear();
+        f.options.retry();
+        QCOMPARE(f.options.status(), FilterOptionsModel::Loading);
+        QTRY_COMPARE(f.options.status(), FilterOptionsModel::Ready);
+        QVERIFY(f.options.available());
+        const QByteArray route =
+            f.server.listingRoutes.value(QStringLiteral("Filters")).constLast();
+        QVERIFY2(!route.contains("parentId="), route.constData());
+        QVERIFY(route.contains("includeItemTypes=Movie"));
     }
 
     void aLateAnswerAfterAClearChangesNothing()

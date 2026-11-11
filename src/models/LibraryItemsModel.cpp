@@ -3,6 +3,7 @@
 #include "LibraryItemsModel.h"
 
 #include "api/MediaSourceSelection.h"
+#include "models/SearchModel.h"
 
 #include <QJsonArray>
 #include <QJsonValue>
@@ -49,15 +50,24 @@ QString filtersFor(LibraryItemsModel::Filter filter)
 }
 } // namespace
 
-LibraryItemsModel::LibraryItemsModel(JellyfinClient *client, QObject *parent)
-    : PagedItemsModel(PageSize, parent), m_client(client), m_genreOptions(client, this)
+LibraryItemsModel::LibraryItemsModel(JellyfinClient *client, int channel, QObject *parent)
+    : PagedItemsModel(PageSize, parent), m_client(client), m_channel(channel),
+      m_genreOptions(client, channel, this)
 {
+    m_searchDebounce.setSingleShot(true);
+    m_searchDebounce.setInterval(SearchModel::DebounceMs);
+    connect(&m_searchDebounce, &QTimer::timeout, this, [this] { applySearchTerm(); });
     // The options decide which of the selected genres still exist: the others are dropped, all of them when the options cannot be loaded (the menu that clears them is hidden then)
     connect(&m_genreOptions, &FilterOptionsModel::statusChanged, this, [this] {
         if (m_genreIds.isEmpty())
             return;
+        // A prune is not an edit of the user: the view state is not reported
+        const auto prune = [this](const QStringList &ids) {
+            if (assignGenreIds(ids) && isOpen())
+                restartPaging();
+        };
         if (m_genreOptions.status() == FilterOptionsModel::Failed) {
-            setGenreIds({});
+            prune({});
             return;
         }
         if (m_genreOptions.status() != FilterOptionsModel::Ready)
@@ -67,7 +77,7 @@ LibraryItemsModel::LibraryItemsModel(JellyfinClient *client, QObject *parent)
             if (m_genreOptions.contains(id))
                 kept.append(id);
         }
-        setGenreIds(kept);
+        prune(kept);
     });
     if (m_client) {
         connect(m_client, &JellyfinClient::itemsReady, this, &LibraryItemsModel::onItemsReady);
@@ -82,24 +92,42 @@ std::optional<ItemQuery> LibraryItemsModel::browseQuery(const QString &collectio
 {
     ItemQuery query;
     query.recursive = true;
-    if (collectionType == QLatin1String("movies"))
+    query.cardImages = true;
+    if (collectionType == QLatin1String("movies")) {
         query.includeItemTypes = QStringLiteral("Movie");
-    else if (collectionType == QLatin1String("tvshows"))
+    } else if (collectionType == QLatin1String("tvshows")) {
         query.includeItemTypes = QStringLiteral("Series");
-    else if (collectionType == QLatin1String("boxsets"))
+        // The season and episode counts of a series card
+        query.fields = {QStringLiteral("ChildCount"), QStringLiteral("RecursiveItemCount")};
+    } else if (collectionType == QLatin1String("boxsets")) {
         query.includeItemTypes = QStringLiteral("BoxSet");
-    else
+    } else {
         return std::nullopt;
+    }
     return query;
 }
 
 bool LibraryItemsModel::open(const QString &libraryId, const QString &collectionType,
                              const QString &libraryName)
 {
+    return openScope(libraryId, collectionType, libraryName, nullptr);
+}
+
+bool LibraryItemsModel::open(const QString &libraryId, const QString &collectionType,
+                             const QString &libraryName, const ViewState &initial)
+{
+    return openScope(libraryId, collectionType, libraryName, &initial);
+}
+
+bool LibraryItemsModel::openScope(const QString &libraryId, const QString &collectionType,
+                                  const QString &libraryName, const ViewState *initial)
+{
     const auto base = browseQuery(collectionType);
-    const bool sameLibrary = libraryId == m_libraryId;
-    clear();
-    if (!base || !isValidJellyfinId(libraryId))
+    const bool sameLibrary =
+        isOpen() && libraryId == m_libraryId && collectionType == m_collectionType;
+    // The search term stays: the tab keeps it while its library selector changes
+    clearLibrary();
+    if (!base || (!libraryId.isEmpty() && !isValidJellyfinId(libraryId)))
         return false;
     m_base = *base;
     m_base.parentId = libraryId;
@@ -107,9 +135,11 @@ bool LibraryItemsModel::open(const QString &libraryId, const QString &collection
     m_collectionType = collectionType;
     m_libraryName = libraryName;
     // Another library starts from the default order and filter: a filter its type cannot offer would silently empty the grid
-    if (!sameLibrary)
-        resetOrderAndFilter();
-    else if (m_filter == Resumable && !resumableAvailable())
+    if (initial)
+        applyViewState(*initial);
+    else if (!sameLibrary)
+        applyViewState({});
+    if (m_filter == Resumable && !resumableAvailable())
         setFilterQuietly(All);
     Q_EMIT libraryChanged();
     restartPaging();
@@ -119,7 +149,13 @@ bool LibraryItemsModel::open(const QString &libraryId, const QString &collection
 
 void LibraryItemsModel::clear()
 {
-    const bool hadLibrary = !m_libraryId.isEmpty();
+    clearLibrary();
+    dropSearchTerm();
+}
+
+void LibraryItemsModel::clearLibrary()
+{
+    const bool hadLibrary = isOpen();
     m_genreOptions.clear();
     clearPaging();
     m_libraryId.clear();
@@ -129,23 +165,19 @@ void LibraryItemsModel::clear()
         Q_EMIT libraryChanged();
 }
 
-void LibraryItemsModel::resetOrderAndFilter()
+void LibraryItemsModel::applyViewState(const ViewState &state)
 {
-    if (m_sortKey != Name) {
-        m_sortKey = Name;
+    if (m_sortKey != state.sort) {
+        m_sortKey = state.sort;
         Q_EMIT sortKeyChanged();
     }
-    if (m_descending) {
-        m_descending = false;
+    if (m_descending != state.descending) {
+        m_descending = state.descending;
         Q_EMIT descendingChanged();
     }
-    setFilterQuietly(All);
-    // Genres belong to a library: another one starts without any
-    if (!m_genreIds.isEmpty()) {
-        m_genreIds.clear();
-        Q_EMIT genreIdsChanged();
-        Q_EMIT filteredChanged();
-    }
+    setFilterQuietly(state.filter);
+    // Genres belong to a library: another one starts with its own or none
+    assignGenreIds(state.genreIds);
 }
 
 void LibraryItemsModel::setFilterQuietly(Filter filter)
@@ -163,8 +195,9 @@ void LibraryItemsModel::setSortKey(SortKey key)
         return;
     m_sortKey = key;
     Q_EMIT sortKeyChanged();
-    if (!m_libraryId.isEmpty())
+    if (isOpen())
         restartPaging();
+    Q_EMIT viewStateEdited();
 }
 
 void LibraryItemsModel::setDescending(bool descending)
@@ -173,8 +206,9 @@ void LibraryItemsModel::setDescending(bool descending)
         return;
     m_descending = descending;
     Q_EMIT descendingChanged();
-    if (!m_libraryId.isEmpty())
+    if (isOpen())
         restartPaging();
+    Q_EMIT viewStateEdited();
 }
 
 void LibraryItemsModel::setFilter(Filter filter)
@@ -184,11 +218,21 @@ void LibraryItemsModel::setFilter(Filter filter)
     m_filter = filter;
     Q_EMIT filterChanged();
     Q_EMIT filteredChanged();
-    if (!m_libraryId.isEmpty())
+    if (isOpen())
         restartPaging();
+    Q_EMIT viewStateEdited();
 }
 
 void LibraryItemsModel::setGenreIds(const QStringList &ids)
+{
+    if (!assignGenreIds(ids))
+        return;
+    if (isOpen())
+        restartPaging();
+    Q_EMIT viewStateEdited();
+}
+
+bool LibraryItemsModel::assignGenreIds(const QStringList &ids)
 {
     // Valid ids only, each once, at most as many as a query may carry
     QStringList clean;
@@ -198,28 +242,77 @@ void LibraryItemsModel::setGenreIds(const QStringList &ids)
             clean.append(id);
     }
     if (clean == m_genreIds)
-        return;
+        return false;
     const bool wasFiltered = filtered();
     m_genreIds = clean;
     Q_EMIT genreIdsChanged();
     if (filtered() != wasFiltered)
         Q_EMIT filteredChanged();
-    if (!m_libraryId.isEmpty())
+    return true;
+}
+
+void LibraryItemsModel::setSearchTerm(const QString &term)
+{
+    if (term == m_searchTerm)
+        return;
+    m_searchTerm = term;
+    Q_EMIT searchTermChanged();
+    const QString clean = SearchModel::normalized(term);
+    const bool tooShort = clean.size() < SearchModel::MinTermLength;
+    // The same words again (a trailing space, a second too-short edit): what is shown or in flight stays
+    if ((tooShort ? QString() : clean) == m_appliedTerm) {
+        m_searchDebounce.stop();
+        return;
+    }
+    if (tooShort) {
+        m_searchDebounce.stop();
+        applySearchTerm();
+        return;
+    }
+    m_searchDebounce.start();
+}
+
+void LibraryItemsModel::applySearchTerm()
+{
+    const QString clean = SearchModel::normalized(m_searchTerm);
+    const QString applied = clean.size() < SearchModel::MinTermLength ? QString() : clean;
+    if (applied == m_appliedTerm)
+        return;
+    const bool wasFiltered = filtered();
+    m_appliedTerm = applied;
+    if (filtered() != wasFiltered)
+        Q_EMIT filteredChanged();
+    if (isOpen())
         restartPaging();
+}
+
+void LibraryItemsModel::dropSearchTerm()
+{
+    m_searchDebounce.stop();
+    const bool wasFiltered = filtered();
+    const bool hadTerm = !m_searchTerm.isEmpty();
+    m_searchTerm.clear();
+    m_appliedTerm.clear();
+    if (hadTerm)
+        Q_EMIT searchTermChanged();
+    if (filtered() != wasFiltered)
+        Q_EMIT filteredChanged();
 }
 
 QHash<int, QByteArray> LibraryItemsModel::roleNames() const
 {
-    return {{ItemIdRole, "itemId"},
-            {NameRole, "name"},
-            {YearRole, "year"},
-            {TypeRole, "type"},
-            {ImageUrlRole, "imageUrl"},
-            {PlayedRole, "played"},
-            {UnplayedCountRole, "unplayedCount"},
-            {PlayedPercentageRole, "playedPercentage"},
-            {FavoriteRole, "favorite"},
-            {LoadedRole, "loaded"}};
+    QHash<int, QByteArray> names{{ItemIdRole, "itemId"},
+                                 {NameRole, "name"},
+                                 {YearRole, "year"},
+                                 {TypeRole, "type"},
+                                 {ImageUrlRole, "imageUrl"},
+                                 {PlayedRole, "played"},
+                                 {UnplayedCountRole, "unplayedCount"},
+                                 {PlayedPercentageRole, "playedPercentage"},
+                                 {FavoriteRole, "favorite"},
+                                 {LoadedRole, "loaded"}};
+    names.insert(cardRoleNames());
+    return names;
 }
 
 QVariant LibraryItemsModel::rowData(const ItemSummary &item, bool loaded, int role) const
@@ -250,7 +343,7 @@ QVariant LibraryItemsModel::rowData(const ItemSummary &item, bool loaded, int ro
     case FavoriteRole:
         return item.favorite;
     default:
-        return {};
+        return cardRoleData(item, role);
     }
 }
 
@@ -261,22 +354,22 @@ bool LibraryItemsModel::sendPage(int start, int limit)
     query.sortOrder = m_descending ? QStringLiteral("Descending") : QStringLiteral("Ascending");
     query.filters = filtersFor(m_filter);
     query.genreIds = m_genreIds;
+    query.searchTerm = m_appliedTerm;
     query.startIndex = start;
     query.limit = limit;
-    return m_client && m_client->fetchItems(query, Channel);
+    return m_client && m_client->fetchItems(query, m_channel);
 }
 
 void LibraryItemsModel::onItemsReady(const QJsonArray &items, int total, int channel)
 {
-    if (channel != Channel || !pageInFlight() || m_libraryId.isEmpty())
+    if (channel != m_channel || !pageInFlight() || !isOpen())
         return;
     deliverPage(items, total);
 }
 
 void LibraryItemsModel::onListingFailed(const QString &family, int, const QString &, int channel)
 {
-    if (family != QLatin1String("Items") || channel != Channel || !pageInFlight()
-        || m_libraryId.isEmpty())
+    if (family != QLatin1String("Items") || channel != m_channel || !pageInFlight() || !isOpen())
         return;
     failPageInFlight();
 }

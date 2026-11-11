@@ -12,7 +12,7 @@
 #include <vector>
 
 namespace Kinefin {
-// The rows of the Home page: Continue Watching, Next Up and Recently Added per movie or series library, each loaded on its own listing channel so they run side by side. A row is `Loading` until its reply, `Ready` (shown only when it has items) or `Failed` with its own retry; nothing retries by itself. The model empties itself when the client loses its credentials. `items` is the row's `ItemRowModel`
+// The rows of the Home page: Continue Watching, Next Up and Recently Added per movie or series library, each loaded on its own listing channel so they run side by side. A row is `Loading` until its reply, `Ready` (shown only when it has items) or `Failed` with its own retry; nothing retries by itself. The model empties itself when the client loses its credentials. `items` is the row's `ItemRowModel` (the Recently Added ones without season counts: on `/Items/Latest` a series' `ChildCount` is not its seasons)
 class HomeRowsModel final : public QAbstractListModel {
     Q_OBJECT
 

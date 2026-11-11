@@ -4,9 +4,9 @@ import QtQuick
 import QtQuick.Controls as QQC2
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
+import org.kde.kirigamiaddons.components as Components
 
-// The top bar: the main menu at the left, the Home tab in the middle, and search, favorites, queue and the account menu at the right.
-// The width decides the mode: Wide from 36 grid units (labelled tab, wide search box), Medium from 24 (icon-only tab, narrow box), Compact below 24 (search, favorites and queue fold into the main menu).
+// The top bar: the main menu at the left, the Home, Movies and TV Shows tabs in the middle (a type tab only while the server has a library of it), and search, favorites, queue and the account menu at the right. The width decides the mode: Wide from 36 grid units (labelled tabs, wide search box), Medium from 24 (icon-only tabs, narrow box), Compact below 24 (search, favorites and queue fold into the main menu)
 Item {
     id: root
     objectName: "shellHeader"
@@ -22,6 +22,12 @@ Item {
     readonly property bool wide: shell.wideHeader
     readonly property bool compact: shell.compactHeader
 
+    // The signed-in user, found among the saved users by id: null when signed out or when the list has no such entry
+    readonly property var currentUser: {
+        const userId = connection.currentUserId;
+        return signedIn && userId.length > 0 ? connection.users.find(user => user.id === userId) ?? null : null;
+    }
+
     implicitHeight: bar.implicitHeight
 
     // Ctrl+F focuses the box and selects what is in it
@@ -33,6 +39,22 @@ Item {
     // The keyboard comes back to the box after the page its typing opened was created: unlike Ctrl+F it must not select, or the keystroke that opened the page would be replaced
     function refocusSearchField() {
         searchField.forceActiveFocus(Qt.TabFocusReason);
+    }
+
+    // The list the box searches: the model of the type tab at the root of the stack; on any other page the box feeds the global search
+    readonly property var localModel: {
+        switch (shell.rootTab) {
+        case "movies":
+            return connection.movies;
+        case "tvshows":
+            return connection.shows;
+        }
+        return null;
+    }
+
+    // The term the box shows now: the one of the list it searches
+    function currentTerm() {
+        return localModel ? localModel.searchTerm : connection.search.term;
     }
 
     // The box holds the keyboard while the term is being typed: the shell does not move the focus while a keystroke of its own opens the search page
@@ -65,7 +87,7 @@ Item {
         leftPadding: menuButton.width + Kirigami.Units.smallSpacing * 2
         rightPadding: rightCluster.width + Kirigami.Units.smallSpacing * 2
 
-        actions: [homeAction]
+        actions: [homeAction, moviesAction, tvShowsAction]
 
         delegate: Kirigami.NavigationTabButton {
             id: tab
@@ -107,6 +129,15 @@ Item {
         }
     }
 
+    // Kirigami's tab bar switches the tab with the mouse wheel: this item sits above it and takes the wheel first, so a stray scroll over the header opens no other tab
+    Item {
+        anchors.fill: bar
+
+        WheelHandler {
+            acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+        }
+    }
+
     RowLayout {
         id: rightCluster
 
@@ -117,7 +148,7 @@ Item {
         }
         spacing: Kirigami.Units.smallSpacing
 
-        // The global search box: it owns the term, and the first keystroke opens the search page above the current one
+        // The search box: on a type tab it searches that tab's list and the first keystroke pops back to the tab; elsewhere it owns the global term and the first keystroke opens the search page above the current one
         Kirigami.SearchField {
             id: searchField
             objectName: "headerSearchField"
@@ -130,18 +161,34 @@ Item {
             focusSequences: []
             maximumLength: 128
             autoAccept: false
-            placeholderText: i18nc("@info:placeholder", "Search")
+            placeholderText: {
+                switch (root.shell.rootTab) {
+                case "movies":
+                    return i18nc("@info:placeholder", "Search in Movies");
+                case "tvshows":
+                    return i18nc("@info:placeholder", "Search in TV Shows");
+                }
+                return i18nc("@info:placeholder", "Search");
+            }
 
             // The box is the source of truth of the term: its own text never echoes back
             onTextChanged: {
-                if (text !== root.connection.search.term) {
+                if (text === root.currentTerm())
+                    return;
+                if (root.localModel) {
+                    root.localModel.searchTerm = text;
+                    root.shell.popToBaseWhileTyping();
+                } else {
                     root.connection.search.term = text;
                     root.shell.openSearchIfMissing();
                 }
             }
-            onAccepted: root.connection.search.searchNow()
+            onAccepted: {
+                if (!root.localModel)
+                    root.connection.search.searchNow();
+            }
             Keys.onDownPressed: root.shell.searchResultsDown()
-            Component.onCompleted: text = root.connection.search.term
+            Component.onCompleted: text = root.currentTerm()
         }
 
         // The star already sits where the Favorites page will go
@@ -174,11 +221,31 @@ Item {
             objectName: "accountButton"
 
             Layout.alignment: Qt.AlignVCenter
+            // The avatar of the user replaces the icon; the name is for screen readers only
+            readonly property bool hasAvatar: root.currentUser !== null && root.currentUser.imageUrl.toString().length > 0
+            // The text stays static: it feeds the tooltip, which must never carry the remote user name
+            readonly property string accessibleName: root.currentUser ? i18nc("@label %1 is a user name", "Account: %1", root.currentUser.name) : text
             text: i18nc("@action:button", "Account")
-            icon.name: "im-user"
+            Accessible.name: accessibleName
+            icon.name: hasAvatar ? "" : "im-user"
             display: QQC2.AbstractButton.IconOnly
             visible: root.signedIn || root.serverChosen
             onClicked: accountMenu.popup(accountButton, 0, accountButton.height)
+
+            Components.Avatar {
+                objectName: "accountAvatar"
+                anchors.centerIn: parent
+                width: Kirigami.Units.iconSizes.smallMedium
+                height: width
+                visible: accountButton.hasAvatar
+                Accessible.ignored: true
+                name: root.currentUser ? root.currentUser.name : ""
+                // Only URLs built by JellyfinClient::userImageUrl belong here: a raw server string must never become a source
+                source: root.currentUser ? root.currentUser.imageUrl : ""
+                // The image is decoded at the size it shows
+                sourceSize.width: width * Screen.devicePixelRatio
+                sourceSize.height: height * Screen.devicePixelRatio
+            }
         }
     }
 
@@ -186,21 +253,75 @@ Item {
     Connections {
         target: root.connection.search
         function onTermChanged() {
-            if (searchField.text !== root.connection.search.term)
+            if (!root.localModel && searchField.text !== root.connection.search.term)
                 searchField.text = root.connection.search.term;
         }
     }
+
+    // The same for the list a type tab searches, and the box takes the term of the other list when the tab changes
+    Connections {
+        target: root.localModel
+        function onSearchTermChanged() {
+            if (searchField.text !== root.localModel.searchTerm)
+                searchField.text = root.localModel.searchTerm;
+        }
+    }
+    onLocalModelChanged: searchField.text = currentTerm()
+
+    // The tab group of Kirigami unchecks an action when its buttons are rebuilt (a tab appears or goes), which would break a binding on `checked`: the marks are written here instead, on every change of the section and whenever one is cleared
+    function syncTabs() {
+        homeAction.checked = shell.currentSection === "home";
+        moviesAction.checked = shell.currentSection === "movies";
+        tvShowsAction.checked = shell.currentSection === "tvshows";
+    }
+
+    Connections {
+        target: shell
+        function onCurrentSectionChanged() {
+            root.syncTabs();
+        }
+    }
+    Component.onCompleted: syncTabs()
 
     Kirigami.Action {
         id: homeAction
         objectName: "homeTabAction"
 
         text: i18nc("@title:tab", "Home")
+        tooltip: root.wide ? "" : text
         icon.name: "go-home"
         enabled: root.signedIn
-        checked: shell.currentSection === "home"
+        onCheckedChanged: Qt.callLater(root.syncTabs)
         shortcut: "Ctrl+1"
         onTriggered: shell.goHome()
+    }
+
+    // Ctrl+2 and Ctrl+3 follow the position of the visible tabs: a missing Movies tab moves TV Shows to Ctrl+2
+    Kirigami.Action {
+        id: moviesAction
+        objectName: "moviesTabAction"
+
+        text: i18nc("@title:tab", "Movies")
+        tooltip: root.wide ? "" : text
+        icon.name: "video-x-generic"
+        visible: root.connection.movieLibraries.length > 0
+        enabled: root.signedIn
+        onCheckedChanged: Qt.callLater(root.syncTabs)
+        shortcut: visible ? "Ctrl+2" : ""
+        onTriggered: shell.openTab("movies")
+    }
+    Kirigami.Action {
+        id: tvShowsAction
+        objectName: "tvShowsTabAction"
+
+        text: i18nc("@title:tab", "TV Shows")
+        tooltip: root.wide ? "" : text
+        icon.name: "video-television"
+        visible: root.connection.showLibraries.length > 0
+        enabled: root.signedIn
+        onCheckedChanged: Qt.callLater(root.syncTabs)
+        shortcut: visible ? (moviesAction.visible ? "Ctrl+3" : "Ctrl+2") : ""
+        onTriggered: shell.openTab("tvshows")
     }
 
     // The shortcuts live on the actions, not on the menu items, so they work with the menu closed
@@ -280,7 +401,8 @@ Item {
         id: switchUserAction
         objectName: "switchUserAction"
 
-        text: i18nc("@action:inmenu", "Switch User")
+        text: i18nc("@action:inmenu Opens the list of the saved users of this server", "Switch User")
+        tooltip: i18nc("@info:tooltip", "Choose another user without signing out")
         icon.name: "system-switch-user"
         visible: root.signedIn
         onTriggered: root.connection.switchUser()
@@ -290,15 +412,17 @@ Item {
         objectName: "signOutAction"
 
         text: i18nc("@action:inmenu", "Sign Out")
+        tooltip: i18nc("@info:tooltip", "Remove this user's saved session from this system")
         icon.name: "system-log-out"
         visible: root.signedIn
-        onTriggered: root.connection.signOut()
+        // Signing out removes the saved session and queue of the user, so it asks first
+        onTriggered: signOutDialog.openFor(root.currentUser ? root.currentUser.name : "")
     }
     Kirigami.Action {
         id: switchServerAction
         objectName: "switchServerAction"
 
-        text: i18nc("@action:inmenu", "Switch Server")
+        text: i18nc("@action:inmenu Goes back to the list of servers", "Switch Server")
         icon.name: "network-server"
         visible: root.serverChosen
         onTriggered: root.connection.cancel()
@@ -355,16 +479,57 @@ Item {
             objectName: "switchUserItem"
             visible: root.signedIn
             action: switchUserAction
+            Accessible.description: switchUserAction.tooltip
+            QQC2.ToolTip.text: switchUserAction.tooltip
+            QQC2.ToolTip.visible: hovered
+            QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
         }
         QQC2.MenuItem {
             objectName: "signOutItem"
             visible: root.signedIn
             action: signOutAction
+            Accessible.description: signOutAction.tooltip
+            QQC2.ToolTip.text: signOutAction.tooltip
+            QQC2.ToolTip.visible: hovered
+            QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
         }
         QQC2.MenuItem {
             objectName: "switchServerItem"
             visible: root.serverChosen
             action: switchServerAction
+        }
+    }
+
+    Kirigami.PromptDialog {
+        id: signOutDialog
+        objectName: "signOutDialog"
+
+        property string userName
+
+        function openFor(name) {
+            userName = name;
+            open();
+        }
+
+        title: i18nc("@title:window", "Sign Out")
+        standardButtons: Kirigami.Dialog.Cancel
+        customFooterActions: [
+            Kirigami.Action {
+                text: i18nc("@action:button", "Sign Out")
+                icon.name: "system-log-out"
+                onTriggered: {
+                    signOutDialog.close();
+                    root.connection.signOut();
+                }
+            }
+        ]
+
+        // The subtitle would render the user name as rich text: the name goes into a plain-text label
+        QQC2.Label {
+            Layout.fillWidth: true
+            wrapMode: Text.Wrap
+            textFormat: Text.PlainText
+            text: signOutDialog.userName.length > 0 ? i18nc("@info %1 is a user name", "Sign out %1? The saved session and queue of this user are removed from this system. The account on the server is not changed", signOutDialog.userName) : i18nc("@info", "Sign out? The saved session and queue of this user are removed from this system. The account on the server is not changed")
         }
     }
 

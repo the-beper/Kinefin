@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <QDateTime>
 #include <QJsonObject>
 #include <QJsonValue>
 #include <QString>
@@ -30,7 +31,13 @@ struct ItemSummary {
     int episodeNumberEnd = -1;
     int runtimeMinutes = -1;
     int unplayedCount = -1;
+    int remainingMinutes = -1;
+    // Seasons (`ChildCount`) and episodes (`RecursiveItemCount`) of a series
+    int childCount = -1;
+    int recursiveItemCount = -1;
     qreal playedPercentage = 0;
+    qreal communityRating = -1;
+    QDateTime dateCreated;
     bool played = false;
     bool favorite = false;
     // An episode the library lists but has no file for (LocationType Virtual)
@@ -39,6 +46,12 @@ struct ItemSummary {
 };
 
 ItemSummary parseItemSummary(const QJsonObject &item);
+
+// How long an unplayed item counts as new
+constexpr int NewItemDays = 7;
+
+// Whether the New badge applies: unplayed and added within `NewItemDays` of `nowUtc` (a date in the future counts as new)
+bool isRecentlyAdded(const ItemSummary &item, const QDateTime &nowUtc);
 
 // The item types the player can open directly: the one rule for the details page and the play queue
 bool isPlayableVideo(const QString &type);

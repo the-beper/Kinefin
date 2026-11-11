@@ -229,10 +229,13 @@ class TestProfileCommands : public QObject {
                   QStringLiteral("d"), QStringLiteral("n"), QStringLiteral("name")},
                  {QStringLiteral("srv2"), QStringLiteral("https://b.example"), QStringLiteral("u"),
                   QStringLiteral("d"), QStringLiteral("n"), QStringLiteral("name")}}));
-        store.tokens.insert(serverTokenKey(id, QStringLiteral("srv1")), QStringLiteral("t1"));
-        store.tokens.insert(serverTokenKey(id, QStringLiteral("srv2")), QStringLiteral("t2"));
-        store.tokens.insert(serverTokenKey(QStringLiteral("other"), QStringLiteral("srv1")),
-                            QStringLiteral("keep"));
+        // The legacy key of one server and the per-user key of the other
+        store.tokens.insert(legacyServerTokenKey(id, QStringLiteral("srv1")), QStringLiteral("t1"));
+        store.tokens.insert(serverTokenKey(id, QStringLiteral("srv2"), QStringLiteral("u")),
+                            QStringLiteral("t2"));
+        store.tokens.insert(
+            serverTokenKey(QStringLiteral("other"), QStringLiteral("srv1"), QStringLiteral("u")),
+            QStringLiteral("keep"));
         touch(profileDataDirectory(id) + QStringLiteral("/downloads/film.mkv"));
         touch(profileDataDirectory(id) + QStringLiteral("/logs/kinefin.log"));
         touch(profileCacheDirectory(id) + QStringLiteral("/images/a.png"));

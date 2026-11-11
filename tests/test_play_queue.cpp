@@ -7,6 +7,7 @@
 #include "models/PlayQueue.h"
 
 #include <QAbstractItemModelTester>
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -54,7 +55,8 @@ struct Fixture {
         put(kSeries, QStringLiteral("series_item"));
         put(kBoxSet, QStringLiteral("boxset_item"));
         ok = server.listen() && login(client, server);
-        queue.setStoragePath(path);
+        path = ownerPath(client.serverId(), client.userId());
+        queue.setStoragePath(legacyPath);
         queue.setSaveDelay(std::chrono::milliseconds(20));
     }
 
@@ -82,6 +84,12 @@ struct Fixture {
                && added.size() == 1;
     }
 
+    // The file the queue of an owner is kept in
+    QString ownerPath(const QString &serverId, const QString &userId) const
+    {
+        return dir.filePath(
+            QStringLiteral("profile/queues/%1_%2.json").arg(serverId.toLower(), userId.toLower()));
+    }
     // The queue becomes the signed-in user's: what it keeps is saved under this owner
     void own() { queue.restoreFor(client.serverId(), client.userId()); }
     QByteArray stored() const
@@ -89,12 +97,18 @@ struct Fixture {
         QFile file(path);
         return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
     }
-    void write(const QByteArray &bytes) const
+    void write(const QByteArray &bytes) const { writeAt(path, bytes); }
+    void writeAt(const QString &target, const QByteArray &bytes) const
     {
-        QDir().mkpath(QFileInfo(path).absolutePath());
-        QFile file(path);
+        QDir().mkpath(QFileInfo(target).absolutePath());
+        QFile file(target);
         QVERIFY(file.open(QIODevice::WriteOnly));
         file.write(bytes);
+    }
+    static QByteArray readAt(const QString &target)
+    {
+        QFile file(target);
+        return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
     }
     QByteArray fileFor(const QStringList &ids, const QString &serverId, const QString &userId,
                        int version = 1) const
@@ -112,7 +126,9 @@ struct Fixture {
     FakeJellyfin server;
     Kinefin::JellyfinClient client;
     QTemporaryDir dir;
-    QString path = dir.filePath(QStringLiteral("profile/queue.json"));
+    // The queue of earlier versions, which the storage path names; `path` is the signed-in user's own file
+    QString legacyPath = dir.filePath(QStringLiteral("profile/queue.json"));
+    QString path;
     PlayQueue queue{&client};
     QAbstractItemModelTester tester{&queue};
     bool ok = false;
@@ -383,7 +399,7 @@ class TestPlayQueue : public QObject {
         f.server.reverseIdsAnswer = true;
         PlayQueue again(&f.client);
         QAbstractItemModelTester tester(&again);
-        again.setStoragePath(f.path);
+        again.setStoragePath(f.legacyPath);
         again.restoreFor(f.client.serverId(), f.client.userId());
         QVERIFY(again.restoring());
         QVERIFY(again.busy());
@@ -428,21 +444,138 @@ class TestPlayQueue : public QObject {
         QCOMPARE(f.queue.count(), 1);
     }
 
-    void anotherOwnersFileIsLeftAloneUntilTheFirstEdit()
+    void eachUserKeepsOwnQueueFile()
     {
         Fixture f;
         QVERIFY(f.ok);
-        const QByteArray theirs = f.fileFor({kMovie}, f.client.serverId(),
-                                            QStringLiteral("0123456789abcdef0123456789abcdef"));
-        f.write(theirs);
-        const int before = f.server.listingRequests;
+        const QString other = QStringLiteral("0123456789abcdef0123456789abcdef");
+        f.server.itemsById.insert(
+            episodeId(1),
+            QJsonDocument(QJsonObject{{QStringLiteral("Id"), episodeId(1)},
+                                      {QStringLiteral("Name"), QStringLiteral("Other")},
+                                      {QStringLiteral("Type"), QStringLiteral("Movie")}})
+                .toJson(QJsonDocument::Compact));
+        f.own();
+        QVERIFY(f.addAndWait(kMovie, PlayQueue::Last));
+        QTRY_VERIFY(f.stored().contains(kMovie.toUtf8()));
+        const QByteArray mine = f.stored();
+        // Another user signs in: no rows, and the first file stays as it is
+        f.queue.restoreFor(f.client.serverId(), other);
+        QCOMPARE(f.queue.count(), 0);
+        QVERIFY(f.addAndWait(episodeId(1), PlayQueue::Last));
+        const QString theirs = f.ownerPath(f.client.serverId(), other);
+        QTRY_VERIFY(f.readAt(theirs).contains(episodeId(1).toUtf8()));
+        QVERIFY(!f.readAt(theirs).contains(kMovie.toUtf8()));
+        QCOMPARE(f.stored(), mine);
+        // The first user is back: their own queue, not the other's
         f.queue.restoreFor(f.client.serverId(), f.client.userId());
+        QTRY_VERIFY(!f.queue.restoring());
+        QCOMPARE(f.queue.count(), 1);
+        QCOMPARE(f.id(0), kMovie);
+        // The folder holds nothing but the two files, and is private
+        QCOMPARE(QDir(QFileInfo(f.path).absolutePath()).entryList(QDir::Files).size(), 2);
+        const auto others = QFileDevice::ReadGroup | QFileDevice::WriteGroup | QFileDevice::ExeGroup
+                            | QFileDevice::ReadOther | QFileDevice::WriteOther
+                            | QFileDevice::ExeOther;
+        QVERIFY(!(QFileInfo(QFileInfo(f.path).absolutePath()).permissions() & others));
+    }
+
+    void legacyQueueMigratesToOwner()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        const QString other = QStringLiteral("0123456789abcdef0123456789abcdef");
+        const QByteArray legacy = f.fileFor({kMovie}, f.client.serverId(), f.client.userId());
+        f.writeAt(f.legacyPath, legacy);
+        const int before = f.server.listingRequests;
+        // Another owner's restore leaves the old file alone
+        f.queue.restoreFor(f.client.serverId(), other);
         QCOMPARE(f.queue.count(), 0);
         QCOMPARE(f.server.listingRequests, before);
-        QTest::qWait(100);
-        QCOMPARE(f.stored(), theirs);
-        QVERIFY(f.addAndWait(kMovie, PlayQueue::Last));
-        QTRY_VERIFY(f.stored().contains(f.client.userId().toUtf8()));
+        QCOMPARE(f.readAt(f.legacyPath), legacy);
+        QVERIFY(!QFileInfo::exists(f.ownerPath(f.client.serverId(), other)));
+        // The owner's restore moves it
+        f.own();
+        QVERIFY(f.queue.restoring());
+        QVERIFY(!QFileInfo::exists(f.legacyPath));
+        QCOMPARE(f.stored(), legacy);
+        QTRY_VERIFY(!f.queue.restoring());
+        QCOMPARE(f.queue.count(), 1);
+        QCOMPARE(f.id(0), kMovie);
+    }
+
+    void aLegacyQueueStaysWhenTheOwnerFileCannotBeWritten()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        const QByteArray legacy = f.fileFor({kMovie}, f.client.serverId(), f.client.userId());
+        f.writeAt(f.legacyPath, legacy);
+        // A regular file where the `queues` folder should be
+        QFile blocker(f.dir.filePath(QStringLiteral("profile/queues")));
+        QVERIFY(blocker.open(QIODevice::WriteOnly));
+        blocker.close();
+        f.own();
+        QCOMPARE(f.queue.count(), 0);
+        QVERIFY(!f.queue.restoring());
+        QCOMPARE(f.readAt(f.legacyPath), legacy);
+    }
+
+    void anExistingOwnerFileWinsOverTheLegacyOne()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        const QByteArray legacy = f.fileFor({kSeason}, f.client.serverId(), f.client.userId());
+        f.writeAt(f.legacyPath, legacy);
+        f.write(f.fileFor({kMovie}, f.client.serverId(), f.client.userId()));
+        f.own();
+        QTRY_VERIFY(!f.queue.restoring());
+        QCOMPARE(f.queue.count(), 1);
+        QCOMPARE(f.id(0), kMovie);
+        QCOMPARE(f.readAt(f.legacyPath), legacy);
+    }
+
+    void aFileThatIsNotWhatItsNameSaysIsRemoved()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        f.write(f.fileFor({kMovie}, f.client.serverId(),
+                          QStringLiteral("0123456789abcdef0123456789abcdef")));
+        const int before = f.server.listingRequests;
+        f.own();
+        QCOMPARE(f.queue.count(), 0);
+        QCOMPARE(f.server.listingRequests, before);
+        QVERIFY(!QFileInfo::exists(f.path));
+    }
+
+    void anOwnerWithAnInvalidIdKeepsNothing()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        // A valid owner's file that a hostile id must not reach
+        f.write(f.fileFor({kMovie}, f.client.serverId(), f.client.userId()));
+        const QByteArray mine = f.stored();
+        const QStringList hostile = {QStringLiteral("../x"), QStringLiteral("a/b"),
+                                     QStringLiteral(".."), QStringLiteral("a_b")};
+        for (const QString &id : hostile) {
+            f.queue.restoreFor(f.client.serverId(), id);
+            QVERIFY(f.addAndWait(kSeason, PlayQueue::Last));
+            QTest::qWait(50);
+            f.queue.forgetStored(f.client.serverId(), id);
+            f.queue.forgetStoredUser(id, f.client.userId());
+            f.queue.restoreFor(id, f.client.userId());
+            QVERIFY(f.addAndWait(kSeason, PlayQueue::Last));
+            QTest::qWait(50);
+        }
+        // No user at all is no owner either
+        f.queue.restoreFor(f.client.serverId(), QString());
+        QVERIFY(f.addAndWait(kSeason, PlayQueue::Last));
+        QTest::qWait(50);
+        // Nothing was written but the valid owner's file, and nothing outside the queues folder
+        QCOMPARE(f.stored(), mine);
+        QCOMPARE(QDir(QFileInfo(f.path).absolutePath()).entryList(QDir::Files).size(), 1);
+        QVERIFY(!QFileInfo::exists(f.legacyPath));
+        QVERIFY(!QFileInfo::exists(f.dir.filePath(QStringLiteral("x.json"))));
+        QVERIFY(!QFileInfo::exists(f.dir.filePath(QStringLiteral("profile/x.json"))));
     }
 
     void aStoredQueueIsAskedFromTheServerInBatchesOfAHundred()
@@ -563,7 +696,7 @@ class TestPlayQueue : public QObject {
         Fixture f;
         QVERIFY(f.ok);
         auto queue = std::make_unique<PlayQueue>(&f.client);
-        queue->setStoragePath(f.path);
+        queue->setStoragePath(f.legacyPath);
         queue->setSaveDelay(std::chrono::minutes(10));
         queue->restoreFor(f.client.serverId(), f.client.userId());
         QSignalSpy added(queue.get(), &PlayQueue::added);
@@ -789,12 +922,67 @@ class TestPlayQueue : public QObject {
         Fixture f;
         QVERIFY(f.ok);
         const QString other = QStringLiteral("0123456789abcdef0123456789abcdef");
-        f.write(f.fileFor({kMovie}, f.client.serverId(), other));
+        const QString theirs = f.ownerPath(f.client.serverId(), other);
+        f.writeAt(theirs, f.fileFor({kMovie}, f.client.serverId(), other));
         f.queue.forgetStored(f.client.serverId(), f.client.userId());
-        QVERIFY(QFileInfo::exists(f.path));
+        QVERIFY(QFileInfo::exists(theirs));
         // Removing the server takes every user's queue of it
         f.queue.forgetStored(f.client.serverId());
+        QVERIFY(!QFileInfo::exists(theirs));
+    }
+
+    void forgetStoredUserRemovesOneOwnersFile()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        const QString other = QStringLiteral("0123456789abcdef0123456789abcdef");
+        const QString foreign = QStringLiteral("00000000000000000000000000000001");
+        const QString theirs = f.ownerPath(f.client.serverId(), other);
+        const QString elsewhere = f.ownerPath(foreign, f.client.userId());
+        f.write(f.fileFor({kMovie}, f.client.serverId(), f.client.userId()));
+        f.writeAt(theirs, f.fileFor({kMovie}, f.client.serverId(), other));
+        f.writeAt(theirs + QStringLiteral(".broken"), QByteArrayLiteral("x"));
+        f.writeAt(elsewhere, f.fileFor({kMovie}, foreign, f.client.userId()));
+        f.writeAt(f.legacyPath, f.fileFor({kMovie}, f.client.serverId(), other));
+        // The current user is in memory too
+        f.own();
+        QTRY_VERIFY(!f.queue.restoring());
+        QCOMPARE(f.queue.count(), 1);
+        f.queue.forgetStoredUser(f.client.serverId(), f.client.userId());
         QVERIFY(!QFileInfo::exists(f.path));
+        QCOMPARE(f.queue.count(), 0);
+        QVERIFY(QFileInfo::exists(theirs));
+        QVERIFY(QFileInfo::exists(elsewhere));
+        // An empty user is not the whole server
+        f.queue.forgetStoredUser(f.client.serverId(), QString());
+        QVERIFY(QFileInfo::exists(theirs));
+        // The other user's file, the one set aside and the old file of that user go
+        f.queue.forgetStoredUser(f.client.serverId(), other);
+        QVERIFY(!QFileInfo::exists(theirs));
+        QVERIFY(!QFileInfo::exists(theirs + QStringLiteral(".broken")));
+        QVERIFY(!QFileInfo::exists(f.legacyPath));
+        QVERIFY(QFileInfo::exists(elsewhere));
+    }
+
+    void forgettingAServerRemovesEveryQueueFileOfIt()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        const QString foreign = QStringLiteral("00000000000000000000000000000001");
+        const QString elsewhere = f.ownerPath(foreign, f.client.userId());
+        const QString second =
+            f.ownerPath(f.client.serverId(), QStringLiteral("abcdefabcdefabcdefabcdefabcdefab"));
+        f.write(f.fileFor({kMovie}, f.client.serverId(), f.client.userId()));
+        f.writeAt(second, QByteArrayLiteral("not even json"));
+        f.writeAt(second + QStringLiteral(".broken"), QByteArrayLiteral("x"));
+        f.writeAt(elsewhere, f.fileFor({kMovie}, foreign, f.client.userId()));
+        f.writeAt(f.legacyPath, f.fileFor({kMovie}, f.client.serverId(), f.client.userId()));
+        f.queue.forgetStored(f.client.serverId());
+        QVERIFY(!QFileInfo::exists(f.path));
+        QVERIFY(!QFileInfo::exists(second));
+        QVERIFY(!QFileInfo::exists(second + QStringLiteral(".broken")));
+        QVERIFY(!QFileInfo::exists(f.legacyPath));
+        QVERIFY(QFileInfo::exists(elsewhere));
     }
 
     void removingAnotherServerKeepsThePendingEdits()
@@ -802,7 +990,7 @@ class TestPlayQueue : public QObject {
         Fixture f;
         QVERIFY(f.ok);
         auto queue = std::make_unique<PlayQueue>(&f.client);
-        queue->setStoragePath(f.path);
+        queue->setStoragePath(f.legacyPath);
         queue->setSaveDelay(std::chrono::minutes(10));
         queue->restoreFor(f.client.serverId(), f.client.userId());
         QSignalSpy added(queue.get(), &PlayQueue::added);

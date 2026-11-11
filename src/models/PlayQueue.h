@@ -73,13 +73,15 @@ class PlayQueue final : public QAbstractListModel {
     // Entries in order
     QStringList itemIds() const;
 
-    // The file the queue is kept in (ids only, one slot per profile, owned by one server and user); empty, the default, keeps nothing. Writes are debounced and a pending one is flushed when the queue is destroyed or loses its credentials
+    // Where the queues are kept: ids only, one file per server and user in the `queues` folder next to `path`, which itself is the one-file queue of earlier versions (read and moved to its owner's file at that owner's first `restoreFor`). Empty, the default, keeps nothing. Writes are debounced and a pending one is flushed when the queue is destroyed or loses its credentials
     void setStoragePath(const QString &path);
     void setSaveDelay(std::chrono::milliseconds delay);
-    // A user signed in: the stored queue of this server and user is read back (the ids asked from the server in batches, the stored order kept, what the server no longer has dropped). A file of another server or user is left alone until the first edit replaces it
+    // A user signed in: the stored queue of this server and user is read back (the ids asked from the server in batches, the stored order kept, what the server no longer has dropped). The files of other users are never touched; an owner whose ids are not valid ids keeps nothing
     void restoreFor(const QString &serverId, const QString &userId);
     // The user signed out or the server was removed: the stored queue of that server (of that user when one is named) goes, and the one in memory with it
     void forgetStored(const QString &serverId, const QString &userId = QString());
+    // One user's queue goes (stored and in memory when it is the current one); the other users of the server keep theirs
+    void forgetStoredUser(const QString &serverId, const QString &userId);
     Q_INVOKABLE void retryRestore();
 
   Q_SIGNALS:
@@ -139,7 +141,11 @@ class PlayQueue final : public QAbstractListModel {
     void insert(std::vector<ItemSummary> items, Placement placement, bool *truncated, int *joined);
     QUrl imageUrlFor(const ItemSummary &item) const;
 
-    Stored readStored(StoredQueue *stored);
+    Stored readStored(const QString &path, StoredQueue *stored);
+    QString queuesDirectory() const;
+    // The file of an owner; empty without a storage path or for ids that are not valid
+    QString ownerFile(const QString &serverId, const QString &userId) const;
+    void migrateLegacy(const QString &serverId, const QString &userId);
     void requestRestoreBatch();
     void onRestoreItems(const QJsonArray &items);
     void finishRestore();

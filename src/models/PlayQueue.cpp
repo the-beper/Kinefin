@@ -5,6 +5,7 @@
 #include "api/MediaSourceSelection.h"
 #include "settings/ProfilePaths.h"
 
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>
@@ -19,6 +20,20 @@ namespace {
 QString idKey(const QString &id)
 {
     return id.toLower().remove(QLatin1Char('-'));
+}
+
+QByteArray queueFileBytes(const QString &serverId, const QString &userId, const QStringList &ids)
+{
+    const QJsonObject root{{QStringLiteral("version"), PlayQueue::FileVersion},
+                           {QStringLiteral("serverId"), serverId},
+                           {QStringLiteral("userId"), userId},
+                           {QStringLiteral("items"), QJsonArray::fromStringList(ids)}};
+    return QJsonDocument(root).toJson(QJsonDocument::Compact);
+}
+
+bool sameId(const QString &a, const QString &b)
+{
+    return a.compare(b, Qt::CaseInsensitive) == 0;
 }
 } // namespace
 
@@ -442,7 +457,7 @@ void PlayQueue::setSaveDelay(std::chrono::milliseconds delay)
 void PlayQueue::scheduleSave()
 {
     // Without a file or an owner there is nothing to keep
-    if (m_path.isEmpty() || m_serverId.isEmpty() || m_userId.isEmpty())
+    if (ownerFile(m_serverId, m_userId).isEmpty())
         return;
     m_dirty = true;
     m_saveTimer.start();
@@ -454,22 +469,16 @@ void PlayQueue::flush()
     if (!m_dirty)
         return;
     m_dirty = false;
-    if (m_path.isEmpty())
+    const QString file = ownerFile(m_serverId, m_userId);
+    if (file.isEmpty())
         return;
     if (m_items.empty()) {
         // Removing what is not there is a success
-        QFile::remove(m_path);
+        QFile::remove(file);
         m_saveFailing = false;
         return;
     }
-    QJsonArray ids;
-    for (const ItemSummary &item : m_items)
-        ids.append(item.id);
-    const QJsonObject root{{QStringLiteral("version"), FileVersion},
-                           {QStringLiteral("serverId"), m_serverId},
-                           {QStringLiteral("userId"), m_userId},
-                           {QStringLiteral("items"), ids}};
-    if (writePrivateFile(m_path, QJsonDocument(root).toJson(QJsonDocument::Compact))) {
+    if (writePrivateFile(file, queueFileBytes(m_serverId, m_userId, itemIds()))) {
         m_saveFailing = false;
     } else if (!m_saveFailing) {
         m_saveFailing = true;
@@ -477,19 +486,34 @@ void PlayQueue::flush()
     }
 }
 
-PlayQueue::Stored PlayQueue::readStored(StoredQueue *stored)
+QString PlayQueue::queuesDirectory() const
 {
-    if (m_path.isEmpty() || !QFileInfo::exists(m_path))
+    return m_path.isEmpty() ? QString()
+                            : QFileInfo(m_path).absolutePath() + QStringLiteral("/queues");
+}
+
+QString PlayQueue::ownerFile(const QString &serverId, const QString &userId) const
+{
+    // Valid ids hold no path separator and no dot: the name cannot leave the folder
+    if (m_path.isEmpty() || !isValidJellyfinId(serverId) || !isValidJellyfinId(userId))
+        return {};
+    return queuesDirectory() + QLatin1Char('/') + serverId.toLower() + QLatin1Char('_')
+           + userId.toLower() + QStringLiteral(".json");
+}
+
+PlayQueue::Stored PlayQueue::readStored(const QString &path, StoredQueue *stored)
+{
+    if (path.isEmpty() || !QFileInfo::exists(path))
         return Stored::Missing;
-    const auto reject = [this] {
-        QFile::remove(m_path);
+    const auto reject = [&path] {
+        QFile::remove(path);
         return Stored::Rejected;
     };
     // A link, a pipe or a device is no queue file: it is never opened (a pipe would block, /dev/zero would never end)
-    const QFileInfo info(m_path);
+    const QFileInfo info(path);
     if (info.isSymLink() || !info.isFile() || info.size() > MaxFileBytes)
         return reject();
-    QFile file(m_path);
+    QFile file(path);
     if (!file.open(QIODevice::ReadOnly))
         return reject();
     // The file may have grown since it was measured: one byte past the limit is enough to tell
@@ -501,8 +525,8 @@ PlayQueue::Stored PlayQueue::readStored(StoredQueue *stored)
     const QJsonValue version = root.value(QStringLiteral("version"));
     if (version.isDouble() && version.toInt() > FileVersion) {
         // A later version wrote it: keep it aside rather than losing it
-        QFile::remove(m_path + QStringLiteral(".broken"));
-        QFile::rename(m_path, m_path + QStringLiteral(".broken"));
+        QFile::remove(path + QStringLiteral(".broken"));
+        QFile::rename(path, path + QStringLiteral(".broken"));
         return Stored::Rejected;
     }
     const QString serverId = root.value(QStringLiteral("serverId")).toString();
@@ -547,22 +571,43 @@ void PlayQueue::restoreFor(const QString &serverId, const QString &userId)
     endOperation();
     // The rows in memory belong to the previous owner
     dropMemory();
-    m_serverId = serverId;
-    m_userId = userId;
-    if (!m_client || m_path.isEmpty())
+    // An owner that cannot name a file keeps nothing
+    const bool named = !ownerFile(serverId, userId).isEmpty();
+    m_serverId = named ? serverId : QString();
+    m_userId = named ? userId : QString();
+    if (!m_client || !named)
         return;
+    migrateLegacy(serverId, userId);
+    const QString file = ownerFile(serverId, userId);
     StoredQueue stored;
-    if (readStored(&stored) != Stored::Ok || stored.ids.isEmpty())
+    if (readStored(file, &stored) != Stored::Ok)
         return;
-    // Another server or user keeps its file until this one saves something
-    if (stored.serverId.compare(serverId, Qt::CaseInsensitive) != 0
-        || stored.userId.compare(userId, Qt::CaseInsensitive) != 0)
+    // A file that is not what its name says is no queue of this owner
+    if (!sameId(stored.serverId, serverId) || !sameId(stored.userId, userId)) {
+        QFile::remove(file);
+        return;
+    }
+    if (stored.ids.isEmpty())
         return;
     m_restore.active = true;
     m_restore.ids = stored.ids;
     Q_EMIT restoringChanged();
     Q_EMIT busyChanged();
     requestRestoreBatch();
+}
+
+void PlayQueue::migrateLegacy(const QString &serverId, const QString &userId)
+{
+    // The one-file queue of earlier versions belongs to the owner it names; another owner leaves it alone
+    const QString file = ownerFile(serverId, userId);
+    StoredQueue legacy;
+    if (QFileInfo(file).isSymLink() || QFileInfo::exists(file)
+        || readStored(m_path, &legacy) != Stored::Ok || !sameId(legacy.serverId, serverId)
+        || !sameId(legacy.userId, userId))
+        return;
+    // The old file goes only once the new one is written
+    if (writePrivateFile(file, queueFileBytes(serverId, userId, legacy.ids)))
+        QFile::remove(m_path);
 }
 
 void PlayQueue::retryRestore()
@@ -623,15 +668,32 @@ void PlayQueue::finishRestore()
 
 void PlayQueue::forgetStored(const QString &serverId, const QString &userId)
 {
-    const auto sameOwner = [&](const QString &storedServer, const QString &storedUser) {
-        return storedServer.compare(serverId, Qt::CaseInsensitive) == 0
-               && (userId.isEmpty() || storedUser.compare(userId, Qt::CaseInsensitive) == 0);
-    };
-    StoredQueue stored;
-    if (readStored(&stored) == Stored::Ok && sameOwner(stored.serverId, stored.userId))
-        QFile::remove(m_path);
+    if (!m_path.isEmpty() && isValidJellyfinId(serverId)
+        && (userId.isEmpty() || isValidJellyfinId(userId))) {
+        if (userId.isEmpty()) {
+            const QDir folder(queuesDirectory());
+            const QString prefix = serverId.toLower() + QLatin1Char('_');
+            // A file set aside as `.broken` is the user's queue as well
+            for (const QString &name :
+                 folder.entryList(QDir::Files | QDir::System | QDir::Hidden)) {
+                if (name.startsWith(prefix)
+                    && (name.endsWith(QLatin1String(".json"))
+                        || name.endsWith(QLatin1String(".json.broken"))))
+                    QFile::remove(folder.filePath(name));
+            }
+        } else {
+            const QString file = ownerFile(serverId, userId);
+            QFile::remove(file);
+            QFile::remove(file + QStringLiteral(".broken"));
+        }
+        // The queue of earlier versions, when it is this owner's
+        StoredQueue legacy;
+        if (readStored(m_path, &legacy) == Stored::Ok && sameId(legacy.serverId, serverId)
+            && (userId.isEmpty() || sameId(legacy.userId, userId)))
+            QFile::remove(m_path);
+    }
     // Pending edits and rows belong to the owner in memory: another server's removal leaves them alone
-    if (sameOwner(m_serverId, m_userId)) {
+    if (sameId(m_serverId, serverId) && (userId.isEmpty() || sameId(m_userId, userId))) {
         m_saveTimer.stop();
         m_dirty = false;
         endOperation();
@@ -640,5 +702,12 @@ void PlayQueue::forgetStored(const QString &serverId, const QString &userId)
         m_serverId.clear();
         m_userId.clear();
     }
+}
+
+void PlayQueue::forgetStoredUser(const QString &serverId, const QString &userId)
+{
+    // An empty user would stand for the whole server
+    if (!userId.isEmpty())
+        forgetStored(serverId, userId);
 }
 } // namespace Kinefin

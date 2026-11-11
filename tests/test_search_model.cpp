@@ -88,7 +88,7 @@ class TestSearchModel : public QObject {
             QCOMPARE(wire.queryItemValue(QStringLiteral("recursive")), QStringLiteral("true"));
             QCOMPARE(wire.queryItemValue(QStringLiteral("limit")), QStringLiteral("24"));
             QCOMPARE(wire.queryItemValue(QStringLiteral("fields")),
-                     QStringLiteral("PrimaryImageAspectRatio"));
+                     QStringLiteral("PrimaryImageAspectRatio,DateCreated"));
             QVERIFY(wire.queryItemValue(QStringLiteral("enableImageTypes"))
                         .contains(QStringLiteral("Thumb")));
             QCOMPARE(wire.queryItemValue(QStringLiteral("imageTypeLimit")), QStringLiteral("1"));

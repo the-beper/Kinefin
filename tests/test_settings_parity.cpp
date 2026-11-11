@@ -104,7 +104,11 @@ class TestSettingsParity : public QObject {
         const auto *geometry =
             Kinefin::findSetting(QStringLiteral("state"), QStringLiteral("geometry"));
         QVERIFY(geometry && geometry->hidden && geometry->defaultValue == QStringLiteral(""));
-        QCOMPARE(Kinefin::settingDefinitions().size(), defined + 1);
+        // §2.7 is not parsed: the Kinefin additions are listed here
+        const auto *newBadge =
+            Kinefin::findSetting(QStringLiteral("library"), QStringLiteral("newBadge"));
+        QVERIFY(newBadge && !newBadge->hidden && newBadge->defaultValue == true);
+        QCOMPARE(Kinefin::settingDefinitions().size(), defined + 2);
     }
 
     void everyDefaultIsValid()

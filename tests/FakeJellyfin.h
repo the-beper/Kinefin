@@ -77,17 +77,65 @@ class FakeJellyfin {
         return QUrl(QStringLiteral("http://127.0.0.1:%1%2").arg(m_server.serverPort()).arg(base));
     }
 
-    // The login response body, with the access token substituted on later successful logins when rotation is on
-    QByteArray authenticateBody() const
+    // The login response body, with the access token substituted on later successful logins when rotation is on. With a user table, the body carries that user's token, id, name and avatar tag (the first user when `username` is empty or unknown)
+    QByteArray authenticateBody(const QString &username = {}) const
     {
         auto document = QJsonDocument::fromJson(fixture(QStringLiteral("authenticate_success")));
-        if (rotateSecondLoginToken && successfulLogins >= 2) {
-            QJsonObject object = document.object();
+        QJsonObject object = document.object();
+        if (!users.isEmpty()) {
+            const FakeUser *found = userByName(username);
+            const FakeUser &user = found ? *found : users.constFirst();
+            QJsonObject userObject = object.value(QStringLiteral("User")).toObject();
+            userObject.insert(QStringLiteral("Id"), user.id);
+            userObject.insert(QStringLiteral("Name"), user.name);
+            userObject.remove(QStringLiteral("PrimaryImageTag"));
+            if (!user.tag.isEmpty())
+                userObject.insert(QStringLiteral("PrimaryImageTag"), user.tag);
+            object.insert(QStringLiteral("User"), userObject);
+            object.insert(QStringLiteral("AccessToken"), QString::fromUtf8(user.token));
+        } else if (rotateSecondLoginToken && successfulLogins >= 2) {
             object.insert(QStringLiteral("AccessToken"), QString::fromUtf8(secondLoginToken));
-            document.setObject(object);
         }
+        document.setObject(object);
         return document.toJson(QJsonDocument::Compact);
     }
+
+    // The user table: when not empty, a login names one of these (any password), /Users/Me answers by the token of the request, /Users/Public lists the visible ones and /UserImage serves the ones with a tag. Empty keeps the single fixture user
+    struct FakeUser {
+        QString id;
+        QByteArray token;
+        QString name;
+        QString tag; // empty: no avatar (the field is absent and /UserImage answers 404)
+        bool hidden = false;
+    };
+    QList<FakeUser> users;
+    // Tokens /Users/Me answers 401 to (the per-user deny switch)
+    QSet<QByteArray> deniedUsersMeTokens;
+    const FakeUser *userByName(const QString &name) const
+    {
+        for (const FakeUser &user : users) {
+            if (user.name == name)
+                return &user;
+        }
+        return nullptr;
+    }
+    const FakeUser *userByToken(const QByteArray &token) const
+    {
+        for (const FakeUser &user : users) {
+            if (user.token == token)
+                return &user;
+        }
+        return nullptr;
+    }
+    // /Users/Public: a status or a raw body replaces the generated list
+    int publicUsersRequests = 0;
+    QByteArray lastPublicUsersAuth;
+    int publicUsersStatus = 200;
+    QByteArray publicUsersRawBody;
+    // /UserImage
+    int userImageRequests = 0;
+    QByteArray lastUserImageRoute;
+    QByteArray lastUserImageAuth;
 
     bool invalidIdentity = false;
     bool denyLogin = false;
@@ -187,6 +235,8 @@ class FakeJellyfin {
     // When >= 0 the Items family is generated from startIndex/limit: `generatedItemTotal` is the TotalRecordCount, `generatedAvailable` (when >= 0) the rows that really exist, so a page past it comes back short; ids, names and image tags follow the row index
     int generatedItemTotal = -1;
     int generatedAvailable = -1;
+    // When >= 0 the Resume family is generated from startIndex/limit like the Items family: this is the TotalRecordCount
+    int generatedResumeTotal = -1;
     // When >= 0 the Episodes family is generated from startIndex/limit, like generatedItemTotal does for Items: this is the TotalRecordCount
     int generatedEpisodeTotal = -1;
     QList<QByteArray> itemsRoutes; // every Items request in arrival order
@@ -325,12 +375,11 @@ class FakeJellyfin {
             .toJson(QJsonDocument::Compact);
     }
 
-    QByteArray generatedItemsBody(const QByteArray &route) const
+    QByteArray generatedItemsBody(const QByteArray &route, int total, int available) const
     {
         const QUrlQuery query(QUrl(QString::fromUtf8(route)));
         const int start = query.queryItemValue(QStringLiteral("startIndex")).toInt();
         const int limit = query.queryItemValue(QStringLiteral("limit")).toInt();
-        const int available = generatedAvailable >= 0 ? generatedAvailable : generatedItemTotal;
         QJsonArray items;
         for (int row = start; row < start + limit && row < available; ++row) {
             // A 32-digit hex id built from the row index
@@ -344,7 +393,7 @@ class FakeJellyfin {
         }
         return QJsonDocument(QJsonObject{{QStringLiteral("Items"), items},
                                          {QStringLiteral("StartIndex"), start},
-                                         {QStringLiteral("TotalRecordCount"), generatedItemTotal}})
+                                         {QStringLiteral("TotalRecordCount"), total}})
             .toJson(QJsonDocument::Compact);
     }
 
@@ -451,8 +500,16 @@ class FakeJellyfin {
             } else if (denyLogin) {
                 respond(socket, 401, {});
             } else {
+                const QString username = QJsonDocument::fromJson(body)
+                                             .object()
+                                             .value(QStringLiteral("Username"))
+                                             .toString();
+                if (!users.isEmpty() && !userByName(username)) {
+                    respond(socket, 401, {});
+                    return;
+                }
                 ++successfulLogins;
-                respond(socket, 200, authenticateBody());
+                respond(socket, 200, authenticateBody(username));
             }
             return;
         }
@@ -504,13 +561,70 @@ class FakeJellyfin {
         if (method == "GET" && route.endsWith("/Users/Me")) {
             ++usersMeRequests;
             lastUsersMeAuth = authorization;
-            if (denyUsersMe) {
+            const qsizetype tokenAt = authorization.indexOf("Token=\"");
+            const QByteArray token =
+                tokenAt < 0 ? QByteArray() : authorization.mid(tokenAt + 7).split('"').value(0);
+            if (denyUsersMe || deniedUsersMeTokens.contains(token)) {
                 respond(socket, 401, {});
+            } else if (!users.isEmpty()) {
+                const FakeUser *user = userByToken(token);
+                if (!user) {
+                    respond(socket, 401, {});
+                    return;
+                }
+                QJsonObject me{{QStringLiteral("Id"), user->id},
+                               {QStringLiteral("Name"), user->name},
+                               {QStringLiteral("Policy"),
+                                QJsonObject{{QStringLiteral("IsAdministrator"), false}}},
+                               {QStringLiteral("Configuration"), QJsonObject()}};
+                if (!user->tag.isEmpty())
+                    me.insert(QStringLiteral("PrimaryImageTag"), user->tag);
+                respond(socket, 200, QJsonDocument(me).toJson(QJsonDocument::Compact));
             } else {
                 respond(socket, 200,
                         "{\"Id\":\"d5ed5d4e2e5447b58e9f2b6f7bd5c96a\",\"Name\":\"bepi\","
                         "\"Policy\":{\"IsAdministrator\":false},\"Configuration\":{}}");
             }
+            return;
+        }
+        if (method == "GET" && route.endsWith("/Users/Public")) {
+            ++publicUsersRequests;
+            lastPublicUsersAuth = authorization;
+            if (publicUsersStatus != 200) {
+                respond(socket, publicUsersStatus, {});
+            } else if (!publicUsersRawBody.isEmpty()) {
+                respond(socket, 200, publicUsersRawBody);
+            } else {
+                QJsonArray list;
+                for (const FakeUser &user : users) {
+                    if (user.hidden)
+                        continue;
+                    QJsonObject entry{{QStringLiteral("Id"), user.id},
+                                      {QStringLiteral("Name"), user.name},
+                                      {QStringLiteral("HasPassword"), true}};
+                    if (!user.tag.isEmpty())
+                        entry.insert(QStringLiteral("PrimaryImageTag"), user.tag);
+                    list.append(entry);
+                }
+                respond(socket, 200, QJsonDocument(list).toJson(QJsonDocument::Compact));
+            }
+            return;
+        }
+        if (method == "GET" && (route.contains("/UserImage?") || route.endsWith("/UserImage"))) {
+            ++userImageRequests;
+            lastUserImageRoute = route;
+            lastUserImageAuth = authorization;
+            const QString id = capturedListingQuery(route).queryItemValue(QStringLiteral("userId"));
+            bool hasAvatar = true;
+            if (!users.isEmpty()) {
+                hasAvatar = false;
+                for (const FakeUser &user : users)
+                    hasAvatar = hasAvatar || (user.id == id && !user.tag.isEmpty());
+            }
+            if (hasAvatar)
+                respond(socket, 200, kTinyPng, "Cache-Control: public, max-age=31536000\r\n");
+            else
+                respond(socket, 404, {});
             return;
         }
         // The listing routes classify by fragment; `listingFamily` keeps the order so the more specific fragments win (/Items/Latest before /Items, /Sessions before the POST-only playback routes never match a GET)
@@ -551,7 +665,14 @@ class FakeJellyfin {
                 respond(socket, 200, itemsByIdBody(route));
             } else if (listingFamily == QLatin1String("Items") && generatedItemTotal >= 0
                        && !denyListings && !redirectListings) {
-                respond(socket, 200, generatedItemsBody(route));
+                respond(socket, 200,
+                        generatedItemsBody(route, generatedItemTotal,
+                                           generatedAvailable >= 0 ? generatedAvailable
+                                                                   : generatedItemTotal));
+            } else if (listingFamily == QLatin1String("Resume") && generatedResumeTotal >= 0
+                       && !denyListings && !redirectListings) {
+                respond(socket, 200,
+                        generatedItemsBody(route, generatedResumeTotal, generatedResumeTotal));
             } else if (redirectListings) {
                 respond(socket, 302, {},
                         QByteArrayLiteral("Location: https://unexpected.invalid/") + route.mid(1)

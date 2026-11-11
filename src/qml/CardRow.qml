@@ -99,6 +99,14 @@ Item {
         Keys.onReturnPressed: activateCurrent()
         Keys.onEnterPressed: activateCurrent()
         Keys.onSpacePressed: activateCurrent()
+        // Only the media cards have a menu: the people cards of a details page have no openMenu
+        Keys.onMenuPressed: list.currentItem?.openMenu?.(0, list.currentItem.height)
+        Keys.onPressed: event => {
+            if (event.modifiers === Qt.ShiftModifier && event.key === Qt.Key_F10 && list.currentItem?.openMenu) {
+                list.currentItem.openMenu(0, list.currentItem.height);
+                event.accepted = true;
+            }
+        }
 
         Controls.ScrollBar.horizontal: Controls.ScrollBar {
             id: scrollBar

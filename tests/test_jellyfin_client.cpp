@@ -3,6 +3,7 @@
 #include "FakeJellyfin.h"
 #include "api/DeviceProfile.h"
 #include "api/JellyfinClient.h"
+#include "models/LibraryItemsModel.h"
 
 #include <QFile>
 #include <QHash>
@@ -15,6 +16,32 @@
 #include <QTcpSocket>
 #include <QUrlQuery>
 #include <QtTest>
+
+namespace {
+
+const QString kAliceId = QStringLiteral("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1");
+const QString kBobId = QStringLiteral("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb2");
+
+// Connects to the fake and signs `name` in (a QTRY_* macro cannot live in a helper that returns a value)
+bool loginAs(Kinefin::JellyfinClient &client, FakeJellyfin &server, const QString &name)
+{
+    QSignalSpy ready(&client, &Kinefin::JellyfinClient::serverReady);
+    QSignalSpy loggedIn(&client, &Kinefin::JellyfinClient::loginSucceeded);
+    if (!prepare(client, server) || !QTest::qWaitFor([&] { return ready.size() == 1; }, 5000))
+        return false;
+    return client.authenticate(name, QStringLiteral("x"))
+           && QTest::qWaitFor([&] { return loggedIn.size() == 1; }, 5000);
+}
+
+QJsonObject publicEntry(const QString &id, const QString &name, const QString &tag = {})
+{
+    QJsonObject entry{{QStringLiteral("Id"), id}, {QStringLiteral("Name"), name}};
+    if (!tag.isEmpty())
+        entry.insert(QStringLiteral("PrimaryImageTag"), tag);
+    return entry;
+}
+
+} // namespace
 
 class TestJellyfinClient : public QObject {
     Q_OBJECT
@@ -1367,6 +1394,77 @@ class TestJellyfinClient : public QObject {
         QCOMPARE(server.listingRequests, before);
     }
 
+    void filtersAndGenresCarryTheirChannel()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        QSignalSpy genres(&client, &Kinefin::JellyfinClient::genresReady);
+        QSignalSpy filters(&client, &Kinefin::JellyfinClient::filtersReady);
+        QSignalSpy failures(&client, &Kinefin::JellyfinClient::listingFailed);
+        // Two channels of one family are two requests in flight, an empty parent sends none
+        QVERIFY(client.fetchGenres({}, 0, 20, QStringLiteral("Movie"), 1027));
+        QVERIFY(client.fetchGenres({}, 0, 20, QStringLiteral("Series"), 1028));
+        QVERIFY(client.fetchFilters({}, QStringLiteral("Movie"), 6));
+        QVERIFY(client.fetchFilters({}, QStringLiteral("Series"), 7));
+        QTRY_COMPARE(genres.size(), 2);
+        QTRY_COMPARE(filters.size(), 2);
+        QCOMPARE(QSet<int>({genres.at(0).at(2).toInt(), genres.at(1).at(2).toInt()}),
+                 (QSet<int>{1027, 1028}));
+        QCOMPARE(QSet<int>({filters.at(0).at(1).toInt(), filters.at(1).at(1).toInt()}),
+                 (QSet<int>{6, 7}));
+        for (const QByteArray &route : server.listingRoutes.value(QStringLiteral("Genres"))
+                                           + server.listingRoutes.value(QStringLiteral("Filters")))
+            QVERIFY2(!route.contains("parentId="), route.constData());
+        // The same channel again supersedes the pending request of that channel only
+        genres.clear();
+        server.holdFirstListings = 1;
+        QVERIFY(client.fetchGenres({}, 0, 20, QStringLiteral("Movie"), 1027));
+        QTRY_COMPARE(server.listingRoutes.value(QStringLiteral("Genres")).size(), 3);
+        QVERIFY(client.fetchGenres({}, 0, 20, QStringLiteral("Movie"), 1027));
+        QTRY_COMPARE(genres.size(), 1);
+        QCOMPARE(genres.constFirst().at(2).toInt(), 1027);
+        // A failure names its channel
+        server.listingStatus.insert(QStringLiteral("Filters"), 500);
+        QVERIFY(client.fetchFilters({}, QStringLiteral("Movie"), 7));
+        QTRY_COMPARE(failures.size(), 1);
+        QCOMPARE(failures.constFirst().at(0).toString(), QStringLiteral("Filters"));
+        QCOMPARE(failures.constFirst().at(3).toInt(), 7);
+        server.listingStatus.clear();
+        server.listingStatus.insert(QStringLiteral("Genres"), 500);
+        QVERIFY(client.fetchGenres({}, 0, 20, QStringLiteral("Movie"), 1027));
+        QTRY_COMPARE(failures.size(), 2);
+        QCOMPARE(failures.constLast().at(0).toString(), QStringLiteral("Genres"));
+        QCOMPARE(failures.constLast().at(3).toInt(), 1027);
+    }
+
+    void releaseDropsGenresAndFilters()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        QSignalSpy genres(&client, &Kinefin::JellyfinClient::genresReady);
+        QSignalSpy filters(&client, &Kinefin::JellyfinClient::filtersReady);
+        QSignalSpy failures(&client, &Kinefin::JellyfinClient::listingFailed);
+        server.holdListings = true;
+        QVERIFY(client.fetchGenres({}, 0, 20, QStringLiteral("Movie"), 1027));
+        QVERIFY(client.fetchFilters({}, QStringLiteral("Movie"), 1027));
+        QTRY_COMPARE(server.listingRoutes.value(QStringLiteral("Genres")).size(), 1);
+        QTRY_COMPARE(server.listingRoutes.value(QStringLiteral("Filters")).size(), 1);
+        client.releaseListingChannel(1027);
+        server.holdListings = false;
+        server.releaseHeld();
+        QTest::qWait(200);
+        QCOMPARE(genres.size(), 0);
+        QCOMPARE(filters.size(), 0);
+        QCOMPARE(failures.size(), 0);
+        // The channel is usable again
+        QVERIFY(client.fetchGenres({}, 0, 20, QStringLiteral("Movie"), 1027));
+        QTRY_COMPARE(genres.size(), 1);
+    }
+
     void similarGenresFiltersSessions()
     {
         FakeJellyfin server;
@@ -1550,6 +1648,166 @@ class TestJellyfinClient : public QObject {
         QCOMPARE(failures.constFirst().at(3).toInt(), 7);
     }
 
+    void cardQueriesPinFields()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        const auto fieldsOf = [&](const QString &family) {
+            return FakeJellyfin::capturedListingQuery(server.lastListingRoute.value(family))
+                .queryItemValue(QStringLiteral("fields"));
+        };
+        const QString cardFields = QStringLiteral("PrimaryImageAspectRatio,DateCreated");
+        QSignalSpy items(&client, &Kinefin::JellyfinClient::itemsReady);
+        const auto movies = Kinefin::LibraryItemsModel::browseQuery(QStringLiteral("movies"));
+        QVERIFY(movies);
+        QVERIFY(client.fetchItems(*movies));
+        QTRY_COMPARE(items.size(), 1);
+        QCOMPARE(fieldsOf(QStringLiteral("Items")), cardFields);
+        const auto series = Kinefin::LibraryItemsModel::browseQuery(QStringLiteral("tvshows"));
+        QVERIFY(series);
+        QVERIFY(client.fetchItems(*series));
+        QTRY_COMPARE(items.size(), 2);
+        QCOMPARE(fieldsOf(QStringLiteral("Items")),
+                 QStringLiteral("ChildCount,RecursiveItemCount,") + cardFields);
+        // A field the caller already named is not repeated
+        Kinefin::ItemQuery named;
+        named.cardImages = true;
+        named.fields = {QStringLiteral("DateCreated")};
+        QVERIFY(client.fetchItems(named));
+        QTRY_COMPARE(items.size(), 3);
+        QCOMPARE(fieldsOf(QStringLiteral("Items")),
+                 QStringLiteral("DateCreated,PrimaryImageAspectRatio"));
+        QSignalSpy resume(&client, &Kinefin::JellyfinClient::resumeItemsReady);
+        QVERIFY(client.fetchResumeItems(10));
+        QTRY_COMPARE(resume.size(), 1);
+        QCOMPARE(fieldsOf(QStringLiteral("Resume")), cardFields);
+        QSignalSpy latest(&client, &Kinefin::JellyfinClient::latestItemsReady);
+        QVERIFY(client.fetchLatestItems({}, 10));
+        QTRY_COMPARE(latest.size(), 1);
+        QCOMPARE(fieldsOf(QStringLiteral("Latest")), cardFields);
+        // Next Up has no New badge: it keeps the aspect ratio only
+        QSignalSpy nextUp(&client, &Kinefin::JellyfinClient::nextUpReady);
+        QVERIFY(client.fetchNextUp({}, {}, {}, false, 10));
+        QTRY_COMPARE(nextUp.size(), 1);
+        QCOMPARE(fieldsOf(QStringLiteral("NextUp")), QStringLiteral("PrimaryImageAspectRatio"));
+    }
+
+    void resumeSendsStartIndex()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        QSignalSpy resume(&client, &Kinefin::JellyfinClient::resumeItemsReady);
+        QVERIFY(client.fetchResumeItems(100, 8, 200));
+        QTRY_COMPARE(resume.size(), 1);
+        // The total of the envelope and the channel come back with the items
+        QCOMPARE(resume.constFirst().at(1).toInt(), 2);
+        QCOMPARE(resume.constFirst().at(2).toInt(), 8);
+        QUrlQuery wire = FakeJellyfin::capturedListingQuery(
+            server.lastListingRoute.value(QStringLiteral("Resume")));
+        QCOMPARE(wire.queryItemValue(QStringLiteral("startIndex")), QStringLiteral("200"));
+        QCOMPARE(wire.queryItemValue(QStringLiteral("limit")), QStringLiteral("100"));
+        // The default sends none, 0 is sent, and a start before -1 is refused
+        QVERIFY(client.fetchResumeItems(100));
+        QTRY_COMPARE(resume.size(), 2);
+        wire = FakeJellyfin::capturedListingQuery(
+            server.lastListingRoute.value(QStringLiteral("Resume")));
+        QVERIFY(!wire.hasQueryItem(QStringLiteral("startIndex")));
+        QVERIFY(client.fetchResumeItems(100, 0, 0));
+        QTRY_COMPARE(resume.size(), 3);
+        wire = FakeJellyfin::capturedListingQuery(
+            server.lastListingRoute.value(QStringLiteral("Resume")));
+        QCOMPARE(wire.queryItemValue(QStringLiteral("startIndex")), QStringLiteral("0"));
+        QVERIFY(!client.fetchResumeItems(100, 0, -2));
+    }
+
+    void overCapReplyFails()
+    {
+        // An envelope padded to exactly the cap is read, one byte more is refused
+        const QByteArray head =
+            QByteArrayLiteral("{\"Items\":[],\"TotalRecordCount\":0,\"Pad\":\"");
+        const QByteArray tail = QByteArrayLiteral("\"}");
+        constexpr int cap = 1'048'576;
+        for (const bool over : {false, true}) {
+            FakeJellyfin server;
+            QVERIFY(server.listen());
+            server.listingRawBody.insert(
+                QStringLiteral("Items"),
+                head + QByteArray(cap + (over ? 1 : 0) - head.size() - tail.size(), 'x') + tail);
+            Kinefin::JellyfinClient client;
+            QVERIFY(login(client, server));
+            QSignalSpy ready(&client, &Kinefin::JellyfinClient::itemsReady);
+            QSignalSpy failures(&client, &Kinefin::JellyfinClient::listingFailed);
+            QVERIFY(client.fetchItems(Kinefin::ItemQuery()));
+            QTRY_COMPARE(ready.size() + failures.size(), 1);
+            QCOMPARE(ready.size(), over ? 0 : 1);
+            if (over)
+                QCOMPARE(failures.constFirst().at(0).toString(), QStringLiteral("Items"));
+        }
+    }
+
+    void cardPageFitsReplyCap()
+    {
+        // 100 items with every field a card reads at its largest, as a server could send them
+        const QString tag(64, QLatin1Char('t'));
+        const QString id(32, QLatin1Char('a'));
+        QJsonArray page;
+        for (int row = 0; row < 100; ++row) {
+            page.append(QJsonObject{
+                {QStringLiteral("Id"), id},
+                {QStringLiteral("Name"), QString(512, QLatin1Char('n'))},
+                {QStringLiteral("Type"), QStringLiteral("Episode")},
+                {QStringLiteral("SeriesName"), QString(512, QLatin1Char('s'))},
+                {QStringLiteral("SeriesId"), id},
+                {QStringLiteral("SeriesThumbImageTag"), tag},
+                {QStringLiteral("SeriesPrimaryImageTag"), tag},
+                {QStringLiteral("ParentBackdropItemId"), id},
+                {QStringLiteral("ParentBackdropImageTags"), QJsonArray{tag}},
+                {QStringLiteral("ParentThumbItemId"), id},
+                {QStringLiteral("ParentThumbImageTag"), tag},
+                {QStringLiteral("ImageTags"),
+                 QJsonObject{{QStringLiteral("Primary"), tag}, {QStringLiteral("Thumb"), tag}}},
+                {QStringLiteral("BackdropImageTags"), QJsonArray{tag}},
+                {QStringLiteral("ProductionYear"), 2026},
+                {QStringLiteral("ParentIndexNumber"), 99},
+                {QStringLiteral("IndexNumber"), 99999},
+                {QStringLiteral("IndexNumberEnd"), 99999},
+                {QStringLiteral("RunTimeTicks"), 99'999'999'999'999.0},
+                {QStringLiteral("CommunityRating"), 9.9},
+                {QStringLiteral("DateCreated"), QStringLiteral("2026-11-10T12:34:56.1234567Z")},
+                {QStringLiteral("ChildCount"), 999'999},
+                {QStringLiteral("RecursiveItemCount"), 9'999'999},
+                {QStringLiteral("PrimaryImageAspectRatio"), 0.6666666666666666},
+                {QStringLiteral("LocationType"), QStringLiteral("Virtual")},
+                {QStringLiteral("UserData"),
+                 QJsonObject{{QStringLiteral("Played"), false},
+                             {QStringLiteral("IsFavorite"), false},
+                             {QStringLiteral("UnplayedItemCount"), 999'999},
+                             {QStringLiteral("PlayedPercentage"), 99.99999999999},
+                             {QStringLiteral("PlaybackPositionTicks"), 99'999'999'999'999.0}}}});
+        }
+        const QByteArray body =
+            QJsonDocument(QJsonObject{{QStringLiteral("Items"), page},
+                                      {QStringLiteral("StartIndex"), 0},
+                                      {QStringLiteral("TotalRecordCount"), 100}})
+                .toJson(QJsonDocument::Compact);
+        constexpr int cap = 1'048'576;
+        QVERIFY2(body.size() < cap / 4, qPrintable(QString::number(body.size())));
+        // The cap is no obstacle in practice: the page arrives whole
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        server.listingRawBody.insert(QStringLiteral("Items"), body);
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        QSignalSpy ready(&client, &Kinefin::JellyfinClient::itemsReady);
+        QVERIFY(client.fetchItems(Kinefin::ItemQuery()));
+        QTRY_COMPARE(ready.size(), 1);
+        QCOMPARE(ready.constFirst().constFirst().value<QJsonArray>().size(), 100);
+    }
+
     void listingFailuresStayOffRequestFailed()
     {
         FakeJellyfin server;
@@ -1650,6 +1908,307 @@ class TestJellyfinClient : public QObject {
                     .isEmpty());
         QVERIFY(client.imageUrl(QStringLiteral("no token"), QStringLiteral("Primary"), 360, {})
                     .isEmpty());
+    }
+
+    void loginKeepsUserNameAndImageTag()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        server.users = {{kAliceId, "tokenalice", QStringLiteral("Alice"), QStringLiteral("tag-a1")},
+                        {kBobId, "tokenbob", QStringLiteral("Bob"), {}},
+                        {QStringLiteral("ccccccccccccccccccccccccccccccc3"), "tokenc",
+                         QStringLiteral("Line\nBreak"), QStringLiteral("bad tag")},
+                        {QStringLiteral("ddddddddddddddddddddddddddddddd4"),
+                         "tokend",
+                         QString(Kinefin::MaxUserNameChars + 1, QLatin1Char('n')),
+                         {}}};
+        Kinefin::JellyfinClient client;
+        // The fields are already set when loginSucceeded fires
+        QString nameAtSignal;
+        QString tagAtSignal;
+        connect(&client, &Kinefin::JellyfinClient::loginSucceeded, this, [&] {
+            nameAtSignal = client.userName();
+            tagAtSignal = client.userImageTag();
+        });
+        QVERIFY(loginAs(client, server, QStringLiteral("Alice")));
+        QCOMPARE(client.userId(), kAliceId);
+        QCOMPARE(client.userName(), QStringLiteral("Alice"));
+        QCOMPARE(client.userImageTag(), QStringLiteral("tag-a1"));
+        QCOMPARE(nameAtSignal, QStringLiteral("Alice"));
+        QCOMPARE(tagAtSignal, QStringLiteral("tag-a1"));
+
+        // Signing out of memory forgets both
+        client.forgetSession();
+        QVERIFY(client.userName().isEmpty());
+        QVERIFY(client.userImageTag().isEmpty());
+
+        // No avatar: the tag is empty; the name stays
+        QSignalSpy loggedIn(&client, &Kinefin::JellyfinClient::loginSucceeded);
+        QVERIFY(client.authenticate(QStringLiteral("Bob"), QStringLiteral("x")));
+        QTRY_COMPARE(loggedIn.size(), 1);
+        QCOMPARE(client.userName(), QStringLiteral("Bob"));
+        QVERIFY(client.userImageTag().isEmpty());
+
+        // A multi-line name, an unsafe tag and an over-long name are each dropped, the login still works
+        client.forgetSession();
+        QVERIFY(client.authenticate(QStringLiteral("Line\nBreak"), QStringLiteral("x")));
+        QTRY_COMPARE(loggedIn.size(), 2);
+        QVERIFY(client.isAuthenticated());
+        QVERIFY(client.userName().isEmpty());
+        QVERIFY(client.userImageTag().isEmpty());
+        client.forgetSession();
+        QVERIFY(client.authenticate(server.users.at(3).name, QStringLiteral("x")));
+        QTRY_COMPARE(loggedIn.size(), 3);
+        QVERIFY(client.userName().isEmpty());
+    }
+
+    void verifySessionRefreshesUserName()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        server.users = {{kAliceId, "tokenalice", QStringLiteral("Alice"), {}}};
+        Kinefin::JellyfinClient client;
+        QVERIFY(loginAs(client, server, QStringLiteral("Alice")));
+        QSignalSpy refreshed(&client, &Kinefin::JellyfinClient::userProfileRefreshed);
+        QSignalSpy expired(&client, &Kinefin::JellyfinClient::sessionExpired);
+
+        server.users[0].name = QStringLiteral("Alice B");
+        server.users[0].tag = QStringLiteral("newtag");
+        QVERIFY(client.verifySession());
+        QTRY_COMPARE(refreshed.size(), 1);
+        QCOMPARE(refreshed.constFirst().at(0).toString(), kAliceId);
+        QCOMPARE(refreshed.constFirst().at(1).toString(), QStringLiteral("Alice B"));
+        QCOMPARE(refreshed.constFirst().at(2).toString(), QStringLiteral("newtag"));
+        QCOMPARE(client.userName(), QStringLiteral("Alice B"));
+        QCOMPARE(client.userImageTag(), QStringLiteral("newtag"));
+
+        // An invalid name keeps the last good one, a removed avatar clears the tag
+        server.users[0].name = QStringLiteral("Bad\nName");
+        server.users[0].tag.clear();
+        QVERIFY(client.verifySession());
+        QTRY_COMPARE(refreshed.size(), 2);
+        QCOMPARE(client.userName(), QStringLiteral("Alice B"));
+        QVERIFY(client.userImageTag().isEmpty());
+        QCOMPARE(expired.size(), 0);
+
+        // A reply for another user than the session's is a stale or foreign token: it expires like a 401, refreshing nothing
+        server.users[0].id = kBobId;
+        QVERIFY(client.verifySession());
+        QTRY_COMPARE(expired.size(), 1);
+        QCOMPARE(expired.constFirst().constFirst().toString(), kAliceId);
+        QCOMPARE(refreshed.size(), 2);
+        QVERIFY(!client.isAuthenticated());
+        QVERIFY(client.userId().isEmpty());
+    }
+
+    void restoredSessionLearnsItsNameFromVerify()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        server.users = {{kAliceId, "tokenalice", QStringLiteral("Alice"), QStringLiteral("t1")}};
+        Kinefin::JellyfinClient client;
+        QSignalSpy ready(&client, &Kinefin::JellyfinClient::serverReady);
+        QVERIFY(prepare(client, server));
+        QTRY_COMPARE(ready.size(), 1);
+        QVERIFY(client.restoreSession(kAliceId, QStringLiteral("tokenalice")));
+        QVERIFY(client.userName().isEmpty());
+        QSignalSpy refreshed(&client, &Kinefin::JellyfinClient::userProfileRefreshed);
+        QVERIFY(client.verifySession());
+        QTRY_COMPARE(refreshed.size(), 1);
+        QCOMPARE(client.userName(), QStringLiteral("Alice"));
+        QCOMPARE(client.userImageTag(), QStringLiteral("t1"));
+    }
+
+    void sessionExpiredNamesTheUser()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        server.users = {{kAliceId, "tokenalice", QStringLiteral("Alice"), {}},
+                        {kBobId, "tokenbob", QStringLiteral("Bob"), {}}};
+        Kinefin::JellyfinClient client;
+        QVERIFY(loginAs(client, server, QStringLiteral("Bob")));
+        QSignalSpy expired(&client, &Kinefin::JellyfinClient::sessionExpired);
+        server.deniedUsersMeTokens.insert("tokenbob");
+        QVERIFY(client.verifySession());
+        QTRY_COMPARE(expired.size(), 1);
+        QCOMPARE(expired.constFirst().constFirst().toString(), kBobId);
+        QVERIFY(client.userId().isEmpty());
+        QVERIFY(client.userName().isEmpty());
+    }
+
+    void publicUsersAreBoundedAndValidated()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(!client.fetchPublicUsers()); // not probed yet
+        QSignalSpy ready(&client, &Kinefin::JellyfinClient::serverReady);
+        QVERIFY(prepare(client, server));
+        QSignalSpy users(&client, &Kinefin::JellyfinClient::publicUsersReady);
+        QSignalSpy failed(&client, &Kinefin::JellyfinClient::publicUsersFailed);
+        QVERIFY(!client.fetchPublicUsers()); // still probing
+        QTRY_COMPARE(ready.size(), 1);
+
+        QJsonArray entries;
+        entries.append(publicEntry(QStringLiteral("bad id;x"), QStringLiteral("BadId")));
+        entries.append(publicEntry(kAliceId, QStringLiteral("Two\nLines")));
+        entries.append(
+            publicEntry(kAliceId, QString(Kinefin::MaxUserNameChars + 1, QLatin1Char('n'))));
+        entries.append(publicEntry(kAliceId, QStringLiteral("   ")));
+        entries.append(publicEntry(kBobId, QStringLiteral("Bob"), QStringLiteral("bad tag")));
+        for (int i = 0; i < 150; ++i)
+            entries.append(publicEntry(QStringLiteral("%1").arg(i + 1, 32, 16, QLatin1Char('0')),
+                                       QStringLiteral("User %1").arg(i),
+                                       QStringLiteral("tag%1").arg(i)));
+        server.publicUsersRawBody = QJsonDocument(entries).toJson(QJsonDocument::Compact);
+        QVERIFY(client.fetchPublicUsers());
+        QTRY_COMPARE(users.size(), 1);
+        QCOMPARE(failed.size(), 0);
+        const auto list = users.constFirst().constFirst().value<QList<Kinefin::PublicUser>>();
+        QCOMPARE(list.size(), Kinefin::MaxPublicUsers);
+        // The entries with an invalid id or name are dropped, an invalid tag only empties the tag
+        QCOMPARE(list.at(0).id, kBobId);
+        QCOMPARE(list.at(0).name, QStringLiteral("Bob"));
+        QVERIFY(list.at(0).imageTag.isEmpty());
+        QCOMPARE(list.at(1).name, QStringLiteral("User 0"));
+        QCOMPARE(list.at(1).imageTag, QStringLiteral("tag0"));
+        // No credentials go out
+        QCOMPARE(server.publicUsersRequests, 1);
+        QVERIFY(server.lastPublicUsersAuth.isEmpty());
+
+        // Failures: a status, a body that is not an array, a body with a non-object entry
+        server.publicUsersStatus = 500;
+        QVERIFY(client.fetchPublicUsers());
+        QTRY_COMPARE(failed.size(), 1);
+        QCOMPARE(failed.constFirst().at(0).toInt(), 500);
+        server.publicUsersStatus = 200;
+        server.publicUsersRawBody = "{\"Items\":[]}";
+        QVERIFY(client.fetchPublicUsers());
+        QTRY_COMPARE(failed.size(), 2);
+        server.publicUsersRawBody = "[1,2]";
+        QVERIFY(client.fetchPublicUsers());
+        QTRY_COMPARE(failed.size(), 3);
+        QCOMPARE(users.size(), 1);
+
+        // The hidden users are the server's business: the generated list leaves them out
+        server.publicUsersRawBody.clear();
+        server.users = {{kAliceId, "ta", QStringLiteral("Alice"), QStringLiteral("t1")},
+                        {kBobId, "tb", QStringLiteral("Bob"), {}, true}};
+        QVERIFY(client.fetchPublicUsers());
+        QTRY_COMPARE(users.size(), 2);
+        const auto visible = users.constLast().constFirst().value<QList<Kinefin::PublicUser>>();
+        QCOMPARE(visible.size(), 1);
+        QCOMPARE(visible.constFirst().id, kAliceId);
+    }
+
+    void publicUsersWorkWithoutASession()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        server.users = {{kAliceId, "ta", QStringLiteral("Alice"), {}}};
+        Kinefin::JellyfinClient client;
+        QSignalSpy ready(&client, &Kinefin::JellyfinClient::serverReady);
+        QVERIFY(prepare(client, server));
+        QTRY_COMPARE(ready.size(), 1);
+        QVERIFY(!client.isAuthenticated());
+        QSignalSpy users(&client, &Kinefin::JellyfinClient::publicUsersReady);
+        QVERIFY(client.fetchPublicUsers());
+        // A disconnect ends the request without a signal
+        client.disconnectFromServer();
+        QTest::qWait(100);
+        QCOMPARE(users.size(), 0);
+        QVERIFY(!client.fetchPublicUsers());
+    }
+
+    void userImageUrlPassesAllowlist()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(client.userImageUrl(kAliceId, QStringLiteral("t1")).isEmpty()); // no server yet
+        QVERIFY(prepare(client, server));
+        const QUrl base = client.serverUrl();
+        const QUrl built = client.userImageUrl(kAliceId, QStringLiteral("tag-a1"));
+        QCOMPARE(built,
+                 QUrl(server.url(
+                     QStringLiteral("/jellyfin/UserImage?userId=%1&tag=tag-a1").arg(kAliceId))));
+        QVERIFY(!built.toString().contains(QLatin1String("Token"), Qt::CaseInsensitive));
+        QVERIFY(Kinefin::JellyfinClient::isServerImageUrl(base, built));
+        // The item image shape keeps working
+        QVERIFY(Kinefin::JellyfinClient::isServerImageUrl(
+            base,
+            client.imageUrl(kPlayItem, QStringLiteral("Primary"), 400, QStringLiteral("abc"))));
+        // No tag: the parameter is left out and the URL still passes
+        const QUrl untagged = client.userImageUrl(kAliceId, {});
+        QVERIFY(!untagged.isEmpty());
+        QVERIFY(!untagged.query().contains(QLatin1String("tag")));
+        QVERIFY(Kinefin::JellyfinClient::isServerImageUrl(base, untagged));
+        // Refusals: bad id, bad tag
+        QVERIFY(client.userImageUrl(QStringLiteral("bad id"), {}).isEmpty());
+        QVERIFY(client.userImageUrl({}, {}).isEmpty());
+        QVERIFY(client.userImageUrl(kAliceId, QStringLiteral("tag?x=1")).isEmpty());
+        QVERIFY(client.userImageUrl(kAliceId, QStringLiteral("tag&x")).isEmpty());
+        // A base with a path prefix
+        const QUrl prefixed(base.toString() + QStringLiteral("/a%20b"));
+        QUrl underPrefix = built;
+        underPrefix.setPath(prefixed.path() + QStringLiteral("/UserImage"));
+        QVERIFY(Kinefin::JellyfinClient::isServerImageUrl(prefixed, underPrefix));
+        QVERIFY(!Kinefin::JellyfinClient::isServerImageUrl(prefixed, built));
+    }
+
+    void allowlistRejectsUserImageWithForeignHostOrExtraPath()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(prepare(client, server));
+        const QUrl base = client.serverUrl();
+        const QUrl built = client.userImageUrl(kAliceId, QStringLiteral("tag-a1"));
+        QVERIFY(Kinefin::JellyfinClient::isServerImageUrl(base, built));
+        const auto refused = [&](const QUrl &url) {
+            return !Kinefin::JellyfinClient::isServerImageUrl(base, url);
+        };
+        QUrl otherPort = built;
+        otherPort.setPort(base.port() + 1);
+        QVERIFY(refused(otherPort));
+        QUrl otherHost = built;
+        otherHost.setHost(QStringLiteral("example.invalid"));
+        QVERIFY(refused(otherHost));
+        QUrl otherScheme = built;
+        otherScheme.setScheme(QStringLiteral("https"));
+        QVERIFY(refused(otherScheme));
+        QUrl credentials = built;
+        credentials.setUserName(QStringLiteral("user"));
+        QVERIFY(refused(credentials));
+        QUrl fragment = built;
+        fragment.setFragment(QStringLiteral("x"));
+        QVERIFY(refused(fragment));
+        // Extra path, a different route, a missing prefix, a traversal and an encoded slash
+        for (const QString &path :
+             {QStringLiteral("/jellyfin/UserImage/extra"), QStringLiteral("/jellyfin/UserImage/"),
+              QStringLiteral("/jellyfin/UserImages"), QStringLiteral("/UserImage"),
+              QStringLiteral("/jellyfin/Users/Me"), QStringLiteral("/jellyfin/x/../Users/Me"),
+              QStringLiteral("/jellyfin/UserImage%2Fextra")}) {
+            QUrl url = built;
+            url.setPath(path, QUrl::StrictMode);
+            QVERIFY2(refused(url), qPrintable(path));
+        }
+        // The query is exactly the builder's: valid userId, optional valid tag, nothing else, nothing twice
+        const QString root = base.toString() + QStringLiteral("/UserImage?");
+        const QStringList queries = {
+            QString(),
+            QStringLiteral("tag=tag-a1"),
+            QStringLiteral("userId=bad%20id"),
+            QStringLiteral("userId=") + kAliceId + QStringLiteral("&tag=bad%20tag"),
+            QStringLiteral("userId=") + kAliceId + QStringLiteral("&maxWidth=96"),
+            QStringLiteral("userId=") + kAliceId + QStringLiteral("&format=png"),
+            QStringLiteral("userId=") + kAliceId + QStringLiteral("&userId=") + kBobId,
+            QStringLiteral("userId=") + kAliceId + QStringLiteral("&api_key=secret"),
+        };
+        for (const QString &query : queries)
+            QVERIFY2(refused(QUrl(root + query)), qPrintable(query));
+        QVERIFY(Kinefin::JellyfinClient::isServerImageUrl(
+            base, QUrl(root + QStringLiteral("userId=") + kAliceId)));
     }
 };
 

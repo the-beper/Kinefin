@@ -6,8 +6,10 @@
 
 namespace Kinefin {
 
-ItemRowModel::ItemRowModel(JellyfinClient *client, bool landscape, QObject *parent)
-    : QAbstractListModel(parent), m_client(client), m_landscape(landscape)
+ItemRowModel::ItemRowModel(JellyfinClient *client, bool landscape, QObject *parent,
+                           bool seasonCounts)
+    : QAbstractListModel(parent), m_client(client), m_landscape(landscape),
+      m_seasonCounts(seasonCounts)
 {
 }
 
@@ -36,49 +38,25 @@ int ItemRowModel::rowCount(const QModelIndex &parent) const
 
 QHash<int, QByteArray> ItemRowModel::roleNames() const
 {
-    return {{ItemIdRole, "itemId"},
-            {NameRole, "name"},
-            {EpisodeTitleRole, "episodeTitle"},
-            {SeasonNumberRole, "seasonNumber"},
-            {EpisodeNumberRole, "episodeNumber"},
-            {YearRole, "year"},
-            {TypeRole, "type"},
-            {ImageUrlRole, "imageUrl"},
-            {PlayedRole, "played"},
-            {UnplayedCountRole, "unplayedCount"},
-            {PlayedPercentageRole, "playedPercentage"},
-            {FavoriteRole, "favorite"}};
+    QHash<int, QByteArray> names{{ItemIdRole, "itemId"},
+                                 {NameRole, "name"},
+                                 {EpisodeTitleRole, "episodeTitle"},
+                                 {SeasonNumberRole, "seasonNumber"},
+                                 {EpisodeNumberRole, "episodeNumber"},
+                                 {YearRole, "year"},
+                                 {TypeRole, "type"},
+                                 {ImageUrlRole, "imageUrl"},
+                                 {PlayedRole, "played"},
+                                 {UnplayedCountRole, "unplayedCount"},
+                                 {PlayedPercentageRole, "playedPercentage"},
+                                 {FavoriteRole, "favorite"}};
+    names.insert(cardRoleNames());
+    return names;
 }
 
 QUrl ItemRowModel::imageUrlFor(const ItemSummary &item) const
 {
-    if (!m_client)
-        return {};
-    const bool episode = item.type == QLatin1String("Episode");
-    const int width = m_landscape ? LandscapeWidth : PosterWidth;
-    const auto url = [&](const QString &id, const QString &type, const QString &tag) {
-        return id.isEmpty() || tag.isEmpty() ? QUrl() : m_client->imageUrl(id, type, width, tag);
-    };
-    if (m_landscape) {
-        // jellyfin-web's default for wide rows: an episode shows its series' thumb, then its parent's backdrop, and only then its own image; a movie or series shows its own thumb, then its backdrop
-        const QList<QUrl> candidates =
-            episode ? QList<QUrl>{url(item.parentThumbItemId, QStringLiteral("Thumb"),
-                                      item.parentThumbTag),
-                                  url(item.seriesId, QStringLiteral("Thumb"), item.seriesThumbTag),
-                                  url(item.parentBackdropItemId, QStringLiteral("Backdrop"),
-                                      item.parentBackdropTag)}
-                    : QList<QUrl>{url(item.id, QStringLiteral("Thumb"), item.thumbTag),
-                                  url(item.id, QStringLiteral("Backdrop"), item.backdropTag)};
-        for (const QUrl &candidate : candidates) {
-            if (!candidate.isEmpty())
-                return candidate;
-        }
-    }
-    // A season without a poster of its own shows its series' poster
-    if (item.type == QLatin1String("Season") && item.primaryTag.isEmpty()
-        && !item.seriesId.isEmpty())
-        return url(item.seriesId, QStringLiteral("Primary"), item.seriesPrimaryTag);
-    return url(item.id, QStringLiteral("Primary"), item.primaryTag);
+    return cardImageUrl(m_client, item, m_landscape, m_landscape ? LandscapeWidth : PosterWidth);
 }
 
 QVariant ItemRowModel::data(const QModelIndex &index, int role) const
@@ -114,8 +92,14 @@ QVariant ItemRowModel::data(const QModelIndex &index, int role) const
         return item.playedPercentage;
     case FavoriteRole:
         return item.favorite;
+    case SeasonCountRole:
+    case EpisodeCountRole:
+    case SeriesProgressRole:
+        if (!m_seasonCounts)
+            return role == SeriesProgressRole ? QVariant(qreal(-1)) : QVariant(-1);
+        return cardRoleData(item, role);
     default:
-        return {};
+        return cardRoleData(item, role);
     }
 }
 } // namespace Kinefin

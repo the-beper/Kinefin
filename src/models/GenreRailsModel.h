@@ -13,7 +13,7 @@
 #include <vector>
 
 namespace Kinefin {
-// The genre rails of one library: a list of genres (20 at a time from `GET /Genres`, at most `MaxRails`), each with a row of items of that genre. A rail loads only when the view asks for it (`want()` when its delegate appears, `unwant()` when it goes), at most `MaxInFlight` at once, the newest wanted first, on listing channels `FirstSlotChannel` up that are released when the model clears. A rail that loads empty is hidden, a failed one has its own `retry()`, and a failed genre list has `retryList()`. The `Genres` family has one channel: this must stay its only consumer. The model empties itself when the client loses its credentials. Genre names are server text: render them as plain text
+// The genre rails of one library: a list of genres (20 at a time from `GET /Genres`, at most `MaxRails`), each with a row of items of that genre. A rail loads only when the view asks for it (`want()` when its delegate appears, `unwant()` when it goes), at most `MaxInFlight` at once, the newest wanted first, on listing channels `FirstSlotChannel` up that are released when the model clears. A rail that loads empty is hidden, a failed one has its own `retry()`, and a failed genre list has `retryList()`. The genre list rides on `ListChannel` of the `Genres` family: this must stay its only consumer. The model empties itself when the client loses its credentials. Genre names are server text: render them as plain text
 class GenreRailsModel final : public QAbstractListModel {
     Q_OBJECT
     Q_PROPERTY(Status status READ status NOTIFY statusChanged)
@@ -41,12 +41,13 @@ class GenreRailsModel final : public QAbstractListModel {
     static constexpr int MaxInFlight = 3;
     static constexpr int MaxNameLength = FilterOptionsModel::MaxNameLength;
     static constexpr int FirstSlotChannel = 1024;
+    static constexpr int ListChannel = 1027;
 
     explicit GenreRailsModel(JellyfinClient *client, QObject *parent = nullptr);
     ~GenreRailsModel() override;
 
-    // Starts the genre list of a library of this `CollectionType` (movies, tvshows or boxsets); false for a type that is not browsable
-    bool open(const QString &libraryId, const QString &collectionType);
+    // Starts the genre list of a library of this `CollectionType` (movies, tvshows or boxsets); an empty `libraryId` spans every library of the type. False for a type that is not browsable or an invalid id
+    bool open(const QString &collectionType, const QString &libraryId = {});
     void clear();
 
     Status status() const { return m_status; }
@@ -87,13 +88,14 @@ class GenreRailsModel final : public QAbstractListModel {
     int rowFor(const QString &genreId) const;
     int rowForSlot(int slot) const;
     void releaseSlots();
-    void onGenresReady(const QJsonArray &items, int total);
+    void onGenresReady(const QJsonArray &items, int total, int channel);
     void onItemsReady(const QJsonArray &items, int total, int channel);
     void onListingFailed(const QString &family, int status, const QString &reason, int channel);
     void setStatus(Status status);
     void setRailStatus(int row, RailStatus status);
 
     QPointer<JellyfinClient> m_client;
+    bool m_open = false;
     QString m_libraryId;
     QString m_includeTypes;
     Status m_status = Idle;

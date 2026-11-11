@@ -25,10 +25,19 @@ Kirigami.ApplicationWindow {
     // attached Window.window kept its load-time value and never followed a resize
     readonly property bool compactHeader: width < compactLimit
     readonly property bool wideHeader: width >= wideLimit
+    // The tab the first page of the stack stands for: "home", "movies" or "tvshows"; empty on the sign-in and server pages and for a library opened from a tile. The depth and the current item change with every push and clear, and the first page is read after them
+    readonly property string rootTab: pageStack.depth > 0 && pageStack.currentItem ? tabOfPage(pageStack.get(0)) : ""
+    // The scroll position and the current tile of each tab left behind, so a tab comes back as the user left it; dropped with the session
+    readonly property var tabState: ({})
+    // The type tabs showing a Recently Added list: what the tab saved on leaving belongs to that list, not to the stored view it comes back to
+    readonly property var oneOffTabs: ({})
+    // The Continue Watching pages alive: the list is closed when the last one goes, not by a page that outlives its successor
+    property int resumePages: 0
 
     property bool fullscreenSetting: settings.value("main", "fullscreen")
     property bool alwaysOnTopSetting: settings.value("main", "alwaysOnTop")
     property string fullscreenOutput: settings.value("main", "forceFSScreen")
+    property bool newBadgeEnabled: settings.value("library", "newBadge")
     readonly property bool wantsFullscreen: startupWindowMode === "fullscreen" || (startupWindowMode !== "windowed" && fullscreenSetting)
 
     width: 1000
@@ -50,6 +59,27 @@ Kirigami.ApplicationWindow {
         id: shellHeader
 
         shell: window
+    }
+
+    // The back button of the mouse goes back like Esc; the missing forward button is a deliberate exception. The column view of the pages moves to the previous page on that button by itself but leaves the page it left in the stack (and its models open), so the page is popped here once that has happened
+    Item {
+        objectName: "mouseBackArea"
+        anchors.fill: parent
+
+        TapHandler {
+            objectName: "mouseBackHandler"
+            acceptedButtons: Qt.BackButton
+            onTapped: {
+                const index = window.pageStack.currentIndex;
+                if (index < 1 || window.pageStack.layers.depth > 1)
+                    return;
+                const target = window.pageStack.get(index - 1);
+                Qt.callLater(() => {
+                    if (window.pageStack.depth > 1 && window.pageStack.get(window.pageStack.depth - 1) !== target)
+                        window.pageStack.pop(target);
+                });
+            }
+        }
     }
 
     // Esc goes back like Alt+Left except on the first page; an open dialog takes the key first
@@ -126,6 +156,10 @@ Kirigami.ApplicationWindow {
     Connections {
         target: window.settings
         function onValueChanged(section, key) {
+            if (section === "library") {
+                window.newBadgeEnabled = window.settings.value("library", "newBadge");
+                return;
+            }
             if (section !== "main")
                 return;
             window.fullscreenSetting = window.settings.value("main", "fullscreen");
@@ -176,7 +210,7 @@ Kirigami.ApplicationWindow {
             settings.setWindowGeometry(Qt.rect(x, y, width, height));
     }
 
-    // The page follows the connection state: Servers until a server is chosen, sign-in until there is a session, Home after
+    // The page follows the connection state: Servers until a server is chosen, the user picker while one of several saved users is to be chosen, sign-in until there is a session, Home after
     function showPageForState() {
         let page = "ServersPage.qml";
         let properties = { connection: connection };
@@ -185,6 +219,9 @@ Kirigami.ApplicationWindow {
         case ConnectionController.SigningIn:
         case ConnectionController.QuickConnectPending:
             page = "LoginPage.qml";
+            break;
+        case ConnectionController.ChoosingUser:
+            page = "UserPickerPage.qml";
             break;
         case ConnectionController.Authenticated:
             page = "HomePage.qml";
@@ -244,11 +281,31 @@ Kirigami.ApplicationWindow {
             pageStack.pop(base);
     }
 
+    // The first keystroke of the header box on a type tab pops the pages above it: the box keeps the keyboard, which the page it pops back to would take
+    function popToBaseWhileTyping() {
+        const wasTyping = shellHeader.searchFieldHasFocus;
+        popToBase();
+        if (wasTyping)
+            Qt.callLater(shellHeader.refocusSearchField);
+    }
+
     // Ctrl+F: a search page already in the stack is brought back as it is, a new one starts from an empty term above Home.
     // The header box takes the focus (the page's own field in Compact mode, where the box hides)
     function openSearch() {
         if (connection.state !== ConnectionController.Authenticated)
             return;
+        if (isTypeTab(rootTab)) {
+            // On a type tab the box searches that tab's own list: the pages above the tab give way, and no search page opens
+            popToBase();
+            const tabPage = pageStack.get(0);
+            Qt.callLater(() => {
+                if (compactHeader)
+                    tabPage?.focusSearchField();
+                else
+                    shellHeader.focusSearchField();
+            });
+            return;
+        }
         let page = null;
         const index = searchPageIndex();
         if (index >= 0) {
@@ -299,17 +356,35 @@ Kirigami.ApplicationWindow {
         const page = pageStack.currentItem;
         if (page?.objectName === "searchPage")
             page.focusFirstResults();
+        else if (page?.objectName === "libraryPage" && page.tabType !== "")
+            page.focusPrimary();
     }
 
-    // The genre rails of the open library go above the library page that asks, which stays below
+    // The genre rails of the library page that asks (its model: a tab or a collections library) go above it, and the page stays below
     function openGenres(fromPage) {
+        if (connection.state !== ConnectionController.Authenticated || !fromPage)
+            return;
+        if (!connection.openGenreRails(fromPage.model))
+            return;
+        pageStack.pop(fromPage);
+        pageStack.push(Qt.resolvedUrl("GenreRailsPage.qml"), { connection: connection });
+    }
+
+    // The menu of a card (a right click, the Menu key or the button of the card): it opens at a point of the card, below it by default
+    function openCardMenu(card, itemId, type, seriesId, x, y) {
         if (connection.state !== ConnectionController.Authenticated)
             return;
-        if (!connection.openGenreRails())
-            return;
-        if (fromPage)
-            pageStack.pop(fromPage);
-        pageStack.push(Qt.resolvedUrl("GenreRailsPage.qml"), { connection: connection });
+        cardMenu.itemId = itemId;
+        cardMenu.itemType = type;
+        cardMenu.seriesId = seriesId;
+        cardMenu.popup(card, x ?? 0, y ?? card.height);
+    }
+
+    CardMenu {
+        id: cardMenu
+
+        connection: window.connection
+        onOpenRequested: targetId => window.openItem(targetId, window.pageStack.currentItem)
     }
 
     // A link opens its item above Home once signed in, whether it came before or after the sign-in
@@ -321,7 +396,7 @@ Kirigami.ApplicationWindow {
         openItem(itemId, home);
     }
 
-    // The sign-in page keeps its place while the state moves between its own steps
+    // The sign-in page keeps its place while the state moves between its own steps, and so does the user picker
     readonly property int pageGroup: {
         switch (connection.state) {
         case ConnectionController.NeedsLogin:
@@ -330,6 +405,8 @@ Kirigami.ApplicationWindow {
             return 1;
         case ConnectionController.Authenticated:
             return 2;
+        case ConnectionController.ChoosingUser:
+            return 3;
         default:
             return 0;
         }
@@ -338,14 +415,17 @@ Kirigami.ApplicationWindow {
         // A link waiting for a sign-in belongs to the server the user is leaving
         if (pageGroup === 0)
             requestedItemId = "";
+        for (const tab of Object.keys(tabState))
+            delete tabState[tab];
+        for (const tab of Object.keys(oneOffTabs))
+            delete oneOffTabs[tab];
         showPageForState();
     }
 
     // A link that arrives while Home is already showing (a second launch) opens at once
     onRequestedItemIdChanged: openRequestedItem(pageStack.get(0))
 
-    // The section the page in front belongs to: the header marks it (the Home tab, the main menu button, the queue button); a page opened from a library belongs to that library.
-    // Settings and About need no session, so they are marked whatever the connection is
+    // The section the page in front belongs to: the header marks it (a tab, the main menu button, the queue button); a page opened above a type tab belongs to that tab, and one opened from a collections tile to that library. Settings and About need no session, so they are marked whatever the connection is
     readonly property string currentSection: {
         switch (pageStack.currentItem?.objectName) {
         case "settingsPage":
@@ -357,7 +437,8 @@ Kirigami.ApplicationWindow {
         if (!signedIn)
             return "";
         for (let i = 0; i <= pageStack.currentIndex; ++i) {
-            if (pageStack.get(i)?.objectName === "libraryPage")
+            const page = pageStack.get(i);
+            if (page?.objectName === "libraryPage" && page.tabType === "")
                 return "library:" + connection.library.libraryId;
         }
         switch (pageStack.currentItem?.objectName) {
@@ -365,28 +446,128 @@ Kirigami.ApplicationWindow {
             return "search";
         case "queuePage":
             return "queue";
-        default:
-            return "home";
         }
+        return rootTab !== "" ? rootTab : "home";
     }
 
-    // Home is the first page: everything above it is dropped, and Home keeps its scroll position and focus
+    function isTypeTab(name) {
+        return name === "movies" || name === "tvshows";
+    }
+
+    function tabOfPage(page) {
+        switch (page?.objectName) {
+        case "homePage":
+            return "home";
+        case "libraryPage":
+            return page.tabType;
+        }
+        return "";
+    }
+
+    // Whether the server has a library of the type: the tab of a type it lacks is not offered
+    function hasTypeTab(name) {
+        return name === "movies" ? connection.movieLibraries.length > 0 : connection.showLibraries.length > 0;
+    }
+
+    // The tab becomes the first page of the stack: what was there goes, the tab it leaves is remembered, and the one it comes back to is restored. A type tab opens its list (the stored library when `libraryId` is empty, else that library, which a Home tile persists); the tab already in front only drops the pages above it. `recentlyAdded` opens the type tab on the one-off Recently Added view instead of the stored one
+    function openTab(name, libraryId) {
+        openTabScope(name, libraryId, false);
+    }
+    function openTabScope(name, libraryId, recentlyAdded) {
+        if (!signedIn)
+            return;
+        const openList = () => recentlyAdded ? connection.openRecentlyAdded(name, libraryId ?? "") : connection.openType(name, libraryId ?? "");
+        const leaving = pageStack.get(0);
+        const leavingTab = rootTab;
+        if (name === leavingTab) {
+            if (isTypeTab(name) && (libraryId || recentlyAdded)) {
+                openList();
+                if (recentlyAdded)
+                    oneOffTabs[name] = true;
+                else
+                    delete oneOffTabs[name];
+            }
+            popToBase();
+            return;
+        }
+        if (isTypeTab(name) && !hasTypeTab(name))
+            return;
+        const model = name === "movies" ? connection.movies : connection.shows;
+        const scopeBefore = isTypeTab(name) ? model.libraryId : "";
+        if (isTypeTab(name) && !openList())
+            return;
+        // A position saved on another library of the type, or on a Recently Added list, means nothing on what opens now
+        if (isTypeTab(name) && (model.libraryId !== scopeBefore || (!recentlyAdded && oneOffTabs[name])))
+            delete tabState[name];
+        if (isTypeTab(name)) {
+            if (recentlyAdded)
+                oneOffTabs[name] = true;
+            else
+                delete oneOffTabs[name];
+        }
+        if (leavingTab !== "" && leaving?.viewPosition)
+            tabState[leavingTab] = leaving.viewPosition();
+        pageStack.clear();
+        let page = null;
+        if (name === "home")
+            page = pageStack.push(Qt.resolvedUrl("HomePage.qml"), { connection: connection });
+        else
+            page = pageStack.push(Qt.resolvedUrl("LibraryPage.qml"), { model: name === "movies" ? connection.movies : connection.shows, tabType: name, connection: connection });
+        if (tabState[name] && page?.restoreViewPosition)
+            page.restoreViewPosition(tabState[name]);
+    }
+
+    // See All of a Recently Added row: the type tab opens from the top on the library's items by date added, newest first, and the sort saved for the tab stays as it was
+    function openRecentlyAdded(name, libraryId) {
+        if (!signedIn || !isTypeTab(name))
+            return;
+        delete tabState[name];
+        openTabScope(name, libraryId, true);
+    }
+
+    // A Continue Watching page is gone: the list is closed with the last one
+    function resumePageGone() {
+        if (--resumePages === 0)
+            connection.resumeItems.close();
+    }
+
+    // See All of Continue Watching goes above Home: a page already open is brought back as it is
+    function openResumeItems() {
+        if (!signedIn)
+            return;
+        for (let i = 0; i <= pageStack.currentIndex; ++i) {
+            const page = pageStack.get(i);
+            if (page?.objectName === "resumeItemsPage") {
+                pageStack.pop(page);
+                return;
+            }
+        }
+        popToBase();
+        if (!connection.openResumeItems())
+            return;
+        // Counted before the page exists and released when it is deleted: a page popped a moment ago may be deleted after this one is pushed
+        resumePages++;
+        if (!pageStack.push(Qt.resolvedUrl("ResumeItemsPage.qml"), { connection: connection, shell: window }))
+            resumePages--;
+    }
+
+    // The Home tab; before a session it is the page the state wants
     function goHome() {
-        const home = pageStack.get(0);
-        if (home?.objectName === "homePage")
-            pageStack.pop(home);
+        if (signedIn)
+            openTab("home");
         else
             showPageForState();
     }
 
-    // A library above Home: one already open gives way to it, and is popped before the shared model switches to the new library
+    // A library opened from a tile that is no tab (collections) goes above Home: one already open gives way to it, and is popped before the shared model switches to the new library
     function openLibrary(libraryId, libraryName) {
         if (!signedIn)
             return;
         // The library already open is not opened again: filters, scroll and the pages above it would be lost
         for (let i = 0; i <= pageStack.currentIndex; ++i) {
-            if (pageStack.get(i)?.objectName === "libraryPage" && connection.library.libraryId === libraryId) {
-                pageStack.pop(pageStack.get(i));
+            const page = pageStack.get(i);
+            if (page?.objectName === "libraryPage" && page.tabType === "" && connection.library.libraryId === libraryId) {
+                pageStack.pop(page);
                 return;
             }
         }
@@ -394,7 +575,21 @@ Kirigami.ApplicationWindow {
         if (home)
             pageStack.pop(home);
         if (connection.openLibrary(libraryId))
-            pageStack.push(Qt.resolvedUrl("LibraryPage.qml"), { model: connection.library, libraryName: libraryName });
+            pageStack.push(Qt.resolvedUrl("LibraryPage.qml"), { model: connection.library, libraryName: libraryName, connection: connection });
+    }
+
+    // A type that vanishes from the server while its tab shows sends the user home
+    Connections {
+        target: window.connection
+        // A menu left open over a session that ended would act on an item of the server the user left
+        function onStateChanged() {
+            if (window.connection.state !== ConnectionController.Authenticated)
+                cardMenu.close();
+        }
+        function onLibrariesChanged() {
+            if (window.signedIn && window.connection.state === ConnectionController.Authenticated && window.isTypeTab(window.rootTab) && !window.hasTypeTab(window.rootTab))
+                window.goHome();
+        }
     }
 
     // What the queue did with an add, for the page that asked: the page itself shows nothing

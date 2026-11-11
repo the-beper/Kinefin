@@ -24,6 +24,19 @@ Kirigami.ScrollablePage {
         }
     ]
 
+    // The scroll position, for the tab to come back as it was left
+    function viewPosition() {
+        return { currentIndex: 0, contentY: page.flickable.contentY };
+    }
+    function restoreViewPosition(position) {
+        // The page may be gone by the time the call runs, when the session ends right after the tab opens
+        Qt.callLater(() => {
+            const flickable = page?.flickable;
+            if (flickable)
+                flickable.contentY = Math.min(position.contentY, Math.max(0, flickable.contentHeight - flickable.height));
+        });
+    }
+
     ColumnLayout {
         spacing: Kirigami.Units.largeSpacing
 
@@ -58,59 +71,12 @@ Kirigami.ScrollablePage {
             visible: page.connection.libraries.length > 0
             Repeater {
                 model: page.connection.libraries
-                delegate: Kirigami.AbstractCard {
-                    id: card
+                delegate: LibraryTile {
+                    id: tile
                     required property var modelData
-                    objectName: "libraryCard_" + modelData.id
-                    enabled: card.modelData.browsable
-                    showClickFeedback: true
-                    Accessible.name: card.modelData.name
-                    Accessible.description: card.modelData.browsable ? "" : i18n("Not supported yet")
-                    onClicked: page.Window.window.openLibrary(card.modelData.id, card.modelData.name)
-                    contentItem: ColumnLayout {
-                        spacing: Kirigami.Units.smallSpacing
-
-                        Rectangle {
-                            Layout.fillWidth: true
-                            Layout.preferredHeight: width * 9 / 16
-                            color: Kirigami.Theme.alternateBackgroundColor
-                            clip: true
-
-                            Kirigami.Icon {
-                                anchors.centerIn: parent
-                                width: Kirigami.Units.iconSizes.huge
-                                height: width
-                                source: "folder-video"
-                                visible: image.status !== Image.Ready
-                            }
-
-                            Image {
-                                id: image
-                                anchors.fill: parent
-                                asynchronous: true
-                                fillMode: Image.PreserveAspectCrop
-                                sourceSize.width: width * Screen.devicePixelRatio
-                                // Only URLs built by JellyfinClient::imageUrl belong here: the image fetcher allows nothing else, but a raw server string must never become a source
-                                source: card.modelData.imageUrl
-                            }
-                        }
-
-                        Controls.Label {
-                            Layout.fillWidth: true
-                            // Library names come from the server: plain text only
-                            textFormat: Text.PlainText
-                            elide: Text.ElideRight
-                            text: card.modelData.name
-                        }
-
-                        Controls.Label {
-                            Layout.fillWidth: true
-                            visible: !card.modelData.browsable
-                            opacity: 0.7
-                            textFormat: Text.PlainText
-                            text: i18n("Not supported yet")
-                        }
-                    }
+                    library: tile.modelData
+                    // A movies or TV shows library opens its tab on that library; the other types open above Home
+                    onClicked: tile.library.tab ? page.Window.window.openTab(tile.library.tab, tile.library.id) : page.Window.window.openLibrary(tile.library.id, tile.library.name)
                 }
             }
         }
@@ -123,6 +89,7 @@ Kirigami.ScrollablePage {
 
                 required property int index
                 required property int kind
+                required property string libraryId
                 required property string libraryName
                 required property int status
                 required property var items
@@ -143,17 +110,42 @@ Kirigami.ScrollablePage {
                     }
                 }
 
+                // The type tab a Recently Added row lists in full, empty for the other rows
+                readonly property string seeAllTab: kind === HomeRowsModel.RecentlyAdded ? (page.connection.libraries.find(entry => entry.id === libraryId)?.tab ?? "") : ""
+                // Continue Watching and Recently Added have a list of their own, Next Up has none
+                readonly property bool hasSeeAll: kind === HomeRowsModel.ContinueWatching || seeAllTab !== ""
+
+                function seeAll() {
+                    if (kind === HomeRowsModel.ContinueWatching)
+                        page.Window.window.openResumeItems();
+                    else
+                        page.Window.window.openRecentlyAdded(seeAllTab, libraryId);
+                }
+
                 Layout.fillWidth: true
                 visible: shown
                 spacing: Kirigami.Units.smallSpacing
 
-                Kirigami.Heading {
+                RowLayout {
                     Layout.fillWidth: true
-                    level: 2
-                    // Library names come from the server: plain text only
-                    textFormat: Text.PlainText
-                    elide: Text.ElideRight
-                    text: row.title
+
+                    Kirigami.Heading {
+                        Layout.fillWidth: true
+                        level: 2
+                        // Library names come from the server: plain text only
+                        textFormat: Text.PlainText
+                        elide: Text.ElideRight
+                        text: row.title
+                    }
+
+                    Controls.ToolButton {
+                        objectName: "homeRowSeeAll_" + row.index
+                        visible: row.hasSeeAll && row.status === HomeRowsModel.Ready
+                        text: i18n("See All")
+                        icon.name: "go-next"
+                        Accessible.name: i18n("See All in %1", row.title)
+                        onClicked: row.seeAll()
+                    }
                 }
 
                 Item {

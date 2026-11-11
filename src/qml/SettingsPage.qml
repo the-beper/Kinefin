@@ -18,6 +18,7 @@ FormCard.FormCardPage {
         { section: "audio", title: i18n("Audio"), icon: "audio-speakers" },
         { section: "video", title: i18n("Video"), icon: "video-display" },
         { section: "subtitles", title: i18n("Subtitles"), icon: "media-view-subtitles" },
+        { section: "library", title: i18n("Library"), icon: "folder-videos" },
         { section: "other", title: i18n("mpv"), icon: "preferences-other" }
     ]
 

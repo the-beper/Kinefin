@@ -9,12 +9,18 @@
 #include <QRegularExpression>
 
 #include <algorithm>
+#include <cmath>
 
 namespace Kinefin {
 namespace {
 constexpr int kMaxNameLength = 512;
 constexpr int kMaxTokenLength = 64;
 constexpr int kMaxOverview = 2048;
+constexpr int kMaxDateLength = 64;
+constexpr int kMinYear = 1900;
+constexpr int kMaxYear = 2200;
+constexpr double kTicksPerMinute = 6e8;
+constexpr double kMaxTicks = 1e14;
 
 QString cappedString(const QJsonValue &value, int limit)
 {
@@ -28,6 +34,41 @@ int boundedInt(const QJsonValue &value, int minimum, int maximum, int fallback)
     const double number = value.toDouble();
     return number < minimum || number > maximum ? fallback : static_cast<int>(number);
 }
+
+// A count is a whole number: 2.5 seasons is a malformed reply, not 2
+int boundedCount(const QJsonValue &value, int maximum)
+{
+    if (!value.isDouble() || std::trunc(value.toDouble()) != value.toDouble())
+        return -1;
+    return boundedInt(value, 0, maximum, -1);
+}
+
+qreal parseCommunityRating(const QJsonValue &value)
+{
+    const double rating = value.toDouble(-1);
+    return value.isDouble() && std::isfinite(rating) && rating >= 0 && rating <= 10 ? rating : -1;
+}
+
+// An ISO 8601 timestamp in UTC, invalid when it is too long, malformed or in an implausible year. The server writes seven fractional digits: the fraction is dropped before parsing, nothing here needs it
+QDateTime parseTimestamp(const QJsonValue &value)
+{
+    if (!value.isString() || value.toString().size() > kMaxDateLength)
+        return {};
+    static const QRegularExpression fraction(QStringLiteral("\\.\\d+"));
+    QString text = value.toString();
+    text.remove(fraction);
+    const QDateTime parsed = QDateTime::fromString(text, Qt::ISODate).toUTC();
+    const int year = parsed.date().year();
+    return parsed.isValid() && year >= kMinYear && year <= kMaxYear ? parsed : QDateTime();
+}
+
+// Minutes still to watch, rounded up; -1 unless the position lies strictly inside the runtime
+int remainingMinutesOf(double positionTicks, double runtimeTicks)
+{
+    if (!(positionTicks > 0 && positionTicks < runtimeTicks && runtimeTicks < kMaxTicks))
+        return -1;
+    return int(std::ceil((runtimeTicks - positionTicks) / kTicksPerMinute));
+}
 } // namespace
 
 QString overviewText(const QJsonValue &value, int limit)
@@ -37,6 +78,14 @@ QString overviewText(const QJsonValue &value, int limit)
                                               QRegularExpression::CaseInsensitiveOption);
     text.replace(lineBreak, QStringLiteral("\n"));
     return text;
+}
+
+bool isRecentlyAdded(const ItemSummary &item, const QDateTime &nowUtc)
+{
+    // A date more than a day ahead is a wrong clock or a hostile value: it never counts as new
+    return !item.played && item.dateCreated.isValid()
+           && item.dateCreated > nowUtc.addDays(-NewItemDays)
+           && item.dateCreated <= nowUtc.addDays(1);
 }
 
 bool isPlayableVideo(const QString &type)
@@ -91,8 +140,13 @@ ItemSummary parseItemSummary(const QJsonObject &item)
         cappedString(item.value(QStringLiteral("SeriesPrimaryImageTag")), kMaxTokenLength);
     summary.overview = overviewText(item.value(QStringLiteral("Overview")), kMaxOverview);
     const double ticks = item.value(QStringLiteral("RunTimeTicks")).toDouble(0);
-    if (ticks > 0 && ticks < 1e14)
-        summary.runtimeMinutes = int(std::max(1.0, ticks / 6e8));
+    if (ticks > 0 && ticks < kMaxTicks)
+        summary.runtimeMinutes = int(std::max(1.0, ticks / kTicksPerMinute));
+    summary.communityRating = parseCommunityRating(item.value(QStringLiteral("CommunityRating")));
+    summary.dateCreated = parseTimestamp(item.value(QStringLiteral("DateCreated")));
+    summary.childCount = boundedCount(item.value(QStringLiteral("ChildCount")), 1'000'000);
+    summary.recursiveItemCount =
+        boundedCount(item.value(QStringLiteral("RecursiveItemCount")), 10'000'000);
     const QJsonValue tags = item.value(QStringLiteral("ImageTags"));
     if (tags.isObject()) {
         const QJsonObject tagObject = tags.toObject();
@@ -115,6 +169,8 @@ ItemSummary parseItemSummary(const QJsonObject &item)
         const QJsonValue percentage = userData.value(QStringLiteral("PlayedPercentage"));
         if (percentage.isDouble() && percentage.toDouble() >= 0 && percentage.toDouble() <= 100)
             summary.playedPercentage = percentage.toDouble();
+        summary.remainingMinutes = remainingMinutesOf(
+            userData.value(QStringLiteral("PlaybackPositionTicks")).toDouble(0), ticks);
     }
     return summary;
 }

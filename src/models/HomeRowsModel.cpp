@@ -56,7 +56,8 @@ void HomeRowsModel::reload()
         if (!hasRecentlyAdded(library.value(QStringLiteral("collectionType")).toString()))
             continue;
         rows.push_back({RecentlyAdded, id, library.value(QStringLiteral("name")).toString(), Idle,
-                        FirstLatestChannel + index++, new ItemRowModel(m_client, false, this)});
+                        FirstLatestChannel + index++,
+                        new ItemRowModel(m_client, false, this, false)});
     }
     // One reset swaps the rows; the old models go after it. A late reply of the previous load finds its channel re-requested (the client aborts the old request when a new one takes the channel) or no row at all
     beginResetModel();

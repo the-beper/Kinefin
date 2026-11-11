@@ -54,8 +54,8 @@ class TestGenreRailsModel : public QObject {
     {
         Fixture f;
         QVERIFY(f.ok);
-        QVERIFY(!f.rails.open(kLibrary, QStringLiteral("music")));
-        QVERIFY(f.rails.open(kLibrary, QStringLiteral("movies")));
+        QVERIFY(!f.rails.open(QStringLiteral("music"), kLibrary));
+        QVERIFY(f.rails.open(QStringLiteral("movies"), kLibrary));
         QCOMPARE(f.rails.status(), GenreRailsModel::Loading);
         QTRY_COMPARE(f.rails.status(), GenreRailsModel::Ready);
         QCOMPARE(f.rails.rowCount(), 3);
@@ -76,7 +76,7 @@ class TestGenreRailsModel : public QObject {
     {
         Fixture f;
         QVERIFY(f.ok);
-        f.rails.open(kLibrary, QStringLiteral("movies"));
+        f.rails.open(QStringLiteral("movies"), kLibrary);
         QTRY_COMPARE(f.rails.status(), GenreRailsModel::Ready);
         QTest::qWait(150);
         QCOMPARE(f.server.itemsRoutes.size(), 0);
@@ -102,7 +102,7 @@ class TestGenreRailsModel : public QObject {
         Fixture f;
         QVERIFY(f.ok);
         f.server.generatedGenreTotal = 10;
-        f.rails.open(kLibrary, QStringLiteral("movies"));
+        f.rails.open(QStringLiteral("movies"), kLibrary);
         QTRY_COMPARE(f.rails.status(), GenreRailsModel::Ready);
         const auto id = [](int row) {
             return QStringLiteral("%1").arg(row + 1, 32, 16, QLatin1Char('d'));
@@ -131,7 +131,7 @@ class TestGenreRailsModel : public QObject {
         f.server.listingRawBody.insert(
             QStringLiteral("Items"),
             QByteArrayLiteral("{\"Items\":[],\"StartIndex\":0,\"TotalRecordCount\":0}"));
-        f.rails.open(kLibrary, QStringLiteral("movies"));
+        f.rails.open(QStringLiteral("movies"), kLibrary);
         QTRY_COMPARE(f.rails.status(), GenreRailsModel::Ready);
         f.rails.want(kMystery);
         QTRY_COMPARE(f.railStatus(1), int(GenreRailsModel::RailReady));
@@ -143,7 +143,7 @@ class TestGenreRailsModel : public QObject {
     {
         Fixture f;
         QVERIFY(f.ok);
-        f.rails.open(kLibrary, QStringLiteral("movies"));
+        f.rails.open(QStringLiteral("movies"), kLibrary);
         QTRY_COMPARE(f.rails.status(), GenreRailsModel::Ready);
         f.server.listingStatus.insert(QStringLiteral("Items"), 500);
         f.rails.want(kMystery);
@@ -162,7 +162,7 @@ class TestGenreRailsModel : public QObject {
         Fixture f;
         QVERIFY(f.ok);
         f.server.generatedGenreTotal = 250;
-        f.rails.open(kLibrary, QStringLiteral("movies"));
+        f.rails.open(QStringLiteral("movies"), kLibrary);
         QTRY_COMPARE(f.rails.status(), GenreRailsModel::Ready);
         QCOMPARE(f.rails.rowCount(), 20);
         while (f.rails.canLoadMore()) {
@@ -188,7 +188,7 @@ class TestGenreRailsModel : public QObject {
             QJsonDocument(QJsonObject{{QStringLiteral("Items"), bad},
                                       {QStringLiteral("TotalRecordCount"), 500}})
                 .toJson(QJsonDocument::Compact));
-        f.rails.open(kLibrary, QStringLiteral("movies"));
+        f.rails.open(QStringLiteral("movies"), kLibrary);
         QTRY_COMPARE(f.rails.status(), GenreRailsModel::Ready);
         QCOMPARE(f.rails.rowCount(), 0);
         QVERIFY(!f.rails.canLoadMore());
@@ -215,7 +215,7 @@ class TestGenreRailsModel : public QObject {
             QJsonDocument(QJsonObject{{QStringLiteral("Items"), page},
                                       {QStringLiteral("TotalRecordCount"), 60}})
                 .toJson(QJsonDocument::Compact));
-        f.rails.open(kLibrary, QStringLiteral("movies"));
+        f.rails.open(QStringLiteral("movies"), kLibrary);
         QTRY_COMPARE(f.rails.status(), GenreRailsModel::Ready);
         QCOMPARE(f.rails.rowCount(), 10);
         QVERIFY(f.rails.canLoadMore());
@@ -231,7 +231,7 @@ class TestGenreRailsModel : public QObject {
         Fixture f;
         QVERIFY(f.ok);
         f.server.listingStatus.insert(QStringLiteral("Genres"), 500);
-        f.rails.open(kLibrary, QStringLiteral("movies"));
+        f.rails.open(QStringLiteral("movies"), kLibrary);
         QTRY_COMPARE(f.rails.status(), GenreRailsModel::Failed);
         f.server.listingStatus.clear();
         f.rails.retryList();
@@ -259,7 +259,7 @@ class TestGenreRailsModel : public QObject {
             QJsonDocument(QJsonObject{{QStringLiteral("Items"), genres},
                                       {QStringLiteral("TotalRecordCount"), 5}})
                 .toJson(QJsonDocument::Compact));
-        f.rails.open(kLibrary, QStringLiteral("movies"));
+        f.rails.open(QStringLiteral("movies"), kLibrary);
         QTRY_COMPARE(f.rails.status(), GenreRailsModel::Ready);
         QCOMPARE(f.rails.rowCount(), 2);
         QCOMPARE(f.rails.data(f.rails.index(0), GenreRailsModel::NameRole).toString().size(),
@@ -272,7 +272,7 @@ class TestGenreRailsModel : public QObject {
     {
         Fixture f;
         QVERIFY(f.ok);
-        f.rails.open(kLibrary, QStringLiteral("movies"));
+        f.rails.open(QStringLiteral("movies"), kLibrary);
         QTRY_COMPARE(f.rails.status(), GenreRailsModel::Ready);
         QSignalSpy failures(&f.client, &Kinefin::JellyfinClient::listingFailed);
         f.server.holdListings = true;
@@ -289,11 +289,63 @@ class TestGenreRailsModel : public QObject {
         QCOMPARE(f.rails.rowCount(), 0);
     }
 
+    void allScopeSendsNoParentId()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        QSignalSpy answers(&f.client, &Kinefin::JellyfinClient::genresReady);
+        QVERIFY(!f.rails.open(QStringLiteral("movies"), QStringLiteral("bad id")));
+        QVERIFY(f.rails.open(QStringLiteral("movies")));
+        QTRY_COMPARE(f.rails.status(), GenreRailsModel::Ready);
+        QVERIFY(f.rails.libraryId().isEmpty());
+        QCOMPARE(answers.constFirst().at(2).toInt(), int(GenreRailsModel::ListChannel));
+        const QByteArray listRoute =
+            f.server.listingRoutes.value(QStringLiteral("Genres")).constFirst();
+        QVERIFY2(!listRoute.contains("parentId="), listRoute.constData());
+        QVERIFY(listRoute.contains("includeItemTypes=Movie"));
+        // A rail of the all scope has no parent either
+        f.rails.want(kSciFi);
+        QTRY_COMPARE(f.railStatus(0), int(GenreRailsModel::RailReady));
+        const QByteArray railRoute = f.server.itemsRoutes.constFirst();
+        QVERIFY2(!railRoute.contains("parentId="), railRoute.constData());
+        QVERIFY(railRoute.contains(QByteArray("genreIds=").append(kSciFi.toUtf8())));
+        // A failed list retries without a library id too
+        f.server.listingStatus.insert(QStringLiteral("Genres"), 500);
+        QVERIFY(f.rails.open(QStringLiteral("tvshows")));
+        QTRY_COMPARE(f.rails.status(), GenreRailsModel::Failed);
+        f.server.listingStatus.clear();
+        f.rails.retryList();
+        QTRY_COMPARE(f.rails.status(), GenreRailsModel::Ready);
+    }
+
+    void listChannelReleasedOnClear()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        QSignalSpy answers(&f.client, &Kinefin::JellyfinClient::genresReady);
+        QSignalSpy failures(&f.client, &Kinefin::JellyfinClient::listingFailed);
+        f.server.holdListings = true;
+        f.rails.open(QStringLiteral("movies"));
+        QTRY_COMPARE(f.server.listingRoutes.value(QStringLiteral("Genres")).size(), 1);
+        f.rails.clear();
+        QCOMPARE(f.rails.status(), GenreRailsModel::Idle);
+        f.server.holdListings = false;
+        f.server.releaseHeld();
+        QTest::qWait(250);
+        QCOMPARE(answers.size(), 0);
+        QCOMPARE(failures.size(), 0);
+        QCOMPARE(f.rails.rowCount(), 0);
+        // A reopen on the same channel answers once
+        f.rails.open(QStringLiteral("movies"));
+        QTRY_COMPARE(f.rails.status(), GenreRailsModel::Ready);
+        QCOMPARE(answers.size(), 1);
+    }
+
     void aLostSessionEmptiesTheRails()
     {
         Fixture f;
         QVERIFY(f.ok);
-        f.rails.open(kLibrary, QStringLiteral("movies"));
+        f.rails.open(QStringLiteral("movies"), kLibrary);
         QTRY_COMPARE(f.rails.status(), GenreRailsModel::Ready);
         f.client.disconnectFromServer();
         QCOMPARE(f.rails.rowCount(), 0);

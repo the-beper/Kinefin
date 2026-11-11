@@ -281,6 +281,41 @@ bool isValidImageTagToken(const QString &token)
     return true;
 }
 
+// The avatar tag of a user: ASCII letters, digits and '-' only, so it is safe in a URL and in a cache key
+bool isValidUserImageTag(QStringView tag)
+{
+    if (tag.isEmpty() || tag.size() > 64)
+        return false;
+    for (const QChar character : tag) {
+        const char16_t c = character.unicode();
+        const bool allowed = (c >= u'0' && c <= u'9') || (c >= u'a' && c <= u'z')
+                             || (c >= u'A' && c <= u'Z') || c == u'-';
+        if (!allowed)
+            return false;
+    }
+    return true;
+}
+
+// A user name from the server: bounded, one line, no control characters (remote text, shown as plain text); empty when it does not qualify
+QString validUserName(const QJsonValue &value)
+{
+    const QString name = value.toString();
+    if (name.trimmed().isEmpty() || name.size() > MaxUserNameChars)
+        return {};
+    for (const QChar c : name) {
+        const char16_t u = c.unicode();
+        if (u < 0x20 || (u >= 0x7f && u <= 0x9f) || u == 0x2028 || u == 0x2029)
+            return {};
+    }
+    return name;
+}
+
+QString validUserImageTag(const QJsonValue &value)
+{
+    const QString tag = value.toString();
+    return isValidUserImageTag(tag) ? tag : QString();
+}
+
 // Splits a comma-separated query value into tokens, refusing empty members
 bool splitTokenList(const QString &value, QList<QString> *tokens)
 {
@@ -541,8 +576,8 @@ void JellyfinClient::finishAuthentication(QNetworkReply *finished)
         return;
     }
     const QString token = result.value(QStringLiteral("AccessToken")).toString();
-    const QString userId =
-        result.value(QStringLiteral("User")).toObject().value(QStringLiteral("Id")).toString();
+    const QJsonObject user = result.value(QStringLiteral("User")).toObject();
+    const QString userId = user.value(QStringLiteral("Id")).toString();
     const QString reportedServerId = result.value(QStringLiteral("ServerId")).toString();
     if (token.isEmpty() || userId.isEmpty() || reportedServerId != m_serverId
         || !validHeaderField(token)) {
@@ -551,6 +586,8 @@ void JellyfinClient::finishAuthentication(QNetworkReply *finished)
     }
     m_token = token.toUtf8();
     m_userId = userId;
+    m_userName = validUserName(user.value(QStringLiteral("Name")));
+    m_userImageTag = validUserImageTag(user.value(QStringLiteral("PrimaryImageTag")));
     m_state = State::Authenticated;
     Q_EMIT loginSucceeded(m_userId);
 }
@@ -620,8 +657,17 @@ QUrlQuery listingQuery(const ItemQuery &query, const QString &userId)
         if (query.limit >= 0)
             wire.addQueryItem(QStringLiteral("limit"), QString::number(query.limit));
     }
-    if (!query.fields.isEmpty())
-        wire.addQueryItem(QStringLiteral("fields"), query.fields.join(QLatin1Char(',')));
+    QStringList fields = query.fields;
+    if (query.cardImages) {
+        // What a card shows besides the images: the aspect ratio and the date the New badge needs
+        for (const QString &field :
+             {QStringLiteral("PrimaryImageAspectRatio"), QStringLiteral("DateCreated")}) {
+            if (!fields.contains(field))
+                fields.append(field);
+        }
+    }
+    if (!fields.isEmpty())
+        wire.addQueryItem(QStringLiteral("fields"), fields.join(QLatin1Char(',')));
     if (query.cardImages)
         addImageTypeParameters(wire);
     wire.addQueryItem(QStringLiteral("userId"), userId);
@@ -724,9 +770,9 @@ bool JellyfinClient::fetchItems(const ItemQuery &query, int channel)
     return true;
 }
 
-bool JellyfinClient::fetchResumeItems(int limit, int channel)
+bool JellyfinClient::fetchResumeItems(int limit, int channel, int startIndex)
 {
-    if (m_state != State::Authenticated || limit <= 0)
+    if (m_state != State::Authenticated || limit <= 0 || startIndex < -1)
         return false;
     const QString family = QStringLiteral("Resume");
     const QString key = listingKey(family, channel);
@@ -734,7 +780,9 @@ bool JellyfinClient::fetchResumeItems(int limit, int channel)
     QUrl url = endpoint(QStringLiteral("/UserItems/Resume"));
     QUrlQuery wire;
     wire.addQueryItem(QStringLiteral("mediaTypes"), QStringLiteral("Video"));
-    addRowImageParameters(wire);
+    addRowImageParameters(wire, QStringLiteral(",DateCreated"));
+    if (startIndex >= 0)
+        wire.addQueryItem(QStringLiteral("startIndex"), QString::number(startIndex));
     wire.addQueryItem(QStringLiteral("limit"), QString::number(limit));
     wire.addQueryItem(QStringLiteral("userId"), m_userId);
     url.setQuery(wire);
@@ -764,7 +812,7 @@ bool JellyfinClient::fetchLatestItems(const QString &parentId, int limit, int ch
     QUrlQuery wire;
     if (!parentId.isEmpty())
         wire.addQueryItem(QStringLiteral("parentId"), parentId);
-    addRowImageParameters(wire);
+    addRowImageParameters(wire, QStringLiteral(",DateCreated"));
     wire.addQueryItem(QStringLiteral("limit"), QString::number(limit));
     wire.addQueryItem(QStringLiteral("userId"), m_userId);
     url.setQuery(wire);
@@ -913,14 +961,15 @@ bool JellyfinClient::fetchSimilarItems(const QString &itemId, int limit, int cha
 }
 
 bool JellyfinClient::fetchGenres(const QString &parentId, int startIndex, int limit,
-                                 const QString &includeItemTypes)
+                                 const QString &includeItemTypes, int channel)
 {
     if (m_state != State::Authenticated || (!parentId.isEmpty() && !isValidJellyfinId(parentId))
         || startIndex < -1 || limit < -1
         || (!includeItemTypes.isEmpty() && !validKindList(includeItemTypes)))
         return false;
     const QString family = QStringLiteral("Genres");
-    const quint64 serial = supersedeListing(family);
+    const QString key = listingKey(family, channel);
+    const quint64 serial = supersedeListing(key);
     QUrl url = endpoint(QStringLiteral("/Genres"));
     QUrlQuery wire;
     if (!parentId.isEmpty())
@@ -934,26 +983,28 @@ bool JellyfinClient::fetchGenres(const QString &parentId, int startIndex, int li
     wire.addQueryItem(QStringLiteral("userId"), m_userId);
     url.setQuery(wire);
     QNetworkReply *reply = m_network.get(requestFor(url, true));
-    m_listingReplies.insert(family, reply);
-    attach(reply, m_generation, [this, family, serial](QNetworkReply *finished) {
-        if (listingSuperseded(family, serial))
+    m_listingReplies.insert(key, reply);
+    attach(reply, m_generation, [this, family, key, channel, serial](QNetworkReply *finished) {
+        if (listingSuperseded(key, serial))
             return;
         QJsonArray items;
         int total = 0;
-        if (!listingEnvelope(finished, family, 0, &items, &total))
+        if (!listingEnvelope(finished, family, channel, &items, &total))
             return;
-        Q_EMIT genresReady(items, total);
+        Q_EMIT genresReady(items, total, channel);
     });
     return true;
 }
 
-bool JellyfinClient::fetchFilters(const QString &parentId, const QString &includeItemTypes)
+bool JellyfinClient::fetchFilters(const QString &parentId, const QString &includeItemTypes,
+                                  int channel)
 {
     if (m_state != State::Authenticated || (!parentId.isEmpty() && !isValidJellyfinId(parentId))
         || (!includeItemTypes.isEmpty() && !validKindList(includeItemTypes)))
         return false;
     const QString family = QStringLiteral("Filters");
-    const quint64 serial = supersedeListing(family);
+    const QString key = listingKey(family, channel);
+    const quint64 serial = supersedeListing(key);
     QUrl url = endpoint(QStringLiteral("/Items/Filters2"));
     QUrlQuery wire;
     if (!parentId.isEmpty())
@@ -966,14 +1017,14 @@ bool JellyfinClient::fetchFilters(const QString &parentId, const QString &includ
     wire.addQueryItem(QStringLiteral("userId"), m_userId);
     url.setQuery(wire);
     QNetworkReply *reply = m_network.get(requestFor(url, true));
-    m_listingReplies.insert(family, reply);
-    attach(reply, m_generation, [this, family, serial](QNetworkReply *finished) {
-        if (listingSuperseded(family, serial))
+    m_listingReplies.insert(key, reply);
+    attach(reply, m_generation, [this, family, key, channel, serial](QNetworkReply *finished) {
+        if (listingSuperseded(key, serial))
             return;
         QJsonObject filters;
-        if (!listingObject(finished, family, 0, &filters))
+        if (!listingObject(finished, family, channel, &filters))
             return;
-        Q_EMIT filtersReady(filters);
+        Q_EMIT filtersReady(filters, channel);
     });
     return true;
 }
@@ -1023,6 +1074,20 @@ QUrl JellyfinClient::imageUrl(const QString &itemId, const QString &imageType, i
     return url;
 }
 
+QUrl JellyfinClient::userImageUrl(const QString &userId, const QString &tag) const
+{
+    if (m_base.isEmpty() || !isValidJellyfinId(userId)
+        || (!tag.isEmpty() && !isValidUserImageTag(tag)))
+        return {};
+    QUrl url = endpoint(QStringLiteral("/UserImage"));
+    QUrlQuery wire;
+    wire.addQueryItem(QStringLiteral("userId"), userId);
+    if (!tag.isEmpty())
+        wire.addQueryItem(QStringLiteral("tag"), tag);
+    url.setQuery(wire);
+    return url;
+}
+
 bool JellyfinClient::isServerImageUrl(const QUrl &base, const QUrl &url)
 {
     if (base.isEmpty() || !url.isValid() || url.scheme() != base.scheme()
@@ -1037,12 +1102,65 @@ bool JellyfinClient::isServerImageUrl(const QUrl &base, const QUrl &url)
     if (encoded.contains(QStringLiteral("%2f")) || encoded.contains(QStringLiteral("%5c")))
         return false;
     const QString path = url.path(QUrl::FullyDecoded);
+    if (path == basePath + QStringLiteral("/UserImage")) {
+        // Exactly the query userImageUrl() writes: a valid userId and an optional valid tag, nothing else, nothing twice
+        bool hasUser = false;
+        bool hasTag = false;
+        for (const auto &[key, value] : QUrlQuery(url).queryItems(QUrl::FullyDecoded)) {
+            if (key == QLatin1String("userId") && !hasUser && isValidJellyfinId(value))
+                hasUser = true;
+            else if (key == QLatin1String("tag") && !hasTag && isValidUserImageTag(value))
+                hasTag = true;
+            else
+                return false;
+        }
+        return hasUser;
+    }
     if (!path.startsWith(basePath + QStringLiteral("/Items/")))
         return false;
     const QStringList parts = path.mid(basePath.size() + 1).split(QLatin1Char('/'));
     return parts.size() == 4 && parts.at(0) == QLatin1String("Items")
            && isValidJellyfinId(parts.at(1)) && parts.at(2) == QLatin1String("Images")
            && isValidImageTypeToken(parts.at(3));
+}
+
+bool JellyfinClient::fetchPublicUsers()
+{
+    if (m_state == State::Disconnected || m_state == State::Probing)
+        return false;
+    const QString family = QStringLiteral("PublicUsers");
+    const quint64 serial = supersedeListing(family);
+    QNetworkReply *reply =
+        m_network.get(requestFor(endpoint(QStringLiteral("/Users/Public")), false));
+    m_listingReplies.insert(family, reply);
+    attach(reply, m_generation, [this, family, serial](QNetworkReply *finished) {
+        if (listingSuperseded(family, serial))
+            return;
+        const int status = finished->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (status != 200 || finished->error() != QNetworkReply::NoError) {
+            Q_EMIT publicUsersFailed(status, QStringLiteral("Public users request failed"));
+            return;
+        }
+        QJsonArray entries;
+        if (!parseArray(finished, &entries)) {
+            Q_EMIT publicUsersFailed(status, QStringLiteral("Invalid public users response"));
+            return;
+        }
+        QList<PublicUser> users;
+        for (const QJsonValue &entry : entries) {
+            if (users.size() >= MaxPublicUsers)
+                break;
+            const QJsonObject object = entry.toObject();
+            const QString id = object.value(QStringLiteral("Id")).toString();
+            const QString name = validUserName(object.value(QStringLiteral("Name")));
+            if (!isValidJellyfinId(id) || name.isEmpty())
+                continue;
+            users.append(
+                {id, name, validUserImageTag(object.value(QStringLiteral("PrimaryImageTag")))});
+        }
+        Q_EMIT publicUsersReady(users);
+    });
+    return true;
 }
 
 bool JellyfinClient::fetchUserViews()
@@ -1278,8 +1396,25 @@ bool JellyfinClient::verifySession()
     QNetworkReply *reply = m_network.get(requestFor(endpoint(QStringLiteral("/Users/Me")), true));
     attach(reply, m_generation, [this](QNetworkReply *finished) {
         m_verifyInFlight = false;
-        if (finished->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() == 401)
+        const int status = finished->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (status == 401) {
             invalidateSession();
+            return;
+        }
+        QJsonObject me;
+        if (status != 200 || finished->error() != QNetworkReply::NoError
+            || !parseObject(finished, &me))
+            return;
+        // The token belongs to another user than the one restored: the stored session is not this user's
+        if (me.value(QStringLiteral("Id")).toString().compare(m_userId, Qt::CaseInsensitive) != 0) {
+            invalidateSession();
+            return;
+        }
+        const QString name = validUserName(me.value(QStringLiteral("Name")));
+        if (!name.isEmpty())
+            m_userName = name;
+        m_userImageTag = validUserImageTag(me.value(QStringLiteral("PrimaryImageTag")));
+        Q_EMIT userProfileRefreshed(m_userId, m_userName, m_userImageTag);
     });
     return true;
 }
@@ -1296,7 +1431,7 @@ void JellyfinClient::releaseListingChannel(int channel)
     for (const QString &family :
          {QStringLiteral("Items"), QStringLiteral("Resume"), QStringLiteral("Latest"),
           QStringLiteral("NextUp"), QStringLiteral("Similar"), QStringLiteral("Seasons"),
-          QStringLiteral("Episodes")}) {
+          QStringLiteral("Episodes"), QStringLiteral("Genres"), QStringLiteral("Filters")}) {
         const QString key = listingKey(family, channel);
         if (!m_listingSerials.contains(key))
             continue;
@@ -1421,6 +1556,8 @@ void JellyfinClient::clearToken()
     m_token.fill('\0');
     m_token.clear();
     m_userId.clear();
+    m_userName.clear();
+    m_userImageTag.clear();
     if (hadToken)
         Q_EMIT credentialsCleared();
 }
@@ -1434,10 +1571,11 @@ void JellyfinClient::invalidateSession()
 {
     if (m_state != State::Authenticated)
         return;
+    const QString expiredUser = m_userId;
     abortPending();
     clearToken();
     m_state = State::Ready;
-    Q_EMIT sessionExpired();
+    Q_EMIT sessionExpired(expiredUser);
 }
 
 void JellyfinClient::failProbe(int status, const QString &reason)
@@ -1505,6 +1643,14 @@ QString JellyfinClient::serverId() const
 QString JellyfinClient::userId() const
 {
     return m_userId;
+}
+QString JellyfinClient::userName() const
+{
+    return m_userName;
+}
+QString JellyfinClient::userImageTag() const
+{
+    return m_userImageTag;
 }
 QString JellyfinClient::deviceId() const
 {

@@ -10,8 +10,8 @@
 
 namespace Kinefin {
 
-FilterOptionsModel::FilterOptionsModel(JellyfinClient *client, QObject *parent)
-    : QAbstractListModel(parent), m_client(client)
+FilterOptionsModel::FilterOptionsModel(JellyfinClient *client, int channel, QObject *parent)
+    : QAbstractListModel(parent), m_client(client), m_channel(channel)
 {
     if (m_client) {
         connect(m_client, &JellyfinClient::filtersReady, this, &FilterOptionsModel::onFiltersReady);
@@ -35,13 +35,13 @@ void FilterOptionsModel::load(const QString &parentId, const QString &includeIte
     m_parentId = parentId;
     m_includeItemTypes = includeItemTypes;
     setStatus(Loading);
-    if (!m_client || !m_client->fetchFilters(parentId, includeItemTypes))
+    if (!m_client || !m_client->fetchFilters(parentId, includeItemTypes, m_channel))
         setStatus(Failed);
 }
 
 void FilterOptionsModel::retry()
 {
-    if (m_status == Failed && !m_parentId.isEmpty())
+    if (m_status == Failed)
         load(m_parentId, m_includeItemTypes);
 }
 
@@ -69,9 +69,9 @@ bool FilterOptionsModel::contains(const QString &genreId) const
     return false;
 }
 
-void FilterOptionsModel::onFiltersReady(const QJsonObject &filters)
+void FilterOptionsModel::onFiltersReady(const QJsonObject &filters, int channel)
 {
-    if (m_status != Loading)
+    if (channel != m_channel || m_status != Loading)
         return;
     std::vector<Option> options;
     QSet<QString> seen;
@@ -99,7 +99,7 @@ void FilterOptionsModel::onFiltersReady(const QJsonObject &filters)
 
 void FilterOptionsModel::onListingFailed(const QString &family, int, const QString &, int channel)
 {
-    if (family != QLatin1String("Filters") || channel != 0 || m_status != Loading)
+    if (family != QLatin1String("Filters") || channel != m_channel || m_status != Loading)
         return;
     setStatus(Failed);
 }

@@ -22,6 +22,16 @@ Controls.ItemDelegate {
     required property real playedPercentage
     required property bool favorite
     required property bool loaded
+    required property string type
+    required property string seriesId
+    // The community rating, 0 to 10, and the minutes left to watch; -1 when unknown
+    required property real rating
+    required property int remainingMinutes
+    required property bool isNew
+    // A series only: how many seasons and episodes it has (-1 otherwise), and the share of its episodes watched, 0 to 1 (-1 otherwise)
+    required property int seasonCount
+    required property int episodeCount
+    required property real seriesProgress
 
     // A 16:9 image area instead of the 2:3 poster
     property bool landscape: false
@@ -29,9 +39,18 @@ Controls.ItemDelegate {
     property string subtitle: ""
 
     readonly property real posterAspect: landscape ? 9 / 16 : 3 / 2
-    readonly property string secondLine: subtitle.length > 0 ? subtitle : (year > 0 ? String(year) : "")
+    readonly property string countsLine: seasonCount > 0 && episodeCount > 0 ? i18nc("seasons and episodes of a series", "%1 · %2", i18np("%1 season", "%1 seasons", seasonCount), i18np("%1 episode", "%1 episodes", episodeCount)) : ""
+    readonly property string secondLine: countsLine.length > 0 ? countsLine : (subtitle.length > 0 ? subtitle : (year > 0 ? String(year) : ""))
 
-    readonly property bool inProgress: loaded && playedPercentage > 0 && playedPercentage < 100
+    // The watched share, 0 to 1: a series counts its episodes, anything else its playback position
+    readonly property real progress: seriesProgress >= 0 ? seriesProgress : playedPercentage / 100
+    readonly property bool inProgress: loaded && progress > 0 && progress < 1
+    readonly property bool showsNew: loaded && isNew && (Window.window?.newBadgeEnabled ?? false)
+
+    // Opens the card menu of the window: at the given point of the card, below it when none
+    function openMenu(x, y) {
+        Window.window?.openCardMenu?.(card, itemId, type, seriesId, x ?? 0, y ?? card.height);
+    }
 
     // The description lists only what applies to the item, and stays empty for a placeholder row
     readonly property string description: {
@@ -42,15 +61,29 @@ Controls.ItemDelegate {
             parts.push(i18nc("state of an item", "Played"));
         if (favorite)
             parts.push(i18n("Favorite"));
+        if (showsNew)
+            parts.push(i18nc("badge on a recently added item", "New"));
+        if (rating > 0)
+            parts.push(i18n("Rated %1 out of 10", Number(rating).toLocaleString(Qt.locale(), "f", 1)));
         if (!played && unplayedCount > 0)
             parts.push(i18np("%1 unplayed item", "%1 unplayed items", unplayedCount));
         if (inProgress)
-            parts.push(i18np("%1 percent watched", "%1 percent watched", Math.round(playedPercentage)));
+            parts.push(i18np("%1 percent watched", "%1 percent watched", Math.round(progress * 100)));
+        if (remainingMinutes > 0)
+            parts.push(i18np("%1 minute left", "%1 minutes left", remainingMinutes));
         return parts.join(", ");
     }
 
+    TapHandler {
+        acceptedButtons: Qt.RightButton
+        onTapped: eventPoint => {
+            card.makeCurrent();
+            card.openMenu(eventPoint.position.x, eventPoint.position.y);
+        }
+    }
+
     // A click makes this tile the current one and gives its view the focus, so the focus comes back to this tile after Back
-    onPressed: {
+    function makeCurrent() {
         const view = ListView.view ?? GridView.view;
         if (!view)
             return;
@@ -58,9 +91,45 @@ Controls.ItemDelegate {
         view.forceActiveFocus(Qt.MouseFocusReason);
     }
 
+    onPressed: makeCurrent()
+
+    // A dark capsule over the poster with an optional icon and a short text, readable on any image
+    component Pill: Rectangle {
+        id: pill
+
+        property string iconName: ""
+        property string text: ""
+
+        implicitWidth: pillRow.implicitWidth + Kirigami.Units.largeSpacing
+        implicitHeight: pillRow.implicitHeight + Kirigami.Units.smallSpacing
+        radius: height / 2
+        color: Qt.rgba(0, 0, 0, 0.6)
+
+        RowLayout {
+            id: pillRow
+            anchors.centerIn: parent
+            spacing: Kirigami.Units.smallSpacing / 2
+
+            Kirigami.Icon {
+                Layout.preferredWidth: Kirigami.Units.iconSizes.small
+                Layout.preferredHeight: Kirigami.Units.iconSizes.small
+                visible: source.toString().length > 0
+                source: pill.iconName
+                color: "white"
+            }
+
+            Controls.Label {
+                color: "white"
+                font: Kirigami.Theme.smallFont
+                textFormat: Text.PlainText
+                text: pill.text
+            }
+        }
+    }
+
     padding: Kirigami.Units.smallSpacing
     Accessible.ignored: !loaded
-    Accessible.name: subtitle.length > 0 ? name + ", " + subtitle : (year > 0 ? name + " (" + year + ")" : name)
+    Accessible.name: countsLine.length > 0 ? name + ", " + countsLine : (subtitle.length > 0 ? name + ", " + subtitle : (year > 0 ? name + " (" + year + ")" : name))
     Accessible.description: description
 
     contentItem: ColumnLayout {
@@ -93,6 +162,8 @@ Controls.ItemDelegate {
             }
 
             Rectangle {
+                id: progressBar
+                objectName: "cardProgress"
                 anchors {
                     left: parent.left
                     right: parent.right
@@ -104,31 +175,71 @@ Controls.ItemDelegate {
 
                 Rectangle {
                     height: parent.height
-                    width: parent.width * card.playedPercentage / 100
+                    width: parent.width * card.progress
                     color: Kirigami.Theme.highlightColor
                 }
             }
 
-            Rectangle {
+            RowLayout {
+                anchors {
+                    left: parent.left
+                    right: parent.right
+                    bottom: parent.bottom
+                    margins: Kirigami.Units.smallSpacing
+                    bottomMargin: Kirigami.Units.smallSpacing + (progressBar.visible ? progressBar.height : 0)
+                }
+                spacing: Kirigami.Units.smallSpacing
+
+                Pill {
+                    objectName: "cardRating"
+                    visible: card.loaded && card.rating > 0
+                    iconName: "starred-symbolic"
+                    text: card.rating.toLocaleString(Qt.locale(), "f", 1)
+                }
+
+                Item {
+                    Layout.fillWidth: true
+                }
+
+                Pill {
+                    objectName: "cardRemaining"
+                    visible: card.loaded && card.remainingMinutes > 0
+                    text: i18np("%1 min left", "%1 min left", card.remainingMinutes)
+                }
+            }
+
+            Row {
                 anchors {
                     top: parent.top
                     left: parent.left
                     margins: Kirigami.Units.smallSpacing
                 }
-                width: Kirigami.Units.iconSizes.smallMedium
-                height: width
-                radius: width / 2
-                visible: card.loaded && card.favorite
-                color: Qt.rgba(0, 0, 0, 0.6)
+                spacing: Kirigami.Units.smallSpacing
 
-                Kirigami.Icon {
-                    anchors.fill: parent
-                    anchors.margins: Kirigami.Units.smallSpacing / 2
-                    source: "emblem-favorite"
+                Pill {
+                    objectName: "cardNew"
+                    visible: card.showsNew
+                    text: i18nc("badge on a recently added item", "New")
+                }
+
+                Rectangle {
+                    objectName: "cardFavorite"
+                    width: Kirigami.Units.iconSizes.smallMedium
+                    height: width
+                    radius: width / 2
+                    visible: card.loaded && card.favorite
+                    color: Qt.rgba(0, 0, 0, 0.6)
+
+                    Kirigami.Icon {
+                        anchors.fill: parent
+                        anchors.margins: Kirigami.Units.smallSpacing / 2
+                        source: "emblem-favorite"
+                    }
                 }
             }
 
             Rectangle {
+                objectName: "cardPlayed"
                 anchors {
                     top: parent.top
                     right: parent.right
@@ -149,6 +260,7 @@ Controls.ItemDelegate {
             }
 
             Rectangle {
+                objectName: "cardUnplayed"
                 anchors {
                     top: parent.top
                     right: parent.right
@@ -171,13 +283,44 @@ Controls.ItemDelegate {
             }
         }
 
-        // Item names come from the server: plain text only
-        Controls.Label {
+        RowLayout {
             Layout.fillWidth: true
-            elide: Text.ElideRight
-            maximumLineCount: 1
-            textFormat: Text.PlainText
-            text: card.loaded ? card.name : ""
+            spacing: 0
+
+            // Item names come from the server: plain text only
+            Controls.Label {
+                id: nameLabel
+                Layout.fillWidth: true
+                elide: Text.ElideRight
+                maximumLineCount: 1
+                textFormat: Text.PlainText
+                text: card.loaded ? card.name : ""
+            }
+
+            // The pointer and keyboard ways to the menu are the right click and the Menu key: this button is for the pointer alone, and the line keeps its height
+            Controls.ToolButton {
+                id: menuButton
+                objectName: "cardMenuButton"
+                Layout.preferredWidth: nameLabel.implicitHeight
+                Layout.preferredHeight: nameLabel.implicitHeight
+                focusPolicy: Qt.NoFocus
+                padding: 0
+                visible: card.loaded
+                display: Controls.AbstractButton.IconOnly
+                icon.name: "overflow-menu"
+                icon.width: Kirigami.Units.iconSizes.small
+                icon.height: Kirigami.Units.iconSizes.small
+                text: i18n("More Actions")
+                // The tooltip keeps the short text: a screen reader hears which card the button belongs to
+                Accessible.name: i18n("More Actions for %1", card.name)
+                Controls.ToolTip.text: text
+                Controls.ToolTip.visible: hovered
+                Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
+                onClicked: {
+                    const point = menuButton.mapToItem(card, 0, menuButton.height);
+                    card.openMenu(point.x, point.y);
+                }
+            }
         }
 
         Controls.Label {

@@ -3,13 +3,16 @@
 #pragma once
 
 #include "api/JellyfinClient.h"
+#include "models/CardRoles.h"
 #include "models/FilterOptionsModel.h"
 #include "models/PagedItemsModel.h"
+
+#include <QTimer>
 
 #include <optional>
 
 namespace Kinefin {
-// The items of one library as a paged list (see PagedItemsModel): the library's own query with a sort order and a filter, on a listing channel of its own so the home rows and the details pages never see its replies. The model empties itself whenever the client loses its credentials
+// The items of one library, or of every library of a type, as a paged list (see PagedItemsModel, with the card roles of CardRoles.h): the query of the type with a sort order, a filter, genres and a search term, on a listing channel given at construction (the genre options use the same channel number in their own family) so the home rows, the other grids and the details pages never see its replies. The model empties itself whenever the client loses its credentials
 class LibraryItemsModel final : public PagedItemsModel {
     Q_OBJECT
     Q_PROPERTY(SortKey sortKey READ sortKey WRITE setSortKey NOTIFY sortKeyChanged)
@@ -21,7 +24,9 @@ class LibraryItemsModel final : public PagedItemsModel {
     // The genre ids the grid is filtered by (any of them), chosen among `genreOptions`
     Q_PROPERTY(QStringList genreIds READ genreIds WRITE setGenreIds NOTIFY genreIdsChanged)
     Q_PROPERTY(Kinefin::FilterOptionsModel *genreOptions READ genreOptions CONSTANT)
-    // Whether any filter or genre narrows the list (the empty-state text depends on it)
+    // What the user typed in the search box: a pause of `SearchModel::DebounceMs` after the last edit reloads the list with the normalised term, a term that becomes too short reloads at once, and the same normalised term sends nothing. Kept across open(), dropped by clear()
+    Q_PROPERTY(QString searchTerm READ searchTerm WRITE setSearchTerm NOTIFY searchTermChanged)
+    // Whether any filter, genre or search term narrows the list (the empty-state text depends on it)
     Q_PROPERTY(bool filtered READ filtered NOTIFY filteredChanged)
 
   public:
@@ -42,21 +47,37 @@ class LibraryItemsModel final : public PagedItemsModel {
         LoadedRole
     };
 
+    // The sort order, filter and genres of a view: what the browse state store keeps per scope
+    struct ViewState {
+        SortKey sort = Name;
+        bool descending = false;
+        Filter filter = All;
+        QStringList genreIds;
+    };
+
     static constexpr int PageSize = 100;
-    // The listing channel of the grid: the home rows use others, so neither sees the other's replies
-    static constexpr int Channel = 1;
+    // The listing channels of the grids: the tile-opened library (collections), the Movies tab and the TV Shows tab
+    static constexpr int TileChannel = 1;
+    static constexpr int MoviesChannel = 6;
+    static constexpr int ShowsChannel = 7;
     // The width requested for a poster: the tiles show at most about this many device pixels
     static constexpr int ImageWidth = 400;
 
-    explicit LibraryItemsModel(JellyfinClient *client, QObject *parent = nullptr);
+    LibraryItemsModel(JellyfinClient *client, int channel, QObject *parent = nullptr);
 
     // The query that lists the items of a library of this `CollectionType`, or nothing when the type is not browsable (movies, tvshows and boxsets are)
     static std::optional<ItemQuery> browseQuery(const QString &collectionType);
 
-    // Resets the model and loads the first page. False (and the model stays empty) for a library id the server could not have sent or a type that is not browsable
+    // Resets the model and loads the first page. An empty `libraryId` lists every library of the type (no parent on the wire). False (and the model stays empty) for a library id the server could not have sent or a type that is not browsable
     bool open(const QString &libraryId, const QString &collectionType,
               const QString &libraryName = QString());
+    // The same, starting from `initial` instead of the default order and filter (applied without viewStateEdited)
+    bool open(const QString &libraryId, const QString &collectionType, const QString &libraryName,
+              const ViewState &initial);
+    // Empties the model and drops the search term
     void clear();
+    // Whether a library (or the whole type) is open
+    bool isOpen() const { return !m_collectionType.isEmpty(); }
 
     SortKey sortKey() const { return m_sortKey; }
     bool descending() const { return m_descending; }
@@ -67,7 +88,15 @@ class LibraryItemsModel final : public PagedItemsModel {
     QString collectionType() const { return m_collectionType; }
     QStringList genreIds() const { return m_genreIds; }
     FilterOptionsModel *genreOptions() { return &m_genreOptions; }
-    bool filtered() const { return m_filter != All || !m_genreIds.isEmpty(); }
+    bool filtered() const
+    {
+        return m_filter != All || !m_genreIds.isEmpty() || !m_appliedTerm.isEmpty();
+    }
+    ViewState viewState() const { return {m_sortKey, m_descending, m_filter, m_genreIds}; }
+    QString searchTerm() const { return m_searchTerm; }
+    void setSearchTerm(const QString &term);
+    // For tests; the default is SearchModel::DebounceMs
+    void setSearchDebounceInterval(int milliseconds) { m_searchDebounce.setInterval(milliseconds); }
     void setGenreIds(const QStringList &ids);
     void setSortKey(SortKey key);
     void setDescending(bool descending);
@@ -82,18 +111,28 @@ class LibraryItemsModel final : public PagedItemsModel {
     void libraryChanged();
     void genreIdsChanged();
     void filteredChanged();
+    void searchTermChanged();
+    // The user changed the sort order, direction, filter or genres (not an open(), a prune of vanished genres or a search term)
+    void viewStateEdited();
 
   protected:
     bool sendPage(int start, int limit) override;
     QVariant rowData(const ItemSummary &item, bool loaded, int role) const override;
 
   private:
-    void resetOrderAndFilter();
+    bool openScope(const QString &libraryId, const QString &collectionType,
+                   const QString &libraryName, const ViewState *initial);
+    void clearLibrary();
+    void applyViewState(const ViewState &state);
+    bool assignGenreIds(const QStringList &ids);
     void setFilterQuietly(Filter filter);
+    void applySearchTerm();
+    void dropSearchTerm();
     void onItemsReady(const QJsonArray &items, int total, int channel);
     void onListingFailed(const QString &family, int status, const QString &reason, int channel);
 
     JellyfinClient *m_client;
+    const int m_channel;
     ItemQuery m_base;
     QString m_libraryId;
     QString m_collectionType;
@@ -102,6 +141,10 @@ class LibraryItemsModel final : public PagedItemsModel {
     bool m_descending = false;
     Filter m_filter = All;
     QStringList m_genreIds;
+    // The typed text, and the normalised term the list was last loaded with (empty when the text is too short)
+    QString m_searchTerm;
+    QString m_appliedTerm;
+    QTimer m_searchDebounce;
     FilterOptionsModel m_genreOptions;
 };
 } // namespace Kinefin

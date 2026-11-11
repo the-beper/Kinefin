@@ -50,6 +50,8 @@ add_library(kinefin_core STATIC
     src/models/GenreRailsModel.h
     src/models/PlayQueue.cpp
     src/models/PlayQueue.h
+    src/models/CardRoles.cpp
+    src/models/CardRoles.h
     src/models/HomeRowsModel.cpp
     src/models/HomeRowsModel.h
     src/models/ItemDetails.cpp
@@ -67,6 +69,8 @@ add_library(kinefin_core STATIC
     src/models/SeasonEpisodesModel.cpp
     src/models/SeasonEpisodesModel.h
     src/models/PagedItemsModel.h
+    src/models/ResumeItemsModel.cpp
+    src/models/ResumeItemsModel.h
     src/models/ItemSummary.h
     src/models/LibraryItemsModel.cpp
     src/models/LibraryItemsModel.h
@@ -78,6 +82,8 @@ add_library(kinefin_core STATIC
     src/player/PlaybackReporter.h
     src/player/PlaybackSession.cpp
     src/integration/LinkRouter.cpp
+    src/settings/BrowseStateStore.cpp
+    src/settings/BrowseStateStore.h
     src/settings/ClientSettings.cpp
     src/settings/ClientSettings.h
     src/settings/KWalletTokenStore.cpp
@@ -115,7 +121,7 @@ if(mpvqt_BINARY_DIR)
 endif()
 
 # The QML module lives in a static library of its own so that the UI tests can import it like the application does
-foreach(page Main ShellHeader ShortcutsDialog HomePage LibraryPage MediaCard CardRow EpisodeRow ItemDetailsPage SearchPage QueuePage GenreFilterDialog GenreRailsPage LoginPage MessageBox ServersPage SettingsPage SettingsSectionPage SettingRow AboutPage)
+foreach(page Main ShellHeader ShortcutsDialog HomePage LibraryTile LibraryPage ResumeItemsPage MediaCard CardMenu CardRow EpisodeRow ItemDetailsPage SearchPage QueuePage GenreFilterDialog GenreRailsPage LoginPage UserPickerPage MessageBox ServersPage SettingsPage SettingsSectionPage SettingRow AboutPage)
     set_source_files_properties(src/qml/${page}.qml PROPERTIES QT_RESOURCE_ALIAS ${page}.qml)
 endforeach()
 qt_add_library(kinefin_ui STATIC)
@@ -127,8 +133,11 @@ qt_add_qml_module(kinefin_ui
         src/qml/ShellHeader.qml
         src/qml/ShortcutsDialog.qml
         src/qml/HomePage.qml
+        src/qml/LibraryTile.qml
         src/qml/LibraryPage.qml
+        src/qml/ResumeItemsPage.qml
         src/qml/MediaCard.qml
+        src/qml/CardMenu.qml
         src/qml/CardRow.qml
         src/qml/EpisodeRow.qml
         src/qml/ItemDetailsPage.qml
@@ -137,6 +146,7 @@ qt_add_qml_module(kinefin_ui
         src/qml/GenreFilterDialog.qml
         src/qml/GenreRailsPage.qml
         src/qml/LoginPage.qml
+        src/qml/UserPickerPage.qml
         src/qml/MessageBox.qml
         src/qml/ServersPage.qml
         src/qml/SettingsPage.qml
@@ -262,6 +272,10 @@ if(BUILD_TESTING)
     target_link_libraries(test_play_queue PRIVATE kinefin_core Qt6::Test Qt6::Network)
     add_test(NAME play_queue COMMAND test_play_queue)
 
+    add_executable(test_browse_state_store tests/test_browse_state_store.cpp)
+    target_link_libraries(test_browse_state_store PRIVATE kinefin_core Qt6::Test)
+    add_test(NAME browse_state_store COMMAND test_browse_state_store)
+
     add_executable(test_genre_rails_model tests/test_genre_rails_model.cpp)
     target_compile_definitions(test_genre_rails_model PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(test_genre_rails_model PRIVATE kinefin_core Qt6::Test Qt6::Network)
@@ -291,6 +305,11 @@ if(BUILD_TESTING)
     target_compile_definitions(test_library_items_model PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(test_library_items_model PRIVATE kinefin_core Qt6::Test Qt6::Network)
     add_test(NAME library_items_model COMMAND test_library_items_model)
+
+    add_executable(test_resume_items_model tests/test_resume_items_model.cpp)
+    target_compile_definitions(test_resume_items_model PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    target_link_libraries(test_resume_items_model PRIVATE kinefin_core Qt6::Test Qt6::Network)
+    add_test(NAME resume_items_model COMMAND test_resume_items_model)
 
     add_executable(test_server_credentials tests/test_server_credentials.cpp)
     target_link_libraries(test_server_credentials PRIVATE kinefin_core Qt6::Test)

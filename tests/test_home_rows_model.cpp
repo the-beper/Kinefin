@@ -4,6 +4,7 @@
 #include "FakeJellyfin.h"
 
 #include "api/JellyfinClient.h"
+#include "models/CardRoles.h"
 #include "models/HomeRowsModel.h"
 #include "models/ItemRowModel.h"
 #include "models/LibraryItemsModel.h"
@@ -321,9 +322,87 @@ class TestHomeRowsModel : public QObject {
             QCOMPARE(wire.queryItemValue(QStringLiteral("imageTypeLimit")), QStringLiteral("1"));
             QVERIFY(wire.queryItemValue(QStringLiteral("enableImageTypes"))
                         .contains(QStringLiteral("Thumb")));
+            // Next Up shows no New badge: it does not ask for the date
             QCOMPARE(wire.queryItemValue(QStringLiteral("fields")),
-                     QStringLiteral("PrimaryImageAspectRatio"));
+                     family == QLatin1String("NextUp")
+                         ? QStringLiteral("PrimaryImageAspectRatio")
+                         : QStringLiteral("PrimaryImageAspectRatio,DateCreated"));
         }
+    }
+
+    void rowsExposeCardRoles()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        const QString added = QDateTime::currentDateTimeUtc().addDays(-1).toString(
+            QStringLiteral("yyyy-MM-dd'T'HH:mm:ss.0000000'Z'"));
+        const QString series = QStringLiteral("aa11bb22cc33dd44ee55ff6677889900");
+        const auto episode = [&](const QString &id, bool played) {
+            return QJsonObject{{QStringLiteral("Id"), id},
+                               {QStringLiteral("Name"), QStringLiteral("The Silent Sea")},
+                               {QStringLiteral("Type"), QStringLiteral("Episode")},
+                               {QStringLiteral("SeriesId"), series},
+                               {QStringLiteral("CommunityRating"), 6.5},
+                               {QStringLiteral("DateCreated"), added},
+                               {QStringLiteral("RunTimeTicks"), 6e9},
+                               {QStringLiteral("UserData"),
+                                QJsonObject{{QStringLiteral("Played"), played},
+                                            {QStringLiteral("PlaybackPositionTicks"), 1.5e9}}}};
+        };
+        f.server.listingRawBody.insert(
+            QStringLiteral("Resume"),
+            Fixture::envelope(
+                QJsonArray{episode(QStringLiteral("b1b2c3d4e5f64788990a1b2c3d4e5f60"), false),
+                           episode(QStringLiteral("c1b2c3d4e5f64788990a1b2c3d4e5f60"), true)}));
+        f.rows.load(libraries());
+        QTRY_VERIFY(f.allSettled());
+        const ItemRowModel *resume = f.items(0);
+        QCOMPARE(resume->count(), 2);
+        const QModelIndex first = resume->index(0);
+        QCOMPARE(resume->data(first, Kinefin::SeriesIdRole).toString(), series);
+        QCOMPARE(resume->data(first, Kinefin::RatingRole).toDouble(), 6.5);
+        // 4.5e9 ticks left of ten minutes: 7.5 minutes, rounded up
+        QCOMPARE(resume->data(first, Kinefin::RemainingMinutesRole).toInt(), 8);
+        QVERIFY(resume->data(first, Kinefin::IsNewRole).toBool());
+        QVERIFY(!resume->data(resume->index(1), Kinefin::IsNewRole).toBool());
+        // Only a series has season and episode counts
+        QCOMPARE(resume->data(first, Kinefin::SeasonCountRole).toInt(), -1);
+        QCOMPARE(resume->data(first, Kinefin::EpisodeCountRole).toInt(), -1);
+        QCOMPARE(resume->data(first, Kinefin::SeriesProgressRole).toDouble(), -1.0);
+        const QHash<int, QByteArray> names = resume->roleNames();
+        for (const char *name : {"seriesId", "rating", "remainingMinutes", "isNew", "seasonCount",
+                                 "episodeCount", "seriesProgress"})
+            QVERIFY2(names.values().contains(name), name);
+    }
+
+    void latestRowHasNoSeasonCount()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        const QJsonArray series{QJsonObject{
+            {QStringLiteral("Id"), QStringLiteral("aa11bb22cc33dd44ee55ff6677889900")},
+            {QStringLiteral("Name"), QStringLiteral("Abyss Station")},
+            {QStringLiteral("Type"), QStringLiteral("Series")},
+            {QStringLiteral("ChildCount"), 5},
+            {QStringLiteral("RecursiveItemCount"), 50},
+            {QStringLiteral("UserData"), QJsonObject{{QStringLiteral("UnplayedItemCount"), 10}}}}};
+        f.server.listingRawBody.insert(QStringLiteral("Latest"), Fixture::itemsBody(series));
+        f.server.listingRawBody.insert(QStringLiteral("NextUp"), Fixture::envelope(series));
+        f.rows.load(libraries());
+        QTRY_VERIFY(f.allSettled());
+        // On /Items/Latest a series' ChildCount counts the new items grouped under it, not seasons
+        for (const int row : {2, 3}) {
+            const ItemRowModel *latest = f.items(row);
+            QCOMPARE(latest->count(), 1);
+            QCOMPARE(latest->data(latest->index(0), Kinefin::SeasonCountRole).toInt(), -1);
+            QCOMPARE(latest->data(latest->index(0), Kinefin::EpisodeCountRole).toInt(), -1);
+            QCOMPARE(latest->data(latest->index(0), Kinefin::SeriesProgressRole).toDouble(), -1.0);
+        }
+        // The other rows keep the counts
+        const ItemRowModel *nextUp = f.items(1);
+        QCOMPARE(nextUp->data(nextUp->index(0), Kinefin::SeasonCountRole).toInt(), 5);
+        QCOMPARE(nextUp->data(nextUp->index(0), Kinefin::EpisodeCountRole).toInt(), 50);
+        QCOMPARE(nextUp->data(nextUp->index(0), Kinefin::SeriesProgressRole).toDouble(), 0.8);
     }
 
     void reloadWhileLoadingDropsTheOldRequests()
@@ -413,7 +492,7 @@ class TestHomeRowsModel : public QObject {
         Fixture f;
         QVERIFY(f.ok);
         f.server.generatedItemTotal = 250;
-        Kinefin::LibraryItemsModel grid(&f.client);
+        Kinefin::LibraryItemsModel grid(&f.client, Kinefin::LibraryItemsModel::TileChannel);
         f.rows.load(libraries());
         QVERIFY(grid.open(kMovies, QStringLiteral("movies"), QStringLiteral("Movies")));
         QTRY_VERIFY(f.allSettled());

@@ -11,6 +11,8 @@
 #include <QJsonObject>
 #include <QSaveFile>
 
+#include "api/MediaSourceSelection.h"
+
 namespace Kinefin {
 namespace {
 QFileDevice::Permissions ownerOnlyFile()
@@ -23,6 +25,11 @@ QString serverCredentialsPath(const QString &profileId)
 {
     const QString directory = profileDataDirectory(profileId);
     return directory.isEmpty() ? QString() : directory + QStringLiteral("/servers.json");
+}
+
+bool hasValidIds(const ServerCredential &credential)
+{
+    return isValidJellyfinId(credential.serverId) && isValidJellyfinId(credential.userId);
 }
 
 QList<ServerCredential> loadServerCredentials(const QString &profileId, QString *error,
@@ -67,6 +74,13 @@ QList<ServerCredential> loadServerCredentials(const QString &profileId, QString 
         entry.deviceId = object.value(QStringLiteral("deviceId")).toString();
         entry.deviceName = object.value(QStringLiteral("deviceName")).toString();
         entry.username = object.value(QStringLiteral("username")).toString();
+        entry.imageTag = object.value(QStringLiteral("imageTag")).toString();
+        // The tag ends up in an image URL: anything that is not an id is dropped
+        if (!entry.imageTag.isEmpty() && !isValidJellyfinId(entry.imageTag))
+            entry.imageTag.clear();
+        entry.askPassword = object.value(QStringLiteral("askPassword")).toBool(false);
+        entry.remembered = object.value(QStringLiteral("remembered")).toBool(true);
+        entry.ownsLegacyKey = !object.contains(QStringLiteral("remembered"));
         if (entry.serverId.isEmpty() || entry.url.isEmpty()) {
             if (error)
                 *error = QStringLiteral("Server credential entry is incomplete");
@@ -91,12 +105,17 @@ bool saveServerCredentials(const QString &profileId, const QList<ServerCredentia
         return false;
     QJsonArray array;
     for (const ServerCredential &entry : credentials) {
-        array.append(QJsonObject{{QStringLiteral("serverId"), entry.serverId},
-                                 {QStringLiteral("url"), entry.url},
-                                 {QStringLiteral("userId"), entry.userId},
-                                 {QStringLiteral("deviceId"), entry.deviceId},
-                                 {QStringLiteral("deviceName"), entry.deviceName},
-                                 {QStringLiteral("username"), entry.username}});
+        QJsonObject object{{QStringLiteral("serverId"), entry.serverId},
+                           {QStringLiteral("url"), entry.url},
+                           {QStringLiteral("userId"), entry.userId},
+                           {QStringLiteral("deviceId"), entry.deviceId},
+                           {QStringLiteral("deviceName"), entry.deviceName},
+                           {QStringLiteral("username"), entry.username},
+                           {QStringLiteral("imageTag"), entry.imageTag},
+                           {QStringLiteral("askPassword"), entry.askPassword}};
+        if (!entry.ownsLegacyKey)
+            object.insert(QStringLiteral("remembered"), entry.remembered);
+        array.append(object);
     }
     const QJsonObject root{{QStringLiteral("servers"), array}};
     QSaveFile output(path);

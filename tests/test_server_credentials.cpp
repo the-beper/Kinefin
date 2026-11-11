@@ -27,6 +27,9 @@ class TestServerCredentials : public QObject {
         entry.deviceId = QStringLiteral("kinefin-fiddle-") + serverId;
         entry.deviceName = QStringLiteral("Kinefin test");
         entry.username = QStringLiteral("kinefin-live");
+        entry.imageTag = QStringLiteral("tag-1");
+        entry.askPassword = serverId == QLatin1String("b");
+        entry.remembered = serverId != QLatin1String("b");
         return entry;
     }
 
@@ -73,7 +76,7 @@ class TestServerCredentials : public QObject {
         QVERIFY(root.value(QStringLiteral("servers")).isArray());
         for (const auto &value : root.value(QStringLiteral("servers")).toArray()) {
             const QJsonObject entryObject = value.toObject();
-            QCOMPARE(entryObject.size(), 6);
+            QCOMPARE(entryObject.size(), 9);
             QVERIFY(!entryObject.contains(QStringLiteral("token")));
             QVERIFY(!entryObject.contains(QStringLiteral("password")));
         }
@@ -130,6 +133,79 @@ class TestServerCredentials : public QObject {
         QVERIFY(Kinefin::saveServerCredentials(QStringLiteral("default"), loaded));
         QVERIFY(file.open(QIODevice::ReadOnly));
         QVERIFY(!file.readAll().contains("legacy-secret"));
+    }
+
+    // A file written before several users per server were kept has no `remembered` key: its token is stored, so it reads as true
+    void aRecordWithoutRememberedReadsAsRemembered()
+    {
+        const QString path = Kinefin::serverCredentialsPath(QStringLiteral("default"));
+        QDir().mkpath(QFileInfo(path).absolutePath());
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write("{\"servers\":[{\"serverId\":\"a\",\"url\":\"http://x:8096\","
+                   "\"userId\":\"u1\",\"imageTag\":\"not a tag!\"}]}");
+        file.close();
+        QString error;
+        const QList<ServerCredential> loaded =
+            Kinefin::loadServerCredentials(QStringLiteral("default"), &error);
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        QCOMPARE(loaded.size(), 1);
+        QVERIFY(loaded.first().remembered);
+        QVERIFY(!loaded.first().askPassword);
+        QVERIFY(loaded.first().imageTag.isEmpty()); // not an id: dropped, it ends up in a URL
+    }
+
+    // The record of the old one-per-server format owns the legacy wallet key; that survives a save until the owner is migrated or forgotten, and a record with the key never owns it
+    void aRecordWithoutRememberedOwnsTheLegacyKeyUntilCleared()
+    {
+        const QString profile = QStringLiteral("default");
+        const QString path = Kinefin::serverCredentialsPath(profile);
+        QDir().mkpath(QFileInfo(path).absolutePath());
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write("{\"servers\":[{\"serverId\":\"a\",\"url\":\"http://x:8096\","
+                   "\"userId\":\"u1\"},{\"serverId\":\"a\",\"url\":\"http://x:8096\","
+                   "\"userId\":\"u2\",\"remembered\":false}]}");
+        file.close();
+        QList<ServerCredential> loaded = Kinefin::loadServerCredentials(profile);
+        QCOMPARE(loaded.size(), 2);
+        QVERIFY(loaded.at(0).ownsLegacyKey);
+        QVERIFY(!loaded.at(1).ownsLegacyKey);
+
+        // Saved as it came: still the owner after a restart
+        QVERIFY(Kinefin::saveServerCredentials(profile, loaded));
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        const QJsonArray saved = QJsonDocument::fromJson(file.readAll())
+                                     .object()
+                                     .value(QStringLiteral("servers"))
+                                     .toArray();
+        file.close();
+        QVERIFY(!saved.at(0).toObject().contains(QStringLiteral("remembered")));
+        QVERIFY(saved.at(1).toObject().contains(QStringLiteral("remembered")));
+        QVERIFY(Kinefin::loadServerCredentials(profile) == loaded);
+
+        // Once migrated the key is written, and the record owns nothing
+        loaded[0].ownsLegacyKey = false;
+        QVERIFY(Kinefin::saveServerCredentials(profile, loaded));
+        const QList<ServerCredential> migrated = Kinefin::loadServerCredentials(profile);
+        QVERIFY(!migrated.at(0).ownsLegacyKey);
+        QVERIFY(migrated.at(0).remembered);
+    }
+
+    // Both ids end up in wallet keys: a `/` must never alias another key
+    void onlyJellyfinIdsAreValidIds()
+    {
+        ServerCredential good = entry(QStringLiteral("a"));
+        QVERIFY(Kinefin::hasValidIds(good));
+        for (const QString &bad :
+             {QString(), QStringLiteral("x/y"), QStringLiteral("a b"), QStringLiteral("..")}) {
+            ServerCredential user = good;
+            user.userId = bad;
+            QVERIFY2(!Kinefin::hasValidIds(user), qPrintable(bad));
+            ServerCredential server = good;
+            server.serverId = bad;
+            QVERIFY2(!Kinefin::hasValidIds(server), qPrintable(bad));
+        }
     }
 
     void missingFileIsNotAnError()

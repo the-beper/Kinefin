@@ -19,8 +19,9 @@ PlaybackReporter::PlaybackReporter(PlaybackSession &session, JellyfinClient &cli
         if (reportable())
             send(PlaybackReport::Kind::Progress);
     });
-    // Once the session is lost there is nobody to report to
+    // Once the session is lost, or the user switched, signed out or removed, there is nobody to report to
     connect(&client, &JellyfinClient::sessionExpired, this, [this] { m_timer.stop(); });
+    connect(&client, &JellyfinClient::credentialsCleared, this, [this] { m_timer.stop(); });
     m_observerId = session.addObserver([this](State from, State to) { onTransition(from, to); });
 }
 
