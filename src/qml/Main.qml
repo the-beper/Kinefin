@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Kinefin contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
 import QtQuick
-import QtQml.Models
 import org.kde.kirigami as Kirigami
 
 Kirigami.ApplicationWindow {
@@ -17,6 +16,15 @@ Kirigami.ApplicationWindow {
     // An item link from the command line: opened once Home shows, then cleared
     property string requestedItemId: ""
     readonly property bool signedIn: connection.state === ConnectionController.Authenticated
+    // A server is chosen while its sign-in or a session is in progress: the account menu shows for it
+    readonly property bool serverChosen: connection.state !== ConnectionController.Idle
+    // The header modes in pixels, from grid units: tests derive their window sizes from these (Compact below 24, Wide from 36)
+    readonly property int compactLimit: Kirigami.Units.gridUnit * 24
+    readonly property int wideLimit: Kirigami.Units.gridUnit * 36
+    // The width decides the modes, read here where the width lives: a header-side binding on the
+    // attached Window.window kept its load-time value and never followed a resize
+    readonly property bool compactHeader: width < compactLimit
+    readonly property bool wideHeader: width >= wideLimit
 
     property bool fullscreenSetting: settings.value("main", "fullscreen")
     property bool alwaysOnTopSetting: settings.value("main", "alwaysOnTop")
@@ -37,12 +45,23 @@ Kirigami.ApplicationWindow {
     pageStack.popHiddenPages: true
     pageStack.globalToolBar.showNavigationButtons: Kirigami.ApplicationHeaderStyle.ShowBackButton
 
-    // Esc goes back like Alt+Left except on the first page; a dialog or an open modal drawer takes the key first
-    readonly property bool modalDrawerOpen: !!globalDrawer && globalDrawer.modal && globalDrawer.drawerOpen
+    // The bar with the menus and the Home tab; it spans the window above the pages
+    header: ShellHeader {
+        id: shellHeader
+
+        shell: window
+    }
+
+    // Esc goes back like Alt+Left except on the first page; an open dialog takes the key first
     Shortcut {
         sequences: ["Escape"]
-        enabled: window.pageStack.currentIndex > 0 && window.pageStack.layers.depth <= 1 && !window.modalDrawerOpen
+        enabled: window.pageStack.currentIndex > 0 && window.pageStack.layers.depth <= 1
         onActivated: window.pageStack.goBack()
+    }
+    Shortcut {
+        sequences: [StandardKey.Find]
+        enabled: window.signedIn
+        onActivated: window.openSearch()
     }
 
     // The page that comes to the front takes the keyboard focus, so Tab and the arrows work without a mouse click first; a page that already focused one of its own fields (sign-in, search) keeps that focus
@@ -66,7 +85,7 @@ Kirigami.ApplicationWindow {
     }
     onActiveFocusItemChanged: {
         const page = pageStack.currentItem;
-        if (!page || !activeFocusItem || !focusIsIn(page))
+        if (!page || !activeFocusItem || openingSearchFromHeader || !focusIsIn(page))
             return;
         // The tab stop that holds the focus (a list, a grid, a field), not the tile inside it that comes and goes
         let control = activeFocusItem;
@@ -75,10 +94,14 @@ Kirigami.ApplicationWindow {
         if (control && control !== page)
             lastFocus.set(page, control);
     }
+    // True while the search page the header box opened takes its place: Kirigami's ScrollablePage
+    // focuses its own scroll view while it is created, and neither that nor the page it belongs to may keep or remember the keyboard
+    property bool openingSearchFromHeader: false
     function focusCurrentPage() {
         forgetLeftPages();
         const page = pageStack.currentItem;
-        if (!page || modalDrawerOpen)
+        // Typing in the header box is never interrupted, not even by the page the typing itself opened
+        if (!page || shellHeader.searchFieldHasFocus)
             return;
         // Back goes to the control the page last had the focus in, a new page to its main control, any other page keeps a field it focused itself
         const remembered = lastFocus.get(page);
@@ -92,6 +115,10 @@ Kirigami.ApplicationWindow {
     Connections {
         target: window.pageStack
         function onCurrentItemChanged() {
+            // The search page leaving the stack takes its term with it: the header box empties with the page.
+            // A page Back just left stays above the current one until the slide ends, and is not a page in the stack any more
+            if (window.searchPageIndex() < 0 && window.connection.search.term.length > 0)
+                window.connection.search.term = "";
             Qt.callLater(window.focusCurrentPage);
         }
     }
@@ -201,28 +228,77 @@ Kirigami.ApplicationWindow {
         openItem(itemId, fromPage);
     }
 
-    // The search page is the one place the term lives: an open one is brought back as it is, a new one starts from an empty term above Home
+    // The stack position of the search page up to the one in front, -1 when it is not there
+    function searchPageIndex() {
+        for (let i = 0; i <= pageStack.currentIndex; ++i) {
+            if (pageStack.get(i)?.objectName === "searchPage")
+                return i;
+        }
+        return -1;
+    }
+
+    // Everything above the first page goes
+    function popToBase() {
+        const base = pageStack.get(0);
+        if (base)
+            pageStack.pop(base);
+    }
+
+    // Ctrl+F: a search page already in the stack is brought back as it is, a new one starts from an empty term above Home.
+    // The header box takes the focus (the page's own field in Compact mode, where the box hides)
     function openSearch() {
         if (connection.state !== ConnectionController.Authenticated)
             return;
         let page = null;
-        // A page Back just left stays above the current one until the slide ends: it is not a page to bring back
-        for (let i = 0; i <= pageStack.currentIndex; ++i) {
-            if (pageStack.get(i)?.objectName === "searchPage") {
-                page = pageStack.get(i);
-                break;
-            }
-        }
-        if (page) {
-            pageStack.pop(page);
+        const index = searchPageIndex();
+        if (index >= 0) {
+            page = pageStack.get(index);
+            if (index < pageStack.currentIndex)
+                pageStack.pop(page);
         } else {
-            const first = pageStack.get(0);
-            if (first)
-                pageStack.pop(first);
+            popToBase();
             connection.search.clear();
             page = pageStack.push(Qt.resolvedUrl("SearchPage.qml"), { connection: connection });
         }
-        Qt.callLater(() => page?.focusSearchField());
+        Qt.callLater(() => {
+            if (compactHeader)
+                page?.focusSearchField();
+            else
+                shellHeader.focusSearchField();
+        });
+    }
+
+    // The first keystroke in the header box: the page opens above the current one, and the term the keystroke already set stays
+    function openSearchIfMissing() {
+        if (connection.state !== ConnectionController.Authenticated)
+            return;
+        const index = searchPageIndex();
+        if (index >= 0) {
+            if (index < pageStack.currentIndex)
+                pageStack.pop(pageStack.get(index));
+            return;
+        }
+        // While the box holds the keyboard, the page it opens must not take it: Kirigami's
+        // ScrollablePage focuses its own scroll view while it is created, so the box takes it back after
+        const wasTyping = shellHeader.searchFieldHasFocus;
+        if (wasTyping) {
+            openingSearchFromHeader = true;
+            pageStack.push(Qt.resolvedUrl("SearchPage.qml"), { connection: connection });
+            Qt.callLater(() => {
+                shellHeader.refocusSearchField();
+                openingSearchFromHeader = false;
+            });
+            return;
+        }
+        popToBase();
+        pageStack.push(Qt.resolvedUrl("SearchPage.qml"), { connection: connection });
+    }
+
+    // Down from the header box goes to the first row of the results that has cards
+    function searchResultsDown() {
+        const page = pageStack.currentItem;
+        if (page?.objectName === "searchPage")
+            page.focusFirstResults();
     }
 
     // The genre rails of the open library go above the library page that asks, which stays below
@@ -268,8 +344,16 @@ Kirigami.ApplicationWindow {
     // A link that arrives while Home is already showing (a second launch) opens at once
     onRequestedItemIdChanged: openRequestedItem(pageStack.get(0))
 
-    // The section the page in front belongs to: the sidebar marks it; a page opened from a library belongs to that library
+    // The section the page in front belongs to: the header marks it (the Home tab, the main menu button, the queue button); a page opened from a library belongs to that library.
+    // Settings and About need no session, so they are marked whatever the connection is
     readonly property string currentSection: {
+        switch (pageStack.currentItem?.objectName) {
+        case "settingsPage":
+        case "settingsSectionPage":
+            return "settings";
+        case "aboutPage":
+            return "about";
+        }
         if (!signedIn)
             return "";
         for (let i = 0; i <= pageStack.currentIndex; ++i) {
@@ -281,11 +365,6 @@ Kirigami.ApplicationWindow {
             return "search";
         case "queuePage":
             return "queue";
-        case "settingsPage":
-        case "settingsSectionPage":
-            return "settings";
-        case "aboutPage":
-            return "about";
         default:
             return "home";
         }
@@ -318,12 +397,6 @@ Kirigami.ApplicationWindow {
             pageStack.push(Qt.resolvedUrl("LibraryPage.qml"), { model: connection.library, libraryName: libraryName });
     }
 
-    // A library name comes from the server and the sidebar renders an action's text as rich text after the mnemonic pass: a doubled ampersand shows as one, and without any "<" (shown as a single angle quotation mark) there is no tag to interpret
-    function sidebarLabel(name) {
-        // An ampersand that starts something like an entity would turn into a character when Alt is held and the label becomes rich text: it takes the full-width form
-        return name.replace(/&(?=#|[A-Za-z0-9]+;)/g, "\uFF06").replace(/&/g, "&&").replace(/</g, "\u2039");
-    }
-
     // What the queue did with an add, for the page that asked: the page itself shows nothing
     Connections {
         target: window.connection.queue
@@ -346,136 +419,6 @@ Kirigami.ApplicationWindow {
         onActivated: window.close()
     }
 
-    Kirigami.Action {
-        id: homeAction
-        text: i18n("Home")
-        icon.name: "go-home"
-        enabled: window.signedIn
-        checked: window.currentSection === "home"
-        onTriggered: window.goHome()
-    }
-    Kirigami.Action {
-        id: searchAction
-        text: i18n("Search")
-        icon.name: "system-search"
-        shortcut: StandardKey.Find
-        enabled: window.signedIn
-        checked: window.currentSection === "search"
-        onTriggered: window.openSearch()
-    }
-    Kirigami.Action {
-        id: queueAction
-        text: i18n("Queue")
-        icon.name: "view-media-playlist"
-        enabled: window.signedIn
-        checked: window.currentSection === "queue"
-        onTriggered: window.openSection("queuePage", "QueuePage.qml", { connection: window.connection })
-    }
-    // One entry per library of the server, below Home and Search
-    property var libraryActions: []
-    // The drawer drops its rows for the old actions first and the actions are destroyed a moment later: an action that dies while a row still shows it makes Kirigami's row read a null
-    property var sidebarLibraries: []
-    readonly property var librariesNow: signedIn ? connection.libraries : []
-    onLibrariesNowChanged: {
-        // The same list again (a Home retry) keeps the rows and the focus in them
-        if (JSON.stringify(librariesNow) === JSON.stringify(sidebarLibraries))
-            return;
-        libraryActions = [];
-        libraryTimer.restart();
-    }
-    Timer {
-        id: libraryTimer
-        interval: 100
-        onTriggered: window.sidebarLibraries = window.librariesNow
-    }
-    Instantiator {
-        model: window.sidebarLibraries
-        delegate: Kirigami.Action {
-            required property var modelData
-            text: window.sidebarLabel(modelData.name)
-            icon.name: "folder-video"
-            enabled: modelData.browsable
-            checked: window.currentSection === "library:" + modelData.id
-            onTriggered: window.openLibrary(modelData.id, modelData.name)
-        }
-        onObjectAdded: (index, object) => {
-            const list = window.libraryActions.slice();
-            list.splice(index, 0, object);
-            window.libraryActions = list;
-        }
-        onObjectRemoved: (index, object) => {
-            const list = window.libraryActions.slice();
-            list.splice(index, 1);
-            window.libraryActions = list;
-        }
-    }
-    Kirigami.Action {
-        id: librariesSeparator
-        separator: true
-        visible: window.libraryActions.length > 0
-    }
-    Kirigami.Action {
-        id: settingsAction
-        text: i18n("Settings")
-        icon.name: "configure"
-        checked: window.currentSection === "settings"
-        onTriggered: window.openSection("settingsPage", "SettingsPage.qml", { settings: window.settings })
-    }
-    Kirigami.Action {
-        id: aboutAction
-        text: i18n("About Kinefin")
-        icon.name: "help-about"
-        checked: window.currentSection === "about"
-        onTriggered: window.openSection("aboutPage", "AboutPage.qml", {})
-    }
-    Kirigami.Action {
-        id: serverSeparator
-        separator: true
-        visible: window.connection.state !== ConnectionController.Idle
-    }
-    Kirigami.Action {
-        id: adminDashboardAction
-        text: i18n("Admin Dashboard")
-        icon.name: "preferences-system-network"
-        visible: window.signedIn
-        onTriggered: {
-            if (!window.connection.openAdminDashboard())
-                window.showPassiveNotification(i18n("The admin dashboard could not be opened: check the default browser"));
-        }
-    }
-    Kirigami.Action {
-        id: switchServerAction
-        text: i18n("Switch Server")
-        icon.name: "network-server"
-        visible: window.connection.state !== ConnectionController.Idle
-        onTriggered: window.connection.cancel()
-    }
-    Kirigami.Action {
-        id: signOutAction
-        text: i18n("Sign Out")
-        icon.name: "system-log-out"
-        visible: window.signedIn
-        onTriggered: window.connection.signOut()
-    }
-
-    // The sections sit in a sidebar next to the pages while the window is wide, and in a drawer behind a handle when it is narrow; the width alone decides, so a window launched narrow and one shrunk to it look the same
-    readonly property bool sidebarFits: width >= Kirigami.Units.gridUnit * 36
-    pageStack.leftSidebar: globalDrawer
-    globalDrawer: Kirigami.GlobalDrawer {
-        title: "Kinefin"
-        // Wide enough for the longest entry without eliding it
-        width: Kirigami.Units.gridUnit * 15
-        modal: !window.sidebarFits
-        // Kirigami leaves the focus on the page when a modal drawer opens, and Esc would never reach the drawer
-        focus: modal && drawerOpen
-        // Kirigami's own binding of drawerOpen to the mode is lost once the drawer was opened or closed by hand: the sidebar is open, the drawer closed
-        onModalChanged: {
-            drawerOpen = !modal;
-            Qt.callLater(window.focusCurrentPage);
-        }
-        actions: [homeAction, searchAction, queueAction, librariesSeparator, ...window.libraryActions, settingsAction, aboutAction, serverSeparator, adminDashboardAction, switchServerAction, signOutAction]
-    }
-
     // A section opens above the first page: one already in the stack is brought back (what is above it goes), so the stack never grows with every click
     function openSection(name, url, properties) {
         for (let i = 0; i <= pageStack.currentIndex; ++i) {
@@ -484,9 +427,7 @@ Kirigami.ApplicationWindow {
                 return;
             }
         }
-        const base = pageStack.get(0);
-        if (base)
-            pageStack.pop(base);
+        popToBase();
         pageStack.push(Qt.resolvedUrl(url), properties);
     }
 

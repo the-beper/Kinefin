@@ -86,6 +86,8 @@ class ConnectionController : public QObject {
     Q_INVOKABLE void cancel();
     // Forgets the active server's stored session and returns to Idle
     Q_INVOKABLE void signOut();
+    // Signs this user out and lands on the sign-in page of the same server: the token goes from the store and memory (the queue of the account with it), the server stays chosen
+    Q_INVOKABLE void switchUser();
     // Loads the items of one of the current `libraries` into `library`; false for an id that is not in the list or whose type cannot be browsed
     Q_INVOKABLE bool openLibrary(const QString &libraryId);
     // The details of one item for the page `owner`: the model is a child of `owner` and dies with it. Null unless signed in and `owner` exists

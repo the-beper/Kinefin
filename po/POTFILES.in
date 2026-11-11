@@ -16,5 +16,7 @@ src/qml/GenreRailsPage.qml
 src/qml/MediaCard.qml
 src/qml/LoginPage.qml
 src/qml/Main.qml
+src/qml/ShellHeader.qml
+src/qml/ShortcutsDialog.qml
 src/qml/ServersPage.qml
 src/qml/SettingsPage.qml

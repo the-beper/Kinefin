@@ -115,7 +115,7 @@ if(mpvqt_BINARY_DIR)
 endif()
 
 # The QML module lives in a static library of its own so that the UI tests can import it like the application does
-foreach(page Main HomePage LibraryPage MediaCard CardRow EpisodeRow ItemDetailsPage SearchPage QueuePage GenreFilterDialog GenreRailsPage LoginPage MessageBox ServersPage SettingsPage SettingsSectionPage SettingRow AboutPage)
+foreach(page Main ShellHeader ShortcutsDialog HomePage LibraryPage MediaCard CardRow EpisodeRow ItemDetailsPage SearchPage QueuePage GenreFilterDialog GenreRailsPage LoginPage MessageBox ServersPage SettingsPage SettingsSectionPage SettingRow AboutPage)
     set_source_files_properties(src/qml/${page}.qml PROPERTIES QT_RESOURCE_ALIAS ${page}.qml)
 endforeach()
 qt_add_library(kinefin_ui STATIC)
@@ -124,6 +124,8 @@ qt_add_qml_module(kinefin_ui
     VERSION 1.0
     QML_FILES
         src/qml/Main.qml
+        src/qml/ShellHeader.qml
+        src/qml/ShortcutsDialog.qml
         src/qml/HomePage.qml
         src/qml/LibraryPage.qml
         src/qml/MediaCard.qml

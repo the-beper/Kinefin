@@ -34,12 +34,14 @@ QStringList gWarnings;
 QMutex gWarningsMutex;
 QtMessageHandler gPreviousHandler = nullptr;
 
-// Kirigami's PageRow warns about every pushed page and its AboutPage reports binding loops: inferred harmless, everything else fails the test
+// Kirigami's PageRow warns about every pushed page and its AboutPage reports binding loops: inferred harmless, everything else fails the test.
+// The animation driver of a window destroyed while a page slide is settling is stopped once too often (Qt 6.11.2, offscreen): framework noise of the teardown, not of the shell
 const QStringList kKnownNoise = {
     QStringLiteral("Created graphical object was not placed in the graphics scene"),
     QStringLiteral("templates/OverlaySheet.qml"),
     QStringLiteral("AboutItem.qml:377:9: QML OverlaySheet: Binding loop"),
     QStringLiteral("AboutItem.qml:380: TypeError: Cannot read property 'height' of null"),
+    QStringLiteral("QUnifiedTimer::stopAnimationDriver: driver is not running"),
 };
 
 void collectWarnings(QtMsgType type, const QMessageLogContext &context, const QString &message)
@@ -163,7 +165,7 @@ struct Ui {
             QTest::keyClick(window, c.toLatin1());
     }
 
-    // Ctrl+F from the signed-in window, then the search page with its field in focus
+    // Ctrl+F from the signed-in window, then the search page with the field of its mode in focus: the header box on a wide window, the page's own field in Compact mode
     QQuickItem *openSearchPage()
     {
         QTest::keyClick(window, Qt::Key_F, Qt::ControlModifier);
@@ -173,12 +175,19 @@ struct Ui {
         QQuickItem *field = nullptr;
         if (!QTest::qWaitFor(
                 [&] {
-                    field = item(QStringLiteral("searchField"));
+                    field = item(searchFieldName());
                     return field && field->hasActiveFocus();
                 },
                 5000))
             return nullptr;
         return field;
+    }
+
+    // The field the search term is typed into at this width
+    QString searchFieldName() const
+    {
+        return window->property("compactHeader").toBool() ? QStringLiteral("searchField")
+                                                          : QStringLiteral("headerSearchField");
     }
 
     // A series with its season and episodes: the series, the season, the episodes of the fixture page and each episode behind the details route
@@ -217,6 +226,13 @@ struct Ui {
         flickable->setProperty("contentY",
                                flickable->property("contentY").toReal() + itemTop - viewTop - 100);
         QTest::qWait(100);
+        // Under load the layout may still move after the reveal: a target outside the window gets no
+        // click (Qt would log the dropped event), the caller tries again
+        const QPointF center =
+            target->mapToScene(QPointF(target->width() / 2, target->height() / 2));
+        if (center.x() < 0 || center.y() < 0 || center.x() >= window->width()
+            || center.y() >= window->height())
+            return;
         clickCenter(target);
     }
 
@@ -397,16 +413,90 @@ struct Ui {
                  item->property("text").toString());
     }
 
-    // The width the sidebar takes beside the pages: nothing while the drawer is modal
-    qreal sidebarWidth() const
+    // The window header the shell puts its menus and tab in
+    QQuickItem *shellHeader() const { return window->property("header").value<QQuickItem *>(); }
+
+    // The Kirigami.Action of the header with this object name: the menus trigger through it like a click does
+    QObject *shellAction(const QString &objectName) const
     {
-        auto *drawer = window->property("globalDrawer").value<QObject *>();
-        if (!drawer || drawer->property("modal").toBool())
-            return 0;
-        return drawer->property("width").toReal() * drawer->property("position").toReal();
+        return engine.rootObjects().constFirst()->findChild<QObject *>(objectName);
     }
 
-    // What is wrong with the layout now: more than one page showing, the page in front not filling the window, a control outside the window. Empty when all is well
+    // The single tab button of the bar: a Kirigami private class, matched by its class name
+    QQuickItem *tabButton() const
+    {
+        for (QQuickItem *candidate : allItems(shellHeader())) {
+            if (QString::fromLatin1(candidate->metaObject()->className())
+                    .contains(QLatin1String("NavigationTabButton")))
+                return candidate;
+        }
+        return nullptr;
+    }
+
+    // The items of a menu, in order: QQuickMenu::itemAt is invokable
+    QList<QQuickItem *> menuItems(const QString &menuName) const
+    {
+        QList<QQuickItem *> found;
+        QObject *menu = popup(menuName);
+        if (!menu)
+            return found;
+        const int count = menu->property("count").toInt();
+        for (int i = 0; i < count; ++i) {
+            QQuickItem *entry = nullptr;
+            if (QMetaObject::invokeMethod(menu, "itemAt", Q_RETURN_ARG(QQuickItem *, entry),
+                                          Q_ARG(int, i))
+                && entry)
+                found.append(entry);
+        }
+        return found;
+    }
+
+    // The header widgets against the mode this width should give: the box, favorites and the queue
+    // fold into the main menu in Compact mode, and only a Wide tab carries its label. Empty when all is well
+    QStringList modeProblems(bool wide, bool compact) const
+    {
+        QStringList problems;
+        if (!shellHeader())
+            return {QStringLiteral("the header is not there")};
+        if (window->property("compactHeader").toBool() != compact)
+            problems << QStringLiteral("compactHeader is %1, the mode wants %2")
+                            .arg(window->property("compactHeader").toBool())
+                            .arg(compact);
+        const struct {
+            const char *name;
+            bool visible;
+        } cluster[] = {
+            {"headerSearchField", !compact},
+            {"favoritesButton", !compact},
+            {"queueButton", !compact},
+            {"accountButton", true},
+        };
+        for (const auto &entry : cluster) {
+            QQuickItem *control = item(QLatin1String(entry.name));
+            if (!control) {
+                problems << QStringLiteral("%1 is not there").arg(QLatin1String(entry.name));
+                continue;
+            }
+            if (control->isVisible() != entry.visible)
+                problems << QStringLiteral("%1 should be %2 but is %3")
+                                .arg(QLatin1String(entry.name),
+                                     entry.visible ? QStringLiteral("visible")
+                                                   : QStringLiteral("hidden"),
+                                     control->isVisible() ? QStringLiteral("visible")
+                                                          : QStringLiteral("hidden"));
+        }
+        QQuickItem *tab = tabButton();
+        const int wantedDisplay = wide ? 2 /*TextBesideIcon*/ : 0 /*IconOnly*/;
+        if (!tab)
+            problems << QStringLiteral("the tab is not there");
+        else if (tab->property("display").toInt() != wantedDisplay)
+            problems << QStringLiteral("the tab display is %1, the mode wants %2")
+                            .arg(tab->property("display").toInt())
+                            .arg(wantedDisplay);
+        return problems;
+    }
+
+    // What is wrong with the layout now: more than one page showing, the page in front not filling the window under the header, a control outside the window. Empty when all is well
     QStringList layoutProblems() const
     {
         QStringList problems;
@@ -418,15 +508,21 @@ struct Ui {
             problems << QStringLiteral("the stack lists %1 pages for a depth of %2")
                             .arg(stackPages().size())
                             .arg(stackDepth());
+        QQuickItem *header = shellHeader();
+        const qreal headerHeight = header ? header->height() : -1;
+        if (headerHeight <= 0)
+            problems << QStringLiteral("the header is not there");
         const QRectF front =
             current->mapRectToScene(QRectF(0, 0, current->width(), current->height()));
-        if (front.left() < sidebarWidth() - 1 || front.right() > bounds.right() + 1
-            || front.width() < bounds.width() - sidebarWidth() - 1)
-            problems << QStringLiteral("front page %1 does not fill the window beside the sidebar "
-                                       "(%2 px): x=%3 width=%4 window=%5")
+        if (front.top() < headerHeight - 1 || front.left() < -1
+            || front.right() > bounds.right() + 1 || front.bottom() > bounds.bottom() + 1
+            || front.width() < bounds.width() - 1)
+            problems << QStringLiteral("front page %1 does not fill the window under the header "
+                                       "(%2 px): x=%3 y=%4 width=%5 window=%6")
                             .arg(describe(current))
-                            .arg(sidebarWidth())
+                            .arg(headerHeight)
                             .arg(front.left())
+                            .arg(front.top())
                             .arg(front.width())
                             .arg(bounds.width());
         for (const QQuickItem *page : stackPages()) {
@@ -1164,7 +1260,7 @@ class TestUiPages : public QObject {
         QTest::keyClick(ui.window, Qt::Key_F, Qt::ControlModifier);
         QTest::qWait(300);
         QCOMPARE(ui.stackDepth(), depth);
-        QVERIFY(ui.item(QStringLiteral("searchField"))->hasActiveFocus());
+        QVERIFY(ui.item(ui.searchFieldName())->hasActiveFocus());
     }
 
     void typingShowsTheGroupedResults()
@@ -1600,26 +1696,6 @@ class TestUiPages : public QObject {
         QCOMPARE(ui.currentDetails()->objectName(), QStringLiteral("libraryPage"));
     }
 
-    void escapeClosesTheDrawerFirst()
-    {
-        Ui ui(m_home->path());
-        QVERIFY(ui.load());
-        QVERIFY(ui.opensWindowOfWidth(440));
-        QVERIFY(buildState(ui, QStringLiteral("library")));
-        QTRY_VERIFY(ui.layoutProblems().isEmpty());
-        auto *drawer = ui.window->property("globalDrawer").value<QObject *>();
-        QVERIFY(drawer);
-        QTRY_VERIFY(drawer->property("modal").toBool());
-        const int depth = ui.stackDepth();
-        QVERIFY(QMetaObject::invokeMethod(drawer, "open"));
-        QTRY_VERIFY(drawer->property("drawerOpen").toBool());
-        QTest::keyClick(ui.window, Qt::Key_Escape);
-        QTRY_VERIFY(!drawer->property("drawerOpen").toBool());
-        QTest::qWait(300);
-        QCOMPARE(ui.stackDepth(), depth);
-        QCOMPARE(ui.currentDetails()->objectName(), QStringLiteral("libraryPage"));
-    }
-
     void theSignInFieldsKeepTheirFocus()
     {
         Ui ui(m_home->path());
@@ -1648,132 +1724,231 @@ class TestUiPages : public QObject {
         QTest::keyClick(ui.window, Qt::Key_F, Qt::ControlModifier);
         QTRY_VERIFY(ui.item(QStringLiteral("searchPage")) != nullptr);
         QTRY_VERIFY(ui.window->activeFocusItem()
-                    && ui.window->activeFocusItem()->objectName() == QStringLiteral("searchField"));
+                    && ui.window->activeFocusItem()->objectName() == ui.searchFieldName());
         QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("searchPage"));
     }
 
-    // The action of the drawer with this text
-    static QObject *drawerAction(Ui &ui, const QString &text)
-    {
-        QQmlListReference actions(ui.window->property("globalDrawer").value<QObject *>(),
-                                  "actions");
-        for (qsizetype i = 0; i < actions.count(); ++i) {
-            if (actions.at(i)->property("text").toString() == text)
-                return actions.at(i);
-        }
-        return nullptr;
-    }
-
-    // The visible row of the sidebar or drawer for the action with this text
-    static QQuickItem *shellItemWithText(Ui &ui, const QString &text)
-    {
-        for (QQuickItem *candidate : allItems(ui.window->contentItem())) {
-            if (!QString::fromLatin1(candidate->metaObject()->className())
-                     .contains(QLatin1String("GlobalDrawerActionItem"))
-                || !candidate->isVisible() || candidate->width() <= 0)
-                continue;
-            const auto *action = candidate->property("kAction").value<QObject *>();
-            if (action && action->property("text").toString() == text)
-                return candidate;
-        }
-        return nullptr;
-    }
-
-    void theSidebarIsOpenOnAWideWindow()
+    void noSidebarRemains()
     {
         Ui ui(m_home->path());
         QVERIFY(ui.load());
-        QVERIFY(ui.opensWindowOfWidth(1000));
         QVERIFY(buildState(ui, QStringLiteral("home")));
-        auto *drawer = ui.window->property("globalDrawer").value<QObject *>();
-        QVERIFY(!drawer->property("modal").toBool());
-        QTRY_VERIFY(drawer->property("drawerOpen").toBool());
-        QTRY_VERIFY(ui.sidebarWidth() > 100);
-        for (const QString &text :
-             {QStringLiteral("Home"), QStringLiteral("Search"), QStringLiteral("Settings")})
-            QTRY_VERIFY2(shellItemWithText(ui, text) != nullptr, qPrintable(text));
-        // The page beside it is whole
-        QTRY_VERIFY(ui.layoutProblems().isEmpty());
-        // Quit is a shortcut only: the HIG keeps it out of a navigation sidebar
-        QVERIFY(!drawerAction(ui, QStringLiteral("Quit")));
+        // The old shell's drawer and its rows are gone for good
+        QVERIFY(!ui.window->property("globalDrawer").value<QObject *>());
+        for (QQuickItem *candidate : allItems(ui.window->contentItem()))
+            QVERIFY2(!QString::fromLatin1(candidate->metaObject()->className())
+                          .contains(QLatin1String("GlobalDrawer")),
+                     qPrintable(Ui::describe(candidate)));
     }
 
-    void aNarrowWindowUsesTheModalDrawer()
+    void theHeaderModesFollowTheWidth()
     {
         Ui ui(m_home->path());
+        ui.server.generatedItemTotal = 10;
         QVERIFY(ui.load());
-        QVERIFY(ui.opensWindowOfWidth(440));
         QVERIFY(buildState(ui, QStringLiteral("home")));
-        auto *drawer = ui.window->property("globalDrawer").value<QObject *>();
-        QTRY_VERIFY(drawer->property("modal").toBool());
-        QTRY_VERIFY(!drawer->property("drawerOpen").toBool());
-        QTRY_COMPARE(ui.sidebarWidth(), 0.0);
-        QTRY_VERIFY(ui.layoutProblems().isEmpty());
-        QVERIFY(QMetaObject::invokeMethod(drawer, "open"));
-        QTRY_VERIFY(drawer->property("drawerOpen").toBool());
-        QTRY_COMPARE(drawer->property("position").toReal(), 1.0);
-        QQuickItem *search = nullptr;
-        QTRY_VERIFY((search = shellItemWithText(ui, QStringLiteral("Search"))) != nullptr);
-        // The rows that appeared with the sign-in lie one under the other once the drawer has laid itself out
-        const auto rowTop = [&ui](const QString &text) {
-            QQuickItem *row = shellItemWithText(ui, text);
-            return row ? row->mapToScene(QPointF(0, 0)).y() : -1.0;
-        };
-        QTRY_VERIFY(rowTop(QStringLiteral("Search")) > rowTop(QStringLiteral("Home")));
-        QTRY_VERIFY(rowTop(QStringLiteral("Settings")) > rowTop(QStringLiteral("Search")));
-
-        QTRY_VERIFY(ui.insideWindow(search));
-        ui.clickCenter(search);
-        QTRY_VERIFY(ui.item(QStringLiteral("searchPage")) != nullptr);
-        QTRY_VERIFY(!drawer->property("drawerOpen").toBool());
+        // The limits the shell itself derives from grid units, in pixels
+        const int compactLimit = ui.window->property("compactLimit").toInt();
+        const int wideLimit = ui.window->property("wideLimit").toInt();
+        QVERIFY(compactLimit > 0 && wideLimit > compactLimit);
+        const struct Mode {
+            int width;
+            bool wide;
+            bool compact;
+        } modes[] = {{wideLimit * 2, true, false},
+                     {wideLimit + 10, true, false},
+                     {compactLimit + 40, false, false},
+                     {compactLimit + 1, false, false},
+                     {compactLimit - 40, false, true}};
+        for (const Mode &mode : modes) {
+            QVERIFY2(ui.opensWindowOfWidth(mode.width), qPrintable(QString::number(mode.width)));
+            // A resize reaches the QML bindings that read the width on the next event loop pass: QTRY lets them settle
+            QTRY_VERIFY2(ui.shellHeader()->property("compact").toBool() == mode.compact,
+                         qPrintable(QStringLiteral("%1 px: compact %2, want %3")
+                                        .arg(mode.width)
+                                        .arg(ui.shellHeader()->property("compact").toBool())
+                                        .arg(mode.compact)));
+            QTRY_VERIFY2(ui.shellHeader()->property("wide").toBool() == mode.wide,
+                         qPrintable(QStringLiteral("%1 px: wide %2, want %3")
+                                        .arg(mode.width)
+                                        .arg(ui.shellHeader()->property("wide").toBool())
+                                        .arg(mode.wide)));
+            QStringList problems = ui.modeProblems(mode.wide, mode.compact);
+            QVERIFY2(problems.isEmpty(), qPrintable(QStringLiteral("%1 px: %2")
+                                                        .arg(mode.width)
+                                                        .arg(problems.join(QLatin1Char('\n')))));
+            // The menu carries what the bar hid, and nothing more
+            QObject *menu = ui.popup(QStringLiteral("mainMenu"));
+            QVERIFY(menu);
+            QVERIFY(QMetaObject::invokeMethod(menu, "open"));
+            QTRY_VERIFY(menu->property("opened").toBool());
+            const QStringList shown = [&ui, &menu] {
+                QStringList names;
+                for (QQuickItem *entry : ui.menuItems(QStringLiteral("mainMenu"))) {
+                    if (entry && entry->isVisible() && entry->property("action").isValid())
+                        names << entry->property("action").value<QObject *>()->objectName();
+                }
+                return names;
+            }();
+            QVERIFY(QMetaObject::invokeMethod(menu, "close"));
+            if (mode.compact) {
+                for (const char *name :
+                     {"compactSearchAction", "compactFavoritesAction", "compactQueueAction",
+                      "settingsAction", "shortcutsAction", "aboutAction", "adminDashboardAction"})
+                    QVERIFY2(shown.contains(QLatin1String(name)),
+                             qPrintable(QStringLiteral("%1 px: %2 missing")
+                                            .arg(mode.width)
+                                            .arg(QLatin1String(name))));
+            } else {
+                for (const char *name :
+                     {"compactSearchAction", "compactFavoritesAction", "compactQueueAction"})
+                    QVERIFY2(!shown.contains(QLatin1String(name)),
+                             qPrintable(QStringLiteral("%1 px: %2 shown")
+                                            .arg(mode.width)
+                                            .arg(QLatin1String(name))));
+                QVERIFY2(shown.contains(QLatin1String("settingsAction")),
+                         qPrintable(shown.join(QLatin1Char('|'))));
+            }
+            // The page keeps its place under the bar in every mode
+            QTRY_VERIFY2((problems = ui.layoutProblems()).isEmpty(),
+                         qPrintable(problems.join(QLatin1Char('\n'))));
+        }
     }
 
-    void theSidebarMarksTheCurrentSection()
+    void theHeaderTabMarksTheCurrentSection()
     {
         Ui ui(m_home->path());
         ui.serveSearch();
         QVERIFY(ui.load());
         QVERIFY(buildState(ui, QStringLiteral("home")));
-        const auto checkedOnly = [&](const QString &expected) {
-            for (const QString &text :
-                 {QStringLiteral("Home"), QStringLiteral("Search"), QStringLiteral("Settings"),
-                  QStringLiteral("About Kinefin")}) {
-                QObject *action = drawerAction(ui, text);
-                QQuickItem *row = shellItemWithText(ui, text);
-                if (!action || !row || action->property("checked").toBool() != (text == expected)
-                    || row->property("checked").toBool() != (text == expected))
-                    return false;
-            }
-            return true;
+        QQuickItem *tab = ui.tabButton();
+        QVERIFY(tab);
+        // Home marks itself, and only itself, wherever the front page belongs
+        const auto marked = [&](bool expected) {
+            return tab->property("checked").toBool() == expected;
         };
-        QTRY_VERIFY(checkedOnly(QStringLiteral("Home")));
+        QTRY_VERIFY(marked(true));
         QVERIFY(ui.openSearchPage() != nullptr);
-        QTRY_VERIFY(checkedOnly(QStringLiteral("Search")));
-        QMetaObject::invokeMethod(drawerAction(ui, QStringLiteral("Settings")), "trigger");
-        QTRY_VERIFY(checkedOnly(QStringLiteral("Settings")));
-        QMetaObject::invokeMethod(drawerAction(ui, QStringLiteral("About Kinefin")), "trigger");
-        QTRY_VERIFY(checkedOnly(QStringLiteral("About Kinefin")));
+        QTRY_VERIFY(marked(false));
+        QMetaObject::invokeMethod(ui.shellAction(QStringLiteral("settingsAction")), "trigger");
+        QTRY_VERIFY(marked(false));
+        // The main menu button marks its own pages while one of them shows
+        QTRY_VERIFY(ui.item(QStringLiteral("mainMenuButton"))->property("down").toBool());
+        QMetaObject::invokeMethod(ui.shellAction(QStringLiteral("aboutAction")), "trigger");
+        QTRY_VERIFY(ui.item(QStringLiteral("mainMenuButton"))->property("down").toBool());
+        // Ctrl+1 back to the same Home: the tab marks it again
+        QTest::keyClick(ui.window, Qt::Key_1, Qt::ControlModifier);
+        QTRY_VERIFY(ui.item(QStringLiteral("homePage")) != nullptr);
+        QTRY_VERIFY(marked(true));
+        QTRY_VERIFY(!ui.item(QStringLiteral("mainMenuButton"))->property("down").toBool());
+        // A library opened from a tile marks nothing: the type tabs are not there yet
+        QVERIFY(ui.openLibraryTile(kMovies));
+        QTRY_VERIFY(ui.item(QStringLiteral("libraryPage")) != nullptr);
+        QTRY_VERIFY(marked(false));
+        QTRY_VERIFY(!ui.item(QStringLiteral("queueButton"))->property("down").toBool());
     }
 
-    void tabReachesTheSidebar()
+    void theHeaderShortcutsOpenTheirPages()
     {
         Ui ui(m_home->path());
         QVERIFY(ui.load());
-        QVERIFY(ui.opensWindowOfWidth(1000));
         QVERIFY(buildState(ui, QStringLiteral("home")));
-        QTRY_VERIFY(ui.sidebarWidth() > 100);
+        // Ctrl+, opens Settings without a menu
+        QTest::keyClick(ui.window, Qt::Key_Comma, Qt::ControlModifier);
+        QTRY_VERIFY(ui.item(QStringLiteral("settingsPage")) != nullptr);
+        QTRY_COMPARE(ui.stackDepth(), 2);
+        // Ctrl+Shift+/ shows the dialog of the shortcuts
+        QTest::keyClick(ui.window, Qt::Key_Slash, Qt::ControlModifier | Qt::ShiftModifier);
+        QObject *dialog = ui.popup(QStringLiteral("shortcutsDialog"));
+        QVERIFY(dialog);
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Go Back")));
+        // The rows: every action the shell answers with, and the keys of the row that shows two modifiers (the keys sit in their own boxes, one label per part)
+        for (const QString &action :
+             {QStringLiteral("Quit Kinefin"), QStringLiteral("Search"), QStringLiteral("Home"),
+              QStringLiteral("Settings"), QStringLiteral("Show Keyboard Shortcuts")})
+            QTRY_VERIFY2(ui.showsText(action), qPrintable(action));
+        for (const QString &key :
+             {QStringLiteral("Ctrl"), QStringLiteral("Shift"), QStringLiteral("/")})
+            QTRY_VERIFY2(ui.showsText(key), qPrintable(key));
+        // Escape closes the dialog first, and nothing else moved
+        QTest::keyClick(ui.window, Qt::Key_Escape);
+        QTRY_VERIFY(!dialog->property("visible").toBool());
+        QTest::qWait(300);
+        QCOMPARE(ui.stackDepth(), 2);
+        QCOMPARE(ui.currentDetails()->objectName(), QStringLiteral("settingsPage"));
+        // Ctrl+1 goes back to Home
+        QTest::keyClick(ui.window, Qt::Key_1, Qt::ControlModifier);
+        QTRY_VERIFY(ui.item(QStringLiteral("homePage")) != nullptr);
+        QTRY_COMPARE(ui.stackDepth(), 1);
+    }
+
+    void typingInTheHeaderBoxOpensTheSearchPage()
+    {
+        Ui ui(m_home->path());
+        ui.serveSearch();
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("home")));
+        // The first keystroke in the header box opens the page above Home and keeps the term
+        QQuickItem *field = ui.item(QStringLiteral("headerSearchField"));
+        QVERIFY(field);
+        field->forceActiveFocus(Qt::TabFocusReason);
+        ui.type(QStringLiteral("a"));
+        QTRY_VERIFY(ui.item(QStringLiteral("searchPage")) != nullptr);
+        QTRY_VERIFY(ui.item(QStringLiteral("headerSearchField"))->hasActiveFocus());
+        // The page keeps its own field hidden on a wide window, where the header box is the field
+        QTRY_VERIFY([&] {
+            QQuickItem *pageField = ui.item(QStringLiteral("searchField"));
+            return pageField && !pageField->isVisible();
+        }());
+        QCOMPARE(ui.controller.search()->term(), QStringLiteral("a"));
+        ui.type(QStringLiteral("byss"));
+        QTRY_COMPARE(ui.controller.search()->state(), Kinefin::SearchModel::Results);
+        QCOMPARE(ui.controller.search()->term(), QStringLiteral("abyss"));
+        // Leaving the search page takes the term with it: the box empties
+        QTest::keyClick(ui.window, Qt::Key_1, Qt::ControlModifier);
+        QTRY_VERIFY(ui.item(QStringLiteral("homePage")) != nullptr);
+        QTRY_VERIFY(ui.item(QStringLiteral("searchPage")) == nullptr);
+        QCOMPARE(ui.controller.search()->term(), QString());
+        QTRY_COMPARE(ui.item(QStringLiteral("headerSearchField"))->property("text").toString(),
+                     QString());
+        // The search page's own field shows only in Compact mode, where the header has none
+        QVERIFY(ui.opensWindowOfWidth(ui.window->property("compactLimit").toInt() - 40));
+        QVERIFY(ui.openSearchPage() != nullptr);
+        ui.type(QStringLiteral("arc"));
+        QTRY_COMPARE(ui.controller.search()->state(), Kinefin::SearchModel::Results);
+        QQuickItem *pageField = ui.item(QStringLiteral("searchField"));
+        QVERIFY(pageField);
+        QTRY_VERIFY(pageField->isVisible());
+        QCOMPARE(pageField->property("text").toString(), QStringLiteral("arc"));
+    }
+
+    void tabWalksTheHeaderBeforeThePage()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("home")));
         QTRY_VERIFY(ui.layoutProblems().isEmpty());
-        // The class name of the rows is Kirigami's private one: a rename there makes this test fail loudly, not pass silently
-        QStringList reached;
-        for (QQuickItem *item : ui.tabCycle(200)) {
-            QVERIFY2(ui.insideWindow(item), qPrintable(Ui::describe(item)));
-            if (const auto *action = item->property("kAction").value<QObject *>())
-                reached << action->property("text").toString();
-        }
-        for (const QString &text : {QStringLiteral("Home"), QStringLiteral("Search"),
-                                    QStringLiteral("Settings"), QStringLiteral("About Kinefin")})
-            QVERIFY2(reached.contains(text), qPrintable(text + QStringLiteral(" not in ")
-                                                        + reached.join(QLatin1Char('|'))));
+        QQuickItem *menuButton = ui.item(QStringLiteral("mainMenuButton"));
+        QVERIFY(menuButton);
+        menuButton->forceActiveFocus(Qt::TabFocusReason);
+        QTRY_VERIFY(menuButton->hasActiveFocus());
+        // The order inside the header: the tab, then the right cluster (the disabled favorites is skipped)
+        QTest::keyClick(ui.window, Qt::Key_Tab);
+        QTRY_VERIFY(ui.tabButton()->hasActiveFocus());
+        QTest::keyClick(ui.window, Qt::Key_Tab);
+        QTRY_VERIFY(ui.item(QStringLiteral("headerSearchField"))->hasActiveFocus());
+        QTest::keyClick(ui.window, Qt::Key_Tab);
+        QTRY_VERIFY(ui.item(QStringLiteral("queueButton"))->hasActiveFocus());
+        QTest::keyClick(ui.window, Qt::Key_Tab);
+        QTRY_VERIFY(ui.item(QStringLiteral("accountButton"))->hasActiveFocus());
+        // Behind the account button the page content begins: Back from the menu button wraps, so nothing of the header sits before it
+        QTest::keyClick(ui.window, Qt::Key_Tab);
+        QQuickItem *next = ui.window->activeFocusItem();
+        QVERIFY(next && next != ui.tabButton() && next != menuButton
+                && next->objectName() != QStringLiteral("headerSearchField")
+                && next->objectName() != QStringLiteral("queueButton")
+                && next->objectName() != QStringLiteral("accountButton"));
     }
 
     void homeReturnsToTheSameHomePage()
@@ -1784,46 +1959,20 @@ class TestUiPages : public QObject {
         QVERIFY(buildState(ui, QStringLiteral("library")));
         QPointer<QQuickItem> home = ui.item(QStringLiteral("homePage"));
         QVERIFY(home);
-        QMetaObject::invokeMethod(drawerAction(ui, QStringLiteral("Home")), "trigger");
+        QTest::keyClick(ui.window, Qt::Key_1, Qt::ControlModifier);
         QTRY_COMPARE(ui.stackDepth(), 1);
         QTRY_COMPARE(ui.currentDetails(), home.data());
     }
 
-    void escapeGoesBackWhileTheSidebarIsOpen()
-    {
-        Ui ui(m_home->path());
-        QVERIFY(ui.load());
-        QVERIFY(ui.opensWindowOfWidth(1000));
-        QVERIFY(buildState(ui, QStringLiteral("library")));
-        auto *drawer = ui.window->property("globalDrawer").value<QObject *>();
-        QTRY_VERIFY(drawer->property("drawerOpen").toBool());
-        QTest::keyClick(ui.window, Qt::Key_Escape);
-        QTRY_VERIFY(ui.item(QStringLiteral("homePage")) != nullptr);
-        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("homePage"));
-        QVERIFY(drawer->property("drawerOpen").toBool());
-    }
-
-    void theWidthAloneDecidesBetweenSidebarAndDrawer()
+    void theHeaderKeepsThePageWholeWhileTheWidthChanges()
     {
         Ui ui(m_home->path());
         QVERIFY(ui.load());
         QVERIFY(buildState(ui, QStringLiteral("library")));
-        auto *drawer = ui.window->property("globalDrawer").value<QObject *>();
-        const auto isSidebar = [&] {
-            return !drawer->property("modal").toBool() && ui.sidebarWidth() > 100;
-        };
-        const auto isDrawer = [&] {
-            return drawer->property("modal").toBool() && ui.sidebarWidth() == 0
-                   && !drawer->property("drawerOpen").toBool();
-        };
-        // The line lies at 36 grid units: only widths far from it say which mode applies
+        // The modes flip as the width crosses the grid-unit lines; whatever the mode, the page in
+        // front keeps the keyboard focus and fills the window under the bar
         for (const int width : {1000, 440, 1000, 560, 1600, 640, 440, 1200}) {
             QVERIFY(ui.opensWindowOfWidth(width));
-            if (width <= 440)
-                QTRY_VERIFY2(isDrawer(), qPrintable(QString::number(width)));
-            else if (width >= 1000)
-                QTRY_VERIFY2(isSidebar(), qPrintable(QString::number(width)));
-            // Whatever the mode, the page in front keeps the keyboard focus and fills the rest of the window
             QTRY_VERIFY2(ui.layoutProblems().isEmpty(),
                          qPrintable(ui.layoutProblems().join(QLatin1Char('\n'))));
             QTRY_VERIFY(ui.window->activeFocusItem()
@@ -1837,34 +1986,110 @@ class TestUiPages : public QObject {
         Ui ui(m_home->path());
         QVERIFY(ui.load());
         QVERIFY(buildState(ui, QStringLiteral("library")));
-        for (const QString &text : {QStringLiteral("Settings"), QStringLiteral("About Kinefin"),
-                                    QStringLiteral("Settings"), QStringLiteral("About Kinefin"),
-                                    QStringLiteral("Settings")}) {
-            QMetaObject::invokeMethod(drawerAction(ui, text), "trigger");
+        for (const char *name :
+             {"settingsAction", "aboutAction", "settingsAction", "aboutAction", "settingsAction"}) {
+            QMetaObject::invokeMethod(ui.shellAction(QLatin1String(name)), "trigger");
             QTRY_VERIFY(ui.currentDetails()->objectName()
-                        == (text == QStringLiteral("Settings") ? QStringLiteral("settingsPage")
-                                                               : QStringLiteral("aboutPage")));
+                        == (QLatin1String(name) == QLatin1String("settingsAction")
+                                ? QStringLiteral("settingsPage")
+                                : QStringLiteral("aboutPage")));
             QTRY_COMPARE(ui.stackDepth(), 2);
         }
         QTest::qWait(300);
         QCOMPARE(ui.stackDepth(), 2);
     }
 
-    void theSidebarDisablesWhatNeedsASession()
+    void theHeaderDisablesWhatNeedsASession()
     {
         Ui ui(m_home->path());
         QVERIFY(ui.load());
         QVERIFY(ui.opensWindowOfWidth(1000));
         QVERIFY(buildState(ui, QStringLiteral("servers")));
-        QTRY_VERIFY(ui.sidebarWidth() > 100);
-        for (const QString &text : {QStringLiteral("Home"), QStringLiteral("Search")}) {
-            QVERIFY2(drawerAction(ui, text)->property("visible").toBool(), qPrintable(text));
-            QVERIFY2(!drawerAction(ui, text)->property("enabled").toBool(), qPrintable(text));
-        }
-        QVERIFY(drawerAction(ui, QStringLiteral("Settings"))->property("enabled").toBool());
+        // Sections that need a session are there but dead
+        QVERIFY(!ui.shellAction(QStringLiteral("homeTabAction"))->property("enabled").toBool());
+        QVERIFY(!ui.item(QStringLiteral("queueButton"))->isEnabled());
+        QVERIFY(!ui.item(QStringLiteral("headerSearchField"))->isEnabled());
+        QVERIFY(ui.item(QStringLiteral("favoritesButton"))->isVisible());
+        QVERIFY(!ui.item(QStringLiteral("favoritesButton"))->isEnabled());
+        // Settings and About work without one
+        QVERIFY(ui.shellAction(QStringLiteral("settingsAction"))->property("enabled").toBool());
+        QVERIFY(ui.shellAction(QStringLiteral("aboutAction"))->property("enabled").toBool());
         // The server and session commands have nothing to act on yet
-        QVERIFY(!drawerAction(ui, QStringLiteral("Sign Out"))->property("visible").toBool());
-        QVERIFY(!drawerAction(ui, QStringLiteral("Admin Dashboard"))->property("visible").toBool());
+        QVERIFY(
+            !ui.shellAction(QStringLiteral("adminDashboardAction"))->property("visible").toBool());
+        QVERIFY(!ui.shellAction(QStringLiteral("signOutAction"))->property("visible").toBool());
+        QVERIFY(!ui.shellAction(QStringLiteral("switchUserAction"))->property("visible").toBool());
+        QVERIFY(
+            !ui.shellAction(QStringLiteral("switchServerAction"))->property("visible").toBool());
+        QVERIFY(!ui.item(QStringLiteral("accountButton"))->isVisible());
+
+        QVERIFY(buildState(ui, QStringLiteral("login")));
+        // A chosen server brings the account menu in, with only Switch Server to act on
+        QVERIFY(ui.item(QStringLiteral("accountButton"))->isVisible());
+        QVERIFY(ui.shellAction(QStringLiteral("switchServerAction"))->property("visible").toBool());
+        QVERIFY(!ui.shellAction(QStringLiteral("signOutAction"))->property("visible").toBool());
+        QVERIFY(!ui.shellAction(QStringLiteral("switchUserAction"))->property("visible").toBool());
+    }
+
+    void switchUserForgetsTheTokenAndLandsOnTheSignIn()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("home")));
+        QVERIFY(!ui.store.tokens.isEmpty());
+        // The account menu opens from its button, and Switch User is one of its entries
+        ui.clickCenter(ui.item(QStringLiteral("accountButton")));
+        QObject *menu = ui.popup(QStringLiteral("accountMenu"));
+        QVERIFY(menu);
+        QTRY_VERIFY(menu->property("opened").toBool());
+        QVERIFY(QMetaObject::invokeMethod(ui.shellAction(QStringLiteral("switchUserAction")),
+                                          "trigger"));
+        // The session goes, the server stays chosen: the sign-in of the same server is next
+        QTRY_COMPARE(ui.controller.state(), ConnectionController::NeedsLogin);
+        QTRY_VERIFY(ui.item(QStringLiteral("loginPage")) != nullptr);
+        QTRY_VERIFY(ui.item(QStringLiteral("homePage")) == nullptr);
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Server: "), false));
+        QTRY_VERIFY(ui.store.tokens.isEmpty());
+        QCOMPARE(ui.controller.servers().size(), 1);
+        // The same account signs back in
+        ui.controller.login(QStringLiteral("fixture-user"), QStringLiteral("fixture-password"));
+        QTRY_COMPARE(ui.controller.state(), ConnectionController::Authenticated);
+        QTRY_VERIFY(ui.item(QStringLiteral("homePage")) != nullptr);
+    }
+
+    void signOutForgetsEverythingAndReturnsToTheServers()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("home")));
+        ui.clickCenter(ui.item(QStringLiteral("accountButton")));
+        QTRY_VERIFY(ui.popup(QStringLiteral("accountMenu"))->property("opened").toBool());
+        QVERIFY(
+            QMetaObject::invokeMethod(ui.shellAction(QStringLiteral("signOutAction")), "trigger"));
+        QTRY_COMPARE(ui.controller.state(), ConnectionController::Idle);
+        QTRY_VERIFY(ui.item(QStringLiteral("serversPage")) != nullptr);
+        QTRY_VERIFY(ui.store.tokens.isEmpty());
+        // The server record went with the session, unlike Switch User's
+        QVERIFY(ui.controller.servers().isEmpty());
+    }
+
+    void switchServerKeepsTheSessionAndReturnsToTheServers()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("home")));
+        ui.clickCenter(ui.item(QStringLiteral("accountButton")));
+        QTRY_VERIFY(ui.popup(QStringLiteral("accountMenu"))->property("opened").toBool());
+        QVERIFY(QMetaObject::invokeMethod(ui.shellAction(QStringLiteral("switchServerAction")),
+                                          "trigger"));
+        QTRY_COMPARE(ui.controller.state(), ConnectionController::Idle);
+        QTRY_VERIFY(ui.item(QStringLiteral("serversPage")) != nullptr);
+        // The session of the server stays: a start finds it again without a password
+        QVERIFY(!ui.store.tokens.isEmpty());
+        QCOMPARE(ui.controller.servers().size(), 1);
+        ui.controller.start();
+        QTRY_COMPARE(ui.controller.state(), ConnectionController::Authenticated);
+        QTRY_VERIFY(ui.item(QStringLiteral("homePage")) != nullptr);
     }
 
     void theGridTakesTheKeysWhenTheLibraryOpens()
@@ -1996,40 +2221,7 @@ class TestUiPages : public QObject {
         QVERIFY(lists.constLast()->hasActiveFocus());
     }
 
-    void theSidebarListsTheLibraries()
-    {
-        Ui ui(m_home->path());
-        QVERIFY(ui.load());
-        QVERIFY(ui.opensWindowOfWidth(1000));
-        QVERIFY(buildState(ui, QStringLiteral("home")));
-        for (const QString &name :
-             {QStringLiteral("Movies"), QStringLiteral("Series"), QStringLiteral("Music")})
-            QTRY_VERIFY2(shellItemWithText(ui, name) != nullptr, qPrintable(name));
-        // A library that cannot be browsed yet is there and disabled, as its tile on Home is
-        QVERIFY(!drawerAction(ui, QStringLiteral("Music"))->property("enabled").toBool());
-        QVERIFY(drawerAction(ui, QStringLiteral("Movies"))->property("enabled").toBool());
-        // Home first, then the libraries
-        QTRY_VERIFY(
-            shellItemWithText(ui, QStringLiteral("Home"))->mapToScene(QPointF(0, 0)).y()
-            < shellItemWithText(ui, QStringLiteral("Movies"))->mapToScene(QPointF(0, 0)).y());
-        QQuickItem *movies = shellItemWithText(ui, QStringLiteral("Movies"));
-        ui.clickCenter(movies);
-        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("libraryPage"));
-        QCOMPARE(ui.controller.library()->libraryName(), QStringLiteral("Movies"));
-        QTRY_VERIFY(shellItemWithText(ui, QStringLiteral("Movies"))->property("checked").toBool());
-        QVERIFY(!shellItemWithText(ui, QStringLiteral("Home"))->property("checked").toBool());
-        // Another library takes the place of the first, the stack stays two pages deep
-        ui.clickCenter(shellItemWithText(ui, QStringLiteral("Series")));
-        QTRY_COMPARE(ui.controller.library()->libraryName(), QStringLiteral("Series"));
-        QTRY_VERIFY(shellItemWithText(ui, QStringLiteral("Series"))->property("checked").toBool());
-        QTRY_VERIFY(!shellItemWithText(ui, QStringLiteral("Movies"))->property("checked").toBool());
-        QTRY_COMPARE(ui.stackDepth(), 2);
-        QMetaObject::invokeMethod(drawerAction(ui, QStringLiteral("Home")), "trigger");
-        QTRY_COMPARE(ui.stackDepth(), 1);
-        QTRY_VERIFY(shellItemWithText(ui, QStringLiteral("Home"))->property("checked").toBool());
-    }
-
-    void theOpenLibraryEntryDoesNotReopenIt()
+    void reopeningTheOpenLibraryKeepsItsPage()
     {
         Ui ui(m_home->path());
         ui.server.generatedItemTotal = 30;
@@ -2039,67 +2231,13 @@ class TestUiPages : public QObject {
         QPointer<QQuickItem> library = ui.item(QStringLiteral("libraryPage"));
         QVERIFY(library);
         ui.controller.library()->setFilter(Kinefin::LibraryItemsModel::Unplayed);
-        QMetaObject::invokeMethod(drawerAction(ui, QStringLiteral("Movies")), "trigger");
+        QVERIFY(QMetaObject::invokeMethod(ui.engine.rootObjects().constFirst(), "openLibrary",
+                                          Q_ARG(QVariant, kMovies),
+                                          Q_ARG(QVariant, QStringLiteral("Movies"))));
         QTest::qWait(500);
         QCOMPARE(ui.currentDetails(), library.data());
         QCOMPARE(ui.controller.library()->filter(), Kinefin::LibraryItemsModel::Unplayed);
         QCOMPARE(ui.stackDepth(), 2);
-    }
-
-    void aLibraryOpenedFromHomeMarksItsSidebarEntry()
-    {
-        Ui ui(m_home->path());
-        QVERIFY(ui.load());
-        QVERIFY(ui.opensWindowOfWidth(1000));
-        QVERIFY(buildState(ui, QStringLiteral("library")));
-        QTRY_VERIFY([&ui] {
-            QQuickItem *row = shellItemWithText(ui, QStringLiteral("Movies"));
-            return row && row->property("checked").toBool();
-        }());
-    }
-
-    void aHostileLibraryNameIsNotInterpretedInTheSidebar()
-    {
-        Ui ui(m_home->path());
-        const QString hostile =
-            QStringLiteral("<b>Bold</b> &Mine <img src=\"http://evil.invalid/x.png\">");
-        const QJsonObject view{
-            {QStringLiteral("Id"), QStringLiteral("e2a1aa11a8d94b5c999a25cf59abcd01")},
-            {QStringLiteral("Name"), hostile},
-            {QStringLiteral("CollectionType"), QStringLiteral("movies")},
-            {QStringLiteral("Type"), QStringLiteral("CollectionFolder")}};
-        ui.server.viewsRawBody =
-            QJsonDocument(QJsonObject{{QStringLiteral("Items"), QJsonArray{view}},
-                                      {QStringLiteral("TotalRecordCount"), 1}})
-                .toJson(QJsonDocument::Compact);
-        QVERIFY(ui.load());
-        QVERIFY(ui.opensWindowOfWidth(1000));
-        QVERIFY(buildState(ui, QStringLiteral("home")));
-        QTRY_VERIFY(ui.sidebarWidth() > 100);
-        // The drawer builds the label of a row once the row is wide enough
-        const QString shown = QString::fromUtf8(
-            "\u2039b>Bold\u2039/b> &Mine \u2039img src=\"http://evil.invalid/x.png\">");
-        QQuickItem *label = nullptr;
-        QTRY_VERIFY([&] {
-            for (QQuickItem *candidate : allItems(ui.window->contentItem())) {
-                if (candidate->inherits("QQuickText")
-                    && candidate->property("text").toString() == shown) {
-                    label = candidate;
-                    return true;
-                }
-            }
-            return false;
-        }());
-        // No label of the sidebar holds a tag, and nothing asked for the image
-        for (QQuickItem *candidate : allItems(ui.window->contentItem())) {
-            if (candidate->inherits("QQuickText") && ui.sidebarWidth() > 0
-                && candidate->mapToScene(QPointF(0, 0)).x() < ui.sidebarWidth())
-                QVERIFY2(!candidate->property("text").toString().contains(QLatin1Char('<')),
-                         qPrintable(candidate->property("text").toString()));
-        }
-        QTest::qWait(300);
-        QVERIFY(gWarnings.filter(QStringLiteral("evil.invalid")).isEmpty());
-        QVERIFY(label->isVisible());
     }
 
     // The queue page of a queue holding the five fixture episodes, in front
@@ -2110,21 +2248,20 @@ class TestUiPages : public QObject {
         return ui.item(QStringLiteral("queueList"));
     }
 
-    void theQueueEntryOpensOnce()
+    void theQueueButtonOpensOnce()
     {
         Ui ui(m_home->path());
         QVERIFY(ui.load());
         QVERIFY(ui.opensWindowOfWidth(1000));
         QVERIFY(buildState(ui, QStringLiteral("home")));
+        QQuickItem *button = ui.item(QStringLiteral("queueButton"));
+        QVERIFY(button);
         for (int i = 0; i < 3; ++i) {
-            QMetaObject::invokeMethod(drawerAction(ui, QStringLiteral("Queue")), "trigger");
+            ui.clickCenter(button);
             QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("queuePage"));
             QTRY_COMPARE(ui.stackDepth(), 2);
         }
-        QTRY_VERIFY([&ui] {
-            QQuickItem *row = shellItemWithText(ui, QStringLiteral("Queue"));
-            return row && row->property("checked").toBool();
-        }());
+        QTRY_VERIFY(button->property("down").toBool());
         QTRY_VERIFY(ui.layoutProblems().isEmpty());
     }
 
@@ -2419,7 +2556,7 @@ class TestUiPages : public QObject {
         Ui ui(m_home->path());
         QVERIFY(ui.load());
         QVERIFY(openQueueWithEpisodes(ui));
-        QTRY_VERIFY(shellItemWithText(ui, QStringLiteral("Movies")) != nullptr);
+        QTRY_VERIFY(ui.item(QStringLiteral("libraryCard_") + kMovies) != nullptr);
         // The rows have their pictures: signing out while they load makes the image fetcher refuse the late requests
         QTRY_VERIFY(ui.server.imageRequests >= 1);
         QTest::qWait(500);

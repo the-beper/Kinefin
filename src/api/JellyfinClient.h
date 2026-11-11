@@ -125,6 +125,8 @@ class JellyfinClient final : public QObject {
     // Whether credentials may be sent to the probed server (HTTPS, loopback, or the explicit insecure-HTTP opt-in): what restoreSession() and authenticate() require of the transport
     bool canSendCredentials() const;
     void disconnectFromServer();
+    // Drops the session in memory without disconnecting: the server stays probed (Ready), only the token goes. What Switch User needs: the sign-in page of the same server is next
+    void forgetSession();
 
     // Internal, only the WebSocket component flips it: remote media control is announced while an authenticated socket exists, and every socket entry re-posts the capabilities
     void setMediaControlAnnounced(bool announced);

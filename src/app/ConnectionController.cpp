@@ -217,6 +217,22 @@ void ConnectionController::signOut()
     setState(Idle);
 }
 
+void ConnectionController::switchUser()
+{
+    if (m_state != Authenticated)
+        return;
+    clearQuickConnect();
+    // Switching user takes the saved queue of this account with it, as it takes the token
+    m_queue.forgetStored(m_client.serverId(), m_client.userId());
+    m_sync.forgetToken(m_client.serverId());
+    m_client.forgetSession();
+    m_libraries.clear();
+    Q_EMIT librariesChanged();
+    setError({});
+    // The server stays probed and chosen: only the sign-in of the same server is left
+    setState(NeedsLogin);
+}
+
 bool ConnectionController::openAdminDashboard() const
 {
     const auto link = adminDashboardUrl(m_serverUrl);

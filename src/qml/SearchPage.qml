@@ -14,6 +14,8 @@ Kirigami.ScrollablePage {
     readonly property int searchState: connection.search.state
     // The groups show only while there is something to show or wait for: a stale group never outlives an empty or too short term
     readonly property bool groupsVisible: searchState === SearchModel.Searching || searchState === SearchModel.Results
+    // The header box hides in Compact mode, and this page's own field takes its place
+    readonly property bool compactShell: Window.window ? Window.window.compactHeader : false
 
     title: i18n("Search")
 
@@ -45,15 +47,17 @@ Kirigami.ScrollablePage {
         Kirigami.SearchField {
             id: field
             objectName: "searchField"
+            // The header owns the box on a wide window: here it shows only in Compact mode, where the header has none
+            visible: page.compactShell
             Layout.fillWidth: true
             Layout.maximumWidth: Kirigami.Units.gridUnit * 30
             Layout.margins: Kirigami.Units.largeSpacing
-            // The drawer action owns Ctrl+F: the field's own sequence would make it ambiguous
+            // The shell owns Ctrl+F: the field's own sequence would make it ambiguous
             focusSequences: []
             maximumLength: 128
             autoAccept: false
 
-            // The field is the source of truth while the page is open
+            // The field is the source of truth while it holds the focus, and follows the term the header box changes
             onTextChanged: {
                 if (text !== page.connection.search.term)
                     page.connection.search.term = text;
@@ -61,6 +65,14 @@ Kirigami.ScrollablePage {
             onAccepted: page.connection.search.searchNow()
             Keys.onDownPressed: page.focusFirstResults()
             Component.onCompleted: text = page.connection.search.term
+        }
+
+        Connections {
+            target: page.connection.search
+            function onTermChanged() {
+                if (field.text !== page.connection.search.term)
+                    field.text = page.connection.search.term;
+            }
         }
     }
 

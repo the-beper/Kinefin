@@ -241,6 +241,23 @@ class TestConnectionController : public QObject {
         QVERIFY(!QFileInfo::exists(queueFile()));
     }
 
+    void switchUserForgetsTheTokenAndTheQueueButKeepsTheServer()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        auto controller = makeController();
+        QVERIFY(signInAndQueueTheMovie(*controller, server));
+        QVERIFY(!gStore->tokens.isEmpty());
+        controller->switchUser();
+        // The token and the queue of the account go, the server record stays: the sign-in of the same server is next
+        QTRY_COMPARE(controller->state(), ConnectionController::NeedsLogin);
+        QTRY_VERIFY(gStore->tokens.isEmpty());
+        QCOMPARE(controller->servers().size(), 1);
+        QTRY_VERIFY(!QFileInfo::exists(queueFile()));
+        // The same account signs back in
+        QVERIFY(signInAgain(*controller, server));
+    }
+
     void removingAServerRemovesItsQueueFile()
     {
         FakeJellyfin server;

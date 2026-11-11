@@ -187,6 +187,16 @@ void ServerCredentialSync::signOut()
     m_client->disconnectFromServer();
 }
 
+void ServerCredentialSync::forgetToken(const QString &serverId)
+{
+    // The same guard as forget(): a token whose save is still in flight is caught by the epoch, one already stored is removed here. The entry and the client stay: only the session is gone
+    ++m_forgetEpoch[serverId];
+    m_store->remove(tokenKey(serverId), [](bool ok) {
+        if (!ok)
+            qCWarning(credentialsLog) << "could not remove the session token from the store";
+    });
+}
+
 void ServerCredentialSync::forget(const QString &serverId)
 {
     ++m_forgetEpoch[serverId];

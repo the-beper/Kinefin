@@ -1462,6 +1462,13 @@ void JellyfinClient::disconnectFromServer()
     m_allowInsecureHttp = false;
 }
 
+void JellyfinClient::forgetSession()
+{
+    abortPending();
+    clearToken();
+    m_state = State::Ready;
+}
+
 QUrl JellyfinClient::endpoint(const QString &path) const
 {
     QUrl url = m_base;

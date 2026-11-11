@@ -21,6 +21,8 @@ KNOWN_NOISE = ("Created graphical object was not placed in the graphics scene",)
 KNOWN_NOISE += ("templates/OverlaySheet.qml", "AboutItem.qml:377:9: QML OverlaySheet: Binding loop")
 # The same sheet reads `parent.Window.window.height` while the page is not in a window yet, and the binding is evaluated again once it is; inferred harmless
 KNOWN_NOISE += ("AboutItem.qml:380: TypeError: Cannot read property 'height' of null",)
+# The animation driver of a window closed while a page slide is settling is stopped once too often (Qt 6.11.2, offscreen): teardown noise of the framework, not of the shell
+KNOWN_NOISE += ("QUnifiedTimer::stopAnimationDriver: driver is not running",)
 
 
 # KINEFIN_START_PAGE opens one more page at start; None is the plain Servers page.

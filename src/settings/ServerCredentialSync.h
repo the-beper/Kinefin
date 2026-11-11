@@ -42,6 +42,8 @@ class ServerCredentialSync final : public QObject {
     void signOut();
     // Drops one stored entry and its token without touching the client (the Servers page's remove action)
     void forgetServer(const QString &serverId) { forget(serverId); }
+    // Removes the token of one server from the store and bumps its forget epoch, without touching the entry or the client: what Switch User needs (the token goes, the server's record stays)
+    void forgetToken(const QString &serverId);
 
   Q_SIGNALS:
     // The stored entries changed (a save finished, an entry was forgotten or moved)

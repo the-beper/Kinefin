@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: kinefin 0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-11-10 18:47+0000\n"
+"POT-Creation-Date: 2026-11-11 10:57+0000\n"
 "PO-Revision-Date: 2026-11-07 00:00+0000\n"
 "Last-Translator: the-beper\n"
 "Language: en\n"
@@ -36,11 +36,11 @@ msgstr "Enter a username and a password"
 msgid "Quick Connect is not available"
 msgstr "Quick Connect is not available"
 
-#: src/app/ConnectionController.cpp:262
+#: src/app/ConnectionController.cpp:278
 msgid "Your session has expired. Sign in again"
 msgstr "Your session has expired. Sign in again"
 
-#: src/app/ConnectionController.cpp:271
+#: src/app/ConnectionController.cpp:287
 msgid ""
 "Could not reach a Jellyfin server. Check the address and your network "
 "connection"
@@ -48,23 +48,23 @@ msgstr ""
 "Could not reach a Jellyfin server. Check the address and your network "
 "connection"
 
-#: src/app/ConnectionController.cpp:275
+#: src/app/ConnectionController.cpp:291
 msgid "Wrong username or password"
 msgstr "Wrong username or password"
 
-#: src/app/ConnectionController.cpp:276
+#: src/app/ConnectionController.cpp:292
 msgid "Signing in failed. Try again, or check the server"
 msgstr "Signing in failed. Try again, or check the server"
 
-#: src/app/ConnectionController.cpp:281
+#: src/app/ConnectionController.cpp:297
 msgid "Quick Connect is not available on this server"
 msgstr "Quick Connect is not available on this server"
 
-#: src/app/ConnectionController.cpp:282
+#: src/app/ConnectionController.cpp:298
 msgid "Quick Connect failed or expired. Start it again"
 msgstr "Quick Connect failed or expired. Start it again"
 
-#: src/app/ConnectionController.cpp:289
+#: src/app/ConnectionController.cpp:305
 msgid "Could not load the libraries. Try again"
 msgstr "Could not load the libraries. Try again"
 
@@ -334,7 +334,7 @@ msgstr "Font"
 msgid "Manual MPV Configuration"
 msgstr "Manual MPV Configuration"
 
-#: src/qml/HomePage.qml:14 src/qml/Main.qml:351
+#: src/qml/HomePage.qml:14
 msgid "Home"
 msgstr "Home"
 
@@ -347,7 +347,7 @@ msgstr "Refresh"
 #: src/qml/ItemDetailsPage.qml:503 src/qml/ItemDetailsPage.qml:720
 #: src/qml/ItemDetailsPage.qml:765 src/qml/ItemDetailsPage.qml:820
 #: src/qml/LibraryPage.qml:139 src/qml/LibraryPage.qml:153
-#: src/qml/SearchPage.qml:76 src/qml/SearchPage.qml:178
+#: src/qml/SearchPage.qml:88 src/qml/SearchPage.qml:190
 #: src/qml/QueuePage.qml:329 src/qml/GenreRailsPage.qml:95
 #: src/qml/GenreRailsPage.qml:195
 msgid "Retry"
@@ -380,7 +380,7 @@ msgstr "Recently Added in %1"
 #: src/qml/HomePage.qml:167 src/qml/ItemDetailsPage.qml:209
 #: src/qml/ItemDetailsPage.qml:439 src/qml/ItemDetailsPage.qml:494
 #: src/qml/ItemDetailsPage.qml:711 src/qml/ItemDetailsPage.qml:756
-#: src/qml/LibraryPage.qml:195 src/qml/SearchPage.qml:168
+#: src/qml/LibraryPage.qml:195 src/qml/SearchPage.qml:180
 #: src/qml/QueuePage.qml:309 src/qml/QueuePage.qml:317
 #: src/qml/GenreRailsPage.qml:77 src/qml/GenreRailsPage.qml:181
 msgid "Loading…"
@@ -393,21 +393,21 @@ msgstr ""
 "Could not load this row: check the connection to the server and try again"
 
 #: src/qml/HomePage.qml:207 src/qml/EpisodeRow.qml:38
-#: src/qml/ItemDetailsPage.qml:48 src/qml/SearchPage.qml:209
+#: src/qml/ItemDetailsPage.qml:48 src/qml/SearchPage.qml:221
 #: src/qml/QueuePage.qml:78 src/qml/GenreRailsPage.qml:230
 msgctxt "season and episode number"
 msgid "S%1:E%2"
 msgstr "S%1:E%2"
 
 #: src/qml/HomePage.qml:207 src/qml/EpisodeRow.qml:41
-#: src/qml/ItemDetailsPage.qml:50 src/qml/SearchPage.qml:209
+#: src/qml/ItemDetailsPage.qml:50 src/qml/SearchPage.qml:221
 #: src/qml/QueuePage.qml:78 src/qml/GenreRailsPage.qml:230
 msgctxt "episode number"
 msgid "E%1"
 msgstr "E%1"
 
 #: src/qml/HomePage.qml:208 src/qml/EpisodeRow.qml:48
-#: src/qml/SearchPage.qml:210 src/qml/QueuePage.qml:79
+#: src/qml/SearchPage.qml:222 src/qml/QueuePage.qml:79
 #: src/qml/GenreRailsPage.qml:231
 msgctxt "episode label and episode title"
 msgid "%1 — %2"
@@ -545,7 +545,7 @@ msgid "Add to Queue"
 msgstr "Add to Queue"
 
 #: src/qml/ItemDetailsPage.qml:180 src/qml/ItemDetailsPage.qml:750
-#: src/qml/SearchPage.qml:141
+#: src/qml/SearchPage.qml:153
 msgid "Episodes"
 msgstr "Episodes"
 
@@ -733,11 +733,11 @@ msgstr "No item matches the selected filter"
 msgid "This library has no items yet"
 msgstr "This library has no items yet"
 
-#: src/qml/SearchPage.qml:18 src/qml/Main.qml:359
+#: src/qml/SearchPage.qml:20
 msgid "Search"
 msgstr "Search"
 
-#: src/qml/SearchPage.qml:73 src/qml/SearchPage.qml:175
+#: src/qml/SearchPage.qml:85 src/qml/SearchPage.qml:187
 msgid ""
 "Could not load these results: check the connection to the server and try "
 "again"
@@ -745,45 +745,45 @@ msgstr ""
 "Could not load these results: check the connection to the server and try "
 "again"
 
-#: src/qml/SearchPage.qml:94
+#: src/qml/SearchPage.qml:106
 msgid "Keep typing"
 msgstr "Keep typing"
 
-#: src/qml/SearchPage.qml:96
+#: src/qml/SearchPage.qml:108
 msgid "No results"
 msgstr "No results"
 
-#: src/qml/SearchPage.qml:98
+#: src/qml/SearchPage.qml:110
 msgid "Search your libraries"
 msgstr "Search your libraries"
 
-#: src/qml/SearchPage.qml:104
+#: src/qml/SearchPage.qml:116
 msgid "Type at least %1 character"
 msgid_plural "Type at least %1 characters"
 msgstr[0] "Type at least %1 character"
 msgstr[1] "Type at least %1 characters"
 
-#: src/qml/SearchPage.qml:106
+#: src/qml/SearchPage.qml:118
 msgid "Nothing in your libraries matches"
 msgstr "Nothing in your libraries matches"
 
-#: src/qml/SearchPage.qml:108
+#: src/qml/SearchPage.qml:120
 msgid "Type the name of a movie, series or episode"
 msgstr "Type the name of a movie, series or episode"
 
-#: src/qml/SearchPage.qml:137
+#: src/qml/SearchPage.qml:149
 msgid "Movies"
 msgstr "Movies"
 
-#: src/qml/SearchPage.qml:139
+#: src/qml/SearchPage.qml:151
 msgid "Series"
 msgstr "Series"
 
-#: src/qml/SearchPage.qml:143
+#: src/qml/SearchPage.qml:155
 msgid "Collections"
 msgstr "Collections"
 
-#: src/qml/QueuePage.qml:16 src/qml/Main.qml:368
+#: src/qml/QueuePage.qml:16
 msgid "Queue"
 msgstr "Queue"
 
@@ -938,7 +938,7 @@ msgstr "Waiting for approval…"
 msgid "Cancel"
 msgstr "Cancel"
 
-#: src/qml/Main.qml:111
+#: src/qml/Main.qml:138
 msgid ""
 "The settings could not be saved: check the free space and the permissions of "
 "the profile folder. Changes last until Kinefin closes"
@@ -946,21 +946,21 @@ msgstr ""
 "The settings could not be saved: check the free space and the permissions of "
 "the profile folder. Changes last until Kinefin closes"
 
-#: src/qml/Main.qml:331
+#: src/qml/Main.qml:404
 msgid "The queue is full: some items were left out, remove some to add more"
 msgstr "The queue is full: some items were left out, remove some to add more"
 
-#: src/qml/Main.qml:331
+#: src/qml/Main.qml:404
 msgid "%1 item added to the queue"
 msgid_plural "%1 items added to the queue"
 msgstr[0] "%1 item added to the queue"
 msgstr[1] "%1 items added to the queue"
 
-#: src/qml/Main.qml:334
+#: src/qml/Main.qml:407
 msgid "There is nothing to play in this item"
 msgstr "There is nothing to play in this item"
 
-#: src/qml/Main.qml:337
+#: src/qml/Main.qml:410
 msgid ""
 "The queue could not be saved: check the free space and the permissions of "
 "the profile folder. It lasts until Kinefin closes"
@@ -968,7 +968,7 @@ msgstr ""
 "The queue could not be saved: check the free space and the permissions of "
 "the profile folder. It lasts until Kinefin closes"
 
-#: src/qml/Main.qml:340
+#: src/qml/Main.qml:413
 msgid ""
 "Could not add this to the queue: check the connection to the server and try "
 "again"
@@ -976,29 +976,128 @@ msgstr ""
 "Could not add this to the queue: check the connection to the server and try "
 "again"
 
-#: src/qml/Main.qml:419 src/qml/SettingsPage.qml:14
+#: src/qml/ShellHeader.qml:51
+msgctxt "@action:button"
+msgid "Main Menu"
+msgstr "Main Menu"
+
+#: src/qml/ShellHeader.qml:133
+msgctxt "@info:placeholder"
+msgid "Search"
+msgstr "Search"
+
+#: src/qml/ShellHeader.qml:153
+msgctxt "@action:button"
+msgid "Favorites"
+msgstr "Favorites"
+
+#: src/qml/ShellHeader.qml:164
+msgctxt "@action:button"
+msgid "Queue"
+msgstr "Queue"
+
+#: src/qml/ShellHeader.qml:177
+msgctxt "@action:button"
+msgid "Account"
+msgstr "Account"
+
+#: src/qml/ShellHeader.qml:198
+msgctxt "@title:tab"
+msgid "Home"
+msgstr "Home"
+
+#: src/qml/ShellHeader.qml:211
+msgctxt "@action:inmenu"
 msgid "Settings"
 msgstr "Settings"
 
-#: src/qml/Main.qml:426
+#: src/qml/ShellHeader.qml:220
+msgctxt "@action:inmenu"
+msgid "Keyboard Shortcuts"
+msgstr "Keyboard Shortcuts"
+
+#: src/qml/ShellHeader.qml:229
+msgctxt "@action:inmenu"
 msgid "About Kinefin"
 msgstr "About Kinefin"
 
-#: src/qml/Main.qml:438
+#: src/qml/ShellHeader.qml:237
+msgctxt "@action:inmenu"
 msgid "Admin Dashboard"
 msgstr "Admin Dashboard"
 
-#: src/qml/Main.qml:443
+#: src/qml/ShellHeader.qml:242
 msgid "The admin dashboard could not be opened: check the default browser"
 msgstr "The admin dashboard could not be opened: check the default browser"
 
-#: src/qml/Main.qml:448
+#: src/qml/ShellHeader.qml:252
+msgctxt "@action:inmenu"
+msgid "Search"
+msgstr "Search"
+
+#: src/qml/ShellHeader.qml:262
+msgctxt "@action:inmenu"
+msgid "Favorites"
+msgstr "Favorites"
+
+#: src/qml/ShellHeader.qml:271
+msgctxt "@action:inmenu"
+msgid "Queue"
+msgstr "Queue"
+
+#: src/qml/ShellHeader.qml:283
+msgctxt "@action:inmenu"
+msgid "Switch User"
+msgstr "Switch User"
+
+#: src/qml/ShellHeader.qml:292
+msgctxt "@action:inmenu"
+msgid "Sign Out"
+msgstr "Sign Out"
+
+#: src/qml/ShellHeader.qml:301
+msgctxt "@action:inmenu"
 msgid "Switch Server"
 msgstr "Switch Server"
 
-#: src/qml/Main.qml:455
-msgid "Sign Out"
-msgstr "Sign Out"
+#: src/qml/ShortcutsDialog.qml:13
+msgctxt "@item:intable shortcut action"
+msgid "Quit Kinefin"
+msgstr "Quit Kinefin"
+
+#: src/qml/ShortcutsDialog.qml:14 src/qml/ShortcutsDialog.qml:15
+msgctxt "@item:intable shortcut action"
+msgid "Go Back"
+msgstr "Go Back"
+
+#: src/qml/ShortcutsDialog.qml:16
+msgctxt "@item:intable shortcut action"
+msgid "Search"
+msgstr "Search"
+
+#: src/qml/ShortcutsDialog.qml:17
+msgctxt "@item:intable shortcut action"
+msgid "Home"
+msgstr "Home"
+
+#: src/qml/ShortcutsDialog.qml:18
+msgctxt "@item:intable shortcut action"
+msgid "Settings"
+msgstr "Settings"
+
+#: src/qml/ShortcutsDialog.qml:19
+msgctxt "@item:intable shortcut action"
+msgid "Show Keyboard Shortcuts"
+msgstr "Show Keyboard Shortcuts"
+
+#: src/qml/ShortcutsDialog.qml:38
+msgid "Keyboard Shortcuts"
+msgstr "Keyboard Shortcuts"
+
+#: src/qml/ShortcutsDialog.qml:71
+msgctxt "@action:button"
+msgid "Close"
+msgstr "Close"
 
 #: src/qml/ServersPage.qml:16
 msgid "Servers"
@@ -1061,6 +1160,10 @@ msgstr "Server address"
 #: src/qml/ServersPage.qml:152
 msgid "Connecting…"
 msgstr "Connecting…"
+
+#: src/qml/SettingsPage.qml:14
+msgid "Settings"
+msgstr "Settings"
 
 #: src/qml/SettingsPage.qml:17
 msgid "General"
