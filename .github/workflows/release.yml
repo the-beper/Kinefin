@@ -56,6 +56,9 @@ jobs:
       - name: Verify immutable Flatpak sources
         run: python3 -I build/release/verify_flatpak_sources.py
 
+      - name: Verify release artwork and desktop metadata
+        run: python3 -I build/release/verify_release_branding.py
+
       - name: Verify reviewed Flatpak sandbox permissions
         run: python3 -I build/release/verify_flatpak_permissions.py
 

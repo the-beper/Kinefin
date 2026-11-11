@@ -56,6 +56,18 @@ python3 -I /verify-permissions.py --manifest /manifest.yml \
     --metadata "$HOME/bundle-metadata" || fail "installed Flatpak sandbox differs from approved permissions"
 echo "ok: installed sandbox permissions match reviewed policy"
 
+# P9 artwork gate: the installed Flatpak must ship the raster icons AppStream
+# can compose. The scalable source is installed for native packages only and
+# removed by the Flatpak manifest's post-install step.
+install_root=$(flatpak info --system --show-location "$id") || fail "read installed Flatpak location"
+for size in 128 256; do
+    [ -s "$install_root/files/share/icons/hicolor/${size}x${size}/apps/$id.png" ] ||
+        fail "missing installed ${size}x${size} application icon"
+done
+[ ! -e "$install_root/files/share/icons/hicolor/scalable/apps/$id.svg" ] ||
+    fail "the Flatpak must not contain the scalable SVG icon"
+echo "ok: installed raster icon sizes and Flatpak SVG policy"
+
 if [ -n "${KINEFIN_EXPECT_VERSION:-}" ]; then
     out=$(flatpak run --env=QT_QPA_PLATFORM=offscreen "$id" --version 2>&1) || fail "--version failed: $out"
     printf '%s\n' "$out" | grep -qxF -e "Kinefin $KINEFIN_EXPECT_VERSION" -e "Kinefin: $KINEFIN_EXPECT_VERSION" \

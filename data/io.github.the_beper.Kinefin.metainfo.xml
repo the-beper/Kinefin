@@ -7,27 +7,16 @@
     <name>the-beper</name>
   </developer>
   <name>Kinefin</name>
-  <summary>A KDE Plasma 6 Jellyfin client with native mpv playback</summary>
+  <summary>Browse Jellyfin movies and TV series on KDE Plasma</summary>
   <description>
-    <p>Kinefin is a client for Jellyfin servers, written for Plasma. Browse your library natively in Kirigami and play through native libmpv: audio passthrough, hardware decoding, subtitle styling, and the display refresh rate following your media on Plasma Wayland.</p>
-    <p>It is a native app, not a web wrapper: the interface is Plasma's, the Jellyfin client talks to the server API directly, and there is no browser embedded. Server administration stays where it belongs — one button opens the server's web interface in your browser.</p>
-    <p>Offline downloads, no browser involved:</p>
+    <p>Kinefin is a native KDE Plasma client for browsing movie and TV libraries on Jellyfin servers. It uses Kirigami and a direct Jellyfin API connection instead of embedding a browser.</p>
+    <p>Organize and explore your media with familiar desktop controls:</p>
     <ul>
-      <li>In-app download manager with series auto-rules (next unwatched episodes, whole seasons, new episodes), exportable to your own folders through the portals</li>
-      <li>Downloaded titles play fully offline in the same interface</li>
+      <li>Browse films, series, seasons and episodes with library filters and search</li>
+      <li>Switch between saved users and servers, and manage favorites</li>
+      <li>Review items, playback queues and remote playback sessions</li>
     </ul>
-    <p>Native playback through mpv:</p>
-    <ul>
-      <li>Direct play with hardware decoding, or transcodes only when the settings ask for it</li>
-      <li>Audio passthrough per codec (AC3, E-AC3, DTS, DTS-HD, TrueHD), device selection, normalization</li>
-      <li>Subtitles of your server, with native styling and per-language selection</li>
-      <li>MPRIS on the session bus, screensaver inhibition, gamepads through SDL3</li>
-    </ul>
-    <p>Part of the world, not of the web:</p>
-    <ul>
-      <li>Follows your Plasma theme, translations, keyboard shortcuts and HIG patterns</li>
-      <li>Single instance, sessions per profile like Jellyfin Desktop</li>
-    </ul>
+    <p>Kinefin is an independent client and requires access to a Jellyfin server.</p>
   </description>
   <launchable type="desktop-id">io.github.the_beper.Kinefin.desktop</launchable>
   <url type="homepage">https://github.com/the-beper/Kinefin</url>

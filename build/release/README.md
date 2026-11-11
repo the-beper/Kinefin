@@ -2,6 +2,14 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 # Release version preparation
 
+For the complete P9 release-channel decision and the remaining manual release
+gates, see [FIRST_RELEASE.md](FIRST_RELEASE.md). The checked-in preflight
+script runs all source-only checks together without publishing:
+
+```sh
+python3 -I build/release/preflight.py
+```
+
 `build/release/version-bump.sh` prepares the two versioned source files for a
 stable Kinefin release. It does **not** create a tag, publish, push, or install
 anything. Run it from any directory in a local checkout:
@@ -352,3 +360,30 @@ This offline audit is a guard against accidental dependency drift, **not**
 a signature or provenance verification. `actionlint` still validates workflow
 syntax separately. When changing an action, review the upstream release and
 resolve its published tag to an actual commit before updating the pinned SHA.
+
+## Release artwork and application identity
+
+Kinefin's final P9 icon is maintained as a 48px-grid scalable SVG source,
+with committed 128px and 256px PNG exports for Flatpak/AppStream. Re-export
+both rasters after any SVG edit (Inkscape command-line example):
+
+```sh
+for size in 128 256; do
+  inkscape data/icons/hicolor/scalable/apps/io.github.the_beper.Kinefin.svg \
+    --export-area-page --export-width="$size" --export-height="$size" \
+    --export-filename="data/icons/hicolor/${size}x${size}/apps/io.github.the_beper.Kinefin.png"
+done
+python3 -I build/release/verify_release_branding.py
+```
+
+The branding gate runs during CI lint and release validation. It verifies the
+source SVG, both PNG pixel streams, file dimensions and alpha margins, desktop
+protocol/identity and AppStream identity. The installed Flatpak smoke test also
+requires both raster icons and the absence of the scalable SVG (removed in the
+Flatpak manifest for compatibility with AppStream composition). This is not a
+substitute for a human visual review of the artwork on KDE Plasma.
+
+```sh
+python3 -m unittest discover -s tests -p 'test_release_branding.py' -v
+python3 -m unittest discover -s tests -p 'test_release_preflight.py' -v
+```
