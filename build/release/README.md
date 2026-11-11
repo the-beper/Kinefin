@@ -115,6 +115,29 @@ Portable tests (including a fake GitHub release lifecycle):
 python3 -m unittest discover -s tests -p 'test_release_publish.py' -v
 ```
 
+## Keep KDE runtime pins consistent
+
+The Flatpak builder and the offscreen smoke test both load the **same**
+`build/flatpak/runtime-pins.conf` file. It contains the KDE SDK/Platform refs
+and their immutable OSTree SHA-256 commits; the smoke container receives this
+file as a **read-only mount**. Update the pins only after checking the matching
+refs and commits on Flathub, and review the change to the four assignments.
+
+The offline gate prevents an accidental mismatch with the manifest's
+`runtime`, `sdk` or `runtime-version` fields and refuses malformed commits,
+duplicate assignments or scripts that stop sourcing the shared pins. It runs
+in both CI and release validation, before attempting a Flatpak build:
+
+```sh
+python3 -I build/release/verify_runtime_pins.py
+python3 -m unittest discover -s tests -p 'test_runtime_pins.py' -v
+```
+
+This check does **not** fetch Flathub metadata or prove the pinned commits are
+still downloadable. The Flatpak build still installs and verifies each pinned
+commit before bundling; the smoke test checks the same commits before and after
+running the app. Re-pin and run a real Flatpak build for the first release.
+
 ## Prepare a Flathub submission manifest
 
 The manifest in `build/flatpak/` uses a local directory source so CI and local

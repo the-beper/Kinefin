@@ -20,14 +20,14 @@ if [ ! -e /run/.containerenv ]; then
     exec podman run --rm --security-opt unmask=ALL --cap-add SYS_ADMIN --cap-add NET_ADMIN --security-opt label=disable \
         --device /dev/fuse -e KINEFIN_EXPECT_VERSION -v kinefin-flatpak:/var/lib/flatpak \
         -v "$bundle:/bundle.flatpak:ro" -v "$root/build/flatpak/test-flatpak.sh:/test.sh:ro" \
+        -v "$root/build/flatpak/runtime-pins.conf:/runtime-pins.conf:ro" \
         "$@" "$image" sh -c 'mkdir -p -m 700 /run/user/0 && exec dbus-run-session -- /test.sh /bundle.flatpak'
 fi
 
-# The bundled runtime commits are frozen by build-flatpak.sh; the smoke may not move them.
-sdk=org.kde.Sdk//6.11
-platform=org.kde.Platform//6.11
-sdk_commit=df314f9c067cba031e153a2f3b0be53bd13c1eca6baa78b68982a1d35b873a86
-platform_commit=76fa01ac42ecf45d2c5020ef80de1c474c0c2ae86a51a79e8fec44c48f9dc473
+# The smoke test consumes the same pinned commits as the build. In the
+# container the file is mounted read-only next to /test.sh.
+# shellcheck source=build/flatpak/runtime-pins.conf
+. "$(dirname "$0")/runtime-pins.conf"
 assert_pin() { [ "$(flatpak info --system --show-commit "$1")" = "$2" ] || { echo "$1 is not at the pinned commit $2" >&2; exit 1; }; }
 assert_pin "$sdk" "$sdk_commit"
 assert_pin "$platform" "$platform_commit"

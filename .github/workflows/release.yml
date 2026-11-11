@@ -47,6 +47,9 @@ jobs:
             echo "$GITHUB_SHA is not on main" >&2; exit 1; }
           echo "version=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
 
+      - name: Verify pinned Flatpak runtimes
+        run: python3 -I build/release/verify_runtime_pins.py
+
       # Review artifact for a future Flathub submission. This never publishes
       # anything and is independent of the GitHub Flatpak bundle release.
       - name: Prepare commit-pinned Flathub manifest

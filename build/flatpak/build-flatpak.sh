@@ -31,13 +31,10 @@ repo=$(readlink -m "${KINEFIN_FLATPAK_REPO:-dist/flatpak-repo}")
 if [ -d "$repo" ]; then mkdir -p "$repo/refs/heads" "$repo/refs/mirrors" "$repo/refs/remotes" "$repo/tmp"; fi
 
 flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-# The build tools at fixed Flathub commits: this is what the release builds with, so a change is a reviewed one.
-# Re-check and bump before a release (the commits below came from KuickShare on 2026-11-07; the runtime is the same org.kde.Platform//6.11, the rust extension is not used by Kinefin and is not installed).
-# TODO: re-pin by hand before the first release.
-sdk=org.kde.Sdk//6.11
-platform=org.kde.Platform//6.11
-sdk_commit=df314f9c067cba031e153a2f3b0be53bd13c1eca6baa78b68982a1d35b873a86
-platform_commit=76fa01ac42ecf45d2c5020ef80de1c474c0c2ae86a51a79e8fec44c48f9dc473
+# Runtime refs and commits are shared with the smoke test. A release gate
+# checks them against the manifest before the Flatpak build starts.
+# shellcheck source=build/flatpak/runtime-pins.conf
+. "$(dirname "$0")/runtime-pins.conf"
 pin() { # pin REF COMMIT: installs nothing, moves the installed ref to the commit and checks it
     flatpak update -y --noninteractive --commit="$2" "$1"
     pinned "$1" "$2"
