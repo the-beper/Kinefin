@@ -108,7 +108,23 @@ class TestSettingsParity : public QObject {
         const auto *newBadge =
             Kinefin::findSetting(QStringLiteral("library"), QStringLiteral("newBadge"));
         QVERIFY(newBadge && !newBadge->hidden && newBadge->defaultValue == true);
-        QCOMPARE(Kinefin::settingDefinitions().size(), defined + 2);
+        // The library sub-tab switches: only Movies Favorites and Collections are on by default
+        const QStringList subTabs{
+            QStringLiteral("tabs.movies.suggestions"), QStringLiteral("tabs.movies.favorites"),
+            QStringLiteral("tabs.movies.collections"), QStringLiteral("tabs.movies.genres"),
+            QStringLiteral("tabs.tv.suggestions"),     QStringLiteral("tabs.tv.upcoming"),
+            QStringLiteral("tabs.tv.genres"),          QStringLiteral("tabs.tv.networks"),
+            QStringLiteral("tabs.tv.episodes")};
+        const QStringList enabledByDefault{QStringLiteral("tabs.movies.favorites"),
+                                           QStringLiteral("tabs.movies.collections")};
+        for (const QString &key : subTabs) {
+            const auto *subTab = Kinefin::findSetting(QStringLiteral("library"), key);
+            QVERIFY2(subTab && !subTab->hidden && !subTab->label.isEmpty()
+                         && subTab->type == SettingDefinition::Type::Bool,
+                     qPrintable(key));
+            QCOMPARE(subTab->defaultValue, QVariant(enabledByDefault.contains(key)));
+        }
+        QCOMPARE(Kinefin::settingDefinitions().size(), defined + 2 + subTabs.size());
     }
 
     void everyDefaultIsValid()

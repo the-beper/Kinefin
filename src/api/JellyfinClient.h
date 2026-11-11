@@ -17,6 +17,7 @@
 
 #include <chrono>
 #include <functional>
+#include <optional>
 
 #include "api/MediaSourceSelection.h"
 #include "api/PlaybackReport.h"
@@ -27,8 +28,18 @@ namespace Kinefin {
 
 bool isValidHeaderField(const QString &field);
 
+// A text value of a pipe-delimited filter (tag, official rating): non-empty, at most MaxFilterValueChars, one line without control characters, and no '|' (the delimiter, which the server could not tell apart)
+bool isValidFilterText(const QString &text);
+
 // The most genre ids one query may carry
 constexpr int MaxGenreIds = 50;
+
+// The most values of one multi-value filter (tags, official ratings, years, video types, series status, studio ids) one query may carry, and the longest text value
+constexpr int MaxFilterValues = 50;
+constexpr int MaxFilterValueChars = 128;
+
+// Random sorting is requested as one page of this many items, never a later one: the order differs on every request
+constexpr int RandomPageSize = 100;
 
 // Bounds of the user fields taken from the server
 constexpr int MaxUserNameChars = 128;
@@ -49,8 +60,31 @@ struct ItemQuery {
     QStringList fields; // ItemFields tokens
     // Also ask for the image types a card shows (one tag per type)
     bool cardImages = false;
+    // With `cardImages`, one more image type whose tag is wanted: "Banner", "Disc" or "Logo" (the card's Primary, Backdrop and Thumb tags are always asked for); empty asks for nothing more
+    QString cardImageType;
     // Genre ids (hex ids from /Genres or Items/Filters2, never names): an item matches any of them. Written pipe-delimited, at most MaxGenreIds
     QStringList genreIds;
+    // The server-side filters of a library grid (see LibraryFilterState.h for the composer): sections combine with AND, the values of one list with OR. A flag or optional that is false/unset sends nothing; `isHd` false is the SD choice. Written only for a listing, never for an ids= resolution. `videoTypes` ("BluRay", "Dvd"), `seriesStatus` ("Continuing", "Ended", "Unreleased") and `years` (1 to 9999) are comma-separated on the wire; `tags` (text from Items/Filters2), `officialRatings` (text from Items/Filters; each isValidFilterText) and `studioIds` (hex ids) are pipe-delimited; every list holds at most MaxFilterValues. `parentIndexNumber` 0 selects the specials, -1 sends none
+    bool hasSubtitles = false;
+    bool hasTrailer = false;
+    bool hasSpecialFeature = false;
+    bool hasThemeSong = false;
+    bool hasThemeVideo = false;
+    std::optional<bool> isHd;
+    bool is4K = false;
+    bool is3D = false;
+    QStringList videoTypes;
+    QStringList seriesStatus;
+    QStringList tags;
+    QStringList officialRatings;
+    QList<int> years;
+    QStringList studioIds;
+    int parentIndexNumber = -1;
+    bool isMissing = false;
+    bool isUnaired = false;
+    // The alphabet picker: `nameStartsWith` is one letter, `nameLessThan` the bound of the "#" bucket; letters or digits only, at most 16 characters
+    QString nameStartsWith;
+    QString nameLessThan;
 };
 
 // One entry of `GET /Users/Public`, already validated: a Jellyfin id, a bounded single-line name and a safe avatar tag (empty when the user has no avatar)
@@ -86,8 +120,9 @@ class JellyfinClient final : public QObject {
     bool fetchItems(const ItemQuery &query, int channel = 0);
     // The Continue Watching row: `GET /UserItems/Resume` (the route the upstream resume section speaks on the 12.x generation), video items; the envelope's total is still required and validated and `resumeItemsReady` carries it. A `startIndex` of 0 or more pages the list, -1 sends none
     bool fetchResumeItems(int limit, int channel = 0, int startIndex = -1);
-    // One library's Recently Added row: `GET /Items/Latest` — the bare-array endpoint. An empty `parentId` spans the whole library set
-    bool fetchLatestItems(const QString &parentId, int limit, int channel = 0);
+    // One library's Recently Added row: `GET /Items/Latest` — the bare-array endpoint. An empty `parentId` spans the whole library set. An `isPlayed` that is set rides as `isPlayed=true|false` (false asks for unplayed items only, the user's HidePlayedInLatest), unset sends nothing
+    bool fetchLatestItems(const QString &parentId, int limit, int channel = 0,
+                          std::optional<bool> isPlayed = std::nullopt);
     // The Next Up row: `GET /Shows/NextUp`. An empty `seriesId` spans every series of the parent (or the whole library). `nextUpDateCutoff` is the upstream user setting's `yyyy-MM-dd` date string the server should not look behind; `enableRewatching` rides as true or false
     bool fetchNextUp(const QString &seriesId, const QString &parentId,
                      const QString &nextUpDateCutoff, bool enableRewatching, int limit,
@@ -106,6 +141,19 @@ class JellyfinClient final : public QObject {
     // The browse filter values: `GET /Items/Filters2`. The known arrays (`Genres` rows of Name/Id, `Tags` strings) and any other QueryFilters member pass through as-is. An empty `parentId` sends none
     bool fetchFilters(const QString &parentId, const QString &includeItemTypes = QString(),
                       int channel = 0);
+    // The legacy filter values: `GET /Items/Filters` (OfficialRatings and Years, which Filters2 lacks), family "FiltersLegacy" with its own signals so that an endpoint missing on the server (a 404 in legacyFiltersFailed) only hides those sections. The object is passed through as-is, legacyFacetsFrom() bounds it. An empty `parentId` sends none
+    bool fetchLegacyFilters(const QString &parentId, const QString &includeItemTypes = QString(),
+                            int channel = 0);
+    // The movie recommendation rows: `GET /Movies/Recommendations` (bare array of RecommendationDto, each with its own Items). An empty `parentId` spans every library. `categoryLimit` 1 to 20, `itemLimit` 1 to 100
+    bool fetchMovieRecommendations(const QString &parentId, int categoryLimit, int itemLimit,
+                                   int channel = 0);
+    // The server's suggestions: `GET /Items/Suggestions`. The route has no parentId, so the answer is always for the whole library set of the user. `type` is a comma-separated BaseItemKind list, `limit` 1 to 100
+    bool fetchSuggestions(const QString &type, int startIndex, int limit, int channel = 0);
+    // Upcoming episodes: `GET /Shows/Upcoming` (not NextUp). An empty `parentId` spans every library. `startIndex` -1 sends none, `limit` is at least 1
+    bool fetchUpcomingEpisodes(const QString &parentId, int startIndex, int limit, int channel = 0);
+    // The studios (the networks of a series library): `GET /Studios`, items with Name and Id. An empty `parentId` sends none; `startIndex` and `limit` -1 send none
+    bool fetchStudios(const QString &parentId, const QString &includeItemTypes, int startIndex,
+                      int limit, int channel = 0);
     // The connected sessions of the server (`GET /Sessions`): the Remote page's data. With `controllableByUserOnly` the server is asked for the sessions this user may control
     bool fetchSessions(bool controllableByUserOnly);
     // The token-free URL of one item image (`GET /Items/{itemId}/Images/{type}` has no `security` requirement in the 12.4 spec, so the URL carries no credentials and the image fetch may stay unauthenticated). `imageType` is one of the spec's ImageType names; `format` may be empty (the server negotiates) or one of "jpg", "gif", "png", "webp"; `tag` is an opaque alphanumeric cache buster. Invalid input yields an empty URL, never a partially valid one
@@ -136,6 +184,17 @@ class JellyfinClient final : public QObject {
     [[nodiscard]] QNetworkRequest webSocketRequest() const;
     // Re-checks a live session against the server (`GET /Users/Me`): a 401 expires it, anything else that fails is silent; a good reply for the session's own user refreshes userName() and userImageTag() and emits userProfileRefreshed, one for another user is treated like a 401. One request in flight at a time. Returns false when it cannot even be sent
     bool verifySession();
+    // The most entries of the lists the account preference calls take from the server: a longer list fails the call
+    static constexpr int MaxCultures = 1000;
+    static constexpr int MaxDisplayPreferenceEntries = 256;
+    // The signed-in user's whole `UserDto` (`GET /Users/Me`) for the preferences editor, unmodified (unknown fields, nulls and nested objects survive): the caller compares `Id` with the signed-in user. Dedicated family, so neither verifySession()'s outcome nor the listing signals are involved. A new call supersedes a pending one silently. Returns false, without a request, when not authenticated
+    bool fetchCurrentUserConfiguration();
+    // Replaces the current user's whole configuration (`POST /Users/Configuration`, the object as the JSON body, no user id: the token names the user). Success is 204 (200 is accepted too) and emits userConfigurationUpdated(), anything else userConfigurationUpdateFailed(); a reply that arrives after the session was lost emits nothing. A new call supersedes a pending one silently. Returns false, without a request, when not authenticated or when the object is empty or its body exceeds the response size cap
+    bool updateCurrentUserConfiguration(const QJsonObject &configuration);
+    // The server's language catalog (`GET /Localization/Cultures`): at most MaxCultures entries, each an object, else the call fails
+    bool fetchCultures();
+    // The `CustomPrefs` of the current user's web display preferences (`GET /DisplayPreferences/usersettings?userId=&client=emby`), values as the server sent them, at most MaxDisplayPreferenceEntries. Read only: nothing in this client ever writes display preferences
+    bool fetchDisplayHomeSections();
     // Reattaches a persisted session without a password: only in the Ready state (the public identity probe succeeded), on a transport that may carry credentials, with a header-safe token. Emits loginSucceeded like a fresh login; the caller should follow with verifySession(), whose 401 expires it. Returns false, changing nothing, otherwise
     bool restoreSession(const QString &userId, const QString &token);
     // Whether credentials may be sent to the probed server (HTTPS, loopback, or the explicit insecure-HTTP opt-in): what restoreSession() and authenticate() require of the transport
@@ -166,6 +225,15 @@ class JellyfinClient final : public QObject {
     // A `/Users/Me` reply for the current session's user: `userName` is the last known good name, `imageTag` empty when the user has no avatar
     void userProfileRefreshed(const QString &userId, const QString &userName,
                               const QString &imageTag);
+    // The account preference calls: the failures carry the HTTP status (0 for a transport error) and a fixed English reason, a 401 also expires the session. None of them goes through requestFailed or listingFailed
+    void currentUserConfigurationReady(const QJsonObject &user);
+    void currentUserConfigurationFailed(int httpStatus, const QString &reason);
+    void userConfigurationUpdated();
+    void userConfigurationUpdateFailed(int httpStatus, const QString &reason);
+    void culturesReady(const QJsonArray &cultures);
+    void culturesFailed(int httpStatus, const QString &reason);
+    void displayHomeSectionsReady(const QJsonObject &customPrefs);
+    void displayHomeSectionsFailed(int httpStatus, const QString &reason);
     void publicUsersReady(const QList<Kinefin::PublicUser> &users);
     void publicUsersFailed(int httpStatus, const QString &reason);
     // Emitted when an existing access token left memory (401, logout, reconnect, destructor): the WebSocket component closes and stops. It also fires at teardown, so persistence must not forget on it (see ServerCredentialSync)
@@ -174,7 +242,7 @@ class JellyfinClient final : public QObject {
     void quickConnectAwaitingApproval();
     void userViewsReady(const QJsonArray &items, int totalRecordCount);
     void requestFailed(int httpStatus, const QString &reason);
-    // A listing family failed (status 0 for a transport error): `family` is the fixed name of the fetcher ("Items", "Resume", "Latest", "NextUp", "Seasons", "Episodes", "Similar", "Genres", "Filters", "Sessions"), the reason a fixed English string; a 401 also expires the session. Listings never emit requestFailed (fetchUserViews, the libraries call, still does), so the Home page error stays about the libraries only
+    // A listing family failed (status 0 for a transport error): `family` is the fixed name of the fetcher ("Items", "Resume", "Latest", "NextUp", "Seasons", "Episodes", "Similar", "Genres", "Filters", "MovieRecommendations", "Suggestions", "Upcoming", "Studios", "Sessions"), the reason a fixed English string; a 401 also expires the session. Listings never emit requestFailed (fetchUserViews, the libraries call, still does), so the Home page error stays about the libraries only. "FiltersLegacy" never emits it: legacyFiltersFailed is its failure
     void listingFailed(const QString &family, int httpStatus, const QString &reason, int channel);
     // `userId` is the user whose session ended (userId() is already empty by then)
     void sessionExpired(const QString &userId);
@@ -193,6 +261,14 @@ class JellyfinClient final : public QObject {
     void similarItemsReady(const QJsonArray &items, int totalRecordCount, int channel);
     void genresReady(const QJsonArray &items, int totalRecordCount, int channel);
     void filtersReady(const QJsonObject &filters, int channel);
+    void legacyFiltersReady(const QJsonObject &filters, int channel);
+    // `httpStatus` is 0 for a transport error, 404 for a server without the endpoint; a 401 also expires the session. `reason` is a fixed English string
+    void legacyFiltersFailed(int httpStatus, const QString &reason, int channel);
+    // The recommendation categories as the server sent them (objects with `Items`, `RecommendationType`, `BaselineItemName`, `CategoryId`): the entries are not validated beyond being objects
+    void movieRecommendationsReady(const QJsonArray &categories, int channel);
+    void suggestionsReady(const QJsonArray &items, int totalRecordCount, int channel);
+    void upcomingReady(const QJsonArray &items, int totalRecordCount, int channel);
+    void studiosReady(const QJsonArray &items, int totalRecordCount, int channel);
     void sessionsReady(const QJsonArray &sessions);
 
   private:
@@ -220,6 +296,9 @@ class JellyfinClient final : public QObject {
     void finishPlaybackReport(QNetworkReply *reply);
     void clearToken();
     void failProbe(int httpStatus, const QString &reason);
+    // The shared status handling of the account preference calls: true for a 200 (or a 204 when `allowNoContent`) without a transport error; otherwise false with the status and the fixed reason (`failure`, or "Authentication expired" after a 401 that also expired the session)
+    bool acceptAccountReply(QNetworkReply *finished, bool allowNoContent, const QString &failure,
+                            int *status, QString *reason);
     QUrl endpoint(const QString &path) const;
     QNetworkRequest requestFor(const QUrl &url, bool authenticated) const;
     void attach(QNetworkReply *reply, quint64 generation,
@@ -267,7 +346,7 @@ class JellyfinClient final : public QObject {
     // Flipped by the WebSocket component while an authenticated socket exists; `reportCapabilities()` carries it
     bool m_mediaControlAnnounced = false;
     bool m_verifyInFlight = false;
-    // The listing families: `Items`, `Resume`, `Latest`, `NextUp`, `Seasons`, `Episodes`, `Similar`, `Genres`, `Filters`, `Sessions` — the serial each accepted request holds and the reply of the one in flight (for supersede aborts)
+    // The listing families: `Items`, `Resume`, `Latest`, `NextUp`, `Seasons`, `Episodes`, `Similar`, `Genres`, `Filters`, `FiltersLegacy`, `MovieRecommendations`, `Suggestions`, `Upcoming`, `Studios`, `Sessions` — the serial each accepted request holds and the reply of the one in flight (for supersede aborts)
     QHash<QString, quint64> m_listingSerials;
     QHash<QString, QPointer<QNetworkReply>> m_listingReplies;
 };

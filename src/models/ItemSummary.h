@@ -16,6 +16,9 @@ struct ItemSummary {
     QString primaryTag;
     QString thumbTag;
     QString backdropTag;
+    QString bannerTag;
+    QString discTag;
+    QString logoTag;
     QString seriesName;
     QString seriesPrimaryTag;
     QString overview;

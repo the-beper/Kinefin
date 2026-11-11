@@ -60,17 +60,18 @@ Kirigami.ScrollablePage {
             icon.name: "folder-video"
         }
 
+        // The tiles follow the user's preferences (order and hidden libraries); the placeholder above is about the libraries themselves, so hiding every tile leaves the rows without it
         Kirigami.Heading {
-            visible: page.connection.libraries.length > 0
+            visible: page.connection.homeLibraries.length > 0
             level: 2
             text: i18n("Libraries")
         }
 
         Kirigami.CardsLayout {
             Layout.fillWidth: true
-            visible: page.connection.libraries.length > 0
+            visible: page.connection.homeLibraries.length > 0
             Repeater {
-                model: page.connection.libraries
+                model: page.connection.homeLibraries
                 delegate: LibraryTile {
                     id: tile
                     required property var modelData

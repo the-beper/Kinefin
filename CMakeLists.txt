@@ -44,8 +44,16 @@ add_library(kinefin_core STATIC
     src/api/MediaSourceSelection.h
     src/api/PlaybackReport.cpp
     src/api/PlaybackReport.h
+    src/models/CultureOptionsModel.cpp
+    src/models/CultureOptionsModel.h
     src/models/FilterOptionsModel.cpp
     src/models/FilterOptionsModel.h
+    src/models/FavoritesModel.cpp
+    src/models/FavoritesModel.h
+    src/models/FavoritesGroupsModel.cpp
+    src/models/FavoritesGroupsModel.h
+    src/models/UserConfigurationModel.cpp
+    src/models/UserConfigurationModel.h
     src/models/GenreRailsModel.cpp
     src/models/GenreRailsModel.h
     src/models/PlayQueue.cpp
@@ -74,6 +82,10 @@ add_library(kinefin_core STATIC
     src/models/ItemSummary.h
     src/models/LibraryItemsModel.cpp
     src/models/LibraryItemsModel.h
+    src/models/LibrarySubtabController.cpp
+    src/models/LibrarySubtabController.h
+    src/models/RecommendationRowsModel.cpp
+    src/models/RecommendationRowsModel.h
     src/imagecache/ImageNetworkAccess.cpp
     src/imagecache/ImageNetworkAccess.h
     src/imagecache/ImageOrigin.cpp
@@ -121,7 +133,7 @@ if(mpvqt_BINARY_DIR)
 endif()
 
 # The QML module lives in a static library of its own so that the UI tests can import it like the application does
-foreach(page Main ShellHeader ShortcutsDialog HomePage LibraryTile LibraryPage ResumeItemsPage MediaCard CardMenu CardRow EpisodeRow ItemDetailsPage SearchPage QueuePage GenreFilterDialog GenreRailsPage LoginPage UserPickerPage MessageBox ServersPage SettingsPage SettingsSectionPage SettingRow AboutPage)
+foreach(page Main ShellHeader ShortcutsDialog HomePage LibraryTile LibraryPage ResumeItemsPage MediaCard CardMenu CardRow EpisodeRow ItemDetailsPage SearchPage QueuePage FilterDialog GenreRailsView GenreRailsPage LibraryContent ItemListRow ItemRowGrid LoginPage UserPickerPage MessageBox ServersPage SettingsPage SettingsSectionPage SettingRow UserPreferencesPage FavoritesPage FavoritesGroupPage AboutPage)
     set_source_files_properties(src/qml/${page}.qml PROPERTIES QT_RESOURCE_ALIAS ${page}.qml)
 endforeach()
 qt_add_library(kinefin_ui STATIC)
@@ -143,8 +155,12 @@ qt_add_qml_module(kinefin_ui
         src/qml/ItemDetailsPage.qml
         src/qml/SearchPage.qml
         src/qml/QueuePage.qml
-        src/qml/GenreFilterDialog.qml
+        src/qml/FilterDialog.qml
+        src/qml/GenreRailsView.qml
         src/qml/GenreRailsPage.qml
+        src/qml/LibraryContent.qml
+        src/qml/ItemListRow.qml
+        src/qml/ItemRowGrid.qml
         src/qml/LoginPage.qml
         src/qml/UserPickerPage.qml
         src/qml/MessageBox.qml
@@ -152,6 +168,9 @@ qt_add_qml_module(kinefin_ui
         src/qml/SettingsPage.qml
         src/qml/SettingsSectionPage.qml
         src/qml/SettingRow.qml
+        src/qml/UserPreferencesPage.qml
+        src/qml/FavoritesPage.qml
+        src/qml/FavoritesGroupPage.qml
         src/qml/AboutPage.qml
     SOURCES
         src/app/ClientSettingsQml.h
@@ -281,6 +300,11 @@ if(BUILD_TESTING)
     target_link_libraries(test_genre_rails_model PRIVATE kinefin_core Qt6::Test Qt6::Network)
     add_test(NAME genre_rails_model COMMAND test_genre_rails_model)
 
+    add_executable(test_user_configuration_model tests/test_user_configuration_model.cpp)
+    target_compile_definitions(test_user_configuration_model PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    target_link_libraries(test_user_configuration_model PRIVATE kinefin_core Qt6::Test Qt6::Network)
+    add_test(NAME user_configuration_model COMMAND test_user_configuration_model)
+
     add_executable(test_search_model tests/test_search_model.cpp)
     target_compile_definitions(test_search_model PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(test_search_model PRIVATE kinefin_core Qt6::Test Qt6::Network)
@@ -305,6 +329,16 @@ if(BUILD_TESTING)
     target_compile_definitions(test_library_items_model PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(test_library_items_model PRIVATE kinefin_core Qt6::Test Qt6::Network)
     add_test(NAME library_items_model COMMAND test_library_items_model)
+
+    add_executable(test_library_subtab_controller tests/test_library_subtab_controller.cpp)
+    target_compile_definitions(test_library_subtab_controller PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    target_link_libraries(test_library_subtab_controller PRIVATE kinefin_core Qt6::Test Qt6::Network)
+    add_test(NAME library_subtab_controller COMMAND test_library_subtab_controller)
+
+    add_executable(test_favorites_model tests/test_favorites_model.cpp)
+    target_compile_definitions(test_favorites_model PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    target_link_libraries(test_favorites_model PRIVATE kinefin_core Qt6::Test Qt6::Network)
+    add_test(NAME favorites_model COMMAND test_favorites_model)
 
     add_executable(test_resume_items_model tests/test_resume_items_model.cpp)
     target_compile_definitions(test_resume_items_model PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")

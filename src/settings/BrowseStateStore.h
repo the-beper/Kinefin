@@ -3,6 +3,7 @@
 #pragma once
 
 #include <QHash>
+#include <QList>
 #include <QObject>
 #include <QString>
 #include <QStringList>
@@ -11,27 +12,60 @@
 #include <chrono>
 #include <optional>
 
+class QJsonObject;
+
 namespace Kinefin {
-// What the movie and TV tabs remember per server and user: which library of a type is selected, and the sort, filter and genres of each scope (a tab over all libraries, or one library). Ids and enum key names only, never server text. Kept in one file with a debounced write; a pending write is flushed by `flush()` (the owner calls it when the session ends) and when the store is destroyed. Whatever cannot be trusted is dropped on load: a link, a non-regular or oversized file goes, a file of a later version is kept aside as `.broken`. At most `MaxViews` views are kept (the one least recently written goes first) and the file stays within `MaxFileBytes`
+// What the movie and TV tabs remember per server and user: which library of a type is selected, and the sort, filters and view options of each scope (a tab or sub-tab over all libraries, or one library). Ids, enum key names and SHA-256 digests only, never server text (a tag or rating has no id: it is kept as the digest of its exact text, see `hashText`). Kept in one file with a debounced write; a pending write is flushed by `flush()` (the owner calls it when the session ends) and when the store is destroyed. Whatever cannot be trusted is dropped on load: a link, a non-regular or oversized file goes, a file of a later version is kept aside as `.broken`. At most `MaxViews` views are kept (the one least recently written goes first) and the file stays within `MaxFileBytes`
 class BrowseStateStore final : public QObject {
     Q_OBJECT
 
   public:
-    // Enum members are their key names (`DateAdded`, `Unplayed`); the store does not know the enums
+    // Enum members are their key names (`DateAdded`, `IsUnplayed`); the store does not know the enums but checks every token against a whitelist
     struct ViewState {
-        QString sort;
+        QString sortKey = QStringLiteral("Name");
         bool descending = false;
-        QString filter;
+        // `IsPlayed` or `IsUnplayed`, with `IsResumable` and `IsFavorite` as well
+        QStringList statusFlags;
+        // `HasSubtitles`, `HasTrailer`, `HasSpecialFeature`, `HasThemeSong`, `HasThemeVideo`
+        QStringList features;
+        // Empty, `HD` or `SD`
+        QString quality;
+        bool is4K = false;
+        bool is3D = false;
+        // `BluRay`, `Dvd`
+        QStringList videoTypes;
         QStringList genreIds;
+        // `hashText` of the exact tag and rating texts: the texts themselves are never stored
+        QStringList tagHashes;
+        QStringList ratingHashes;
+        QList<int> years;
+        // `Continuing`, `Ended`, `Unreleased`
+        QStringList seriesStatus;
+        // `All`, `Specials`, `Missing`, `Unaired`
+        QString episodeKind = QStringLiteral("All");
+        // `grid` or `list`
+        QString viewMode = QStringLiteral("grid");
+        // `Primary`, `Banner`, `Disc`, `Logo`, `Thumb`
+        QString imageType = QStringLiteral("Primary");
+        bool showTitle = true;
+        bool showYear = true;
+        bool cardLayout = true;
         bool operator==(const ViewState &) const = default;
     };
 
     static constexpr int MaxViews = 200;
     static constexpr int MaxGenreIds = 64;
+    static constexpr int MaxHashes = 64;
+    static constexpr int MaxYears = 64;
+    static constexpr int MinYear = 1800;
+    static constexpr int MaxYear = 2200;
     // A stored sequence number above this is a damaged file: counting on from it would overflow
     static constexpr qint64 MaxSeq = qint64(1) << 52;
     static constexpr qint64 MaxFileBytes = 256 * 1024;
-    static constexpr int FileVersion = 1;
+    static constexpr int FileVersion = 2;
+
+    // The digest the store keeps a tag or rating by: SHA-256 of the UTF-8 text as is, lower case hex
+    static QString hashText(const QString &text);
 
     explicit BrowseStateStore(QObject *parent = nullptr);
     ~BrowseStateStore() override;
@@ -46,12 +80,17 @@ class BrowseStateStore final : public QObject {
     void setSelection(const QString &serverId, const QString &userId, const QString &type,
                       const QString &libraryId);
 
-    // The scope key is `movies`, `tvshows`, `tvshows:<libraryId>`, `movies:<libraryId>` or `boxsets:<libraryId>`, lower case without dashes by the caller's convention. `Resumable` is read as `All` in a TV scope: there is no such filter over series
+    // The scope key is `movies`, `tvshows`, `movies:<id>`, `tvshows:<id>`, `boxsets:<id>`, `movies/favorites`, `movies/favorites:<id>`, `movies/collections`, `tvshows/episodes`, `tvshows/episodes:<id>` or `tvshows/network:<studioId>`, ids lower case without dashes by the caller's convention. `IsResumable` is dropped from the flags in a scope that lists series (`tvshows`, `tvshows:<id>`, `tvshows/network:<studioId>`): there is no such filter over series
     std::optional<ViewState> view(const QString &serverId, const QString &userId,
                                   const QString &scopeKey) const;
     // Writing the state a scope already has changes nothing; an invalid argument is ignored
     void setView(const QString &serverId, const QString &userId, const QString &scopeKey,
                  const ViewState &state);
+
+    // How the Favorites page groups its items: `Type` (the default), `Library`, `Genre`, `Year` or `None`; an unknown value is ignored
+    QString favoritesGrouping(const QString &serverId, const QString &userId) const;
+    void setFavoritesGrouping(const QString &serverId, const QString &userId,
+                              const QString &grouping);
 
     // Drops everything stored for the server, every user's
     void forgetServer(const QString &serverId);
@@ -71,10 +110,13 @@ class BrowseStateStore final : public QObject {
     struct UserState {
         QHash<QString, QString> selection;
         QHash<QString, StoredView> views;
+        // Empty until set
+        QString favoritesGrouping;
     };
     using Users = QHash<QString, UserState>;
 
     void load();
+    void loadUsers(const QJsonObject &servers, int version, qint64 &highest);
     void scheduleSave();
     const UserState *userState(const QString &serverId, const QString &userId) const;
     // Drops the view written longest ago; false when there is none

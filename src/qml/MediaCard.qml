@@ -37,8 +37,16 @@ Controls.ItemDelegate {
     property bool landscape: false
     // The second text line, the year when empty
     property string subtitle: ""
+    // How a library page presents the card: the height of the image area over its width (0: from `landscape`), the image fitted instead of cropped, the title and year lines, and the text footer at all
+    property real imageAspect: 0
+    property bool fitImage: false
+    property bool showTitle: true
+    property bool showYear: true
+    property bool cardLayout: true
+    // False for a card whose item has no card menu (a network)
+    property bool hasMenu: true
 
-    readonly property real posterAspect: landscape ? 9 / 16 : 3 / 2
+    readonly property real posterAspect: imageAspect > 0 ? imageAspect : (landscape ? 9 / 16 : 3 / 2)
     readonly property string countsLine: seasonCount > 0 && episodeCount > 0 ? i18nc("seasons and episodes of a series", "%1 · %2", i18np("%1 season", "%1 seasons", seasonCount), i18np("%1 episode", "%1 episodes", episodeCount)) : ""
     readonly property string secondLine: countsLine.length > 0 ? countsLine : (subtitle.length > 0 ? subtitle : (year > 0 ? String(year) : ""))
 
@@ -49,6 +57,8 @@ Controls.ItemDelegate {
 
     // Opens the card menu of the window: at the given point of the card, below it when none
     function openMenu(x, y) {
+        if (!card.hasMenu)
+            return;
         Window.window?.openCardMenu?.(card, itemId, type, seriesId, x ?? 0, y ?? card.height);
     }
 
@@ -155,7 +165,7 @@ Controls.ItemDelegate {
                 id: poster
                 anchors.fill: parent
                 asynchronous: true
-                fillMode: Image.PreserveAspectCrop
+                fillMode: card.fitImage ? Image.PreserveAspectFit : Image.PreserveAspectCrop
                 sourceSize.width: width * Screen.devicePixelRatio
                 // A placeholder row has no image to fetch. Only URLs built by JellyfinClient::imageUrl belong here: the image fetcher allows nothing else, but a raw server string must never become a source
                 source: card.loaded ? card.imageUrl : ""
@@ -286,15 +296,23 @@ Controls.ItemDelegate {
         RowLayout {
             Layout.fillWidth: true
             spacing: 0
+            visible: card.cardLayout
 
             // Item names come from the server: plain text only
             Controls.Label {
                 id: nameLabel
                 Layout.fillWidth: true
+                visible: card.showTitle
                 elide: Text.ElideRight
                 maximumLineCount: 1
                 textFormat: Text.PlainText
                 text: card.loaded ? card.name : ""
+            }
+
+            // Without the title the button keeps the right edge
+            Item {
+                Layout.fillWidth: true
+                visible: !nameLabel.visible
             }
 
             // The pointer and keyboard ways to the menu are the right click and the Menu key: this button is for the pointer alone, and the line keeps its height
@@ -305,7 +323,7 @@ Controls.ItemDelegate {
                 Layout.preferredHeight: nameLabel.implicitHeight
                 focusPolicy: Qt.NoFocus
                 padding: 0
-                visible: card.loaded
+                visible: card.loaded && card.hasMenu
                 display: Controls.AbstractButton.IconOnly
                 icon.name: "overflow-menu"
                 icon.width: Kirigami.Units.iconSizes.small
@@ -325,6 +343,7 @@ Controls.ItemDelegate {
 
         Controls.Label {
             Layout.fillWidth: true
+            visible: card.cardLayout && card.showYear
             elide: Text.ElideRight
             maximumLineCount: 1
             opacity: 0.7

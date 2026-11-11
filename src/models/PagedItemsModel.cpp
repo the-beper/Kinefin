@@ -29,6 +29,12 @@ void PagedItemsModel::clearPaging()
     setStatus(Idle);
 }
 
+void PagedItemsModel::holdPaging(Status status)
+{
+    resetState();
+    setStatus(status);
+}
+
 void PagedItemsModel::retry()
 {
     if (m_status == Idle || m_inFlight >= 0)

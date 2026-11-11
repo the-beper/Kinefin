@@ -43,6 +43,9 @@ Item {
 
     // The list the box searches: the model of the type tab at the root of the stack; on any other page the box feeds the global search
     readonly property var localModel: {
+        // The user preferences and Favorites pages opened over a tab are no part of it: the box searches the whole server there
+        if (shell.globalSearchPage)
+            return null;
         switch (shell.rootTab) {
         case "movies":
             return connection.movies;
@@ -162,7 +165,7 @@ Item {
             maximumLength: 128
             autoAccept: false
             placeholderText: {
-                switch (root.shell.rootTab) {
+                switch (root.localModel ? root.shell.rootTab : "") {
                 case "movies":
                     return i18nc("@info:placeholder", "Search in Movies");
                 case "tvshows":
@@ -191,7 +194,6 @@ Item {
             Component.onCompleted: text = root.currentTerm()
         }
 
-        // The star already sits where the Favorites page will go
         QQC2.ToolButton {
             objectName: "favoritesButton"
 
@@ -200,7 +202,9 @@ Item {
             text: i18nc("@action:button", "Favorites")
             icon.name: "favorite"
             display: QQC2.AbstractButton.IconOnly
-            enabled: false
+            enabled: root.signedIn
+            down: shell.currentSection === "favorites"
+            onClicked: shell.openFavorites()
         }
 
         QQC2.ToolButton {
@@ -383,7 +387,8 @@ Item {
         text: i18nc("@action:inmenu", "Favorites")
         icon.name: "favorite"
         visible: root.compact
-        enabled: false
+        enabled: root.signedIn
+        onTriggered: shell.openFavorites()
     }
     Kirigami.Action {
         id: compactQueueAction
@@ -397,6 +402,16 @@ Item {
     }
 
     // The account menu: what a session can lose, and what a chosen server can still be left for
+    Kirigami.Action {
+        id: userPreferencesAction
+        objectName: "userPreferencesAction"
+
+        text: i18nc("@action:inmenu", "User Preferences")
+        tooltip: i18nc("@info:tooltip", "Language, subtitle and Home preferences of this user, kept on the server")
+        icon.name: "preferences-desktop-user"
+        visible: root.signedIn
+        onTriggered: shell.openSection("userPreferencesPage", "UserPreferencesPage.qml", { connection: shell.connection })
+    }
     Kirigami.Action {
         id: switchUserAction
         objectName: "switchUserAction"
@@ -475,6 +490,15 @@ Item {
         id: accountMenu
         objectName: "accountMenu"
 
+        QQC2.MenuItem {
+            objectName: "userPreferencesItem"
+            visible: root.signedIn
+            action: userPreferencesAction
+            Accessible.description: userPreferencesAction.tooltip
+            QQC2.ToolTip.text: userPreferencesAction.tooltip
+            QQC2.ToolTip.visible: hovered
+            QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
+        }
         QQC2.MenuItem {
             objectName: "switchUserItem"
             visible: root.signedIn

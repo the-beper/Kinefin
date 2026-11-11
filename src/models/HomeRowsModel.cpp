@@ -37,9 +37,10 @@ HomeRowsModel::HomeRowsModel(JellyfinClient *client, QObject *parent)
     connect(m_client, &JellyfinClient::credentialsCleared, this, [this] { clear(); });
 }
 
-void HomeRowsModel::load(const QVariantList &libraries)
+void HomeRowsModel::load(const QVariantList &libraries, bool unplayedOnly)
 {
     m_libraries = libraries;
+    m_unplayedOnly = unplayedOnly;
     reload();
 }
 
@@ -80,6 +81,7 @@ void HomeRowsModel::retry(int row)
 void HomeRowsModel::clear()
 {
     m_libraries.clear();
+    m_unplayedOnly = false;
     clearRows();
 }
 
@@ -116,7 +118,9 @@ void HomeRowsModel::request(int row)
                 false, ItemsPerRow, channel);
             break;
         case RecentlyAdded:
-            started = m_client->fetchLatestItems(libraryId, ItemsPerRow, channel);
+            started = m_client->fetchLatestItems(libraryId, ItemsPerRow, channel,
+                                                 m_unplayedOnly ? std::optional<bool>(false)
+                                                                : std::nullopt);
             break;
         }
     }

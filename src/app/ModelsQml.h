@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "models/FavoritesGroupsModel.h"
+#include "models/FavoritesModel.h"
 #include "models/FilterOptionsModel.h"
 #include "models/GenreRailsModel.h"
 #include "models/HomeRowsModel.h"
@@ -9,10 +11,13 @@
 #include "models/ItemDetailsModel.h"
 #include "models/ItemRowModel.h"
 #include "models/LibraryItemsModel.h"
+#include "models/LibrarySubtabController.h"
 #include "models/PlayQueue.h"
+#include "models/RecommendationRowsModel.h"
 #include "models/ResumeItemsModel.h"
 #include "models/SearchModel.h"
 #include "models/SeasonEpisodesModel.h"
+#include "models/UserConfigurationModel.h"
 
 #include <QtQml/qqmlregistration.h>
 
@@ -22,6 +27,20 @@ struct LibraryItemsModelForeign {
     Q_GADGET
     QML_FOREIGN(Kinefin::LibraryItemsModel)
     QML_NAMED_ELEMENT(LibraryItemsModel)
+    QML_UNCREATABLE("Created by the application")
+};
+
+struct LibrarySubtabControllerForeign {
+    Q_GADGET
+    QML_FOREIGN(Kinefin::LibrarySubtabController)
+    QML_NAMED_ELEMENT(LibrarySubtabController)
+    QML_UNCREATABLE("Created by the application")
+};
+
+struct RecommendationRowsModelForeign {
+    Q_GADGET
+    QML_FOREIGN(Kinefin::RecommendationRowsModel)
+    QML_NAMED_ELEMENT(RecommendationRowsModel)
     QML_UNCREATABLE("Created by the application")
 };
 
@@ -92,6 +111,34 @@ struct ResumeItemsModelForeign {
     Q_GADGET
     QML_FOREIGN(Kinefin::ResumeItemsModel)
     QML_NAMED_ELEMENT(ResumeItemsModel)
+    QML_UNCREATABLE("Created by the application")
+};
+
+struct UserConfigurationModelForeign {
+    Q_GADGET
+    QML_FOREIGN(Kinefin::UserConfigurationModel)
+    QML_NAMED_ELEMENT(UserConfigurationModel)
+    QML_UNCREATABLE("Created by the application")
+};
+
+struct CultureOptionsModelForeign {
+    Q_GADGET
+    QML_FOREIGN(Kinefin::CultureOptionsModel)
+    QML_NAMED_ELEMENT(CultureOptionsModel)
+    QML_UNCREATABLE("Created by the application")
+};
+
+struct FavoritesModelForeign {
+    Q_GADGET
+    QML_FOREIGN(Kinefin::FavoritesModel)
+    QML_NAMED_ELEMENT(FavoritesModel)
+    QML_UNCREATABLE("Created by the application")
+};
+
+struct FavoritesGroupsModelForeign {
+    Q_GADGET
+    QML_FOREIGN(Kinefin::FavoritesGroupsModel)
+    QML_NAMED_ELEMENT(FavoritesGroupsModel)
     QML_UNCREATABLE("Created by the application")
 };
 } // namespace Kinefin

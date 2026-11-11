@@ -1444,3 +1444,845 @@ msgstr "Libreria"
 #: src/qml/SettingsPage.qml:22
 msgid "mpv"
 msgstr "mpv"
+
+
+#: src/qml/UserPreferencesPage.qml
+msgctxt "@item:inlistbox %1 is a language code the server stores"
+msgid "%1 (not in the catalog)"
+msgstr "%1 (non presente nel catalogo)"
+
+#: src/qml/FavoritesPage.qml
+msgid "%1 favorites found, %2 of %3 libraries read"
+msgstr "%1 preferiti trovati, %2 librerie su %3 consultate"
+
+#: src/qml/LibraryPage.qml
+msgctxt "%1 is the name of a network"
+msgid "%1 · series from all libraries"
+msgstr "%1 · serie di tutte le librerie"
+
+#: src/qml/FilterDialog.qml
+msgctxt "@option:check filter by video quality"
+msgid "3D"
+msgstr "3D"
+
+#: src/qml/FilterDialog.qml
+msgctxt "@option:check filter by video quality"
+msgid "4K"
+msgstr "4K"
+
+#: src/qml/LibraryPage.qml
+msgid "All Networks"
+msgstr "Tutte le reti"
+
+#: src/qml/FavoritesPage.qml
+msgctxt "all favorites in one group"
+msgid "All favorites"
+msgstr "Tutti i preferiti"
+
+#: src/qml/LibraryPage.qml
+msgctxt "@label accessible name of the alphabet picker"
+msgid "Alphabet"
+msgstr "Alfabeto"
+
+#: src/qml/UserPreferencesPage.qml
+msgctxt "@item:inlistbox subtitle mode"
+msgid "Always show subtitles"
+msgstr "Mostra sempre i sottotitoli"
+
+#: src/qml/FilterDialog.qml
+msgid "Apply"
+msgstr "Applica"
+
+#: src/qml/LibraryContent.qml
+msgid "Applying the saved filters…"
+msgstr "Applicazione dei filtri salvati…"
+
+#: src/qml/LibraryPage.qml
+msgid "Ascending Order"
+msgstr "Ordine crescente"
+
+#: src/qml/UserPreferencesPage.qml
+msgctxt "@title:group"
+msgid "Audio"
+msgstr "Audio"
+
+#: src/qml/UserPreferencesPage.qml
+msgid "Audio language"
+msgstr "Lingua audio"
+
+#: src/qml/UserPreferencesPage.qml
+msgctxt "@item:inlistbox no language preference"
+msgid "Automatic"
+msgstr "Automatica"
+
+#: src/qml/LibraryPage.qml
+msgctxt "@item:inmenu type of image shown on the cards"
+msgid "Banner"
+msgstr "Banner"
+
+#: src/qml/LibraryPage.qml
+msgid "Because you like films directed by %1"
+msgstr "Perché ti piacciono i film diretti da %1"
+
+#: src/qml/LibraryPage.qml
+msgid "Because you like films with %1"
+msgstr "Perché ti piacciono i film con %1"
+
+#: src/qml/LibraryPage.qml
+msgid "Because you liked %1"
+msgstr "Perché ti è piaciuto %1"
+
+#: src/qml/LibraryPage.qml
+msgid "Because you watched %1"
+msgstr "Perché hai guardato %1"
+
+#: src/qml/LibraryPage.qml
+msgid "Because you watched films directed by %1"
+msgstr "Perché hai guardato film diretti da %1"
+
+#: src/qml/LibraryPage.qml
+msgid "Because you watched films with %1"
+msgstr "Perché hai guardato film con %1"
+
+#: src/qml/FilterDialog.qml
+msgctxt "@option:check filter by video type"
+msgid "Blu-ray"
+msgstr "Blu-ray"
+
+#: src/qml/LibraryPage.qml
+msgid "Card Layout"
+msgstr "Layout schede"
+
+#: src/qml/UserPreferencesPage.qml
+msgid "Checked libraries get no Recently Added row on Home. Their tiles, Continue Watching and Next Up are not affected"
+msgstr "Le librerie selezionate non avranno una riga Aggiunti di recente nella Home. I riquadri, Continua a guardare e Prossimi episodi non cambiano"
+
+#: src/qml/UserPreferencesPage.qml
+msgid "Checked libraries get no tile on Home. Hiding a library here does not remove access to it: it stays available in Movies, TV Shows, Favorites and Search"
+msgstr "Le librerie selezionate non avranno un riquadro nella Home. Nascondere qui una libreria non ne revoca l’accesso: rimane disponibile in Film, Serie TV, Preferiti e Ricerca"
+
+#: src/qml/LibraryContent.qml
+msgid "Clear Filters"
+msgstr "Cancella filtri"
+
+#: src/qml/LibraryPage.qml
+msgctxt "@title:tab sub-tab of Movies"
+msgid "Collections"
+msgstr "Raccolte"
+
+#: src/qml/FavoritesPage.qml
+msgctxt "favorites grouped by type"
+msgid "Collections"
+msgstr "Raccolte"
+
+#: src/qml/LibraryPage.qml
+msgid "Collections from all libraries"
+msgstr "Collezioni di tutte le librerie"
+
+#: src/qml/UserPreferencesPage.qml
+msgctxt "@item:intable Home section"
+msgid "Continue Watching"
+msgstr "Continua a guardare"
+
+#: src/qml/FilterDialog.qml
+msgctxt "@option:check filter by series status"
+msgid "Continuing"
+msgstr "In corso"
+
+#: src/qml/UserPreferencesPage.qml
+msgid "Could not load the preferences: check the connection to the server and try again"
+msgstr "Impossibile caricare le preferenze: controlla la connessione al server e riprova"
+
+#: src/qml/FilterDialog.qml
+msgid "Could not load these filters"
+msgstr "Impossibile caricare questi filtri"
+
+#: src/qml/LibraryPage.qml
+msgid "Could not load this section: check the connection to the server and try again"
+msgstr "Impossibile caricare questa sezione: controlla la connessione al server e riprova"
+
+#: src/qml/UserPreferencesPage.qml
+msgid "Could not save the preferences, your changes are kept: check the connection to the server and try again"
+msgstr "Impossibile salvare le preferenze. Le modifiche sono conservate: controlla la connessione al server e riprova"
+
+#: src/qml/LibraryPage.qml
+msgid "Critic Rating"
+msgstr "Valutazione della critica"
+
+#: src/qml/FilterDialog.qml
+msgctxt "@option:check filter by video type"
+msgid "DVD"
+msgstr "DVD"
+
+#: src/qml/LibraryPage.qml
+msgid "Date Episode Added"
+msgstr "Data di aggiunta episodio"
+
+#: src/qml/UserPreferencesPage.qml
+msgctxt "@item:inlistbox subtitle mode"
+msgid "Default"
+msgstr "Predefinito"
+
+#: src/qml/LibraryPage.qml
+msgctxt "@item:inmenu type of image shown on the cards"
+msgid "Disc"
+msgstr "Disco"
+
+#: src/qml/UserPreferencesPage.qml
+msgctxt "@action:button"
+msgid "Discard"
+msgstr "Scarta"
+
+#: src/qml/FilterDialog.qml
+msgctxt "@option:check filter by series status"
+msgid "Ended"
+msgstr "Terminata"
+
+#: src/qml/LibraryPage.qml
+msgid "Episode Order"
+msgstr "Ordine degli episodi"
+
+#: src/qml/FilterDialog.qml
+msgctxt "@title:group section of the filter dialog"
+msgid "Episodes"
+msgstr "Episodi"
+
+#: src/qml/LibraryPage.qml
+msgctxt "@title:tab sub-tab of TV Shows"
+msgid "Episodes"
+msgstr "Episodi"
+
+#: src/qml/FavoritesPage.qml
+msgctxt "favorites grouped by type"
+msgid "Episodes"
+msgstr "Episodi"
+
+#: src/qml/FilterDialog.qml
+msgctxt "@option:check filter by favorite"
+msgid "Favorites"
+msgstr "Preferiti"
+
+#: src/qml/LibraryPage.qml
+msgctxt "@title:tab sub-tab of Movies"
+msgid "Favorites"
+msgstr "Preferiti"
+
+#: src/qml/FavoritesPage.qml
+msgid "Favorites come from your movie, TV show and collection libraries"
+msgstr "I preferiti provengono dalle librerie di film, serie TV e collezioni"
+
+#: src/qml/FilterDialog.qml
+msgctxt "@title:group section of the filter dialog"
+msgid "Features"
+msgstr "Funzionalità"
+
+#: src/qml/FilterDialog.qml
+msgid "Filters"
+msgstr "Filtri"
+
+#: src/qml/FilterDialog.qml
+msgctxt "@item:inlistbox a genre whose name is not known"
+msgid "Genre"
+msgstr "Genere"
+
+#: src/qml/FavoritesPage.qml
+msgctxt "group favorites by"
+msgid "Genre"
+msgstr "Genere"
+
+#: src/qml/FilterDialog.qml
+msgctxt "@title:group section of the filter dialog"
+msgid "Genres"
+msgstr "Generi"
+
+#: src/qml/LibraryPage.qml
+msgctxt "@title:tab sub-tab of Movies and TV Shows"
+msgid "Genres"
+msgstr "Generi"
+
+#: src/qml/FilterDialog.qml
+msgctxt "@title:group section of the filter dialog"
+msgid "Genres and Tags"
+msgstr "Generi e tag"
+
+#: src/qml/FavoritesPage.qml
+msgid "Go to Home"
+msgstr "Vai alla Home"
+
+#: src/qml/LibraryPage.qml
+msgid "Grid View"
+msgstr "Vista a griglia"
+
+#: src/qml/FavoritesPage.qml
+msgid "Group By"
+msgstr "Raggruppa per"
+
+#: src/qml/FilterDialog.qml
+msgctxt "@option:check filter by video quality"
+msgid "HD"
+msgstr "HD"
+
+#: src/qml/UserPreferencesPage.qml
+msgctxt "@option:check %1 is a library name"
+msgid "Hide %1 from the Home tiles"
+msgstr "Nascondi %1 dai riquadri della Home"
+
+#: src/qml/UserPreferencesPage.qml
+msgctxt "@title:group"
+msgid "Home sections set in Jellyfin"
+msgstr "Sezioni Home impostate su Jellyfin"
+
+#: src/qml/UserPreferencesPage.qml
+msgctxt "@action:button"
+msgid "Keep Editing"
+msgstr "Continua a modificare"
+
+#: src/qml/ShellHeader.qml
+msgctxt "@info:tooltip"
+msgid "Language, subtitle and Home preferences of this user, kept on the server"
+msgstr "Preferenze di lingua, sottotitoli e Home dell’utente, salvate sul server"
+
+#: src/qml/UserPreferencesPage.qml
+msgctxt "@option:check %1 is a library name"
+msgid "Leave %1 out of the Recently Added rows"
+msgstr "Escludi %1 dalle righe Aggiunti di recente"
+
+#: src/qml/UserPreferencesPage.qml
+msgid "Leave played items out of Recently Added"
+msgstr "Escludi gli elementi già visti da Aggiunti di recente"
+
+#: src/qml/UserPreferencesPage.qml
+msgctxt "@item:intable Home section"
+msgid "Libraries"
+msgstr "Librerie"
+
+#: src/qml/UserPreferencesPage.qml
+msgctxt "@title:group"
+msgid "Libraries and Home"
+msgstr "Librerie e Home"
+
+#: src/qml/UserPreferencesPage.qml
+msgctxt "@title:group"
+msgid "Libraries on Home"
+msgstr "Librerie nella Home"
+
+#: src/qml/FavoritesPage.qml
+msgctxt "group favorites by"
+msgid "Library"
+msgstr "Libreria"
+
+#: src/qml/LibraryPage.qml
+msgid "List View"
+msgstr "Vista elenco"
+
+#: src/qml/FavoritesPage.qml
+msgid "Loading favorites…"
+msgstr "Caricamento preferiti…"
+
+#: src/qml/LibraryPage.qml
+msgctxt "@item:inmenu type of image shown on the cards"
+msgid "Logo"
+msgstr "Logo"
+
+#: src/qml/FilterDialog.qml
+msgctxt "@option:check filter by kind of episode"
+msgid "Missing"
+msgstr "Mancanti"
+
+#: src/qml/FavoritesPage.qml
+msgctxt "favorites listed by several libraries"
+msgid "More libraries"
+msgstr "Più librerie"
+
+#: src/qml/UserPreferencesPage.qml
+msgctxt "@action:button"
+msgid "Move Down"
+msgstr "Sposta giù"
+
+#: src/qml/UserPreferencesPage.qml
+msgctxt "@action:button"
+msgid "Move Up"
+msgstr "Sposta su"
+
+#: src/qml/LibraryPage.qml
+msgctxt "@title:tab main sub-tab of Movies"
+msgid "Movies"
+msgstr "Film"
+
+#: src/qml/FavoritesPage.qml
+msgctxt "favorites grouped by type"
+msgid "Movies"
+msgstr "Film"
+
+#: src/qml/FavoritesPage.qml
+msgid "Movies, shows and collections you mark as favorites on the server show up here"
+msgstr "Qui compaiono film, serie TV e collezioni contrassegnati come preferiti sul server"
+
+#: src/qml/LibraryPage.qml
+msgctxt "@title:tab sub-tab of TV Shows"
+msgid "Networks"
+msgstr "Reti"
+
+#: src/qml/UserPreferencesPage.qml
+msgctxt "@item:intable Home section"
+msgid "Next Up"
+msgstr "Prossimi"
+
+#: src/qml/LibraryPage.qml
+msgid "No episode is about to air"
+msgstr "Nessun episodio in arrivo"
+
+#: src/qml/FavoritesPage.qml
+msgid "No favorites yet"
+msgstr "Nessun preferito"
+
+#: src/qml/FavoritesPage.qml
+msgctxt "favorites without a genre"
+msgid "No genre"
+msgstr "Senza genere"
+
+#: src/qml/UserPreferencesPage.qml
+msgid "No libraries are available"
+msgstr "Nessuna libreria disponibile"
+
+#: src/qml/LibraryPage.qml
+msgid "No movie is marked as a favorite yet"
+msgstr "Nessun film è ancora tra i preferiti"
+
+#: src/qml/UserPreferencesPage.qml
+msgid "No sections are set"
+msgstr "Nessuna sezione impostata"
+
+#: src/qml/UserPreferencesPage.qml
+msgctxt "@item:inlistbox subtitle mode"
+msgid "No subtitles"
+msgstr "Nessun sottotitolo"
+
+#: src/qml/FavoritesPage.qml
+msgctxt "favorites without a year"
+msgid "No year"
+msgstr "Senza anno"
+
+#: src/qml/FavoritesPage.qml
+msgctxt "do not group favorites"
+msgid "None"
+msgstr "Nessuno"
+
+#: src/qml/UserPreferencesPage.qml
+msgctxt "@item:inlistbox subtitle mode"
+msgid "Not supported by Kinefin"
+msgstr "Non supportato da Kinefin"
+
+#: src/qml/LibraryPage.qml
+msgctxt "accessible name of the alphabet picker button for the names that do not start with a letter"
+msgid "Numbers and symbols"
+msgstr "Numeri e simboli"
+
+#: src/qml/UserPreferencesPage.qml
+msgctxt "@item:inlistbox subtitle mode"
+msgid "Only forced subtitles"
+msgstr "Solo sottotitoli forzati"
+
+#: src/qml/UserPreferencesPage.qml
+msgctxt "@title:group"
+msgid "Order of the libraries"
+msgstr "Ordine delle librerie"
+
+#: src/qml/FavoritesPage.qml
+msgctxt "favorites grouped by type"
+msgid "Other"
+msgstr "Altro"
+
+#: src/qml/LibraryPage.qml
+msgid "Play Count"
+msgstr "Numero riproduzioni"
+
+#: src/qml/UserPreferencesPage.qml
+msgid "Play the default audio track"
+msgstr "Riproduci la traccia audio predefinita"
+
+#: src/qml/UserPreferencesPage.qml
+msgid "Play the next episode automatically"
+msgstr "Riproduci automaticamente il prossimo episodio"
+
+#: src/qml/UserPreferencesPage.qml
+msgctxt "@title:group"
+msgid "Playback"
+msgstr "Riproduzione"
+
+#: src/qml/FilterDialog.qml
+msgctxt "@option:check filter by watched state"
+msgid "Played"
+msgstr "Visto"
+
+#: src/qml/LibraryPage.qml
+msgctxt "@item:inmenu type of image shown on the cards"
+msgid "Poster"
+msgstr "Locandina"
+
+#: src/qml/UserPreferencesPage.qml
+msgid "Preferences saved"
+msgstr "Preferenze salvate"
+
+#: src/qml/LibraryPage.qml
+msgid "Random"
+msgstr "Casuale"
+
+#: src/qml/FilterDialog.qml
+msgctxt "@title:group section of the filter dialog"
+msgid "Ratings"
+msgstr "Classificazioni"
+
+#: src/qml/FilterDialog.qml
+msgctxt "@title:group section of the filter dialog"
+msgid "Ratings and Years"
+msgstr "Classificazioni e anni"
+
+#: src/qml/UserPreferencesPage.qml
+msgid "Read only: Kinefin keeps its own Home layout"
+msgstr "Sola lettura: Kinefin mantiene la propria disposizione della Home"
+
+#: src/qml/UserPreferencesPage.qml
+msgctxt "@item:intable Home section"
+msgid "Recently Added"
+msgstr "Aggiunti di recente"
+
+#: src/qml/UserPreferencesPage.qml
+msgctxt "@title:group"
+msgid "Recently Added rows on Home"
+msgstr "Righe Aggiunti di recente nella Home"
+
+#: src/qml/FavoritesPage.qml
+msgid "Reload"
+msgstr "Ricarica"
+
+#: src/qml/UserPreferencesPage.qml
+msgctxt "@action:button"
+msgid "Reload"
+msgstr "Ricarica"
+
+#: src/qml/UserPreferencesPage.qml
+msgid "Remember the audio track"
+msgstr "Ricorda la traccia audio"
+
+#: src/qml/UserPreferencesPage.qml
+msgid "Remember the subtitle track"
+msgstr "Ricorda la traccia dei sottotitoli"
+
+#: src/qml/LibraryPage.qml
+msgctxt "accessible name of the button that removes one filter, %1 is the filter"
+msgid "Remove the filter %1"
+msgstr "Rimuovi il filtro %1"
+
+#: src/qml/LibraryPage.qml
+msgid "Remove this filter"
+msgstr "Rimuovi questo filtro"
+
+#: src/qml/LibraryPage.qml
+msgid "Reshuffle"
+msgstr "Rimescola"
+
+#: src/qml/FilterDialog.qml
+msgctxt "@option:check filter by watched state"
+msgid "Resumable"
+msgstr "Riprendibili"
+
+#: src/qml/UserPreferencesPage.qml
+msgctxt "@action:button"
+msgid "Retry"
+msgstr "Riprova"
+
+#: src/qml/FilterDialog.qml
+msgctxt "@option:check filter by video quality"
+msgid "SD"
+msgstr "SD"
+
+#: src/qml/UserPreferencesPage.qml
+msgctxt "@action:button"
+msgid "Save"
+msgstr "Salva"
+
+#: src/qml/UserPreferencesPage.qml
+msgid "Saving…"
+msgstr "Salvataggio…"
+
+#: src/qml/FavoritesPage.qml
+msgctxt "favorites grouped by type"
+msgid "Seasons"
+msgstr "Stagioni"
+
+#: src/qml/UserPreferencesPage.qml
+msgctxt "@item:intable Home section"
+msgid "Section not supported by Kinefin"
+msgstr "Sezione non supportata da Kinefin"
+
+#: src/qml/LibraryPage.qml
+msgctxt "@label accessible name of the sub-tabs of a page"
+msgid "Sections"
+msgstr "Sezioni"
+
+#: src/qml/FilterDialog.qml
+msgctxt "@title:group section of the filter dialog"
+msgid "Series Status"
+msgstr "Stato della serie"
+
+#: src/qml/FavoritesPage.qml
+msgid "Show All in %1"
+msgstr "Mostra tutti in %1"
+
+#: src/qml/LibraryPage.qml
+msgid "Show Title"
+msgstr "Mostra titolo"
+
+#: src/qml/LibraryPage.qml
+msgid "Show Year"
+msgstr "Mostra anno"
+
+#: src/qml/UserPreferencesPage.qml
+msgid "Show missing episodes"
+msgstr "Mostra episodi mancanti"
+
+#: src/qml/FavoritesPage.qml
+msgid "Showing %1 favorites: the list may be incomplete"
+msgstr "Visualizzati %1 preferiti: l’elenco potrebbe essere incompleto"
+
+#: src/qml/LibraryPage.qml
+msgctxt "@title:tab main sub-tab of TV Shows"
+msgid "Shows"
+msgstr "Serie"
+
+#: src/qml/UserPreferencesPage.qml
+msgctxt "@item:inlistbox subtitle mode"
+msgid "Smart"
+msgstr "Intelligente"
+
+#: src/qml/FavoritesPage.qml
+msgid "Some libraries could not be read"
+msgstr "Impossibile leggere alcune librerie"
+
+#: src/qml/UserPreferencesPage.qml
+msgid "Some preferences were changed on another device, so nothing was saved: keep editing to review your changes, or discard them"
+msgstr "Alcune preferenze sono state modificate su un altro dispositivo, quindi non è stato salvato nulla: continua a modificarle o scarta le modifiche"
+
+#: src/qml/FilterDialog.qml
+msgctxt "@option:check filter by feature"
+msgid "Special Features"
+msgstr "Contenuti speciali"
+
+#: src/qml/FilterDialog.qml
+msgctxt "@option:check filter by kind of episode"
+msgid "Specials"
+msgstr "Speciali"
+
+#: src/qml/UserPreferencesPage.qml
+msgid "Start an item with the audio track chosen for the previous one when possible"
+msgstr "Quando possibile, usa la traccia audio scelta per il contenuto precedente"
+
+#: src/qml/UserPreferencesPage.qml
+msgid "Start an item with the subtitles chosen for the previous one when possible"
+msgstr "Quando possibile, usa i sottotitoli scelti per il contenuto precedente"
+
+#: src/qml/FilterDialog.qml
+msgctxt "@title:group section of the filter dialog"
+msgid "Status"
+msgstr "Stato"
+
+#: src/qml/UserPreferencesPage.qml
+msgid "Subtitle language"
+msgstr "Lingua sottotitoli"
+
+#: src/qml/UserPreferencesPage.qml
+msgid "Subtitle mode"
+msgstr "Modalità sottotitoli"
+
+#: src/qml/FilterDialog.qml
+msgctxt "@option:check filter by feature"
+msgid "Subtitles"
+msgstr "Sottotitoli"
+
+#: src/qml/UserPreferencesPage.qml
+msgctxt "@title:group"
+msgid "Subtitles"
+msgstr "Sottotitoli"
+
+#: src/qml/LibraryPage.qml
+msgid "Suggested for you"
+msgstr "Consigliati per te"
+
+#: src/qml/LibraryPage.qml
+msgctxt "@title:tab sub-tab of Movies and TV Shows"
+msgid "Suggestions"
+msgstr "Suggerimenti"
+
+#: src/qml/LibraryPage.qml
+msgid "Suggestions from all libraries"
+msgstr "Suggerimenti da tutte le librerie"
+
+#: src/qml/FavoritesPage.qml
+msgctxt "favorites grouped by type"
+msgid "TV Shows"
+msgstr "Serie TV"
+
+#: src/qml/FilterDialog.qml
+msgctxt "@title:group section of the filter dialog"
+msgid "Tags"
+msgstr "Tag"
+
+#: src/qml/UserPreferencesPage.qml
+msgid "The Jellyfin preview is not available"
+msgstr "L’anteprima di Jellyfin non è disponibile"
+
+#: src/qml/UserPreferencesPage.qml
+msgid "The changes to your preferences are not saved"
+msgstr "Le modifiche alle preferenze non sono state salvate"
+
+#: src/qml/UserPreferencesPage.qml
+msgid "The language list is not available: only Automatic and the current choice can be selected"
+msgstr "Elenco lingue non disponibile: puoi scegliere solo Automatica e l’opzione attuale"
+
+#: src/qml/UserPreferencesPage.qml
+msgid "The order of the library tiles on Home. Select a library and press Ctrl+Up or Ctrl+Down to move it"
+msgstr "Ordine dei riquadri delle librerie nella Home. Seleziona una libreria e premi Ctrl+Su o Ctrl+Giù per spostarla"
+
+#: src/qml/UserPreferencesPage.qml
+msgid "The preferences were sent but could not be confirmed: reload them before trusting what is shown"
+msgstr "Preferenze inviate ma non confermate: ricaricale prima di considerare attendibili i valori mostrati"
+
+#: src/qml/UserPreferencesPage.qml
+msgid "The server sent preferences that Kinefin cannot read"
+msgstr "Il server ha inviato preferenze che Kinefin non riesce a leggere"
+
+#: src/qml/UserPreferencesPage.qml
+msgid "The server stores this in a form Kinefin cannot edit"
+msgstr "Il server memorizza questo dato in un formato che Kinefin non può modificare"
+
+#: src/qml/FilterDialog.qml
+msgctxt "@option:check filter by feature"
+msgid "Theme Song"
+msgstr "Tema musicale"
+
+#: src/qml/FilterDialog.qml
+msgctxt "@option:check filter by feature"
+msgid "Theme Video"
+msgstr "Video tematico"
+
+#: src/qml/LibraryPage.qml
+msgid "There are no collections yet"
+msgstr "Non ci sono ancora collezioni"
+
+#: src/qml/LibraryPage.qml
+msgid "There are no episodes yet"
+msgstr "Non ci sono ancora episodi"
+
+#: src/qml/LibraryPage.qml
+msgid "There are no networks"
+msgstr "Non ci sono reti"
+
+#: src/qml/LibraryPage.qml
+msgid "There are no suggestions yet"
+msgstr "Non ci sono ancora suggerimenti"
+
+#: src/qml/FavoritesGroupPage.qml
+msgid "These are the favorites loaded so far: the list may be incomplete"
+msgstr "Questi sono i preferiti caricati finora: l’elenco potrebbe essere incompleto"
+
+#: src/qml/UserPreferencesPage.qml
+msgid "These preferences are stored on your Jellyfin server. They do not change the language of Kinefin, and the player will apply the language and subtitle choices in a later version"
+msgstr "Queste preferenze sono salvate sul server Jellyfin. Non cambiano la lingua di Kinefin; il lettore applicherà le scelte di lingua e sottotitoli in una versione successiva"
+
+#: src/qml/LibraryPage.qml
+msgid "This network has no series"
+msgstr "Questa rete non contiene serie"
+
+#: src/qml/LibraryPage.qml
+msgctxt "@item:inmenu type of image shown on the cards"
+msgid "Thumbnail"
+msgstr "Miniatura"
+
+#: src/qml/FilterDialog.qml
+msgctxt "@option:check filter by feature"
+msgid "Trailer"
+msgstr "Trailer"
+
+#: src/qml/FavoritesPage.qml
+msgctxt "group favorites by"
+msgid "Type"
+msgstr "Tipo"
+
+#: src/qml/FilterDialog.qml
+msgctxt "@option:check filter by kind of episode"
+msgid "Unaired"
+msgstr "Non trasmessi"
+
+#: src/qml/FilterDialog.qml
+msgctxt "@option:check filter by watched state"
+msgid "Unplayed"
+msgstr "Da vedere"
+
+#: src/qml/FilterDialog.qml
+msgctxt "@option:check filter by series status"
+msgid "Unreleased"
+msgstr "Non ancora uscita"
+
+#: src/qml/UserPreferencesPage.qml
+msgctxt "@title:window"
+msgid "Unsaved Changes"
+msgstr "Modifiche non salvate"
+
+#: src/qml/LibraryPage.qml
+msgctxt "@title:tab sub-tab of TV Shows"
+msgid "Upcoming"
+msgstr "In arrivo"
+
+#: src/qml/UserPreferencesPage.qml
+msgid "Use the track the file marks as default, whatever its language"
+msgstr "Usa la traccia indicata come predefinita nel file, indipendentemente dalla lingua"
+
+#: src/qml/UserPreferencesPage.qml
+msgid "User Preferences"
+msgstr "Preferenze utente"
+
+#: src/qml/ShellHeader.qml
+msgctxt "@action:inmenu"
+msgid "User Preferences"
+msgstr "Preferenze utente"
+
+#: src/qml/FilterDialog.qml
+msgctxt "@title:group section of the filter dialog"
+msgid "Video Quality"
+msgstr "Qualità video"
+
+#: src/qml/FilterDialog.qml
+msgctxt "@title:group section of the filter dialog: Blu-ray and DVD"
+msgid "Video Type"
+msgstr "Tipo di video"
+
+#: src/qml/LibraryPage.qml
+msgid "View Options"
+msgstr "Opzioni di visualizzazione"
+
+#: src/qml/LibraryPage.qml
+msgid "Year"
+msgstr "Anno"
+
+#: src/qml/FavoritesPage.qml
+msgctxt "group favorites by"
+msgid "Year"
+msgstr "Anno"
+
+#: src/qml/FilterDialog.qml
+msgctxt "@title:group section of the filter dialog"
+msgid "Years"
+msgstr "Anni"
+
+#: src/qml/FavoritesPage.qml
+msgid "%1 favorite"
+msgid_plural "%1 favorites"
+msgstr[0] "%1 preferito"
+msgstr[1] "%1 preferiti"
+
+#: src/qml/UserPreferencesPage.qml
+msgid "The preferences of %1 library that is not available are kept"
+msgid_plural "The preferences of %1 libraries that are not available are kept"
+msgstr[0] "Le preferenze di %1 libreria non disponibile vengono conservate"
+msgstr[1] "Le preferenze di %1 librerie non disponibili vengono conservate"

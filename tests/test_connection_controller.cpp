@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Kinefin contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QHostAddress>
@@ -17,6 +18,7 @@
 #include "FakeJellyfin.h"
 #include "MemoryTokenStore.h"
 #include "app/ConnectionController.h"
+#include "settings/BrowseStateStore.h"
 #include "settings/ServerCredentials.h"
 
 using Kinefin::ConnectionController;
@@ -78,6 +80,68 @@ bool waitForState(ConnectionController &controller, State state)
     return QTest::qWaitFor([&] { return controller.state() == state; }, 10000);
 }
 
+// A GET /Users/Me body for `userId` carrying `configuration`
+QByteArray meBody(const QString &userId, const QJsonObject &configuration)
+{
+    return QJsonDocument(QJsonObject{{QStringLiteral("Id"), userId},
+                                     {QStringLiteral("Name"), QStringLiteral("bepi")},
+                                     {QStringLiteral("Policy"),
+                                      QJsonObject{{QStringLiteral("IsAdministrator"), false}}},
+                                     {QStringLiteral("Configuration"), configuration}})
+        .toJson(QJsonDocument::Compact);
+}
+
+// The `id` of each entry of a library list, in order
+QStringList idsOf(const QVariantList &libraries)
+{
+    QStringList ids;
+    for (const QVariant &library : libraries)
+        ids.append(library.toMap().value(QStringLiteral("id")).toString());
+    return ids;
+}
+
+// The library id of each Recently Added row of the Home rows, in order
+QStringList recentRowIds(Kinefin::HomeRowsModel *rows)
+{
+    QStringList ids;
+    for (int row = 0; row < rows->rowCount(); ++row) {
+        const QModelIndex index = rows->index(row);
+        if (rows->data(index, Kinefin::HomeRowsModel::KindRole).toInt()
+            == Kinefin::HomeRowsModel::RecentlyAdded)
+            ids.append(rows->data(index, Kinefin::HomeRowsModel::LibraryIdRole).toString());
+    }
+    return ids;
+}
+
+// Whether every `/Items/Latest` request of `routes` (from `first` on) carries `isPlayed=false`, and none carries another value
+bool latestAsksUnplayedOnly(const QList<QByteArray> &routes, qsizetype first = 0)
+{
+    for (qsizetype i = first; i < routes.size(); ++i) {
+        if (!routes.at(i).contains("isPlayed=false"))
+            return false;
+    }
+    return routes.size() > first;
+}
+
+bool latestAsksNoPlayedFilter(const QList<QByteArray> &routes, qsizetype first = 0)
+{
+    for (qsizetype i = first; i < routes.size(); ++i) {
+        if (routes.at(i).contains("isPlayed"))
+            return false;
+    }
+    return routes.size() > first;
+}
+
+// Signs the fixture user in on `server`
+bool signInFixtureUser(ConnectionController &controller, const FakeJellyfin &server)
+{
+    controller.connectTo(address(server));
+    if (!waitForState(controller, ConnectionController::NeedsLogin))
+        return false;
+    controller.login(QStringLiteral("fixture-user"), QStringLiteral("fixture-password"));
+    return waitForState(controller, ConnectionController::Authenticated);
+}
+
 // The ids of the system_info_public and authenticate_success fixtures
 const QString kServerId = QStringLiteral("9c076c52ba5340d59f6baf5b57cf0a5e");
 const QString kFixtureUserId = QStringLiteral("d5ed5d4e2e5447b58e9f2b6f7bd5c96a");
@@ -135,6 +199,90 @@ bool saveBothUsers(FakeJellyfin &server)
     controller->addUser();
     return controller->state() == ConnectionController::NeedsLogin
            && signInUser(*controller, QStringLiteral("Ben"), 2);
+}
+
+// A parameter of a captured listing request, decoded
+QString wire(const QByteArray &route, const char *name)
+{
+    return FakeJellyfin::capturedListingQuery(route).queryItemValue(QString::fromLatin1(name),
+                                                                    QUrl::FullyDecoded);
+}
+
+// The text of a tag or rating the fake server lists, and the digest the store keeps it by
+QString digestOf(const char *text)
+{
+    return Kinefin::BrowseStateStore::hashText(QString::fromLatin1(text));
+}
+
+const QString kSciFi = QStringLiteral("aa00000000000000000000000000ff01");
+
+// A movie view with every field away from its default: genres, tags, ratings and years the fake server lists
+Kinefin::LibraryItemsModel::ViewState richMovieView()
+{
+    using namespace Kinefin;
+    LibraryItemsModel::ViewState view;
+    view.sortBy = QStringLiteral("Runtime");
+    view.descending = true;
+    view.filters.played = PlayedState::Unplayed;
+    view.filters.resumable = true;
+    view.filters.favorites = true;
+    view.filters.features = LibraryFeature::Subtitles | LibraryFeature::ThemeSong;
+    view.filters.quality = VideoQuality::HD;
+    view.filters.is4K = true;
+    view.filters.is3D = true;
+    view.filters.videoTypes = {QStringLiteral("BluRay"), QStringLiteral("Dvd")};
+    view.filters.genreIds = {kSciFi};
+    view.filters.tags = {QStringLiteral("restored-master")};
+    view.filters.officialRatings = {QStringLiteral("PG-13")};
+    view.filters.years = {2019, 2024};
+    view.viewMode = QStringLiteral("list");
+    view.imageType = QStringLiteral("Thumb");
+    view.showTitle = false;
+    view.showYear = false;
+    view.cardLayout = false;
+    return view;
+}
+
+// A series view: the sections only series have, and the ones its scope keeps
+Kinefin::LibraryItemsModel::ViewState richSeriesView()
+{
+    using namespace Kinefin;
+    LibraryItemsModel::ViewState view;
+    view.sortBy = QStringLiteral("DateLastContentAdded");
+    view.filters.played = PlayedState::Played;
+    view.filters.features = LibraryFeature::Trailer;
+    view.filters.seriesStatus = {QStringLiteral("Continuing"), QStringLiteral("Unreleased")};
+    view.filters.genreIds = {kSciFi};
+    view.filters.tags = {QStringLiteral("director-cut")};
+    view.filters.officialRatings = {QStringLiteral("R")};
+    view.filters.years = {2012};
+    view.viewMode = QStringLiteral("list");
+    view.imageType = QStringLiteral("Banner");
+    return view;
+}
+
+// What the user does to a model, edit by edit
+void applyView(Kinefin::LibraryItemsModel *model, const Kinefin::LibraryItemsModel::ViewState &view)
+{
+    model->setSortBy(view.sortBy);
+    model->setDescending(view.descending);
+    model->setFilterState(view.filters);
+    model->setViewMode(view.viewMode);
+    model->setImageType(view.imageType);
+    model->setShowTitle(view.showTitle);
+    model->setShowYear(view.showYear);
+    model->setCardLayout(view.cardLayout);
+}
+
+// The facets of the open scope loaded, so the model can resolve and prune
+bool facetsLoaded(Kinefin::LibraryItemsModel *model)
+{
+    return QTest::qWaitFor(
+        [&] {
+            return model->filterOptions()->status() == Kinefin::FilterOptionsModel::Ready
+                   && model->filterOptions()->legacyStatus() == Kinefin::FilterOptionsModel::Ready;
+        },
+        10000);
 }
 } // namespace
 
@@ -421,6 +569,180 @@ class TestConnectionController : public QObject {
     bool signInWithLibraries(ConnectionController &controller, FakeJellyfin &server, int libraries)
     {
         return signInAgain(controller, server) && waitForLibraries(controller, libraries);
+    }
+
+    void subtabsFollowOpenTypeAndTheEnabledSet()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        server.generatedItemTotal = 5;
+        auto controller = makeController();
+        auto *subtabs = controller->subtabs();
+        // The settings come before the session: unknown ids are ignored, a type's own set is its own
+        controller->setSubtabsEnabled(QStringLiteral("movies"),
+                                      {QStringLiteral("favorites"), QStringLiteral("collections"),
+                                       QStringLiteral("bogus"), QStringLiteral("episodes")});
+        controller->connectTo(address(server));
+        QTRY_VERIFY(controller->state() == ConnectionController::NeedsLogin);
+        controller->login(QStringLiteral("fixture-user"), QStringLiteral("fixture-password"));
+        QTRY_COMPARE(controller->libraries().size(), 3);
+        QVERIFY(!subtabs->isOpen());
+
+        QVERIFY(controller->openType(QStringLiteral("movies")));
+        QVERIFY(subtabs->isOpen());
+        QCOMPARE(subtabs->type(), QStringLiteral("movies"));
+        QVERIFY(subtabs->libraryId().isEmpty());
+        QCOMPARE(subtabs->available(),
+                 (QStringList{QStringLiteral("main"), QStringLiteral("favorites"),
+                              QStringLiteral("collections")}));
+        QCOMPARE(subtabs->current(), QStringLiteral("main"));
+        // Nothing is asked for a sub-tab that is not showing
+        QTRY_COMPARE(controller->movies()->status(), Kinefin::LibraryItemsModel::Ready);
+        for (const QByteArray &route : std::as_const(server.itemsRoutes))
+            QVERIFY2(!route.contains("BoxSet") && !route.contains("IsFavorite"), route.constData());
+        QVERIFY(server.listingRoutes.value(QStringLiteral("MovieRecommendations")).isEmpty());
+
+        // Turning one on shows it in the bar of the open page
+        QSignalSpy availableChanged(subtabs, &Kinefin::LibrarySubtabController::availableChanged);
+        controller->setSubtabsEnabled(
+            QStringLiteral("movies"),
+            {QStringLiteral("favorites"), QStringLiteral("collections"), QStringLiteral("genres")});
+        QCOMPARE(availableChanged.size(), 1);
+        QCOMPARE(subtabs->available().size(), 4);
+        QVERIFY(subtabs->select(QStringLiteral("favorites")));
+        QCOMPARE(subtabs->current(), QStringLiteral("favorites"));
+        // ...and off while it shows: back to the main one
+        controller->setSubtabsEnabled(QStringLiteral("movies"), {QStringLiteral("collections")});
+        QCOMPARE(subtabs->current(), QStringLiteral("main"));
+        QVERIFY(!subtabs->select(QStringLiteral("favorites")));
+
+        // Another tab opens its own sub-tabs, the Home tab closes them, the same scope opens them again
+        QVERIFY(controller->openType(QStringLiteral("tvshows")));
+        QCOMPARE(subtabs->type(), QStringLiteral("tvshows"));
+        QCOMPARE(subtabs->available(), QStringList{QStringLiteral("main")});
+        controller->closeSubtabs();
+        QVERIFY(!subtabs->isOpen());
+        QVERIFY(controller->openType(QStringLiteral("tvshows")));
+        QVERIFY(subtabs->isOpen());
+        // The end of the session releases everything
+        controller->cancel();
+        QVERIFY(!subtabs->isOpen());
+        QVERIFY(subtabs->available().isEmpty());
+    }
+
+    void aLibraryChangeMovesTheSubtabsToTheLibrary()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        server.generatedItemTotal = 5;
+        server.viewsRawBody = twoMovieLibrariesBody();
+        auto controller = makeController();
+        auto *subtabs = controller->subtabs();
+        controller->setSubtabsEnabled(QStringLiteral("movies"), {QStringLiteral("favorites")});
+        controller->connectTo(address(server));
+        QTRY_VERIFY(controller->state() == ConnectionController::NeedsLogin);
+        controller->login(QStringLiteral("fixture-user"), QStringLiteral("fixture-password"));
+        QTRY_COMPARE(controller->libraries().size(), 3);
+        QVERIFY(controller->openType(QStringLiteral("movies")));
+        QVERIFY(subtabs->libraryId().isEmpty());
+        QVERIFY(subtabs->select(QStringLiteral("favorites")));
+        QTRY_COMPARE(subtabs->status(), Kinefin::LibrarySubtabController::Ready);
+        // Another library keeps the sub-tab and lists its own favorites
+        QVERIFY(controller->openType(QStringLiteral("movies"), kMoviesB));
+        QCOMPARE(subtabs->libraryId(), kMoviesB);
+        QCOMPARE(subtabs->current(), QStringLiteral("favorites"));
+        QTRY_COMPARE(subtabs->status(), Kinefin::LibrarySubtabController::Ready);
+        QVERIFY(subtabs->activeList());
+        QCOMPARE(subtabs->activeList()->libraryId(), kMoviesB);
+        // A one-off Recently Added list is the main sub-tab's
+        QVERIFY(controller->openRecentlyAdded(QStringLiteral("movies"), kMoviesB));
+        QCOMPARE(subtabs->current(), QStringLiteral("main"));
+    }
+
+    void subtabListsKeepTheirOwnViewState()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        server.generatedItemTotal = 5;
+        server.viewsRawBody = twoMovieLibrariesBody();
+        {
+            auto controller = makeController();
+            controller->setSubtabsEnabled(
+                QStringLiteral("movies"),
+                {QStringLiteral("favorites"), QStringLiteral("collections")});
+            controller->setSubtabsEnabled(QStringLiteral("tvshows"),
+                                          {QStringLiteral("networks"), QStringLiteral("episodes")});
+            controller->connectTo(address(server));
+            QTRY_VERIFY(controller->state() == ConnectionController::NeedsLogin);
+            controller->login(QStringLiteral("fixture-user"), QStringLiteral("fixture-password"));
+            QTRY_COMPARE(controller->libraries().size(), 3);
+            auto *subtabs = controller->subtabs();
+            QVERIFY(controller->openType(QStringLiteral("movies")));
+            controller->movies()->setSortBy(QStringLiteral("DateCreated"));
+
+            // Favorites over every library, and over one library, are two views
+            QVERIFY(subtabs->select(QStringLiteral("favorites")));
+            QVERIFY(subtabs->activeList());
+            QCOMPARE(subtabs->scopeKey(), QStringLiteral("movies/favorites"));
+            subtabs->activeList()->setSortBy(QStringLiteral("Runtime"));
+            subtabs->activeList()->setViewMode(QStringLiteral("list"));
+            subtabs->activeList()->setFilterValues(
+                QVariantMap{{QStringLiteral("played"), QStringLiteral("Unplayed")}});
+            QVERIFY(controller->openType(QStringLiteral("movies"), kMoviesB));
+            QCOMPARE(subtabs->current(), QStringLiteral("favorites"));
+            QCOMPARE(subtabs->activeList()->sortBy(), QStringLiteral("SortName"));
+            QCOMPARE(subtabs->activeList()->viewMode(), QStringLiteral("grid"));
+            subtabs->activeList()->setSortBy(QStringLiteral("PremiereDate"));
+            // The collections are one view whatever the library
+            QVERIFY(subtabs->select(QStringLiteral("collections")));
+            subtabs->activeList()->setSortBy(QStringLiteral("CommunityRating"));
+            // The main sub-tab's own view is another one, and not touched by any of it
+            QVERIFY(subtabs->select(QStringLiteral("main")));
+            QCOMPARE(controller->movies()->sortBy(), QStringLiteral("SortName"));
+
+            // A network's series are kept under the network
+            QVERIFY(controller->openType(QStringLiteral("tvshows")));
+            QVERIFY(subtabs->select(QStringLiteral("networks")));
+            QTRY_COMPARE(subtabs->status(), Kinefin::LibrarySubtabController::Ready);
+            QVERIFY(subtabs->networks()->count() > 0);
+            const QString studio =
+                subtabs->networks()
+                    ->data(subtabs->networks()->index(0), Kinefin::ItemRowModel::ItemIdRole)
+                    .toString();
+            QVERIFY(subtabs->selectNetwork(studio));
+            QVERIFY(subtabs->activeList());
+            QCOMPARE(subtabs->scopeKey(), QStringLiteral("tvshows/network:") + studio);
+            subtabs->activeList()->setSortBy(QStringLiteral("PlayCount"));
+        } // the pending write goes out with the controller
+        QFile file(browseFile());
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        const QByteArray stored = file.readAll();
+        file.close();
+        QVERIFY(stored.contains("movies/favorites\""));
+        QVERIFY(stored.contains(QByteArray("movies/favorites:").append(kMoviesB.toLatin1())));
+        QVERIFY(stored.contains("movies/collections"));
+        QVERIFY(stored.contains("tvshows/network:"));
+        // Names of the server are never stored
+        QVERIFY(!stored.contains("Library "));
+
+        auto again = makeController();
+        again->setSubtabsEnabled(QStringLiteral("movies"),
+                                 {QStringLiteral("favorites"), QStringLiteral("collections")});
+        QVERIFY(signInWithLibraries(*again, server, 3));
+        auto *subtabs = again->subtabs();
+        QVERIFY(again->openType(QStringLiteral("movies"), QStringLiteral("*")));
+        QVERIFY(subtabs->select(QStringLiteral("favorites")));
+        QCOMPARE(subtabs->activeList()->sortBy(), QStringLiteral("Runtime"));
+        QCOMPARE(subtabs->activeList()->viewMode(), QStringLiteral("list"));
+        QCOMPARE(subtabs->activeList()->filterState().played, Kinefin::PlayedState::Unplayed);
+        QVERIFY(again->openType(QStringLiteral("movies"), kMoviesB));
+        QCOMPARE(subtabs->activeList()->sortBy(), QStringLiteral("PremiereDate"));
+        QVERIFY(subtabs->select(QStringLiteral("collections")));
+        QCOMPARE(subtabs->activeList()->sortBy(), QStringLiteral("CommunityRating"));
+        // The main list of this library has the view of its own key, which nothing above touched
+        QCOMPARE(again->movies()->sortBy(), QStringLiteral("SortName"));
+        QVERIFY(again->openType(QStringLiteral("movies"), QStringLiteral("*")));
+        QCOMPARE(again->movies()->sortBy(), QStringLiteral("DateCreated"));
     }
 
     void typeLibrariesFollowViews()
@@ -892,12 +1214,379 @@ class TestConnectionController : public QObject {
             auto controller = makeController();
             QVERIFY(signInWithLibraries(*controller, server, 1));
             QVERIFY(controller->openLibrary(boxsets));
-            controller->library()->setSortKey(Kinefin::LibraryItemsModel::Runtime);
+            // A collection offers no runtime order: the date added is one of its five
+            controller->library()->setSortKey(Kinefin::LibraryItemsModel::DateAdded);
         }
         auto again = makeController();
         QVERIFY(signInWithLibraries(*again, server, 1));
         QVERIFY(again->openLibrary(boxsets));
-        QCOMPARE(again->library()->sortKey(), Kinefin::LibraryItemsModel::Runtime);
+        QCOMPARE(again->library()->sortKey(), Kinefin::LibraryItemsModel::DateAdded);
+    }
+
+    void everyViewFieldSurvivesARestart()
+    {
+        using Model = Kinefin::LibraryItemsModel;
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        server.generatedItemTotal = 5;
+        server.viewsRawBody = twoMovieLibrariesBody();
+        const Model::ViewState movieView = richMovieView();
+        const Model::ViewState seriesView = richSeriesView();
+        {
+            auto controller = makeController();
+            QVERIFY(signInWithLibraries(*controller, server, 3));
+            QVERIFY(controller->openType(QStringLiteral("movies"), kMoviesB));
+            QVERIFY(facetsLoaded(controller->movies()));
+            applyView(controller->movies(), movieView);
+            QVERIFY(controller->movies()->viewState() == movieView);
+            QVERIFY(controller->openType(QStringLiteral("tvshows")));
+            QVERIFY(facetsLoaded(controller->shows()));
+            applyView(controller->shows(), seriesView);
+            QVERIFY(controller->shows()->viewState() == seriesView);
+        }
+        // The file keeps digests of the tags and ratings, never their text
+        const QByteArray bytes = browseBytes();
+        for (const char *text : {"restored-master", "director-cut", "PG-13"})
+            QVERIFY2(!bytes.contains(text), text);
+        for (const char *text : {"restored-master", "director-cut", "PG-13", "R"})
+            QVERIFY2(bytes.contains(digestOf(text).toUtf8()), text);
+
+        auto again = makeController();
+        QVERIFY(signInWithLibraries(*again, server, 3));
+        // Requests the ended session still had in flight reach the server late: count from here
+        QTest::qWait(100);
+        const int before = int(server.itemsRoutes.size());
+        QSignalSpy edits(again->movies(), &Model::viewStateEdited);
+        QVERIFY(again->openType(QStringLiteral("movies")));
+        QCOMPARE(again->movies()->libraryId(), kMoviesB);
+        // The tag and the rating come back as texts once the facets have loaded
+        QTRY_VERIFY(!again->movies()->resolvingFacets());
+        QVERIFY(again->movies()->viewState() == movieView);
+        QTRY_COMPARE(again->movies()->status(), Model::Ready);
+        QCOMPARE(edits.size(), 0);
+        // The one request of the view carries all of it
+        QCOMPARE(int(server.itemsRoutes.size()), before + 1);
+        const QByteArray route = server.itemsRoutes.constLast();
+        QCOMPARE(wire(route, "tags"), QStringLiteral("restored-master"));
+        QCOMPARE(wire(route, "officialRatings"), QStringLiteral("PG-13"));
+        QCOMPARE(wire(route, "years"), QStringLiteral("2019,2024"));
+        QCOMPARE(wire(route, "genreIds"), kSciFi);
+        QCOMPARE(wire(route, "videoTypes"), QStringLiteral("BluRay,Dvd"));
+        QCOMPARE(wire(route, "sortBy"), QStringLiteral("Runtime,SortName"));
+        QCOMPARE(wire(route, "sortOrder"), QStringLiteral("Descending"));
+
+        QVERIFY(again->openType(QStringLiteral("tvshows")));
+        QTRY_VERIFY(!again->shows()->resolvingFacets());
+        QVERIFY(again->shows()->viewState() == seriesView);
+        // Another scope of the same type has its own, untouched view
+        QVERIFY(again->openType(QStringLiteral("movies"), kMoviesA));
+        QVERIFY(again->movies()->viewState() == Model::ViewState());
+    }
+
+    void editsOfTheViewOptionsAreSavedPerScope()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        server.generatedItemTotal = 5;
+        server.viewsRawBody = twoMovieLibrariesBody();
+        {
+            auto controller = makeController();
+            QVERIFY(signInWithLibraries(*controller, server, 3));
+            QVERIFY(controller->openType(QStringLiteral("movies"), kMoviesB));
+            controller->movies()->setViewMode(QStringLiteral("list"));
+            controller->movies()->setImageType(QStringLiteral("Disc"));
+            controller->movies()->setShowYear(false);
+            QVERIFY(controller->openType(QStringLiteral("movies"), kMoviesA));
+            controller->movies()->setImageType(QStringLiteral("Logo"));
+            controller->movies()->setCardLayout(false);
+        }
+        auto again = makeController();
+        QVERIFY(signInWithLibraries(*again, server, 3));
+        QVERIFY(again->openType(QStringLiteral("movies"), kMoviesB));
+        QCOMPARE(again->movies()->viewMode(), QStringLiteral("list"));
+        QCOMPARE(again->movies()->imageType(), QStringLiteral("Disc"));
+        QVERIFY(!again->movies()->showYear());
+        QVERIFY(again->movies()->showTitle());
+        QVERIFY(again->movies()->cardLayout());
+        QVERIFY(again->openType(QStringLiteral("movies"), kMoviesA));
+        QCOMPARE(again->movies()->viewMode(), QStringLiteral("grid"));
+        QCOMPARE(again->movies()->imageType(), QStringLiteral("Logo"));
+        QVERIFY(again->movies()->showYear());
+        QVERIFY(!again->movies()->cardLayout());
+    }
+
+    void savedTagsAndRatingsWaitForTheFacetsAfterARestart()
+    {
+        using Model = Kinefin::LibraryItemsModel;
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        server.generatedItemTotal = 5;
+        {
+            auto controller = makeController();
+            QVERIFY(signInWithLibraries(*controller, server, 3));
+            QVERIFY(controller->openType(QStringLiteral("movies")));
+            QVERIFY(facetsLoaded(controller->movies()));
+            Kinefin::LibraryFilterState filters;
+            filters.tags = {QStringLiteral("restored-master")};
+            filters.officialRatings = {QStringLiteral("PG-13")};
+            controller->movies()->setFilterState(filters);
+        }
+        server.listingStatus.insert(QStringLiteral("Filters"), 500);
+        {
+            auto again = makeController();
+            QVERIFY(signInWithLibraries(*again, server, 3));
+            const int before = int(server.itemsRoutes.size());
+            QVERIFY(again->openType(QStringLiteral("movies")));
+            QTRY_COMPARE(again->movies()->filterOptions()->status(),
+                         Kinefin::FilterOptionsModel::Failed);
+            // The facet that names the tag is missing: nothing wider than the saved view is sent, and the view offers a retry
+            QCOMPARE(again->movies()->status(), Model::Failed);
+            QVERIFY(again->movies()->resolvingFacets());
+            QTest::qWait(100);
+            QCOMPARE(int(server.itemsRoutes.size()), before);
+            // An edit made meanwhile keeps both saved selections
+            again->movies()->setSortBy(QStringLiteral("DateCreated"));
+            QCOMPARE(again->movies()->viewState().pendingTagHashes,
+                     QStringList({digestOf("restored-master")}));
+            // The legacy facets did load: the rating is a text already, only the tag still waits, and the rating's digest stays saved
+            QVERIFY(again->movies()->viewState().pendingRatingHashes.isEmpty());
+            QCOMPARE(again->movies()->filterState().officialRatings,
+                     QStringList({QStringLiteral("PG-13")}));
+            server.listingStatus.clear();
+            again->movies()->retry();
+            QTRY_COMPARE(again->movies()->status(), Model::Ready);
+            QCOMPARE(int(server.itemsRoutes.size()), before + 1);
+            QCOMPARE(wire(server.itemsRoutes.constLast(), "tags"),
+                     QStringLiteral("restored-master"));
+            QCOMPARE(wire(server.itemsRoutes.constLast(), "officialRatings"),
+                     QStringLiteral("PG-13"));
+            QCOMPARE(wire(server.itemsRoutes.constLast(), "sortBy"),
+                     QStringLiteral("DateCreated,SortName"));
+        }
+        // What was saved while the facets were missing still names the tag and the rating
+        const QByteArray bytes = browseBytes();
+        QVERIFY(bytes.contains(digestOf("restored-master").toUtf8()));
+        QVERIFY(bytes.contains(digestOf("PG-13").toUtf8()));
+        QVERIFY(!bytes.contains("restored-master"));
+        auto third = makeController();
+        QVERIFY(signInWithLibraries(*third, server, 3));
+        QVERIFY(third->openType(QStringLiteral("movies")));
+        QTRY_VERIFY(!third->movies()->resolvingFacets());
+        QCOMPARE(third->movies()->sortBy(), QStringLiteral("DateCreated"));
+        QCOMPARE(third->movies()->filterState().tags,
+                 QStringList({QStringLiteral("restored-master")}));
+        QCOMPARE(third->movies()->filterState().officialRatings,
+                 QStringList({QStringLiteral("PG-13")}));
+    }
+
+    void aRenamedTagIsDroppedAfterARestartAndTheFileIsLeftAlone()
+    {
+        using Model = Kinefin::LibraryItemsModel;
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        server.generatedItemTotal = 5;
+        {
+            auto controller = makeController();
+            QVERIFY(signInWithLibraries(*controller, server, 3));
+            QVERIFY(controller->openType(QStringLiteral("movies")));
+            QVERIFY(facetsLoaded(controller->movies()));
+            Kinefin::LibraryFilterState filters;
+            filters.tags = {QStringLiteral("restored-master"), QStringLiteral("black-and-white")};
+            controller->movies()->setFilterState(filters);
+        }
+        const QByteArray before = browseBytes();
+        QVERIFY(!before.isEmpty());
+        // The server renamed one tag
+        server.listingRawBody.insert(
+            QStringLiteral("Filters"),
+            QByteArrayLiteral("{\"Genres\":[],\"Tags\":[\"black-and-white\","
+                              "\"restored-print\"]}"));
+        {
+            auto again = makeController();
+            QVERIFY(signInWithLibraries(*again, server, 3));
+            // Requests the ended session still had in flight reach the server late: count from here
+            QTest::qWait(100);
+            const int routesBefore = int(server.itemsRoutes.size());
+            QSignalSpy edits(again->movies(), &Model::viewStateEdited);
+            QVERIFY(again->openType(QStringLiteral("movies")));
+            QTRY_VERIFY(!again->movies()->resolvingFacets());
+            QCOMPARE(again->movies()->filterState().tags,
+                     QStringList({QStringLiteral("black-and-white")}));
+            QTRY_COMPARE(again->movies()->status(), Model::Ready);
+            QCOMPARE(int(server.itemsRoutes.size()), routesBefore + 1);
+            QCOMPARE(wire(server.itemsRoutes.constLast(), "tags"),
+                     QStringLiteral("black-and-white"));
+            QCOMPARE(edits.size(), 0);
+        }
+        QCOMPARE(browseBytes(), before);
+    }
+
+    void aMissingLegacyEndpointDropsTheSavedRatingAfterARestart()
+    {
+        using Model = Kinefin::LibraryItemsModel;
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        server.generatedItemTotal = 5;
+        {
+            auto controller = makeController();
+            QVERIFY(signInWithLibraries(*controller, server, 3));
+            QVERIFY(controller->openType(QStringLiteral("movies")));
+            QVERIFY(facetsLoaded(controller->movies()));
+            Kinefin::LibraryFilterState filters;
+            filters.tags = {QStringLiteral("restored-master")};
+            filters.officialRatings = {QStringLiteral("PG-13")};
+            controller->movies()->setFilterState(filters);
+        }
+        server.listingStatus.insert(QStringLiteral("FiltersLegacy"), 404);
+        auto again = makeController();
+        QVERIFY(signInWithLibraries(*again, server, 3));
+        // Requests the ended session still had in flight reach the server late: count from here
+        QTest::qWait(100);
+        const int before = int(server.itemsRoutes.size());
+        QVERIFY(again->openType(QStringLiteral("movies")));
+        // The view is not blocked for good by a rating nothing can name
+        QTRY_COMPARE(again->movies()->status(), Model::Ready);
+        QVERIFY(!again->movies()->resolvingFacets());
+        QVERIFY(again->movies()->filterState().officialRatings.isEmpty());
+        QCOMPARE(int(server.itemsRoutes.size()), before + 1);
+        QCOMPARE(wire(server.itemsRoutes.constLast(), "tags"), QStringLiteral("restored-master"));
+        QVERIFY(wire(server.itemsRoutes.constLast(), "officialRatings").isEmpty());
+    }
+
+    void aVersionOneFileMigratesThroughTheController()
+    {
+        using Model = Kinefin::LibraryItemsModel;
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        server.generatedItemTotal = 5;
+        server.viewsRawBody = twoMovieLibrariesBody();
+        const QJsonObject view{{QStringLiteral("sort"), QStringLiteral("DateAdded")},
+                               {QStringLiteral("descending"), true},
+                               {QStringLiteral("filter"), QStringLiteral("Unplayed")},
+                               {QStringLiteral("genreIds"), QJsonArray{kSciFi}},
+                               {QStringLiteral("seq"), 1}};
+        const QJsonObject user{
+            {QStringLiteral("selection"), QJsonObject{{QStringLiteral("movies"), kMoviesB}}},
+            {QStringLiteral("views"),
+             QJsonObject{{QString(QStringLiteral("movies:") + kMoviesB), view}}}};
+        const QJsonObject root{
+            {QStringLiteral("version"), 1},
+            {QStringLiteral("nextSeq"), 2},
+            {QStringLiteral("servers"),
+             QJsonObject{{kServerId, QJsonObject{{QStringLiteral("users"),
+                                                  QJsonObject{{kFixtureUserId, user}}}}}}}};
+        QVERIFY(QDir().mkpath(QFileInfo(browseFile()).absolutePath()));
+        QFile file(browseFile());
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write(QJsonDocument(root).toJson(QJsonDocument::Compact));
+        file.close();
+        {
+            auto controller = makeController();
+            QVERIFY(signInWithLibraries(*controller, server, 3));
+            QVERIFY(controller->openType(QStringLiteral("movies")));
+            QCOMPARE(controller->movies()->libraryId(), kMoviesB);
+            QCOMPARE(controller->movies()->sortBy(), QStringLiteral("DateCreated"));
+            QVERIFY(controller->movies()->descending());
+            QCOMPARE(controller->movies()->filter(), Model::Unplayed);
+            QCOMPARE(controller->movies()->genreIds(), QStringList({kSciFi}));
+            // The new fields start from their defaults
+            QCOMPARE(controller->movies()->viewMode(), QStringLiteral("grid"));
+            QCOMPARE(controller->movies()->imageType(), QStringLiteral("Primary"));
+            QVERIFY(controller->movies()->showTitle() && controller->movies()->showYear()
+                    && controller->movies()->cardLayout());
+            QTRY_COMPARE(controller->movies()->genreIds(), QStringList({kSciFi}));
+            // The next save writes version 2 and keeps what was there
+            controller->movies()->setViewMode(QStringLiteral("list"));
+        }
+        const QJsonObject migrated = QJsonDocument::fromJson(browseBytes()).object();
+        QCOMPARE(migrated.value(QStringLiteral("version")).toInt(), 2);
+        auto again = makeController();
+        QVERIFY(signInWithLibraries(*again, server, 3));
+        QVERIFY(again->openType(QStringLiteral("movies")));
+        QCOMPARE(again->movies()->sortBy(), QStringLiteral("DateCreated"));
+        QCOMPARE(again->movies()->filter(), Model::Unplayed);
+        QCOMPARE(again->movies()->genreIds(), QStringList({kSciFi}));
+        QCOMPARE(again->movies()->viewMode(), QStringLiteral("list"));
+    }
+
+    void oneOffKeepsTheStoredViewOptionsAndFilters()
+    {
+        using Model = Kinefin::LibraryItemsModel;
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        server.generatedItemTotal = 5;
+        {
+            auto controller = makeController();
+            QVERIFY(signInWithLibraries(*controller, server, 3));
+            QVERIFY(controller->openType(QStringLiteral("movies")));
+            controller->movies()->setSortKey(Model::Runtime);
+            controller->movies()->setFilter(Model::Unplayed);
+            controller->movies()->setViewMode(QStringLiteral("list"));
+            controller->movies()->setShowYear(false);
+            QVERIFY(controller->openRecentlyAdded(QStringLiteral("movies")));
+            QCOMPARE(controller->movies()->sortKey(), Model::DateAdded);
+            QCOMPARE(controller->movies()->filter(), Model::All);
+            QCOMPARE(controller->movies()->viewMode(), QStringLiteral("list"));
+            QVERIFY(!controller->movies()->showYear());
+            // Changing how it is shown is not a choice of order or filters: the stored ones stay
+            controller->movies()->setViewMode(QStringLiteral("grid"));
+        }
+        auto again = makeController();
+        QVERIFY(signInWithLibraries(*again, server, 3));
+        QVERIFY(again->openType(QStringLiteral("movies")));
+        QCOMPARE(again->movies()->sortKey(), Model::Runtime);
+        QCOMPARE(again->movies()->filter(), Model::Unplayed);
+        QCOMPARE(again->movies()->viewMode(), QStringLiteral("grid"));
+        QVERIFY(!again->movies()->showYear());
+    }
+
+    void scopeKeysCoverTheSubtabs()
+    {
+        using Controller = Kinefin::ConnectionController;
+        const QString dashed = QStringLiteral("B2B2B2B2-B2B2-B2B2-B2B2-B2B2B2B2B2B2");
+        const QString id = kMoviesB;
+        const QString movies = QStringLiteral("movies");
+        const QString shows = QStringLiteral("tvshows");
+        // The tab scopes keep the keys they always had
+        QCOMPARE(Controller::scopeKey(movies, {}, {}), QStringLiteral("movies"));
+        QCOMPARE(Controller::scopeKey(shows, {}, dashed), QString(QStringLiteral("tvshows:") + id));
+        QCOMPARE(Controller::scopeKey(QStringLiteral("boxsets"), {}, id),
+                 QString(QStringLiteral("boxsets:") + id));
+        QCOMPARE(Controller::scopeKey(movies, QStringLiteral("favorites"), {}),
+                 QStringLiteral("movies/favorites"));
+        QCOMPARE(Controller::scopeKey(movies, QStringLiteral("favorites"), dashed),
+                 QString(QStringLiteral("movies/favorites:") + id));
+        // Collections belong to no one library
+        QCOMPARE(Controller::scopeKey(movies, QStringLiteral("collections"), {}),
+                 QStringLiteral("movies/collections"));
+        QCOMPARE(Controller::scopeKey(movies, QStringLiteral("collections"), id),
+                 QStringLiteral("movies/collections"));
+        QCOMPARE(Controller::scopeKey(shows, QStringLiteral("episodes"), {}),
+                 QStringLiteral("tvshows/episodes"));
+        QCOMPARE(Controller::scopeKey(shows, QStringLiteral("episodes"), id),
+                 QString(QStringLiteral("tvshows/episodes:") + id));
+        QCOMPARE(Controller::scopeKey(shows, QStringLiteral("network"), dashed),
+                 QString(QStringLiteral("tvshows/network:") + id));
+        // A network needs its studio, and a sub-tab belongs to its own type
+        QVERIFY(Controller::scopeKey(shows, QStringLiteral("network"), {}).isEmpty());
+        QVERIFY(Controller::scopeKey(shows, QStringLiteral("favorites"), {}).isEmpty());
+        QVERIFY(Controller::scopeKey(movies, QStringLiteral("episodes"), {}).isEmpty());
+        QVERIFY(Controller::scopeKey(movies, QStringLiteral("unknown"), {}).isEmpty());
+
+        // The store accepts every one of them
+        Kinefin::BrowseStateStore store;
+        Kinefin::BrowseStateStore::ViewState state;
+        state.viewMode = QStringLiteral("list");
+        const QList<QString> keys{Controller::scopeKey(movies, QStringLiteral("favorites"), {}),
+                                  Controller::scopeKey(movies, QStringLiteral("favorites"), id),
+                                  Controller::scopeKey(movies, QStringLiteral("collections"), {}),
+                                  Controller::scopeKey(shows, QStringLiteral("episodes"), {}),
+                                  Controller::scopeKey(shows, QStringLiteral("episodes"), id),
+                                  Controller::scopeKey(shows, QStringLiteral("network"), id)};
+        for (const QString &key : keys) {
+            store.setView(kServerId, kFixtureUserId, key, state);
+            QVERIFY2(store.view(kServerId, kFixtureUserId, key).has_value(), qPrintable(key));
+        }
     }
 
     void aLibraryPageFailureKeepsErrorTextEmpty()
@@ -1366,6 +2055,8 @@ class TestConnectionController : public QObject {
         QVERIFY(server.listen());
         addTwoUsers(server);
         QVERIFY(saveBothUsers(server));
+        // The sign-ins of the first controller each read the user's configuration: let the last one reach the server before counting
+        QTest::qWait(300);
         const int logins = server.successfulLogins;
         const int checks = server.usersMeRequests;
         auto controller = makeController();
@@ -1374,9 +2065,10 @@ class TestConnectionController : public QObject {
         controller->chooseUser(kAnna);
         QCOMPARE(controller->state(), ConnectionController::Connecting);
         QTRY_VERIFY(controller->state() == ConnectionController::Authenticated);
-        QTRY_COMPARE(server.usersMeRequests, checks + 1);
+        // One check of the session and one read of the user's configuration for Home
+        QTRY_COMPARE(server.usersMeRequests, checks + 2);
         QTest::qWait(100);
-        QCOMPARE(server.usersMeRequests, checks + 1); // exactly one check of the session
+        QCOMPARE(server.usersMeRequests, checks + 2);
         QCOMPARE(server.successfulLogins, logins);
         QVERIFY(controller->errorText().isEmpty());
         QTRY_COMPARE(controller->libraries().size(), 3);
@@ -1406,7 +2098,8 @@ class TestConnectionController : public QObject {
         QCOMPARE(controller->users().size(), 2);
         QVERIFY(!userEntry(*controller, kAnna).value(QStringLiteral("remembered")).toBool());
         QVERIFY(userEntry(*controller, kBen).value(QStringLiteral("remembered")).toBool());
-        // The password signs the user back in
+        // The password signs the user back in; a real server issues a new token, the fake reissues the user's fixed one, so the revocation ends here (the configuration read after sign-in would meet it)
+        server.deniedUsersMeTokens.clear();
         controller->login(QStringLiteral("Anna"), QStringLiteral("fixture-password"));
         QTRY_VERIFY(controller->state() == ConnectionController::Authenticated);
         QVERIFY(controller->loginUserName().isEmpty());
@@ -1835,6 +2528,161 @@ class TestConnectionController : public QObject {
         QTRY_COMPARE(controller->publicUsers().size(), 2);
         QCOMPARE(controller->publicUsers().at(1).toMap().value(QStringLiteral("name")).toString(),
                  QStringLiteral("Cl eo Q"));
+    }
+
+    // Home shows the tiles the configuration orders and does not hide, and Recently Added rows for the libraries it does not exclude; `libraries` and the Movies tab stay whole, and an id that names no library is ignored
+    void homeProjectsTheConfigurationOntoTilesAndRows()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        server.viewsRawBody = twoMovieLibrariesBody();
+        const QString unknown = QStringLiteral("f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0");
+        server.usersMeRawBody = meBody(
+            kFixtureUserId,
+            QJsonObject{{QStringLiteral("OrderedViews"), QJsonArray{kShows, unknown, kMoviesB}},
+                        {QStringLiteral("MyMediaExcludes"), QJsonArray{kMoviesB}},
+                        {QStringLiteral("LatestItemsExcludes"), QJsonArray{kMoviesA, unknown}},
+                        {QStringLiteral("HidePlayedInLatest"), true}});
+        auto controller = makeController();
+        QVERIFY(signInFixtureUser(*controller, server));
+        QTRY_COMPARE(controller->homeLibraries().size(), 2);
+        QCOMPARE(idsOf(controller->libraries()), (QStringList{kMoviesA, kMoviesB, kShows}));
+        // The listed order first (the hidden one dropped), the library the order does not name after them
+        QCOMPARE(idsOf(controller->homeLibraries()), (QStringList{kShows, kMoviesA}));
+        // Server order, only the Recently Added rows lose a library
+        QCOMPARE(idsOf(controller->recentLibraries()), (QStringList{kMoviesB, kShows}));
+        QCOMPARE(idsOf(controller->movieLibraries()), (QStringList{kMoviesA, kMoviesB}));
+        QTRY_COMPARE(recentRowIds(controller->homeRows()), (QStringList{kMoviesB, kShows}));
+        QTRY_COMPARE(server.listingRoutes.value(QStringLiteral("Latest")).size(), 2);
+        QVERIFY(latestAsksUnplayedOnly(server.listingRoutes.value(QStringLiteral("Latest"))));
+
+        // The libraries change: the projection follows them
+        server.viewsRawBody =
+            viewsBody({{kMoviesA, QStringLiteral("movies")}, {kShows, QStringLiteral("tvshows")}});
+        controller->reloadLibraries();
+        QTRY_COMPARE(idsOf(controller->libraries()), (QStringList{kMoviesA, kShows}));
+        QCOMPARE(idsOf(controller->homeLibraries()), (QStringList{kShows, kMoviesA}));
+        QCOMPARE(idsOf(controller->recentLibraries()), (QStringList{kShows}));
+        QTRY_COMPARE(recentRowIds(controller->homeRows()), (QStringList{kShows}));
+    }
+
+    void homeAsksForAllItemsWhenPlayedOnesAreKept()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        server.viewsRawBody = twoMovieLibrariesBody();
+        server.usersMeRawBody =
+            meBody(kFixtureUserId, QJsonObject{{QStringLiteral("HidePlayedInLatest"), false}});
+        auto controller = makeController();
+        QVERIFY(signInFixtureUser(*controller, server));
+        QTRY_COMPARE(server.listingRoutes.value(QStringLiteral("Latest")).size(), 3);
+        QVERIFY(latestAsksNoPlayedFilter(server.listingRoutes.value(QStringLiteral("Latest"))));
+        QCOMPARE(controller->homeLibraries().size(), 3);
+        QCOMPARE(controller->recentLibraries().size(), 3);
+    }
+
+    // No error banner, the unprojected Home, and the next refresh tries the configuration again
+    void homeFallsBackWhenTheConfigurationCannotBeLoaded()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        server.viewsRawBody = twoMovieLibrariesBody();
+        server.usersMeStatus = 500;
+        auto controller = makeController();
+        QVERIFY(signInFixtureUser(*controller, server));
+        QTRY_COMPARE(controller->homeLibraries().size(), 3);
+        QCOMPARE(idsOf(controller->homeLibraries()), idsOf(controller->libraries()));
+        QCOMPARE(idsOf(controller->recentLibraries()), idsOf(controller->libraries()));
+        QCOMPARE(controller->userConfiguration()->state(), Kinefin::UserConfigurationModel::Failed);
+        QTRY_COMPARE(server.listingRoutes.value(QStringLiteral("Latest")).size(), 3);
+        QVERIFY(latestAsksNoPlayedFilter(server.listingRoutes.value(QStringLiteral("Latest"))));
+        QVERIFY(controller->errorText().isEmpty());
+
+        server.usersMeStatus = 0;
+        server.usersMeRawBody =
+            meBody(kFixtureUserId,
+                   QJsonObject{{QStringLiteral("MyMediaExcludes"), QJsonArray{kMoviesA}},
+                               {QStringLiteral("LatestItemsExcludes"), QJsonArray{kMoviesB}}});
+        controller->reloadLibraries();
+        QTRY_COMPARE(idsOf(controller->homeLibraries()), (QStringList{kMoviesB, kShows}));
+        QCOMPARE(idsOf(controller->recentLibraries()), (QStringList{kMoviesA, kShows}));
+        QTRY_COMPARE(recentRowIds(controller->homeRows()), (QStringList{kMoviesA, kShows}));
+        QTest::qWait(200);
+        QVERIFY(server.lastListingRoute.value(QStringLiteral("Latest")).contains("isPlayed=false"));
+        QVERIFY(controller->errorText().isEmpty());
+    }
+
+    // Nothing of the previous user's configuration survives a switch, on the Home side or in the editor
+    void switchingUserClearsTheHomeProjection()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        addTwoUsers(server);
+        server.viewsRawBody = twoMovieLibrariesBody();
+        server.onUsersMe = [&server] {
+            if (server.lastUsersMeAuth.contains("annatoken"))
+                server.usersMeRawBody = meBody(
+                    kAnna,
+                    QJsonObject{{QStringLiteral("MyMediaExcludes"), QJsonArray{kMoviesA}},
+                                {QStringLiteral("LatestItemsExcludes"), QJsonArray{kShows}}});
+            else
+                server.usersMeRawBody = meBody(kBen, QJsonObject());
+        };
+        auto controller = makeController();
+        controller->connectTo(address(server));
+        QVERIFY(waitForState(*controller, ConnectionController::NeedsLogin));
+        QVERIFY(signInUser(*controller, QStringLiteral("Anna"), 1));
+        QTRY_COMPARE(controller->homeLibraries().size(), 2);
+        QCOMPARE(idsOf(controller->recentLibraries()), (QStringList{kMoviesA, kMoviesB}));
+        QTRY_COMPARE(recentRowIds(controller->homeRows()), (QStringList{kMoviesA, kMoviesB}));
+
+        controller->switchUser();
+        QVERIFY(controller->homeLibraries().isEmpty());
+        QVERIFY(controller->recentLibraries().isEmpty());
+        QCOMPARE(controller->homeRows()->rowCount(), 0);
+        QVERIFY(!controller->userConfiguration()->loaded());
+        QVERIFY(controller->userConfiguration()->myMediaExcludes().isEmpty());
+
+        controller->addUser();
+        QVERIFY(signInUser(*controller, QStringLiteral("Ben"), 2));
+        QTRY_COMPARE(controller->homeLibraries().size(), 3);
+        QCOMPARE(idsOf(controller->homeLibraries()), idsOf(controller->libraries()));
+        QCOMPARE(idsOf(controller->recentLibraries()), idsOf(controller->libraries()));
+        QVERIFY(controller->userConfiguration()->myMediaExcludes().isEmpty());
+        QTRY_COMPARE(recentRowIds(controller->homeRows()),
+                     (QStringList{kMoviesA, kMoviesB, kShows}));
+    }
+
+    // A save the editor verified reaches Home without a reload of the libraries
+    void aVerifiedSaveUpdatesTheHomeProjection()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        server.viewsRawBody = twoMovieLibrariesBody();
+        QJsonObject remote;
+        server.onUsersMe = [&] { server.usersMeRawBody = meBody(kFixtureUserId, remote); };
+        server.onUserConfigurationPost = [&](const QByteArray &body) {
+            remote = QJsonDocument::fromJson(body).object();
+        };
+        auto controller = makeController();
+        QVERIFY(signInFixtureUser(*controller, server));
+        QTRY_COMPARE(controller->homeLibraries().size(), 3);
+        QTRY_COMPARE(server.listingRoutes.value(QStringLiteral("Latest")).size(), 3);
+        QVERIFY(latestAsksUnplayedOnly(server.listingRoutes.value(QStringLiteral("Latest"))));
+        Kinefin::UserConfigurationModel *prefs = controller->userConfiguration();
+        QTRY_COMPARE(prefs->state(), Kinefin::UserConfigurationModel::Ready);
+
+        prefs->setMyMediaExcluded(kMoviesA, true);
+        prefs->setLatestExcluded(kShows, true);
+        prefs->setHidePlayedInLatest(false);
+        QSignalSpy saved(prefs, &Kinefin::UserConfigurationModel::saved);
+        prefs->save();
+        QTRY_COMPARE(saved.size(), 1);
+        QCOMPARE(idsOf(controller->homeLibraries()), (QStringList{kMoviesB, kShows}));
+        QCOMPARE(idsOf(controller->recentLibraries()), (QStringList{kMoviesA, kMoviesB}));
+        QTRY_COMPARE(recentRowIds(controller->homeRows()), (QStringList{kMoviesA, kMoviesB}));
+        QTRY_COMPARE(server.listingRoutes.value(QStringLiteral("Latest")).size(), 5);
+        QVERIFY(latestAsksNoPlayedFilter(server.listingRoutes.value(QStringLiteral("Latest")), 3));
     }
 
   private:

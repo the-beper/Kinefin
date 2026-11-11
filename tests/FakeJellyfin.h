@@ -50,6 +50,13 @@ class FakeJellyfin {
         listingFixtures.insert(QStringLiteral("Similar"), QStringLiteral("items_similar"));
         listingFixtures.insert(QStringLiteral("Genres"), QStringLiteral("genres_page"));
         listingFixtures.insert(QStringLiteral("Filters"), QStringLiteral("items_filters2"));
+        listingFixtures.insert(QStringLiteral("FiltersLegacy"),
+                               QStringLiteral("items_filters_legacy"));
+        listingFixtures.insert(QStringLiteral("MovieRecommendations"),
+                               QStringLiteral("movies_recommendations"));
+        listingFixtures.insert(QStringLiteral("Suggestions"), QStringLiteral("items_page"));
+        listingFixtures.insert(QStringLiteral("Upcoming"), QStringLiteral("shows_next_up"));
+        listingFixtures.insert(QStringLiteral("Studios"), QStringLiteral("studios_page"));
         listingFixtures.insert(QStringLiteral("Sessions"), QStringLiteral("sessions_list"));
         QObject::connect(&m_server, &QTcpServer::newConnection, &m_server, [this] {
             while (QTcpSocket *socket = m_server.nextPendingConnection()) {
@@ -218,6 +225,29 @@ class FakeJellyfin {
     int usersMeRequests = 0;
     QByteArray lastUsersMeAuth;
     bool denyUsersMe = false;
+    // GET /Users/Me: a status (non-zero) or a raw body replaces the generated user, after the deny switches
+    int usersMeStatus = 0;
+    QByteArray usersMeRawBody;
+    // The account preference routes: POST /Users/Configuration, GET /Localization/Cultures and GET /DisplayPreferences/usersettings. Every request to them is logged; `holdAccount` keeps the answers back until releaseHeld(); a status (non-zero) or a raw body replaces the default answer of a route
+    struct AccountCall {
+        QByteArray method;
+        QByteArray route;
+        QByteArray auth;
+        QByteArray contentType;
+        QByteArray body;
+    };
+    QList<AccountCall> accountCalls;
+    bool holdAccount = false;
+    int userConfigurationStatus = 204;
+    int culturesStatus = 0;
+    QByteArray culturesRawBody;
+    int displayPreferencesStatus = 0;
+    QByteArray displayPreferencesRawBody;
+    // Called before GET /Users/Me is answered (so a test can change usersMeRawBody per request) and with the body of a POST /Users/Configuration before its answer (so a test can store it, or end the session in the middle of the write)
+    std::function<void()> onUsersMe;
+    std::function<void(const QByteArray &)> onUserConfigurationPost;
+    // Every plain HTTP request in arrival order, method and route (the whole-client check that a route is never written to)
+    QList<QPair<QByteArray, QByteArray>> requestLog;
 
     // The listing routes (fetchItems and family). `holdFirstListings` holds that many next listing replies suppressed until releaseHeld(), `holdListings` holds every one of them, `denyListings` answers 401, `redirectListings` answers 302 off-host. The family (a key of the two last* hashes) is classified from the route fragment, so a test can assert the exact query the client sent. Fixture bodies come from `listingFixtures` (the ctor fills the defaults; a test may override a family)
     int holdFirstListings = 0;
@@ -240,6 +270,8 @@ class FakeJellyfin {
     // When >= 0 the Episodes family is generated from startIndex/limit, like generatedItemTotal does for Items: this is the TotalRecordCount
     int generatedEpisodeTotal = -1;
     QList<QByteArray> itemsRoutes; // every Items request in arrival order
+    // A test's own answer to an Items request, from its route: a status of 0 passes to the other answers
+    std::function<std::pair<int, QByteArray>(const QByteArray &route)> itemsResponder;
     // Items by lower-case id, each a JSON object: when not empty, an Items request with `ids=` answers the entries it finds (an empty envelope when none), whatever the listing fixture says
     QHash<QString, QByteArray> itemsById;
     // A search answers by the one type it asks for: `includeItemTypes` value -> fixture name. Only a request with a searchTerm is answered this way
@@ -291,6 +323,16 @@ class FakeJellyfin {
             return QStringLiteral("Genres");
         if (route.contains("/Filters2?"))
             return QStringLiteral("Filters");
+        if (route.contains("/Items/Filters?"))
+            return QStringLiteral("FiltersLegacy");
+        if (route.contains("/Movies/Recommendations?"))
+            return QStringLiteral("MovieRecommendations");
+        if (route.contains("/Items/Suggestions?"))
+            return QStringLiteral("Suggestions");
+        if (route.contains("/Shows/Upcoming?"))
+            return QStringLiteral("Upcoming");
+        if (route.contains("/Studios?"))
+            return QStringLiteral("Studios");
         if (route.endsWith("/Sessions") || route.contains("/Sessions?"))
             return QStringLiteral("Sessions");
         if (route.contains("/Items?"))
@@ -459,6 +501,7 @@ class FakeJellyfin {
         const QByteArray body = input.mid(bodyStart, contentLength);
         m_buffers.remove(socket);
         ++requestCount;
+        requestLog.append({method, route});
         if (upgradeRequest) {
             // Guard first so bytes arriving while the handshake is written can never leak back into the HTTP parser
             m_wsTaken.insert(socket, nullptr);
@@ -561,11 +604,17 @@ class FakeJellyfin {
         if (method == "GET" && route.endsWith("/Users/Me")) {
             ++usersMeRequests;
             lastUsersMeAuth = authorization;
+            if (onUsersMe)
+                onUsersMe();
             const qsizetype tokenAt = authorization.indexOf("Token=\"");
             const QByteArray token =
                 tokenAt < 0 ? QByteArray() : authorization.mid(tokenAt + 7).split('"').value(0);
             if (denyUsersMe || deniedUsersMeTokens.contains(token)) {
                 respond(socket, 401, {});
+            } else if (usersMeStatus != 0) {
+                respond(socket, usersMeStatus, {});
+            } else if (!usersMeRawBody.isEmpty()) {
+                respond(socket, 200, usersMeRawBody);
             } else if (!users.isEmpty()) {
                 const FakeUser *user = userByToken(token);
                 if (!user) {
@@ -627,6 +676,45 @@ class FakeJellyfin {
                 respond(socket, 404, {});
             return;
         }
+        if ((method == "POST" && route.endsWith("/Users/Configuration"))
+            || (method == "GET" && route.endsWith("/Localization/Cultures"))
+            || route.contains("/DisplayPreferences/")) {
+            accountCalls.append({method, route, authorization, contentType, body});
+            if (holdAccount) {
+                m_held.append(socket);
+                return;
+            }
+            if (method == "POST") {
+                if (onUserConfigurationPost)
+                    onUserConfigurationPost(body);
+                respond(socket, userConfigurationStatus, {});
+            } else if (route.contains("/Localization/Cultures")) {
+                if (culturesStatus != 0)
+                    respond(socket, culturesStatus, {});
+                else
+                    respond(socket, 200,
+                            culturesRawBody.isEmpty()
+                                ? QByteArrayLiteral(
+                                      "[{\"Name\":\"English\",\"DisplayName\":\"English\","
+                                      "\"TwoLetterISOLanguageName\":\"en\","
+                                      "\"ThreeLetterISOLanguageName\":\"eng\"},"
+                                      "{\"Name\":\"Italian\",\"DisplayName\":\"Italian\","
+                                      "\"TwoLetterISOLanguageName\":\"it\","
+                                      "\"ThreeLetterISOLanguageName\":\"ita\"}]")
+                                : culturesRawBody);
+            } else if (displayPreferencesStatus != 0) {
+                respond(socket, displayPreferencesStatus, {});
+            } else {
+                respond(socket, 200,
+                        displayPreferencesRawBody.isEmpty()
+                            ? QByteArrayLiteral(
+                                  "{\"Id\":\"usersettings\",\"Client\":\"emby\","
+                                  "\"CustomPrefs\":{\"homesection0\":\"smalllibrarytiles\","
+                                  "\"homesection1\":\"resume\"}}")
+                            : displayPreferencesRawBody);
+            }
+            return;
+        }
         // The listing routes classify by fragment; `listingFamily` keeps the order so the more specific fragments win (/Items/Latest before /Items, /Sessions before the POST-only playback routes never match a GET)
         const QString listingFamily = classifyListingRoute(route);
         if (method == "GET" && !listingFamily.isEmpty()) {
@@ -640,8 +728,14 @@ class FakeJellyfin {
                 m_held.append(socket);
                 return;
             }
+            const std::pair<int, QByteArray> custom =
+                listingFamily == QLatin1String("Items") && itemsResponder
+                    ? itemsResponder(route)
+                    : std::pair<int, QByteArray>{};
             if (listingStatus.contains(listingFamily)) {
                 respond(socket, listingStatus.value(listingFamily), {});
+            } else if (custom.first != 0) {
+                respond(socket, custom.first, custom.second);
             } else if (listingFamily == QLatin1String("Episodes") && generatedEpisodeTotal >= 0
                        && !denyListings && !redirectListings) {
                 respond(socket, 200, generatedEpisodesBody(route));

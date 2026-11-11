@@ -33,11 +33,15 @@ Kirigami.ApplicationWindow {
     readonly property var oneOffTabs: ({})
     // The Continue Watching pages alive: the list is closed when the last one goes, not by a page that outlives its successor
     property int resumePages: 0
+    // The Favorites pages alive, counted the same way: the scan stops when the last one goes, not by a page that outlives its successor
+    property int favoritesPages: 0
 
     property bool fullscreenSetting: settings.value("main", "fullscreen")
     property bool alwaysOnTopSetting: settings.value("main", "alwaysOnTop")
     property string fullscreenOutput: settings.value("main", "forceFSScreen")
     property bool newBadgeEnabled: settings.value("library", "newBadge")
+    // Which library sub-tabs are switched on, by setting id without the "tabs." prefix (e.g. "movies.favorites"); replaced as a whole on a change so bindings re-evaluate
+    property var subTabs: readSubTabs()
     readonly property bool wantsFullscreen: startupWindowMode === "fullscreen" || (startupWindowMode !== "windowed" && fullscreenSetting)
 
     width: 1000
@@ -74,6 +78,17 @@ Kirigami.ApplicationWindow {
                 if (index < 1 || window.pageStack.layers.depth > 1)
                     return;
                 const target = window.pageStack.get(index - 1);
+                const leaving = window.pageStack.get(index);
+                if (leaving?.hasUnsavedChanges) {
+                    // The column view moves back by itself: the page returns to the front before it asks
+                    Qt.callLater(() => {
+                        if (window.pageStack.get(index) !== leaving)
+                            return;
+                        window.pageStack.currentIndex = index;
+                        leaving.askBeforeLeaving(() => window.pageStack.goBack());
+                    });
+                    return;
+                }
                 Qt.callLater(() => {
                     if (window.pageStack.depth > 1 && window.pageStack.get(window.pageStack.depth - 1) !== target)
                         window.pageStack.pop(target);
@@ -158,6 +173,8 @@ Kirigami.ApplicationWindow {
         function onValueChanged(section, key) {
             if (section === "library") {
                 window.newBadgeEnabled = window.settings.value("library", "newBadge");
+                if (key.startsWith("tabs."))
+                    window.subTabs = window.readSubTabs();
                 return;
             }
             if (section !== "main")
@@ -172,6 +189,21 @@ Kirigami.ApplicationWindow {
             window.showPassiveNotification(i18n("The settings could not be saved: check the free space and the permissions of the profile folder. Changes last until Kinefin closes"));
         }
     }
+
+    function readSubTabs() {
+        const ids = ["movies.suggestions", "movies.favorites", "movies.collections", "movies.genres", "tv.suggestions", "tv.upcoming", "tv.genres", "tv.networks", "tv.episodes"];
+        const tabs = {};
+        for (const id of ids)
+            tabs[id] = settings.value("library", "tabs." + id);
+        return tabs;
+    }
+
+    // The sub-tabs the settings turn on go to the controller (ids without the prefix, e.g. "favorites"): the sub-tab bar of an open page follows without a restart
+    function applySubTabs() {
+        for (const [type, prefix] of [["movies", "movies."], ["tvshows", "tv."]])
+            connection.setSubtabsEnabled(type, Object.keys(subTabs).filter(id => id.startsWith(prefix) && subTabs[id]).map(id => id.slice(prefix.length)));
+    }
+    onSubTabsChanged: applySubTabs()
 
     // Full screen goes to the output named by "Force Full Screen Display" when that output exists
     function applyFullscreen() {
@@ -204,7 +236,12 @@ Kirigami.ApplicationWindow {
         }
     }
 
-    onClosing: {
+    onClosing: close => {
+        // Unsaved preferences ask first; the window closes again once they are settled
+        if (askBeforeLeaving(() => window.close())) {
+            close.accepted = false;
+            return;
+        }
         // A full-screen or maximized window has no geometry of its own to keep
         if (window.visibility === Window.Windowed)
             settings.setWindowGeometry(Qt.rect(x, y, width, height));
@@ -274,6 +311,25 @@ Kirigami.ApplicationWindow {
         return -1;
     }
 
+    // The page above the first one that holds changes the user has not saved (the user preferences), or null
+    function unsavedPage() {
+        for (let i = 1; i < pageStack.depth; ++i) {
+            const page = pageStack.get(i);
+            if (page?.hasUnsavedChanges)
+                return page;
+        }
+        return null;
+    }
+
+    // True when a page holds unsaved changes: it asks the user, and `again` runs once they are saved or discarded; the caller stops there. False, with nothing asked, when no page does
+    function askBeforeLeaving(again) {
+        const page = unsavedPage();
+        if (!page)
+            return false;
+        page.askBeforeLeaving(again);
+        return true;
+    }
+
     // Everything above the first page goes
     function popToBase() {
         const base = pageStack.get(0);
@@ -293,6 +349,9 @@ Kirigami.ApplicationWindow {
     // The header box takes the focus (the page's own field in Compact mode, where the box hides)
     function openSearch() {
         if (connection.state !== ConnectionController.Authenticated)
+            return;
+        // A search page already in the stack is brought back without dropping what lies below it
+        if ((isTypeTab(rootTab) || searchPageIndex() < 0) && askBeforeLeaving(() => openSearch()))
             return;
         if (isTypeTab(rootTab)) {
             // On a type tab the box searches that tab's own list: the pages above the tab give way, and no search page opens
@@ -425,7 +484,7 @@ Kirigami.ApplicationWindow {
     // A link that arrives while Home is already showing (a second launch) opens at once
     onRequestedItemIdChanged: openRequestedItem(pageStack.get(0))
 
-    // The section the page in front belongs to: the header marks it (a tab, the main menu button, the queue button); a page opened above a type tab belongs to that tab, and one opened from a collections tile to that library. Settings and About need no session, so they are marked whatever the connection is
+    // The section the page in front belongs to: the header marks it (a tab, the main menu button, the queue button); a page opened above a type tab belongs to that tab, and one opened from a collections tile to that library; the user preferences page and the Favorites page (with what opens above it) belong to no tab, and the header search is global there. Settings and About need no session, so they are marked whatever the connection is
     readonly property string currentSection: {
         switch (pageStack.currentItem?.objectName) {
         case "settingsPage":
@@ -446,8 +505,37 @@ Kirigami.ApplicationWindow {
             return "search";
         case "queuePage":
             return "queue";
+        case "userPreferencesPage":
+            return "userPreferences";
         }
+        // The Favorites page and what opens above it (a group, an item) belong to the star: no tab is marked
+        if (favoritesPageIndex() >= 0)
+            return "favorites";
         return rootTab !== "" ? rootTab : "home";
+    }
+
+    // The stack position of the Favorites page up to the one in front, -1 when it is not there; the current item is read for the dependency: the stack changes with every push and pop
+    function favoritesPageIndex() {
+        if (!pageStack.currentItem)
+            return -1;
+        for (let i = 1; i <= pageStack.currentIndex; ++i) {
+            if (pageStack.get(i)?.objectName === "favoritesPage")
+                return i;
+        }
+        return -1;
+    }
+
+    // True while the user preferences page or the Favorites page is in the stack, whatever page lies above it (the search page the header box opens included): the box stays on the global search then, or the page it opens would turn it back to the list of the tab at the root and pop everything
+    readonly property bool globalSearchPage: {
+        // The current item is read for the dependency: the stack changes with every push and pop
+        if (!pageStack.currentItem)
+            return false;
+        for (let i = 1; i < pageStack.depth; ++i) {
+            const name = pageStack.get(i)?.objectName;
+            if (name === "userPreferencesPage" || name === "favoritesPage")
+                return true;
+        }
+        return false;
     }
 
     function isTypeTab(name) {
@@ -474,7 +562,7 @@ Kirigami.ApplicationWindow {
         openTabScope(name, libraryId, false);
     }
     function openTabScope(name, libraryId, recentlyAdded) {
-        if (!signedIn)
+        if (!signedIn || askBeforeLeaving(() => openTabScope(name, libraryId, recentlyAdded)))
             return;
         const openList = () => recentlyAdded ? connection.openRecentlyAdded(name, libraryId ?? "") : connection.openType(name, libraryId ?? "");
         const leaving = pageStack.get(0);
@@ -508,6 +596,9 @@ Kirigami.ApplicationWindow {
         if (leavingTab !== "" && leaving?.viewPosition)
             tabState[leavingTab] = leaving.viewPosition();
         pageStack.clear();
+        // Leaving the type pages gives the sub-tab's data and channels back
+        if (name === "home")
+            connection.closeSubtabs();
         let page = null;
         if (name === "home")
             page = pageStack.push(Qt.resolvedUrl("HomePage.qml"), { connection: connection });
@@ -549,6 +640,19 @@ Kirigami.ApplicationWindow {
         resumePages++;
         if (!pageStack.push(Qt.resolvedUrl("ResumeItemsPage.qml"), { connection: connection, shell: window }))
             resumePages--;
+    }
+
+    // A Favorites page is gone: the scan stops with the last one
+    function favoritesPageGone() {
+        if (--favoritesPages === 0)
+            connection.favorites.close();
+    }
+
+    // The star of the header: the Favorites page opens above the first page, and one already in the stack is brought back as it is (the page starts the scan when it is created)
+    function openFavorites() {
+        if (!signedIn)
+            return;
+        openSection("favoritesPage", "FavoritesPage.qml", { connection: connection, shell: window });
     }
 
     // The Home tab; before a session it is the page the state wants
@@ -622,6 +726,8 @@ Kirigami.ApplicationWindow {
                 return;
             }
         }
+        if (askBeforeLeaving(() => openSection(name, url, properties)))
+            return;
         popToBase();
         pageStack.push(Qt.resolvedUrl(url), properties);
     }
@@ -638,6 +744,7 @@ Kirigami.ApplicationWindow {
     }
 
     Component.onCompleted: {
+        applySubTabs();
         if (wantsFullscreen)
             applyFullscreen();
         else

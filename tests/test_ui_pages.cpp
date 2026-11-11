@@ -781,6 +781,215 @@ struct Ui {
     QQuickWindow *window = nullptr;
 };
 
+const QString kSignedInUserId = QStringLiteral("d5ed5d4e2e5447b58e9f2b6f7bd5c96a");
+const QString kMusicLibrary = QStringLiteral("2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f");
+
+// The configuration of the signed-in user the preferences tests start from: every field the page edits, two the page must carry untouched, and ids of a library the user cannot see
+QJsonObject preferencesConfiguration()
+{
+    return QJsonObject{{QStringLiteral("AudioLanguagePreference"), QStringLiteral("ita")},
+                       {QStringLiteral("SubtitleLanguagePreference"), QStringLiteral("eng")},
+                       {QStringLiteral("SubtitleMode"), QStringLiteral("Smart")},
+                       {QStringLiteral("PlayDefaultAudioTrack"), true},
+                       {QStringLiteral("RememberAudioSelections"), true},
+                       {QStringLiteral("RememberSubtitleSelections"), false},
+                       {QStringLiteral("EnableNextEpisodeAutoPlay"), true},
+                       {QStringLiteral("DisplayMissingEpisodes"), false},
+                       {QStringLiteral("HidePlayedInLatest"), true},
+                       {QStringLiteral("GroupedFolders"), QJsonArray{kMovies}},
+                       {QStringLiteral("FutureField"), QJsonObject{{QStringLiteral("Flag"), true}}},
+                       {QStringLiteral("OrderedViews"), QJsonArray{kHiddenId, kMovies, kSeries}},
+                       {QStringLiteral("MyMediaExcludes"), QJsonArray{}},
+                       {QStringLiteral("LatestItemsExcludes"), QJsonArray{kHiddenId}}};
+}
+
+QByteArray preferencesUser(const QJsonObject &configuration)
+{
+    return QJsonDocument(QJsonObject{{QStringLiteral("Id"), kSignedInUserId},
+                                     {QStringLiteral("Name"), QStringLiteral("bepi")},
+                                     {QStringLiteral("Policy"),
+                                      QJsonObject{{QStringLiteral("IsAdministrator"), false}}},
+                                     {QStringLiteral("Configuration"), configuration}})
+        .toJson(QJsonDocument::Compact);
+}
+
+// The server side of the preferences tests: GET /Users/Me serves `configuration`, every POST of it is kept and replaces it (unless `stores` is off), and a test changes it to play another device
+struct RemotePreferences {
+    explicit RemotePreferences(Ui &ui, const QJsonObject &initial = preferencesConfiguration())
+        : ui(ui), configuration(initial)
+    {
+        ui.server.onUsersMe = [this] {
+            this->ui.server.usersMeRawBody = preferencesUser(configuration);
+        };
+        ui.server.onUserConfigurationPost = [this](const QByteArray &body) {
+            posts.append(QJsonDocument::fromJson(body).object());
+            if (stores)
+                configuration = posts.constLast();
+        };
+    }
+    ~RemotePreferences()
+    {
+        ui.server.onUsersMe = nullptr;
+        ui.server.onUserConfigurationPost = nullptr;
+    }
+
+    Ui &ui;
+    QJsonObject configuration;
+    QList<QJsonObject> posts;
+    bool stores = true;
+};
+
+// Opens the page from the account menu action and waits until the configuration is loaded; null when it did not come up
+QQuickItem *openPreferences(Ui &ui)
+{
+    if (!QMetaObject::invokeMethod(ui.shellAction(QStringLiteral("userPreferencesAction")),
+                                   "trigger"))
+        return nullptr;
+    if (!QTest::qWaitFor([&] { return ui.item(QStringLiteral("userPreferencesPage")) != nullptr; },
+                         10000))
+        return nullptr;
+    // The page asks for a load when it is created; one the sign-in started for Home may still be under way, and the page then waits for that one, so no new load is to be expected here
+    return QTest::qWaitFor(
+               [&] {
+                   const auto *prefs = ui.controller.userConfiguration();
+                   return prefs->state() == Kinefin::UserConfigurationModel::Ready
+                          && prefs->loaded();
+               },
+               10000)
+               ? ui.item(QStringLiteral("userPreferencesPage"))
+               : nullptr;
+}
+
+QQuickItem *comboBoxIn(QQuickItem *root)
+{
+    for (QQuickItem *candidate : allItems(root)) {
+        if (candidate->inherits("QQuickComboBox"))
+            return candidate;
+    }
+    return nullptr;
+}
+
+// Clicks the button with this text inside a dialog: the page footer has a Discard button of its own
+bool clickInDialog(const Ui &ui, const QString &dialogName, const QString &text)
+{
+    QObject *dialog = ui.popup(dialogName);
+    const auto *content = dialog ? dialog->property("contentItem").value<QQuickItem *>() : nullptr;
+    for (QQuickItem *candidate : allItems(content ? content->parentItem() : nullptr)) {
+        if (candidate->property("text").toString() == text && candidate->isVisible()
+            && candidate->isEnabled() && candidate->metaObject()->indexOfMethod("click()") >= 0)
+            return QMetaObject::invokeMethod(candidate, "click");
+    }
+    return false;
+}
+
+// The favorites each library answers with, by the parentId the scan asks for, and the libraries that fail with a status instead
+struct FavoritesData {
+    QHash<QString, QJsonArray> byLibrary;
+    QHash<QString, int> failing;
+};
+
+QString favoriteId(int n)
+{
+    return QString::number(n).rightJustified(32, QLatin1Char('0'));
+}
+
+QJsonObject favoriteJson(int n, const QString &type, const QString &name, int year,
+                         const QStringList &genres = {})
+{
+    QJsonObject item{{QStringLiteral("Id"), favoriteId(n)},
+                     {QStringLiteral("Name"), name},
+                     {QStringLiteral("Type"), type},
+                     {QStringLiteral("ProductionYear"), year}};
+    if (!genres.isEmpty())
+        item.insert(QStringLiteral("Genres"), QJsonArray::fromStringList(genres));
+    return item;
+}
+
+// Answers the Items requests of the Favorites scan (filters=IsFavorite under a library of `data`) a page at a time; every other request goes to the usual fixtures. Without `data` the fixture favorites are served: three movies in the movies library, two series and an episode in the TV library. The data lives as long as the server
+std::shared_ptr<FavoritesData> serveFavorites(Ui &ui, std::shared_ptr<FavoritesData> data = nullptr)
+{
+    if (!data) {
+        data = std::make_shared<FavoritesData>();
+        data->byLibrary[kMovies] =
+            QJsonArray{favoriteJson(1, QStringLiteral("Movie"), QStringLiteral("Alpha"), 2020,
+                                    {QStringLiteral("Action")}),
+                       favoriteJson(2, QStringLiteral("Movie"), QStringLiteral("Bravo"), 2019,
+                                    {QStringLiteral("Drama")}),
+                       favoriteJson(3, QStringLiteral("Movie"), QStringLiteral("Charlie"), 2019)};
+        data->byLibrary[kSeries] =
+            QJsonArray{favoriteJson(4, QStringLiteral("Series"), QStringLiteral("Delta"), 2015,
+                                    {QStringLiteral("Drama")}),
+                       favoriteJson(5, QStringLiteral("Series"), QStringLiteral("Echo"), 2012,
+                                    {QStringLiteral("Comedy")}),
+                       favoriteJson(6, QStringLiteral("Episode"), QStringLiteral("Foxtrot"), 2015,
+                                    {QStringLiteral("Drama")})};
+    }
+    ui.server.itemsResponder = [data](const QByteArray &route) -> std::pair<int, QByteArray> {
+        const QUrlQuery query = FakeJellyfin::capturedListingQuery(route);
+        const QString parent = query.queryItemValue(QStringLiteral("parentId"));
+        if (query.queryItemValue(QStringLiteral("filters")) != QLatin1String("IsFavorite")
+            || (!data->byLibrary.contains(parent) && !data->failing.contains(parent)))
+            return {};
+        if (data->failing.contains(parent))
+            return {data->failing.value(parent), {}};
+        const QJsonArray all = data->byLibrary.value(parent);
+        const int start = query.queryItemValue(QStringLiteral("startIndex")).toInt();
+        const int limit = query.queryItemValue(QStringLiteral("limit")).toInt();
+        QJsonArray page;
+        for (int i = start; i < start + limit && i < all.size(); ++i)
+            page.append(all.at(i));
+        return {200,
+                QJsonDocument(QJsonObject{{QStringLiteral("Items"), page},
+                                          {QStringLiteral("StartIndex"), start},
+                                          {QStringLiteral("TotalRecordCount"), int(all.size())}})
+                    .toJson(QJsonDocument::Compact)};
+    };
+    return data;
+}
+
+// Opens the Favorites page the way the star does and waits until the scan ended; null when the page did not come up. The libraries come first: the scan reads the ones the server listed
+QQuickItem *openFavorites(Ui &ui)
+{
+    if (!QTest::qWaitFor([&] { return !ui.controller.libraries().isEmpty(); }, 10000))
+        return nullptr;
+    if (!QMetaObject::invokeMethod(ui.engine.rootObjects().constFirst(), "openFavorites"))
+        return nullptr;
+    if (!QTest::qWaitFor([&] { return ui.item(QStringLiteral("favoritesPage")) != nullptr; },
+                         10000))
+        return nullptr;
+    return QTest::qWaitFor(
+               [&] {
+                   const auto status = ui.controller.favorites()->status();
+                   return status != Kinefin::FavoritesModel::Loading
+                          && status != Kinefin::FavoritesModel::Idle;
+               },
+               10000)
+               ? ui.item(QStringLiteral("favoritesPage"))
+               : nullptr;
+}
+
+QString favoriteGroupTitle(const Ui &ui, int row)
+{
+    const QQuickItem *title = ui.item(QStringLiteral("favoritesGroupTitle_%1").arg(row));
+    return title ? title->property("text").toString() : QString();
+}
+
+// The names of the groups shown, in order
+QStringList favoriteGroupTitles(Ui &ui)
+{
+    QStringList titles;
+    for (int row = 0; row < ui.controller.favoriteGroups()->count(); ++row)
+        titles << favoriteGroupTitle(ui, row);
+    return titles;
+}
+
+// An action of the page's Group By menu: "Type", "Library", "Genre", "Year" or "None"
+QObject *groupByAction(QQuickItem *page, const QString &grouping)
+{
+    return page ? page->findChild<QObject *>(QStringLiteral("favoritesGroupBy_") + grouping)
+                : nullptr;
+}
+
 // Brings the window to one of the screens the layout checks walk through; false when it could not
 bool buildState(Ui &ui, const QString &state)
 {
@@ -848,8 +1057,16 @@ bool buildState(Ui &ui, const QString &state)
         ui.server.generatedGenreTotal = 2;
         ui.server.listingStatus.insert(QStringLiteral("Items"), 500);
     }
+    if (state == QLatin1String("preferences"))
+        ui.server.usersMeRawBody = preferencesUser(preferencesConfiguration());
+    if (state == QLatin1String("favorites"))
+        serveFavorites(ui);
     if (!ui.signIn())
         return false;
+    if (state == QLatin1String("preferences"))
+        return openPreferences(ui) != nullptr;
+    if (state == QLatin1String("favorites"))
+        return openFavorites(ui) != nullptr && ui.controller.favorites()->count() == 6;
     if (state == QLatin1String("home") || state == QLatin1String("homeFailedRow"))
         return QTest::qWaitFor([&] { return ui.controller.homeRows()->rowCount() > 0; }, 10000);
     if (state == QLatin1String("search")) {
@@ -910,6 +1127,24 @@ bool buildState(Ui &ui, const QString &state)
                        && ui.item(QStringLiteral("librarySelector"))->isVisible();
             },
             10000);
+    if (state == QLatin1String("browse")) {
+        // The Favorites and Genres sub-tabs on, the list view, a status and a feature filter and a letter: every row of the page showing
+        ui.settings.setValue(QStringLiteral("library"), QStringLiteral("tabs.movies.genres"), true);
+        auto *movies = ui.controller.movies();
+        movies->setViewMode(QStringLiteral("list"));
+        movies->setFilterValues(
+            QVariantMap{{QStringLiteral("played"), QStringLiteral("Unplayed")},
+                        {QStringLiteral("features"), QStringList{QStringLiteral("Subtitles")}}});
+        movies->setAlphabet(QStringLiteral("A"));
+        return QTest::qWaitFor(
+            [&] {
+                return movies->status() != Kinefin::LibraryItemsModel::Loading
+                       && ui.item(QStringLiteral("subtab_genres")) != nullptr
+                       && ui.item(QStringLiteral("filterChip_1")) != nullptr
+                       && ui.item(QStringLiteral("libraryList")) != nullptr;
+            },
+            10000);
+    }
     if (state == QLatin1String("library") || state == QLatin1String("libraryFailed"))
         return QTest::qWaitFor(
             [&] { return ui.controller.movies()->status() != Kinefin::LibraryItemsModel::Loading; },
@@ -947,6 +1182,188 @@ bool buildState(Ui &ui, const QString &state)
                                            : QStringLiteral("This item is not available"));
                },
                10000);
+}
+} // namespace
+
+namespace {
+// The Kirigami action or menu entry of the library page with this object name, triggered the way a click does
+bool triggerAction(const Ui &ui, const QString &name)
+{
+    QObject *action = ui.popup(name);
+    return action && QMetaObject::invokeMethod(action, "trigger");
+}
+
+// The headings of the filter dialog's list, in order
+QStringList filterSections(const Ui &ui)
+{
+    QStringList titles;
+    QObject *dialog = ui.popup(QStringLiteral("filterDialog"));
+    if (!dialog)
+        return titles;
+    for (const QVariant &entry : dialog->property("entries").toList()) {
+        const QVariantMap row = entry.toMap();
+        if (row.value(QStringLiteral("kind")).toString() == QLatin1String("heading"))
+            titles << row.value(QStringLiteral("title")).toString();
+    }
+    return titles;
+}
+
+// Opens the filter dialog once it is fully open: its footer buttons only answer then. A dialog still closing from the last Apply finishes first, so that it opens again from what the model has
+bool openFilterDialog(const Ui &ui)
+{
+    QObject *dialog = ui.popup(QStringLiteral("filterDialog"));
+    if (!dialog
+        || !QTest::qWaitFor([dialog] { return !dialog->property("visible").toBool(); }, 5000))
+        return false;
+    return QMetaObject::invokeMethod(dialog, "open")
+           && QTest::qWaitFor([dialog] { return dialog->property("opened").toBool(); }, 5000);
+}
+
+// Flips one option of the open filter dialog (the options below the first rows of its list have no item until scrolled to)
+bool toggleOption(const Ui &ui, const QString &facet, const QVariant &value)
+{
+    QObject *dialog = ui.popup(QStringLiteral("filterDialog"));
+    QVariantMap entry;
+    entry.insert(QStringLiteral("facet"), facet);
+    entry.insert(QStringLiteral("value"), value);
+    return dialog && QMetaObject::invokeMethod(dialog, "toggle", Q_ARG(QVariant, entry));
+}
+
+// Scrolls the list of the open filter dialog towards one entry (its facet and value, or the state row of a failed source when `facet` is empty): a row has no item before it is near the view, so callers look again until the item is there
+bool revealFilterEntry(const Ui &ui, const QString &facet, const QVariant &value = {})
+{
+    QObject *dialog = ui.popup(QStringLiteral("filterDialog"));
+    QQuickItem *list = ui.item(QStringLiteral("filterOptionsList"));
+    if (!dialog || !list)
+        return false;
+    const QVariantList entries = dialog->property("entries").toList();
+    for (qsizetype i = 0; i < entries.size(); ++i) {
+        const QVariantMap row = entries.at(i).toMap();
+        const bool match =
+            facet.isEmpty() ? row.value(QStringLiteral("kind")).toString() == QLatin1String("state")
+                            : row.value(QStringLiteral("facet")).toString() == facet
+                                  && row.value(QStringLiteral("value")) == value;
+        if (!match)
+            continue;
+        const qreal contentHeight = list->property("contentHeight").toReal();
+        const qreal top = contentHeight * qreal(qMax(qsizetype(0), i - 2)) / qreal(entries.size());
+        list->setProperty("contentY", qBound(0.0, top, qMax(0.0, contentHeight - list->height())));
+        return true;
+    }
+    return false;
+}
+
+// The query of the most recent Items request the server saw
+QUrlQuery lastItemsQuery(const Ui &ui)
+{
+    return FakeJellyfin::capturedListingQuery(
+        ui.server.lastListingRoute.value(QStringLiteral("Items")));
+}
+
+// The visible item with this object name, once it has a size
+QQuickItem *shownItem(const Ui &ui, const QString &name)
+{
+    QQuickItem *found = ui.item(name);
+    return found && found->isVisible() && found->width() > 0 && found->height() > 0 ? found
+                                                                                    : nullptr;
+}
+
+// The sub-tab bar of the library page: the ids of its buttons that exist, in the order of the bar
+QStringList subtabIds(const Ui &ui)
+{
+    QStringList ids;
+    for (const QString &id :
+         {QStringLiteral("main"), QStringLiteral("suggestions"), QStringLiteral("favorites"),
+          QStringLiteral("collections"), QStringLiteral("genres"), QStringLiteral("upcoming"),
+          QStringLiteral("networks"), QStringLiteral("episodes")}) {
+        const QQuickItem *button = ui.item(QStringLiteral("subtab_") + id);
+        if (button && button->isVisible())
+            ids << id;
+    }
+    return ids;
+}
+
+void setSubtabSetting(Ui &ui, const QString &id, bool on)
+{
+    ui.settings.setValue(QStringLiteral("library"), QStringLiteral("tabs.") + id, on);
+}
+
+// The toolbar of the library page builds its buttons a moment after its actions change, and a window or a page that goes meanwhile makes Kirigami warn about a delegate destroyed during incubation: waits until the items of the toolbar hold still
+void settleToolbar(const Ui &ui)
+{
+    qsizetype last = -1;
+    int still = 0;
+    (void)QTest::qWaitFor(
+        [&] {
+            const QQuickItem *bar = ui.item(QStringLiteral("libraryToolbar"));
+            const qsizetype now = bar ? allItems(const_cast<QQuickItem *>(bar)).size() : 0;
+            still = now == last ? still + 1 : 0;
+            last = now;
+            QTest::qWait(60);
+            return still >= 4;
+        },
+        5000);
+}
+
+// Picks a sub-tab by clicking its button. A button of a bar that was just created or shown is laid out a moment later, so a click at the spot it has at first could land beside it: the button is clicked by itself
+bool selectSubtab(const Ui &ui, const QString &id)
+{
+    QQuickItem *button = nullptr;
+    if (!QTest::qWaitFor(
+            [&] { return (button = shownItem(ui, QStringLiteral("subtab_") + id)) != nullptr; },
+            5000))
+        return false;
+    return QMetaObject::invokeMethod(button, "click");
+}
+
+// Clicks the real, visible footer button, not the QAction. Kirigami's
+// customFooterActions delegates do not always attach their action through
+// QQuickAbstractButton.action; the visible button's text is still the text of
+// the named action. This verifies the actual clickable UI without depending on
+// an ActionToolBar implementation detail.
+bool clickActionButton(const Ui &ui, const QString &actionName)
+{
+    QObject *action = ui.popup(actionName);
+    if (!action)
+        return false;
+    const QString label = action->property("text").toString();
+    for (QQuickItem *button : allItems(ui.window->contentItem())) {
+        if (!button->inherits("QQuickAbstractButton") || !button->isVisible()
+            || !button->isEnabled() || button->width() <= 0 || button->height() <= 0
+            || !ui.insideWindow(button) || Ui::clippedAway(button))
+            continue;
+        const QObject *bound = button->property("action").value<QObject *>();
+        if (bound == action || (!label.isEmpty() && button->property("text").toString() == label))
+            return QMetaObject::invokeMethod(button, "click");
+    }
+    return false;
+}
+
+// Waits until the button can be clicked, then clicks it once. Not for QTRY_VERIFY: that macro evaluates its expression a second time after it succeeded, which would click again on the page the first click closed
+bool clickActionButtonWhenReady(const Ui &ui, const QString &actionName)
+{
+    return QTest::qWaitFor([&] { return clickActionButton(ui, actionName); }, 5000);
+}
+
+// Full diagnostic, including buttons that Kirigami creates without setting
+// their QQuickAbstractButton.action (the cause of the former false failure).
+QString describeButtons(const Ui &ui)
+{
+    QStringList parts;
+    for (QQuickItem *button : allItems(ui.window->contentItem())) {
+        if (!button->inherits("QQuickAbstractButton"))
+            continue;
+        const QObject *action = button->property("action").value<QObject *>();
+        parts << QStringLiteral("%1 -> %2 visible=%3 enabled=%4 width=%5 text='%6'")
+                     .arg(action ? action->objectName() : QStringLiteral("(no bound action)"),
+                          Ui::describe(button))
+                     .arg(button->isVisible())
+                     .arg(button->isEnabled())
+                     .arg(button->width())
+                     .arg(button->property("text").toString());
+    }
+    return parts.isEmpty() ? QStringLiteral("no abstract button exists")
+                           : parts.join(QStringLiteral("; "));
 }
 } // namespace
 
@@ -1000,6 +1417,72 @@ class TestUiPages : public QObject {
         QQuickItem *list = ui.item(QStringLiteral("homeRowList_0"));
         QVERIFY(list);
         QTRY_COMPARE(list->property("count").toInt(), 2);
+    }
+
+    // MyMediaExcludes hides a tile only, LatestItemsExcludes a Recently Added row only, OrderedViews orders the tiles that stay
+    void homeTilesAndRowsFollowTheUserConfiguration()
+    {
+        Ui ui(m_home->path());
+        RemotePreferences remote(
+            ui, QJsonObject{{QStringLiteral("OrderedViews"), QJsonArray{kSeries, kMovies}},
+                            {QStringLiteral("MyMediaExcludes"), QJsonArray{kMovies}},
+                            {QStringLiteral("LatestItemsExcludes"), QJsonArray{kSeries}}});
+        ui.server.generatedItemTotal = 10;
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        // Series first, then the library the order does not name; Movies has no tile
+        QTRY_COMPARE(ui.itemsStartingWith(QStringLiteral("libraryCard_")).size(), 2);
+        QQuickItem *series = ui.item(QStringLiteral("libraryCard_") + kSeries);
+        QQuickItem *music = ui.item(QStringLiteral("libraryCard_") + kMusicLibrary);
+        QVERIFY(series && music);
+        QVERIFY(ui.item(QStringLiteral("libraryCard_") + kMovies) == nullptr);
+        const QPointF seriesAt = series->mapToScene(QPointF(0, 0));
+        const QPointF musicAt = music->mapToScene(QPointF(0, 0));
+        QVERIFY(seriesAt.y() < musicAt.y() - 1
+                || (qAbs(seriesAt.y() - musicAt.y()) <= 1 && seriesAt.x() < musicAt.x()));
+        // The rows: the tile of Series stays, its Recently Added row does not; Continue Watching and Next Up are untouched
+        QTRY_VERIFY(!ui.itemsWithText(QStringLiteral("Recently Added in Movies")).isEmpty());
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Continue Watching")));
+        QVERIFY(ui.showsText(QStringLiteral("Next Up")));
+        QVERIFY(ui.itemsWithText(QStringLiteral("Recently Added in Series")).isEmpty());
+        // The libraries and the Movies tab are not filtered by a presentation preference
+        QCOMPARE(ui.controller.libraries().size(), 3);
+        QVERIFY(ui.controller.hasType(QStringLiteral("movies")));
+        QVERIFY(QMetaObject::invokeMethod(ui.engine.rootObjects().constFirst(), "openTab",
+                                          Q_ARG(QVariant, QStringLiteral("movies")),
+                                          Q_ARG(QVariant, kMovies)));
+        QTRY_COMPARE(ui.rootTab(), QStringLiteral("movies"));
+        // The hidden library is the only movies library: its scope is all of them
+        QTRY_VERIFY(ui.controller.movies()->isOpen());
+        QCOMPARE(ui.controller.movieLibraries().size(), 1);
+        QCOMPARE(ui.controller.movieLibraries().constFirst().toMap().value(QStringLiteral("id")),
+                 QVariant(kMovies));
+        QVERIFY(ui.controller.movies()->libraryId().isEmpty());
+    }
+
+    // The save of the preferences page reaches Home at once: no restart and no refresh
+    void aVerifiedSaveFromThePreferencesPageUpdatesHome()
+    {
+        Ui ui(m_home->path());
+        RemotePreferences remote(ui, QJsonObject());
+        ui.server.generatedItemTotal = 10;
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QTRY_COMPARE(ui.itemsStartingWith(QStringLiteral("libraryCard_")).size(), 3);
+        QTRY_VERIFY(!ui.itemsWithText(QStringLiteral("Recently Added in Series")).isEmpty());
+        QVERIFY(openPreferences(ui) != nullptr);
+        auto *prefs = ui.controller.userConfiguration();
+        prefs->setMyMediaExcluded(kMovies, true);
+        prefs->setLatestExcluded(kSeries, true);
+        QTRY_VERIFY(ui.item(QStringLiteral("prefsSaveButton"))->isEnabled());
+        QVERIFY(QMetaObject::invokeMethod(ui.item(QStringLiteral("prefsSaveButton")), "click"));
+        QTRY_COMPARE(remote.posts.size(), 1);
+        QTRY_VERIFY(ui.item(QStringLiteral("libraryCard_") + kMovies) == nullptr);
+        QCOMPARE(ui.itemsStartingWith(QStringLiteral("libraryCard_")).size(), 2);
+        QTRY_VERIFY(ui.itemsWithText(QStringLiteral("Recently Added in Series")).isEmpty());
+        QVERIFY(!ui.itemsWithText(QStringLiteral("Recently Added in Movies")).isEmpty());
+        QCOMPARE(ui.controller.libraries().size(), 3);
+        QVERIFY(ui.controller.hasType(QStringLiteral("movies")));
     }
 
     void libraryTilesShowTheirImages()
@@ -1629,22 +2112,29 @@ class TestUiPages : public QObject {
         QVERIFY(ui.openLibraryTile(kMovies));
         auto *library = ui.controller.movies();
         QTRY_VERIFY(library->genreOptions()->available());
-        QObject *dialog = ui.popup(QStringLiteral("genreFilterDialog"));
-        QVERIFY(dialog);
-        QVERIFY(QMetaObject::invokeMethod(dialog, "open"));
+        // The footer buttons answer once the dialog is fully open
+        QVERIFY(openFilterDialog(ui));
         QQuickItem *option = nullptr;
-        QTRY_VERIFY((option = ui.item(QStringLiteral("genreOption_") + kSciFi)) != nullptr);
-        QTRY_VERIFY(option->isVisible() && option->width() > 0);
+        QTRY_VERIFY((revealFilterEntry(ui, QStringLiteral("genreIds"), kSciFi),
+                     (option = shownItem(ui, QStringLiteral("filterOption_genreIds_") + kSciFi))
+                         != nullptr));
         QVERIFY(ui.showsText(QStringLiteral("Science Fiction")));
         ui.clickCenter(option);
+        // The choice is a draft until Apply
+        QTRY_COMPARE(option->property("selected").toBool(), true);
+        QVERIFY(library->genreIds().isEmpty());
+        QVERIFY(triggerAction(ui, QStringLiteral("filterApplyAction")));
         QTRY_COMPARE(library->genreIds(), QStringList({kSciFi}));
         QTRY_COMPARE(library->rowCount(), 2);
-        QCOMPARE(option->property("selected").toBool(), true);
-        // The list is the focus: Space on the current row toggles it back
-        QQuickItem *list = ui.item(QStringLiteral("genreOptionsList"));
-        QVERIFY(list);
-        list->forceActiveFocus();
-        QTest::keyClick(ui.window, Qt::Key_Space);
+        // The dialog opens on what the model has: the row clicked again and Apply take the genre off
+        QVERIFY(openFilterDialog(ui));
+        QTRY_VERIFY((revealFilterEntry(ui, QStringLiteral("genreIds"), kSciFi),
+                     (option = shownItem(ui, QStringLiteral("filterOption_genreIds_") + kSciFi))
+                         != nullptr));
+        QTRY_COMPARE(option->property("selected").toBool(), true);
+        ui.clickCenter(option);
+        QTRY_COMPARE(option->property("selected").toBool(), false);
+        QVERIFY(triggerAction(ui, QStringLiteral("filterApplyAction")));
         QTRY_VERIFY(library->genreIds().isEmpty());
         QTRY_VERIFY(!library->filtered());
     }
@@ -1682,8 +2172,9 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(ui.item(QStringLiteral("libraryCard_") + kMovies) != nullptr);
         QVERIFY(ui.openLibraryTile(kMovies));
         QTRY_VERIFY(ui.controller.movies()->genreOptions()->available());
-        QVERIFY(QMetaObject::invokeMethod(ui.popup(QStringLiteral("genreFilterDialog")), "open"));
-        QTRY_VERIFY(!ui.itemsWithText(hostile).isEmpty());
+        QVERIFY(QMetaObject::invokeMethod(ui.popup(QStringLiteral("filterDialog")), "open"));
+        QTRY_VERIFY((revealFilterEntry(ui, QStringLiteral("genreIds"), kSciFi),
+                     !ui.itemsWithText(hostile).isEmpty()));
         for (QQuickItem *label : ui.itemsWithText(hostile))
             QCOMPARE(label->property("textFormat").toInt(), int(Qt::PlainText));
         QTest::qWait(300);
@@ -1825,6 +2316,715 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(first->hasActiveFocus());
     }
 
+    void theFilterDialogOffersTheSectionsOfTheScope()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        auto *movies = ui.controller.movies();
+        QTRY_VERIFY(movies->filterOptions()->available());
+        QTRY_COMPARE(movies->filterOptions()->legacyStatus(), Kinefin::FilterOptionsModel::Ready);
+        QTRY_COMPARE(filterSections(ui),
+                     (QStringList{QStringLiteral("Status"), QStringLiteral("Features"),
+                                  QStringLiteral("Video Quality"), QStringLiteral("Video Type"),
+                                  QStringLiteral("Genres"), QStringLiteral("Tags"),
+                                  QStringLiteral("Ratings"), QStringLiteral("Years")}));
+    }
+
+    void aSeriesLibraryOffersItsStatusAndNoVideoQuality()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("tvTab")));
+        auto *shows = ui.controller.shows();
+        QTRY_VERIFY(shows->filterOptions()->available());
+        QTRY_COMPARE(shows->filterOptions()->legacyStatus(), Kinefin::FilterOptionsModel::Ready);
+        QTRY_COMPARE(filterSections(ui),
+                     (QStringList{QStringLiteral("Status"), QStringLiteral("Features"),
+                                  QStringLiteral("Series Status"), QStringLiteral("Genres"),
+                                  QStringLiteral("Tags"), QStringLiteral("Ratings"),
+                                  QStringLiteral("Years")}));
+    }
+
+    void ratingsAndYearsAreHiddenWithoutTheLegacyEndpoint()
+    {
+        Ui ui(m_home->path());
+        ui.server.listingStatus.insert(QStringLiteral("FiltersLegacy"), 404);
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        auto *movies = ui.controller.movies();
+        QTRY_COMPARE(movies->filterOptions()->legacyStatus(),
+                     Kinefin::FilterOptionsModel::Unavailable);
+        QTRY_VERIFY(movies->filterOptions()->available());
+        QTRY_VERIFY(filterSections(ui).contains(QStringLiteral("Genres")));
+        QVERIFY(!filterSections(ui).contains(QStringLiteral("Ratings")));
+        QVERIFY(!filterSections(ui).contains(QStringLiteral("Years")));
+        QVERIFY(!filterSections(ui).contains(QStringLiteral("Ratings and Years")));
+    }
+
+    void aFilterChosenInTheDialogReachesTheServer()
+    {
+        Ui ui(m_home->path());
+        ui.server.itemsByGenre.insert(kSciFi, QStringLiteral("items_genre_scifi"));
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        QTRY_VERIFY(ui.layoutProblems().isEmpty());
+        auto *movies = ui.controller.movies();
+        QTRY_VERIFY(movies->filterOptions()->available());
+        QVERIFY(openFilterDialog(ui));
+        QQuickItem *unplayed = nullptr;
+        QQuickItem *played = nullptr;
+        QTRY_VERIFY((unplayed = shownItem(ui, QStringLiteral("filterOption_played_Unplayed")))
+                    != nullptr);
+        QTRY_VERIFY((played = shownItem(ui, QStringLiteral("filterOption_played_Played")))
+                    != nullptr);
+        ui.clickCenter(unplayed);
+        QTRY_VERIFY(unplayed->property("selected").toBool());
+        // Played and Unplayed exclude each other
+        ui.clickCenter(played);
+        QTRY_VERIFY(played->property("selected").toBool());
+        QVERIFY(!unplayed->property("selected").toBool());
+        ui.clickCenter(unplayed);
+        QTRY_VERIFY(unplayed->property("selected").toBool());
+        QVERIFY(!played->property("selected").toBool());
+        QVERIFY(toggleOption(ui, QStringLiteral("is4K"), true));
+        QVERIFY(toggleOption(ui, QStringLiteral("features"), QStringLiteral("Subtitles")));
+        QVERIFY(toggleOption(ui, QStringLiteral("genreIds"), kSciFi));
+        // The choices are a draft: nothing reaches the model, or the server, before Apply
+        QVERIFY(!movies->filtered());
+        QVERIFY(triggerAction(ui, QStringLiteral("filterApplyAction")));
+        QTRY_VERIFY(movies->filtered());
+        QCOMPARE(movies->filterState().played, Kinefin::PlayedState::Unplayed);
+        QVERIFY(movies->filterState().is4K);
+        QVERIFY(movies->filterState().features.testFlag(Kinefin::LibraryFeature::Subtitles));
+        QCOMPARE(movies->genreIds(), QStringList({kSciFi}));
+        QTRY_COMPARE(movies->status(), Kinefin::LibraryItemsModel::Ready);
+        const QUrlQuery query = lastItemsQuery(ui);
+        QVERIFY(query.queryItemValue(QStringLiteral("filters"))
+                    .split(QLatin1Char(','))
+                    .contains(QStringLiteral("IsUnplayed")));
+        QCOMPARE(query.queryItemValue(QStringLiteral("is4K")), QStringLiteral("true"));
+        QCOMPARE(query.queryItemValue(QStringLiteral("hasSubtitles")), QStringLiteral("true"));
+        QCOMPARE(query.queryItemValue(QStringLiteral("genreIds")), kSciFi);
+        // Clear in the dialog empties the draft, and Apply then clears the model
+        QVERIFY(openFilterDialog(ui));
+        QVERIFY(triggerAction(ui, QStringLiteral("filterClearAction")));
+        QVERIFY(triggerAction(ui, QStringLiteral("filterApplyAction")));
+        QTRY_VERIFY(!movies->filtered());
+    }
+
+    void theFooterButtonsOfTheFilterDialogApplyAndClear()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        QTRY_VERIFY(ui.layoutProblems().isEmpty());
+        auto *movies = ui.controller.movies();
+        QVERIFY(openFilterDialog(ui));
+        QVERIFY(toggleOption(ui, QStringLiteral("played"), QStringLiteral("Unplayed")));
+        // The buttons as the user meets them; the message says what is wrong with them when there is none to click
+        QVERIFY2(clickActionButtonWhenReady(ui, QStringLiteral("filterApplyAction")),
+                 qPrintable(describeButtons(ui)));
+        QTRY_COMPARE(movies->filterState().played, Kinefin::PlayedState::Unplayed);
+        QVERIFY(openFilterDialog(ui));
+        QVERIFY2(clickActionButtonWhenReady(ui, QStringLiteral("filterClearAction")),
+                 qPrintable(describeButtons(ui)));
+        QVERIFY2(clickActionButtonWhenReady(ui, QStringLiteral("filterApplyAction")),
+                 qPrintable(describeButtons(ui)));
+        QTRY_VERIFY(!movies->filtered());
+    }
+
+    void chipsRemoveOneFilterAndClearFiltersLeavesTheRest()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        QTRY_VERIFY(ui.layoutProblems().isEmpty());
+        auto *movies = ui.controller.movies();
+        movies->setSortBy(QStringLiteral("Runtime"));
+        movies->setFilterValues(
+            QVariantMap{{QStringLiteral("played"), QStringLiteral("Unplayed")},
+                        {QStringLiteral("favorites"), true},
+                        {QStringLiteral("features"), QStringList{QStringLiteral("Subtitles")}}});
+        movies->setAlphabet(QStringLiteral("B"));
+        QTRY_VERIFY(shownItem(ui, QStringLiteral("filterChip_2")) != nullptr);
+        QVERIFY(!ui.item(QStringLiteral("filterChip_3")));
+        // One chip, one remove button: Favorites goes, the other filters stay
+        QQuickItem *remove = nullptr;
+        QTRY_VERIFY((remove = shownItem(ui, QStringLiteral("filterChipRemove_1"))) != nullptr);
+        // The chips are laid out a moment after they exist: a click at the spot of a button that has not moved yet would land on another one (Clear Filters, say), so the button is clicked by itself
+        QVERIFY(QMetaObject::invokeMethod(remove, "click"));
+        QTRY_VERIFY(!movies->filterState().favorites);
+        QCOMPARE(movies->filterState().played, Kinefin::PlayedState::Unplayed);
+        QVERIFY(movies->filterState().features.testFlag(Kinefin::LibraryFeature::Subtitles));
+        QTRY_VERIFY(!ui.item(QStringLiteral("filterChip_2")));
+        // Clear Filters takes the filters and nothing else: not the sort, the letter or the library
+        QQuickItem *clear = nullptr;
+        QTRY_VERIFY((clear = shownItem(ui, QStringLiteral("clearFiltersButton"))) != nullptr);
+        QVERIFY(QMetaObject::invokeMethod(clear, "click"));
+        QTRY_VERIFY(movies->filterState().isEmpty());
+        QCOMPARE(movies->sortBy(), QStringLiteral("Runtime"));
+        QCOMPARE(movies->alphabet(), QStringLiteral("B"));
+        QTRY_VERIFY(!ui.item(QStringLiteral("filterChip_0")));
+    }
+
+    void theSortMenuOffersTheKeysOfTheScopeAndRandomOffersReshuffle()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        auto *movies = ui.controller.movies();
+        QStringList offered;
+        for (const QString &token :
+             {QStringLiteral("SortName"), QStringLiteral("DateCreated"),
+              QStringLiteral("DateLastContentAdded"), QStringLiteral("PremiereDate"),
+              QStringLiteral("ProductionYear"), QStringLiteral("AiredEpisodeOrder"),
+              QStringLiteral("CommunityRating"), QStringLiteral("CriticRating"),
+              QStringLiteral("Runtime"), QStringLiteral("DatePlayed"), QStringLiteral("PlayCount"),
+              QStringLiteral("Random")}) {
+            QObject *action = ui.popup(QStringLiteral("sortKey_") + token);
+            QVERIFY2(action, qPrintable(token));
+            if (action->property("visible").toBool())
+                offered << token;
+        }
+        QStringList keys = movies->sortKeys();
+        offered.sort();
+        keys.sort();
+        QCOMPARE(offered.size(), 10);
+        QCOMPARE(offered, keys);
+
+        movies->setFilterValues(
+            QVariantMap{{QStringLiteral("played"), QStringLiteral("Unplayed")}});
+        QTRY_COMPARE(movies->status(), Kinefin::LibraryItemsModel::Ready);
+        QVERIFY(triggerAction(ui, QStringLiteral("sortKey_Runtime")));
+        QCOMPARE(movies->sortBy(), QStringLiteral("Runtime"));
+        QVERIFY(triggerAction(ui, QStringLiteral("sortDescending")));
+        QVERIFY(movies->descending());
+        QTRY_COMPARE(lastItemsQuery(ui).queryItemValue(QStringLiteral("sortOrder")),
+                     QStringLiteral("Descending"));
+        QVERIFY(!ui.popup(QStringLiteral("reshuffleAction"))->property("visible").toBool());
+
+        // Random is one page of at most 100 items, with the filters kept, and Reshuffle asks for another
+        QVERIFY(triggerAction(ui, QStringLiteral("sortKey_Random")));
+        QVERIFY(movies->isRandom());
+        QTRY_COMPARE(movies->status(), Kinefin::LibraryItemsModel::Ready);
+        QTRY_VERIFY(ui.popup(QStringLiteral("reshuffleAction"))->property("visible").toBool());
+        QVERIFY(!ui.popup(QStringLiteral("sortAscending"))->property("enabled").toBool());
+        QUrlQuery query = lastItemsQuery(ui);
+        QCOMPARE(query.queryItemValue(QStringLiteral("sortBy")), QStringLiteral("Random"));
+        QCOMPARE(query.queryItemValue(QStringLiteral("startIndex")), QStringLiteral("0"));
+        QCOMPARE(query.queryItemValue(QStringLiteral("limit")), QStringLiteral("100"));
+        QVERIFY(
+            query.queryItemValue(QStringLiteral("filters")).contains(QStringLiteral("IsUnplayed")));
+        const qsizetype before = ui.server.itemsRoutes.size();
+        QVERIFY(triggerAction(ui, QStringLiteral("reshuffleAction")));
+        QTRY_COMPARE(ui.server.itemsRoutes.size(), before + 1);
+        query = lastItemsQuery(ui);
+        QCOMPARE(query.queryItemValue(QStringLiteral("sortBy")), QStringLiteral("Random"));
+        QVERIFY(
+            query.queryItemValue(QStringLiteral("filters")).contains(QStringLiteral("IsUnplayed")));
+        // The alphabet picker is not offered for a random order
+        QVERIFY(!ui.item(QStringLiteral("alphabetPicker"))->isVisible());
+
+        QVERIFY(triggerAction(ui, QStringLiteral("sortKey_SortName")));
+        QTRY_VERIFY(!ui.popup(QStringLiteral("reshuffleAction"))->property("visible").toBool());
+        QTRY_VERIFY(ui.item(QStringLiteral("alphabetPicker"))->isVisible());
+    }
+
+    void theAlphabetPickerAsksTheServerForTheLetter()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        QTRY_VERIFY(ui.layoutProblems().isEmpty());
+        auto *movies = ui.controller.movies();
+        QQuickItem *letter = nullptr;
+        QTRY_VERIFY((letter = shownItem(ui, QStringLiteral("letter_B"))) != nullptr);
+        ui.clickCenter(letter);
+        QTRY_COMPARE(movies->alphabet(), QStringLiteral("B"));
+        QTRY_COMPARE(lastItemsQuery(ui).queryItemValue(QStringLiteral("nameStartsWith")),
+                     QStringLiteral("B"));
+        // The search is independent of the letter
+        movies->setSearchTerm(QStringLiteral("abyss"));
+        QCOMPARE(movies->alphabet(), QStringLiteral("B"));
+        movies->setSearchTerm(QString());
+        // # is the names before A
+        QQuickItem *hash = nullptr;
+        QTRY_VERIFY((hash = shownItem(ui, QStringLiteral("letter_hash"))) != nullptr);
+        ui.clickCenter(hash);
+        QTRY_COMPARE(movies->alphabet(), QStringLiteral("#"));
+        QTRY_COMPARE(lastItemsQuery(ui).queryItemValue(QStringLiteral("nameLessThan")),
+                     QStringLiteral("A"));
+        QVERIFY(lastItemsQuery(ui).queryItemValue(QStringLiteral("nameStartsWith")).isEmpty());
+        // The same letter again takes it off
+        ui.clickCenter(hash);
+        QTRY_VERIFY(movies->alphabet().isEmpty());
+        QTRY_VERIFY(lastItemsQuery(ui).queryItemValue(QStringLiteral("nameLessThan")).isEmpty());
+        QVERIFY(lastItemsQuery(ui).queryItemValue(QStringLiteral("nameStartsWith")).isEmpty());
+    }
+
+    void theViewModeIsKeptPerLibraryAndTheListShowsRows()
+    {
+        Ui ui(m_home->path());
+        ui.server.generatedItemTotal = 12;
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("moviesTwoLibraries")));
+        auto *movies = ui.controller.movies();
+        QTRY_VERIFY(ui.item(QStringLiteral("libraryGrid")) != nullptr);
+        // The scope the Home tile opened: the list mode is kept under it
+        const QString first =
+            movies->libraryId().isEmpty() ? QStringLiteral("*") : movies->libraryId();
+        QVERIFY(triggerAction(ui, QStringLiteral("viewModeAction")));
+        QCOMPARE(movies->viewMode(), QStringLiteral("list"));
+        QTRY_VERIFY(ui.item(QStringLiteral("libraryList")) != nullptr);
+        QTRY_VERIFY(!ui.item(QStringLiteral("libraryGrid")));
+        QTRY_VERIFY(!ui.itemsStartingWith(QStringLiteral("listRow_")).isEmpty());
+        QTRY_VERIFY(ui.itemsStartingWith(QStringLiteral("mediaCard_")).isEmpty());
+        // Another library has its own view, and the first one comes back as it was left
+        QVERIFY(ui.controller.openType(QStringLiteral("movies"), kMovies2));
+        QCOMPARE(movies->viewMode(), QStringLiteral("grid"));
+        QTRY_VERIFY(ui.item(QStringLiteral("libraryGrid")) != nullptr);
+        QVERIFY(ui.controller.openType(QStringLiteral("movies"), first));
+        QCOMPARE(movies->viewMode(), QStringLiteral("list"));
+        QTRY_VERIFY(ui.item(QStringLiteral("libraryList")) != nullptr);
+        QVERIFY(triggerAction(ui, QStringLiteral("viewModeAction")));
+        QCOMPARE(movies->viewMode(), QStringLiteral("grid"));
+        QTRY_VERIFY(ui.item(QStringLiteral("libraryGrid")) != nullptr);
+    }
+
+    void theViewOptionsReachTheCards()
+    {
+        Ui ui(m_home->path());
+        ui.server.generatedItemTotal = 6;
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        auto *movies = ui.controller.movies();
+        // A new image type of the cards asks the server again: the cards go and come back, so a property of the first card is read when there is one
+        const auto firstCard = [&ui](const char *name) {
+            const QList<QQuickItem *> cards = ui.itemsStartingWith(QStringLiteral("mediaCard_"));
+            return cards.isEmpty() ? QVariant() : cards.constFirst()->property(name);
+        };
+        QTRY_VERIFY(firstCard("posterAspect").isValid());
+        QCOMPARE(firstCard("posterAspect").toReal(), 1.5);
+        QVERIFY(triggerAction(ui, QStringLiteral("imageType_Banner")));
+        QCOMPARE(movies->imageType(), QStringLiteral("Banner"));
+        QTRY_VERIFY(firstCard("posterAspect").isValid()
+                    && qAbs(firstCard("posterAspect").toReal() - 0.185) < 0.01);
+        QVERIFY(triggerAction(ui, QStringLiteral("showTitleAction")));
+        QVERIFY(triggerAction(ui, QStringLiteral("showYearAction")));
+        QVERIFY(triggerAction(ui, QStringLiteral("cardLayoutAction")));
+        QVERIFY(!movies->showTitle());
+        QVERIFY(!movies->showYear());
+        QVERIFY(!movies->cardLayout());
+        QTRY_VERIFY(firstCard("cardLayout").isValid() && !firstCard("cardLayout").toBool());
+        QTRY_VERIFY(firstCard("showTitle").isValid() && !firstCard("showTitle").toBool());
+    }
+
+    void theListOpensAnItemWithTheKeyboardAndBackKeepsTheMode()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        QVERIFY(triggerAction(ui, QStringLiteral("viewModeAction")));
+        QQuickItem *list = nullptr;
+        QTRY_VERIFY((list = ui.item(QStringLiteral("libraryList"))) != nullptr);
+        QTRY_VERIFY(ui.item(QStringLiteral("listRow_") + kMovieId) != nullptr);
+        QTRY_VERIFY(ui.layoutProblems().isEmpty());
+        QVERIFY(QMetaObject::invokeMethod(list, "forceActiveFocus",
+                                          Q_ARG(Qt::FocusReason, Qt::TabFocusReason)));
+        QTRY_VERIFY(list->hasActiveFocus());
+        QTest::keyClick(ui.window, Qt::Key_Return);
+        QTRY_VERIFY(ui.item(QStringLiteral("itemDetailsPage")) != nullptr);
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("itemDetailsPage"));
+        QTest::keyClick(ui.window, Qt::Key_Left, Qt::AltModifier);
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("libraryPage"));
+        QTRY_VERIFY(list->hasActiveFocus());
+        QCOMPARE(ui.controller.movies()->viewMode(), QStringLiteral("list"));
+    }
+
+    void anEmptyLibraryAndAnEmptyFilteredListAreTold()
+    {
+        Ui ui(m_home->path());
+        ui.server.generatedItemTotal = 0;
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        auto *movies = ui.controller.movies();
+        QTRY_VERIFY(shownItem(ui, QStringLiteral("libraryEmpty")) != nullptr);
+        QVERIFY(!ui.item(QStringLiteral("libraryFilteredEmpty"))->isVisible());
+        QVERIFY(ui.showsText(QStringLiteral("There are no movies yet")));
+        // A filter that leaves nothing is not an empty library, and has its own way out
+        movies->setFilterValues(
+            QVariantMap{{QStringLiteral("played"), QStringLiteral("Unplayed")}});
+        QTRY_VERIFY(shownItem(ui, QStringLiteral("libraryFilteredEmpty")) != nullptr);
+        QVERIFY(!ui.item(QStringLiteral("libraryEmpty"))->isVisible());
+        QVERIFY(ui.showsText(QStringLiteral("No item matches the search or the selected filters")));
+        QQuickItem *clear = nullptr;
+        QTRY_VERIFY((clear = [&]() -> QQuickItem * {
+                        for (QQuickItem *candidate :
+                             allItems(ui.item(QStringLiteral("libraryFilteredEmpty")))) {
+                            if (candidate->property("text").toString()
+                                    == QStringLiteral("Clear Filters")
+                                && candidate->isVisible() && candidate->width() > 0)
+                                return candidate;
+                        }
+                        return nullptr;
+                    }())
+                    != nullptr);
+        QVERIFY(QMetaObject::invokeMethod(clear, "click"));
+        QTRY_VERIFY(!movies->filtered());
+        QTRY_VERIFY(shownItem(ui, QStringLiteral("libraryEmpty")) != nullptr);
+        QVERIFY(!ui.item(QStringLiteral("libraryFilteredEmpty"))->isVisible());
+    }
+
+    void aFailedFacetShowsRetryAndKeepsTheSelection()
+    {
+        Ui ui(m_home->path());
+        ui.server.listingStatus.insert(QStringLiteral("Filters"), 500);
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        auto *movies = ui.controller.movies();
+        QTRY_COMPARE(movies->filterOptions()->status(), Kinefin::FilterOptionsModel::Failed);
+        QTRY_COMPARE(movies->filterOptions()->legacyStatus(), Kinefin::FilterOptionsModel::Ready);
+        movies->setFilterValues(
+            QVariantMap{{QStringLiteral("played"), QStringLiteral("Unplayed")}});
+        QVERIFY(openFilterDialog(ui));
+        // The failed source has its own state with Retry, the other one has its sections
+        QQuickItem *retry = nullptr;
+        QTRY_VERIFY((revealFilterEntry(ui, QString()),
+                     (retry = shownItem(ui, QStringLiteral("filterRetry_genres"))) != nullptr));
+        QVERIFY(filterSections(ui).contains(QStringLiteral("Genres and Tags")));
+        QVERIFY(filterSections(ui).contains(QStringLiteral("Ratings")));
+        QVERIFY(!ui.item(QStringLiteral("filterOption_genreIds_") + kSciFi));
+        ui.server.listingStatus.remove(QStringLiteral("Filters"));
+        ui.clickCenter(retry);
+        QTRY_COMPARE(movies->filterOptions()->status(), Kinefin::FilterOptionsModel::Ready);
+        QTRY_VERIFY((revealFilterEntry(ui, QStringLiteral("genreIds"), kSciFi),
+                     ui.item(QStringLiteral("filterOption_genreIds_") + kSciFi) != nullptr));
+        QVERIFY(!filterSections(ui).contains(QStringLiteral("Genres and Tags")));
+        // The selection was never touched
+        QCOMPARE(movies->filterState().played, Kinefin::PlayedState::Unplayed);
+    }
+
+    void savedFiltersStillResolvingShowAsLoading()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        QTRY_VERIFY(ui.layoutProblems().isEmpty());
+        auto *movies = ui.controller.movies();
+        // The source of the tags holds its answer: the saved tag cannot be named yet
+        ui.server.heldFamilies.insert(QStringLiteral("Filters"));
+        Kinefin::LibraryItemsModel::ViewState saved;
+        saved.pendingTagHashes = {
+            Kinefin::BrowseStateStore::hashText(QStringLiteral("restored-master"))};
+        QVERIFY(movies->open(QString(), QStringLiteral("movies"), QStringLiteral("Movies"), saved));
+        QVERIFY(movies->resolvingFacets());
+        QTRY_VERIFY(shownItem(ui, QStringLiteral("resolvingFiltersLabel")) != nullptr);
+        QVERIFY(shownItem(ui, QStringLiteral("libraryLoading")) != nullptr);
+        QVERIFY(ui.showsText(QStringLiteral("Applying the saved filters…")));
+        // No list is shown as if it were filtered, and Clear Filters ends the wait
+        QCOMPARE(movies->rowCount(), 0);
+        QQuickItem *clear = nullptr;
+        QTRY_VERIFY((clear = shownItem(ui, QStringLiteral("clearFiltersButton"))) != nullptr);
+        QVERIFY(QMetaObject::invokeMethod(clear, "click"));
+        QTRY_VERIFY(!movies->resolvingFacets());
+        QTRY_VERIFY(!ui.item(QStringLiteral("resolvingFiltersLabel"))
+                    || !ui.item(QStringLiteral("resolvingFiltersLabel"))->isVisible());
+    }
+
+    void tagsRatingsAndTheirChipsStayPlainText()
+    {
+        Ui ui(m_home->path());
+        const QString tag = QStringLiteral("<b>Noir</b> & <img src=\"http://evil.invalid/t.png\">");
+        const QString rating = QStringLiteral("<i>R</i><img src=\"http://evil.invalid/r.png\">");
+        ui.server.listingRawBody.insert(
+            QStringLiteral("Filters"),
+            QJsonDocument(QJsonObject{{QStringLiteral("Genres"),
+                                       QJsonArray{QJsonObject{
+                                           {QStringLiteral("Id"), kSciFi},
+                                           {QStringLiteral("Name"), QStringLiteral("Sci-Fi")}}}},
+                                      {QStringLiteral("Tags"), QJsonArray{tag}}})
+                .toJson(QJsonDocument::Compact));
+        ui.server.listingRawBody.insert(
+            QStringLiteral("FiltersLegacy"),
+            QJsonDocument(QJsonObject{{QStringLiteral("OfficialRatings"), QJsonArray{rating}},
+                                      {QStringLiteral("Years"), QJsonArray{2024}}})
+                .toJson(QJsonDocument::Compact));
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        auto *movies = ui.controller.movies();
+        QTRY_VERIFY(movies->filterOptions()->tagsAvailable());
+        QTRY_VERIFY(movies->filterOptions()->ratingsAvailable());
+        // The chips of the selected values
+        movies->setFilterValues(
+            QVariantMap{{QStringLiteral("tags"), QStringList{tag}},
+                        {QStringLiteral("officialRatings"), QStringList{rating}}});
+        QTRY_VERIFY(!ui.itemsWithText(tag).isEmpty());
+        QTRY_VERIFY(!ui.itemsWithText(rating).isEmpty());
+        // And the options of the dialog, once its list has scrolled to them
+        QVERIFY(openFilterDialog(ui));
+        QQuickItem *list = ui.item(QStringLiteral("filterOptionsList"));
+        QVERIFY(list);
+        QVERIFY(QMetaObject::invokeMethod(list, "positionViewAtEnd"));
+        QTRY_VERIFY(ui.itemsWithText(tag).size() >= 2);
+        QTRY_VERIFY(ui.itemsWithText(rating).size() >= 2);
+        for (const QString &text : {tag, rating}) {
+            for (QQuickItem *label : ui.itemsWithText(text)) {
+                QVERIFY2(label->inherits("QQuickText"), qPrintable(Ui::describe(label)));
+                QCOMPARE(label->property("textFormat").toInt(), int(Qt::PlainText));
+            }
+        }
+        QVERIFY(gWarnings.filter(QStringLiteral("evil.invalid")).isEmpty());
+    }
+
+    void theSubtabBarFollowsTheSettingsWhileTheAppRuns()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        QTRY_VERIFY(ui.layoutProblems().isEmpty());
+        auto *subtabs = ui.controller.subtabs();
+        // Favorites and Collections are on at first, and the main one is always there
+        QTRY_COMPARE(subtabIds(ui),
+                     (QStringList{QStringLiteral("main"), QStringLiteral("favorites"),
+                                  QStringLiteral("collections")}));
+        settleToolbar(ui);
+        setSubtabSetting(ui, QStringLiteral("movies.genres"), true);
+        QTRY_COMPARE(subtabIds(ui),
+                     (QStringList{QStringLiteral("main"), QStringLiteral("favorites"),
+                                  QStringLiteral("collections"), QStringLiteral("genres")}));
+        settleToolbar(ui);
+        setSubtabSetting(ui, QStringLiteral("movies.favorites"), false);
+        QTRY_COMPARE(subtabIds(ui),
+                     (QStringList{QStringLiteral("main"), QStringLiteral("collections"),
+                                  QStringLiteral("genres")}));
+        settleToolbar(ui);
+        // A sub-tab turned off while it shows gives way to the main one
+        QTRY_VERIFY(shownItem(ui, QStringLiteral("subtab_genres")) != nullptr);
+        QVERIFY(selectSubtab(ui, QStringLiteral("genres")));
+        QTRY_COMPARE(subtabs->current(), QStringLiteral("genres"));
+        settleToolbar(ui);
+        setSubtabSetting(ui, QStringLiteral("movies.genres"), false);
+        QTRY_COMPARE(subtabs->current(), QStringLiteral("main"));
+        settleToolbar(ui);
+        // Nothing but the main one: no bar
+        setSubtabSetting(ui, QStringLiteral("movies.collections"), false);
+        QTRY_VERIFY(subtabIds(ui).isEmpty());
+        QVERIFY(!ui.item(QStringLiteral("subtabBar"))->isVisible());
+        QTRY_VERIFY(ui.item(QStringLiteral("libraryGrid")) != nullptr);
+        settleToolbar(ui);
+    }
+
+    void aHiddenSubtabAsksTheServerForNothing()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        QTRY_VERIFY(ui.layoutProblems().isEmpty());
+        // Favorites and Collections are on and not showing: no request for them, none for the others
+        for (const QByteArray &route : std::as_const(ui.server.itemsRoutes)) {
+            QVERIFY2(!route.contains("BoxSet") && !route.contains("IsFavorite"), route.constData());
+        }
+        QVERIFY(ui.server.listingRoutes.value(QStringLiteral("MovieRecommendations")).isEmpty());
+        QVERIFY(ui.server.listingRoutes.value(QStringLiteral("Genres")).isEmpty());
+        QTRY_VERIFY(shownItem(ui, QStringLiteral("subtab_collections")) != nullptr);
+        QVERIFY(selectSubtab(ui, QStringLiteral("collections")));
+        QTRY_COMPARE(ui.controller.subtabs()->current(), QStringLiteral("collections"));
+        // The collections of the user, over every library
+        QTRY_VERIFY(lastItemsQuery(ui).queryItemValue(QStringLiteral("includeItemTypes"))
+                    == QStringLiteral("BoxSet"));
+        QVERIFY(lastItemsQuery(ui).queryItemValue(QStringLiteral("parentId")).isEmpty());
+        QVERIFY(ui.server.listingRoutes.value(QStringLiteral("MovieRecommendations")).isEmpty());
+        // Suggestions load when they show, as cards in rows with the wording built from the kind
+        setSubtabSetting(ui, QStringLiteral("movies.suggestions"), true);
+        QTRY_VERIFY(shownItem(ui, QStringLiteral("subtab_suggestions")) != nullptr);
+        QVERIFY(selectSubtab(ui, QStringLiteral("suggestions")));
+        QTRY_VERIFY(
+            !ui.server.listingRoutes.value(QStringLiteral("MovieRecommendations")).isEmpty());
+        QTRY_VERIFY(ui.item(QStringLiteral("recommendationRow_0")) != nullptr);
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Because you watched Hollow Interval")));
+        // The list of Collections is gone from the page
+        QTRY_VERIFY(!ui.item(QStringLiteral("libraryGrid")));
+        settleToolbar(ui);
+    }
+
+    void theFavoritesSubtabIsALibraryListWithAFixedFavoritesFilter()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        QTRY_VERIFY(ui.layoutProblems().isEmpty());
+        auto *subtabs = ui.controller.subtabs();
+        QTRY_VERIFY(shownItem(ui, QStringLiteral("subtab_favorites")) != nullptr);
+        QVERIFY(selectSubtab(ui, QStringLiteral("favorites")));
+        QTRY_COMPARE(subtabs->current(), QStringLiteral("favorites"));
+        QTRY_COMPARE(subtabs->status(), Kinefin::LibrarySubtabController::Ready);
+        auto *list = subtabs->activeList();
+        QVERIFY(list);
+        QVERIFY(list != ui.controller.movies());
+        QUrlQuery query = lastItemsQuery(ui);
+        QCOMPARE(query.queryItemValue(QStringLiteral("includeItemTypes")), QStringLiteral("Movie"));
+        QVERIFY(
+            query.queryItemValue(QStringLiteral("filters")).contains(QStringLiteral("IsFavorite")));
+        // The fixed filter is neither a chip nor an option of the dialog
+        QVERIFY(!ui.item(QStringLiteral("filterChip_0")));
+        QVERIFY(openFilterDialog(ui));
+        QTRY_VERIFY(ui.item(QStringLiteral("filterOption_played_Unplayed")) != nullptr);
+        QVERIFY(!ui.item(QStringLiteral("filterOption_favorites_true")));
+        QVERIFY(!filterSections(ui).isEmpty());
+        QTest::keyClick(ui.window, Qt::Key_Escape);
+        QTRY_VERIFY(!ui.popup(QStringLiteral("filterDialog"))->property("visible").toBool());
+        // A filter of the user joins it, and clearing the filters leaves it
+        list->setFilter(Kinefin::LibraryItemsModel::Unplayed);
+        QTRY_VERIFY(lastItemsQuery(ui)
+                        .queryItemValue(QStringLiteral("filters"))
+                        .contains(QStringLiteral("IsUnplayed")));
+        QVERIFY(lastItemsQuery(ui)
+                    .queryItemValue(QStringLiteral("filters"))
+                    .contains(QStringLiteral("IsFavorite")));
+        list->clearFilters();
+        QTRY_COMPARE(lastItemsQuery(ui).queryItemValue(QStringLiteral("filters")),
+                     QStringLiteral("IsFavorite"));
+        // It is a list of the library page, not the global Favorites page
+        QCOMPARE(ui.currentDetails()->objectName(), QStringLiteral("libraryPage"));
+        QCOMPARE(ui.rootTab(), QStringLiteral("movies"));
+    }
+
+    void typingInTheHeaderSearchReturnsToTheMainSubtab()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        QTRY_VERIFY(ui.layoutProblems().isEmpty());
+        auto *subtabs = ui.controller.subtabs();
+        QTRY_VERIFY(shownItem(ui, QStringLiteral("subtab_favorites")) != nullptr);
+        QVERIFY(selectSubtab(ui, QStringLiteral("favorites")));
+        QTRY_COMPARE(subtabs->current(), QStringLiteral("favorites"));
+        // The header box writes the term of the tab's own list, which is the main one
+        ui.controller.movies()->setSearchTerm(QStringLiteral("abyss"));
+        QTRY_COMPARE(subtabs->current(), QStringLiteral("main"));
+        QTRY_VERIFY(ui.item(QStringLiteral("libraryGrid")) != nullptr);
+    }
+
+    void selectingANetworkOpensItsSeriesAndBackReturns()
+    {
+        Ui ui(m_home->path());
+        const QString studioId = QStringLiteral("aa00000000000000000000000000ff11");
+        const QString hostile = QStringLiteral("<u>Net</u><img src=\"http://evil.invalid/s.png\">");
+        ui.server.listingRawBody.insert(
+            QStringLiteral("Studios"),
+            QJsonDocument(QJsonObject{{QStringLiteral("Items"),
+                                       QJsonArray{QJsonObject{
+                                           {QStringLiteral("Name"), hostile},
+                                           {QStringLiteral("Id"), studioId},
+                                           {QStringLiteral("Type"), QStringLiteral("Studio")}}}},
+                                      {QStringLiteral("TotalRecordCount"), 1}})
+                .toJson(QJsonDocument::Compact));
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("tvTab")));
+        setSubtabSetting(ui, QStringLiteral("tv.networks"), true);
+        QTRY_VERIFY(ui.layoutProblems().isEmpty());
+        QTRY_VERIFY(shownItem(ui, QStringLiteral("subtab_networks")) != nullptr);
+        settleToolbar(ui);
+        auto *subtabs = ui.controller.subtabs();
+        QVERIFY(selectSubtab(ui, QStringLiteral("networks")));
+        QTRY_COMPARE(subtabs->current(), QStringLiteral("networks"));
+        QTRY_COMPARE(subtabs->status(), Kinefin::LibrarySubtabController::Ready);
+        QQuickItem *card = nullptr;
+        QTRY_VERIFY((card = shownItem(ui, QStringLiteral("mediaCard_") + studioId)) != nullptr);
+        // The network's name is server text: plain text only, and the studio has no card menu
+        QVERIFY(!ui.itemsWithText(hostile).isEmpty());
+        for (QQuickItem *label : ui.itemsWithText(hostile)) {
+            QVERIFY2(label->inherits("QQuickText"), qPrintable(Ui::describe(label)));
+            QCOMPARE(label->property("textFormat").toInt(), int(Qt::PlainText));
+        }
+        QVERIFY(!shownItem(ui, QStringLiteral("cardMenuButton")));
+        ui.clickCenter(card);
+        QTRY_COMPARE(subtabs->networkId(), studioId);
+        QTRY_VERIFY(shownItem(ui, QStringLiteral("networkBackButton")) != nullptr);
+        QTRY_COMPARE(lastItemsQuery(ui).queryItemValue(QStringLiteral("studioIds")), studioId);
+        // Series of every library, and the label says so with the name as plain text
+        QQuickItem *cross = nullptr;
+        QTRY_VERIFY((cross = shownItem(ui, QStringLiteral("crossLibraryLabel"))) != nullptr);
+        QCOMPARE(cross->property("textFormat").toInt(), int(Qt::PlainText));
+        QVERIFY(cross->property("text").toString().contains(hostile));
+        QTRY_VERIFY(ui.item(QStringLiteral("libraryGrid")) != nullptr);
+        QTRY_VERIFY(!ui.item(QStringLiteral("networksGrid"))
+                    || !ui.item(QStringLiteral("networksGrid"))->isVisible());
+        // The way back shows the networks again
+        QVERIFY(
+            QMetaObject::invokeMethod(shownItem(ui, QStringLiteral("networkBackButton")), "click"));
+        QTRY_VERIFY(subtabs->networkId().isEmpty());
+        QTRY_VERIFY(shownItem(ui, QStringLiteral("networksGrid")) != nullptr);
+        settleToolbar(ui);
+        QVERIFY(gWarnings.filter(QStringLiteral("evil.invalid")).isEmpty());
+    }
+
+    void theEpisodesSubtabShowsTheCountAndItsOwnFilters()
+    {
+        Ui ui(m_home->path());
+        ui.server.generatedItemTotal = 40;
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("tvTab")));
+        setSubtabSetting(ui, QStringLiteral("tv.episodes"), true);
+        QTRY_VERIFY(ui.layoutProblems().isEmpty());
+        QTRY_VERIFY(shownItem(ui, QStringLiteral("subtab_episodes")) != nullptr);
+        settleToolbar(ui);
+        auto *subtabs = ui.controller.subtabs();
+        QVERIFY(selectSubtab(ui, QStringLiteral("episodes")));
+        QTRY_COMPARE(subtabs->current(), QStringLiteral("episodes"));
+        // The count is the server's own, from a request of its own
+        QTRY_COMPARE(subtabs->episodeCount(), 40);
+        QTRY_VERIFY(shownItem(ui, QStringLiteral("episodeCountLabel")) != nullptr);
+        QVERIFY(ui.showsText(QStringLiteral("40 episodes")));
+        // The filters of an episode list: the kinds of episode and the video quality, no series status
+        QTRY_VERIFY(filterSections(ui).contains(QStringLiteral("Episodes")));
+        QVERIFY(filterSections(ui).contains(QStringLiteral("Video Quality")));
+        QVERIFY(!filterSections(ui).contains(QStringLiteral("Series Status")));
+        QCOMPARE(subtabs->activeList()->sortKeys().size(), 7);
+        settleToolbar(ui);
+    }
+
+    void theTabOrderFollowsTheLayoutOfThePage()
+    {
+        Ui ui(m_home->path());
+        ui.server.generatedItemTotal = 20;
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        QTRY_VERIFY(ui.layoutProblems().isEmpty());
+        QTRY_VERIFY(shownItem(ui, QStringLiteral("subtab_collections")) != nullptr);
+        QQuickItem *menuButton = ui.item(QStringLiteral("mainMenuButton"));
+        menuButton->forceActiveFocus(Qt::TabFocusReason);
+        QTRY_VERIFY(menuButton->hasActiveFocus());
+        const QList<QQuickItem *> visited = ui.tabCycle();
+        const auto indexOfItem = [&](const QString &name) {
+            const QQuickItem *target = ui.item(name);
+            for (qsizetype i = 0; i < visited.size(); ++i) {
+                if (visited.at(i) == target || (target && target->isAncestorOf(visited.at(i))))
+                    return i;
+            }
+            return qsizetype(-1);
+        };
+        // After the tabs of the shell: the sub-tabs, the toolbar, the alphabet, the grid
+        const qsizetype mainAt = indexOfItem(QStringLiteral("subtab_main"));
+        const qsizetype favoritesAt = indexOfItem(QStringLiteral("subtab_favorites"));
+        const qsizetype collectionsAt = indexOfItem(QStringLiteral("subtab_collections"));
+        const qsizetype toolbarAt = indexOfItem(QStringLiteral("libraryToolbar"));
+        const qsizetype alphabetAt = indexOfItem(QStringLiteral("alphabetPicker"));
+        const qsizetype gridAt = indexOfItem(QStringLiteral("libraryGrid"));
+        QVERIFY(mainAt > 2);
+        QVERIFY(favoritesAt > mainAt);
+        QVERIFY(collectionsAt > favoritesAt);
+        QVERIFY(toolbarAt > collectionsAt);
+        QVERIFY(alphabetAt > toolbarAt);
+        QVERIFY(gridAt > alphabetAt);
+        for (QQuickItem *item : visited) {
+            QVERIFY2(item->isVisible(), qPrintable(Ui::describe(item)));
+            QVERIFY2(ui.insideWindow(item), qPrintable(Ui::describe(item)));
+        }
+    }
+
     void everyControlIsInsideTheWindow_data()
     {
         QTest::addColumn<QString>("state");
@@ -1851,6 +3051,12 @@ class TestUiPages : public QObject {
             QTest::addRow("%s@440", qPrintable(state)) << state << 440;
             QTest::addRow("%s@1600", qPrintable(state)) << state << 1600;
         }
+        for (const int width : {440, 560, 1000, 1600})
+            QTest::addRow("preferences@%d", width) << QStringLiteral("preferences") << width;
+        for (const int width : {560, 1000, 1600})
+            QTest::addRow("browse@%d", width) << QStringLiteral("browse") << width;
+        for (const int width : {560, 1000, 1600})
+            QTest::addRow("favorites@%d", width) << QStringLiteral("favorites") << width;
     }
 
     void everyControlIsInsideTheWindow()
@@ -1935,7 +3141,7 @@ class TestUiPages : public QObject {
         QVERIFY(ui.load());
         QVERIFY(buildState(ui, QStringLiteral("library")));
         QTRY_VERIFY(ui.controller.movies()->genreOptions()->available());
-        QObject *dialog = ui.popup(QStringLiteral("genreFilterDialog"));
+        QObject *dialog = ui.popup(QStringLiteral("filterDialog"));
         QVERIFY(dialog);
         QVERIFY(QMetaObject::invokeMethod(dialog, "open"));
         QTRY_VERIFY(dialog->property("opened").toBool());
@@ -2215,7 +3421,7 @@ class TestUiPages : public QObject {
         QVERIFY(menuButton);
         menuButton->forceActiveFocus(Qt::TabFocusReason);
         QTRY_VERIFY(menuButton->hasActiveFocus());
-        // The order inside the header: the three tabs, then the right cluster (the disabled favorites is skipped)
+        // The order inside the header: the three tabs, then the right cluster
         const QList<QQuickItem *> tabs = ui.tabButtons();
         QCOMPARE(tabs.size(), 3);
         for (QQuickItem *tab : tabs) {
@@ -2225,6 +3431,8 @@ class TestUiPages : public QObject {
         QTest::keyClick(ui.window, Qt::Key_Tab);
         QTRY_VERIFY(ui.item(QStringLiteral("headerSearchField"))->hasActiveFocus());
         QTest::keyClick(ui.window, Qt::Key_Tab);
+        QTRY_VERIFY(ui.item(QStringLiteral("favoritesButton"))->hasActiveFocus());
+        QTest::keyClick(ui.window, Qt::Key_Tab);
         QTRY_VERIFY(ui.item(QStringLiteral("queueButton"))->hasActiveFocus());
         QTest::keyClick(ui.window, Qt::Key_Tab);
         QTRY_VERIFY(ui.item(QStringLiteral("accountButton"))->hasActiveFocus());
@@ -2233,6 +3441,7 @@ class TestUiPages : public QObject {
         QQuickItem *next = ui.window->activeFocusItem();
         QVERIFY(next && !tabs.contains(next) && next != menuButton
                 && next->objectName() != QStringLiteral("headerSearchField")
+                && next->objectName() != QStringLiteral("favoritesButton")
                 && next->objectName() != QStringLiteral("queueButton")
                 && next->objectName() != QStringLiteral("accountButton"));
     }
@@ -3089,7 +4298,7 @@ class TestUiPages : public QObject {
             return menu && menu->property("visible").toBool();
         };
         const auto entryShown = [&ui](const QString &name) {
-            QTest::qWaitFor([&] { return ui.item(name) != nullptr; }, 5000);
+            (void)QTest::qWaitFor([&] { return ui.item(name) != nullptr; }, 5000);
             const QQuickItem *found = ui.item(name);
             return found && found->isVisible();
         };
@@ -3958,6 +5167,423 @@ class TestUiPages : public QObject {
         QTRY_COMPARE(ui.controller.movies()->status(), Kinefin::LibraryItemsModel::Ready);
     }
 
+    void userPreferencesNeedASession()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("servers")));
+        QObject *action = ui.shellAction(QStringLiteral("userPreferencesAction"));
+        QVERIFY(action);
+        QVERIFY(!action->property("visible").toBool());
+        QVERIFY(buildState(ui, QStringLiteral("login")));
+        QVERIFY(!action->property("visible").toBool());
+        QVERIFY(ui.signInAs(QStringLiteral("fixture-user")));
+        QVERIFY(action->property("visible").toBool());
+    }
+
+    void userPreferencesOpenFromTheAccountMenuAndShowTheStoredValues()
+    {
+        Ui ui(m_home->path());
+        RemotePreferences remote(ui);
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        // The account menu lists the entry first, and it is not part of Settings
+        ui.clickCenter(ui.item(QStringLiteral("accountButton")));
+        QObject *menu = ui.popup(QStringLiteral("accountMenu"));
+        QVERIFY(menu);
+        QTRY_VERIFY(menu->property("opened").toBool());
+        const QList<QQuickItem *> entries = ui.menuItems(QStringLiteral("accountMenu"));
+        QVERIFY(!entries.isEmpty());
+        QCOMPARE(entries.constFirst()->objectName(), QStringLiteral("userPreferencesItem"));
+        QVERIFY(entries.constFirst()->isVisible());
+        QCOMPARE(entries.constFirst()->property("text").toString(),
+                 QStringLiteral("User Preferences"));
+        QVERIFY(QMetaObject::invokeMethod(menu, "close"));
+        QTRY_VERIFY(!menu->property("visible").toBool());
+        QVERIFY(openPreferences(ui) != nullptr);
+        // No tab and no menu button marks the page
+        QCOMPARE(ui.window->property("currentSection").toString(),
+                 QStringLiteral("userPreferences"));
+        QVERIFY(!ui.item(QStringLiteral("mainMenuButton"))->property("down").toBool());
+        // The stored values: the language names come from the catalog
+        QQuickItem *audio = ui.item(QStringLiteral("prefAudioLanguage"));
+        QQuickItem *subtitles = ui.item(QStringLiteral("prefSubtitleLanguage"));
+        QVERIFY(audio && subtitles);
+        QTRY_COMPARE(comboBoxIn(audio)->property("displayText").toString(),
+                     QStringLiteral("Italian"));
+        QTRY_COMPARE(comboBoxIn(subtitles)->property("displayText").toString(),
+                     QStringLiteral("English"));
+        QCOMPARE(comboBoxIn(ui.item(QStringLiteral("prefSubtitleMode")))
+                     ->property("displayText")
+                     .toString(),
+                 QStringLiteral("Smart"));
+        QVERIFY(ui.item(QStringLiteral("prefPlayDefaultAudioTrack"))->property("checked").toBool());
+        QVERIFY(!ui.item(QStringLiteral("prefRememberSubtitleSelections"))
+                     ->property("checked")
+                     .toBool());
+        // The libraries in the stored order, the id of the one the user cannot see kept out of sight
+        QTRY_VERIFY(ui.item(QStringLiteral("prefOrderRow_2")) != nullptr);
+        QCOMPARE(ui.item(QStringLiteral("prefOrderRow_0"))->property("text").toString(),
+                 QStringLiteral("Movies"));
+        QCOMPARE(ui.item(QStringLiteral("prefOrderRow_1"))->property("text").toString(),
+                 QStringLiteral("Series"));
+        QCOMPARE(ui.item(QStringLiteral("prefOrderRow_2"))->property("text").toString(),
+                 QStringLiteral("Music"));
+        QVERIFY(ui.item(QStringLiteral("prefOrderRow_3")) == nullptr);
+        QTRY_VERIFY(ui.showsText(
+            QStringLiteral("The preferences of 1 library that is not available are kept")));
+        // The Home sections of Jellyfin are only listed
+        QTRY_VERIFY(ui.item(QStringLiteral("prefHomeSection_1")) != nullptr);
+        QCOMPARE(ui.item(QStringLiteral("prefHomeSection_0"))->property("text").toString(),
+                 QStringLiteral("Libraries"));
+        QCOMPARE(ui.item(QStringLiteral("prefHomeSection_1"))->property("text").toString(),
+                 QStringLiteral("Continue Watching"));
+        // Nothing to save yet
+        QVERIFY(!ui.item(QStringLiteral("prefsSaveButton"))->isEnabled());
+        QVERIFY(!ui.item(QStringLiteral("prefsDiscardButton"))->isEnabled());
+        QVERIFY(remote.posts.isEmpty());
+    }
+
+    void savingPostsTheWholeConfigurationAndKeepsWhatThePageDoesNotEdit()
+    {
+        Ui ui(m_home->path());
+        RemotePreferences remote(ui);
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *page = openPreferences(ui);
+        QVERIFY(page != nullptr);
+        auto *prefs = ui.controller.userConfiguration();
+        QTRY_VERIFY(ui.item(QStringLiteral("prefMyMediaExclude_") + kMovies) != nullptr);
+        // Real clicks: click() on a switch delegate does not toggle it the way a press and release do
+        QVERIFY(ui.revealAndClickUntil(page,
+                                       ui.item(QStringLiteral("prefRememberSubtitleSelections")),
+                                       [&] { return prefs->rememberSubtitleSelections(); }));
+        QVERIFY(ui.revealAndClickUntil(
+            page, ui.item(QStringLiteral("prefMyMediaExclude_") + kMovies),
+            [&] { return prefs->myMediaExcludes() == QStringList{kMovies}; }));
+        QVERIFY(prefs->dirty());
+        QVERIFY(ui.item(QStringLiteral("prefsSaveButton"))->isEnabled());
+        QVERIFY(QMetaObject::invokeMethod(ui.item(QStringLiteral("prefsSaveButton")), "click"));
+        QTRY_COMPARE(remote.posts.size(), 1);
+        QTRY_VERIFY(!prefs->dirty());
+        QTRY_VERIFY(!ui.item(QStringLiteral("prefsSaveButton"))->isEnabled());
+        // The whole object goes: the two edits, and everything else as the server had it
+        const QJsonObject posted = remote.posts.constFirst();
+        const QJsonObject before = preferencesConfiguration();
+        QCOMPARE(posted.keys(), before.keys());
+        QVERIFY(posted.value(QStringLiteral("RememberSubtitleSelections")).toBool());
+        QCOMPARE(posted.value(QStringLiteral("MyMediaExcludes")).toArray(), QJsonArray{kMovies});
+        QCOMPARE(posted.value(QStringLiteral("GroupedFolders")),
+                 before.value(QStringLiteral("GroupedFolders")));
+        QCOMPARE(posted.value(QStringLiteral("FutureField")),
+                 before.value(QStringLiteral("FutureField")));
+        QCOMPARE(posted.value(QStringLiteral("LatestItemsExcludes")),
+                 before.value(QStringLiteral("LatestItemsExcludes")));
+        QCOMPARE(posted.value(QStringLiteral("OrderedViews")),
+                 before.value(QStringLiteral("OrderedViews")));
+        QCOMPARE(posted.value(QStringLiteral("AudioLanguagePreference")).toString(),
+                 QStringLiteral("ita"));
+    }
+
+    void aConflictShowsTheBannerAndPostsNothing()
+    {
+        Ui ui(m_home->path());
+        RemotePreferences remote(ui);
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(openPreferences(ui) != nullptr);
+        auto *prefs = ui.controller.userConfiguration();
+        prefs->setSubtitleMode(QStringLiteral("Always"));
+        QTRY_VERIFY(ui.item(QStringLiteral("prefsSaveButton"))->isEnabled());
+        // Another device changes the same field first
+        remote.configuration.insert(QStringLiteral("SubtitleMode"), QStringLiteral("None"));
+        QVERIFY(QMetaObject::invokeMethod(ui.item(QStringLiteral("prefsSaveButton")), "click"));
+        QTRY_COMPARE(prefs->state(), Kinefin::UserConfigurationModel::Conflict);
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Some preferences were changed on another "
+                                                "device, so nothing was saved: keep editing to "
+                                                "review your changes, or discard them")));
+        QVERIFY(remote.posts.isEmpty());
+        QVERIFY(!ui.item(QStringLiteral("prefRememberAudioSelections"))->isEnabled());
+        // Keep Editing gives the draft back, a second save meets the same conflict, Discard drops the draft
+        QVERIFY(ui.clickButton(QStringLiteral("Keep Editing")));
+        QTRY_COMPARE(prefs->state(), Kinefin::UserConfigurationModel::Ready);
+        QVERIFY(prefs->dirty());
+        QVERIFY(ui.item(QStringLiteral("prefRememberAudioSelections"))->isEnabled());
+        QVERIFY(QMetaObject::invokeMethod(ui.item(QStringLiteral("prefsSaveButton")), "click"));
+        QTRY_COMPARE(prefs->state(), Kinefin::UserConfigurationModel::Conflict);
+        QVERIFY(ui.clickButton(QStringLiteral("Discard")));
+        QTRY_COMPARE(prefs->state(), Kinefin::UserConfigurationModel::Ready);
+        QVERIFY(!prefs->dirty());
+        QCOMPARE(prefs->subtitleMode(), QStringLiteral("Smart"));
+        QVERIFY(remote.posts.isEmpty());
+    }
+
+    void leavingWithUnsavedChangesAsksFirst()
+    {
+        Ui ui(m_home->path());
+        RemotePreferences remote(ui);
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(openPreferences(ui) != nullptr);
+        auto *prefs = ui.controller.userConfiguration();
+        QObject *dialog = ui.popup(QStringLiteral("unsavedChangesDialog"));
+        QVERIFY(dialog);
+        // Without a draft Escape just goes back
+        QTest::keyClick(ui.window, Qt::Key_Escape);
+        QTRY_VERIFY(ui.item(QStringLiteral("userPreferencesPage")) == nullptr);
+        QVERIFY(openPreferences(ui) != nullptr);
+        dialog = ui.popup(QStringLiteral("unsavedChangesDialog"));
+        QVERIFY(dialog);
+        prefs->setSubtitleMode(QStringLiteral("Always"));
+        QTRY_VERIFY(prefs->dirty());
+        // With one it asks before the page is popped, and Cancel stays
+        QTest::keyClick(ui.window, Qt::Key_Escape);
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QCOMPARE(ui.stackDepth(), 2);
+        QVERIFY(ui.item(QStringLiteral("userPreferencesPage")) != nullptr);
+        QVERIFY(
+            clickInDialog(ui, QStringLiteral("unsavedChangesDialog"), QStringLiteral("Cancel")));
+        QTRY_VERIFY(!dialog->property("visible").toBool());
+        QCOMPARE(ui.stackDepth(), 2);
+        QVERIFY(prefs->dirty());
+        QCOMPARE(prefs->subtitleMode(), QStringLiteral("Always"));
+        // A section asks the same, and Discard opens it
+        QVERIFY(
+            QMetaObject::invokeMethod(ui.shellAction(QStringLiteral("settingsAction")), "trigger"));
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QVERIFY(ui.item(QStringLiteral("settingsPage")) == nullptr);
+        QVERIFY(ui.item(QStringLiteral("userPreferencesPage")) != nullptr);
+        QVERIFY(
+            clickInDialog(ui, QStringLiteral("unsavedChangesDialog"), QStringLiteral("Discard")));
+        QTRY_VERIFY(ui.item(QStringLiteral("settingsPage")) != nullptr);
+        QTRY_VERIFY(ui.item(QStringLiteral("userPreferencesPage")) == nullptr);
+        QVERIFY(!prefs->dirty());
+        QVERIFY(remote.posts.isEmpty());
+        // A tab asks too, and Save writes the draft and then leaves
+        QVERIFY(openPreferences(ui) != nullptr);
+        dialog = ui.popup(QStringLiteral("unsavedChangesDialog"));
+        QVERIFY(dialog);
+        prefs->setRememberSubtitleSelections(true);
+        QTRY_VERIFY(prefs->dirty());
+        QTest::keyClick(ui.window, Qt::Key_1, Qt::ControlModifier);
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QVERIFY(clickInDialog(ui, QStringLiteral("unsavedChangesDialog"), QStringLiteral("Save")));
+        QTRY_COMPARE(remote.posts.size(), 1);
+        QTRY_VERIFY(ui.item(QStringLiteral("userPreferencesPage")) == nullptr);
+        QTRY_VERIFY(ui.item(QStringLiteral("homePage")) != nullptr);
+        QCOMPARE(ui.stackDepth(), 1);
+        QVERIFY(!prefs->dirty());
+    }
+
+    void theMouseBackButtonAndClosingAskBeforeLosingUnsavedPreferences()
+    {
+        Ui ui(m_home->path());
+        RemotePreferences remote(ui);
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(openPreferences(ui) != nullptr);
+        auto *prefs = ui.controller.userConfiguration();
+        QObject *dialog = ui.popup(QStringLiteral("unsavedChangesDialog"));
+        QVERIFY(dialog);
+        prefs->setSubtitleMode(QStringLiteral("Always"));
+        QTRY_VERIFY(prefs->dirty());
+        const QPoint middle(ui.window->width() / 2, ui.window->height() / 2);
+        QTest::mouseClick(ui.window, Qt::BackButton, Qt::NoModifier, middle);
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QCOMPARE(ui.stackDepth(), 2);
+        // The page is brought back to the front under the dialog
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("userPreferencesPage"));
+        QVERIFY(
+            clickInDialog(ui, QStringLiteral("unsavedChangesDialog"), QStringLiteral("Cancel")));
+        QTRY_VERIFY(!dialog->property("visible").toBool());
+        QVERIFY(prefs->dirty());
+        // Closing the window asks too, and Cancel keeps it open
+        ui.window->close();
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QVERIFY(ui.window->isVisible());
+        QVERIFY(
+            clickInDialog(ui, QStringLiteral("unsavedChangesDialog"), QStringLiteral("Cancel")));
+        QTRY_VERIFY(!dialog->property("visible").toBool());
+        QVERIFY(ui.window->isVisible());
+        QVERIFY(prefs->dirty());
+    }
+
+    void theHeaderSearchIsGlobalOnThePreferencesPage()
+    {
+        Ui ui(m_home->path());
+        RemotePreferences remote(ui);
+        ui.controller.movies()->setSearchDebounceInterval(30);
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        QQuickItem *field = ui.item(QStringLiteral("headerSearchField"));
+        QVERIFY(field);
+        QCOMPARE(field->property("placeholderText").toString(), QStringLiteral("Search in Movies"));
+        QTRY_VERIFY(ui.tabButtons().value(1)->property("checked").toBool());
+        QVERIFY(openPreferences(ui) != nullptr);
+        // The Movies tab stays at the root of the stack but is not marked, and the box searches the server
+        QCOMPARE(ui.rootTab(), QStringLiteral("movies"));
+        QCOMPARE(ui.window->property("currentSection").toString(),
+                 QStringLiteral("userPreferences"));
+        QTRY_COMPARE(field->property("placeholderText").toString(), QStringLiteral("Search"));
+        for (int index = 0; index < 3; ++index)
+            QTRY_VERIFY(!ui.tabButtons().value(index)->property("checked").toBool());
+        field->forceActiveFocus(Qt::TabFocusReason);
+        QTRY_VERIFY(field->hasActiveFocus());
+        ui.type(QStringLiteral("ab"));
+        QTRY_VERIFY(ui.item(QStringLiteral("searchPage")) != nullptr);
+        QCOMPARE(ui.controller.search()->term(), QStringLiteral("ab"));
+        QCOMPARE(ui.controller.movies()->searchTerm(), QString());
+        QCOMPARE(ui.stackDepth(), 3);
+        QVERIFY(ui.item(QStringLiteral("userPreferencesPage")) != nullptr);
+    }
+
+    void aFailedLoadOffersRetryAndAMissingCatalogKeepsTheStoredLanguage()
+    {
+        Ui ui(m_home->path());
+        RemotePreferences remote(ui);
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        ui.server.usersMeStatus = 500;
+        ui.server.culturesStatus = 500;
+        QVERIFY(QMetaObject::invokeMethod(ui.shellAction(QStringLiteral("userPreferencesAction")),
+                                          "trigger"));
+        auto *prefs = ui.controller.userConfiguration();
+        QTRY_COMPARE(prefs->state(), Kinefin::UserConfigurationModel::Failed);
+        QTRY_VERIFY(ui.showsText(QStringLiteral(
+            "Could not load the preferences: check the connection to the server and try again")));
+        QVERIFY(!ui.item(QStringLiteral("prefAudioLanguage"))->isVisible());
+        QVERIFY(!ui.item(QStringLiteral("prefsSaveButton"))->isVisible());
+        ui.server.usersMeStatus = 0;
+        QVERIFY(ui.clickButton(QStringLiteral("Retry")));
+        QTRY_COMPARE(prefs->state(), Kinefin::UserConfigurationModel::Ready);
+        // The catalog is still missing: the stored code stays selected, and the list says so
+        QTRY_COMPARE(comboBoxIn(ui.item(QStringLiteral("prefAudioLanguage")))
+                         ->property("displayText")
+                         .toString(),
+                     QStringLiteral("ita (not in the catalog)"));
+        QTRY_VERIFY(ui.showsText(QStringLiteral("The language list is not available: only "
+                                                "Automatic and the current choice can be "
+                                                "selected")));
+        QVERIFY(!prefs->dirty());
+    }
+
+    void userPreferencesKeepServerTextPlain()
+    {
+        Ui ui(m_home->path());
+        RemotePreferences remote(ui);
+        const QString library =
+            QStringLiteral("<b>Films</b><img src=\"http://evil.invalid/x.png\">");
+        const QString language =
+            QStringLiteral("<i>Italiano</i><img src=\"http://evil.invalid/y.png\">");
+        ui.serveViews({{kMovies, library, QStringLiteral("movies")},
+                       {kSeries, QStringLiteral("Series"), QStringLiteral("tvshows")}});
+        ui.server.culturesRawBody =
+            QJsonDocument(
+                QJsonArray{QJsonObject{{QStringLiteral("DisplayName"), language},
+                                       {QStringLiteral("ThreeLetterISOLanguageName"),
+                                        QStringLiteral("ita")}},
+                           QJsonObject{{QStringLiteral("DisplayName"), QStringLiteral("English")},
+                                       {QStringLiteral("ThreeLetterISOLanguageName"),
+                                        QStringLiteral("eng")}}})
+                .toJson(QJsonDocument::Compact);
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(openPreferences(ui) != nullptr);
+        QQuickItem *box = comboBoxIn(ui.item(QStringLiteral("prefAudioLanguage")));
+        QVERIFY(box);
+        QTRY_COMPARE(box->property("displayText").toString(), language);
+        // The name of the library shows in the order list and in the two lists of check boxes
+        int found = 0;
+        QTRY_VERIFY((ui.notPlainText(library, &found), found >= 3));
+        const QStringList problems = ui.notPlainText(library);
+        QVERIFY2(problems.isEmpty(), qPrintable(problems.join(QLatin1Char('\n'))));
+        // The popup of the box builds its entries
+        auto *popup = box->property("popup").value<QObject *>();
+        QVERIFY(popup);
+        QVERIFY(QMetaObject::invokeMethod(popup, "open"));
+        QTRY_VERIFY(popup->property("opened").toBool());
+        QTRY_VERIFY(ui.itemsWithText(language).size() >= 2);
+        for (QQuickItem *label : ui.itemsWithText(language)) {
+            if (label->inherits("QQuickAbstractButton"))
+                continue;
+            QVERIFY2(label->inherits("QQuickText"), qPrintable(Ui::describe(label)));
+            QCOMPARE(label->property("textFormat").toInt(), int(Qt::PlainText));
+        }
+        QVERIFY(QMetaObject::invokeMethod(popup, "close"));
+        QTest::qWait(300);
+        QVERIFY(gWarnings.filter(QStringLiteral("evil.invalid")).isEmpty());
+    }
+
+    void aSessionSwitchDropsTheDraft()
+    {
+        Ui ui(m_home->path());
+        RemotePreferences remote(ui);
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(openPreferences(ui) != nullptr);
+        auto *prefs = ui.controller.userConfiguration();
+        prefs->setSubtitleMode(QStringLiteral("Always"));
+        QTRY_VERIFY(prefs->dirty());
+        // The session ends without asking: nothing of the draft can reach the next one
+        ui.controller.switchUser();
+        QTRY_VERIFY(ui.item(QStringLiteral("userPreferencesPage")) == nullptr);
+        QTRY_COMPARE(prefs->state(), Kinefin::UserConfigurationModel::Idle);
+        QVERIFY(!prefs->dirty());
+        QVERIFY(!prefs->loaded());
+        QVERIFY(prefs->libraries().isEmpty());
+        QVERIFY(remote.posts.isEmpty());
+    }
+
+    void theKeyboardReordersTheLibraries()
+    {
+        Ui ui(m_home->path());
+        RemotePreferences remote(ui);
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(openPreferences(ui) != nullptr);
+        auto *prefs = ui.controller.userConfiguration();
+        QTRY_VERIFY(ui.item(QStringLiteral("prefOrderRow_2")) != nullptr);
+        QQuickItem *row = ui.item(QStringLiteral("prefOrderRow_1"));
+        row->forceActiveFocus(Qt::TabFocusReason);
+        QTRY_VERIFY(row->hasActiveFocus());
+        QTest::keyClick(ui.window, Qt::Key_Up, Qt::ControlModifier);
+        QTRY_COMPARE(prefs->orderedViews(), QStringList({kSeries, kMovies, kMusicLibrary}));
+        // The rows are rebuilt: the keyboard follows the one that moved
+        QTRY_VERIFY(ui.item(QStringLiteral("prefOrderRow_0")) != nullptr
+                    && ui.item(QStringLiteral("prefOrderRow_0"))->hasActiveFocus());
+        QCOMPARE(ui.item(QStringLiteral("prefOrderRow_0"))->property("text").toString(),
+                 QStringLiteral("Series"));
+        QVERIFY(QMetaObject::invokeMethod(ui.item(QStringLiteral("prefsSaveButton")), "click"));
+        QTRY_COMPARE(remote.posts.size(), 1);
+        // The id the user cannot see keeps its slot
+        QCOMPARE(remote.posts.constFirst().value(QStringLiteral("OrderedViews")).toArray(),
+                 QJsonArray({kHiddenId, kSeries, kMovies, kMusicLibrary}));
+    }
+
+    void preferencesTabStaysInThePage()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("preferences")));
+        QTRY_VERIFY(ui.layoutProblems().isEmpty());
+        ui.controller.userConfiguration()->setSubtitleMode(QStringLiteral("Always"));
+        QTRY_VERIFY(ui.item(QStringLiteral("prefsSaveButton"))->isEnabled());
+        const QList<QQuickItem *> visited = ui.tabCycle();
+        QVERIFY(visited.size() >= 2);
+        QStringList seen;
+        bool save = false;
+        bool rows = false;
+        for (QQuickItem *item : visited) {
+            seen << Ui::describe(item);
+            QVERIFY2(item->isVisible(), qPrintable(Ui::describe(item)));
+            QVERIFY2(!ui.inAnotherPage(item), qPrintable(Ui::describe(item)));
+            QVERIFY2(ui.insideWindow(item), qPrintable(Ui::describe(item)));
+            save = save || item->objectName() == QStringLiteral("prefsSaveButton");
+            rows = rows || item->objectName().startsWith(QStringLiteral("prefOrderRow_"));
+        }
+        QVERIFY2(save && rows, qPrintable(seen.join(QLatin1Char('\n'))));
+    }
+
     void lossOfTheSessionReturnsToSignIn()
     {
         Ui ui(m_home->path());
@@ -3978,6 +5604,461 @@ class TestUiPages : public QObject {
         QVERIFY(!ui.origin->get().isEmpty());
         ui.controller.cancel();
         QTRY_VERIFY(ui.origin->get().isEmpty());
+    }
+
+    void theStarOpensTheFavoritesPageAndMarksItself()
+    {
+        Ui ui(m_home->path());
+        serveFavorites(ui);
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(1000));
+        QVERIFY(buildState(ui, QStringLiteral("home")));
+        QQuickItem *star = ui.item(QStringLiteral("favoritesButton"));
+        QVERIFY(star && star->isVisible() && star->isEnabled());
+        QVERIFY(!star->property("down").toBool());
+        QTRY_VERIFY(!ui.controller.libraries().isEmpty());
+        ui.clickCenter(star);
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("favoritesPage"));
+        QTRY_COMPARE(ui.controller.favorites()->status(), Kinefin::FavoritesModel::Complete);
+        QCOMPARE(ui.stackDepth(), 2);
+        // The star marks itself and no tab does
+        QTRY_VERIFY(star->property("down").toBool());
+        QCOMPARE(ui.window->property("currentSection").toString(), QStringLiteral("favorites"));
+        for (int index = 0; index < 3; ++index)
+            QTRY_VERIFY(!ui.tabButtons().value(index)->property("checked").toBool());
+        // By type, the default: the movies, the shows and the episode, with their counts
+        QCOMPARE(ui.controller.favorites()->count(), 6);
+        QTRY_COMPARE(favoriteGroupTitles(ui),
+                     QStringList({QStringLiteral("Movies"), QStringLiteral("TV Shows"),
+                                  QStringLiteral("Episodes")}));
+        QCOMPARE(ui.item(QStringLiteral("favoritesGroupCount_0"))->property("text").toString(),
+                 QStringLiteral("3 favorites"));
+        QCOMPARE(ui.item(QStringLiteral("favoritesGroupCount_2"))->property("text").toString(),
+                 QStringLiteral("1 favorite"));
+        // Nothing is marked as loading, empty or partial
+        QVERIFY(!ui.item(QStringLiteral("favoritesLoading"))->isVisible());
+        QVERIFY(!ui.item(QStringLiteral("favoritesEmpty"))->isVisible());
+        QVERIFY(!ui.item(QStringLiteral("favoritesCappedBanner"))->isVisible());
+        QVERIFY(!ui.item(QStringLiteral("favoritesPartialBanner"))->isVisible());
+        // The first row takes the keys
+        QTRY_VERIFY(ui.item(QStringLiteral("favoritesRow_0"))->hasActiveFocus());
+        QTRY_VERIFY(ui.layoutProblems().isEmpty());
+        // The star again brings the page back as it is: no second page, no second scan
+        const int requests = ui.server.itemsRoutes.size();
+        ui.clickCenter(star);
+        QTest::qWait(300);
+        QCOMPARE(ui.stackDepth(), 2);
+        QCOMPARE(ui.server.itemsRoutes.size(), requests);
+    }
+
+    void theCompactMenuOpensTheFavorites()
+    {
+        Ui ui(m_home->path());
+        serveFavorites(ui);
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("home")));
+        // Below the Compact limit, which the shell derives from grid units: a fixed width may lie above it
+        QVERIFY(ui.opensWindowOfWidth(ui.window->property("compactLimit").toInt() - 40));
+        QTRY_VERIFY(ui.shellHeader()->property("compact").toBool());
+        QTRY_VERIFY(!ui.item(QStringLiteral("favoritesButton"))->isVisible());
+        QObject *action = ui.shellAction(QStringLiteral("compactFavoritesAction"));
+        QVERIFY(action && action->property("enabled").toBool());
+        QTRY_VERIFY(!ui.controller.libraries().isEmpty());
+        QVERIFY(QMetaObject::invokeMethod(action, "trigger"));
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("favoritesPage"));
+        QTRY_COMPARE(ui.controller.favorites()->status(), Kinefin::FavoritesModel::Complete);
+        QCOMPARE(ui.window->property("currentSection").toString(), QStringLiteral("favorites"));
+        QTRY_VERIFY(ui.layoutProblems().isEmpty());
+    }
+
+    void groupByRegroupsWithoutARequestAndIsKeptAcrossARestart()
+    {
+        {
+            Ui ui(m_home->path());
+            serveFavorites(ui);
+            QVERIFY(ui.load());
+            QVERIFY(buildState(ui, QStringLiteral("home")));
+            QQuickItem *page = openFavorites(ui);
+            QVERIFY(page);
+            QCOMPARE(ui.controller.favoriteGroups()->grouping(),
+                     Kinefin::FavoritesGroupsModel::Type);
+            for (const char *name : {"Type", "Library", "Genre", "Year", "None"})
+                QVERIFY2(groupByAction(page, QLatin1String(name)), name);
+            QTRY_VERIFY(groupByAction(page, QStringLiteral("Type"))->property("checked").toBool());
+            QVERIFY(!groupByAction(page, QStringLiteral("Library"))->property("checked").toBool());
+
+            // Each choice regroups at once and sends nothing
+            const int requests = ui.server.itemsRoutes.size();
+            const auto choose = [&](const QString &grouping, const QStringList &titles) {
+                QVERIFY(QMetaObject::invokeMethod(groupByAction(page, grouping), "trigger"));
+                QTRY_COMPARE(favoriteGroupTitles(ui), titles);
+                QTRY_VERIFY(groupByAction(page, grouping)->property("checked").toBool());
+                QCOMPARE(ui.server.itemsRoutes.size(), requests);
+            };
+            choose(QStringLiteral("Library"), {QStringLiteral("Movies"), QStringLiteral("Series")});
+            QVERIFY(!groupByAction(page, QStringLiteral("Type"))->property("checked").toBool());
+            choose(QStringLiteral("Genre"), {QStringLiteral("Action"), QStringLiteral("Comedy"),
+                                             QStringLiteral("Drama"), QStringLiteral("No genre")});
+            choose(QStringLiteral("Year"), {QStringLiteral("2020"), QStringLiteral("2019"),
+                                            QStringLiteral("2015"), QStringLiteral("2012")});
+            // None is one group, shown as a grid of every favorite and with no title row
+            QVERIFY(
+                QMetaObject::invokeMethod(groupByAction(page, QStringLiteral("None")), "trigger"));
+            QTRY_COMPARE(ui.controller.favoriteGroups()->count(), 1);
+            QTRY_VERIFY(groupByAction(page, QStringLiteral("None"))->property("checked").toBool());
+            QCOMPARE(ui.server.itemsRoutes.size(), requests);
+            QQuickItem *grid = nullptr;
+            QTRY_VERIFY((grid = ui.item(QStringLiteral("favoritesGrid"))) != nullptr);
+            QTRY_COMPARE(grid->property("count").toInt(), 6);
+            QTRY_VERIFY(ui.layoutProblems().isEmpty());
+            choose(QStringLiteral("Library"), {QStringLiteral("Movies"), QStringLiteral("Series")});
+            QTRY_VERIFY(ui.layoutProblems().isEmpty());
+        }
+        // A new run of the application on the same profile: the page opens grouped by library
+        Ui ui(m_home->path());
+        serveFavorites(ui);
+        QVERIFY(ui.load());
+        QTRY_VERIFY(!ui.controller.errorText().isEmpty());
+        ui.controller.connectTo(address(ui.server));
+        const auto settled = [&] {
+            return ui.controller.state() == ConnectionController::NeedsLogin
+                   || ui.controller.state() == ConnectionController::Authenticated;
+        };
+        QTRY_VERIFY_WITH_TIMEOUT(settled(), 15000);
+        if (ui.controller.state() == ConnectionController::NeedsLogin)
+            ui.controller.login(QStringLiteral("fixture-user"), QStringLiteral("fixture-password"));
+        QTRY_VERIFY_WITH_TIMEOUT(ui.item(QStringLiteral("homePage")) != nullptr, 15000);
+        QCOMPARE(ui.controller.favoriteGroups()->grouping(),
+                 Kinefin::FavoritesGroupsModel::Library);
+        QQuickItem *page = openFavorites(ui);
+        QVERIFY(page);
+        QTRY_COMPARE(favoriteGroupTitles(ui),
+                     QStringList({QStringLiteral("Movies"), QStringLiteral("Series")}));
+        QTRY_VERIFY(groupByAction(page, QStringLiteral("Library"))->property("checked").toBool());
+    }
+
+    void aCappedScanShowsItsBannerAndShowAllListsWhatWasLoaded()
+    {
+        Ui ui(m_home->path());
+        const auto data = serveFavorites(ui);
+        QJsonArray many;
+        for (int n = 1; n <= 1001; ++n)
+            many.append(favoriteJson(n, QStringLiteral("Movie"),
+                                     QStringLiteral("Movie %1").arg(n, 5, 10, QLatin1Char('0')),
+                                     2000));
+        data->byLibrary[kMovies] = many;
+        data->byLibrary[kSeries] = QJsonArray();
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("home")));
+        QVERIFY(openFavorites(ui));
+        QCOMPARE(ui.controller.favorites()->status(), Kinefin::FavoritesModel::Capped);
+        QCOMPARE(ui.controller.favorites()->count(), 1000);
+        QTRY_VERIFY(ui.item(QStringLiteral("favoritesCappedBanner"))->isVisible());
+        QVERIFY(ui.showsText(QStringLiteral("favorites: the list may be incomplete"), false));
+        QVERIFY(!ui.item(QStringLiteral("favoritesPartialBanner"))->isVisible());
+        // Show All is cut from the same snapshot and says it may be partial
+        QQuickItem *showAll = nullptr;
+        QTRY_VERIFY((showAll = ui.item(QStringLiteral("favoritesShowAll_0"))) != nullptr);
+        QVERIFY(QMetaObject::invokeMethod(showAll, "click"));
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("favoritesGroupPage"));
+        QQuickItem *grid = nullptr;
+        QTRY_VERIFY((grid = ui.item(QStringLiteral("favoritesGroupGrid"))) != nullptr);
+        QTRY_COMPARE(grid->property("count").toInt(), 1000);
+        QVERIFY(ui.showsText(QStringLiteral("the list may be incomplete"), false));
+    }
+
+    void aFailedLibraryKeepsTheOthersAndOffersRetry()
+    {
+        Ui ui(m_home->path());
+        const auto data = serveFavorites(ui);
+        data->failing[kSeries] = 500;
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("home")));
+        QVERIFY(openFavorites(ui));
+        QCOMPARE(ui.controller.favorites()->status(), Kinefin::FavoritesModel::PartialError);
+        // The movies show, the failure is no empty state
+        QTRY_VERIFY(ui.item(QStringLiteral("favoritesPartialBanner"))->isVisible());
+        QVERIFY(ui.showsText(QStringLiteral("Some libraries could not be read")));
+        QVERIFY(!ui.item(QStringLiteral("favoritesCappedBanner"))->isVisible());
+        QVERIFY(!ui.item(QStringLiteral("favoritesEmpty"))->isVisible());
+        QTRY_COMPARE(favoriteGroupTitles(ui), QStringList({QStringLiteral("Movies")}));
+        // Retry scans again
+        data->failing.clear();
+        QVERIFY(ui.clickButton(QStringLiteral("Retry")));
+        QTRY_COMPARE(ui.controller.favorites()->status(), Kinefin::FavoritesModel::Complete);
+        QTRY_VERIFY(!ui.item(QStringLiteral("favoritesPartialBanner"))->isVisible());
+        QTRY_COMPARE(favoriteGroupTitles(ui).size(), 3);
+    }
+
+    void noFavoritesAndNoLibrariesHaveTheirOwnStates()
+    {
+        Ui ui(m_home->path());
+        const auto data = serveFavorites(ui);
+        data->byLibrary[kMovies] = QJsonArray();
+        data->byLibrary[kSeries] = QJsonArray();
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("home")));
+        QVERIFY(openFavorites(ui));
+        QTRY_VERIFY(ui.item(QStringLiteral("favoritesEmpty"))->isVisible());
+        QVERIFY(ui.showsText(QStringLiteral("No favorites yet")));
+        QVERIFY(!ui.item(QStringLiteral("favoritesNoLibraries"))->isVisible());
+        QVERIFY(!ui.item(QStringLiteral("favoritesLoading"))->isVisible());
+        QCOMPARE(ui.controller.favoriteGroups()->count(), 0);
+        QTRY_VERIFY(ui.layoutProblems().isEmpty());
+    }
+
+    void withoutLibrariesThePageLeadsHome()
+    {
+        Ui ui(m_home->path());
+        serveFavorites(ui);
+        ui.serveViews({{kMusic, QStringLiteral("Music"), QStringLiteral("music")}});
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(openFavorites(ui));
+        QTRY_VERIFY(ui.item(QStringLiteral("favoritesNoLibraries"))->isVisible());
+        QVERIFY(!ui.item(QStringLiteral("favoritesEmpty"))->isVisible());
+        QCOMPARE(ui.controller.favorites()->libraryCount(), 0);
+        QPointer<QQuickItem> page = ui.item(QStringLiteral("favoritesPage"));
+        // The button belongs to the placeholder's action: it is triggered through the placeholder
+        QObject *action = ui.item(QStringLiteral("favoritesNoLibraries"))
+                              ->property("helpfulAction")
+                              .value<QObject *>();
+        QVERIFY(action && action->property("text").toString() == QStringLiteral("Go to Home"));
+        QVERIFY(QMetaObject::invokeMethod(action, "trigger"));
+        QTRY_COMPARE(ui.stackDepth(), 1);
+        QTRY_VERIFY(!page);
+        QCOMPARE(ui.window->property("currentSection").toString(), QStringLiteral("home"));
+    }
+
+    void showAllOpensTheGroupAndBackReturnsTheFocus()
+    {
+        Ui ui(m_home->path());
+        const auto data = serveFavorites(ui);
+        // The first movie behind the details route
+        ui.server.itemsById.insert(
+            favoriteId(1), QJsonDocument(cardItem(favoriteId(1))).toJson(QJsonDocument::Compact));
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("home")));
+        QVERIFY(openFavorites(ui));
+        QQuickItem *row = nullptr;
+        QTRY_VERIFY((row = ui.item(QStringLiteral("favoritesRow_0"))) != nullptr
+                    && row->hasActiveFocus());
+        // Show All of the second group, the shows
+        QQuickItem *showAll = ui.item(QStringLiteral("favoritesShowAll_1"));
+        QVERIFY(showAll);
+        QVERIFY(QMetaObject::invokeMethod(showAll, "click"));
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("favoritesGroupPage"));
+        QCOMPARE(ui.stackDepth(), 3);
+        QCOMPARE(ui.currentDetails()->property("title").toString(), QStringLiteral("TV Shows"));
+        QCOMPARE(ui.window->property("currentSection").toString(), QStringLiteral("favorites"));
+        QQuickItem *grid = nullptr;
+        QTRY_VERIFY((grid = ui.item(QStringLiteral("favoritesGroupGrid"))) != nullptr);
+        QTRY_COMPARE(grid->property("count").toInt(), 2);
+        QTRY_VERIFY(grid->hasActiveFocus());
+        QTRY_VERIFY(ui.layoutProblems().isEmpty());
+        // Back returns to the row the user came from
+        QPointer<QQuickItem> groupPage = ui.currentDetails();
+        QTest::keyClick(ui.window, Qt::Key_Left, Qt::AltModifier);
+        QTRY_COMPARE(ui.stackDepth(), 2);
+        QTRY_VERIFY(!groupPage);
+        QCOMPARE(ui.currentDetails()->objectName(), QStringLiteral("favoritesPage"));
+        QTRY_VERIFY(ui.item(QStringLiteral("favoritesRow_0"))->hasActiveFocus());
+        // A card opens its item above the page and Escape comes back to the same card
+        QTest::keyClick(ui.window, Qt::Key_Return);
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("itemDetailsPage"));
+        QCOMPARE(ui.window->property("currentSection").toString(), QStringLiteral("favorites"));
+        QTest::keyClick(ui.window, Qt::Key_Escape);
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("favoritesPage"));
+        QTRY_VERIFY(ui.item(QStringLiteral("favoritesRow_0"))->hasActiveFocus());
+        // A replaced snapshot takes the group page with it
+        QVERIFY(QMetaObject::invokeMethod(ui.item(QStringLiteral("favoritesShowAll_0")), "click"));
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("favoritesGroupPage"));
+        data->byLibrary[kSeries] = QJsonArray();
+        ui.controller.favorites()->reload();
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("favoritesPage"));
+        QTRY_COMPARE(ui.controller.favorites()->status(), Kinefin::FavoritesModel::Complete);
+        QTRY_COMPARE(ui.stackDepth(), 2);
+    }
+
+    void theMenuKeyOpensTheCardMenuAndEscapeClosesItFirst()
+    {
+        Ui ui(m_home->path());
+        serveFavorites(ui);
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("favorites")));
+        QTRY_VERIFY(ui.item(QStringLiteral("favoritesRow_0"))->hasActiveFocus());
+        QObject *menu = ui.popup(QStringLiteral("cardMenu"));
+        QVERIFY(menu);
+        QTest::keyClick(ui.window, Qt::Key_Menu);
+        QTRY_VERIFY(menu->property("opened").toBool());
+        // The card menu is the one of every page, with no entry that changes a favorite
+        QCOMPARE(menu->property("itemId").toString(), favoriteId(1));
+        QTest::keyClick(ui.window, Qt::Key_Escape);
+        QTRY_VERIFY(!menu->property("opened").toBool());
+        QCOMPARE(ui.currentDetails()->objectName(), QStringLiteral("favoritesPage"));
+        QTest::keyClick(ui.window, Qt::Key_F10, Qt::ShiftModifier);
+        QTRY_VERIFY(menu->property("opened").toBool());
+        QTest::keyClick(ui.window, Qt::Key_Escape);
+        QTRY_VERIFY(!menu->property("opened").toBool());
+    }
+
+    void backClosesThePageAndOpeningAgainScansAgain()
+    {
+        Ui ui(m_home->path());
+        serveFavorites(ui);
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(1000));
+        QVERIFY(buildState(ui, QStringLiteral("favorites")));
+        QCOMPARE(ui.window->property("favoritesPages").toInt(), 1);
+        QPointer<QQuickItem> page = ui.item(QStringLiteral("favoritesPage"));
+        QTest::keyClick(ui.window, Qt::Key_Escape);
+        QTRY_COMPARE(ui.stackDepth(), 1);
+        QTRY_VERIFY(!page);
+        QTRY_COMPARE(ui.window->property("favoritesPages").toInt(), 0);
+        QTRY_COMPARE(ui.window->property("currentSection").toString(), QStringLiteral("home"));
+        // The next visit starts from a new scan: the star shows nothing of the old snapshot while it runs
+        const int requests = ui.server.itemsRoutes.size();
+        ui.clickCenter(ui.item(QStringLiteral("favoritesButton")));
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("favoritesPage"));
+        QTRY_VERIFY(ui.server.itemsRoutes.size() > requests);
+        QTRY_COMPARE(ui.controller.favorites()->status(), Kinefin::FavoritesModel::Complete);
+        QCOMPARE(ui.window->property("favoritesPages").toInt(), 1);
+        QCOMPARE(ui.controller.favorites()->count(), 6);
+    }
+
+    void theHeaderSearchIsGlobalOnTheFavoritesPage()
+    {
+        Ui ui(m_home->path());
+        serveFavorites(ui);
+        ui.controller.movies()->setSearchDebounceInterval(30);
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        QQuickItem *field = ui.item(QStringLiteral("headerSearchField"));
+        QVERIFY(field);
+        QCOMPARE(field->property("placeholderText").toString(), QStringLiteral("Search in Movies"));
+        QTRY_VERIFY(ui.tabButtons().value(1)->property("checked").toBool());
+        QVERIFY(openFavorites(ui));
+        // The Movies tab stays at the root of the stack but is not marked, and the box searches the server
+        QCOMPARE(ui.rootTab(), QStringLiteral("movies"));
+        QCOMPARE(ui.window->property("currentSection").toString(), QStringLiteral("favorites"));
+        QTRY_COMPARE(field->property("placeholderText").toString(), QStringLiteral("Search"));
+        for (int index = 0; index < 3; ++index)
+            QTRY_VERIFY(!ui.tabButtons().value(index)->property("checked").toBool());
+        QTRY_VERIFY(ui.item(QStringLiteral("favoritesButton"))->property("down").toBool());
+        field->forceActiveFocus(Qt::TabFocusReason);
+        QTRY_VERIFY(field->hasActiveFocus());
+        ui.type(QStringLiteral("ab"));
+        QTRY_VERIFY(ui.item(QStringLiteral("searchPage")) != nullptr);
+        QCOMPARE(ui.controller.search()->term(), QStringLiteral("ab"));
+        QCOMPARE(ui.controller.movies()->searchTerm(), QString());
+        QCOMPARE(ui.stackDepth(), 3);
+        QVERIFY(ui.item(QStringLiteral("favoritesPage")) != nullptr);
+    }
+
+    void switchingUserOrServerClearsTheSnapshot()
+    {
+        Ui ui(m_home->path());
+        const auto data = serveFavorites(ui);
+        data->byLibrary[kMovies] = QJsonArray{
+            favoriteJson(1, QStringLiteral("Movie"), QStringLiteral("Alice Movie"), 2001)};
+        data->byLibrary[kSeries] = QJsonArray();
+        QVERIFY(ui.load());
+        QVERIFY(ui.openPickerWithTwoUsers());
+        ui.controller.chooseUser(kAliceId);
+        QVERIFY(ui.reach(ConnectionController::Authenticated, QStringLiteral("homePage")));
+        QVERIFY(openFavorites(ui));
+        QCOMPARE(ui.controller.favorites()->count(), 1);
+        const auto firstName = [&] {
+            return ui.controller.favorites()
+                ->data(ui.controller.favorites()->index(0, 0), Kinefin::FavoritesModel::NameRole)
+                .toString();
+        };
+        QCOMPARE(firstName(), QStringLiteral("Alice Movie"));
+        // Another user of the server: nothing of Alice's is left, not even before the page scans
+        ui.controller.switchUser();
+        QTRY_COMPARE(ui.controller.state(), ConnectionController::ChoosingUser);
+        QCOMPARE(ui.controller.favorites()->count(), 0);
+        QCOMPARE(ui.controller.favorites()->status(), Kinefin::FavoritesModel::Idle);
+        QCOMPARE(ui.controller.favoriteGroups()->count(), 0);
+        QTRY_VERIFY(ui.item(QStringLiteral("favoritesPage")) == nullptr);
+        data->byLibrary[kMovies] =
+            QJsonArray{favoriteJson(2, QStringLiteral("Movie"), QStringLiteral("Bob Movie"), 2002)};
+        ui.controller.chooseUser(kBobId);
+        QVERIFY(ui.reach(ConnectionController::Authenticated, QStringLiteral("homePage")));
+        QCOMPARE(ui.controller.favorites()->count(), 0);
+        QVERIFY(openFavorites(ui));
+        QCOMPARE(ui.controller.favorites()->count(), 1);
+        QCOMPARE(firstName(), QStringLiteral("Bob Movie"));
+        QTRY_COMPARE(favoriteGroupTitles(ui), QStringList({QStringLiteral("Movies")}));
+        // Leaving the server drops the snapshot and its libraries
+        ui.controller.cancel();
+        QTRY_VERIFY(ui.item(QStringLiteral("favoritesPage")) == nullptr);
+        QCOMPARE(ui.controller.favorites()->count(), 0);
+        QCOMPARE(ui.controller.favorites()->status(), Kinefin::FavoritesModel::Idle);
+        QCOMPARE(ui.controller.favorites()->libraryCount(), 0);
+    }
+
+    void aLostSessionEmptiesTheFavorites()
+    {
+        Ui ui(m_home->path());
+        serveFavorites(ui);
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("favorites")));
+        ui.server.denyViews = true;
+        ui.controller.reloadLibraries();
+        QTRY_COMPARE(ui.controller.state(), ConnectionController::NeedsLogin);
+        QTRY_VERIFY(ui.item(QStringLiteral("favoritesPage")) == nullptr);
+        QCOMPARE(ui.controller.favorites()->count(), 0);
+        QCOMPARE(ui.controller.favorites()->status(), Kinefin::FavoritesModel::Idle);
+        QCOMPARE(ui.controller.favoriteGroups()->count(), 0);
+    }
+
+    void favoriteNamesAreShownAsPlainText()
+    {
+        Ui ui(m_home->path());
+        const auto data = serveFavorites(ui);
+        ui.serveViews({{kMovies, kHostileName, QStringLiteral("movies")},
+                       {kSeries, QStringLiteral("Series"), QStringLiteral("tvshows")}});
+        data->byLibrary[kMovies] = QJsonArray{favoriteJson(
+            1, QStringLiteral("Movie"), QStringLiteral("Alpha"), 2020, {kHostileName})};
+        data->byLibrary[kSeries] = QJsonArray();
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("home")));
+        QQuickItem *page = openFavorites(ui);
+        QVERIFY(page);
+        for (const QString &grouping : {QStringLiteral("Library"), QStringLiteral("Genre")}) {
+            QVERIFY(QMetaObject::invokeMethod(groupByAction(page, grouping), "trigger"));
+            QTRY_COMPARE(favoriteGroupTitle(ui, 0), kHostileName);
+            int found = 0;
+            const QStringList problems = ui.notPlainText(kHostileName, &found);
+            QVERIFY2(problems.isEmpty(), qPrintable(problems.join(QLatin1Char('\n'))));
+            QVERIFY(found > 0);
+        }
+    }
+
+    void theFavoritesCardsKeepTheirKeys()
+    {
+        Ui ui(m_home->path());
+        serveFavorites(ui);
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("favorites")));
+        QTRY_VERIFY(ui.layoutProblems().isEmpty());
+        // Down walks the rows
+        QQuickItem *first = ui.item(QStringLiteral("favoritesRow_0"));
+        QTRY_VERIFY(first && first->hasActiveFocus());
+        QTest::keyClick(ui.window, Qt::Key_Down);
+        QTRY_VERIFY(ui.item(QStringLiteral("favoritesRow_1"))->hasActiveFocus());
+        QTest::keyClick(ui.window, Qt::Key_Up);
+        QTRY_VERIFY(first->hasActiveFocus());
+        // Tab stops stay visible and inside the page in front or the shell
+        const QList<QQuickItem *> visited = ui.tabCycle();
+        QVERIFY(visited.size() >= 2);
+        QStringList seen;
+        for (QQuickItem *item : visited) {
+            seen << Ui::describe(item);
+            QVERIFY2(item->isVisible(), qPrintable(seen.join(QLatin1Char('\n'))));
+            QVERIFY2(!ui.inAnotherPage(item), qPrintable(seen.join(QLatin1Char('\n'))));
+        }
     }
 
   private:

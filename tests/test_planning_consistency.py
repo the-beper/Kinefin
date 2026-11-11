@@ -36,11 +36,19 @@ class PlanningConsistency(unittest.TestCase):
     def test_all_qml_messages_are_in_committed_catalogs(self) -> None:
         potfiles = set(content("po/POTFILES.in").splitlines())
         self.assertIn("src/qml/Main.qml", potfiles)
-        messages: set[str] = set()
+        messages: set[tuple[str, str | None]] = set()
         for path in sorted((ROOT / "src/qml").glob("*.qml")):
             relative = path.relative_to(ROOT).as_posix()
             qml = content(relative)
-            found = set(re.findall(r'\bi18n\("([^"\\]+)"', qml))
+            # Context is part of the gettext identity: a translation without the
+            # matching i18nc context is not used at runtime.
+            found = {(msgid, None) for msgid in re.findall(r'\bi18n\("([^"\\]+)"', qml)}
+            found |= {(msgid, context) for context, msgid in
+                      re.findall(r'\bi18nc\("([^"\\]+)"\s*,\s*"([^"\\]+)"', qml)}
+            found |= {(msgid, None) for msgid in
+                      re.findall(r'\bi18np\("([^"\\]+)"\s*,\s*"[^"\\]+"', qml)}
+            found |= {(msgid, context) for context, msgid in
+                      re.findall(r'\bi18ncp\("([^"\\]+)"\s*,\s*"([^"\\]+)"\s*,\s*"[^"\\]+"', qml)}
             # A page with translatable strings must be extracted, or its strings never reach a catalog.
             self.assertTrue(not found or relative in potfiles, relative)
             messages |= found
@@ -51,10 +59,23 @@ class PlanningConsistency(unittest.TestCase):
         spec.loader.exec_module(module)
         for lang in ("en", "it"):
             with self.subTest(lang=lang):
-                keys = {msgid for msgid, context in module.message_keys(ROOT / "po" / f"{lang}.po")
-                        if context is None}
+                keys = module.message_keys(ROOT / "po" / f"{lang}.po")
                 self.assertTrue(messages <= keys, messages - keys)
                 self.assertEqual(module.pending(lang), [])
+
+    def test_d_f_checkboxes_do_not_mutate_drafts_on_programmatic_sync(self) -> None:
+        # AbstractButton.toggled fires on any checked change, including a
+        # property binding refresh. Only an actual user click may mutate the
+        # filter draft or toggle the wrapping preference delegate.
+        for file, start in (
+            ("src/qml/FilterDialog.qml", "id: optionComponent"),
+            ("src/qml/UserPreferencesPage.qml", "component LibraryCheckRow:"),
+        ):
+            with self.subTest(file=file):
+                body = content(file).split(start, 1)[1]
+                checkbox = body.split("Controls.CheckBox {", 1)[1].split("Controls.Label {", 1)[0]
+                self.assertIn("onClicked:", checkbox)
+                self.assertNotIn("onToggled:", checkbox)
 
     def test_reuse_configuration_and_license_texts(self) -> None:
         settings = tomllib.loads(content("REUSE.toml"))

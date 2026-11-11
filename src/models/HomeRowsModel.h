@@ -42,8 +42,8 @@ class HomeRowsModel final : public QAbstractListModel {
 
     explicit HomeRowsModel(JellyfinClient *client, QObject *parent = nullptr);
 
-    // Rebuilds the rows for these libraries (`id`, `name`, `collectionType` entries as ConnectionController lists them) and loads them all
-    void load(const QVariantList &libraries);
+    // Rebuilds the rows for these libraries (`id`, `name`, `collectionType` entries as ConnectionController lists them: the ones whose Recently Added row shows) and loads them all. With `unplayedOnly` the Recently Added rows ask the server for unplayed items only (the user's HidePlayedInLatest)
+    void load(const QVariantList &libraries, bool unplayedOnly = false);
     // Loads everything again for the libraries of the last load()
     Q_INVOKABLE void reload();
     // Asks for one failed row again
@@ -73,6 +73,7 @@ class HomeRowsModel final : public QAbstractListModel {
 
     JellyfinClient *m_client;
     QVariantList m_libraries;
+    bool m_unplayedOnly = false;
     std::vector<Row> m_rows;
 };
 } // namespace Kinefin

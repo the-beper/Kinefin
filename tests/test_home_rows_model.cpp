@@ -425,6 +425,57 @@ class TestHomeRowsModel : public QObject {
         QVERIFY(f.items(2)->count() > 0);
     }
 
+    // The user's HidePlayedInLatest: only the Recently Added requests carry it, a reload keeps the choice and the next load replaces it
+    void recentlyAddedRowsAskForUnplayedItemsOnlyOnRequest()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        const auto latest = [&f] { return f.server.listingRoutes.value(QStringLiteral("Latest")); };
+        const auto carry = [](const QList<QByteArray> &routes, qsizetype from) {
+            return routes.mid(from, 2).constFirst().contains("isPlayed=false")
+                   && routes.mid(from, 2).constLast().contains("isPlayed=false");
+        };
+        const auto carryNone = [](const QList<QByteArray> &routes, qsizetype from) {
+            return !routes.mid(from, 2).constFirst().contains("isPlayed")
+                   && !routes.mid(from, 2).constLast().contains("isPlayed");
+        };
+        f.rows.load(libraries());
+        QTRY_COMPARE(latest().size(), 2);
+        QVERIFY(carryNone(latest(), 0));
+        QTRY_VERIFY(f.allSettled());
+        f.rows.load(libraries(), true);
+        QTRY_COMPARE(latest().size(), 4);
+        QVERIFY(carry(latest(), 2));
+        QTRY_VERIFY(f.allSettled());
+        // The other rows never carry it
+        QVERIFY(!f.server.lastListingRoute.value(QStringLiteral("Resume")).contains("isPlayed"));
+        QVERIFY(!f.server.lastListingRoute.value(QStringLiteral("NextUp")).contains("isPlayed"));
+        f.rows.reload();
+        QTRY_COMPARE(latest().size(), 6);
+        QVERIFY(carry(latest(), 4));
+        QTRY_VERIFY(f.allSettled());
+        f.rows.load(libraries(), false);
+        QTRY_COMPARE(latest().size(), 8);
+        QVERIFY(carryNone(latest(), 6));
+    }
+
+    void aLibraryLeavingTheListLosesItsRecentlyAddedRow()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        f.rows.load(libraries());
+        QCOMPARE(f.rows.rowCount(), 4);
+        QTRY_VERIFY(f.allSettled());
+        f.rows.load({library(kSeries, QStringLiteral("Series"), QStringLiteral("tvshows"))});
+        QCOMPARE(f.rows.rowCount(), 3);
+        QCOMPARE(f.rows.data(f.rows.index(2), HomeRowsModel::LibraryIdRole).toString(), kSeries);
+        QTRY_VERIFY(f.allSettled());
+        QCOMPARE(f.rows.rowCount(), 3);
+        QVERIFY(f.items(2)->count() > 0);
+        f.rows.load({});
+        QCOMPARE(f.rows.rowCount(), 2);
+    }
+
     void aLostSessionWithRowsInFlightLeavesNothingLoading()
     {
         Fixture f;

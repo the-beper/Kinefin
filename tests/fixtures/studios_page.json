@@ -1,0 +1,8 @@
+{
+  "Items": [
+    { "Name": "Northern Lights", "Id": "aa00000000000000000000000000ff11", "Type": "Studio" },
+    { "Name": "Harbour Channel", "Id": "bb00000000000000000000000000ff12", "Type": "Studio" }
+  ],
+  "StartIndex": 0,
+  "TotalRecordCount": 2
+}

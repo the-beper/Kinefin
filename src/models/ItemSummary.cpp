@@ -153,6 +153,10 @@ ItemSummary parseItemSummary(const QJsonObject &item)
         summary.primaryTag =
             cappedString(tagObject.value(QStringLiteral("Primary")), kMaxTokenLength);
         summary.thumbTag = cappedString(tagObject.value(QStringLiteral("Thumb")), kMaxTokenLength);
+        summary.bannerTag =
+            cappedString(tagObject.value(QStringLiteral("Banner")), kMaxTokenLength);
+        summary.discTag = cappedString(tagObject.value(QStringLiteral("Disc")), kMaxTokenLength);
+        summary.logoTag = cappedString(tagObject.value(QStringLiteral("Logo")), kMaxTokenLength);
     }
     const QJsonValue backdrops = item.value(QStringLiteral("BackdropImageTags"));
     if (backdrops.isArray() && !backdrops.toArray().isEmpty())

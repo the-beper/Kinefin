@@ -13,8 +13,12 @@ src/qml/LibraryTile.qml
 src/qml/ResumeItemsPage.qml
 src/qml/SearchPage.qml
 src/qml/QueuePage.qml
-src/qml/GenreFilterDialog.qml
+src/qml/FilterDialog.qml
+src/qml/GenreRailsView.qml
 src/qml/GenreRailsPage.qml
+src/qml/LibraryContent.qml
+src/qml/ItemListRow.qml
+src/qml/ItemRowGrid.qml
 src/qml/MediaCard.qml
 src/qml/CardMenu.qml
 src/qml/LoginPage.qml
@@ -24,3 +28,6 @@ src/qml/ShellHeader.qml
 src/qml/ShortcutsDialog.qml
 src/qml/ServersPage.qml
 src/qml/SettingsPage.qml
+src/qml/UserPreferencesPage.qml
+src/qml/FavoritesPage.qml
+src/qml/FavoritesGroupPage.qml

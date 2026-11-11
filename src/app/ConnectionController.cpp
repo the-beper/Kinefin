@@ -10,6 +10,7 @@
 #include <QJsonObject>
 #include <QLoggingCategory>
 #include <QMetaEnum>
+#include <QSet>
 #include <QStringList>
 #include <QUrl>
 #include <KLocalizedString>
@@ -24,6 +25,34 @@ namespace Kinefin {
 Q_LOGGING_CATEGORY(controllerLog, "kinefin.app.connection")
 // The store drops a view with more genre ids than it accepts: it must hold what the model sends
 static_assert(BrowseStateStore::MaxGenreIds >= MaxGenreIds);
+static_assert(BrowseStateStore::MaxHashes >= MaxFilterValues);
+static_assert(BrowseStateStore::MaxYears >= MaxFilterValues);
+
+QString ConnectionController::scopeKey(const QString &type, const QString &subtab,
+                                       const QString &libraryId)
+{
+    QString id = libraryId.toLower();
+    id.remove(QLatin1Char('-'));
+    const auto withLibrary = [&id](const QString &key) -> QString {
+        if (id.isEmpty())
+            return key;
+        return key + QLatin1Char(':') + id;
+    };
+    if (subtab.isEmpty())
+        return withLibrary(type);
+    const bool movies = type == QLatin1String("movies");
+    const bool shows = type == QLatin1String("tvshows");
+    if (movies && subtab == QLatin1String("favorites"))
+        return withLibrary(QStringLiteral("movies/favorites"));
+    // Collections belong to no one library of the type
+    if (movies && subtab == QLatin1String("collections"))
+        return QStringLiteral("movies/collections");
+    if (shows && subtab == QLatin1String("episodes"))
+        return withLibrary(QStringLiteral("tvshows/episodes"));
+    if (shows && subtab == QLatin1String("network") && !id.isEmpty())
+        return QStringLiteral("tvshows/network:") + id;
+    return {};
+}
 namespace {
 bool isLoopbackHost(const QUrl &url)
 {
@@ -56,41 +85,138 @@ QString tabOf(const QString &collectionType)
                : QString();
 }
 
-// The key the browse state store keeps a scope's view under: the type alone for all libraries, else with the library id (lower case, no dashes)
-QString scopeKey(const QString &type, const QString &libraryId)
+// The tokens the browse state store keeps the feature filters under
+struct StoredFeature {
+    LibraryFeature feature;
+    QLatin1String token;
+};
+constexpr StoredFeature kStoredFeatures[] = {
+    {LibraryFeature::Subtitles, QLatin1String("HasSubtitles")},
+    {LibraryFeature::Trailer, QLatin1String("HasTrailer")},
+    {LibraryFeature::SpecialFeatures, QLatin1String("HasSpecialFeature")},
+    {LibraryFeature::ThemeSong, QLatin1String("HasThemeSong")},
+    {LibraryFeature::ThemeVideo, QLatin1String("HasThemeVideo")}};
+
+QString storedEpisodeKind(EpisodeKind kind)
 {
-    if (libraryId.isEmpty())
-        return type;
-    QString id = libraryId.toLower();
-    id.remove(QLatin1Char('-'));
-    return type + QLatin1Char(':') + id;
+    switch (kind) {
+    case EpisodeKind::All:
+        break;
+    case EpisodeKind::Specials:
+        return QStringLiteral("Specials");
+    case EpisodeKind::Missing:
+        return QStringLiteral("Missing");
+    case EpisodeKind::Unaired:
+        return QStringLiteral("Unaired");
+    }
+    return QStringLiteral("All");
+}
+
+EpisodeKind episodeKindFromStored(const QString &stored)
+{
+    if (stored == QLatin1String("Specials"))
+        return EpisodeKind::Specials;
+    if (stored == QLatin1String("Missing"))
+        return EpisodeKind::Missing;
+    if (stored == QLatin1String("Unaired"))
+        return EpisodeKind::Unaired;
+    return EpisodeKind::All;
+}
+
+// The digests of the selected texts, then those of an earlier session that no listed text has named yet: each once, at most what the store keeps. The texts themselves never reach the store
+QStringList storedHashes(const QStringList &texts, const QStringList &pending)
+{
+    QStringList hashes;
+    const auto add = [&hashes](const QString &hash) {
+        if (hashes.size() < BrowseStateStore::MaxHashes && !hashes.contains(hash))
+            hashes.append(hash);
+    };
+    for (const QString &text : texts)
+        add(BrowseStateStore::hashText(text));
+    for (const QString &hash : pending)
+        add(hash);
+    return hashes;
 }
 
 BrowseStateStore::ViewState toStored(const LibraryItemsModel::ViewState &state)
 {
-    return {QString::fromLatin1(
-                QMetaEnum::fromType<LibraryItemsModel::SortKey>().valueToKey(state.sort)),
-            state.descending,
-            QString::fromLatin1(
-                QMetaEnum::fromType<LibraryItemsModel::Filter>().valueToKey(state.filter)),
-            state.genreIds};
+    const LibraryFilterState &filters = state.filters;
+    BrowseStateStore::ViewState stored;
+    stored.sortKey = state.sortBy;
+    stored.descending = state.descending;
+    if (filters.played == PlayedState::Played)
+        stored.statusFlags.append(QStringLiteral("IsPlayed"));
+    else if (filters.played == PlayedState::Unplayed)
+        stored.statusFlags.append(QStringLiteral("IsUnplayed"));
+    if (filters.resumable)
+        stored.statusFlags.append(QStringLiteral("IsResumable"));
+    if (filters.favorites)
+        stored.statusFlags.append(QStringLiteral("IsFavorite"));
+    for (const StoredFeature &entry : kStoredFeatures) {
+        if (filters.features.testFlag(entry.feature))
+            stored.features.append(entry.token);
+    }
+    if (filters.quality == VideoQuality::HD)
+        stored.quality = QStringLiteral("HD");
+    else if (filters.quality == VideoQuality::SD)
+        stored.quality = QStringLiteral("SD");
+    stored.is4K = filters.is4K;
+    stored.is3D = filters.is3D;
+    stored.videoTypes = filters.videoTypes;
+    stored.genreIds = filters.genreIds;
+    stored.tagHashes = storedHashes(filters.tags, state.pendingTagHashes);
+    stored.ratingHashes = storedHashes(filters.officialRatings, state.pendingRatingHashes);
+    // The model takes any year of 1 to 9999, the store the plausible ones: a view must not be refused whole for one odd year
+    for (const int year : filters.years) {
+        if (year >= BrowseStateStore::MinYear && year <= BrowseStateStore::MaxYear
+            && stored.years.size() < BrowseStateStore::MaxYears)
+            stored.years.append(year);
+    }
+    stored.seriesStatus = filters.seriesStatus;
+    stored.episodeKind = storedEpisodeKind(filters.episodeKind);
+    stored.viewMode = state.viewMode;
+    stored.imageType = state.imageType;
+    stored.showTitle = state.showTitle;
+    stored.showYear = state.showYear;
+    stored.cardLayout = state.cardLayout;
+    return stored;
 }
 
-// A key name the enum does not know keeps the default
+// A sort key the model does not know keeps the default
 LibraryItemsModel::ViewState fromStored(const BrowseStateStore::ViewState &stored)
 {
     LibraryItemsModel::ViewState state;
-    bool ok = false;
-    const int sort = QMetaEnum::fromType<LibraryItemsModel::SortKey>().keyToValue(
-        stored.sort.toLatin1().constData(), &ok);
-    if (ok)
-        state.sort = LibraryItemsModel::SortKey(sort);
-    const int filter = QMetaEnum::fromType<LibraryItemsModel::Filter>().keyToValue(
-        stored.filter.toLatin1().constData(), &ok);
-    if (ok)
-        state.filter = LibraryItemsModel::Filter(filter);
+    state.sortBy = LibraryItemsModel::sortByFromStored(stored.sortKey);
+    if (stored.statusFlags.contains(QLatin1String("IsUnplayed")))
+        state.filters.played = PlayedState::Unplayed;
+    else if (stored.statusFlags.contains(QLatin1String("IsPlayed")))
+        state.filters.played = PlayedState::Played;
+    state.filters.resumable = stored.statusFlags.contains(QLatin1String("IsResumable"));
+    state.filters.favorites = stored.statusFlags.contains(QLatin1String("IsFavorite"));
+    for (const StoredFeature &entry : kStoredFeatures) {
+        if (stored.features.contains(entry.token))
+            state.filters.features |= entry.feature;
+    }
+    if (stored.quality == QLatin1String("HD"))
+        state.filters.quality = VideoQuality::HD;
+    else if (stored.quality == QLatin1String("SD"))
+        state.filters.quality = VideoQuality::SD;
+    state.filters.is4K = stored.is4K;
+    state.filters.is3D = stored.is3D;
+    state.filters.videoTypes = stored.videoTypes;
     state.descending = stored.descending;
-    state.genreIds = stored.genreIds;
+    state.filters.genreIds = stored.genreIds;
+    // The texts are not stored: the model resolves the digests when the facet lists load
+    state.pendingTagHashes = stored.tagHashes;
+    state.pendingRatingHashes = stored.ratingHashes;
+    state.filters.years = stored.years;
+    state.filters.seriesStatus = stored.seriesStatus;
+    state.filters.episodeKind = episodeKindFromStored(stored.episodeKind);
+    state.viewMode = stored.viewMode;
+    state.imageType = stored.imageType;
+    state.showTitle = stored.showTitle;
+    state.showYear = stored.showYear;
+    state.cardLayout = stored.cardLayout;
     return state;
 }
 } // namespace
@@ -124,6 +250,34 @@ ConnectionController::ConnectionController(const QString &profileId, const QStri
     connectViewPersistence(&m_movies);
     connectViewPersistence(&m_shows);
     connectViewPersistence(&m_library);
+    // The list of a sub-tab opens straight into the view stored under its own key, and its edits are kept there
+    m_subtabs.setViewStateProvider([this](const QString &) {
+        const QString key = subtabViewKey();
+        const auto stored = key.isEmpty()
+                                ? std::nullopt
+                                : m_browse.view(m_client.serverId(), m_client.userId(), key);
+        return stored ? fromStored(*stored) : LibraryItemsModel::ViewState();
+    });
+    connect(&m_subtabs, &LibrarySubtabController::listViewStateEdited, this, [this] {
+        LibraryItemsModel *list = m_subtabs.activeList();
+        const QString key = subtabViewKey();
+        if (list && !key.isEmpty())
+            m_browse.setView(m_client.serverId(), m_client.userId(), key,
+                             toStored(list->viewState()));
+    });
+    // The favorites are scanned over the libraries the server lists, whatever the Home preferences hide; the model drops its snapshot when the list changes, and a lost session empties the list
+    connect(this, &ConnectionController::librariesChanged, this,
+            [this] { m_favorites.setLibraries(m_libraries); });
+    // The saved grouping belongs to the user who signs in, a restore included; a choice made on the page is saved for that user
+    connect(&m_client, &JellyfinClient::loginSucceeded, this, [this] {
+        m_favoriteGroups.applyGrouping(FavoritesGroupsModel::groupingFromToken(
+            m_browse.favoritesGrouping(m_client.serverId(), m_client.userId())));
+    });
+    connect(&m_favoriteGroups, &FavoritesGroupsModel::groupingEdited, this, [this] {
+        m_browse.setFavoritesGrouping(
+            m_client.serverId(), m_client.userId(),
+            FavoritesGroupsModel::groupingToken(m_favoriteGroups.grouping()));
+    });
     m_quickConnectTimer.setInterval(5000);
     connect(&m_quickConnectTimer, &QTimer::timeout, &m_client,
             [this] { m_client.pollQuickConnect(); });
@@ -158,6 +312,25 @@ ConnectionController::ConnectionController(const QString &profileId, const QStri
             [this](int status) { onRequestFailed(status); });
     connect(&m_client, &JellyfinClient::userViewsReady, this,
             [this](const QJsonArray &items) { onUserViews(items); });
+    // The session's configuration is read once after sign-in for Home: a load of the preferences page that ends Ready adopts the server's data too, and a verified save projects at once
+    connect(&m_userConfiguration, &UserConfigurationModel::stateChanged, this, [this] {
+        if (m_state != Authenticated)
+            return;
+        if (m_userConfiguration.state() == UserConfigurationModel::Ready
+            && m_userConfiguration.loaded()) {
+            const UserPreferencesSnapshot snapshot = m_userConfiguration.snapshot();
+            applyPreferences(&snapshot);
+        } else if (m_userConfiguration.state() == UserConfigurationModel::Failed
+                   && !m_preferencesSettled) {
+            applyPreferences(nullptr);
+        }
+    });
+    connect(&m_userConfiguration, &UserConfigurationModel::configurationApplied, this,
+            [this](const UserPreferencesSnapshot &snapshot) { applyPreferences(&snapshot); });
+    connect(&m_client, &JellyfinClient::credentialsCleared, this,
+            [this] { resetHomeProjection(); });
+    connect(this, &ConnectionController::librariesChanged, this,
+            &ConnectionController::homeProjectionChanged);
     connect(&m_client, &JellyfinClient::quickConnectCodeReady, this, [this](const QString &code) {
         if (m_state != QuickConnectPending)
             return;
@@ -339,6 +512,9 @@ void ConnectionController::leaveSession()
 {
     clearQuickConnect();
     m_client.forgetSession();
+    // The draft and the libraries of the preferences belong to the session that ended (the model also clears on credentialsCleared, which a session without a token does not emit)
+    m_userConfiguration.clear();
+    resetHomeProjection();
     if (!m_libraries.isEmpty()) {
         m_libraries.clear();
         Q_EMIT librariesChanged();
@@ -483,6 +659,9 @@ void ConnectionController::reloadLibraries()
     if (m_state != Authenticated)
         return;
     clearLibraryError();
+    // A configuration that could not be loaded is tried again with the libraries; a load already under way is left alone
+    if (!m_hasPreferences)
+        m_userConfiguration.load();
     m_client.fetchUserViews();
 }
 
@@ -493,6 +672,9 @@ void ConnectionController::onLoginSucceeded()
     refreshServers();
     setState(Authenticated);
     m_queue.restoreFor(m_client.serverId(), m_client.userId());
+    // Home waits for the configuration (its answer, or its failure) before it shows tiles and loads rows
+    resetHomeProjection();
+    m_userConfiguration.load();
     m_client.fetchUserViews();
 }
 
@@ -556,6 +738,18 @@ bool ConnectionController::openResumeItems()
     return m_state == Authenticated && m_resumeItems.open();
 }
 
+bool ConnectionController::openFavorites()
+{
+    if (m_state != Authenticated)
+        return false;
+    // Reopening the page rescans: favorites change elsewhere, and a snapshot is never shown as current after a visit; a scan already under way is kept
+    if (m_favorites.status() == FavoritesModel::Loading)
+        m_favorites.load();
+    else
+        m_favorites.reload();
+    return true;
+}
+
 bool ConnectionController::openLibrary(const QString &libraryId)
 {
     // Rails belong to the library they were opened for
@@ -571,7 +765,7 @@ bool ConnectionController::openLibrary(const QString &libraryId)
         // Only the collections are remembered here: the movie and TV libraries belong to their tabs
         const auto stored = collectionType == QLatin1String("boxsets")
                                 ? m_browse.view(m_client.serverId(), m_client.userId(),
-                                                scopeKey(collectionType, libraryId))
+                                                scopeKey(collectionType, {}, libraryId))
                                 : std::nullopt;
         return stored ? m_library.open(libraryId, collectionType, name, fromStored(*stored))
                       : m_library.open(libraryId, collectionType, name);
@@ -643,12 +837,25 @@ bool ConnectionController::openRecentlyAdded(const QString &type, const QString 
     LibraryItemsModel *model = typeModel(type);
     const QString scope = chooseScope(type, libraryId);
     model->setSearchTerm({});
-    const LibraryItemsModel::ViewState view{
-        LibraryItemsModel::DateAdded, true, LibraryItemsModel::All, {}};
+    LibraryItemsModel::ViewState view;
+    // Only the order and the filters are the one-off's: how the items are shown stays what the scope has stored
+    if (const auto stored =
+            m_browse.view(m_client.serverId(), m_client.userId(), scopeKey(type, {}, scope))) {
+        const LibraryItemsModel::ViewState kept = fromStored(*stored);
+        view.viewMode = kept.viewMode;
+        view.imageType = kept.imageType;
+        view.showTitle = kept.showTitle;
+        view.showYear = kept.showYear;
+        view.cardLayout = kept.cardLayout;
+    }
+    view.sortBy = QStringLiteral("DateCreated");
+    view.descending = true;
     m_oneOff.remove(model);
     if (!openScopeView(type, scope, view))
         return false;
     m_oneOff.insert(model, view);
+    // The one-off list is the main sub-tab's
+    m_subtabs.select(LibrarySubtabController::Main);
     return true;
 }
 
@@ -656,30 +863,84 @@ bool ConnectionController::openTypeScope(const QString &type, const QString &sco
 {
     LibraryItemsModel *model = typeModel(type);
     const bool wasOneOff = m_oneOff.remove(model) > 0;
-    if (!wasOneOff && model->isOpen() && model->libraryId() == scope)
+    if (!wasOneOff && model->isOpen() && model->libraryId() == scope) {
+        // The page may have been left (the Home tab) with the scope still open: the sub-tabs come back, a page already showing them changes nothing
+        m_subtabs.open(type, scope, libraryNameOf(type, scope));
         return true;
+    }
     return openScopeView(type, scope, std::nullopt);
+}
+
+QString ConnectionController::libraryNameOf(const QString &type, const QString &libraryId) const
+{
+    for (const QVariant &entry : typeLibraries(type)) {
+        const QVariantMap library = entry.toMap();
+        if (library.value(QStringLiteral("id")).toString() == libraryId)
+            return library.value(QStringLiteral("name")).toString();
+    }
+    return {};
+}
+
+void ConnectionController::setSubtabsEnabled(const QString &type, const QStringList &ids)
+{
+    QList<LibrarySubtabController::Subtab> enabled;
+    for (const QString &id : ids) {
+        if (const auto subtab = LibrarySubtabController::subtabFromId(id))
+            enabled.append(*subtab);
+    }
+    m_subtabs.setEnabled(type, enabled);
+}
+
+void ConnectionController::closeSubtabs()
+{
+    m_subtabs.close();
+}
+
+QString ConnectionController::subtabViewKey() const
+{
+    const QString type = m_subtabs.type();
+    switch (m_subtabs.currentSubtab()) {
+    case LibrarySubtabController::Favorites:
+        return scopeKey(type, QStringLiteral("favorites"), m_subtabs.libraryId());
+    case LibrarySubtabController::Collections:
+        return scopeKey(type, QStringLiteral("collections"), {});
+    case LibrarySubtabController::Episodes:
+        return scopeKey(type, QStringLiteral("episodes"), m_subtabs.libraryId());
+    case LibrarySubtabController::Networks:
+        return m_subtabs.networkId().isEmpty()
+                   ? QString()
+                   : scopeKey(type, QStringLiteral("network"), m_subtabs.networkId());
+    case LibrarySubtabController::Main:
+    case LibrarySubtabController::Suggestions:
+    case LibrarySubtabController::Genres:
+    case LibrarySubtabController::Upcoming:
+        break;
+    }
+    return {};
 }
 
 bool ConnectionController::openScopeView(const QString &type, const QString &scope,
                                          const std::optional<LibraryItemsModel::ViewState> &view)
 {
     LibraryItemsModel *model = typeModel(type);
+    // The sub-tabs of the scope that closes give their data and channels back first, the rails they drive included
+    m_subtabs.close();
     // Rails belong to the library they were opened for
     if (m_genreRailsType == type)
         m_genreRails.clear();
-    QString name;
-    for (const QVariant &entry : typeLibraries(type)) {
-        const QVariantMap library = entry.toMap();
-        if (library.value(QStringLiteral("id")).toString() == scope)
-            name = library.value(QStringLiteral("name")).toString();
+    const QString name = libraryNameOf(type, scope);
+    bool opened = false;
+    if (view) {
+        opened = model->open(scope, type, name, *view);
+    } else {
+        const auto stored =
+            m_browse.view(m_client.serverId(), m_client.userId(), scopeKey(type, {}, scope));
+        opened = model->open(scope, type, name,
+                             stored ? fromStored(*stored) : LibraryItemsModel::ViewState());
     }
-    if (view)
-        return model->open(scope, type, name, *view);
-    const auto stored =
-        m_browse.view(m_client.serverId(), m_client.userId(), scopeKey(type, scope));
-    return model->open(scope, type, name,
-                       stored ? fromStored(*stored) : LibraryItemsModel::ViewState());
+    if (opened)
+        m_subtabs.open(type, scope, name);
+    return opened;
 }
 
 void ConnectionController::keepTypeModelsConsistent()
@@ -689,6 +950,8 @@ void ConnectionController::keepTypeModelsConsistent()
         if (!hasType(type)) {
             m_oneOff.remove(model);
             model->clear();
+            if (m_subtabs.type() == type)
+                m_subtabs.close();
         } else if (model->isOpen() && model->libraryId() != resolveScope(type, model->libraryId()))
             openTypeScope(type, {});
     }
@@ -704,17 +967,25 @@ void ConnectionController::connectViewPersistence(LibraryItemsModel *model)
         const bool boxset = type == QLatin1String("boxsets") && !model->libraryId().isEmpty();
         if (model == &m_library && !boxset)
             return;
-        const QString key = scopeKey(type, model->libraryId());
+        const QString key = scopeKey(type, {}, model->libraryId());
         LibraryItemsModel::ViewState state = model->viewState();
         const auto oneOff = m_oneOff.constFind(model);
         if (oneOff != m_oneOff.constEnd()) {
-            if (state.sort == oneOff->sort && state.descending == oneOff->descending) {
+            if (state.sortBy == oneOff->sortBy && state.descending == oneOff->descending) {
                 // The user did not pick a sort: the one-off order is not theirs to keep, the filter and genres are
                 const auto stored = m_browse.view(m_client.serverId(), m_client.userId(), key);
                 const LibraryItemsModel::ViewState kept =
                     stored ? fromStored(*stored) : LibraryItemsModel::ViewState();
-                state.sort = kept.sort;
+                state.sortBy = kept.sortBy;
                 state.descending = kept.descending;
+                // The same for the filters the user left alone: the one-off has none, the scope may
+                if (state.filters == oneOff->filters
+                    && state.pendingTagHashes == oneOff->pendingTagHashes
+                    && state.pendingRatingHashes == oneOff->pendingRatingHashes) {
+                    state.filters = kept.filters;
+                    state.pendingTagHashes = kept.pendingTagHashes;
+                    state.pendingRatingHashes = kept.pendingRatingHashes;
+                }
             } else {
                 m_oneOff.remove(model);
             }
@@ -760,7 +1031,18 @@ void ConnectionController::onUserViews(const QJsonArray &items)
     }
     keepTypeModelsConsistent();
     Q_EMIT librariesChanged();
-    m_home.load(m_libraries);
+    // Every library the server lists, music included: the preferences name any of them
+    QList<LibraryOption> options;
+    for (const QVariant &library : std::as_const(m_libraries)) {
+        const QVariantMap entry = library.toMap();
+        options.append({entry.value(QStringLiteral("id")).toString(),
+                        entry.value(QStringLiteral("name")).toString()});
+    }
+    m_userConfiguration.setLibraries(options);
+    m_librariesLoaded = true;
+    // Without the configuration's answer the rows wait for it (applyPreferences loads them then)
+    if (m_preferencesSettled)
+        m_home.load(recentLibraries(), hidePlayedInLatest());
 }
 
 ItemDetailsModel *ConnectionController::createItemDetails(const QString &itemId, QObject *owner)
@@ -777,6 +1059,86 @@ void ConnectionController::reloadHome()
     if (m_state != Authenticated)
         return;
     m_home.reload();
+}
+
+namespace {
+// The server writes ids in one case, but the preference lists and the library list are compared the way the preferences editor does: case-insensitively
+QString libraryKey(const QVariant &library)
+{
+    return library.toMap().value(QStringLiteral("id")).toString().toLower();
+}
+
+QSet<QString> keySet(const QStringList &ids)
+{
+    QSet<QString> keys;
+    for (const QString &id : ids)
+        keys.insert(id.toLower());
+    return keys;
+}
+} // namespace
+
+QVariantList ConnectionController::homeLibraries() const
+{
+    if (!m_preferencesSettled)
+        return {};
+    QVariantList tiles = m_libraries;
+    if (!m_hasPreferences)
+        return tiles;
+    // A library the order does not name goes after the named ones, in server order; an id of the order that is no library is just never found
+    QHash<QString, int> rank;
+    for (const QString &id : std::as_const(m_preferences.orderedViews)) {
+        if (!rank.contains(id.toLower()))
+            rank.insert(id.toLower(), int(rank.size()));
+    }
+    const int unlisted = int(rank.size());
+    std::stable_sort(tiles.begin(), tiles.end(), [&](const QVariant &a, const QVariant &b) {
+        return rank.value(libraryKey(a), unlisted) < rank.value(libraryKey(b), unlisted);
+    });
+    const QSet<QString> hidden = keySet(m_preferences.myMediaExcludes);
+    tiles.removeIf([&](const QVariant &library) { return hidden.contains(libraryKey(library)); });
+    return tiles;
+}
+
+QVariantList ConnectionController::recentLibraries() const
+{
+    if (!m_preferencesSettled)
+        return {};
+    QVariantList recent = m_libraries;
+    if (m_hasPreferences) {
+        const QSet<QString> hidden = keySet(m_preferences.latestItemsExcludes);
+        recent.removeIf(
+            [&](const QVariant &library) { return hidden.contains(libraryKey(library)); });
+    }
+    return recent;
+}
+
+void ConnectionController::applyPreferences(const UserPreferencesSnapshot *snapshot)
+{
+    const bool wasSettled = m_preferencesSettled;
+    const QVariantList recentBefore = recentLibraries();
+    const bool unplayedBefore = hidePlayedInLatest();
+    if (snapshot) {
+        m_preferences = *snapshot;
+        m_hasPreferences = true;
+    }
+    m_preferencesSettled = true;
+    Q_EMIT homeProjectionChanged();
+    // Only what the rows ask for rebuilds them: a new tile order, say, leaves them alone
+    if (m_librariesLoaded
+        && (!wasSettled || recentBefore != recentLibraries()
+            || unplayedBefore != hidePlayedInLatest()))
+        m_home.load(recentLibraries(), hidePlayedInLatest());
+}
+
+void ConnectionController::resetHomeProjection()
+{
+    const bool changed = m_hasPreferences || m_preferencesSettled || m_librariesLoaded;
+    m_preferences = {};
+    m_hasPreferences = false;
+    m_preferencesSettled = false;
+    m_librariesLoaded = false;
+    if (changed)
+        Q_EMIT homeProjectionChanged();
 }
 
 void ConnectionController::setState(State state)

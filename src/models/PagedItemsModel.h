@@ -31,7 +31,7 @@ class PagedItemsModel : public QAbstractListModel {
     static constexpr int MaxRows = 1'000'000;
 
     // Asks for the failed pages again, or for the first page when it never arrived
-    Q_INVOKABLE void retry();
+    Q_INVOKABLE virtual void retry();
 
     Status status() const { return m_status; }
     int totalCount() const { return m_total < 0 ? 0 : m_total; }
@@ -60,6 +60,8 @@ class PagedItemsModel : public QAbstractListModel {
     void restartPaging();
     // Forgets every row and goes back to Idle
     void clearPaging();
+    // Forgets every row and takes `status` (Loading or Failed) without asking for a page: for a derived class that cannot send yet, which then also overrides retry()
+    void holdPaging(Status status);
     bool pageInFlight() const { return m_inFlight >= 0; }
     // The reply of the page in flight, or a failure of it
     void deliverPage(const QJsonArray &items, int total);

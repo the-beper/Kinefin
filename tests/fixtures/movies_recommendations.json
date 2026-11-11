@@ -1,0 +1,28 @@
+[
+  {
+    "Items": [
+      {
+        "Name": "Arcturus (2012)",
+        "Id": "f0e1d2c3b4a5968778695a4b3c2d1e0f",
+        "Type": "Movie",
+        "ImageTags": { "Primary": "arcturus-primary" }
+      }
+    ],
+    "RecommendationType": "SimilarToRecentlyPlayed",
+    "BaselineItemName": "Hollow Interval",
+    "CategoryId": "9a8b7c6d5e4f3827160594a3b2c1d0e1"
+  },
+  {
+    "Items": [
+      {
+        "Name": "Hollow Interval",
+        "Id": "9a8b7c6d5e4f3827160594a3b2c1d0e1",
+        "Type": "Movie",
+        "ImageTags": { "Primary": "hollow-primary" }
+      }
+    ],
+    "RecommendationType": "HasDirectorFromRecentlyPlayed",
+    "BaselineItemName": "A Director",
+    "CategoryId": "aa00000000000000000000000000ff01"
+  }
+]

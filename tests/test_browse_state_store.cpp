@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Kinefin contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
-// The browse state store: per server and user round trips, the private file, the debounced write, the caps and what is dropped or kept aside on load
+// The browse state store: per server and user round trips, the version 1 migration, the private file, the debounced write, the caps and what is dropped or kept aside on load
 #include "settings/BrowseStateStore.h"
 
 #include <QDir>
@@ -31,13 +31,43 @@ const QString kGenre = QStringLiteral("ffffffffffffffffffffffffffffffff");
 const QString kMovies = QStringLiteral("movies");
 const QString kShows = QStringLiteral("tvshows");
 
+// `filter` is a version 1 filter name: `All` (no flag), `Unplayed`, `Played`, `Resumable` or `Favorites`
 ViewState state(const QString &sort, bool descending, const QString &filter,
                 const QStringList &genreIds = {})
 {
-    return ViewState{sort, descending, filter, genreIds};
+    ViewState result;
+    result.sortKey = sort;
+    result.descending = descending;
+    if (filter != QLatin1String("All"))
+        result.statusFlags = {filter == QLatin1String("Favorites")
+                                  ? QStringLiteral("IsFavorite")
+                                  : QString(QStringLiteral("Is") + filter)};
+    result.genreIds = genreIds;
+    return result;
+}
+
+// Zero padded: a padding that is itself a hex digit would make different indexes the same id
+QString hex(int index)
+{
+    return QStringLiteral("%1").arg(index, 32, 16, QLatin1Char('0'));
+}
+
+QString hash(int index)
+{
+    return QStringLiteral("%1").arg(index, 64, 16, QLatin1Char('0'));
 }
 
 QJsonObject goodView(qint64 seq = 1)
+{
+    return QJsonObject{{QStringLiteral("sortKey"), QStringLiteral("Name")},
+                       {QStringLiteral("descending"), false},
+                       {QStringLiteral("statusFlags"), QJsonArray()},
+                       {QStringLiteral("genreIds"), QJsonArray()},
+                       {QStringLiteral("seq"), seq}};
+}
+
+// The version 1 form of a view
+QJsonObject v1View(qint64 seq = 1)
 {
     return QJsonObject{{QStringLiteral("sort"), QStringLiteral("Name")},
                        {QStringLiteral("descending"), false},
@@ -48,10 +78,9 @@ QJsonObject goodView(qint64 seq = 1)
 
 const QJsonValue kAbsent(QJsonValue::Undefined);
 
-// A copy of the good view with one member replaced (or removed when `value` is `kAbsent`)
-QJsonObject viewWith(const QString &key, const QJsonValue &value)
+// A copy of the view with one member replaced (or removed when `value` is `kAbsent`)
+QJsonObject viewWith(QJsonObject view, const QString &key, const QJsonValue &value)
 {
-    QJsonObject view = goodView();
     if (value.isUndefined())
         view.remove(key);
     else
@@ -60,10 +89,12 @@ QJsonObject viewWith(const QString &key, const QJsonValue &value)
 }
 
 // A file with one server and one user holding the given selection and views
-QByteArray fileFor(const QJsonObject &selection, const QJsonObject &views, int version = 1)
+QByteArray fileFor(const QJsonObject &selection, const QJsonObject &views, int version = 2,
+                   const QJsonObject &userExtra = {})
 {
-    const QJsonObject user{{QStringLiteral("selection"), selection},
-                           {QStringLiteral("views"), views}};
+    QJsonObject user = userExtra;
+    user.insert(QStringLiteral("selection"), selection);
+    user.insert(QStringLiteral("views"), views);
     const QJsonObject server{
         {QStringLiteral("users"), QJsonObject{{kUser, user}}},
     };
@@ -110,6 +141,36 @@ bool holds(const BrowseStateStore &store, const QString &serverId, const QString
 {
     const std::optional<ViewState> found = store.view(serverId, userId, scope);
     return found && *found == expected;
+}
+// Every field away from its default
+ViewState fullState()
+{
+    ViewState full;
+    full.sortKey = QStringLiteral("CommunityRating");
+    full.descending = true;
+    full.statusFlags = {QStringLiteral("IsUnplayed"), QStringLiteral("IsFavorite"),
+                        QStringLiteral("IsResumable")};
+    full.features = {QStringLiteral("HasSubtitles"), QStringLiteral("HasTrailer"),
+                     QStringLiteral("HasSpecialFeature"), QStringLiteral("HasThemeSong"),
+                     QStringLiteral("HasThemeVideo")};
+    full.quality = QStringLiteral("HD");
+    full.is4K = true;
+    full.is3D = true;
+    full.videoTypes = {QStringLiteral("BluRay"), QStringLiteral("Dvd")};
+    full.genreIds = {kGenre, kLibrary};
+    full.tagHashes = {BrowseStateStore::hashText(QStringLiteral("Cult Classic"))};
+    full.ratingHashes = {BrowseStateStore::hashText(QStringLiteral("PG-13")),
+                         BrowseStateStore::hashText(QStringLiteral("R"))};
+    full.years = {1800, 2024, 2200};
+    full.seriesStatus = {QStringLiteral("Continuing"), QStringLiteral("Ended"),
+                         QStringLiteral("Unreleased")};
+    full.episodeKind = QStringLiteral("Unaired");
+    full.viewMode = QStringLiteral("list");
+    full.imageType = QStringLiteral("Thumb");
+    full.showTitle = false;
+    full.showYear = false;
+    full.cardLayout = false;
+    return full;
 }
 } // namespace
 
@@ -230,7 +291,7 @@ class TestBrowseStateStore : public QObject {
         Fixture f;
         QStringList genres;
         for (int i = 0; i < BrowseStateStore::MaxGenreIds; ++i)
-            genres.append(QStringLiteral("%1").arg(i, 32, 16, QLatin1Char('a')));
+            genres.append(hex(i));
         const ViewState big = state(QStringLiteral("Name"), false, QStringLiteral("All"), genres);
         constexpr int count = 150;
         {
@@ -294,7 +355,7 @@ class TestBrowseStateStore : public QObject {
     void newerVersionRenamedBroken()
     {
         Fixture f;
-        const QByteArray bytes = fileFor({{kMovies, kLibrary}}, {}, 2);
+        const QByteArray bytes = fileFor({{kMovies, kLibrary}}, {}, 3);
         f.write(bytes);
         const QString aside = f.path + QStringLiteral(".broken");
         QFile old(aside);
@@ -312,7 +373,7 @@ class TestBrowseStateStore : public QObject {
     void aNewerFileThatCannotBeSetAsideIsNotOverwritten()
     {
         Fixture f;
-        const QByteArray bytes = fileFor({{kMovies, kLibrary}}, {}, 2);
+        const QByteArray bytes = fileFor({{kMovies, kLibrary}}, {}, 3);
         f.write(bytes);
         // A directory with a file in it blocks both the removal and the rename of the .broken name
         const QString aside = f.path + QStringLiteral(".broken");
@@ -331,14 +392,14 @@ class TestBrowseStateStore : public QObject {
     void aSequenceNumberBeyondTheLimitDropsTheView()
     {
         Fixture f;
-        const QJsonObject views{
-            {QStringLiteral("movies"), viewWith(QStringLiteral("seq"), qint64(1) << 60)}};
+        const QJsonObject views{{QStringLiteral("movies"),
+                                 viewWith(goodView(), QStringLiteral("seq"), qint64(1) << 60)}};
         f.write(fileFor({}, views));
         auto store = f.open();
         QVERIFY(!store->view(kServer, kUser, QStringLiteral("movies")));
     }
 
-    void badEntriesDropped()
+    void badEntriesDroppedInVersion1()
     {
         Fixture f;
         const QJsonObject selection{
@@ -349,23 +410,25 @@ class TestBrowseStateStore : public QObject {
             {kShows, 12},
         };
         QJsonObject views{
-            {QStringLiteral("movies"), goodView()},
+            {QStringLiteral("movies"), v1View()},
             {QStringLiteral("tvshows"),
-             viewWith(QStringLiteral("filter"), QStringLiteral("Resumable"))},
-            {QStringLiteral("movies:bad id"), goodView()},
-            {QStringLiteral("radio"), goodView()},
-            {QStringLiteral("boxsets:") + kLibrary, goodView()},
+             viewWith(v1View(), QStringLiteral("filter"), QStringLiteral("Resumable"))},
+            {QStringLiteral("movies:bad id"), v1View()},
+            {QStringLiteral("radio"), v1View()},
+            {QStringLiteral("boxsets:") + kLibrary, v1View()},
             {QStringLiteral("movies:badsort"),
-             viewWith(QStringLiteral("sort"), QStringLiteral("Date Added"))},
-            {QStringLiteral("movies:nofilter"), viewWith(QStringLiteral("filter"), kAbsent)},
+             viewWith(v1View(), QStringLiteral("sort"), QStringLiteral("Date Added"))},
+            {QStringLiteral("movies:nofilter"),
+             viewWith(v1View(), QStringLiteral("filter"), kAbsent)},
             {QStringLiteral("movies:badgenre"),
-             viewWith(QStringLiteral("genreIds"), QJsonArray{kGenre, QStringLiteral("a/b")})},
+             viewWith(v1View(), QStringLiteral("genreIds"),
+                      QJsonArray{kGenre, QStringLiteral("a/b")})},
             {QStringLiteral("movies:nodescending"),
-             viewWith(QStringLiteral("descending"), kAbsent)},
-            {QStringLiteral("movies:negseq"), viewWith(QStringLiteral("seq"), -1)},
+             viewWith(v1View(), QStringLiteral("descending"), kAbsent)},
+            {QStringLiteral("movies:negseq"), viewWith(v1View(), QStringLiteral("seq"), -1)},
             {QStringLiteral("movies:notobject"), 5},
         };
-        QJsonObject root = QJsonDocument::fromJson(fileFor(selection, views)).object();
+        QJsonObject root = QJsonDocument::fromJson(fileFor(selection, views, 1)).object();
         // Invalid server and user ids
         QJsonObject servers = root.value(QStringLiteral("servers")).toObject();
         servers.insert(QStringLiteral("bad server"), servers.value(kServer));
@@ -464,6 +527,417 @@ class TestBrowseStateStore : public QObject {
         store->forgetServer(kOtherServer);
         store->flush();
         QVERIFY(!QFileInfo::exists(f.path));
+    }
+
+    void version2RoundTripOfEveryField()
+    {
+        Fixture f;
+        const ViewState full = fullState();
+        ViewState other = fullState();
+        other.statusFlags.clear();
+        other.imageType = QStringLiteral("Banner");
+        const QString scope = QStringLiteral("movies/favorites:") + kLibrary;
+        {
+            auto store = f.open();
+            store->setView(kServer, kUser, scope, full);
+            store->setView(kServer, kUser, QStringLiteral("tvshows/episodes"), other);
+            store->flush();
+        }
+        QCOMPARE(
+            QJsonDocument::fromJson(f.stored()).object().value(QStringLiteral("version")).toInt(),
+            2);
+        auto store = f.open();
+        QVERIFY(holds(*store, kServer, kUser, scope, full));
+        QVERIFY(holds(*store, kServer, kUser, QStringLiteral("tvshows/episodes"), other));
+        // The defaults are what a view starts from
+        const ViewState defaults;
+        QCOMPARE(defaults.sortKey, QStringLiteral("Name"));
+        QCOMPARE(defaults.viewMode, QStringLiteral("grid"));
+        QCOMPARE(defaults.imageType, QStringLiteral("Primary"));
+        QCOMPARE(defaults.episodeKind, QStringLiteral("All"));
+        QVERIFY(defaults.showTitle && defaults.showYear && defaults.cardLayout);
+    }
+
+    void tagAndRatingTextsNeverInTheFile()
+    {
+        Fixture f;
+        const QString tag = QStringLiteral("Zebra Secret Tag");
+        const QString rating = QStringLiteral("TV-MA-Zebra");
+        // SHA-256 of "abc", from FIPS 180-2
+        QCOMPARE(
+            BrowseStateStore::hashText(QStringLiteral("abc")),
+            QStringLiteral("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"));
+        // The exact text is hashed: case and surrounding blanks count
+        QVERIFY(BrowseStateStore::hashText(tag) != BrowseStateStore::hashText(tag.toLower()));
+        QVERIFY(BrowseStateStore::hashText(tag)
+                != BrowseStateStore::hashText(tag + QLatin1Char(' ')));
+        ViewState tagged;
+        tagged.tagHashes = {BrowseStateStore::hashText(tag)};
+        tagged.ratingHashes = {BrowseStateStore::hashText(rating)};
+        {
+            auto store = f.open();
+            store->setView(kServer, kUser, QStringLiteral("movies"), tagged);
+            store->flush();
+        }
+        const QByteArray bytes = f.stored();
+        QVERIFY(!bytes.contains("Zebra"));
+        QVERIFY(bytes.contains(BrowseStateStore::hashText(tag).toUtf8()));
+        QVERIFY(bytes.contains(BrowseStateStore::hashText(rating).toUtf8()));
+        auto store = f.open();
+        QVERIFY(holds(*store, kServer, kUser, QStringLiteral("movies"), tagged));
+    }
+
+    void version1MigratesAndIsWrittenAsVersion2()
+    {
+        Fixture f;
+        const QByteArray v1 = QStringLiteral(R"({
+            "version": 1, "nextSeq": 40,
+            "servers": {"%1": {"users": {"%2": {
+                "selection": {"movies": "%3", "tvshows": ""},
+                "views": {
+                    "movies": {"sort": "DateAdded", "descending": true, "filter": "Unplayed", "genreIds": ["%4", "%3"], "seq": 7},
+                    "tvshows": {"sort": "Name", "descending": false, "filter": "Resumable", "genreIds": [], "seq": 9},
+                    "boxsets:%3": {"sort": "Runtime", "descending": false, "filter": "Favorites", "genreIds": [], "seq": 11},
+                    "movies:%3": {"sort": "Name", "descending": false, "filter": "Played", "genreIds": [], "seq": 12},
+                    "tvshows:%3": {"sort": "Name", "descending": false, "filter": "Mystery", "genreIds": [], "seq": 13}
+                }}}}}})")
+                                  .arg(kServer, kUser, kLibrary, kGenre)
+                                  .toUtf8();
+        f.write(v1);
+        {
+            auto store = f.open();
+            QCOMPARE(store->selection(kServer, kUser, kMovies), kLibrary);
+            QCOMPARE(store->selection(kServer, kUser, kShows), QString());
+            const ViewState movies = state(QStringLiteral("DateAdded"), true,
+                                           QStringLiteral("Unplayed"), {kGenre, kLibrary});
+            QVERIFY(holds(*store, kServer, kUser, QStringLiteral("movies"), movies));
+            // Over series there is no resumable filter
+            QVERIFY(holds(*store, kServer, kUser, QStringLiteral("tvshows"),
+                          state(QStringLiteral("Name"), false, QStringLiteral("All"))));
+            QVERIFY(holds(*store, kServer, kUser, QStringLiteral("boxsets:") + kLibrary,
+                          state(QStringLiteral("Runtime"), false, QStringLiteral("Favorites"))));
+            QVERIFY(holds(*store, kServer, kUser, QStringLiteral("movies:") + kLibrary,
+                          state(QStringLiteral("Name"), false, QStringLiteral("Played"))));
+            // A filter name of no known meaning leaves no flag, the rest is kept
+            QVERIFY(holds(*store, kServer, kUser, QStringLiteral("tvshows:") + kLibrary,
+                          state(QStringLiteral("Name"), false, QStringLiteral("All"))));
+            // The new options start at their defaults
+            const ViewState read = *store->view(kServer, kUser, QStringLiteral("movies"));
+            QCOMPARE(read.viewMode, QStringLiteral("grid"));
+            QCOMPARE(read.imageType, QStringLiteral("Primary"));
+            QVERIFY(read.showTitle && read.showYear && read.cardLayout);
+            QVERIFY(read.features.isEmpty() && read.years.isEmpty() && read.quality.isEmpty());
+            // Nothing is written until something changes
+            QCOMPARE(f.stored(), v1);
+            store->setView(kServer, kUser, QStringLiteral("movies"),
+                           state(QStringLiteral("Name"), false, QStringLiteral("All")));
+            store->flush();
+        }
+        const QJsonObject root = QJsonDocument::fromJson(f.stored()).object();
+        QCOMPARE(root.value(QStringLiteral("version")).toInt(), 2);
+        // The counter went on from where it was: the edited view got 40, the others kept their number
+        QCOMPARE(root.value(QStringLiteral("nextSeq")).toInteger(), 41);
+        const QJsonObject views = root.value(QStringLiteral("servers"))
+                                      .toObject()
+                                      .value(kServer)
+                                      .toObject()
+                                      .value(QStringLiteral("users"))
+                                      .toObject()
+                                      .value(kUser)
+                                      .toObject()
+                                      .value(QStringLiteral("views"))
+                                      .toObject();
+        const auto seqOf = [&views](const QString &scope) {
+            return views.value(scope).toObject().value(QStringLiteral("seq")).toInteger();
+        };
+        QCOMPARE(seqOf(QStringLiteral("movies")), 40);
+        QCOMPARE(seqOf(QStringLiteral("tvshows")), 9);
+        QCOMPARE(seqOf(QStringLiteral("boxsets:") + kLibrary), 11);
+        QVERIFY(views.value(QStringLiteral("boxsets:") + kLibrary)
+                    .toObject()
+                    .value(QStringLiteral("statusFlags"))
+                    .toArray()
+                == QJsonArray{QStringLiteral("IsFavorite")});
+        auto store = f.open();
+        QVERIFY(holds(*store, kServer, kUser, QStringLiteral("boxsets:") + kLibrary,
+                      state(QStringLiteral("Runtime"), false, QStringLiteral("Favorites"))));
+    }
+
+    void invalidFieldsDropOnlyThatView_data()
+    {
+        QTest::addColumn<QString>("key");
+        QTest::addColumn<QJsonValue>("value");
+        const auto row = [](const char *name, const char *key, const QJsonValue &value) {
+            QTest::newRow(name) << QString::fromLatin1(key) << value;
+        };
+        QJsonArray moreGenres;
+        QJsonArray moreHashes;
+        for (int i = 0; i <= BrowseStateStore::MaxGenreIds; ++i) {
+            moreGenres.append(hex(i));
+            moreHashes.append(hash(i));
+        }
+        QJsonArray tooManyYears;
+        for (int i = 0; i <= BrowseStateStore::MaxYears; ++i)
+            tooManyYears.append(1900 + i);
+        row("sortKey with a blank", "sortKey", QStringLiteral("Date Added"));
+        row("sortKey not text", "sortKey", 5);
+        row("sortKey empty", "sortKey", QString());
+        row("sortKey too long", "sortKey", QString(33, QLatin1Char('a')));
+        row("descending as text", "descending", QStringLiteral("yes"));
+        row("statusFlags unknown", "statusFlags", QJsonArray{QStringLiteral("IsBogus")});
+        row("statusFlags lower case", "statusFlags", QJsonArray{QStringLiteral("isplayed")});
+        row("statusFlags not an array", "statusFlags", QStringLiteral("IsPlayed"));
+        row("statusFlags with a number", "statusFlags", QJsonArray{5});
+        row("statusFlags twice", "statusFlags",
+            QJsonArray{QStringLiteral("IsPlayed"), QStringLiteral("IsPlayed")});
+        row("features unknown", "features", QJsonArray{QStringLiteral("HasNothing")});
+        row("quality unknown", "quality", QStringLiteral("UHD"));
+        row("quality not text", "quality", 1);
+        row("is4K as text", "is4K", QStringLiteral("true"));
+        row("is3D as number", "is3D", 1);
+        row("videoTypes unknown", "videoTypes", QJsonArray{QStringLiteral("Vhs")});
+        row("genreIds not an id", "genreIds", QJsonArray{QStringLiteral("a/b")});
+        row("genreIds too many", "genreIds", moreGenres);
+        row("tagHashes too short", "tagHashes", QJsonArray{QStringLiteral("abc")});
+        row("tagHashes upper case", "tagHashes", QJsonArray{hash(10).toUpper()});
+        row("tagHashes not hex", "tagHashes", QJsonArray{QString(64, QLatin1Char('g'))});
+        row("tagHashes too many", "tagHashes", moreHashes);
+        row("ratingHashes clear text", "ratingHashes", QJsonArray{QStringLiteral("PG-13")});
+        row("ratingHashes too many", "ratingHashes", moreHashes);
+        row("years below", "years", QJsonArray{BrowseStateStore::MinYear - 1});
+        row("years above", "years", QJsonArray{BrowseStateStore::MaxYear + 1});
+        row("years with a fraction", "years", QJsonArray{2000.5});
+        row("years as text", "years", QJsonArray{QStringLiteral("2000")});
+        row("years huge", "years", QJsonArray{1e300});
+        row("years too many", "years", tooManyYears);
+        row("seriesStatus unknown", "seriesStatus", QJsonArray{QStringLiteral("Paused")});
+        row("episodeKind unknown", "episodeKind", QStringLiteral("Everything"));
+        row("viewMode unknown", "viewMode", QStringLiteral("tiles"));
+        row("viewMode upper case", "viewMode", QStringLiteral("Grid"));
+        row("imageType unknown", "imageType", QStringLiteral("Poster"));
+        row("showTitle as number", "showTitle", 1);
+        row("showYear as text", "showYear", QStringLiteral("x"));
+        row("cardLayout null", "cardLayout", QJsonValue(QJsonValue::Null));
+    }
+
+    void invalidFieldsDropOnlyThatView()
+    {
+        QFETCH(QString, key);
+        QFETCH(QJsonValue, value);
+        Fixture f;
+        const QJsonObject views{{QStringLiteral("movies"), goodView(1)},
+                                {QStringLiteral("tvshows"), viewWith(goodView(2), key, value)},
+                                {QStringLiteral("movies/collections"), goodView(3)}};
+        f.write(fileFor({{kMovies, kLibrary}}, views));
+        auto store = f.open();
+        QVERIFY(!store->view(kServer, kUser, QStringLiteral("tvshows")));
+        QVERIFY(store->view(kServer, kUser, QStringLiteral("movies")));
+        QVERIFY(store->view(kServer, kUser, QStringLiteral("movies/collections")));
+        QCOMPARE(store->selection(kServer, kUser, kMovies), kLibrary);
+    }
+
+    void limitsAreInclusive()
+    {
+        Fixture f;
+        ViewState edge;
+        for (int i = 0; i < BrowseStateStore::MaxGenreIds; ++i)
+            edge.genreIds.append(hex(i));
+        for (int i = 0; i < BrowseStateStore::MaxHashes; ++i) {
+            edge.tagHashes.append(hash(i));
+            edge.ratingHashes.append(hash(i + 100));
+        }
+        for (int i = 0; i < BrowseStateStore::MaxYears; ++i)
+            edge.years.append(BrowseStateStore::MinYear + i);
+        edge.years.last() = BrowseStateStore::MaxYear;
+        edge.quality = QStringLiteral("SD");
+        {
+            auto store = f.open();
+            store->setView(kServer, kUser, QStringLiteral("movies"), edge);
+            QVERIFY(holds(*store, kServer, kUser, QStringLiteral("movies"), edge));
+            // One past a limit is refused, the stored view stays as it was
+            ViewState over = edge;
+            over.years.append(2000);
+            store->setView(kServer, kUser, QStringLiteral("movies"), over);
+            over = edge;
+            over.tagHashes.append(hash(1000));
+            store->setView(kServer, kUser, QStringLiteral("movies"), over);
+            over = edge;
+            over.genreIds.append(hex(1000));
+            store->setView(kServer, kUser, QStringLiteral("movies"), over);
+            over = edge;
+            over.viewMode = QStringLiteral("tiles");
+            store->setView(kServer, kUser, QStringLiteral("movies"), over);
+            over = edge;
+            over.years.first() = BrowseStateStore::MinYear - 1;
+            store->setView(kServer, kUser, QStringLiteral("movies"), over);
+            QVERIFY(holds(*store, kServer, kUser, QStringLiteral("movies"), edge));
+            store->flush();
+        }
+        auto store = f.open();
+        QVERIFY(holds(*store, kServer, kUser, QStringLiteral("movies"), edge));
+    }
+
+    void scopeKeysAreStrict()
+    {
+        Fixture f;
+        const QString id = kLibrary;
+        const QStringList valid{QStringLiteral("movies"),
+                                QStringLiteral("tvshows"),
+                                QStringLiteral("movies:") + id,
+                                QStringLiteral("tvshows:") + id,
+                                QStringLiteral("boxsets:") + id,
+                                QStringLiteral("movies/favorites"),
+                                QStringLiteral("movies/favorites:") + id,
+                                QStringLiteral("movies/collections"),
+                                QStringLiteral("tvshows/episodes"),
+                                QStringLiteral("tvshows/episodes:") + id,
+                                QStringLiteral("tvshows/network:") + id};
+        const QStringList invalid{QStringLiteral("movies/"),
+                                  QStringLiteral("movies/favorites:"),
+                                  QStringLiteral("movies/favorites:bad id"),
+                                  QStringLiteral("movies/collections:") + id,
+                                  QStringLiteral("tvshows/network"),
+                                  QStringLiteral("tvshows/network:Studio Name"),
+                                  QStringLiteral("tvshows/network:"),
+                                  QStringLiteral("movies/episodes"),
+                                  QStringLiteral("tvshows/favorites"),
+                                  QStringLiteral("boxsets"),
+                                  QStringLiteral("boxsets/x"),
+                                  QStringLiteral("music")};
+        QJsonObject views;
+        const ViewState a = state(QStringLiteral("Name"), true, QStringLiteral("Played"));
+        {
+            auto store = f.open();
+            for (const QString &scope : valid)
+                store->setView(kServer, kUser, scope, a);
+            for (const QString &scope : invalid)
+                store->setView(kServer, kUser, scope, a);
+            for (const QString &scope : valid)
+                QVERIFY2(store->view(kServer, kUser, scope), qPrintable(scope));
+            for (const QString &scope : invalid)
+                QVERIFY2(!store->view(kServer, kUser, scope), qPrintable(scope));
+            store->flush();
+        }
+        // The same keys in a file by hand
+        int seq = 1;
+        for (const QString &scope : valid + invalid)
+            views.insert(scope, goodView(seq++));
+        f.write(fileFor({}, views));
+        auto store = f.open();
+        for (const QString &scope : valid)
+            QVERIFY2(store->view(kServer, kUser, scope), qPrintable(scope));
+        for (const QString &scope : invalid)
+            QVERIFY2(!store->view(kServer, kUser, scope), qPrintable(scope));
+    }
+
+    void resumableIsDroppedOverSeriesOnly()
+    {
+        Fixture f;
+        ViewState resumable;
+        resumable.statusFlags = {QStringLiteral("IsResumable"), QStringLiteral("IsFavorite")};
+        ViewState favorite;
+        favorite.statusFlags = {QStringLiteral("IsFavorite")};
+        auto store = f.open();
+        for (const QString &scope :
+             QStringList{QStringLiteral("tvshows"), QString(QStringLiteral("tvshows:") + kLibrary),
+                         QString(QStringLiteral("tvshows/network:") + kLibrary)}) {
+            store->setView(kServer, kUser, scope, resumable);
+            QVERIFY2(holds(*store, kServer, kUser, scope, favorite), qPrintable(scope));
+        }
+        for (const QString &scope : {QStringLiteral("movies"), QStringLiteral("movies/favorites"),
+                                     QStringLiteral("tvshows/episodes")}) {
+            store->setView(kServer, kUser, scope, resumable);
+            QVERIFY2(holds(*store, kServer, kUser, scope, resumable), qPrintable(scope));
+        }
+    }
+
+    void capAndLruWithTheNewScopeKeys()
+    {
+        Fixture f;
+        const ViewState a = state(QStringLiteral("Name"), false, QStringLiteral("All"));
+        const auto scope = [](int i) -> QString {
+            switch (i % 4) {
+            case 0:
+                return QStringLiteral("tvshows/network:") + hex(i);
+            case 1:
+                return QStringLiteral("tvshows/episodes:") + hex(i);
+            case 2:
+                return QStringLiteral("movies/favorites:") + hex(i);
+            default:
+                return QStringLiteral("movies:") + hex(i);
+            }
+        };
+        auto store = f.open();
+        for (int i = 0; i <= BrowseStateStore::MaxViews; ++i)
+            store->setView(kServer, kUser, scope(i), a);
+        QVERIFY(!store->view(kServer, kUser, scope(0)));
+        QVERIFY(store->view(kServer, kUser, scope(1)));
+        // Writing a view again makes it the newest
+        ViewState changed = a;
+        changed.viewMode = QStringLiteral("list");
+        store->setView(kServer, kUser, scope(1), changed);
+        store->setView(kServer, kUser, QStringLiteral("movies/collections"), a);
+        QVERIFY(holds(*store, kServer, kUser, scope(1), changed));
+        QVERIFY(!store->view(kServer, kUser, scope(2)));
+        QVERIFY(store->view(kServer, kUser, scope(3)));
+        store->flush();
+        auto again = f.open();
+        int kept = 0;
+        for (int i = 0; i <= BrowseStateStore::MaxViews; ++i)
+            kept += again->view(kServer, kUser, scope(i)).has_value();
+        QCOMPARE(kept, BrowseStateStore::MaxViews - 1);
+        QVERIFY(again->view(kServer, kUser, QStringLiteral("movies/collections")));
+        QVERIFY(QFileInfo(f.path).size() <= BrowseStateStore::MaxFileBytes);
+    }
+
+    void favoritesGroupingRoundTripAndBadValues()
+    {
+        Fixture f;
+        {
+            auto store = f.open();
+            QCOMPARE(store->favoritesGrouping(kServer, kUser), QStringLiteral("Type"));
+            // The default is not worth a file
+            store->setFavoritesGrouping(kServer, kUser, QStringLiteral("Type"));
+            store->flush();
+            QVERIFY(!QFileInfo::exists(f.path));
+            for (const QString &bad : {QString(), QStringLiteral("genre"), QStringLiteral("Bogus"),
+                                       QStringLiteral("Genre ")})
+                store->setFavoritesGrouping(kServer, kUser, bad);
+            QCOMPARE(store->favoritesGrouping(kServer, kUser), QStringLiteral("Type"));
+            store->setFavoritesGrouping(QStringLiteral("bad id"), kUser, QStringLiteral("Year"));
+            QCOMPARE(store->favoritesGrouping(QStringLiteral("bad id"), kUser),
+                     QStringLiteral("Type"));
+            store->setFavoritesGrouping(kServer, kUser, QStringLiteral("Genre"));
+            store->setFavoritesGrouping(kServer, kOtherUser, QStringLiteral("None"));
+            // A bad value keeps the previous one
+            store->setFavoritesGrouping(kServer, kUser, QStringLiteral("Nope"));
+            QCOMPARE(store->favoritesGrouping(kServer, kUser), QStringLiteral("Genre"));
+            store->flush();
+        }
+        {
+            // A user with nothing but the grouping is kept
+            auto store = f.open();
+            QCOMPARE(store->favoritesGrouping(kServer, kUser), QStringLiteral("Genre"));
+            QCOMPARE(store->favoritesGrouping(kServer, kOtherUser), QStringLiteral("None"));
+            QCOMPARE(store->favoritesGrouping(kOtherServer, kUser), QStringLiteral("Type"));
+            store->setView(kServer, kUser, QStringLiteral("movies"),
+                           state(QStringLiteral("Name"), false, QStringLiteral("All")));
+            store->setFavoritesGrouping(kServer, kUser, QStringLiteral("Library"));
+            store->flush();
+        }
+        auto store = f.open();
+        QCOMPARE(store->favoritesGrouping(kServer, kUser), QStringLiteral("Library"));
+        QVERIFY(store->view(kServer, kUser, QStringLiteral("movies")));
+        // An unknown value in the file is ignored and costs nothing else
+        f.write(fileFor({{kMovies, kLibrary}}, {{QStringLiteral("movies"), goodView()}}, 2,
+                        {{QStringLiteral("favoritesGrouping"), QStringLiteral("Weekday")}}));
+        auto bad = f.open();
+        QCOMPARE(bad->favoritesGrouping(kServer, kUser), QStringLiteral("Type"));
+        QCOMPARE(bad->selection(kServer, kUser, kMovies), kLibrary);
+        QVERIFY(bad->view(kServer, kUser, QStringLiteral("movies")));
+        f.write(fileFor({}, {}, 2, {{QStringLiteral("favoritesGrouping"), 7}}));
+        auto number = f.open();
+        QCOMPARE(number->favoritesGrouping(kServer, kUser), QStringLiteral("Type"));
     }
 
     void saveFailedOncePerStreak()
