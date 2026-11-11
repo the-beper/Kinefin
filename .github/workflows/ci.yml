@@ -58,6 +58,9 @@ jobs:
       - name: Verify immutable Flatpak sources
         run: python3 -I build/release/verify_flatpak_sources.py
 
+      - name: Verify reviewed Flatpak sandbox permissions
+        run: python3 -I build/release/verify_flatpak_permissions.py
+
       - name: shellcheck
         run: |
           shellcheck --version

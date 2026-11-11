@@ -194,3 +194,33 @@ no GitHub credentials, network access, Flatpak or Qt; Git and Python 3 suffice.
 ```sh
 python3 -m unittest discover -s tests -p 'test_flathub_manifest.py' -v
 ```
+
+## Audit Flatpak sandbox permissions
+
+The release manifest uses an explicitly reviewed set of sandbox grants. Run the
+fail-closed, **offline** audit before building or submitting a Flathub manifest:
+
+```sh
+python3 -I build/release/verify_flatpak_permissions.py
+python3 -I build/release/verify_flatpak_permissions.py \
+  --manifest dist/flathub/v0.0.2/io.github.the_beper.Kinefin.yml
+python3 -m unittest discover -s tests -p 'test_flatpak_sandbox_permissions.py' -v
+```
+
+The validator checks the app ID, KDE runtime and SDK, launch command and all
+`finish-args`. It rejects duplicate or unreviewed grants rather than accepting
+new filesystem, broad D-Bus, X11 or host-device access silently. **Intended**
+permission changes need a security review and an update to the allowlist in
+`verify_flatpak_permissions.py`; the gate is not a substitute for that review.
+
+The Flatpak smoke test also runs the verifier against the **installed bundle's**
+`flatpak info --show-metadata` output, before starting the app. This detects a
+packaging result that differs from the reviewed manifest, including new host
+filesystem grants, bus names and runtime drift. A real Flatpak build is still
+required to exercise this test; the offline tests use representative keyfiles.
+
+The smoke-test image now includes Python 3. After merging this change, verify
+that the **Images** workflow rebuilt `kinefin-flatpak:fedora45`, and set the
+release digest variable to the new approved image digest before tagging a
+release. Reusing the old image will fail the smoke test because Python is
+missing. No auto-update or publication is performed by this gate.

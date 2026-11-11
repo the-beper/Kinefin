@@ -53,6 +53,9 @@ jobs:
       - name: Verify immutable Flatpak sources
         run: python3 -I build/release/verify_flatpak_sources.py
 
+      - name: Verify reviewed Flatpak sandbox permissions
+        run: python3 -I build/release/verify_flatpak_permissions.py
+
       # Review artifact for a future Flathub submission. This never publishes
       # anything and is independent of the GitHub Flatpak bundle release.
       - name: Prepare commit-pinned Flathub manifest
@@ -67,6 +70,13 @@ jobs:
           python3 -I build/release/verify_flatpak_sources.py \
             --manifest "dist/flathub/$RELEASE_TAG/io.github.the_beper.Kinefin.yml" \
             --flathub-tag "$RELEASE_TAG" --flathub-commit "$(git rev-parse HEAD)"
+
+      - name: Verify generated Flathub permissions
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python3 -I build/release/verify_flatpak_permissions.py \
+            --manifest "dist/flathub/$RELEASE_TAG/io.github.the_beper.Kinefin.yml"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

@@ -21,6 +21,8 @@ if [ ! -e /run/.containerenv ]; then
         --device /dev/fuse -e KINEFIN_EXPECT_VERSION -v kinefin-flatpak:/var/lib/flatpak \
         -v "$bundle:/bundle.flatpak:ro" -v "$root/build/flatpak/test-flatpak.sh:/test.sh:ro" \
         -v "$root/build/flatpak/runtime-pins.conf:/runtime-pins.conf:ro" \
+        -v "$root/build/flatpak/io.github.the_beper.Kinefin.yml:/manifest.yml:ro" \
+        -v "$root/build/release/verify_flatpak_permissions.py:/verify-permissions.py:ro" \
         "$@" "$image" sh -c 'mkdir -p -m 700 /run/user/0 && exec dbus-run-session -- /test.sh /bundle.flatpak'
 fi
 
@@ -47,13 +49,12 @@ flatpak install --system -y --noninteractive --reinstall --no-deps --bundle "$1"
 echo "ok: installed"
 assert_pin "$sdk" "$sdk_commit"
 assert_pin "$platform" "$platform_commit"
-id=io.github.the_beper.Kinefin
-fail() { echo "FAIL: $*" >&2; exit 1; }
-HOME=$(mktemp -d)
-export HOME
-trap 'flatpak kill "$id" 2>/dev/null; kill %1 2>/dev/null; rm -rf "$HOME"' EXIT
-export XDG_DATA_HOME=$HOME/xdg-data XDG_CONFIG_HOME=$HOME/xdg-config
-mkdir -p "$XDG_DATA_HOME" "$XDG_CONFIG_HOME"
+# Check the actual Flatpak metadata from the installed bundle before launching it.
+# The source-only release gate cannot detect extra permissions in a built bundle.
+flatpak info --system --show-metadata "$id" >"$HOME/bundle-metadata" || fail "read bundle metadata"
+python3 -I /verify-permissions.py --manifest /manifest.yml \
+    --metadata "$HOME/bundle-metadata" || fail "installed Flatpak sandbox differs from approved permissions"
+echo "ok: installed sandbox permissions match reviewed policy"
 
 if [ -n "${KINEFIN_EXPECT_VERSION:-}" ]; then
     out=$(flatpak run --env=QT_QPA_PLATFORM=offscreen "$id" --version 2>&1) || fail "--version failed: $out"

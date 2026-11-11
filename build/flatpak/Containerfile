@@ -1,8 +1,10 @@
 FROM registry.fedoraproject.org/fedora:45
 
-# The image build/flatpak/build-flatpak.sh and test-flatpak.sh run flatpak and ostree in. It carries nothing else (flatpak-builder included) on purpose: quickcheck of tools happens in the scripts (they refuse a rootful podman).
+# The Flatpak builder and smoke test run here. Python 3 validates the installed
+# bundle metadata against the reviewed sandbox policy before launching Kinefin.
+# The scripts still require rootless podman on the host.
 RUN dnf install -y --setopt=install_weak_deps=False \
-        flatpak flatpak-builder ostree squashfs-tools curl git dbus-daemon \
+        flatpak flatpak-builder ostree squashfs-tools curl git dbus-daemon python3 \
     && dnf clean all
 
 # Links the ghcr.io package to the repository, so the workflows can pull it with GITHUB_TOKEN.
