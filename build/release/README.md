@@ -114,3 +114,35 @@ Portable tests (including a fake GitHub release lifecycle):
 ```sh
 python3 -m unittest discover -s tests -p 'test_release_publish.py' -v
 ```
+
+## Prepare a Flathub submission manifest
+
+The manifest in `build/flatpak/` uses a local directory source so CI and local
+builds compile exactly the checked-out tree. Do not change that source to a
+remote Git reference in the checked-in manifest. Once a stable release tag
+exists and its commit is checked out, generate the Flathub variant instead:
+
+```sh
+python3 -I build/release/prepare_flathub.py v0.0.2
+# or inspect the transformed YAML without writing a file:
+python3 -I build/release/prepare_flathub.py --dry-run v0.0.2
+```
+
+The helper requires a **clean checkout at the exact tag commit**, matching
+CMake and AppStream release metadata. It replaces the application's `type: dir`
+source with a public `type: git` source containing both `tag: vX.Y.Z` and the
+full commit ID. All other dependencies and their hashes remain unchanged. The
+result lives under `dist/flathub/vX.Y.Z/io.github.the_beper.Kinefin.yml` and
+is never submitted or published automatically. It refuses to overwrite a
+previously generated file if its contents differ.
+
+A successful release **validate** job also uploads the same candidate YAML as
+a separate `flathub-manifest` Actions artifact for review. This is not a
+Flathub submission or a replacement for Flathub's build and review gates.
+Before submitting, review the app metadata, runtime pins, application icon,
+permissions, and the completed first-release acceptance checks. The CLI needs
+no GitHub credentials, network access, Flatpak or Qt; Git and Python 3 suffice.
+
+```sh
+python3 -m unittest discover -s tests -p 'test_flathub_manifest.py' -v
+```
