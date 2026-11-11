@@ -10,16 +10,16 @@ A scaffold-forward project of one developer. These are the real rules; the layou
 | `build/build-env.sh` | Runs any command in that image: the only supported way to build and check locally |
 | `build/check.sh` | Every automated check (build, ctest, qmllint, metainfo, desktop file, catalogs): the one list |
 | `build/flatpak/` | The Flatpak image (`Containerfile`), the manifest (`io.github.the_beper.Kinefin.yml`), and its build/test scripts |
-| `build/release/` | Release tooling (empty until the version-bump script is written) |
+| `build/release/` | Version bump, Flatpak source/runtime/permission/Action gates, Flathub manifest generator, artifact verification, attestation checks, release publisher and first-release checklist |
 | `data/` | Desktop file, AppStream metainfo and icons (`icons/hicolor`: the scalable SVG source and the 128/256 px PNG renders) |
 | `po/` | Gettext: `LINGUAS`, `POTFILES.in`, `extract.sh`, per-language catalogs |
 | `src/api/` | Jellyfin REST client (auth, discovery, device profile, media sources, reporting) |
 | `src/downloads/` | Not started: download queue, tracked-series auto rules, portal export (feature doc: parity §10) |
 | `src/app/` | `ConnectionController`: the one object the QML pages talk to (servers, sign-in, Quick Connect, session restore); profile commands and logging; `ClientSettingsQml.h`, which exposes the settings object to QML |
 | `src/player/` | Playback session state machine, server reporting (`PlaybackReporter`) and the mpv engine (`PlaybackEngine`); property mapping and subtitles come later |
-| `src/integration/` | Safe `jellyfin://` link parser; MPRIS, screensaver/power, Wayland/libkscreen display switching, SDL3/optional CEC input |
+| `src/integration/` | Validated `jellyfin://item/<id>` routing and registered desktop protocol; the remaining MPRIS, screensaver/power, Wayland/libkscreen display switching and SDL3/optional CEC work belongs to P6 |
 | `src/settings/` | Profile index and identity, server credentials, KConfig client settings (`SettingDefinitions`, `ClientSettings`, `SettingsSectionModel`) |
-| `src/models/` | list models without QtQml or QtGui: `ItemSummary`, the windowing base `PagedItemsModel` with `LibraryItemsModel` and `SeasonEpisodesModel`, `ItemRowModel`, `HomeRowsModel`, the item details pair `ItemDetails` (parser) and `ItemDetailsModel`, `ItemChildrenModel` (seasons, Next Up, episodes, collection children), `SearchModel` (global search), `FilterOptionsModel` (genre facet), `GenreRailsModel` (genre rails) and `PlayQueue` (the video up-next list with its per-owner persistence in `queues/<serverId>_<userId>.json`) |
+| `src/models/` | API-backed listing, details, search, genre and Remote sessions models; `PlayQueue` persists the video up-next list per owner in `queues/<serverId>_<userId>.json` and supports one-level undo |
 | `src/imagecache/` | Image origin lock and the restricted network access (allowed image URLs only, disk cache with a cap); the subtitle cache is not started |
 | `src/qml/` | All Kirigami pages and their components, built as the static QML module `kinefin_ui` (linked by the `kinefin` executable and by `test_ui_pages`) |
 | `tests/`, `scripts/testing/` | Unit tests, test scripts, and `tests/fixtures/` (the realistic server-response corpus the P2 fake server replays; its README rules shape changes) |
@@ -60,10 +60,10 @@ python3 scripts/po.py status        # 0 pending per language
 
 ```sh
 build/flatpak/build-flatpak.sh                 # dist/Kinefin-x86_64.flatpak
-KINEFIN_EXPECT_VERSION=$(…) build/flatpak/test-flatpak.sh dist/Kinefin-x86_64.flatpak
+KINEFIN_EXPECT_VERSION=X.Y.Z build/flatpak/test-flatpak.sh dist/Kinefin-x86_64.flatpak
 ```
 
-The build script installs the org.kde runtime at pinned commits (see the constants inside) and refuses to run outside rootless podman. `test-flatpak.sh` installs the bundle into a throwaway container `HOME`, checks the version, that the app owns its D-Bus name, that the profile data lands under the redirected XDG, and that a second launch hands over — then kills the app.
+The build script installs the org.kde runtime at commits recorded in `build/flatpak/runtime-pins.conf` and refuses to run outside rootless podman. `test-flatpak.sh` installs the bundle into a throwaway container `HOME`, checks the version, installed sandbox permissions and raster icons, D-Bus single-instance behaviour, private profile storage and QML start-up. A real Plasma/Wayland host is still needed for playback, KWallet, portals and GUI acceptance.
 
 ## Translations
 
@@ -73,13 +73,15 @@ Strings are `i18n()` calls (QML: plain `i18n()` injected with `KLocalization::se
 
 ## Releasing
 
-1. Bump the version with `build/release/version-bump.sh X.Y.0 NOTES` (single sources: root `CMakeLists.txt` and one metainfo `<release>` entry). Until that script exists, the bump is hand-written and both places must move together.
-2. Run `build/build-env.sh build/check.sh` on the commit and tag it `vX.Y.0`.
+**Source preparation is implemented; P9 acceptance is not closed.** Do not tag or publish before the required v1 features, real Jellyfin/Plasma rounds and packaging gates pass. The authoritative instructions are [release tooling](build/release/README.md) and the [first-release checklist](build/release/FIRST_RELEASE.md).
 
-Before the first release:
+1. Run `python3 -I build/release/preflight.py` for the offline source gates, then `build/build-env.sh build/check.sh` for the native/container checks.
+2. When v1 acceptance is complete, prepare the version with `build/release/version-bump.sh --dry-run --date YYYY-MM-DD X.Y.Z` and `build/release/version-bump.sh --date YYYY-MM-DD X.Y.Z`; review and commit CMake and AppStream together.
+3. Review the rebuilt Flatpak image from the Images workflow and set the repository variable `KINEFIN_RELEASE_FLATPAK_DIGEST` to its approved `sha256:` digest. Verify KDE SDK/Platform commits against Flathub availability.
+4. Only after green CI on the intended `main` commit, create the protected `vX.Y.Z` tag. The release workflow validates the tag, builds and smokes the bundle, verifies signed attestations and provenance, and publishes the three checked release assets. This workflow has **not yet been verified end to end from a real tag**.
+5. Review the generated commit-pinned Flathub manifest separately. Submission to Flathub is a manual, independent review; the GitHub release workflow does not submit it.
 
-- re-pin the org.kde Platform/Sdk commits in `build/flatpak/build-flatpak.sh` (the pins date from 2026-11-07 and were copied over as working values);
-- decide self-hosting: Flathub avoids it (submissions need `type: git` sources in the manifest — the switch is marked in `io.github.the_beper.Kinefin.yml`); a signed OSTree repository needs KuickShare's pipeline ported; a bundle attached to a GitHub release needs nothing.
+Source checks and the 128px/256px icon are present, but they do not replace a build on the pinned image, a real host review or a maintainer decision to release.
 
 ## How to work here
 
@@ -91,4 +93,4 @@ Before the first release:
 
 ## Validation scope of this snapshot
 
-P0 portable checks (including a real C++20 state-machine compile) run with `scripts/testing/run_portable_checks.sh`; the native Qt/KF6 tests require the build container. A fake Jellyfin server can be exercised with `python3 scripts/testing/probe_jellyfin.py --fixture`; live-server read-only API probes require explicitly supplied environment variables (see the script). Playback and session reporting still require dedicated host tests.
+P0 portable checks (including a real C++20 state-machine compile) run with `scripts/testing/run_portable_checks.sh`; the native Qt/KF6 tests require the build container. The `build/release/` unit tests exercise release logic with local fixtures; signed attestation retrieval, a real tag build and host/Flatpak tests still require external systems. A fake Jellyfin server can be exercised with `python3 scripts/testing/probe_jellyfin.py --fixture`; live-server read-only API probes require explicitly supplied environment variables (see the script). Playback and session reporting still require dedicated host tests.
