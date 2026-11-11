@@ -30,3 +30,25 @@ Portable regression tests:
 ```sh
 python3 -m unittest discover -s tests -p 'test_release_version_bump.py' -v
 ```
+
+## Release metadata gate
+
+Before creating a `vX.Y.Z` tag, run the same check as the release workflow:
+
+```sh
+python3 -I build/release/verify_release.py v0.0.2
+```
+
+Replace the example tag with the version being released. The check requires an
+exact match between the tag, `project(kinefin VERSION ...)` and the **newest**
+AppStream `<release>` entry, validates its date and rejects duplicate or
+out-of-order release history. It does not change files or require GitHub access.
+The workflow also checks that the tagged commit is on `main`. The current
+`0.0.1` skeleton has no AppStream release entry and therefore is **not**
+release-ready until `version-bump.sh` has prepared the first release.
+
+Run its portable regression tests with:
+
+```sh
+python3 -m unittest discover -s tests -p 'test_release_verify.py' -v
+```

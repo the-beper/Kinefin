@@ -35,18 +35,17 @@ jobs:
           fetch-tags: true
           persist-credentials: false
 
-      - name: Check the tag, the version and the commit
+      - name: Check tag, CMake, AppStream and main ancestry
         id: check
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          version=$(sed -n 's/^project(kinefin VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
-          [ -n "$version" ] || { echo "no version in CMakeLists.txt" >&2; exit 1; }
-          [ "$RELEASE_TAG" = "v$version" ] || { echo "tag $RELEASE_TAG does not name version $version" >&2; exit 1; }
+          # Do not build or publish a tag whose release metadata was not bumped.
+          python3 -I build/release/verify_release.py "$RELEASE_TAG"
           # The commit must be on main (a build of a stray branch is not a release).
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main || {
             echo "$GITHUB_SHA is not on main" >&2; exit 1; }
-          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "version=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
 
   ci-gate:
     needs: validate
