@@ -18,7 +18,7 @@ namespace Kinefin {
 // The releases/latest endpoint supplies only a redirect: no untrusted HTML or
 // release assets are downloaded, and only a same-origin, final-version tag is
 // ever offered to the user as a URL to open in their browser.
-class UpdateChecker final : public QObject {
+class UpdateChecker : public QObject {
     Q_OBJECT
     Q_PROPERTY(bool checking READ checking NOTIFY checkingChanged)
 

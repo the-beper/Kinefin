@@ -42,7 +42,7 @@ if [ -n "$cpp_files" ]; then
         --keyword=i18n:1 --keyword=kli18n:1 --keyword=i18nc:1c,2 --keyword=i18np:1,2 --keyword=i18ncp:1c,2,3 \
         --files-from="$tmpdir/potfiles" \
         --package-name=kinefin --copyright-holder="the-beper" \
-        --msgid-bugs-address= \
+        --msgid-bugs-address=https://github.com/the-beper/Kinefin/issues \
         -o "$pot"
 fi
 if [ -n "$qml_files" ]; then
@@ -54,7 +54,7 @@ if [ -n "$qml_files" ]; then
         --keyword=i18n:1 --keyword=kli18n:1 --keyword=i18nc:1c,2 --keyword=i18np:1,2 --keyword=i18ncp:1c,2,3 \
         --files-from="$tmpdir/potfiles" \
         --package-name=kinefin --copyright-holder="the-beper" \
-        --msgid-bugs-address= \
+        --msgid-bugs-address=https://github.com/the-beper/Kinefin/issues \
         -o "$pot"
 fi
 [ -f "$pot" ] || { echo "no extracted messages from po/POTFILES.in; refusing a vacuous green gate" >&2; exit 1; }
@@ -73,4 +73,13 @@ cp "$pot" po/kinefin.pot
 for lang in $(cat po/LINGUAS); do
     msgmerge --update --backup=none --quiet "po/$lang.po" po/kinefin.pot
     msgattrib --no-obsolete --output-file="po/$lang.po" "po/$lang.po"
+    # msgfmt -c wants a Language-Team field; msgmerge keeps the catalog's own header, so it is added once here
+    grep -q '^"Language-Team:' "po/$lang.po" || {
+        case "$lang" in
+            en) team=English ;;
+            it) team=Italian ;;
+            *) team=$lang ;;
+        esac
+        sed -i "s/^\"Last-Translator:.*\$/&\n\"Language-Team: $team\\\\n\"/" "po/$lang.po"
+    }
 done

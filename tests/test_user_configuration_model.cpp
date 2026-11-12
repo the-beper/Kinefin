@@ -274,22 +274,69 @@ class TestUserConfigurationModel : public QObject {
         QVERIFY(f.posts.isEmpty());
         QCOMPARE(f.model.conflictFields(), QStringList{text("SubtitleMode")});
         QCOMPARE(saved.size(), 0);
-        // The draft survives, a second save is checked again, and the page can return to editing
+        // The draft survives and the page can return to editing
         QCOMPARE(f.model.subtitleMode(), text("Always"));
         QVERIFY(!f.model.canSave());
         f.model.keepEditing();
         QCOMPARE(f.model.state(), State::Ready);
         QVERIFY(f.model.conflictFields().isEmpty());
+        // The server's values are the baseline now: the draft stays, a field nobody edited follows the server
+        QCOMPARE(f.model.subtitleMode(), text("Always"));
+        QVERIFY(!f.model.rememberAudioSelections());
+        QCOMPARE(f.model.dirtyFields().size(), 2);
+        // The second save overwrites knowingly
+        f.model.save();
+        QVERIFY(f.waitFor(State::Ready));
+        QCOMPARE(f.posts.size(), 1);
+        QCOMPARE(f.lastPost().value(text("SubtitleMode")), QJsonValue(text("Always")));
+        QCOMPARE(f.lastPost().value(text("RememberAudioSelections")), QJsonValue(false));
+        QVERIFY(!f.model.dirty());
+    }
+
+    void reloadingAfterAConflictTakesTheServerValues()
+    {
+        Fixture f;
+        QVERIFY(f.ok && f.loadReady());
+        f.model.setSubtitleMode(text("Always"));
+        f.remote.insert(text("SubtitleMode"), text("None"));
+        f.remote.insert(text("RememberAudioSelections"), false);
         f.model.save();
         QVERIFY(f.waitFor(State::Conflict));
-        QVERIFY(f.posts.isEmpty());
-
-        // Reloading takes the server's values and drops the draft
         f.model.load();
         QVERIFY(f.waitFor(State::Ready));
         QCOMPARE(f.model.subtitleMode(), text("None"));
         QVERIFY(!f.model.rememberAudioSelections());
         QVERIFY(!f.model.dirty());
+    }
+
+    void discardingAfterAConflictShowsTheServerValues()
+    {
+        Fixture f;
+        QVERIFY(f.ok && f.loadReady());
+        f.model.setSubtitleMode(text("Always"));
+        f.remote.insert(text("SubtitleMode"), text("None"));
+        f.model.save();
+        QVERIFY(f.waitFor(State::Conflict));
+        f.model.discard();
+        QVERIFY(f.waitFor(State::Ready));
+        QCOMPARE(f.model.subtitleMode(), text("None"));
+        QVERIFY(!f.model.dirty());
+        QVERIFY(f.posts.isEmpty());
+    }
+
+    void discardingTheDraftOfAClosedPageReadsNothing()
+    {
+        Fixture f;
+        QVERIFY(f.ok && f.loadReady());
+        f.model.setSubtitleMode(text("Always"));
+        f.remote.insert(text("SubtitleMode"), text("None"));
+        f.model.save();
+        QVERIFY(f.waitFor(State::Conflict));
+        f.model.discardDraft();
+        // At once, with no read of the server: the draft is back at the baseline
+        QCOMPARE(f.model.state(), State::Ready);
+        QVERIFY(!f.model.dirty());
+        QCOMPARE(f.model.subtitleMode(), text("Smart"));
     }
 
     void aServerValueThatAlreadyEqualsTheDraftIsNoConflict()
@@ -408,12 +455,54 @@ class TestUserConfigurationModel : public QObject {
 
     void aFailedWriteCanBeDiscarded()
     {
+        // The write was sent, so its outcome is unknown: discarding reloads from the server (which did not apply it here)
         Fixture f;
         QVERIFY(f.ok && f.loadReady());
+        f.storePosts = false;
         f.server.userConfigurationStatus = 500;
         f.model.setSubtitleMode(text("Always"));
         f.model.save();
         QVERIFY(f.waitFor(State::Failed));
+        f.model.discard();
+        QCOMPARE(f.model.state(), State::Loading);
+        QVERIFY(f.waitFor(State::Ready));
+        QVERIFY(!f.model.dirty());
+        QCOMPARE(f.model.subtitleMode(), text("Smart"));
+    }
+
+    void discardingAnUnknownWriteReloadsAndLaterEditsDoNotConflict()
+    {
+        Fixture f;
+        QVERIFY(f.ok && f.loadReady());
+        // The server applies the write and answers 500: the stale baseline must not survive a discard
+        f.server.userConfigurationStatus = 500;
+        f.model.setSubtitleMode(text("Always"));
+        f.model.save();
+        QVERIFY(f.waitFor(State::Failed));
+        QCOMPARE(f.model.failure(), UserConfigurationModel::SaveFailed);
+        f.model.discard();
+        QVERIFY(f.waitFor(State::Ready));
+        QCOMPARE(f.model.subtitleMode(), text("Always"));
+        QVERIFY(!f.model.dirty());
+        f.server.userConfigurationStatus = 204;
+        f.model.setSubtitleMode(text("None"));
+        f.model.save();
+        QVERIFY(f.waitFor(State::Ready));
+        QCOMPARE(f.posts.size(), 2);
+        QCOMPARE(f.lastPost().value(text("SubtitleMode")), QJsonValue(text("None")));
+        QVERIFY(!f.model.dirty());
+    }
+
+    void aWriteRefusedBeforeBeingSentDiscardsToTheBaseline()
+    {
+        Fixture f;
+        QVERIFY(f.ok && f.loadReady());
+        f.server.usersMeStatus = 500;
+        f.model.setSubtitleMode(text("Always"));
+        f.model.save();
+        QVERIFY(f.waitFor(State::Failed));
+        QCOMPARE(f.model.failure(), UserConfigurationModel::SaveFailed);
+        QVERIFY(f.posts.isEmpty());
         f.model.discard();
         QCOMPARE(f.model.state(), State::Ready);
         QVERIFY(!f.model.dirty());

@@ -19,14 +19,22 @@ import re
 import sys
 
 APP_ID = "io.github.the_beper.Kinefin"
-ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_MANIFEST = ROOT / "build/flatpak" / f"{APP_ID}.yml"
+DEFAULT_MANIFEST = Path(__file__).resolve().parent.parent / "flatpak" / f"{APP_ID}.yml"
 IDENTITY = {
     "app-id": APP_ID,
     "runtime": "org.kde.Platform",
     "runtime-version": "6.11",
     "sdk": "org.kde.Sdk",
     "command": "kinefin",
+}
+
+# Granted by the org.kde.Platform runtime's own [Context], not by the manifest: read-only KDE colour and font settings
+RUNTIME_CONTEXT: dict[str, set[str]] = {"filesystems": {"xdg-config/kdeglobals:ro"}}
+# Session bus names the same runtime talks to for every KDE app
+RUNTIME_SESSION_BUS = {
+    "com.canonical.AppMenu.Registrar": "talk",
+    "org.kde.KGlobalSettings": "talk",
+    "org.kde.kconfig.notify": "talk",
 }
 
 # Explicitly reviewed grants. New permissions must be audited before this list
@@ -128,7 +136,7 @@ def expected_metadata() -> tuple[dict[str, set[str]], dict[str, str], dict[str, 
             system[value] = "own" if key == "--system-own-name" else "talk"
         else:
             raise SandboxError(f"unhandled policy permission {key}")
-    return contexts, session, system
+    return contexts, {**session, **RUNTIME_SESSION_BUS}, system
 
 
 def permission_list(value: str, label: str) -> set[str]:
@@ -168,7 +176,9 @@ def check_metadata(contents: str) -> None:
         if actual != wanted:
             raise SandboxError(f"installed [Context] {key}: expected {sorted(wanted)}, got {sorted(actual)}")
     for key, value in parser.items("Context", raw=True):
-        if key not in contexts and value.strip():
+        if key in contexts or not value.strip():
+            continue
+        if permission_list(value, f"Context/{key}") != RUNTIME_CONTEXT.get(key, set()):
             raise SandboxError(f"unexpected installed [Context] permission: {key}={value}")
     for section, expected in (("Session Bus Policy", session), ("System Bus Policy", system)):
         actual = dict(parser.items(section, raw=True)) if parser.has_section(section) else {}

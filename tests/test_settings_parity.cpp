@@ -13,8 +13,8 @@ struct ParityRow {
     QString section;
     QString key;
     QString defaultText;
-    bool defined; // ✅ or ◇ in the Kinefin column
-    bool hidden;  // ◇
+    bool defined = false; // ✅ or ◇ in the Kinefin column
+    bool hidden = false;  // ◇
 };
 
 QStringList backticked(const QString &cell)

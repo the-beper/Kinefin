@@ -29,15 +29,15 @@ class TestJellyfinLive : public QObject {
 
   public:
     TestJellyfinLive()
+        : m_base(QUrl(qEnvironmentVariable("KINEFIN_LIVE_BASE_URL"))),
+          m_user(qEnvironmentVariable("KINEFIN_LIVE_USER")),
+          m_password(qEnvironmentVariable("KINEFIN_LIVE_PASSWORD")),
+          m_live(m_base.isValid() && !m_base.isEmpty() && !m_user.isEmpty()
+                 && !m_password.isEmpty()),
+          m_adminUser(qEnvironmentVariable("KINEFIN_LIVE_ADMIN_USER")),
+          m_adminPassword(qEnvironmentVariable("KINEFIN_LIVE_ADMIN_PASSWORD")),
+          m_adminLive(!m_adminUser.isEmpty() && !m_adminPassword.isEmpty())
     {
-        m_base = QUrl(qEnvironmentVariable("KINEFIN_LIVE_BASE_URL"));
-        m_user = qEnvironmentVariable("KINEFIN_LIVE_USER");
-        m_password = qEnvironmentVariable("KINEFIN_LIVE_PASSWORD");
-        m_live =
-            m_base.isValid() && !m_base.isEmpty() && !m_user.isEmpty() && !m_password.isEmpty();
-        m_adminUser = qEnvironmentVariable("KINEFIN_LIVE_ADMIN_USER");
-        m_adminPassword = qEnvironmentVariable("KINEFIN_LIVE_ADMIN_PASSWORD");
-        m_adminLive = !m_adminUser.isEmpty() && !m_adminPassword.isEmpty();
     }
 
   private Q_SLOTS:
@@ -1033,8 +1033,8 @@ void TestJellyfinLive::engineDirectPlayLifecycle()
     auto *engine = new Kinefin::PlaybackEngine(client, session, this);
     QVERIFY(engine->init({QStringLiteral("vo=null"), QStringLiteral("ao=null")}));
     Kinefin::PlaybackReporter reporter(session, client, [&engine] {
-        return Kinefin::PlaybackReporter::PlayerState{engine->knownPositionTicks(),
-                                                      engine->canSeek()};
+        return Kinefin::PlaybackReporter::PlayerState{.positionTicks = engine->knownPositionTicks(),
+                                                      .canSeek = engine->canSeek()};
     });
     QSignalSpy ended(engine, &Kinefin::PlaybackEngine::streamEnded);
     QVERIFY(engine->open(source));
@@ -1108,8 +1108,8 @@ void TestJellyfinLive::engineTranscodeLifecycle()
     auto *engine = new Kinefin::PlaybackEngine(client, session, this);
     QVERIFY(engine->init({QStringLiteral("vo=null"), QStringLiteral("ao=null")}));
     Kinefin::PlaybackReporter reporter(session, client, [&engine] {
-        return Kinefin::PlaybackReporter::PlayerState{engine->knownPositionTicks(),
-                                                      engine->canSeek()};
+        return Kinefin::PlaybackReporter::PlayerState{.positionTicks = engine->knownPositionTicks(),
+                                                      .canSeek = engine->canSeek()};
     });
     QSignalSpy ended(engine, &Kinefin::PlaybackEngine::streamEnded);
     QVERIFY(engine->open(source));
@@ -1153,8 +1153,8 @@ void TestJellyfinLive::engineProgressAdvancesUserData()
     auto *engine = new Kinefin::PlaybackEngine(client, session, this);
     QVERIFY(engine->init({QStringLiteral("vo=null"), QStringLiteral("ao=null")}));
     Kinefin::PlaybackReporter reporter(session, client, [&engine] {
-        return Kinefin::PlaybackReporter::PlayerState{engine->knownPositionTicks(),
-                                                      engine->canSeek()};
+        return Kinefin::PlaybackReporter::PlayerState{.positionTicks = engine->knownPositionTicks(),
+                                                      .canSeek = engine->canSeek()};
     });
     QVERIFY(engine->open(source));
     QTRY_VERIFY_WITH_TIMEOUT(session.state() == Kinefin::PlaybackSession::State::Playing, 30000);
@@ -1364,8 +1364,8 @@ void TestJellyfinLive::engineInterruptionSeversAndRecovers()
                                          "reconnect_at_eof=0,reconnect_on_network_error=0"),
                           QStringLiteral("demuxer-max-bytes=5MiB")}));
     Kinefin::PlaybackReporter reporter(session, proxyClient, [&engine] {
-        return Kinefin::PlaybackReporter::PlayerState{engine->knownPositionTicks(),
-                                                      engine->canSeek()};
+        return Kinefin::PlaybackReporter::PlayerState{.positionTicks = engine->knownPositionTicks(),
+                                                      .canSeek = engine->canSeek()};
     });
     QSignalSpy ended(engine, &Kinefin::PlaybackEngine::streamEnded);
     QVERIFY(engine->open(throughSource));
@@ -1420,8 +1420,8 @@ void TestJellyfinLive::engineSurvivesALocalLogout()
     auto *engine = new Kinefin::PlaybackEngine(client, session, this);
     QVERIFY(engine->init({QStringLiteral("vo=null"), QStringLiteral("ao=null")}));
     Kinefin::PlaybackReporter reporter(session, client, [&engine] {
-        return Kinefin::PlaybackReporter::PlayerState{engine->knownPositionTicks(),
-                                                      engine->canSeek()};
+        return Kinefin::PlaybackReporter::PlayerState{.positionTicks = engine->knownPositionTicks(),
+                                                      .canSeek = engine->canSeek()};
     });
     QSignalSpy loggedOut(&client, &Kinefin::JellyfinClient::credentialsCleared);
     QVERIFY(engine->open(source));

@@ -14,7 +14,7 @@ include(KDEInstallDirs6)
 include(KDECMakeSettings)
 include(KDECompilerSettings NO_POLICY_SCOPE)
 
-find_package(Qt6 6.6 REQUIRED COMPONENTS Core Gui Quick Qml QuickControls2 DBus Network WebSockets)
+find_package(Qt6 6.6 REQUIRED COMPONENTS Core Gui Widgets Quick Qml QuickControls2 DBus Network WebSockets)
 find_package(KF6 6.8 REQUIRED COMPONENTS Config CoreAddons I18n DBusAddons Wallet)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 qt_standard_project_setup(REQUIRES 6.6)
@@ -144,7 +144,7 @@ if(mpvqt_BINARY_DIR)
 endif()
 
 # The QML module lives in a static library of its own so that the UI tests can import it like the application does
-foreach(page Main PlayerPage ShellHeader ShortcutsDialog RemotePage HomePage LibraryTile LibraryPage ResumeItemsPage MediaCard CardMenu CardRow EpisodeRow ItemDetailsPage SearchPage QueuePage FilterDialog GenreRailsView GenreRailsPage LibraryContent ItemListRow ItemRowGrid LoginPage UserPickerPage MessageBox ServersPage SettingsPage SettingsSectionPage SettingRow UserPreferencesPage FavoritesPage FavoritesGroupPage AboutPage)
+foreach(page Main PlayerPage ShellHeader AboutDialog ShortcutsDialog RemoteSessionsDialog HomePage LibraryTile LibraryPage ResumeItemsPage MediaCard CardMenu CardRow EpisodeRow ItemDetailsPage SearchPage QueuePage FilterDialog GenreRailsView GenreRailsPage LibraryContent ItemListRow ItemRowGrid LoginPage UserPickerPage MessageBox ServersPage SettingsPage SettingsSectionPage SettingRow UserPreferencesPage FavoritesPage FavoritesGroupPage)
     set_source_files_properties(src/qml/${page}.qml PROPERTIES QT_RESOURCE_ALIAS ${page}.qml)
 endforeach()
 qt_add_library(kinefin_ui STATIC)
@@ -156,7 +156,8 @@ qt_add_qml_module(kinefin_ui
         src/qml/PlayerPage.qml
         src/qml/ShellHeader.qml
         src/qml/ShortcutsDialog.qml
-        src/qml/RemotePage.qml
+        src/qml/AboutDialog.qml
+        src/qml/RemoteSessionsDialog.qml
         src/qml/HomePage.qml
         src/qml/LibraryTile.qml
         src/qml/LibraryPage.qml
@@ -184,7 +185,6 @@ qt_add_qml_module(kinefin_ui
         src/qml/UserPreferencesPage.qml
         src/qml/FavoritesPage.qml
         src/qml/FavoritesGroupPage.qml
-        src/qml/AboutPage.qml
     SOURCES
         src/app/ClientSettingsQml.h
         src/app/UpdateCheckerQml.h
@@ -209,7 +209,7 @@ target_link_libraries(kinefin_ui PUBLIC
 add_executable(kinefin src/main.cpp)
 target_link_libraries(kinefin PRIVATE
     kinefin_ui kinefin_uiplugin kinefin_core kinefin_player
-    Qt6::Core Qt6::Gui Qt6::Quick Qt6::Qml Qt6::QuickControls2 Qt6::DBus
+    Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Quick Qt6::Qml Qt6::QuickControls2 Qt6::DBus
     KF6::CoreAddons KF6::I18n KF6::I18nQml KF6::DBusAddons
 )
 target_include_directories(kinefin PRIVATE src/app)
@@ -303,9 +303,44 @@ if(BUILD_TESTING)
 
     add_executable(test_ui_pages tests/test_ui_pages.cpp)
     target_compile_definitions(test_ui_pages PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}" TRANSLATION_DOMAIN="kinefin")
-    target_link_libraries(test_ui_pages PRIVATE kinefin_ui kinefin_uiplugin kinefin_core Qt6::Test Qt6::Gui Qt6::Quick Qt6::Qml KF6::I18n KF6::I18nQml)
-    add_test(NAME ui_pages COMMAND test_ui_pages)
-    set_tests_properties(ui_pages PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    target_link_libraries(test_ui_pages PRIVATE kinefin_ui kinefin_uiplugin kinefin_core Qt6::Test Qt6::Gui Qt6::Widgets Qt6::Quick Qt6::QuickControls2 Qt6::Qml KF6::I18n KF6::I18nQml)
+    # The UI tests take minutes in one process: the test functions are dealt out to shards that run side by side under `ctest -j`. Functions with a `_data` sibling are the slow ones and go first so no shard gets two of them
+    set(KINEFIN_UI_SHARDS 6)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS tests/test_ui_pages.cpp)
+    file(READ tests/test_ui_pages.cpp ui_pages_source)
+    string(FIND "${ui_pages_source}" "private Q_SLOTS:" ui_pages_slots_at)
+    string(SUBSTRING "${ui_pages_source}" ${ui_pages_slots_at} -1 ui_pages_source)
+    string(REGEX MATCHALL "\n    void [A-Za-z0-9_]+\\(\\)\n" ui_pages_slots "${ui_pages_source}")
+    set(ui_pages_data "")
+    set(ui_pages_plain "")
+    foreach(slot IN LISTS ui_pages_slots)
+        string(REGEX REPLACE "^\n    void ([A-Za-z0-9_]+)\\(\\)\n$" "\\1" slot "${slot}")
+        if(slot MATCHES "_data$")
+            string(REGEX REPLACE "_data$" "" slot "${slot}")
+            list(APPEND ui_pages_data "${slot}")
+        elseif(NOT slot MATCHES "^(init|cleanup|initTestCase|cleanupTestCase)$")
+            list(APPEND ui_pages_plain "${slot}")
+        endif()
+    endforeach()
+    if(ui_pages_data)
+        list(REMOVE_ITEM ui_pages_plain ${ui_pages_data})
+    endif()
+    set(ui_pages_all ${ui_pages_data} ${ui_pages_plain})
+    set(index 0)
+    foreach(slot IN LISTS ui_pages_all)
+        math(EXPR shard "${index} % ${KINEFIN_UI_SHARDS}")
+        list(APPEND ui_pages_shard_${shard} "${slot}")
+        math(EXPR index "${index} + 1")
+    endforeach()
+    math(EXPR last_shard "${KINEFIN_UI_SHARDS} - 1")
+    foreach(shard RANGE ${last_shard})
+        if(ui_pages_shard_${shard})
+            add_test(NAME ui_pages_${shard} COMMAND test_ui_pages ${ui_pages_shard_${shard}})
+            set_tests_properties(ui_pages_${shard} PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" PROCESSORS 2)
+        endif()
+    endforeach()
+    add_test(NAME ui_pages_shards COMMAND ${CMAKE_COMMAND} -DBIN=$<TARGET_FILE:test_ui_pages> "-DSHARDED=${ui_pages_all}" -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_ui_shards.cmake)
+    set_tests_properties(ui_pages_shards PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
     add_executable(test_filter_options_model tests/test_filter_options_model.cpp)
     target_compile_definitions(test_filter_options_model PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")

@@ -25,6 +25,8 @@ Kirigami.ApplicationWindow {
     // The header modes in pixels, from grid units: tests derive their window sizes from these (Compact below 24, Wide from 36)
     readonly property int compactLimit: Kirigami.Units.gridUnit * 24
     readonly property int wideLimit: Kirigami.Units.gridUnit * 36
+    // The widest a block of reading content (item header, queue rows) gets before it is centred: the pages read it from here so they agree
+    readonly property real readingWidth: Kirigami.Units.gridUnit * 70
     // The width decides the modes, read here where the width lives: a header-side binding on the
     // attached Window.window kept its load-time value and never followed a resize
     readonly property bool compactHeader: width < compactLimit
@@ -55,19 +57,92 @@ Kirigami.ApplicationWindow {
     flags: alwaysOnTopSetting ? (Qt.Window | Qt.WindowStaysOnTopHint) : Qt.Window
 
     // Auto resolves to the Breadcrumb header only on mobile in narrow mode, and that one renders titles without plain-text formatting: the pin keeps server-supplied page titles in the toolbar title delegate, which is plain text
+    // The row keeps one toolbar style for every page of its life: a style that follows the stack depth resizes the columns while a page slides out (the toolbar row above them bounces the column height), and Kirigami then reads the resize as a layout pass, stops the exit slide without finishing it, and the page it was removing is never destroyed. So the style stays ToolBar, and the pages that don't put actions in the toolbar turn their own toolbar off (the root tabs, the pre-signin screens, the settings)
     pageStack.globalToolBar.style: Kirigami.ApplicationHeaderStyle.ToolBar
     // One page at a time: the default switches to side-by-side columns from 40 grid units, which pushes the pages beyond the window
     pageStack.columnView.columnResizeMode: Kirigami.ColumnView.SingleColumn
-    // Back removes the page it leaves, so its models give their listing channels back
-    pageStack.popHiddenPages: true
     pageStack.globalToolBar.showNavigationButtons: Kirigami.ApplicationHeaderStyle.ShowBackButton
 
     // The bar with the menus and the Home tab; it spans the window above the pages
     header: ShellHeader {
         id: shellHeader
-        visible: !window.playbackPageShowing
+        visible: !window.playbackPageShowing && !window.startupVisible
 
         shell: window
+    }
+
+    // A visible connection target stays on screen for at least one second after
+    // selection. This does not delay the request or keep a failed connection busy.
+    property bool serverSelectionPending: false
+    Timer {
+        id: serverSelectionTimer
+        interval: 1000
+        repeat: false
+        onTriggered: {
+            window.serverSelectionPending = false;
+            window.showPageForState();
+        }
+    }
+    function beginServerSelection() {
+        serverSelectionPending = true;
+        serverSelectionTimer.restart();
+    }
+
+    // The initial shell never flashes an empty page. The delay is short enough
+    // to feel responsive, with a finite fallback for offline/unresponsive servers.
+    property bool startupVisible: startupPage.length === 0
+    property bool startupMinimumElapsed: false
+    property bool startupDeadlineElapsed: false
+    function settleStartup() {
+        if (!startupVisible || !startupMinimumElapsed || !pageStack.currentItem)
+            return;
+        if (!startupDeadlineElapsed && (connection.state === ConnectionController.Connecting
+                || (signedIn && !connection.librariesLoaded)))
+            return;
+        startupVisible = false;
+    }
+    Timer {
+        interval: 500
+        running: window.startupVisible
+        repeat: false
+        onTriggered: { window.startupMinimumElapsed = true; window.settleStartup(); }
+    }
+    Timer {
+        interval: 8000
+        running: window.startupVisible
+        repeat: false
+        onTriggered: { window.startupDeadlineElapsed = true; window.settleStartup(); }
+    }
+    Connections {
+        target: window.connection
+        function onStateChanged() { Qt.callLater(window.settleStartup); }
+        function onHomeProjectionChanged() { Qt.callLater(window.settleStartup); }
+    }
+    Rectangle {
+        id: startupCover
+        objectName: "startupCover"
+        anchors.fill: parent
+        z: 1000
+        color: Kirigami.Theme.backgroundColor
+        opacity: window.startupVisible ? 1 : 0
+        visible: opacity > 0
+        Behavior on opacity { NumberAnimation { duration: Kirigami.Units.longDuration; easing.type: Easing.OutCubic } }
+        // Do not allow activating a page while the shell is still preparing.
+        MouseArea { anchors.fill: parent; enabled: window.startupVisible }
+        Column {
+            anchors.centerIn: parent
+            spacing: Kirigami.Units.largeSpacing
+            Kirigami.Icon {
+                anchors.horizontalCenter: parent.horizontalCenter
+                source: "io.github.the_beper.Kinefin"
+                width: Kirigami.Units.iconSizes.huge
+                height: width
+            }
+            Kirigami.LoadingPlaceholder {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: i18n("Preparing Kinefin…")
+            }
+        }
     }
 
     // The back button of the mouse goes back like Esc; the missing forward button is a deliberate exception
@@ -92,6 +167,20 @@ Kirigami.ApplicationWindow {
             leaving.askBeforeLeaving(leave);
         else
             leave();
+    }
+
+    // A back that only moves the index (Esc, the header button, the toolbar back button) leaves the
+    // page it leaves in the stack, hidden above the current one and still counted, with its models
+    // alive. Kirigami's own popHiddenPages option took such pages once the row settled, but it also
+    // ran while a push was still placing its page mid-slide, and popped the page it had just
+    // received. So the leftovers are taken here, deferred to the next turn of the event loop: by
+    // then every push has landed and every unwind has taken the pages it was removing, and pages
+    // above the current index can only be leftovers a back left behind
+    function popLeftoverPages() {
+        Qt.callLater(() => {
+            while (pageStack.currentIndex >= 0 && pageStack.currentIndex < pageStack.depth - 1)
+                pageStack.pop(pageStack.get(pageStack.currentIndex));
+        });
     }
 
     // Esc goes back like Alt+Left except on the first page; an open dialog takes the key first
@@ -139,24 +228,29 @@ Kirigami.ApplicationWindow {
     // True while the search page the header box opened takes its place: Kirigami's ScrollablePage
     // focuses its own scroll view while it is created, and neither that nor the page it belongs to may keep or remember the keyboard
     property bool openingSearchFromHeader: false
-    function focusCurrentPage() {
-        forgetLeftPages();
-        const page = pageStack.currentItem;
-        // Typing in the header box is never interrupted, not even by the page the typing itself opened
-        if (!page || shellHeader.searchFieldHasFocus)
-            return;
+    function applyPageFocus(page) {
         // Back goes to the control the page last had the focus in, a new page to its main control, any other page keeps a field it focused itself
         const remembered = lastFocus.get(page);
-        if (remembered?.visible && remembered.enabled)
+        if (remembered?.visible && remembered.enabled && remembered !== page.contentItem)
             remembered.forceActiveFocus(Qt.TabFocusReason);
         else if (page.focusPrimary)
             page.focusPrimary();
         else if (!focusIsIn(page))
             page.forceActiveFocus();
     }
+    function focusCurrentPage() {
+        forgetLeftPages();
+        const page = pageStack.currentItem;
+        // Typing in the header box is never interrupted, not even by the page the typing itself opened
+        if (!page || shellHeader.searchFieldHasFocus)
+            return;
+        applyPageFocus(page);
+    }
     Connections {
         target: window.pageStack
         function onCurrentItemChanged() {
+            // A page a Back left hidden above the current one is taken once the stack settles
+            window.popLeftoverPages();
             // The search page leaving the stack takes its term with it: the header box empties with the page.
             // A page Back just left stays above the current one until the slide ends, and is not a page in the stack any more
             if (window.searchPageIndex() < 0 && window.connection.search.term.length > 0)
@@ -195,7 +289,7 @@ Kirigami.ApplicationWindow {
         return tabs;
     }
 
-    // The sub-tabs the settings turn on go to the controller (ids without the prefix, e.g. "favorites"): the sub-tab bar of an open page follows without a restart
+    // The sub-tabs the settings turn on go to the controller (ids without the prefix, e.g. "favorites"): the sub-tab entries of an open page follow without a restart
     function applySubTabs() {
         for (const [type, prefix] of [["movies", "movies."], ["tvshows", "tv."]])
             connection.setSubtabsEnabled(type, Object.keys(subTabs).filter(id => id.startsWith(prefix) && subTabs[id]).map(id => id.slice(prefix.length)));
@@ -246,6 +340,8 @@ Kirigami.ApplicationWindow {
 
     // The page follows the connection state: Servers until a server is chosen, the user picker while one of several saved users is to be chosen, sign-in until there is a session, Home after
     function showPageForState() {
+        if (serverSelectionPending && pageGroup !== 0)
+            return;
         let page = "ServersPage.qml";
         let properties = { connection: connection };
         switch (connection.state) {
@@ -261,9 +357,17 @@ Kirigami.ApplicationWindow {
             page = "HomePage.qml";
             break;
         }
+        // A failed connection must not wipe out the form/error while the
+        // minimum selection interval elapses.
+        if (page === "ServersPage.qml" && pageStack.depth === 1
+            && pageStack.currentItem?.objectName === "serversPage") {
+            Qt.callLater(settleStartup);
+            return;
+        }
         pageStack.clear();
         const shown = pageStack.push(Qt.resolvedUrl(page), properties);
         openRequestedItem(shown);
+        Qt.callLater(settleStartup);
     }
 
     // The only way to the details of an item: the pages above the one asking give way, and the item already showing is not pushed twice
@@ -473,7 +577,9 @@ Kirigami.ApplicationWindow {
         id: cardMenu
 
         connection: window.connection
+        playAvailable: !!window.player
         onOpenRequested: targetId => window.openItem(targetId, window.pageStack.currentItem)
+        onPlayRequested: targetId => window.playItem(targetId)
     }
 
     // A link opens above the active root tab after sign-in. Incoming links must not bypass the
@@ -526,8 +632,10 @@ Kirigami.ApplicationWindow {
         for (const tab of Object.keys(oneOffTabs))
             delete oneOffTabs[tab];
         showPageForState();
+        Qt.callLater(settleStartup);
     }
 
+    // A link that arrives while Home is already showing (a second launch) opens at once
     // A link that arrives while Home is already showing (a second launch) opens at once
     onRequestedItemIdChanged: openRequestedItem(pageStack.get(0))
 
@@ -552,8 +660,6 @@ Kirigami.ApplicationWindow {
             return "search";
         case "queuePage":
             return "queue";
-        case "remotePage":
-            return "remote";
         case "userPreferencesPage":
             return "userPreferences";
         }
@@ -581,7 +687,7 @@ Kirigami.ApplicationWindow {
             return false;
         for (let i = 1; i < pageStack.depth; ++i) {
             const name = pageStack.get(i)?.objectName;
-            if (name === "userPreferencesPage" || name === "favoritesPage" || name === "remotePage")
+            if (name === "userPreferencesPage" || name === "favoritesPage")
                 return true;
         }
         return false;
@@ -784,11 +890,9 @@ Kirigami.ApplicationWindow {
     // Pushing before the window's page row is complete leaves the page outside the scene
     function openStartupPage() {
         if (startupPage === "about") {
-            openSection("aboutPage", "AboutPage.qml", {});
+            shellHeader.showAboutDialog();
         } else if (startupPage === "settings") {
-            const page = pageStack.push(Qt.resolvedUrl("SettingsPage.qml"), { settings: settings });
-            for (const entry of page.sections)
-                pageStack.push(Qt.resolvedUrl("SettingsSectionPage.qml"), { settings: settings, section: entry.section, title: entry.title });
+            pageStack.push(Qt.resolvedUrl("SettingsPage.qml"), { settings: settings });
         }
     }
 

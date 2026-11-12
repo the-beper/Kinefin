@@ -144,7 +144,7 @@ class FavoritesModel final : public QAbstractListModel {
     bool m_active = false;
     bool m_capped = false;
     bool m_libraryFailed = false;
-    // A new distinct item was turned away because the snapshot is full
+    // A new distinct item was turned away because the snapshot is full, or a library was cut at MaxItems with more announced
     bool m_capRejected = false;
     bool m_inFlight = false;
     // The library the request in flight reads, and the generation it was sent in: a reply of an older generation is stale

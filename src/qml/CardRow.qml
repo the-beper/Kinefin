@@ -15,7 +15,7 @@ Item {
     required property real cardHeight
     required property string accessibleName
     // The flickable of the page the row sits in, which receives the vertical wheel
-    required property Item pageFlickable
+    required property Flickable pageFlickable
     // The object name of the inner list, for the tests
     property string listObjectName: ""
     // A page that builds its rows lazily moves between them itself: Up and Down then emit the signals below instead of moving the focus

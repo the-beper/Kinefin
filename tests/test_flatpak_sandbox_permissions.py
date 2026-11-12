@@ -18,7 +18,7 @@ VERIFIER = "build/release/verify_flatpak_permissions.py"
 sys.path.insert(0, str(SOURCE / "build/release"))
 from verify_flatpak_permissions import SandboxError, check_manifest, check_metadata  # noqa: E402
 
-# Representative ``flatpak info --show-metadata`` for the reviewed manifest.
+# Representative ``flatpak info --show-metadata`` for the reviewed manifest, including the grants the org.kde.Platform runtime adds.
 INSTALLED = """[Application]
 name=io.github.the_beper.Kinefin
 runtime=org.kde.Platform/x86_64/6.11
@@ -29,6 +29,7 @@ command=kinefin
 shared=network;
 sockets=pulseaudio;wayland;
 devices=input;dri;
+filesystems=xdg-config/kdeglobals:ro;
 
 [Session Bus Policy]
 io.github.the_beper.Kinefin=own
@@ -37,6 +38,9 @@ org.mpris.MediaPlayer2.Kinefin.*=own
 org.freedesktop.ScreenSaver=talk
 org.kde.kwalletd6=talk
 org.freedesktop.portal.Desktop=talk
+com.canonical.AppMenu.Registrar=talk
+org.kde.KGlobalSettings=talk
+org.kde.kconfig.notify=talk
 
 [System Bus Policy]
 org.freedesktop.NetworkManager=talk
@@ -181,9 +185,13 @@ class FlatpakSandboxPermissionsTest(unittest.TestCase):
 
     def test_installed_filesystem_persistent_and_extra_context_grants_are_rejected(self) -> None:
         original = self.metadata.read_text(encoding="utf-8")
-        for field in ("filesystems=home;", "persistent=.config;", "features=devel;", "usb=all;", "other-context-permission=unsafe"):
+        for field in ("persistent=.config;", "features=devel;", "usb=all;", "other-context-permission=unsafe"):
             with self.subTest(field=field):
                 self.metadata.write_text(original.replace("[Context]\n", "[Context]\n" + field + "\n"), encoding="utf-8")
+                self.reject("unexpected installed [Context] permission", with_metadata=True)
+        for filesystems in ("filesystems=home;", "filesystems=xdg-config/kdeglobals:rw;"):
+            with self.subTest(filesystems=filesystems):
+                self.metadata.write_text(original.replace("filesystems=xdg-config/kdeglobals:ro;", filesystems), encoding="utf-8")
                 self.reject("unexpected installed [Context] permission", with_metadata=True)
 
     def test_installed_bus_policy_expansion_or_missing_grant_fails(self) -> None:
@@ -223,7 +231,7 @@ class FlatpakSandboxPermissionsTest(unittest.TestCase):
         self.assertIn("No such file", result.stderr)
 
     def test_ci_and_release_gate_before_build_and_flathub_upload(self) -> None:
-        ci = (SOURCE / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        ci = (SOURCE / ".github/workflows/verify.yml").read_text(encoding="utf-8")
         release = (SOURCE / ".github/workflows/release.yml").read_text(encoding="utf-8")
         command = "python3 -I build/release/verify_flatpak_permissions.py"
         self.assertIn(command, ci)

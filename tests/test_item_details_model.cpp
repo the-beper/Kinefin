@@ -87,10 +87,9 @@ class TestItemDetailsModel : public QObject {
         QCOMPARE(f.server.playedWrites.size(), 1);
         QCOMPARE(f.server.playedWrites.constFirst().method, QByteArrayLiteral("POST"));
         const QByteArray route = f.server.playedWrites.constFirst().route;
-        QVERIFY(route.startsWith(QByteArrayLiteral("/jellyfin/UserPlayedItems/")
-                                 + kMovie.toLatin1() + QByteArrayLiteral("?")));
-        QCOMPARE(FakeJellyfin::capturedListingQuery(route)
-                     .queryItemValue(QStringLiteral("userId")),
+        QVERIFY(route.startsWith(QByteArray(QByteArrayLiteral("/jellyfin/UserPlayedItems/")
+                                            + kMovie.toLatin1() + QByteArrayLiteral("?"))));
+        QCOMPARE(FakeJellyfin::capturedListingQuery(route).queryItemValue(QStringLiteral("userId")),
                  f.client.userId());
         QVERIFY(f.server.playedWrites.constFirst().authorization.startsWith("MediaBrowser "));
         QVERIFY(!route.contains("token"));

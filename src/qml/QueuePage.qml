@@ -103,7 +103,18 @@ Kirigami.ScrollablePage {
             return parts.join(i18nc("separator between items of a list", ", "));
         }
 
+        // The row spans the list and its visible part is capped at the shell's reading width and centred: a ListView resets the x of its delegates, so the side margins are insets
+        readonly property real sideMargin: Math.max(0, (ListView.view.width - (ListView.view.Window.window?.readingWidth ?? ListView.view.width)) / 2)
         width: ListView.view.width
+        leftInset: sideMargin
+        rightInset: sideMargin
+        leftPadding: sideMargin + Kirigami.Units.smallSpacing
+        rightPadding: sideMargin + Kirigami.Units.smallSpacing
+        containmentMask: QtObject {
+            function contains(point: point): bool {
+                return point.x >= row.sideMargin && point.x <= row.width - row.sideMargin;
+            }
+        }
         // The list is the one tab stop, the arrow keys move inside it
         focusPolicy: Qt.NoFocus
         highlighted: ListView.isCurrentItem && ListView.view.activeFocus
@@ -311,7 +322,7 @@ Kirigami.ScrollablePage {
         function openCurrentMenu() {
             const item = list.currentItem;
             if (item)
-                page.openMenu(list.currentIndex, item, 0, item.height);
+                page.openMenu(list.currentIndex, item, item.sideMargin, item.height);
         }
         Keys.onReturnPressed: openCurrent()
         Keys.onEnterPressed: openCurrent()

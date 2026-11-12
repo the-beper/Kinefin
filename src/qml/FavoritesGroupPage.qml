@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Kinefin contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
 import QtQuick
-import QtQuick.Controls as Controls
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 
@@ -60,8 +59,8 @@ Kirigami.ScrollablePage {
         id: grid
         objectName: "favoritesGroupGrid"
 
-        // Poster tiles of about ten grid units, at least two to a row
-        readonly property int columns: Math.max(2, Math.floor(width / (Kirigami.Units.gridUnit * 10)))
+        // Poster tiles of about ten grid units, at least one to a row
+        readonly property int columns: Math.max(1, Math.floor(width / (Kirigami.Units.gridUnit * 10)))
 
         model: page.items
         cellWidth: Math.floor(width / columns)

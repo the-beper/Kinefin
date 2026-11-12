@@ -22,6 +22,9 @@ Controls.Menu {
 
     // The page that opened the item gives way, as for a click on the card
     signal openRequested(string targetId)
+    // A popup is not an Item, so the window that plays is passed in by the owner
+    property bool playAvailable: false
+    signal playRequested(string targetId)
 
     Controls.MenuItem {
         objectName: "cardMenuOpen"
@@ -35,8 +38,8 @@ Controls.Menu {
         icon.name: "media-playback-start"
         visible: menu.playable
         height: visible ? implicitHeight : 0
-        enabled: !!menu.Window.window?.player
-        onTriggered: menu.Window.window.playItem(menu.itemId)
+        enabled: menu.playAvailable
+        onTriggered: menu.playRequested(menu.itemId)
     }
     Controls.MenuItem {
         objectName: "cardMenuPlayNext"

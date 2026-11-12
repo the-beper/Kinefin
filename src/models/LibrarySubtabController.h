@@ -96,6 +96,8 @@ class LibrarySubtabController final : public QObject {
     Q_INVOKABLE bool select(const QString &id);
     // Retry of the showing sub-tab's failed request, keeping the selection (the library, the sub-tab, the chosen network)
     Q_INVOKABLE void retry();
+    // Asks for the showing sub-tab's data again, as selecting it anew would; a network's series reload alone, and the main sub-tab belongs to its list model
+    Q_INVOKABLE void reload();
     // Opens the series of a network of the `networks` list (an id it does not list is refused); only in the Networks sub-tab
     Q_INVOKABLE bool selectNetwork(const QString &studioId);
     // Back from a network's series to the list of networks, which stays loaded
@@ -156,7 +158,7 @@ class LibrarySubtabController final : public QObject {
     void releaseChannels();
     void onItemsReady(const QJsonArray &items, int total, int channel);
     void onListingFailed(const QString &family, int status, const QString &reason, int channel);
-    void forwardEdit(LibraryItemsModel *list);
+    void forwardEdit(const LibraryItemsModel *list);
     void retryList(LibraryItemsModel *list);
 
     QPointer<JellyfinClient> m_client;

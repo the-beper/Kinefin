@@ -140,7 +140,13 @@ Kirigami.Page {
         anchors.bottom: parent.bottom
         color: "#d9000000"
         implicitHeight: controls.implicitHeight + Kirigami.Units.largeSpacing * 2
-        visible: page.showChrome || !page.player.active || queuePanel.opened
+        readonly property bool wanted: page.showChrome || !page.player.active || queuePanel.opened
+        enabled: wanted
+        opacity: wanted ? 1 : 0
+        visible: opacity > 0
+        Behavior on opacity {
+            NumberAnimation { duration: Kirigami.Units.longDuration; easing.type: Easing.OutCubic }
+        }
         ColumnLayout {
             id: controls
             anchors.fill: parent

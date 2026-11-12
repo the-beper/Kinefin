@@ -43,6 +43,10 @@ Kirigami.AbstractCard {
             Image {
                 id: image
                 anchors.fill: parent
+                opacity: status === Image.Ready ? 1 : 0
+                Behavior on opacity {
+                    NumberAnimation { duration: Kirigami.Units.longDuration; easing.type: Easing.OutCubic }
+                }
                 asynchronous: true
                 fillMode: Image.PreserveAspectCrop
                 sourceSize.width: width * Screen.devicePixelRatio

@@ -122,7 +122,8 @@ void addExternalSubtitles(PlaybackSource &playback, const QJsonObject &mediaSour
         if (stream.value(QStringLiteral("Type")).toString() != QLatin1String("Subtitle")
             || !flag(stream, QStringLiteral("IsExternal"))
             || !flag(stream, QStringLiteral("IsTextSubtitleStream"))
-            || stream.value(QStringLiteral("DeliveryMethod")).toString() != QLatin1String("External"))
+            || stream.value(QStringLiteral("DeliveryMethod")).toString()
+                   != QLatin1String("External"))
             continue;
         const int index = stream.value(QStringLiteral("Index")).toInt(-1);
         if (index < 0 || index >= 4096)
@@ -138,7 +139,8 @@ void addExternalSubtitles(PlaybackSource &playback, const QJsonObject &mediaSour
         subtitle.url = *url;
         subtitle.language = stream.value(QStringLiteral("Language")).toString().left(32);
         subtitle.label = stream.value(QStringLiteral("DisplayTitle")).toString().left(100);
-        if (subtitle.label.isEmpty()) subtitle.label = subtitle.language;
+        if (subtitle.label.isEmpty())
+            subtitle.label = subtitle.language;
         const QString extension = url->path().section(QLatin1Char('.'), -1).toLower();
         if (extension != QLatin1String("vtt") && extension != QLatin1String("srt")
             && extension != QLatin1String("ass") && extension != QLatin1String("ssa"))

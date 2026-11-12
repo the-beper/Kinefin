@@ -190,7 +190,7 @@ class ActionPinTests(unittest.TestCase):
 
     def test_release_and_ci_validate_before_build_jobs(self) -> None:
         command = "python3 -I build/release/verify_action_pins.py"
-        ci = (SOURCE / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        ci = (SOURCE / ".github/workflows/verify.yml").read_text(encoding="utf-8")
         release = (SOURCE / ".github/workflows/release.yml").read_text(encoding="utf-8")
         self.assertEqual(ci.count(command), 1)
         self.assertEqual(release.count(command), 1)

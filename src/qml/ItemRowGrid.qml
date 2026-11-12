@@ -17,7 +17,7 @@ GridView {
     signal activated(string itemId)
 
     readonly property real tileWidth: Kirigami.Units.gridUnit * (landscape ? 14 : 10)
-    readonly property int columns: Math.max(2, Math.floor(width / tileWidth))
+    readonly property int columns: Math.max(1, Math.floor(width / tileWidth))
     readonly property real aspect: landscape ? 9 / 16 : 3 / 2
 
     cellWidth: Math.floor(width / columns)

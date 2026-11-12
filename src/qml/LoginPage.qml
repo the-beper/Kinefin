@@ -11,12 +11,22 @@ Kirigami.ScrollablePage {
     objectName: "loginPage"
 
     required property ConnectionController connection
+
+    // The row toolbar is ToolBar everywhere (Main.qml): the pre-signin screens keep their identity in the top bar instead
+    globalToolBarStyle: Kirigami.ApplicationHeaderStyle.None
+
     readonly property bool signingIn: connection.state === ConnectionController.SigningIn
     readonly property bool quick: connection.state === ConnectionController.QuickConnectPending
 
     readonly property string usersTitle: i18nc("@title", "Users on This Server")
 
     title: i18n("Sign In")
+
+    // The keyboard starts in the sign-in form: the password when the user is known from the picker, else the username. Quick Connect has no field to take
+    function focusPrimary() {
+        if (!page.quick)
+            (username.text.length > 0 ? password : username).forceActiveFocus(Qt.TabFocusReason);
+    }
 
     // A fresh login lists the users the server shows on its own sign-in screen
     Component.onCompleted: {

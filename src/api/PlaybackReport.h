@@ -3,8 +3,8 @@
 #pragma once
 
 #include <QJsonObject>
-#include <QStringList>
 #include <QString>
+#include <QStringList>
 #include <optional>
 
 #include "api/MediaSourceSelection.h"

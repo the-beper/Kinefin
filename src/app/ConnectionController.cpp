@@ -5,15 +5,18 @@
 #include "api/MediaSourceSelection.h"
 
 #include <QDesktopServices>
-#include <QHostAddress>
 #include <QEventLoop>
-#include <QTimer>
+#include <QHostAddress>
 #include <QJsonArray>
+#include <QJsonDocument>
 #include <QJsonObject>
 #include <QLoggingCategory>
 #include <QMetaEnum>
+#include <QNetworkReply>
+#include <QNetworkRequest>
 #include <QSet>
 #include <QStringList>
+#include <QTimer>
 #include <QUrl>
 #include <KLocalizedString>
 
@@ -258,7 +261,12 @@ ConnectionController::ConnectionController(const QString &profileId, const QStri
         const auto stored = key.isEmpty()
                                 ? std::nullopt
                                 : m_browse.view(m_client.serverId(), m_client.userId(), key);
-        return stored ? fromStored(*stored) : LibraryItemsModel::ViewState();
+        if (stored)
+            return fromStored(*stored);
+        // Episodes start in the aired order
+        return m_subtabs.currentSubtab() == LibrarySubtabController::Episodes
+                   ? LibraryItemsModel::defaultViewState(LibraryScope::Episodes)
+                   : LibraryItemsModel::ViewState();
     });
     connect(&m_subtabs, &LibrarySubtabController::listViewStateEdited, this, [this] {
         LibraryItemsModel *list = m_subtabs.activeList();
@@ -363,6 +371,153 @@ void ConnectionController::start()
     connectTo(m_servers.constLast().toMap().value(QStringLiteral("url")).toString());
 }
 
+// Discovery is deliberately independent of the authenticated JellyfinClient. Never
+// forward passwords, cookies or the Jellyfin access token to a host being tested.
+// Only well-formed HTTP(S) URLs are accepted; fallback never changes the scheme/host/path.
+QList<QUrl> ConnectionController::connectionCandidates(const QString &address,
+                                                       bool standardPortFallback)
+{
+    QUrl url(address.trimmed());
+    if (!url.isValid() || url.isRelative() || url.host().isEmpty()
+        || (url.scheme() != QLatin1String("http") && url.scheme() != QLatin1String("https"))
+        || !url.userName().isEmpty() || !url.password().isEmpty() || url.hasQuery()
+        || url.hasFragment() || url.port(-1) == 0 || address.size() > 2048)
+        return {};
+    QList<QUrl> result{url};
+    const bool tls = url.scheme() == QLatin1String("https");
+    const int primary = tls ? 8920 : 8096;
+    const int standard = tls ? 443 : 80;
+    // Custom ports must remain explicit. A fallback is allowed only from the
+    // standard Jellyfin port (or the scheme's default) selected in the form.
+    const int selected = url.port(standard);
+    if (standardPortFallback && (selected == primary || selected == standard)) {
+        for (const int port : {primary, standard}) {
+            if (port == selected)
+                continue;
+            QUrl alternative(url);
+            alternative.setPort(port);
+            result.append(alternative);
+        }
+    }
+    return result;
+}
+
+void ConnectionController::setReachability(const QString &key, bool testing, bool reachable,
+                                           const QString &message, const QUrl &resolved)
+{
+    const QVariantMap state{{QStringLiteral("testing"), testing},
+                            {QStringLiteral("reachable"), reachable},
+                            {QStringLiteral("message"), message},
+                            {QStringLiteral("resolvedUrl"), resolved.toString()}};
+    if (m_serverReachability.value(key).toMap() == state)
+        return;
+    m_serverReachability.insert(key, state);
+    Q_EMIT serverReachabilityChanged();
+}
+
+void ConnectionController::startProbeCheck(const QString &key, const QList<QUrl> &candidates,
+                                           int index, quint64 generation)
+{
+    if (m_probeGeneration.value(key) != generation)
+        return;
+    if (index >= candidates.size()) {
+        m_probeReplies.remove(key);
+        setReachability(key, false, false, i18n("Server not reachable"));
+        return;
+    }
+    QUrl endpoint = candidates.at(index);
+    QString path = endpoint.path();
+    while (path.endsWith(QLatin1Char('/')))
+        path.chop(1);
+    endpoint.setPath(path + QStringLiteral("/System/Info/Public"));
+    QNetworkRequest request(endpoint);
+    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
+                         QNetworkRequest::ManualRedirectPolicy);
+    request.setTransferTimeout(4000);
+    QNetworkReply *reply = m_probeNetwork.get(request);
+    m_probeReplies.insert(key, reply);
+    connect(
+        reply, &QNetworkReply::finished, this, [this, key, candidates, index, generation, reply] {
+            const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            const bool ok = reply->error() == QNetworkReply::NoError && status == 200
+                            && reply->bytesAvailable() <= 32768;
+            const QByteArray body = ok ? reply->readAll() : QByteArray();
+            reply->deleteLater();
+            if (m_probeGeneration.value(key) != generation)
+                return;
+            if (ok) {
+                const QJsonDocument json = QJsonDocument::fromJson(body);
+                if (json.isObject()
+                    && !json.object().value(QStringLiteral("Id")).toString().isEmpty()) {
+                    m_probeReplies.remove(key);
+                    setReachability(key, false, true, i18n("Jellyfin server reachable"),
+                                    candidates.at(index));
+                    return;
+                }
+            }
+            startProbeCheck(key, candidates, index + 1, generation);
+        });
+}
+
+void ConnectionController::testServer(const QString &address, bool standardPortFallback)
+{
+    const QString key = address.trimmed();
+    const QList<QUrl> candidates = connectionCandidates(key, standardPortFallback);
+    if (key.isEmpty())
+        return;
+    const quint64 generation = ++m_testGeneration;
+    m_probeGeneration.insert(key, generation);
+    if (QNetworkReply *previous = m_probeReplies.take(key)) {
+        previous->disconnect(this);
+        previous->abort();
+        previous->deleteLater();
+    }
+    if (candidates.isEmpty()) {
+        setReachability(key, false, false, i18n("Enter a valid server address"));
+        return;
+    }
+    setReachability(key, true, false, i18n("Testing connection…"));
+    startProbeCheck(key, candidates, 0, generation);
+}
+
+void ConnectionController::testSavedServers()
+{
+    for (const QVariant &entry : std::as_const(m_servers)) {
+        const QString url = entry.toMap().value(QStringLiteral("url")).toString();
+        if (!m_probeReplies.contains(url))
+            testServer(url);
+    }
+}
+
+void ConnectionController::connectToWithFallback(const QString &address)
+{
+    if (m_state != Idle && m_state != NeedsLogin)
+        return;
+    const QList<QUrl> candidates = connectionCandidates(address, true);
+    if (candidates.isEmpty()) {
+        setError(i18n("Enter a valid server address"));
+        return;
+    }
+    m_connectionFallback = candidates.mid(1);
+    connectTo(candidates.constFirst().toString());
+    if (m_state != Connecting)
+        m_connectionFallback.clear();
+}
+
+void ConnectionController::tryNextConnection()
+{
+    if (m_connectionFallback.isEmpty())
+        return;
+    const QUrl next = m_connectionFallback.takeFirst();
+    m_client.disconnectFromServer();
+    if (!m_client.connectToServer(next)) {
+        tryNextConnection();
+        return;
+    }
+    m_serverUrl = next.toString();
+    Q_EMIT serverUrlChanged();
+}
+
 void ConnectionController::connectTo(const QString &address)
 {
     if (m_state != Idle && m_state != NeedsLogin)
@@ -392,6 +547,7 @@ void ConnectionController::onServerReady()
 {
     if (m_state != Connecting)
         return;
+    m_connectionFallback.clear();
     const QUrl base = m_client.serverUrl();
     m_serverUrl = base.toString();
     Q_EMIT serverUrlChanged();
@@ -497,6 +653,7 @@ void ConnectionController::cancelQuickConnect()
 
 void ConnectionController::cancel()
 {
+    m_connectionFallback.clear();
     if (m_state == Idle)
         return;
     if (m_state == Authenticated)
@@ -525,8 +682,7 @@ void ConnectionController::preparePlaybackDisconnect()
     QTimer deadline;
     deadline.setSingleShot(true);
     deadline.setInterval(5000);
-    connect(&m_client, &JellyfinClient::playbackReportsSettled,
-            &wait, &QEventLoop::quit);
+    connect(&m_client, &JellyfinClient::playbackReportsSettled, &wait, &QEventLoop::quit);
     connect(&deadline, &QTimer::timeout, &wait, &QEventLoop::quit);
     deadline.start();
     if (m_client.hasPendingPlaybackReports())
@@ -662,6 +818,21 @@ bool ConnectionController::openAdminDashboard() const
 
 void ConnectionController::removeServer(const QString &serverId)
 {
+    for (const QVariant &entry : std::as_const(m_servers)) {
+        const auto server = entry.toMap();
+        if (server.value(QStringLiteral("serverId")).toString() != serverId)
+            continue;
+        const QString url = server.value(QStringLiteral("url")).toString();
+        m_probeGeneration.remove(url);
+        if (QNetworkReply *reply = m_probeReplies.take(url)) {
+            reply->disconnect(this);
+            reply->abort();
+            reply->deleteLater();
+        }
+        if (m_serverReachability.remove(url))
+            Q_EMIT serverReachabilityChanged();
+        break;
+    }
     const bool active = m_state != Idle && m_client.serverId() == serverId;
     // Unlike a sign-out, forgetting a server takes the browse state of all its users with it
     m_browse.forgetServer(serverId);
@@ -723,6 +894,11 @@ void ConnectionController::onRequestFailed(int status)
 {
     switch (m_state) {
     case Connecting:
+        if (status == 0 && !m_connectionFallback.isEmpty()) {
+            tryNextConnection();
+            return;
+        }
+        m_connectionFallback.clear();
         setError(i18n(
             "Could not reach a Jellyfin server. Check the address and your network connection"));
         setState(Idle);

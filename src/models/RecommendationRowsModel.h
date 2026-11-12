@@ -38,7 +38,7 @@ class RecommendationRowsModel final : public QAbstractListModel {
 
     static constexpr int MaxCategories = 20;
 
-    RecommendationRowsModel(JellyfinClient *client, QObject *parent = nullptr);
+    explicit RecommendationRowsModel(JellyfinClient *client, QObject *parent = nullptr);
 
     // Replaces every row with the categories of one reply
     void setCategories(const QJsonArray &categories);

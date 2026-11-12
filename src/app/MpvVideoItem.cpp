@@ -17,7 +17,10 @@ MpvVideoItem::~MpvVideoItem()
         m_player->detachVideo(this);
 }
 
-QObject *MpvVideoItem::player() const { return m_player.data(); }
+QObject *MpvVideoItem::player() const
+{
+    return m_player.data();
+}
 
 void MpvVideoItem::setPlayer(QObject *object)
 {

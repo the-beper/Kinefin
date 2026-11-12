@@ -18,7 +18,7 @@ struct SettingDefinition {
 
     QString section;
     QString key;
-    Type type;
+    Type type{};
     QVariant defaultValue;
     // Closed list: a stored value outside it falls back to the default. Empty: any value of the type (a double also needs min <= value <= max)
     QList<Option> options;

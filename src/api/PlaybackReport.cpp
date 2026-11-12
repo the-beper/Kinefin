@@ -25,13 +25,13 @@ std::optional<QJsonObject> playbackReportBody(const PlaybackReport &report)
     if (!report.playlistItemId.isEmpty() && isValidJellyfinId(report.playlistItemId))
         body.insert(QStringLiteral("PlaylistItemId"), report.playlistItemId);
     if (report.repeatMode >= 0 && report.repeatMode <= 2) {
-        const QStringList tokens{QStringLiteral("RepeatNone"),
-                                 QStringLiteral("RepeatAll"), QStringLiteral("RepeatOne")};
+        const QStringList tokens{QStringLiteral("RepeatNone"), QStringLiteral("RepeatAll"),
+                                 QStringLiteral("RepeatOne")};
         body.insert(QStringLiteral("RepeatMode"), tokens.at(report.repeatMode));
     }
     if (report.shuffle)
-        body.insert(QStringLiteral("PlaybackOrder"), *report.shuffle
-                    ? QStringLiteral("Shuffle") : QStringLiteral("Default"));
+        body.insert(QStringLiteral("PlaybackOrder"),
+                    *report.shuffle ? QStringLiteral("Shuffle") : QStringLiteral("Default"));
     if (!report.nowPlayingQueue.isEmpty()) {
         QJsonArray queue;
         for (const QString &id : report.nowPlayingQueue) {

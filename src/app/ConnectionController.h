@@ -3,9 +3,13 @@
 #pragma once
 
 #include <QHash>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
 #include <QObject>
+#include <QPointer>
 #include <QString>
 #include <QTimer>
+#include <QUrl>
 
 #include <QVariantList>
 #include <QtQml/qqmlregistration.h>
@@ -22,8 +26,8 @@
 #include "models/LibraryItemsModel.h"
 #include "models/LibrarySubtabController.h"
 #include "models/PlayQueue.h"
-#include "models/ResumeItemsModel.h"
 #include "models/RemoteSessionsModel.h"
+#include "models/ResumeItemsModel.h"
 #include "models/SearchModel.h"
 #include "models/UserConfigurationModel.h"
 #include "settings/BrowseStateStore.h"
@@ -41,6 +45,10 @@ class ConnectionController : public QObject {
     Q_PROPERTY(QString serverUrl READ serverUrl NOTIFY serverUrlChanged)
     Q_PROPERTY(QString quickConnectCode READ quickConnectCode NOTIFY quickConnectCodeChanged)
     Q_PROPERTY(QVariantList servers READ servers NOTIFY serversChanged)
+    // Anonymous, one-shot availability checks. Keys are the submitted server URLs; the
+    // status carries testing/reachable/message/resolvedUrl. No credentials are transmitted.
+    Q_PROPERTY(
+        QVariantMap serverReachability READ serverReachability NOTIFY serverReachabilityChanged)
     // The saved users of the active server, most recently used first: `id`, `name`, `imageUrl` (a QUrl, empty without an avatar), `remembered` (a token is stored, so choosing the user needs no password) and `askPassword`. `name` is remote text: render it as plain text. Empty while no server is active and while credentials cannot be sent to it
     Q_PROPERTY(QVariantList users READ users NOTIFY usersChanged)
     // What the server lists on its sign-in screen (after loadPublicUsers()), without the users already in `users`: `id`, `name`, `imageUrl` as above
@@ -63,7 +71,7 @@ class ConnectionController : public QObject {
     Q_PROPERTY(Kinefin::HomeRowsModel *homeRows READ homeRows CONSTANT)
     Q_PROPERTY(Kinefin::SearchModel *search READ search CONSTANT)
     Q_PROPERTY(Kinefin::GenreRailsModel *genreRails READ genreRails CONSTANT)
-    // The sub-tabs of the Movies and TV Shows pages and the data of the one showing; it follows openType (opened for the scope the tab opens, closed with the Home tab and the session) and drives `genreRails` while its Genres sub-tab shows
+    // The sub-tabs of the Movies and Shows pages and the data of the one showing; it follows openType (opened for the scope the tab opens, closed with the Home tab and the session) and drives `genreRails` while its Genres sub-tab shows
     Q_PROPERTY(Kinefin::LibrarySubtabController *subtabs READ subtabs CONSTANT)
     Q_PROPERTY(Kinefin::ResumeItemsModel *resumeItems READ resumeItems CONSTANT)
     Q_PROPERTY(Kinefin::RemoteSessionsModel *remoteSessions READ remoteSessions CONSTANT)
@@ -100,6 +108,7 @@ class ConnectionController : public QObject {
     QString serverUrl() const { return m_serverUrl; }
     QString quickConnectCode() const { return m_quickConnectCode; }
     QVariantList servers() const { return m_servers; }
+    QVariantMap serverReachability() const { return m_serverReachability; }
     QVariantList users() const { return m_users; }
     QVariantList publicUsers() const { return m_publicUsers; }
     QString loginUserName() const { return m_loginUserName; }
@@ -178,9 +187,9 @@ class ConnectionController : public QObject {
     Q_INVOKABLE bool openRecentlyAdded(const QString &type, const QString &libraryId = {});
     // Starts the genre rails of the library open in `model` (`library`, `movies` or `shows`); false when it is none of them or none is open
     Q_INVOKABLE bool openGenreRails(Kinefin::LibraryItemsModel *model);
-    // The sub-tabs the settings turn on for `type` (the ids of LibrarySubtabController::subtabId, e.g. "favorites"; unknown ones are ignored): the sub-tab bar follows at once, and a showing sub-tab that went off gives way to the main one. Kept across sessions
+    // The sub-tabs the settings turn on for `type` (the ids of LibrarySubtabController::subtabId, e.g. "favorites"; unknown ones are ignored): the sub-tab entries of the toolbar follow at once, and a showing sub-tab that went off gives way to the main one. Kept across sessions
     Q_INVOKABLE void setSubtabsEnabled(const QString &type, const QStringList &ids);
-    // Leaves the Movies and TV Shows pages (the Home tab): the showing sub-tab's data and channels are released, the sub-tab last used stays remembered
+    // Leaves the Movies and Shows pages (the Home tab): the showing sub-tab's data and channels are released, the sub-tab last used stays remembered
     Q_INVOKABLE void closeSubtabs();
     // Starts loading everything in Continue Watching into `resumeItems` (the page that shows it calls its `close()` when it goes); false when not signed in
     Q_INVOKABLE bool openResumeItems();
@@ -189,6 +198,13 @@ class ConnectionController : public QObject {
     // Asks the server for the libraries again (the Home page's retry)
     Q_INVOKABLE void reloadLibraries();
     // Removes a stored server with all its users, saved queues and browse state; disconnects first when it is the active one
+    // Probe /System/Info/Public once, without a session/token. A manual test can
+    // optionally try only the standard ports of the same scheme and host.
+    Q_INVOKABLE void testServer(const QString &address, bool standardPortFallback = false);
+    Q_INVOKABLE void testSavedServers();
+    // Connecting from the new-server form may try the standard same-scheme ports.
+    // Saved-server connections use connectTo() and never silently change their endpoint.
+    Q_INVOKABLE void connectToWithFallback(const QString &address);
     Q_INVOKABLE void removeServer(const QString &serverId);
     // Opens the admin dashboard of the active server's web interface in the host browser (the app's one action for everything server-side). False when there is no server or its address is not an http(s) link
     Q_INVOKABLE bool openAdminDashboard() const;
@@ -199,6 +215,7 @@ class ConnectionController : public QObject {
     void serverUrlChanged();
     void quickConnectCodeChanged();
     void serversChanged();
+    void serverReachabilityChanged();
     void usersChanged();
     void publicUsersChanged();
     void loginUserNameChanged();
@@ -253,6 +270,12 @@ class ConnectionController : public QObject {
     void clearQuickConnect();
     void clearLibraryError();
     void refreshServers();
+    static QList<QUrl> connectionCandidates(const QString &address, bool standardPortFallback);
+    void startProbeCheck(const QString &key, const QList<QUrl> &candidates, int index,
+                         quint64 generation);
+    void setReachability(const QString &key, bool testing, bool reachable, const QString &message,
+                         const QUrl &resolved = {});
+    void tryNextConnection();
     void refreshUsers();
     void refreshPublicUsers();
     void setLoginUserName(const QString &name);
@@ -294,6 +317,12 @@ class ConnectionController : public QObject {
     QString m_serverUrl;
     QString m_quickConnectCode;
     QVariantList m_servers;
+    QVariantMap m_serverReachability;
+    QNetworkAccessManager m_probeNetwork;
+    QHash<QString, QPointer<QNetworkReply>> m_probeReplies;
+    QHash<QString, quint64> m_probeGeneration;
+    QList<QUrl> m_connectionFallback;
+    quint64 m_testGeneration = 0;
     QVariantList m_users;
     QList<PublicUser>
         m_publicSource; // what the server listed, before the saved users are taken out

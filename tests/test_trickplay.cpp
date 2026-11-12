@@ -1,32 +1,31 @@
 // SPDX-FileCopyrightText: 2026 Kinefin contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
-#include "player/Trickplay.h"
 #include <QtTest>
+#include "player/Trickplay.h"
 
 using namespace Kinefin;
 
 namespace {
-QJsonObject layout(int width = 320, int height = 180, int columns = 5,
-                   int rows = 4, int images = 41, int interval = 10000)
+QJsonObject layout(int width = 320, int height = 180, int columns = 5, int rows = 4,
+                   int images = 41, int interval = 10000)
 {
-    return {{QStringLiteral("Width"), width}, {QStringLiteral("Height"), height},
-            {QStringLiteral("TileWidth"), columns}, {QStringLiteral("TileHeight"), rows},
+    return {{QStringLiteral("Width"), width},           {QStringLiteral("Height"), height},
+            {QStringLiteral("TileWidth"), columns},     {QStringLiteral("TileHeight"), rows},
             {QStringLiteral("ThumbnailCount"), images}, {QStringLiteral("Interval"), interval}};
 }
 QJsonObject nested(const QJsonObject &widths)
 {
-    return {{QStringLiteral("Trickplay"), QJsonObject{
-        {QStringLiteral("media-source"), widths}}}};
+    return {{QStringLiteral("Trickplay"), QJsonObject{{QStringLiteral("media-source"), widths}}}};
 }
 } // namespace
 
 class TestTrickplay : public QObject {
     Q_OBJECT
-private Q_SLOTS:
+  private Q_SLOTS:
     void readsNestedMetadata()
     {
         const auto result = parseTrickplayLayout(nested({{QStringLiteral("320"), layout()}}),
-                                                  QStringLiteral("media-source"));
+                                                 QStringLiteral("media-source"));
         QVERIFY(result.has_value());
         QCOMPARE(result->width, 320);
         QCOMPARE(result->height, 180);
@@ -40,39 +39,42 @@ private Q_SLOTS:
         const QJsonObject widths{{QStringLiteral("320"), layout()}};
         const QJsonObject flat{{QStringLiteral("Trickplay"), widths}};
         QVERIFY(parseTrickplayLayout(flat, QStringLiteral("missing-source")));
-        const QJsonObject oneSource{{QStringLiteral("Trickplay"),
-            QJsonObject{{QStringLiteral("other-source"), widths}}}};
+        const QJsonObject oneSource{
+            {QStringLiteral("Trickplay"), QJsonObject{{QStringLiteral("other-source"), widths}}}};
         QVERIFY(parseTrickplayLayout(oneSource, QStringLiteral("missing-source")));
     }
     void picksClosestWidthTo320()
     {
-        const auto result = parseTrickplayLayout(nested({
-            {QStringLiteral("160"), layout(160, 90)},
-            {QStringLiteral("320"), layout(320, 180)},
-            {QStringLiteral("640"), layout(640, 360, 1, 1)}}),
-            QStringLiteral("media-source"));
+        const auto result =
+            parseTrickplayLayout(nested({{QStringLiteral("160"), layout(160, 90)},
+                                         {QStringLiteral("320"), layout(320, 180)},
+                                         {QStringLiteral("640"), layout(640, 360, 1, 1)}}),
+                                 QStringLiteral("media-source"));
         QVERIFY(result);
         QCOMPARE(result->width, 320);
     }
     void rejectsInvalidMetadata()
     {
         const QList<QJsonObject> bad{
-            layout(320, 0), layout(0, 180), layout(320, 180, 0),
-            layout(320, 180, 5, 0), layout(320, 180, 5, 4, 0),
+            layout(320, 0),
+            layout(0, 180),
+            layout(320, 180, 0),
+            layout(320, 180, 5, 0),
+            layout(320, 180, 5, 4, 0),
             layout(320, 180, 5, 4, 40, 0),
             layout(640, 360, 20, 20),
             layout(320, 180, 5, 4, 40, 100),
         };
         for (const QJsonObject &value : bad) {
             const auto result = parseTrickplayLayout(nested({{QStringLiteral("320"), value}}),
-                                                      QStringLiteral("media-source"));
+                                                     QStringLiteral("media-source"));
             QVERIFY2(!result, "untrusted thumbnail metadata must be rejected");
         }
     }
     void tileBoundaries()
     {
         const auto value = parseTrickplayLayout(nested({{QStringLiteral("320"), layout()}}),
-                                                 QStringLiteral("media-source"));
+                                                QStringLiteral("media-source"));
         QVERIFY(value);
         const auto first = trickplayFrameAt(*value, 0);
         QVERIFY(first);

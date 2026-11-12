@@ -24,6 +24,11 @@ Kirigami.ScrollablePage {
     readonly property bool inView: Kirigami.ColumnView.inViewport
     readonly property bool showSimilar: details.similarStatus === ItemDetailsModel.Loading || details.similarStatus === ItemDetailsModel.Failed || (details.similarStatus === ItemDetailsModel.Ready && details.similar.count > 0)
 
+    // What the main menu's Refresh calls while this page is in front
+    function refreshPage() {
+        details.reload();
+    }
+
     // The space the page keeps around its content
     readonly property real margin: Kirigami.Units.largeSpacing
     readonly property ItemChildrenModel childModel: details.below
@@ -214,10 +219,12 @@ Kirigami.ScrollablePage {
 
             ColumnLayout {
                 id: headerContent
+                objectName: "detailsHeaderContent"
 
-                x: page.margin
                 y: page.margin
-                width: parent.width - page.margin * 2
+                // Prose and metadata stay readable on ultrawide monitors: the cap is the shell's reading width
+                width: Math.min(Math.max(0, parent.width - page.margin * 2), page.Window.window?.readingWidth ?? Infinity)
+                x: (parent.width - width) / 2
                 spacing: Kirigami.Units.largeSpacing
 
                 Kirigami.LoadingPlaceholder {
@@ -280,7 +287,7 @@ Kirigami.ScrollablePage {
 
                     Rectangle {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: Math.min(width * 9 / 16, Kirigami.Units.gridUnit * 20)
+                        Layout.preferredHeight: Math.min(width * 9 / 16, Kirigami.Units.gridUnit * 24)
                         visible: page.details.backdropUrl.toString().length > 0 || page.details.logoUrl.toString().length > 0
                         color: Kirigami.Theme.alternateBackgroundColor
                         clip: true
@@ -435,7 +442,7 @@ Kirigami.ScrollablePage {
                     Controls.Label {
                         Layout.fillWidth: true
                         visible: text.length > 0
-                        Layout.maximumWidth: Kirigami.Units.gridUnit * 35
+                        Layout.maximumWidth: Kirigami.Units.gridUnit * 43
                         wrapMode: Text.Wrap
                         textFormat: Text.PlainText
                         text: page.details.overview

@@ -6,8 +6,8 @@
 #include "settings/ClientSettings.h"
 
 #include <QGuiApplication>
-#include <QScreen>
 #include <QRegularExpression>
+#include <QScreen>
 #include <QVariant>
 #include <QtMath>
 
@@ -17,17 +17,21 @@
 
 namespace Kinefin {
 namespace {
-QString mpvBool(bool enabled) { return enabled ? QStringLiteral("yes") : QStringLiteral("no"); }
+QString mpvBool(bool enabled)
+{
+    return enabled ? QStringLiteral("yes") : QStringLiteral("no");
 }
+} // namespace
 
 PlayerSettings::PlayerSettings(ClientSettings &settings, PlaybackEngine &engine, QObject *parent)
     : QObject(parent), m_settings(settings), m_engine(engine)
 {
-    connect(&settings, &ClientSettings::valueChanged, this, [this](const QString &section, const QString &) {
-        if (section == QLatin1String("audio") || section == QLatin1String("video")
-            || section == QLatin1String("subtitles") || section == QLatin1String("other"))
-            apply();
-    });
+    connect(&settings, &ClientSettings::valueChanged, this,
+            [this](const QString &section, const QString &) {
+                if (section == QLatin1String("audio") || section == QLatin1String("video")
+                    || section == QLatin1String("subtitles") || section == QLatin1String("other"))
+                    apply();
+            });
 }
 
 void PlayerSettings::apply()
@@ -42,25 +46,31 @@ void PlayerSettings::apply()
 
 void PlayerSettings::applyAudio()
 {
-    const auto v = [this](const char *key) { return m_settings.value(QStringLiteral("audio"), QString::fromLatin1(key)); };
+    const auto v = [this](const char *key) {
+        return m_settings.value(QStringLiteral("audio"), QString::fromLatin1(key));
+    };
     const QString type = v("devicetype").toString();
     m_engine.setMpvProperty(QStringLiteral("audio-exclusive"), mpvBool(v("exclusive").toBool()));
     QString device = v("device").toString();
-    if (device.isEmpty()) device = QStringLiteral("auto");
+    if (device.isEmpty())
+        device = QStringLiteral("auto");
     if (device != QLatin1String("auto")) {
-        const QVariantList devices = m_engine.mpvProperty(QStringLiteral("audio-device-list")).toList();
+        const QVariantList devices =
+            m_engine.mpvProperty(QStringLiteral("audio-device-list")).toList();
         if (!devices.isEmpty()) {
-            const bool available = std::any_of(devices.cbegin(), devices.cend(),
-                [&device](const QVariant &entry) {
+            const bool available =
+                std::any_of(devices.cbegin(), devices.cend(), [&device](const QVariant &entry) {
                     return entry.toMap().value(QStringLiteral("name")).toString() == device;
                 });
-            if (!available) device = QStringLiteral("auto");
+            if (!available)
+                device = QStringLiteral("auto");
         }
     }
     m_engine.setMpvProperty(QStringLiteral("audio-device"), device);
     const bool normalize = v("normalize").toBool();
     m_engine.setMpvProperty(QStringLiteral("audio-normalize-downmix"), mpvBool(normalize));
-    m_engine.setMpvProperty(QStringLiteral("audio-swresample-o"), QStringLiteral("surround_mix_level=1"));
+    m_engine.setMpvProperty(QStringLiteral("audio-swresample-o"),
+                            QStringLiteral("surround_mix_level=1"));
     QStringList codecs;
     if (type != QLatin1String("basic")) {
         for (const char *codec : {"ac3", "dts", "eac3", "truehd"}) {
@@ -76,28 +86,34 @@ void PlayerSettings::applyAudio()
         }
     }
     m_engine.setMpvProperty(QStringLiteral("audio-spdif"), codecs.join(QLatin1Char(',')));
-    m_engine.setMpvProperty(QStringLiteral("audio-channels"),
-                            type == QLatin1String("spdif") ? QStringLiteral("2.0") : v("channels").toString());
+    m_engine.setMpvProperty(QStringLiteral("audio-channels"), type == QLatin1String("spdif")
+                                                                  ? QStringLiteral("2.0")
+                                                                  : v("channels").toString());
     if (type == QLatin1String("spdif") && v("passthrough.ac3").toBool())
-        m_engine.mpvCommand({QStringLiteral("af"), QStringLiteral("add"), QStringLiteral("@ac3:lavcac3enc")});
+        m_engine.mpvCommand(
+            {QStringLiteral("af"), QStringLiteral("add"), QStringLiteral("@ac3:lavcac3enc")});
     else
-        m_engine.mpvCommand({QStringLiteral("af"), QStringLiteral("remove"), QStringLiteral("@ac3")});
+        m_engine.mpvCommand(
+            {QStringLiteral("af"), QStringLiteral("remove"), QStringLiteral("@ac3")});
 }
 
 void PlayerSettings::applyVideo()
 {
-    const auto v = [this](const char *key) { return m_settings.value(QStringLiteral("video"), QString::fromLatin1(key)); };
+    const auto v = [this](const char *key) {
+        return m_settings.value(QStringLiteral("video"), QString::fromLatin1(key));
+    };
     const QString hw = v("hardwareDecoding").toString();
-    m_engine.setMpvProperty(QStringLiteral("hwdec"), hw == QLatin1String("disabled")
-                                ? QStringLiteral("no")
-                                : hw == QLatin1String("copy") ? QStringLiteral("auto-copy") : QStringLiteral("auto"));
+    m_engine.setMpvProperty(QStringLiteral("hwdec"),
+                            hw == QLatin1String("disabled") ? QStringLiteral("no")
+                            : hw == QLatin1String("copy")   ? QStringLiteral("auto-copy")
+                                                            : QStringLiteral("auto"));
     m_engine.setMpvProperty(QStringLiteral("deinterlace"), mpvBool(v("deinterlace").toBool()));
     const QString forcedVo = v("debug.force_vo").toString().trimmed();
     if (!forcedVo.isEmpty())
         m_engine.setMpvProperty(QStringLiteral("vo"), forcedVo);
     m_engine.setMpvProperty(QStringLiteral("video-sync"), v("sync_mode").toString());
     m_engine.setMpvProperty(QStringLiteral("demuxer-max-bytes"),
-                            QString::number(v("cache").toInt()) + QStringLiteral("MiB"));
+                            QString(QString::number(v("cache").toInt()) + QStringLiteral("MiB")));
     m_engine.setMpvProperty(QStringLiteral("speed"), v("default_playback_speed").toDouble());
     if (auto *screen = QGuiApplication::primaryScreen()) {
         const qreal fps = screen->refreshRate();
@@ -116,17 +132,21 @@ void PlayerSettings::applyVideo()
         else if (aspect == QLatin1String("force_4_3"))
             m_engine.setMpvProperty(QStringLiteral("video-aspect-override"), QStringLiteral("4:3"));
         else if (aspect == QLatin1String("force_16_9"))
-            m_engine.setMpvProperty(QStringLiteral("video-aspect-override"), QStringLiteral("16:9"));
+            m_engine.setMpvProperty(QStringLiteral("video-aspect-override"),
+                                    QStringLiteral("16:9"));
         else if (aspect == QLatin1String("force_16_9_if_4_3")) {
-            const QVariantMap decoded = m_engine.mpvProperty(QStringLiteral("video-dec-params")).toMap();
+            const QVariantMap decoded =
+                m_engine.mpvProperty(QStringLiteral("video-dec-params")).toMap();
             if (std::abs(decoded.value(QStringLiteral("aspect")).toDouble() - 4.0 / 3) <= 0.1)
-                m_engine.setMpvProperty(QStringLiteral("video-aspect-override"), QStringLiteral("16:9"));
+                m_engine.setMpvProperty(QStringLiteral("video-aspect-override"),
+                                        QStringLiteral("16:9"));
         } else if (aspect == QLatin1String("stretch"))
             m_engine.setMpvProperty(QStringLiteral("keepaspect"), QStringLiteral("no"));
         else if (aspect == QLatin1String("noscaling"))
             m_engine.setMpvProperty(QStringLiteral("video-unscaled"), QStringLiteral("yes"));
     }
-    double refresh = QGuiApplication::primaryScreen() ? QGuiApplication::primaryScreen()->refreshRate() : 0;
+    double refresh =
+        QGuiApplication::primaryScreen() ? QGuiApplication::primaryScreen()->refreshRate() : 0;
     const char *bucket = "normal";
     for (int fps : {24, 25, 50}) {
         if (std::abs(refresh - fps) <= 0.5) {
@@ -135,18 +155,23 @@ void PlayerSettings::applyVideo()
         }
     }
     const QByteArray key = QByteArray("audio_delay.").append(bucket);
-    m_engine.setMpvProperty(QStringLiteral("audio-delay"), v(key.constData()).toInt() / 1000.0 + m_audioOffset);
+    m_engine.setMpvProperty(QStringLiteral("audio-delay"),
+                            v(key.constData()).toInt() / 1000.0 + m_audioOffset);
 }
 
 void PlayerSettings::applySubtitles()
 {
-    const auto v = [this](const char *key) { return m_settings.value(QStringLiteral("subtitles"), QString::fromLatin1(key)); };
+    const auto v = [this](const char *key) {
+        return m_settings.value(QStringLiteral("subtitles"), QString::fromLatin1(key));
+    };
     m_engine.setMpvProperty(QStringLiteral("sub-ass-style-overrides"),
-        QStringLiteral("ScaledBorderAndShadow=") + mpvBool(v("ass_scale_border_and_shadow").toBool()));
+                            QString(QStringLiteral("ScaledBorderAndShadow=")
+                                    + mpvBool(v("ass_scale_border_and_shadow").toBool())));
     m_engine.setMpvProperty(QStringLiteral("sub-ass-override"), v("ass_style_override").toString());
     const int size = v("size").toInt();
     m_engine.setMpvProperty(QStringLiteral("sub-scale"), size > 0 ? size / 32.0 : 1.0);
-    for (const auto &pair : {std::pair{"font", "sub-font"}, {"color", "sub-color"},
+    for (const auto &pair : {std::pair{"font", "sub-font"},
+                             {"color", "sub-color"},
                              {"border_color", "sub-border-color"}}) {
         const QString value = v(pair.first).toString();
         if (!value.isEmpty())
@@ -159,7 +184,8 @@ void PlayerSettings::applySubtitles()
     const QString alpha = v("background_transparency").toString();
     if (QRegularExpression(QStringLiteral("^#[0-9a-fA-F]{6}$")).match(bg).hasMatch()
         && QRegularExpression(QStringLiteral("^[0-9a-fA-F]{2}$")).match(alpha).hasMatch())
-        m_engine.setMpvProperty(QStringLiteral("sub-back-color"), QStringLiteral("#") + alpha + bg.mid(1));
+        m_engine.setMpvProperty(QStringLiteral("sub-back-color"),
+                                QString(QStringLiteral("#") + alpha + bg.mid(1)));
     const QStringList placement = v("placement").toString().split(QLatin1Char(','));
     const QString align = placement.value(0).trimmed().toLower();
     if (align == QLatin1String("left") || align == QLatin1String("center")
@@ -167,13 +193,15 @@ void PlayerSettings::applySubtitles()
         m_engine.setMpvProperty(QStringLiteral("sub-align-x"), align);
     const QString vertical = placement.value(1, align).trimmed().toLower();
     if (vertical == QLatin1String("top") || vertical == QLatin1String("bottom"))
-        m_engine.setMpvProperty(QStringLiteral("sub-pos"), vertical == QLatin1String("top") ? 10 : 100);
+        m_engine.setMpvProperty(QStringLiteral("sub-pos"),
+                                vertical == QLatin1String("top") ? 10 : 100);
     m_engine.setMpvProperty(QStringLiteral("sub-delay"), m_subtitleOffset);
 }
 
 void PlayerSettings::applyOverrides()
 {
-    const QString conf = m_settings.value(QStringLiteral("other"), QStringLiteral("other_conf")).toString();
+    const QString conf =
+        m_settings.value(QStringLiteral("other"), QStringLiteral("other_conf")).toString();
     static const QRegularExpression keyPattern(QStringLiteral("^[a-z][a-z0-9-]{0,63}$"));
     for (const QString &line : conf.split(QLatin1Char('\n'))) {
         const QString entry = line.trimmed();

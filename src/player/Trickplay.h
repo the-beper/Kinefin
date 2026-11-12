@@ -25,6 +25,5 @@ struct TrickplayFrame {
 
 std::optional<TrickplayLayout> parseTrickplayLayout(const QJsonObject &item,
                                                     const QString &mediaSourceId);
-std::optional<TrickplayFrame> trickplayFrameAt(const TrickplayLayout &layout,
-                                               qint64 positionTicks);
+std::optional<TrickplayFrame> trickplayFrameAt(const TrickplayLayout &layout, qint64 positionTicks);
 } // namespace Kinefin

@@ -11,8 +11,8 @@
 
 namespace Kinefin {
 namespace {
-const QUrl kLatestReleaseUrl(
-    QStringLiteral("https://github.com/the-beper/Kinefin/releases/latest"));
+const QUrl
+    kLatestReleaseUrl(QStringLiteral("https://github.com/the-beper/Kinefin/releases/latest"));
 const QString kLatestSuffix = QStringLiteral("/releases/latest");
 const QString kTagPrefix = QStringLiteral("/releases/tag/");
 
@@ -63,8 +63,7 @@ UpdateChecker::~UpdateChecker()
     cancel();
 }
 
-std::optional<int> UpdateChecker::compareVersions(const QString &current,
-                                                   const QString &candidate)
+std::optional<int> UpdateChecker::compareVersions(const QString &current, const QString &candidate)
 {
     const auto left = components(current);
     const auto right = components(candidate);
@@ -93,10 +92,9 @@ QUrl UpdateChecker::releaseFromRedirect(const QUrl &target) const
             return {};
     }
     const QUrl url = m_latestUrl.resolved(target);
-    if (!url.isValid() || url.scheme() != m_latestUrl.scheme()
-        || url.host() != m_latestUrl.host() || url.port() != m_latestUrl.port()
-        || !url.userName().isEmpty() || !url.password().isEmpty() || url.hasQuery()
-        || url.hasFragment())
+    if (!url.isValid() || url.scheme() != m_latestUrl.scheme() || url.host() != m_latestUrl.host()
+        || url.port() != m_latestUrl.port() || !url.userName().isEmpty()
+        || !url.password().isEmpty() || url.hasQuery() || url.hasFragment())
         return {};
 
     const QString expected = m_latestUrl.path().chopped(kLatestSuffix.size()) + kTagPrefix;
@@ -109,8 +107,7 @@ QUrl UpdateChecker::releaseFromRedirect(const QUrl &target) const
     const QString version = tag.startsWith(QLatin1Char('v')) ? tag.mid(1) : tag;
     // A URL may have an encoded slash/dot. Require the original path to be
     // canonical as well as its decoded value before allowing the browser link.
-    if (tag.isEmpty() || !components(version)
-        || url.path(QUrl::FullyEncoded) != expected + tag)
+    if (tag.isEmpty() || !components(version) || url.path(QUrl::FullyEncoded) != expected + tag)
         return {};
     return url;
 }
@@ -149,8 +146,10 @@ bool UpdateChecker::check()
         const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const QUrl target = reply->attribute(QNetworkRequest::RedirectionTargetAttribute).toUrl();
         const QUrl release = releaseFromRedirect(target);
+        // QUrl decodes escaped unreserved characters, so only the raw Location shows a %39 that is not a 9
+        const bool escaped = reply->rawHeader("Location").contains('%');
         const bool valid = reply->error() == QNetworkReply::NoError && isRedirect(status)
-                           && !release.isEmpty();
+                           && !escaped && !release.isEmpty();
         reply->deleteLater();
         if (!valid) {
             Q_EMIT checkFailed();

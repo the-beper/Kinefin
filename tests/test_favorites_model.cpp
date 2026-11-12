@@ -98,7 +98,8 @@ struct Fixture {
             if (!favorites.contains(parent))
                 return {};
             const QJsonArray all = favorites.value(parent);
-            const int start = startOf(route);
+            // A repeating library answers the first page whatever the offset
+            const int start = repeating.contains(parent) ? 0 : startOf(route);
             const int limit = FakeJellyfin::capturedListingQuery(route)
                                   .queryItemValue(QStringLiteral("limit"))
                                   .toInt();
@@ -107,7 +108,7 @@ struct Fixture {
                 page.append(all.at(i));
             const QByteArray body =
                 QJsonDocument(QJsonObject{{QStringLiteral("Items"), page},
-                                          {QStringLiteral("StartIndex"), start},
+                                          {QStringLiteral("StartIndex"), startOf(route)},
                                           {QStringLiteral("TotalRecordCount"),
                                            declaredTotals.value(parent, int(all.size()))}})
                     .toJson(QJsonDocument::Compact);
@@ -138,6 +139,7 @@ struct Fixture {
     QHash<QString, QJsonArray> favorites;
     QHash<QString, int> failing;
     QHash<QString, int> declaredTotals;
+    QSet<QString> repeating;
     bool ok = false;
 };
 
@@ -436,6 +438,21 @@ class TestFavoritesModel : public QObject {
         QCOMPARE(groupSummary(f.groups), (QStringList{QStringLiteral("more-libraries:600")}));
     }
 
+    void aLibraryThatRepeatsItsPageStopsAtTheLimit()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        f.favorites[kMovies] = movies(1, 100);
+        f.declaredTotals[kMovies] = 1000000;
+        f.repeating.insert(kMovies);
+        f.start({library(kMovies, QStringLiteral("Movies"))});
+        QTRY_COMPARE(f.model.status(), FavoritesModel::Capped);
+        QTest::qWait(100);
+        QCOMPARE(f.model.count(), 100);
+        QVERIFY(f.model.capped());
+        QCOMPARE(f.server.itemsRoutes.size(), FavoritesModel::MaxItems / FavoritesModel::PageSize);
+    }
+
     void failingLibraryGivesPartialResults()
     {
         Fixture f;
@@ -527,9 +544,11 @@ class TestFavoritesModel : public QObject {
             lateGenres.append(QString());
         lateGenres.append(QStringLiteral("Late"));
         QJsonObject skipsInvalid = favorite(1);
-        skipsInvalid.insert(
-            QStringLiteral("Genres"),
-            QJsonArray{QString(), 7, (QStringLiteral("Sci") + QChar(ushort(0x202e)) + QStringLiteral("Fi\nx")), QStringLiteral("Drama")});
+        skipsInvalid.insert(QStringLiteral("Genres"),
+                            QJsonArray{QString(), 7,
+                                       QString(QStringLiteral("Sci") + QChar(ushort(0x202e))
+                                               + QStringLiteral("Fi\nx")),
+                                       QStringLiteral("Drama")});
         QJsonObject tooLate = favorite(2);
         tooLate.insert(QStringLiteral("Genres"), lateGenres);
         QJsonObject tooLong = favorite(3);

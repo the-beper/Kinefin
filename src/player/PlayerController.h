@@ -2,20 +2,20 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <QImage>
+#include <QTemporaryDir>
+#include <QUrl>
 #include "player/PlaybackEngine.h"
 #include "player/PlaybackReporter.h"
 #include "player/PlayerSettings.h"
 #include "player/Trickplay.h"
-#include <QImage>
-#include <QTemporaryDir>
-#include <QUrl>
 
 #include <QJsonObject>
 #include <QObject>
 #include <QPointer>
+#include <QStringList>
 #include <QTimer>
 #include <QVariantList>
-#include <QStringList>
 #include <optional>
 
 class MpvAbstractItem;
@@ -57,13 +57,16 @@ class PlayerController final : public QObject {
     Q_PROPERTY(QString screenshotPath READ screenshotPath NOTIFY changed)
     Q_PROPERTY(QString skipLabel READ skipLabel NOTIFY changed)
     Q_PROPERTY(int sleepRemainingMinutes READ sleepRemainingMinutes NOTIFY changed)
-public:
+  public:
     PlayerController(JellyfinClient &client, PlayQueue &queue, ClientSettings &settings,
                      const QString &profileId, QObject *parent = nullptr);
     ~PlayerController() override;
 
     bool active() const { return m_loading || m_session.state() != PlaybackSession::State::Idle; }
-    bool loading() const { return m_loading || m_session.state() == PlaybackSession::State::Opening; }
+    bool loading() const
+    {
+        return m_loading || m_session.state() == PlaybackSession::State::Opening;
+    }
     bool paused() const { return m_session.state() == PlaybackSession::State::Paused; }
     bool buffering() const { return m_session.state() == PlaybackSession::State::Buffering; }
     QString itemId() const { return m_itemId; }
@@ -95,7 +98,7 @@ public:
     void detachVideo(MpvAbstractItem *item);
 
     Q_INVOKABLE bool playItem(const QString &id, qint64 resumeTicks = 0,
-                             const QString &title = QString());
+                              const QString &title = QString());
     Q_INVOKABLE bool playQueue(int index);
     Q_INVOKABLE bool resumeQueue();
     Q_INVOKABLE void pause();
@@ -125,13 +128,13 @@ public:
     // Used before a session changes, never by QML to re-authenticate.
     void onAccountLeaving();
 
-Q_SIGNALS:
+  Q_SIGNALS:
     void changed();
     void tracksChanged();
     void previewChanged();
     void finished();
 
-private:
+  private:
     bool startItem(const QString &id, qint64 resumeTicks, const QString &title);
     void requestPending();
     void onSource(const PlaybackSource &source);

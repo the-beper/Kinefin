@@ -28,9 +28,26 @@ Controls.ItemDelegate {
     required property int seasonCount
     required property int episodeCount
     required property real seriesProgress
+    required property string seriesName
+    required property int seasonNumber
+    required property int episodeNumber
 
     readonly property string countsLine: seasonCount > 0 && episodeCount > 0 ? i18nc("seasons and episodes of a series", "%1 · %2", i18np("%1 season", "%1 seasons", seasonCount), i18np("%1 episode", "%1 episodes", episodeCount)) : ""
-    readonly property string secondLine: countsLine.length > 0 ? countsLine : (year > 0 ? String(year) : "")
+    // An episode is named by its title: the series and the numbers are its second line
+    readonly property string episodeLine: {
+        if (type !== "Episode" || episodeNumber < 0)
+            return "";
+        const label = seasonNumber >= 0 ? i18nc("season and episode number", "S%1:E%2", seasonNumber, episodeNumber) : i18nc("episode number", "E%1", episodeNumber);
+        return seriesName.length > 0 ? i18nc("series name and episode label", "%1 · %2", seriesName, label) : label;
+    }
+    // What a screen reader says for the episode line: "S1:E3" would be spelled out
+    readonly property string episodeSpoken: {
+        if (episodeLine.length === 0)
+            return "";
+        const label = seasonNumber >= 0 ? i18nc("season and episode number spoken", "Season %1, Episode %2", seasonNumber, episodeNumber) : i18nc("episode number spoken", "Episode %1", episodeNumber);
+        return seriesName.length > 0 ? i18nc("series name and episode label", "%1 · %2", seriesName, label) : label;
+    }
+    readonly property string secondLine: countsLine.length > 0 ? countsLine : (episodeLine.length > 0 ? episodeLine : (year > 0 ? String(year) : ""))
     // The watched share, 0 to 1: a series counts its episodes, anything else its playback position
     readonly property real progress: seriesProgress >= 0 ? seriesProgress : playedPercentage / 100
     readonly property bool inProgress: loaded && progress > 0 && progress < 1
@@ -77,7 +94,7 @@ Controls.ItemDelegate {
 
     padding: Kirigami.Units.smallSpacing
     Accessible.ignored: !loaded
-    Accessible.name: countsLine.length > 0 ? name + ", " + countsLine : (year > 0 ? name + " (" + year + ")" : name)
+    Accessible.name: countsLine.length > 0 ? name + ", " + countsLine : (episodeSpoken.length > 0 ? name + ", " + episodeSpoken : (year > 0 ? name + " (" + year + ")" : name))
     Accessible.description: description
 
     contentItem: RowLayout {

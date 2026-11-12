@@ -189,7 +189,7 @@ bool signInUser(ConnectionController &controller, const QString &name, int users
 }
 
 // Saves Anna, then Ben through Add User, so Ben is the most recently used; `server` needs the user table of addTwoUsers
-bool saveBothUsers(FakeJellyfin &server)
+bool saveBothUsers(const FakeJellyfin &server)
 {
     auto controller = makeController();
     controller->connectTo(address(server));
@@ -306,6 +306,85 @@ class TestConnectionController : public QObject {
         controller->start();
         QCOMPARE(controller->state(), ConnectionController::Idle);
         QVERIFY(controller->servers().isEmpty());
+    }
+
+    void anonymousServerTestsAreOneShotPerVisitAndSendNoCredentials()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        auto controller = makeController();
+        QVERIFY(signInFixtureUser(*controller, server));
+        QTRY_COMPARE(controller->servers().size(), 1);
+        const QString url =
+            controller->servers().constFirst().toMap().value(QStringLiteral("url")).toString();
+        const int previous = server.publicInfoRequests;
+        controller->testSavedServers();
+        QTRY_VERIFY(controller->serverReachability()
+                        .value(url)
+                        .toMap()
+                        .value(QStringLiteral("reachable"))
+                        .toBool());
+        QCOMPARE(server.publicInfoRequests, previous + 1);
+        QVERIFY(server.lastPublicInfoAuth.isEmpty());
+        controller->testSavedServers();
+        QTRY_COMPARE(server.publicInfoRequests, previous + 2);
+        QVERIFY(!controller->serverReachability()
+                     .value(url)
+                     .toMap()
+                     .value(QStringLiteral("testing"))
+                     .toBool());
+    }
+
+    void malformedServerTestsDoNotSendNetworkRequests()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        auto controller = makeController();
+        for (const QString &url : {QStringLiteral("file:///tmp/server"),
+                                   QStringLiteral("http://user:password@127.0.0.1:8096"),
+                                   QStringLiteral("https://host.invalid/#fragment"),
+                                   QStringLiteral("http://localhost:0")}) {
+            controller->testServer(url);
+            const auto result = controller->serverReachability().value(url).toMap();
+            QVERIFY(!result.value(QStringLiteral("reachable")).toBool());
+            QVERIFY(!result.value(QStringLiteral("testing")).toBool());
+        }
+        QCOMPARE(server.publicInfoRequests, 0);
+    }
+
+    void availabilityCheckRejectsRedirectedAndInvalidIdentities()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        auto controller = makeController();
+        const QString url = address(server);
+        server.redirectPublicOffHost = true;
+        controller->testServer(url);
+        QTRY_VERIFY(!controller->serverReachability()
+                         .value(url)
+                         .toMap()
+                         .value(QStringLiteral("testing"))
+                         .toBool());
+        QVERIFY(!controller->serverReachability()
+                     .value(url)
+                     .toMap()
+                     .value(QStringLiteral("reachable"))
+                     .toBool());
+        QCOMPARE(server.publicInfoRequests, 1);
+        server.redirectPublicOffHost = false;
+        server.invalidIdentity = true;
+        controller->testServer(url);
+        QTRY_COMPARE(server.publicInfoRequests, 2);
+        QTRY_VERIFY(!controller->serverReachability()
+                         .value(url)
+                         .toMap()
+                         .value(QStringLiteral("testing"))
+                         .toBool());
+        QVERIFY(!controller->serverReachability()
+                     .value(url)
+                     .toMap()
+                     .value(QStringLiteral("reachable"))
+                     .toBool());
     }
 
     void connectSignInAndLibraries()
@@ -444,7 +523,7 @@ class TestConnectionController : public QObject {
     }
 
     // Connects to a server the profile already signed in to: the stored session restores itself, otherwise the fixture user signs in
-    bool signInAgain(ConnectionController &controller, FakeJellyfin &server)
+    bool signInAgain(ConnectionController &controller, const FakeJellyfin &server)
     {
         controller.connectTo(address(server));
         if (!QTest::qWaitFor(
@@ -566,7 +645,8 @@ class TestConnectionController : public QObject {
                                 + QStringLiteral("/browse.json"));
     }
 
-    bool signInWithLibraries(ConnectionController &controller, FakeJellyfin &server, int libraries)
+    bool signInWithLibraries(ConnectionController &controller, const FakeJellyfin &server,
+                             int libraries)
     {
         return signInAgain(controller, server) && waitForLibraries(controller, libraries);
     }

@@ -112,6 +112,7 @@ void UserConfigurationModel::load()
     m_baselineRaw = {};
     m_latestRaw = {};
     m_pending = {};
+    m_postSent = false;
     m_saving.clear();
     m_conflictFields.clear();
     m_malformed.reset();
@@ -155,11 +156,17 @@ void UserConfigurationModel::retry()
 
 void UserConfigurationModel::discard()
 {
-    if (m_state == Failed && m_failure != SaveFailed) {
+    // The baseline is unreliable after a failure that is not a plain write failure, after a conflict (the server holds other values) and once a write was sent without a confirmed outcome
+    if ((m_state == Failed && m_failure != SaveFailed) || m_state == Conflict || m_postSent) {
         load();
         return;
     }
-    if (!m_hasBaseline || m_step != Step::None)
+    discardDraft();
+}
+
+void UserConfigurationModel::discardDraft()
+{
+    if (m_postSent || !m_hasBaseline || m_step != Step::None)
         return;
     adoptBaseline(m_baselineRaw);
     m_failure = NoFailure;
@@ -170,6 +177,8 @@ void UserConfigurationModel::keepEditing()
 {
     if (!m_hasBaseline || !(m_state == Conflict || (m_state == Failed && m_failure == SaveFailed)))
         return;
+    if (m_state == Conflict)
+        rebaseOntoLatest();
     m_conflictFields.clear();
     m_failure = NoFailure;
     setState(Ready, Step::None);
@@ -183,6 +192,7 @@ void UserConfigurationModel::clear()
     m_baselineRaw = {};
     m_latestRaw = {};
     m_pending = {};
+    m_postSent = false;
     m_saving.clear();
     m_conflictFields.clear();
     m_malformed.reset();
@@ -276,8 +286,11 @@ void UserConfigurationModel::onUserReady(const QJsonObject &user)
         return;
     }
     setState(Saving, Step::Posting);
-    if (!m_client->updateCurrentUserConfiguration(m_pending))
+    if (!m_client->updateCurrentUserConfiguration(m_pending)) {
         fail(SaveFailed);
+        return;
+    }
+    m_postSent = true;
 }
 
 void UserConfigurationModel::onUserFailed()
@@ -361,12 +374,27 @@ void UserConfigurationModel::adoptBaseline(const QJsonObject &configuration)
 {
     m_baselineRaw = configuration;
     m_latestRaw = configuration;
+    m_postSent = false;
     m_hasBaseline = true;
     m_conflictFields.clear();
     for (int i = 0; i < FieldCount; ++i) {
         const QVariant value = project(configuration, Field(i));
         m_malformed.set(size_t(i), !value.isValid());
         m_draft[size_t(i)] = value.isValid() ? value : defaultValue(Field(i));
+    }
+}
+
+// After a conflict: the fresh read becomes the baseline, so the next save knowingly overwrites it. A field the user edited keeps its draft, every other field follows the server
+void UserConfigurationModel::rebaseOntoLatest()
+{
+    const QList<Field> edited = dirtyFieldList();
+    m_baselineRaw = m_latestRaw;
+    m_postSent = false;
+    for (int i = 0; i < FieldCount; ++i) {
+        const QVariant value = project(m_baselineRaw, Field(i));
+        m_malformed.set(size_t(i), !value.isValid());
+        if (!edited.contains(Field(i)))
+            m_draft[size_t(i)] = value.isValid() ? value : defaultValue(Field(i));
     }
 }
 

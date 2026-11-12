@@ -41,7 +41,6 @@ class LibraryItemsModel final : public PagedItemsModel {
     Q_PROPERTY(QStringList genreIds READ genreIds WRITE setGenreIds NOTIFY genreIdsChanged)
     // The values the filters can take: the genres, tags, official ratings and years of the open scope
     Q_PROPERTY(Kinefin::FilterOptionsModel *filterOptions READ filterOptions CONSTANT)
-    Q_PROPERTY(Kinefin::FilterOptionsModel *genreOptions READ filterOptions CONSTANT)
     // The alphabet picker: empty, "#" (names before "A") or one letter "A" to "Z", always from the first row. Never kept in the view state, dropped by open() and clear(), refused for Random, independent of the search term
     Q_PROPERTY(QString alphabet READ alphabet WRITE setAlphabet NOTIFY alphabetChanged)
     // How the items are shown: `viewMode` "grid" or "list", `imageType` one of Primary, Banner, Disc, Logo and Thumb (an item without that image shows its Primary), and the presentation switches of the cards. None of them changes the items, so none reloads the list but a new image type whose tags were not asked for
@@ -56,6 +55,8 @@ class LibraryItemsModel final : public PagedItemsModel {
     Q_PROPERTY(bool filtered READ filtered NOTIFY filteredChanged)
     // Whether a saved tag or rating still waits for its facet list: the list is held back (Loading, or Failed with retry()) until it is resolved
     Q_PROPERTY(bool resolvingFacets READ resolvingFacets NOTIFY resolvingFacetsChanged)
+    // Whether the last request was refused because the query is longer than MaxItemsQueryChars (a search term or a saved view past the budget the filter editor keeps): the list is Failed and retry() does nothing, only a shorter query (clearFilters(), a shorter search term) helps
+    Q_PROPERTY(bool queryTooLong READ queryTooLong NOTIFY queryTooLongChanged)
 
   public:
     enum SortKey { Name, DateAdded, ReleaseDate, CommunityRating, DatePlayed, Runtime };
@@ -72,7 +73,11 @@ class LibraryItemsModel final : public PagedItemsModel {
         UnplayedCountRole,
         PlayedPercentageRole,
         FavoriteRole,
-        LoadedRole
+        LoadedRole,
+        // The series of an episode (empty for anything else) and the season and episode numbers (-1 when the item has none)
+        SeriesNameRole,
+        SeasonNumberRole,
+        EpisodeNumberRole
     };
 
     // The order, filters and view options of a view: what the browse state store keeps per scope. `sortBy` is a wire token of librarySortKeys(); `viewMode` is "grid" or "list"; `imageType` is Primary, Banner, Disc, Logo or Thumb. A value the model does not accept is replaced by the default when applied. Two equal states are the same view
@@ -120,6 +125,9 @@ class LibraryItemsModel final : public PagedItemsModel {
     static QVariantMap filtersToVariant(const LibraryFilterState &state);
     static LibraryFilterState filtersFromVariant(const QVariantMap &values);
 
+    // The view a scope starts from when nothing was stored: the default state with the first sort key of the scope (the aired order for episodes)
+    static ViewState defaultViewState(LibraryScope scope);
+
     // Resets the model and loads the first page. An empty `libraryId` lists every library of the type (no parent on the wire). False (and the model stays empty) for a library id the server could not have sent or a type that is not browsable
     bool open(const QString &libraryId, const QString &collectionType,
               const QString &libraryName = QString());
@@ -165,6 +173,7 @@ class LibraryItemsModel final : public PagedItemsModel {
                || !m_appliedTerm.isEmpty();
     }
     bool resolvingFacets() const { return hasPendingSelections(); }
+    bool queryTooLong() const { return m_queryTooLong; }
     QStringList pendingTagHashes() const { return m_pendingTagHashes; }
     QStringList pendingRatingHashes() const { return m_pendingRatingHashes; }
     ViewState viewState() const;
@@ -177,9 +186,11 @@ class LibraryItemsModel final : public PagedItemsModel {
     void setSortBy(const QString &key);
     void setSortKey(SortKey key);
     void setDescending(bool descending);
-    // Replaces every filter section; values the query could not carry are dropped, and so are the sections the scope does not offer
+    // Replaces every filter section; values the query could not carry are dropped, and so are the sections the scope does not offer. A state whose query would pass MaxItemsQueryChars is refused (nothing changes) unless it is shorter than the current one, so a view that is already over can always be reduced
     void setFilterState(const LibraryFilterState &state);
     void setFilterValues(const QVariantMap &values);
+    // Whether the query of the open view with `filters` (the format of the `filters` property), with the sort, alphabet letter and search term of now, stays within MaxItemsQueryChars: what the filter editor asks before it lets a value in
+    Q_INVOKABLE bool filtersFit(const QVariantMap &filters) const;
     void setFilter(Filter filter);
     void setGenreIds(const QStringList &ids);
     // Not an edit of the view state: the letter is not kept. Ignored for Random and for a value that is not "#" or a letter
@@ -193,6 +204,8 @@ class LibraryItemsModel final : public PagedItemsModel {
     Q_INVOKABLE void clearFilters();
     // Held back while a saved tag or rating is pending: asks the failed facet source again instead of the list (nothing is sent before it resolves)
     void retry() override;
+    // Asks for the list again from its first page, keeping the query and the view; nothing while it is closed
+    Q_INVOKABLE void reload();
     // With Random sorting, asks for a new page of random items; the filters stay. Nothing otherwise
     Q_INVOKABLE void reshuffle();
 
@@ -215,6 +228,7 @@ class LibraryItemsModel final : public PagedItemsModel {
     void cardLayoutChanged();
     void resolvingFacetsChanged();
     void searchTermChanged();
+    void queryTooLongChanged();
     // The user changed the sort, direction, filters or view options (not an open(), a resolution or prune of values the server no longer lists, the alphabet or a search term)
     void viewStateEdited();
 
@@ -245,6 +259,12 @@ class LibraryItemsModel final : public PagedItemsModel {
     // The pending selections the loaded facet lists can settle: resolved into texts, or dropped when no listed text matches (or the legacy endpoint is missing). Not an edit
     void resolvePendingSelections();
     void onFacetsChanged();
+    // The query of one page of the open view with `filters` (already cleaned), or nothing for a sort key or letter the composer refuses
+    std::optional<ItemQuery> composedQuery(const LibraryFilterState &filters, int start,
+                                           int limit) const;
+    // The encoded length of the longest page request of the view with `filters`, -1 when there is no query
+    int queryCharsOf(const LibraryFilterState &filters) const;
+    void setQueryTooLong(bool tooLong);
     bool assignViewMode(const QString &mode);
     bool assignImageType(const QString &type);
     void refreshFiltered();
@@ -280,6 +300,7 @@ class LibraryItemsModel final : public PagedItemsModel {
     bool m_cardLayout = true;
     // The value `filtered` last had, for its change signal
     bool m_wasFiltered = false;
+    bool m_queryTooLong = false;
     // The typed text, and the normalised term the list was last loaded with (empty when the text is too short)
     QString m_searchTerm;
     QString m_appliedTerm;

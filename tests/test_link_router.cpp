@@ -53,8 +53,7 @@ class TestLinkRouter : public QObject {
             {QStringLiteral("kinefin"), QStringLiteral("--log-level"), uri}));
         QVERIFY(!Kinefin::itemFromActivationArguments(
             {QStringLiteral("kinefin"), QStringLiteral("--profile"), uri}));
-        QVERIFY(!Kinefin::itemFromActivationArguments(
-            {QStringLiteral("kinefin"), uri, uri}));
+        QVERIFY(!Kinefin::itemFromActivationArguments({QStringLiteral("kinefin"), uri, uri}));
         QVERIFY(!Kinefin::itemFromActivationArguments(
             {QStringLiteral("kinefin"), QStringLiteral("jellyfin://item/../admin")}));
         QVERIFY(!Kinefin::itemFromActivationArguments({QStringLiteral("kinefin")}));

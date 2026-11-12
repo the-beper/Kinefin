@@ -27,7 +27,7 @@ class KWalletTokenStore final : public TokenStore {
   private:
     struct Operation {
         enum class Kind { Read, Write, Remove };
-        Kind kind;
+        Kind kind{};
         QString key;
         QString token;
         ReadDone readDone;

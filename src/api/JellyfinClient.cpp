@@ -15,11 +15,10 @@ namespace Kinefin {
 namespace {
 constexpr int MaxResponseBytes = 1'048'576;
 constexpr int MaxPublicRedirects = 3;
-// The longest encoded query of an Items listing: below the 8 KiB request line the server and the usual proxies accept
-constexpr int MaxItemsQueryChars = 7000;
 constexpr int MaxRecommendationCategories = 20;
 constexpr int MaxRecommendationItems = 100;
 constexpr int MaxSuggestions = 100;
+constexpr int MaxUpcomingEpisodes = 100;
 const QString publicSuffix = QStringLiteral("/System/Info/Public");
 
 bool validServerUrl(const QUrl &url)
@@ -330,6 +329,13 @@ bool splitTokenList(const QString &value, QList<QString> *tokens)
             return false;
     }
     return true;
+}
+
+// Qt warns about any POST without a content type, an empty one included
+QNetworkReply *postEmpty(QNetworkAccessManager &network, QNetworkRequest request)
+{
+    request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    return network.post(request, QByteArray());
 }
 } // namespace
 
@@ -882,15 +888,26 @@ bool validListingQuery(const ItemQuery &query)
     }
     return true;
 }
+
+// The wire form of an Items listing query. The server reads a literal '+' as a space: a typed term such as "C++" must reach it as %2B (a space is already %20)
+QString encodedItemsQuery(const ItemQuery &query, const QString &userId)
+{
+    QString encoded = listingQuery(query, userId).toString(QUrl::FullyEncoded);
+    encoded.replace(QLatin1Char('+'), QStringLiteral("%2B"));
+    return encoded;
+}
 } // namespace
+
+int JellyfinClient::itemsQueryChars(const ItemQuery &query) const
+{
+    return encodedItemsQuery(query, m_userId).size();
+}
 
 bool JellyfinClient::fetchItems(const ItemQuery &query, int channel)
 {
     if (m_state != State::Authenticated || !validListingQuery(query))
         return false;
-    // The server reads a literal '+' as a space: a typed term such as "C++" must reach it as %2B (a space is already %20)
-    QString encodedQuery = listingQuery(query, m_userId).toString(QUrl::FullyEncoded);
-    encodedQuery.replace(QLatin1Char('+'), QStringLiteral("%2B"));
+    const QString encodedQuery = encodedItemsQuery(query, m_userId);
     // A bound on the whole URL, refused before the pending request of the channel is touched
     if (encodedQuery.size() > MaxItemsQueryChars)
         return false;
@@ -1253,7 +1270,7 @@ bool JellyfinClient::fetchMovieRecommendations(const QString &parentId, int cate
 
 bool JellyfinClient::fetchSuggestions(const QString &type, int startIndex, int limit, int channel)
 {
-    if (m_state != State::Authenticated || type.isEmpty() || !validKindList(type) || startIndex < -1
+    if (m_state != State::Authenticated || !isValidBaseItemKindToken(type) || startIndex < -1
         || limit < 1 || limit > MaxSuggestions)
         return false;
     const QString family = QStringLiteral("Suggestions");
@@ -1265,6 +1282,8 @@ bool JellyfinClient::fetchSuggestions(const QString &type, int startIndex, int l
     if (startIndex >= 0)
         wire.addQueryItem(QStringLiteral("startIndex"), QString::number(startIndex));
     wire.addQueryItem(QStringLiteral("limit"), QString::number(limit));
+    // The route does not count by default, and the envelope check needs a TotalRecordCount
+    wire.addQueryItem(QStringLiteral("enableTotalRecordCount"), QStringLiteral("true"));
     wire.addQueryItem(QStringLiteral("userId"), m_userId);
     url.setQuery(wire);
     QNetworkReply *reply = m_network.get(requestFor(url, true));
@@ -1285,7 +1304,7 @@ bool JellyfinClient::fetchUpcomingEpisodes(const QString &parentId, int startInd
                                            int channel)
 {
     if (m_state != State::Authenticated || (!parentId.isEmpty() && !isValidJellyfinId(parentId))
-        || startIndex < -1 || limit < 1)
+        || startIndex < -1 || limit < 1 || limit > MaxUpcomingEpisodes)
         return false;
     const QString family = QStringLiteral("Upcoming");
     const QString key = listingKey(family, channel);
@@ -1381,9 +1400,9 @@ bool JellyfinClient::sendSessionPlaystate(const QString &sessionId, const QStrin
         || (command != QLatin1String("Pause") && command != QLatin1String("Unpause")
             && command != QLatin1String("Stop")))
         return false;
-    const QUrl url = endpoint(QStringLiteral("/Sessions/") + sessionId
-                              + QStringLiteral("/Playing/") + command);
-    QNetworkReply *reply = m_network.post(requestFor(url, true), QByteArray());
+    const QUrl url =
+        endpoint(QStringLiteral("/Sessions/") + sessionId + QStringLiteral("/Playing/") + command);
+    QNetworkReply *reply = postEmpty(m_network, requestFor(url, true));
     attach(reply, m_generation, [this, sessionId, command](QNetworkReply *finished) {
         const int status = finished->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         if (status == 401)
@@ -1409,7 +1428,7 @@ bool JellyfinClient::setItemFavorite(const QString &itemId, bool favorite)
     const QNetworkRequest request =
         requestFor(endpoint(QStringLiteral("/UserFavoriteItems/") + itemId), true);
     QNetworkReply *reply = favorite
-                               ? m_network.post(request, QByteArray())
+                               ? postEmpty(m_network, request)
                                : m_network.sendCustomRequest(request, QByteArrayLiteral("DELETE"));
     attach(reply, m_generation, [this, itemId, key, favorite](QNetworkReply *finished) {
         m_favoritePending.remove(key);
@@ -1421,8 +1440,7 @@ bool JellyfinClient::setItemFavorite(const QString &itemId, bool favorite)
         bool valid = finished->error() == QNetworkReply::NoError && status == 204;
         if (status == 200 && finished->error() == QNetworkReply::NoError) {
             QJsonObject data;
-            if (parseObject(finished, &data)
-                && data.value(QStringLiteral("IsFavorite")).isBool()
+            if (parseObject(finished, &data) && data.value(QStringLiteral("IsFavorite")).isBool()
                 && data.value(QStringLiteral("IsFavorite")).toBool() == favorite) {
                 const QJsonValue id = data.value(QStringLiteral("ItemId"));
                 valid = id.isUndefined()
@@ -1453,7 +1471,7 @@ bool JellyfinClient::setItemPlayed(const QString &itemId, bool played)
     url.setQuery(query);
     const QNetworkRequest request = requestFor(url, true);
     QNetworkReply *reply = played
-                               ? m_network.post(request, QByteArray())
+                               ? postEmpty(m_network, request)
                                : m_network.sendCustomRequest(request, QByteArrayLiteral("DELETE"));
     attach(reply, m_generation, [this, itemId, key, played](QNetworkReply *finished) {
         m_playedPending.remove(key);
@@ -1684,8 +1702,7 @@ bool JellyfinClient::fetchMediaSegments(const QString &itemId)
     const quint64 serial = ++m_segmentsSerial;
     QUrl url = endpoint(QStringLiteral("/MediaSegments/") + itemId);
     QUrlQuery query;
-    query.addQueryItem(QStringLiteral("includeSegmentTypes"),
-                       QStringLiteral("Intro,Recap,Outro"));
+    query.addQueryItem(QStringLiteral("includeSegmentTypes"), QStringLiteral("Intro,Recap,Outro"));
     url.setQuery(query);
     QNetworkReply *reply = m_network.get(requestFor(url, true));
     attach(reply, m_generation, [this, itemId, serial](QNetworkReply *finished) {
@@ -1724,7 +1741,6 @@ bool JellyfinClient::fetchMediaSegments(const QString &itemId)
     return true;
 }
 
-
 namespace {
 // The API must never use the access token on an untrusted or redirected URL.
 // Subtitle URLs are supplied solely by MediaSourceSelection after it has
@@ -1732,16 +1748,15 @@ namespace {
 bool allowedPlayerFile(const QUrl &base, const QUrl &url)
 {
     QString prefix = base.path();
-    while (prefix.endsWith(QLatin1Char('/'))) prefix.chop(1);
+    while (prefix.endsWith(QLatin1Char('/')))
+        prefix.chop(1);
     prefix += QStringLiteral("/Videos/");
     return url.isValid() && url.scheme() == base.scheme()
-           && url.host().compare(base.host(), Qt::CaseInsensitive) == 0
-           && url.port() == base.port() && url.userInfo().isEmpty()
-           && !url.hasQuery() && !url.hasFragment()
-           && url.path().startsWith(prefix)
-           && !url.path().contains(QStringLiteral("/../"));
+           && url.host().compare(base.host(), Qt::CaseInsensitive) == 0 && url.port() == base.port()
+           && url.userInfo().isEmpty() && !url.hasQuery() && !url.hasFragment()
+           && url.path().startsWith(prefix) && !url.path().contains(QStringLiteral("/../"));
 }
-}
+} // namespace
 
 bool JellyfinClient::downloadExternalSubtitle(const QUrl &url)
 {
@@ -1749,17 +1764,22 @@ bool JellyfinClient::downloadExternalSubtitle(const QUrl &url)
         || !url.path().contains(QStringLiteral("/Subtitles/")))
         return false;
     const quint64 serial = ++m_subtitleSerial;
-    if (m_subtitleReply) m_subtitleReply->abort();
+    if (m_subtitleReply)
+        m_subtitleReply->abort();
     QNetworkRequest request = requestFor(url, true);
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
                          QNetworkRequest::ManualRedirectPolicy);
     QNetworkReply *reply = m_network.get(request);
     m_subtitleReply = reply;
     attach(reply, m_generation, [this, url, serial](QNetworkReply *finished) {
-        if (serial != m_subtitleSerial) return;
+        if (serial != m_subtitleSerial)
+            return;
         m_subtitleReply.clear();
         const int status = finished->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-        if (status == 401) { invalidateSession(); return; }
+        if (status == 401) {
+            invalidateSession();
+            return;
+        }
         if (status != 200 || finished->error() != QNetworkReply::NoError
             || finished->bytesAvailable() > 1024 * 1024) {
             Q_EMIT externalSubtitleFailed(url);
@@ -1780,16 +1800,19 @@ bool JellyfinClient::fetchTrickplayInfo(const QString &itemId)
     if (m_state != State::Authenticated || !isValidJellyfinId(itemId))
         return false;
     const quint64 serial = ++m_trickplayInfoSerial;
-    QUrl url = endpoint(QStringLiteral("/Users/") + m_userId
-                        + QStringLiteral("/Items/") + itemId);
+    QUrl url = endpoint(QStringLiteral("/Users/") + m_userId + QStringLiteral("/Items/") + itemId);
     QUrlQuery query;
     query.addQueryItem(QStringLiteral("fields"), QStringLiteral("Trickplay"));
     url.setQuery(query);
     QNetworkReply *reply = m_network.get(requestFor(url, true));
     attach(reply, m_generation, [this, itemId, serial](QNetworkReply *finished) {
-        if (serial != m_trickplayInfoSerial) return;
+        if (serial != m_trickplayInfoSerial)
+            return;
         const int status = finished->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-        if (status == 401) { invalidateSession(); return; }
+        if (status == 401) {
+            invalidateSession();
+            return;
+        }
         QJsonObject item;
         if (status == 200 && finished->error() == QNetworkReply::NoError
             && parseObject(finished, &item))
@@ -1802,14 +1825,15 @@ bool JellyfinClient::fetchTrickplayTile(const QString &itemId, const QString &me
                                         int width, int tileIndex)
 {
     if (m_state != State::Authenticated || !isValidJellyfinId(itemId)
-        || !isValidJellyfinId(mediaSourceId) || width < 16 || width > 640
-        || tileIndex < 0 || tileIndex > 100'000)
+        || !isValidJellyfinId(mediaSourceId) || width < 16 || width > 640 || tileIndex < 0
+        || tileIndex > 100'000)
         return false;
     const quint64 serial = ++m_trickplayTileSerial;
-    if (m_trickplayTileReply) m_trickplayTileReply->abort();
-    QUrl url = endpoint(QStringLiteral("/Videos/") + itemId
-                        + QStringLiteral("/Trickplay/") + QString::number(width)
-                        + QLatin1Char('/') + QString::number(tileIndex) + QStringLiteral(".jpg"));
+    if (m_trickplayTileReply)
+        m_trickplayTileReply->abort();
+    QUrl url = endpoint(QStringLiteral("/Videos/") + itemId + QStringLiteral("/Trickplay/")
+                        + QString::number(width) + QLatin1Char('/') + QString::number(tileIndex)
+                        + QStringLiteral(".jpg"));
     QUrlQuery query;
     query.addQueryItem(QStringLiteral("mediaSourceId"), mediaSourceId);
     url.setQuery(query);
@@ -1819,10 +1843,14 @@ bool JellyfinClient::fetchTrickplayTile(const QString &itemId, const QString &me
     QNetworkReply *reply = m_network.get(request);
     m_trickplayTileReply = reply;
     attach(reply, m_generation, [this, itemId, width, tileIndex, serial](QNetworkReply *finished) {
-        if (serial != m_trickplayTileSerial) return;
+        if (serial != m_trickplayTileSerial)
+            return;
         m_trickplayTileReply.clear();
         const int status = finished->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-        if (status == 401) { invalidateSession(); return; }
+        if (status == 401) {
+            invalidateSession();
+            return;
+        }
         if (status != 200 || finished->error() != QNetworkReply::NoError
             || finished->bytesAvailable() > 2 * 1024 * 1024) {
             Q_EMIT trickplayTileFailed(itemId, width, tileIndex);

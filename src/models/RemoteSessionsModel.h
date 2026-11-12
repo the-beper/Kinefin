@@ -10,10 +10,7 @@
 #include <vector>
 
 namespace Kinefin {
-// The sessions the signed-in user may control. Polls only while the Remote page is
-// open; never exposes raw JSON or accepts a session id supplied outside its snapshot.
-// A failed refresh discards stale controls rather than letting them target a device
-// whose permissions or playing state may have changed.
+// The sessions the signed-in user may control. Polls only between open() and close() (the Remote Sessions dialog), never while a reload or a command is under way; never exposes raw JSON or accepts a session id supplied outside its snapshot. A failed refresh discards stale controls rather than letting them target a device whose permissions or playing state may have changed. A reload keeps the rows of the sessions that stay (updated in place, new ones appended, gone ones removed) so a view keeps its items and focus
 class RemoteSessionsModel final : public QAbstractListModel {
     Q_OBJECT
     Q_PROPERTY(Status status READ status NOTIFY statusChanged)
@@ -37,7 +34,7 @@ class RemoteSessionsModel final : public QAbstractListModel {
     };
     static constexpr int MaxSessions = 100;
     static constexpr int MaxTextChars = 128;
-    static constexpr int PollIntervalMs = 20000;
+    static constexpr int PollIntervalMs = 5000;
 
     explicit RemoteSessionsModel(JellyfinClient *client, QObject *parent = nullptr);
 
@@ -76,6 +73,7 @@ class RemoteSessionsModel final : public QAbstractListModel {
 
     void setStatus(Status status);
     void clearRows();
+    void applySessions(std::vector<Session> rows);
     void clear();
     void onSessionsReady(const QJsonArray &sessions);
     void onListingFailed(const QString &family, int status, const QString &reason, int channel);

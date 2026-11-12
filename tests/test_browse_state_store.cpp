@@ -286,14 +286,20 @@ class TestBrowseStateStore : public QObject {
         QVERIFY(crowded->view(kServer, kUser, libraryScope(249)));
     }
 
-    void sizeCapEvicts()
+    void sizeCapEvictsTheOldestViewsFirst()
     {
         Fixture f;
-        QStringList genres;
+        // The worst case of one view: every selection at its cap, which is far more than MaxViews of them could fit in MaxFileBytes
+        ViewState big = state(QStringLiteral("Name"), false, QStringLiteral("All"));
         for (int i = 0; i < BrowseStateStore::MaxGenreIds; ++i)
-            genres.append(hex(i));
-        const ViewState big = state(QStringLiteral("Name"), false, QStringLiteral("All"), genres);
-        constexpr int count = 150;
+            big.genreIds.append(hex(i));
+        for (int i = 0; i < BrowseStateStore::MaxHashes; ++i) {
+            big.tagHashes.append(hash(i));
+            big.ratingHashes.append(hash(1000 + i));
+        }
+        for (int i = 0; i < BrowseStateStore::MaxYears; ++i)
+            big.years.append(BrowseStateStore::MinYear + i);
+        constexpr int count = BrowseStateStore::MaxViews;
         {
             auto store = f.open();
             for (int i = 0; i < count; ++i)
@@ -304,10 +310,16 @@ class TestBrowseStateStore : public QObject {
         auto store = f.open();
         QVERIFY(!store->view(kServer, kUser, libraryScope(0)));
         QVERIFY(holds(*store, kServer, kUser, libraryScope(count - 1), big));
+        // The byte cap, not MaxViews, is what binds: the views kept are exactly the newest ones, without a gap
         int kept = 0;
-        for (int i = 0; i < count; ++i)
-            kept += store->view(kServer, kUser, libraryScope(i)).has_value();
-        QVERIFY(kept > 0 && kept < count);
+        bool seenKept = false;
+        for (int i = 0; i < count; ++i) {
+            const bool has = store->view(kServer, kUser, libraryScope(i)).has_value();
+            kept += has;
+            QVERIFY2(has || !seenKept, "a newer view was dropped before an older one");
+            seenKept = seenKept || has;
+        }
+        QVERIFY(kept > 0 && kept < count / 2);
     }
 
     void oversizedDeletedUnread()
@@ -551,7 +563,7 @@ class TestBrowseStateStore : public QObject {
         QVERIFY(holds(*store, kServer, kUser, QStringLiteral("tvshows/episodes"), other));
         // The defaults are what a view starts from
         const ViewState defaults;
-        QCOMPARE(defaults.sortKey, QStringLiteral("Name"));
+        QCOMPARE(defaults.sortKey, QStringLiteral("SortName"));
         QCOMPARE(defaults.viewMode, QStringLiteral("grid"));
         QCOMPARE(defaults.imageType, QStringLiteral("Primary"));
         QCOMPARE(defaults.episodeKind, QStringLiteral("All"));

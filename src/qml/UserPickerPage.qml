@@ -13,6 +13,9 @@ Kirigami.ScrollablePage {
 
     required property ConnectionController connection
 
+    // The row toolbar is ToolBar everywhere (Main.qml): the pre-signin screens keep their identity in the top bar instead
+    globalToolBarStyle: Kirigami.ApplicationHeaderStyle.None
+
     // `ConnectionController::users` entries (`id`, `name`, `imageUrl`, `remembered`, `askPassword`) carry server metadata, rendered as plain text; the last entry stands for Add User
     readonly property var entries: connection.users.concat([{ id: "", name: "", imageUrl: "", remembered: true, askPassword: false, add: true }])
 

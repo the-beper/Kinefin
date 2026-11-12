@@ -34,9 +34,18 @@ step "Build and tests"
 # reuse lint must not have to cover, and this checkout runs without git, so no
 # ignore rule could ever hide it. Point KINEFIN_BUILD_DIR elsewhere to override.
 bdir=${KINEFIN_BUILD_DIR:-/buildtmp/check}
-cmake -S . -B "$bdir" -G Ninja -DBUILD_TESTING=ON
+# ccache is optional (an older image or a host without it builds as before); its cache sits next to the build tree, outside the checkout
+set --
+if command -v ccache >/dev/null 2>&1; then
+    export CCACHE_DIR="${CCACHE_DIR:-/buildtmp/ccache}"
+    set -- -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+fi
+cmake -S . -B "$bdir" -G Ninja -DBUILD_TESTING=ON "$@"
 cmake --build "$bdir"
-ctest --test-dir "$bdir" --output-on-failure
+if command -v ccache >/dev/null 2>&1; then ccache -s; fi
+jobs=$(nproc)
+[ "$jobs" -le 8 ] || jobs=8
+ctest --test-dir "$bdir" --output-on-failure -j "$jobs"
 
 step "qmllint"
 # Linted through the module's own target, so the module's C++ types resolve; a QML file nobody registers would escape it, so every file under src/qml must be listed in CMakeLists.txt.

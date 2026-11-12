@@ -775,7 +775,8 @@ class TestLibrarySubtabController : public QObject {
         QTRY_COMPARE(f.tabs.status(), S::Ready);
 
         QSet<int> channels;
-        for (QSignalSpy *spy : {&items, &recommendations, &suggestions, &upcoming, &studios}) {
+        for (const QSignalSpy *spy :
+             {&items, &recommendations, &suggestions, &upcoming, &studios}) {
             for (const QList<QVariant> &args : *spy)
                 channels.insert(args.constLast().toInt());
         }

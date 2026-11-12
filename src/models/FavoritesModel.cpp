@@ -264,10 +264,14 @@ void FavoritesModel::requestNext()
         query.sortOrder = QStringLiteral("Ascending");
         query.startIndex = library.offset;
         query.limit = PageSize;
+        const quint64 generation = m_generation;
         m_pending = pick;
-        m_sentGeneration = m_generation;
+        m_sentGeneration = generation;
         m_inFlight = true;
         if (m_client->fetchItems(query, Channel))
+            return;
+        // A refusal that was reported through listingFailed already failed this library and went on with the scan
+        if (!m_inFlight || m_generation != generation || m_pending != pick)
             return;
         m_inFlight = false;
         failLibrary(pick);
@@ -341,6 +345,11 @@ void FavoritesModel::onItemsReady(const QJsonArray &items, int total, int channe
     library.offset += int(items.size());
     library.total = total;
     library.done = library.offset >= total;
+    // A server that repeats pages under a huge total never reaches its end: a library is read to MaxItems at most, which is more than the snapshot can hold anyway
+    if (!library.done && library.offset >= MaxItems) {
+        library.done = true;
+        m_capRejected = true;
+    }
     m_next = (index + 1) % int(m_libraries.size());
     Q_EMIT progressChanged();
     requestNext();

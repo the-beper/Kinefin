@@ -6,7 +6,7 @@ import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 import org.kde.kirigamiaddons.components as Components
 
-// The top bar: the main menu at the left, the Home, Movies and TV Shows tabs in the middle (a type tab only while the server has a library of it), and search, favorites, queue and the account menu at the right. The width decides the mode: Wide from 36 grid units (labelled tabs, wide search box), Medium from 24 (icon-only tabs, narrow box), Compact below 24 (search, favorites and queue fold into the main menu)
+// The top bar: the main menu at the left, the Home, Movies and Shows tabs in the middle (a type tab only while the server has a library of it), and search, favorites, queue and the account menu at the right. The width decides the mode: Wide from 36 grid units (labelled tabs, wide search box), Medium from 24 (icon-only tabs, narrow box), Compact below 24 (search, favorites and queue fold into the main menu)
 Item {
     id: root
     objectName: "shellHeader"
@@ -40,20 +40,38 @@ Item {
         onUpdateAvailable: (version, releaseUrl) => {
             if (!root.updateChecksEnabled)
                 return;
-            root.manualUpdateCheck = false;
             updateDialog.version = version;
             updateDialog.releaseUrl = releaseUrl;
-            updateNotificationTimer.restart();
+            if (!root.manualUpdateCheck) {
+                updateNotificationTimer.restart();
+                return;
+            }
+            // The user asked for this check: the result shows where they are, with no timer that could open a dialog under the pointer
+            root.manualUpdateCheck = false;
+            updateNotificationTimer.stop();
+            if (aboutDialog.opened) {
+                aboutDialog.updateVersion = version;
+                aboutDialog.updateStatus = "available";
+            } else {
+                updateDialog.open();
+            }
         }
+        // The result of a manual check shows in the About dialog while it is open, else as a notification
         onUpToDate: {
-            if (root.manualUpdateCheck)
-                shell.showPassiveNotification(i18n("Kinefin is up to date"));
+            if (root.manualUpdateCheck) {
+                aboutDialog.updateStatus = "upToDate";
+                if (!aboutDialog.opened)
+                    shell.showPassiveNotification(i18n("Kinefin is up to date"));
+            }
             root.manualUpdateCheck = false;
         }
         onCheckFailed: {
-            // An automatic check without network access must be silent.
-            if (root.manualUpdateCheck)
-                shell.showPassiveNotification(i18n("Could not check for updates. Check the internet connection"));
+            // An automatic check without network access must be silent
+            if (root.manualUpdateCheck) {
+                aboutDialog.updateStatus = "failed";
+                if (!aboutDialog.opened)
+                    shell.showPassiveNotification(i18n("Could not check for updates. Check the internet connection"));
+            }
             root.manualUpdateCheck = false;
         }
     }
@@ -66,13 +84,17 @@ Item {
         onTriggered: updateChecker.check()
     }
 
+    // The delay of an update found by the automatic check before its dialog opens
     Timer {
         id: updateNotificationTimer
         interval: 3000
         repeat: false
         onTriggered: {
-            if (root.updateChecksEnabled)
-                updateDialog.open();
+            if (!root.updateChecksEnabled)
+                return;
+            // Never two dialogs at once
+            aboutDialog.close();
+            updateDialog.open();
         }
     }
 
@@ -84,12 +106,17 @@ Item {
             root.updateChecksEnabled = root.shell.settings.value("main", "checkForUpdates");
             if (!root.updateChecksEnabled) {
                 root.manualUpdateCheck = false;
+                aboutDialog.updateStatus = "";
                 updateChecker.cancel();
                 updateNotificationTimer.stop();
                 updateDialog.close();
             }
         }
     }
+
+    // The Home page on a wide window shows Refresh in the bar, anywhere else it is a menu entry
+    readonly property bool refreshFitsBar: signedIn && shell.width >= Kirigami.Units.gridUnit * 48
+    readonly property bool refreshInBar: refreshFitsBar && shell.pageStack.currentItem?.objectName === "homePage"
 
     implicitHeight: bar.implicitHeight
 
@@ -126,7 +153,7 @@ Item {
     // The list the box searches: the model of the type tab at the root of the stack; on any other page the box feeds the global search
     readonly property var localModel: {
         // The user preferences and Favorites pages opened over a tab are no part of it: the box searches the whole server there
-        if (shell.globalSearchPage || shell.currentSection === "remote")
+        if (shell.globalSearchPage)
             return null;
         switch (shell.rootTab) {
         case "movies":
@@ -142,10 +169,33 @@ Item {
         return localModel ? localModel.searchTerm : connection.search.term;
     }
 
+    // Runs `action` at once, or once the user settled the unsaved preferences draft that the page above would lose
+    function afterUnsavedSettled(action) {
+        if (!shell.askBeforeLeaving(action))
+            action();
+    }
+
     // The box holds the keyboard while the term is being typed: the shell does not move the focus while a keystroke of its own opens the search page
     readonly property bool searchFieldHasFocus: searchField.activeFocus
 
     // First in the file: siblings take the Tab order by declaration, so the menu button precedes the tab and the right cluster
+    QQC2.ToolButton {
+        id: headerBackButton
+        objectName: "headerBackButton"
+        visible: shell.pageStack.currentItem?.objectName === "settingsPage"
+        z: 2
+        anchors.left: parent.left
+        anchors.leftMargin: Kirigami.Units.smallSpacing
+        anchors.verticalCenter: parent.verticalCenter
+        text: i18nc("@action:button", "Back")
+        icon.name: "go-previous"
+        display: QQC2.AbstractButton.IconOnly
+        QQC2.ToolTip.text: text
+        QQC2.ToolTip.visible: hovered
+        QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
+        onClicked: shell.pageStack.goBack()
+    }
+
     QQC2.ToolButton {
         id: menuButton
         objectName: "mainMenuButton"
@@ -153,7 +203,7 @@ Item {
         // The tab bar fills the header and is declared after this button: without a z above it the bar covers the button, which neither shows nor takes the clicks (the Tab order follows the declaration, not z)
         z: 1
         anchors {
-            left: parent.left
+            left: headerBackButton.visible ? headerBackButton.right : parent.left
             leftMargin: Kirigami.Units.smallSpacing
             verticalCenter: parent.verticalCenter
         }
@@ -161,8 +211,11 @@ Item {
         icon.name: "open-menu-symbolic"
         // Only the icon; the text is for screen readers
         display: QQC2.AbstractButton.IconOnly
+        QQC2.ToolTip.text: text
+        QQC2.ToolTip.visible: hovered
+        QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
         // The menu marks where its entries lead while one of them shows
-        down: shell.currentSection === "settings" || shell.currentSection === "about" || shell.currentSection === "remote"
+        down: shell.currentSection === "settings" || shell.currentSection === "about"
         onClicked: mainMenu.popup(menuButton, 0, menuButton.height)
     }
 
@@ -171,10 +224,21 @@ Item {
         id: bar
 
         anchors.fill: parent
-        leftPadding: menuButton.width + Kirigami.Units.smallSpacing * 2
-        rightPadding: rightCluster.width + Kirigami.Units.smallSpacing * 2
+        leftPadding: menuButton.width + (headerBackButton.visible ? headerBackButton.width : 0)
+                     + Kirigami.Units.smallSpacing * 3
+        // The room of the Refresh button stays reserved on the other pages of a wide window: the tabs keep their width while it comes and goes
+        rightPadding: rightCluster.width + (root.refreshFitsBar && !root.refreshInBar ? refreshButton.implicitWidth + rightCluster.spacing : 0)
+                      + Kirigami.Units.smallSpacing * 2
 
         actions: [homeAction, moviesAction, tvShowsAction]
+
+        // The bar's own tab shortcuts neither wrap nor follow a page above the tabs, and two shortcuts with one sequence are ambiguous so neither fires: the shell's take over all of their sequences
+        Component.onCompleted: {
+            for (const child of bar.contentData) {
+                if (child instanceof Shortcut)
+                    child.enabled = false;
+            }
+        }
 
         delegate: Kirigami.NavigationTabButton {
             id: tab
@@ -253,7 +317,7 @@ Item {
                 case "movies":
                     return i18nc("@info:placeholder", "Search in Movies");
                 case "tvshows":
-                    return i18nc("@info:placeholder", "Search in TV Shows");
+                    return i18nc("@info:placeholder", "Search in Shows");
                 }
                 return i18nc("@info:placeholder", "Search");
             }
@@ -279,6 +343,20 @@ Item {
         }
 
         QQC2.ToolButton {
+            id: refreshButton
+            objectName: "headerRefreshButton"
+            Layout.alignment: Qt.AlignVCenter
+            visible: root.refreshInBar
+            text: refreshAction.text
+            icon.name: refreshAction.icon.name
+            display: QQC2.AbstractButton.IconOnly
+            QQC2.ToolTip.text: text
+            QQC2.ToolTip.visible: hovered
+            QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
+            onClicked: refreshAction.trigger()
+        }
+
+        QQC2.ToolButton {
             objectName: "favoritesButton"
 
             Layout.alignment: Qt.AlignVCenter
@@ -286,6 +364,9 @@ Item {
             text: i18nc("@action:button", "Favorites")
             icon.name: "favorite"
             display: QQC2.AbstractButton.IconOnly
+            QQC2.ToolTip.text: text
+            QQC2.ToolTip.visible: hovered
+            QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
             enabled: root.signedIn
             down: shell.currentSection === "favorites"
             onClicked: shell.openFavorites()
@@ -299,6 +380,9 @@ Item {
             text: i18nc("@action:button", "Queue")
             icon.name: "view-media-playlist"
             display: QQC2.AbstractButton.IconOnly
+            QQC2.ToolTip.text: text
+            QQC2.ToolTip.visible: hovered
+            QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
             enabled: root.signedIn
             down: shell.currentSection === "queue"
             onClicked: shell.openSection("queuePage", "QueuePage.qml", { connection: shell.connection })
@@ -309,6 +393,30 @@ Item {
             objectName: "accountButton"
 
             Layout.alignment: Qt.AlignVCenter
+            // The desktop style draws the icon and sizes the button in its own background: with this one the button would be empty and 0 x 0, so the icon and the size are given here
+            contentItem: Item {
+                implicitWidth: Kirigami.Units.iconSizes.medium
+                implicitHeight: Kirigami.Units.iconSizes.medium
+                Kirigami.Icon {
+                    anchors.centerIn: parent
+                    width: Kirigami.Units.iconSizes.smallMedium
+                    height: width
+                    source: accountButton.icon.name
+                    visible: !accountButton.hasAvatar
+                }
+            }
+            // The same hit area as the other header buttons, with the ring and the avatar centred in it
+            implicitWidth: menuButton.implicitHeight
+            implicitHeight: menuButton.implicitHeight
+            padding: 0
+            // The ring thickens while the keyboard focus is on the button
+            background: Rectangle {
+                radius: width / 2
+                color: Qt.alpha(Kirigami.Theme.highlightColor, accountButton.down ? 0.30 : 0.14)
+                border.width: accountButton.visualFocus ? 3 : 2
+                border.color: Kirigami.Theme.highlightColor
+                Behavior on color { ColorAnimation { duration: Kirigami.Units.shortDuration } }
+            }
             // The avatar of the user replaces the icon; the name is for screen readers only
             readonly property bool hasAvatar: root.currentUser !== null && root.currentUser.imageUrl.toString().length > 0
             // The text stays static: it feeds the tooltip, which must never carry the remote user name
@@ -318,12 +426,15 @@ Item {
             icon.name: hasAvatar ? "" : "im-user"
             display: QQC2.AbstractButton.IconOnly
             visible: root.signedIn || root.serverChosen
+            QQC2.ToolTip.text: text
+            QQC2.ToolTip.visible: hovered
+            QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
             onClicked: accountMenu.popup(accountButton, 0, accountButton.height)
 
             Components.Avatar {
                 objectName: "accountAvatar"
                 anchors.centerIn: parent
-                width: Kirigami.Units.iconSizes.smallMedium
+                width: Kirigami.Units.iconSizes.medium
                 height: width
                 visible: accountButton.hasAvatar
                 Accessible.ignored: true
@@ -384,7 +495,7 @@ Item {
         onTriggered: shell.goHome()
     }
 
-    // Ctrl+2 and Ctrl+3 follow the position of the visible tabs: a missing Movies tab moves TV Shows to Ctrl+2
+    // Ctrl+2 and Ctrl+3 follow the position of the visible tabs: a missing Movies tab moves Shows to Ctrl+2
     Kirigami.Action {
         id: moviesAction
         objectName: "moviesTabAction"
@@ -402,7 +513,7 @@ Item {
         id: tvShowsAction
         objectName: "tvShowsTabAction"
 
-        text: i18nc("@title:tab", "TV Shows")
+        text: i18nc("@title:tab", "Shows")
         tooltip: root.wide ? "" : text
         icon.name: "video-television"
         visible: root.connection.showLibraries.length > 0
@@ -412,16 +523,17 @@ Item {
         onTriggered: shell.openTab("tvshows")
     }
 
-    // PageUp/PageDown are the KDE tab navigation conventions. They work even
-    // when a detail page is on top; absent Movies/TV types are skipped.
+    // PageUp/PageDown are the KDE tab navigation conventions, the other sequences are the ones of Kirigami's tab bar. They work even when a detail page is on top; absent Movies/TV types are skipped
     Shortcut {
-        sequence: "Ctrl+PgUp"
+        objectName: "previousTabShortcut"
+        sequences: ["Ctrl+PgUp", "Ctrl+[", "Ctrl+Shift+Tab"]
         context: Qt.WindowShortcut
         enabled: root.signedIn
         onActivated: root.switchRelativeTab(-1)
     }
     Shortcut {
-        sequence: "Ctrl+PgDown"
+        objectName: "nextTabShortcut"
+        sequences: ["Ctrl+PgDown", "Ctrl+]", "Ctrl+Tab"]
         context: Qt.WindowShortcut
         enabled: root.signedIn
         onActivated: root.switchRelativeTab(1)
@@ -452,19 +564,24 @@ Item {
 
         text: i18nc("@action:inmenu", "About Kinefin")
         icon.name: "help-about"
-        onTriggered: shell.openSection("aboutPage", "AboutPage.qml", {})
+        onTriggered: aboutDialog.open()
     }
+    // No shortcut: F5 belongs to the page actions, and a second one makes both ambiguous
     Kirigami.Action {
-        id: updateCheckAction
-        objectName: "updateCheckAction"
+        id: refreshAction
+        objectName: "refreshAction"
 
-        text: i18nc("@action:inmenu", "Check for Updates")
-        icon.name: "software-update-available"
-        visible: root.updateChecksEnabled
-        enabled: !updateChecker.checking
+        text: i18nc("@action:inmenu", "Refresh")
+        icon.name: "view-refresh"
+        visible: root.signedIn
+        // Only a page that has something to refresh takes it: Home reloads the libraries, the others do it themselves
+        enabled: typeof shell.pageStack.currentItem?.refreshPage === "function" || shell.pageStack.currentItem?.objectName === "homePage"
         onTriggered: {
-            root.manualUpdateCheck = true;
-            updateChecker.check();
+            const page = shell.pageStack.currentItem;
+            if (typeof page?.refreshPage === "function")
+                page.refreshPage();
+            else if (page?.objectName === "homePage")
+                root.connection.reloadLibraries();
         }
     }
     Kirigami.Action {
@@ -514,13 +631,13 @@ Item {
     }
 
     Kirigami.Action {
-        id: remoteAction
-        objectName: "remoteAction"
+        id: remoteSessionsAction
+        objectName: "remoteSessionsAction"
 
-        text: i18nc("@action:inmenu", "Remote")
-        icon.name: "network-wireless"
+        text: i18nc("@action:inmenu", "Remote Sessions")
+        icon.name: "input-tvremote"
         visible: root.signedIn
-        onTriggered: shell.openSection("remotePage", "RemotePage.qml", { connection: shell.connection })
+        onTriggered: remoteSessionsDialog.open()
     }
 
     // The account menu: what a session can lose, and what a chosen server can still be left for
@@ -542,7 +659,7 @@ Item {
         tooltip: i18nc("@info:tooltip", "Choose another user without signing out")
         icon.name: "system-switch-user"
         visible: root.signedIn
-        onTriggered: root.connection.switchUser()
+        onTriggered: root.afterUnsavedSettled(() => root.connection.switchUser())
     }
     Kirigami.Action {
         id: signOutAction
@@ -552,8 +669,8 @@ Item {
         tooltip: i18nc("@info:tooltip", "Remove this user's saved session from this system")
         icon.name: "system-log-out"
         visible: root.signedIn
-        // Signing out removes the saved session and queue of the user, so it asks first
-        onTriggered: signOutDialog.openFor(root.currentUser ? root.currentUser.name : "")
+        // Signing out removes the saved session and queue of the user, so it asks first (about unsaved preferences, then about the sign-out)
+        onTriggered: root.afterUnsavedSettled(() => signOutDialog.openFor(root.currentUser ? root.currentUser.name : ""))
     }
     Kirigami.Action {
         id: switchServerAction
@@ -562,12 +679,23 @@ Item {
         text: i18nc("@action:inmenu Goes back to the list of servers", "Switch Server")
         icon.name: "network-server"
         visible: root.serverChosen
-        onTriggered: root.connection.cancel()
+        onTriggered: root.afterUnsavedSettled(() => root.connection.cancel())
     }
 
     QQC2.Menu {
         id: mainMenu
         objectName: "mainMenu"
+        // Reserve a separate column for displayed shortcuts; otherwise the
+        // keyboard-shortcuts entry overlaps its own Ctrl+Shift+/ annotation.
+        implicitWidth: Math.min(Kirigami.Units.gridUnit * 23,
+                                Math.max(Kirigami.Units.gridUnit * 16,
+                                         shell.width - Kirigami.Units.largeSpacing * 2))
+
+        QQC2.MenuItem {
+            objectName: "menuRefreshItem"
+            visible: root.signedIn && !root.refreshInBar
+            action: refreshAction
+        }
 
         // In Compact mode the right cluster hides and its three actions fold in here, in the order of the bar
         QQC2.MenuItem {
@@ -586,7 +714,21 @@ Item {
             action: compactQueueAction
         }
         QQC2.MenuSeparator {
-            visible: root.compact
+            visible: root.compact || (root.signedIn && !root.refreshInBar)
+        }
+
+        QQC2.MenuItem {
+            objectName: "menuRemoteItem"
+            visible: root.signedIn
+            action: remoteSessionsAction
+        }
+        QQC2.MenuItem {
+            objectName: "menuAdminItem"
+            visible: root.signedIn
+            action: adminDashboardAction
+        }
+        QQC2.MenuSeparator {
+            visible: root.signedIn
         }
 
         QQC2.MenuItem {
@@ -600,21 +742,6 @@ Item {
         QQC2.MenuItem {
             objectName: "menuAboutItem"
             action: aboutAction
-        }
-        QQC2.MenuItem {
-            objectName: "menuUpdateItem"
-            visible: root.updateChecksEnabled
-            action: updateCheckAction
-        }
-        QQC2.MenuItem {
-            objectName: "menuRemoteItem"
-            visible: root.signedIn
-            action: remoteAction
-        }
-        QQC2.MenuItem {
-            objectName: "menuAdminItem"
-            visible: root.signedIn
-            action: adminDashboardAction
         }
     }
 
@@ -697,6 +824,8 @@ Item {
         }
 
         title: i18nc("@title:window", "Sign Out")
+        preferredWidth: Kirigami.Units.gridUnit * 26
+        maximumWidth: Math.min(Kirigami.Units.gridUnit * 28, shell.width - Kirigami.Units.largeSpacing * 2)
         standardButtons: Kirigami.Dialog.Cancel
         customFooterActions: [
             Kirigami.Action {
@@ -714,9 +843,39 @@ Item {
             Layout.fillWidth: true
             wrapMode: Text.Wrap
             textFormat: Text.PlainText
-            text: signOutDialog.userName.length > 0 ? i18nc("@info %1 is a user name", "Sign out %1? The saved session and queue of this user are removed from this system. The account on the server is not changed", signOutDialog.userName) : i18nc("@info", "Sign out? The saved session and queue of this user are removed from this system. The account on the server is not changed")
+            text: signOutDialog.userName.length > 0
+                ? i18nc("@info %1 is a user name", "Sign out %1? Saved credentials and the local queue will be removed. The server account stays unchanged.", signOutDialog.userName)
+                : i18nc("@info", "Sign out? Saved credentials and the local queue will be removed. The server account stays unchanged.")
         }
     }
+
+    AboutDialog {
+        id: aboutDialog
+        objectName: "aboutDialog"
+
+        updateChecksEnabled: root.updateChecksEnabled
+        checking: updateChecker.checking
+        onCheckForUpdatesRequested: {
+            root.manualUpdateCheck = true;
+            updateStatus = "checking";
+            updateChecker.check();
+        }
+        onUpdateDetailsRequested: {
+            close();
+            updateDialog.open();
+        }
+    }
+
+    RemoteSessionsDialog {
+        id: remoteSessionsDialog
+        objectName: "remoteSessionsDialog"
+
+        connection: root.connection
+        maximumWidth: Math.min(Kirigami.Units.gridUnit * 34, root.shell.width - Kirigami.Units.largeSpacing * 2)
+    }
+
+    // Opening while the startup layout runs leaves a y binding loop in Kirigami.Dialog
+    function showAboutDialog() { Qt.callLater(aboutDialog.open); }
 
     ShortcutsDialog {
         id: shortcutsDialog

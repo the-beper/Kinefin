@@ -6,6 +6,7 @@
 #include <QSet>
 
 #include <algorithm>
+#include <iterator>
 #include <utility>
 
 namespace Kinefin {
@@ -27,7 +28,10 @@ RemoteSessionsModel::RemoteSessionsModel(JellyfinClient *client, QObject *parent
     : QAbstractListModel(parent), m_client(client)
 {
     m_pollTimer.setInterval(PollIntervalMs);
-    connect(&m_pollTimer, &QTimer::timeout, this, &RemoteSessionsModel::reload);
+    connect(&m_pollTimer, &QTimer::timeout, this, [this] {
+        if (!commandPending())
+            reload();
+    });
     if (!m_client)
         return;
     connect(m_client, &JellyfinClient::sessionsReady, this, &RemoteSessionsModel::onSessionsReady);
@@ -144,18 +148,76 @@ void RemoteSessionsModel::onSessionsReady(const QJsonArray &sessions)
         session.client = plainLine(item.value(QStringLiteral("Client")));
         session.user = plainLine(item.value(QStringLiteral("UserName")));
         session.title = plainLine(now.value(QStringLiteral("Name")));
-        session.playing = !now.isEmpty() && isValidJellyfinId(now.value(QStringLiteral("Id")).toString());
+        session.playing =
+            !now.isEmpty() && isValidJellyfinId(now.value(QStringLiteral("Id")).toString());
         session.paused = session.playing && playState.value(QStringLiteral("IsPaused")).toBool();
-        session.controllable = session.playing
-                               && item.value(QStringLiteral("SupportsMediaControl")).toBool();
+        session.controllable =
+            session.playing && item.value(QStringLiteral("SupportsMediaControl")).toBool();
         rows.push_back(std::move(session));
     }
-    beginResetModel();
-    m_rows = std::move(rows);
-    endResetModel();
-    Q_EMIT countChanged();
+    applySessions(std::move(rows));
     m_truncated = truncated;
     setStatus(Ready);
+}
+
+// Diff by session id, never a reset: a view keeps its items (and the keyboard focus inside them) across a poll. Rows that stay keep their position even when the server reorders them, new sessions are appended in the order of the answer, gone ones are removed
+void RemoteSessionsModel::applySessions(std::vector<Session> rows)
+{
+    const auto sameId = [](const QString &a, const QString &b) {
+        return a.compare(b, Qt::CaseInsensitive) == 0;
+    };
+    const auto isIn = [&sameId](const std::vector<Session> &list, const QString &id) {
+        return std::any_of(list.cbegin(), list.cend(),
+                           [&](const Session &row) { return sameId(row.id, id); });
+    };
+    const int before = int(m_rows.size());
+    for (int i = int(m_rows.size()) - 1; i >= 0; --i) {
+        if (isIn(rows, m_rows[size_t(i)].id))
+            continue;
+        beginRemoveRows({}, i, i);
+        m_rows.erase(m_rows.begin() + i);
+        endRemoveRows();
+    }
+    for (int i = 0; i < int(m_rows.size()); ++i) {
+        Session &kept = m_rows[size_t(i)];
+        const auto fresh = std::find_if(rows.cbegin(), rows.cend(), [&](const Session &row) {
+            return sameId(row.id, kept.id);
+        });
+        QList<int> roles;
+        if (kept.id != fresh->id)
+            roles << SessionIdRole;
+        if (kept.device != fresh->device)
+            roles << DeviceNameRole;
+        if (kept.client != fresh->client)
+            roles << ClientNameRole;
+        if (kept.user != fresh->user)
+            roles << UserNameRole;
+        if (kept.title != fresh->title)
+            roles << NowPlayingRole;
+        if (kept.playing != fresh->playing)
+            roles << PlayingRole;
+        if (kept.paused != fresh->paused)
+            roles << PausedRole;
+        if (kept.controllable != fresh->controllable)
+            roles << CanControlRole;
+        if (roles.isEmpty())
+            continue;
+        kept = *fresh;
+        Q_EMIT dataChanged(index(i), index(i), roles);
+    }
+    std::vector<Session> added;
+    for (Session &row : rows) {
+        if (!isIn(m_rows, row.id))
+            added.push_back(std::move(row));
+    }
+    if (!added.empty()) {
+        const int first = int(m_rows.size());
+        beginInsertRows({}, first, first + int(added.size()) - 1);
+        std::move(added.begin(), added.end(), std::back_inserter(m_rows));
+        endInsertRows();
+    }
+    if (int(m_rows.size()) != before)
+        Q_EMIT countChanged();
 }
 
 void RemoteSessionsModel::onListingFailed(const QString &family, int, const QString &, int channel)
@@ -232,7 +294,7 @@ QVariant RemoteSessionsModel::data(const QModelIndex &index, int role) const
 
 QHash<int, QByteArray> RemoteSessionsModel::roleNames() const
 {
-    return {{SessionIdRole, "sessionId"},  {DeviceNameRole, "deviceName"},
+    return {{SessionIdRole, "sessionId"},   {DeviceNameRole, "deviceName"},
             {ClientNameRole, "clientName"}, {UserNameRole, "userName"},
             {NowPlayingRole, "nowPlaying"}, {PlayingRole, "playing"},
             {PausedRole, "paused"},         {CanControlRole, "canControl"}};

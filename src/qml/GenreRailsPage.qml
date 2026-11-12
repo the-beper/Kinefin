@@ -31,9 +31,7 @@ Kirigami.ScrollablePage {
             const libraryPage = page.libraryPageBelow();
             if (!libraryPage)
                 return;
-            // The rail ignores the grid's filter: the grid starts from the genre alone
-            libraryPage.model.filter = LibraryItemsModel.All;
-            libraryPage.model.genreIds = [genreId];
+            libraryPage.showGenre(genreId);
             page.Window.window.pageStack.pop(libraryPage);
         }
     }

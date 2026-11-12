@@ -174,7 +174,7 @@ void SearchModel::resetGroups()
     }
 }
 
-int SearchModel::groupFor(int channel) const
+int SearchModel::groupFor(int channel)
 {
     const int group = channel - FirstChannel;
     return group >= 0 && group < GroupCount ? group : -1;

@@ -456,6 +456,16 @@ void LibrarySubtabController::retry()
     }
 }
 
+void LibrarySubtabController::reload()
+{
+    if (!m_open || !m_started || m_current == Main)
+        return;
+    if (m_current == Networks && !m_networkId.isEmpty())
+        m_showList.reload();
+    else
+        show(m_current);
+}
+
 void LibrarySubtabController::retryList(LibraryItemsModel *list)
 {
     if (list->status() == PagedItemsModel::Failed || list->pageError())
@@ -606,7 +616,7 @@ LibraryItemsModel *LibrarySubtabController::activeList()
     return nullptr;
 }
 
-void LibrarySubtabController::forwardEdit(LibraryItemsModel *list)
+void LibrarySubtabController::forwardEdit(const LibraryItemsModel *list)
 {
     if (activeList() == list)
         Q_EMIT listViewStateEdited();

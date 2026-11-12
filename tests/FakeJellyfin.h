@@ -144,6 +144,8 @@ class FakeJellyfin {
     QByteArray lastUserImageRoute;
     QByteArray lastUserImageAuth;
 
+    int publicInfoRequests = 0;
+    QByteArray lastPublicInfoAuth;
     bool invalidIdentity = false;
     bool denyLogin = false;
     bool denyViews = false;
@@ -336,6 +338,9 @@ class FakeJellyfin {
         return m_wsConnections.isEmpty() ? nullptr : m_wsConnections.constLast();
     }
 
+    // How many replies are being held; a test waits for it before releasing, as the request may not have reached the server yet
+    qsizetype heldCount() const { return m_held.size(); }
+
     void releaseHeld()
     {
         const auto held = m_held;
@@ -459,7 +464,7 @@ class FakeJellyfin {
             .toJson(QJsonDocument::Compact);
     }
 
-    QByteArray generatedItemsBody(const QByteArray &route, int total, int available) const
+    static QByteArray generatedItemsBody(const QByteArray &route, int total, int available)
     {
         const QUrlQuery query(QUrl(QString::fromUtf8(route)));
         const int start = query.queryItemValue(QStringLiteral("startIndex")).toInt();
@@ -566,6 +571,8 @@ class FakeJellyfin {
             return;
         }
         if (method == "GET" && route.endsWith("/System/Info/Public")) {
+            ++publicInfoRequests;
+            lastPublicInfoAuth = authorization;
             if (redirectPublicOffHost) {
                 respond(socket, 302, {},
                         "Location: https://unexpected.invalid/System/Info/Public\r\n");
@@ -829,8 +836,7 @@ class FakeJellyfin {
             respond(socket, 204, {});
             return;
         }
-        if ((method == "POST" || method == "DELETE")
-            && route.contains("/UserFavoriteItems/")) {
+        if ((method == "POST" || method == "DELETE") && route.contains("/UserFavoriteItems/")) {
             favoriteWrites.append({method, route, authorization});
             if (holdFavoriteWrites) {
                 m_held.append(socket);
@@ -866,8 +872,7 @@ class FakeJellyfin {
             }
             return;
         }
-        if ((method == "POST" || method == "DELETE")
-            && route.contains("/UserPlayedItems/")) {
+        if ((method == "POST" || method == "DELETE") && route.contains("/UserPlayedItems/")) {
             playedWrites.append({method, route, authorization});
             if (holdPlayedWrites) {
                 m_held.append(socket);
@@ -881,8 +886,8 @@ class FakeJellyfin {
                 respond(socket, playedWriteStatus, {});
                 return;
             }
-            const QString id = QString::fromUtf8(route.split('?').first().split('/').last())
-                                   .toLower();
+            const QString id =
+                QString::fromUtf8(route.split('?').first().split('/').last()).toLower();
             const bool isPlayed = method == "POST";
             if (itemsById.contains(id)) {
                 QJsonObject item = QJsonDocument::fromJson(itemsById.value(id)).object();
@@ -1032,7 +1037,7 @@ class FakeJellyfin {
     QList<FakeSocketConnection *> m_wsConnections;
 };
 
-inline bool prepare(Kinefin::JellyfinClient &client, FakeJellyfin &server)
+inline bool prepare(Kinefin::JellyfinClient &client, const FakeJellyfin &server)
 {
     if (!client.setDeviceIdentity(QStringLiteral("Kinefin test"), QStringLiteral("stable-test-id"),
                                   QStringLiteral("0.0.1")))
@@ -1046,7 +1051,7 @@ const QByteArray kFixtureToken = "f2f4b7c1ee8a4d0bb2a5f9d1f9e0e2ab";
 const QByteArray kTokenField = QByteArray("Token=\"") + kFixtureToken + QByteArray("\"");
 
 // Connects and logs in; QTRY_* macros cannot live in a helper that returns a value
-inline bool login(Kinefin::JellyfinClient &client, FakeJellyfin &server)
+inline bool login(Kinefin::JellyfinClient &client, const FakeJellyfin &server)
 {
     QSignalSpy ready(&client, &Kinefin::JellyfinClient::serverReady);
     QSignalSpy loggedIn(&client, &Kinefin::JellyfinClient::loginSucceeded);

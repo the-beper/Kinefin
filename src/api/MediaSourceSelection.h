@@ -4,8 +4,8 @@
 
 #include <QByteArrayView>
 #include <QJsonObject>
-#include <QMetaType>
 #include <QList>
+#include <QMetaType>
 #include <QString>
 #include <QStringView>
 #include <QUrl>

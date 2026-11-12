@@ -8,21 +8,21 @@
 #include "settings/ClientSettings.h"
 #include "settings/ProfilePaths.h"
 
+#include <KLocalizedString>
 #include <MpvAbstractItem>
 #include <MpvController>
-#include <KLocalizedString>
 
-#include <QDateTime>
 #include <QBuffer>
+#include <QDateTime>
 #include <QDir>
-#include <QImageReader>
-#include <QStandardPaths>
-#include <QUrl>
 #include <QFile>
+#include <QImageReader>
 #include <QJsonDocument>
 #include <QJsonParseError>
 #include <QRandomGenerator>
 #include <QSaveFile>
+#include <QStandardPaths>
+#include <QUrl>
 
 #include <algorithm>
 #include <cmath>
@@ -31,54 +31,59 @@ namespace Kinefin {
 namespace {
 constexpr qint64 TicksPerSecond = 10'000'000;
 constexpr int MaxRememberedItems = 1000;
-}
+} // namespace
 
 PlayerController::PlayerController(JellyfinClient &client, PlayQueue &queue,
                                    ClientSettings &settings, const QString &profileId,
                                    QObject *parent)
     : QObject(parent), m_client(client), m_queue(queue), m_settings(settings),
-      m_memoryFile(profileDataDirectory(profileId).isEmpty() ? QString()
-          : profileDataDirectory(profileId) + QStringLiteral("/storage.json")),
+      m_memoryFile(profileDataDirectory(profileId).isEmpty()
+                       ? QString()
+                       : profileDataDirectory(profileId) + QStringLiteral("/storage.json")),
       m_engine(client, m_session, this),
-      m_reporter(m_session, client, [this] {
-          PlaybackReporter::PlayerState state;
-          state.positionTicks = m_engine.knownPositionTicks();
-          state.canSeek = m_engine.canSeek();
-          state.audioStreamIndex = m_selectedAudioIndex;
-          state.subtitleStreamIndex = m_selectedSubtitleIndex;
-          state.volume = m_volume;
-          state.muted = m_muted;
-          state.nowPlayingQueue = m_playlist;
-          // The item id is the stable queue identity for this session. It is
-          // valid even after a user reordered the saved queue in another view.
-          state.playlistItemId = m_queueIndex >= 0 ? m_itemId : QString();
-          state.repeatMode = m_repeat;
-          state.shuffle = m_shuffle;
-          return state;
-      }, std::chrono::seconds(10), this),
+      m_reporter(
+          m_session, client,
+          [this] {
+              PlaybackReporter::PlayerState state;
+              state.positionTicks = m_engine.knownPositionTicks();
+              state.canSeek = m_engine.canSeek();
+              state.audioStreamIndex = m_selectedAudioIndex;
+              state.subtitleStreamIndex = m_selectedSubtitleIndex;
+              state.volume = m_volume;
+              state.muted = m_muted;
+              state.nowPlayingQueue = m_playlist;
+              // The item id is the stable queue identity for this session. It is
+              // valid even after a user reordered the saved queue in another view.
+              state.playlistItemId = m_queueIndex >= 0 ? m_itemId : QString();
+              state.repeatMode = m_repeat;
+              state.shuffle = m_shuffle;
+              return state;
+          },
+          std::chrono::seconds(10), this),
       m_mpvSettings(settings, m_engine, this)
 {
     m_profileDataDir = profileDataDirectory(profileId);
-    m_observerId = m_session.addObserver([this](PlaybackSession::State from,
-                                                PlaybackSession::State to) { onState(from, to); });
+    m_observerId = m_session.addObserver(
+        [this](PlaybackSession::State from, PlaybackSession::State to) { onState(from, to); });
     connect(&client, &JellyfinClient::playbackInfoReady, this, &PlayerController::onSource);
     connect(&client, &JellyfinClient::externalSubtitleDownloaded, this,
             [this](const QUrl &url, const QByteArray &bytes) {
-        if (!active() || url != m_pendingSubtitle || !m_subtitleDir.isValid()) return;
-        const QString extension = url.path().section(QLatin1Char('.'), -1).toLower();
-        const QString filename = m_subtitleDir.path() + QStringLiteral("/subtitle-")
-            + QString::number(QDateTime::currentMSecsSinceEpoch()) + QLatin1Char('.') + extension;
-        QSaveFile file(filename);
-        if (file.open(QIODevice::WriteOnly) && file.write(bytes) == bytes.size()
-            && file.commit()) {
-            m_engine.mpvCommand({QStringLiteral("sub-add"), filename,
-                                 QStringLiteral("select")});
-            QTimer::singleShot(250, this, &PlayerController::refreshTracks);
-        }
-        m_pendingSubtitle.clear();
-    });
-    connect(&client, &JellyfinClient::externalSubtitleFailed, this,
-            [this](const QUrl &url) {
+                if (!active() || url != m_pendingSubtitle || !m_subtitleDir.isValid())
+                    return;
+                const QString extension = url.path().section(QLatin1Char('.'), -1).toLower();
+                const QString filename = m_subtitleDir.path() + QStringLiteral("/subtitle-")
+                                         + QString::number(QDateTime::currentMSecsSinceEpoch())
+                                         + QLatin1Char('.') + extension;
+                QSaveFile file(filename);
+                if (file.open(QIODevice::WriteOnly) && file.write(bytes) == bytes.size()
+                    && file.commit()) {
+                    m_engine.mpvCommand(
+                        {QStringLiteral("sub-add"), filename, QStringLiteral("select")});
+                    QTimer::singleShot(250, this, &PlayerController::refreshTracks);
+                }
+                m_pendingSubtitle.clear();
+            });
+    connect(&client, &JellyfinClient::externalSubtitleFailed, this, [this](const QUrl &url) {
         if (url == m_pendingSubtitle) {
             m_pendingSubtitle.clear();
             m_errorText = i18n("Could not download the subtitle.");
@@ -87,9 +92,9 @@ PlayerController::PlayerController(JellyfinClient &client, PlayQueue &queue,
     });
     connect(&client, &JellyfinClient::trickplayInfoReady, this,
             [this](const QString &id, const QJsonObject &item) {
-        if (id == m_itemId && active())
-            m_trickplay = parseTrickplayLayout(item, m_source.mediaSourceId);
-    });
+                if (id == m_itemId && active())
+                    m_trickplay = parseTrickplayLayout(item, m_source.mediaSourceId);
+            });
     connect(&client, &JellyfinClient::trickplayTileFailed, this,
             [this](const QString &id, int width, int index) {
                 if (id == m_itemId && m_trickplay && width == m_trickplay->width
@@ -98,29 +103,32 @@ PlayerController::PlayerController(JellyfinClient &client, PlayQueue &queue,
             });
     connect(&client, &JellyfinClient::trickplayTileReady, this,
             [this](const QString &id, int width, int index, const QByteArray &jpeg) {
-        if (!active() || id != m_itemId || !m_trickplay
-            || width != m_trickplay->width || index != m_pendingTileIndex
-            || !m_requestedFrame || m_requestedFrame->tileIndex != index)
-            return;
-        QBuffer buffer;
-        buffer.setData(jpeg);
-        if (!buffer.open(QIODevice::ReadOnly)) return;
-        QImageReader reader(&buffer, "jpeg");
-        const QSize size = reader.size();
-        if (!size.isValid() || qint64(size.width()) * size.height() > 12'000'000
-            || size.width() < m_trickplay->width * m_trickplay->columns
-            || size.height() < m_trickplay->height * m_trickplay->rows)
-            return;
-        m_lastTile = reader.read();
-        if (m_lastTile.isNull()) return;
-        m_pendingTileIndex = -1;
-        m_cachedTileIndex = index;
-        displayTileFrame(m_lastTile, *m_requestedFrame);
-    });
+                if (!active() || id != m_itemId || !m_trickplay || width != m_trickplay->width
+                    || index != m_pendingTileIndex || !m_requestedFrame
+                    || m_requestedFrame->tileIndex != index)
+                    return;
+                QBuffer buffer;
+                buffer.setData(jpeg);
+                if (!buffer.open(QIODevice::ReadOnly))
+                    return;
+                QImageReader reader(&buffer, "jpeg");
+                const QSize size = reader.size();
+                if (!size.isValid() || qint64(size.width()) * size.height() > 12'000'000
+                    || size.width() < m_trickplay->width * m_trickplay->columns
+                    || size.height() < m_trickplay->height * m_trickplay->rows)
+                    return;
+                m_lastTile = reader.read();
+                if (m_lastTile.isNull())
+                    return;
+                m_pendingTileIndex = -1;
+                m_cachedTileIndex = index;
+                displayTileFrame(m_lastTile, *m_requestedFrame);
+            });
     connect(&m_queue, &PlayQueue::edited, this, &PlayerController::updatePlaylist);
     connect(&client, &JellyfinClient::mediaSegmentsReady, this,
             [this](const QString &itemId, const QJsonArray &segments) {
-                if (itemId != m_itemId || !active()) return;
+                if (itemId != m_itemId || !active())
+                    return;
                 m_segments.clear();
                 for (const QJsonValue &segment : segments)
                     m_segments.append(segment.toObject().toVariantMap());
@@ -294,16 +302,18 @@ bool PlayerController::playQueue(int index)
 
 bool PlayerController::resumeQueue()
 {
-    if (m_queue.count() == 0 || m_queue.busy()) return false;
+    if (m_queue.count() == 0 || m_queue.busy())
+        return false;
     const QStringList ids = m_queue.itemIds();
-    const QString key = m_client.serverId().toLower() + QLatin1Char('/')
-                      + m_client.userId().toLower();
+    const QString key =
+        m_client.serverId().toLower() + QLatin1Char('/') + m_client.userId().toLower();
     const QJsonObject last = m_queueMemory.value(key).toObject();
     int index = ids.indexOf(last.value(QStringLiteral("itemId")).toString());
     qint64 ticks = 0;
     if (index >= 0) {
         ticks = last.value(QStringLiteral("positionTicks")).toVariant().toLongLong();
-        if (ticks < 0 || ticks > 24LL * 3600 * TicksPerSecond) ticks = 0;
+        if (ticks < 0 || ticks > 24LL * 3600 * TicksPerSecond)
+            ticks = 0;
     } else {
         index = 0;
         for (int i = 0; i < m_queue.count(); ++i) {
@@ -351,9 +361,10 @@ void PlayerController::onSource(const PlaybackSource &source)
     m_subtitleOptions = source.externalSubtitles;
     m_externalSubtitles.clear();
     for (const ExternalSubtitle &entry : m_subtitleOptions)
-        m_externalSubtitles.append(QVariantMap{{QStringLiteral("index"), entry.index},
-                {QStringLiteral("name"), entry.label.isEmpty()
-                     ? i18n("External subtitle %1").arg(entry.index) : entry.label}});
+        m_externalSubtitles.append(QVariantMap{
+            {QStringLiteral("index"), entry.index},
+            {QStringLiteral("name"),
+             entry.label.isEmpty() ? i18n("External subtitle %1").arg(entry.index) : entry.label}});
     Q_EMIT tracksChanged();
     if (!m_engine.open(source)) {
         m_errorText = i18n("The selected media source could not be opened.");
@@ -390,8 +401,8 @@ void PlayerController::onEnd(const QString &reason)
     }
     if (reason == QLatin1String("eof") && !m_stopping && next())
         return;
-    if (reason == QLatin1String("eof") && !m_playlist.isEmpty()
-        && !m_client.serverId().isEmpty() && !m_client.userId().isEmpty()) {
+    if (reason == QLatin1String("eof") && !m_playlist.isEmpty() && !m_client.serverId().isEmpty()
+        && !m_client.userId().isEmpty()) {
         m_queueMemory.remove(m_client.serverId().toLower() + QLatin1Char('/')
                              + m_client.userId().toLower());
         saveMemory();
@@ -415,11 +426,20 @@ void PlayerController::clearCurrent()
     m_segments.clear();
 }
 
-void PlayerController::pause() { m_engine.pause(); }
-void PlayerController::resume() { m_engine.resume(); }
+void PlayerController::pause()
+{
+    m_engine.pause();
+}
+void PlayerController::resume()
+{
+    m_engine.resume();
+}
 void PlayerController::togglePause()
 {
-    if (paused()) resume(); else pause();
+    if (paused())
+        resume();
+    else
+        pause();
 }
 void PlayerController::stop()
 {
@@ -464,10 +484,12 @@ bool PlayerController::next()
     m_queueIndex = next;
     const QString id = m_playlist.at(next);
     const int row = m_queue.itemIds().indexOf(id);
-    const QString title = row < 0 ? QString() : m_queue.data(m_queue.index(row), PlayQueue::NameRole).toString();
+    const QString title =
+        row < 0 ? QString() : m_queue.data(m_queue.index(row), PlayQueue::NameRole).toString();
     m_queue.setCurrentPlaybackItemId(id);
     const bool started = startItem(id, 0, title);
-    if (started) persistQueueCursor();
+    if (started)
+        persistQueueCursor();
     return started;
 }
 bool PlayerController::previous()
@@ -483,9 +505,11 @@ bool PlayerController::previous()
     const QString id = m_playlist.at(prev);
     const int row = m_queue.itemIds().indexOf(id);
     m_queue.setCurrentPlaybackItemId(id);
-    const bool started = startItem(id, 0,
+    const bool started = startItem(
+        id, 0,
         row < 0 ? QString() : m_queue.data(m_queue.index(row), PlayQueue::NameRole).toString());
-    if (started) persistQueueCursor();
+    if (started)
+        persistQueueCursor();
     return started;
 }
 
@@ -493,7 +517,8 @@ void PlayerController::seek(qint64 ticks)
 {
     if (!m_engine.canSeek() || !active() || ticks < 0)
         return;
-    m_engine.seekTo(m_engine.durationTicks() > 0 ? std::min(ticks, m_engine.durationTicks()) : ticks);
+    m_engine.seekTo(m_engine.durationTicks() > 0 ? std::min(ticks, m_engine.durationTicks())
+                                                 : ticks);
     QTimer::singleShot(250, this, [this] { m_reporter.reportNow(); });
 }
 void PlayerController::seekRelative(int seconds)
@@ -507,7 +532,8 @@ void PlayerController::setRate(double value)
 }
 void PlayerController::setVolume(int level)
 {
-    if (!m_engine.isInitialized() || level < 0 || level > 100) return;
+    if (!m_engine.isInitialized() || level < 0 || level > 100)
+        return;
     m_volume = level;
     m_engine.setMpvProperty(QStringLiteral("volume"), level);
     Q_EMIT changed();
@@ -515,7 +541,8 @@ void PlayerController::setVolume(int level)
 }
 void PlayerController::toggleMute()
 {
-    if (!m_engine.isInitialized()) return;
+    if (!m_engine.isInitialized())
+        return;
     m_muted = !m_muted;
     m_engine.setMpvProperty(QStringLiteral("mute"), m_muted);
     Q_EMIT changed();
@@ -546,27 +573,36 @@ void PlayerController::refreshTracks()
         const QVariantMap map = entry.toMap();
         const QString type = map.value(QStringLiteral("type")).toString();
         const int id = map.value(QStringLiteral("id")).toInt();
-        if (id <= 0 || id > 1024 || (type != QLatin1String("audio") && type != QLatin1String("sub")))
+        if (id <= 0 || id > 1024
+            || (type != QLatin1String("audio") && type != QLatin1String("sub")))
             continue;
         QString label = map.value(QStringLiteral("title")).toString().left(120);
         if (label.isEmpty())
             label = map.value(QStringLiteral("lang")).toString().left(24);
         if (label.isEmpty())
-            label = type == QLatin1String("audio") ? i18n("Audio track %1").arg(id) : i18n("Subtitle %1").arg(id);
+            label = type == QLatin1String("audio") ? i18n("Audio track %1").arg(id)
+                                                   : i18n("Subtitle %1").arg(id);
         const bool selected = map.value(QStringLiteral("selected")).toBool();
         const QVariant indexValue = map.value(QStringLiteral("ff-index"));
         if (selected && indexValue.isValid() && indexValue.toInt() >= 0) {
-            if (type == QLatin1String("audio")) m_selectedAudioIndex = indexValue.toInt();
-            else m_selectedSubtitleIndex = indexValue.toInt();
+            if (type == QLatin1String("audio"))
+                m_selectedAudioIndex = indexValue.toInt();
+            else
+                m_selectedSubtitleIndex = indexValue.toInt();
         }
         if (selected) {
-            if (type == QLatin1String("audio")) m_selectedAudioId = id;
-            else m_selectedSubtitleId = id;
+            if (type == QLatin1String("audio"))
+                m_selectedAudioId = id;
+            else
+                m_selectedSubtitleId = id;
         }
         const QVariantMap result{{QStringLiteral("id"), id},
                                  {QStringLiteral("name"), label},
                                  {QStringLiteral("selected"), selected}};
-        if (type == QLatin1String("audio")) audio.append(result); else subs.append(result);
+        if (type == QLatin1String("audio"))
+            audio.append(result);
+        else
+            subs.append(result);
     }
     if (audio != m_audioTracks || subs != m_subtitleTracks) {
         m_audioTracks = audio;
@@ -580,7 +616,8 @@ void PlayerController::refreshTracks()
 }
 void PlayerController::selectAudioTrack(int id)
 {
-    if (id < 1 || id > 1024 || !active()) return;
+    if (id < 1 || id > 1024 || !active())
+        return;
     m_engine.setMpvProperty(QStringLiteral("aid"), id);
     rememberTracks(id, m_selectedSubtitleId);
     QTimer::singleShot(0, this, &PlayerController::refreshTracks);
@@ -588,31 +625,38 @@ void PlayerController::selectAudioTrack(int id)
 }
 void PlayerController::selectSubtitleTrack(int id)
 {
-    if (id < 0 || id > 1024 || !active()) return;
-    m_engine.setMpvProperty(QStringLiteral("sid"), id == 0 ? QVariant(QStringLiteral("no")) : QVariant(id));
+    if (id < 0 || id > 1024 || !active())
+        return;
+    m_engine.setMpvProperty(QStringLiteral("sid"),
+                            id == 0 ? QVariant(QStringLiteral("no")) : QVariant(id));
     rememberTracks(m_selectedAudioId, id);
     QTimer::singleShot(0, this, &PlayerController::refreshTracks);
     m_reporter.reportNow();
 }
 void PlayerController::adjustAudioDelay(double seconds)
 {
-    if (!std::isfinite(seconds) || seconds < -10.0 || seconds > 10.0) return;
+    if (!std::isfinite(seconds) || seconds < -10.0 || seconds > 10.0)
+        return;
     m_audioDelay = seconds;
     m_mpvSettings.setAudioOffset(seconds);
     Q_EMIT changed();
 }
 void PlayerController::adjustSubtitleDelay(double seconds)
 {
-    if (!std::isfinite(seconds) || seconds < -10.0 || seconds > 10.0) return;
+    if (!std::isfinite(seconds) || seconds < -10.0 || seconds > 10.0)
+        return;
     m_subtitleDelay = seconds;
     m_mpvSettings.setSubtitleOffset(seconds);
     Q_EMIT changed();
 }
 void PlayerController::setSleepTimer(int minutes)
 {
-    if (minutes < 0 || minutes > 240) return;
-    if (minutes == 0) m_sleep.stop();
-    else m_sleep.start(minutes * 60 * 1000);
+    if (minutes < 0 || minutes > 240)
+        return;
+    if (minutes == 0)
+        m_sleep.stop();
+    else
+        m_sleep.start(minutes * 60 * 1000);
     Q_EMIT changed();
 }
 int PlayerController::sleepRemainingMinutes() const
@@ -621,14 +665,17 @@ int PlayerController::sleepRemainingMinutes() const
 }
 void PlayerController::screenshot()
 {
-    if (!active() || !m_engine.isInitialized() || m_profileDataDir.isEmpty()) return;
+    if (!active() || !m_engine.isInitialized() || m_profileDataDir.isEmpty())
+        return;
     const QString directory = m_profileDataDir + QStringLiteral("/screenshots");
-    if (!ensurePrivateDirectory(directory)) return;
-    const QString file = directory + QStringLiteral("/kinefin-")
-       + QDateTime::currentDateTimeUtc().toString(QStringLiteral("yyyyMMdd-HHmmss-zzz"))
-       + QStringLiteral(".png");
-    if (!m_engine.mpvCommand({QStringLiteral("screenshot-to-file"), file,
-                              QStringLiteral("video")})) {
+    if (!ensurePrivateDirectory(directory))
+        return;
+    const QString file =
+        directory + QStringLiteral("/kinefin-")
+        + QDateTime::currentDateTimeUtc().toString(QStringLiteral("yyyyMMdd-HHmmss-zzz"))
+        + QStringLiteral(".png");
+    if (!m_engine.mpvCommand(
+            {QStringLiteral("screenshot-to-file"), file, QStringLiteral("video")})) {
         m_errorText = i18n("Could not save the screenshot.");
         Q_EMIT changed();
         return;
@@ -659,10 +706,14 @@ void PlayerController::updateSkip()
         if (positionTicks() < start || positionTicks() >= finish || finish <= start)
             continue;
         const QString type = row.value(QStringLiteral("type")).toString();
-        label = type == QLatin1String("Intro") ? i18n("Skip intro")
-              : type == QLatin1String("Recap") ? i18n("Skip recap")
-              : type == QLatin1String("Outro") ? i18n("Skip outro") : QString();
-        if (!label.isEmpty()) { end = finish; break; }
+        label = type == QLatin1String("Intro")   ? i18n("Skip intro")
+                : type == QLatin1String("Recap") ? i18n("Skip recap")
+                : type == QLatin1String("Outro") ? i18n("Skip outro")
+                                                 : QString();
+        if (!label.isEmpty()) {
+            end = finish;
+            break;
+        }
     }
     if (label != m_skipLabel || end != m_skipEnd) {
         m_skipLabel = label;
@@ -683,30 +734,37 @@ QString PlayerController::memoryKey() const
 }
 void PlayerController::loadMemory()
 {
-    if (m_memoryFile.isEmpty()) return;
+    if (m_memoryFile.isEmpty())
+        return;
     QFile file(m_memoryFile);
-    if (!file.open(QIODevice::ReadOnly) || file.size() > 256 * 1024) return;
+    if (!file.open(QIODevice::ReadOnly) || file.size() > 256 * 1024)
+        return;
     const QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
-    if (!doc.isObject() || doc.object().value(QStringLiteral("version")).toInt() != 1) return;
+    if (!doc.isObject() || doc.object().value(QStringLiteral("version")).toInt() != 1)
+        return;
     m_memory = doc.object().value(QStringLiteral("tracks")).toObject();
     m_queueMemory = doc.object().value(QStringLiteral("queue")).toObject();
 }
 void PlayerController::saveMemory()
 {
-    if (m_memoryFile.isEmpty()) return;
+    if (m_memoryFile.isEmpty())
+        return;
     if (m_memory.size() > MaxRememberedItems) {
         m_memory = {};
         return;
     }
     const QByteArray bytes = QJsonDocument(QJsonObject{{QStringLiteral("version"), 1},
-        {QStringLiteral("tracks"), m_memory},
-        {QStringLiteral("queue"), m_queueMemory}}).toJson(QJsonDocument::Compact);
-    if (bytes.size() > 256 * 1024) return;
+                                                       {QStringLiteral("tracks"), m_memory},
+                                                       {QStringLiteral("queue"), m_queueMemory}})
+                                 .toJson(QJsonDocument::Compact);
+    if (bytes.size() > 256 * 1024)
+        return;
     writePrivateFile(m_memoryFile, bytes);
 }
 void PlayerController::rememberTracks(int audioId, int subtitleId)
 {
-    if (m_itemId.isEmpty() || m_memoryFile.isEmpty()) return;
+    if (m_itemId.isEmpty() || m_memoryFile.isEmpty())
+        return;
     m_memory.insert(memoryKey(), QJsonObject{{QStringLiteral("audio"), audioId},
                                              {QStringLiteral("subtitle"), subtitleId}});
     saveMemory();
@@ -714,7 +772,8 @@ void PlayerController::rememberTracks(int audioId, int subtitleId)
 void PlayerController::restoreTracks()
 {
     const QJsonObject stored = m_memory.value(memoryKey()).toObject();
-    if (stored.isEmpty()) return;
+    if (stored.isEmpty())
+        return;
     // Only restore ids which actually exist on this media source.
     const int aid = stored.value(QStringLiteral("audio")).toInt();
     const int sid = stored.value(QStringLiteral("subtitle")).toInt();
@@ -725,12 +784,13 @@ void PlayerController::restoreTracks()
         }
     if (sid == 0) {
         m_engine.setMpvProperty(QStringLiteral("sid"), QStringLiteral("no"));
-    } else for (const QVariant &track : m_subtitleTracks) {
-        if (track.toMap().value(QStringLiteral("id")).toInt() == sid) {
-            m_engine.setMpvProperty(QStringLiteral("sid"), sid);
-            break;
+    } else
+        for (const QVariant &track : m_subtitleTracks) {
+            if (track.toMap().value(QStringLiteral("id")).toInt() == sid) {
+                m_engine.setMpvProperty(QStringLiteral("sid"), sid);
+                break;
+            }
         }
-    }
 }
 
 bool PlayerController::downloadSubtitle(int index)
@@ -738,7 +798,8 @@ bool PlayerController::downloadSubtitle(int index)
     if (!active() || !m_subtitleDir.isValid() || !m_pendingSubtitle.isEmpty())
         return false;
     for (const ExternalSubtitle &subtitle : m_subtitleOptions) {
-        if (subtitle.index != index) continue;
+        if (subtitle.index != index)
+            continue;
         if (m_client.downloadExternalSubtitle(subtitle.url)) {
             m_pendingSubtitle = subtitle.url;
             return true;
@@ -750,17 +811,20 @@ bool PlayerController::downloadSubtitle(int index)
 
 void PlayerController::displayTileFrame(const QImage &tile, const TrickplayFrame &frame)
 {
-    if (!m_trickplay || tile.isNull()) return;
-    const QRect crop(frame.column * m_trickplay->width,
-                     frame.row * m_trickplay->height,
+    if (!m_trickplay || tile.isNull())
+        return;
+    const QRect crop(frame.column * m_trickplay->width, frame.row * m_trickplay->height,
                      m_trickplay->width, m_trickplay->height);
-    if (!tile.rect().contains(crop)) return;
+    if (!tile.rect().contains(crop))
+        return;
     QByteArray bytes;
     QBuffer buffer(&bytes);
-    if (!buffer.open(QIODevice::WriteOnly)) return;
-    if (!tile.copy(crop).save(&buffer, "PNG")) return;
-    m_previewImage = QStringLiteral("data:image/png;base64,")
-        + QString::fromLatin1(bytes.toBase64());
+    if (!buffer.open(QIODevice::WriteOnly))
+        return;
+    if (!tile.copy(crop).save(&buffer, "PNG"))
+        return;
+    m_previewImage =
+        QStringLiteral("data:image/png;base64,") + QString::fromLatin1(bytes.toBase64());
     Q_EMIT previewChanged();
 }
 
@@ -769,15 +833,19 @@ void PlayerController::previewAt(qint64 ticks)
     if (!m_trickplay || m_itemId.isEmpty() || !active() || !canSeek())
         return;
     const auto frame = trickplayFrameAt(*m_trickplay, ticks);
-    if (!frame) { clearPreview(); return; }
+    if (!frame) {
+        clearPreview();
+        return;
+    }
     m_requestedFrame = frame;
     if (m_cachedTileIndex == frame->tileIndex && !m_lastTile.isNull()) {
         displayTileFrame(m_lastTile, *frame);
         return;
     }
-    if (m_pendingTileIndex == frame->tileIndex) return;
-    if (m_client.fetchTrickplayTile(m_itemId, m_source.mediaSourceId,
-                                    m_trickplay->width, frame->tileIndex))
+    if (m_pendingTileIndex == frame->tileIndex)
+        return;
+    if (m_client.fetchTrickplayTile(m_itemId, m_source.mediaSourceId, m_trickplay->width,
+                                    frame->tileIndex))
         m_pendingTileIndex = frame->tileIndex;
 }
 
@@ -792,7 +860,8 @@ void PlayerController::clearPreview()
 
 void PlayerController::updatePlaylist()
 {
-    if (m_playlist.isEmpty() || m_queueIndex < 0 || m_itemId.isEmpty()) return;
+    if (m_playlist.isEmpty() || m_queueIndex < 0 || m_itemId.isEmpty())
+        return;
     QStringList updated = m_queue.itemIds();
     const int current = updated.indexOf(m_itemId);
     if (current >= 0) {
@@ -812,20 +881,20 @@ void PlayerController::updatePlaylist()
 void PlayerController::persistQueueCursor()
 {
     if (m_playlist.isEmpty() || m_queueIndex < 0 || m_itemId.isEmpty()
-        || m_client.serverId().isEmpty() || m_client.userId().isEmpty()) return;
-    const QString key = m_client.serverId().toLower() + QLatin1Char('/')
-                      + m_client.userId().toLower();
-    const auto position = m_loading ? std::optional<qint64>{}
-                                    : m_engine.knownPositionTicks();
+        || m_client.serverId().isEmpty() || m_client.userId().isEmpty())
+        return;
+    const QString key =
+        m_client.serverId().toLower() + QLatin1Char('/') + m_client.userId().toLower();
+    const auto position = m_loading ? std::optional<qint64>{} : m_engine.knownPositionTicks();
     // A pending media source has no mpv position. Do not erase an earlier
     // resume point while buffering its next source.
     qint64 ticks = position.value_or(m_resumeTicks);
-    if (ticks < 0 || ticks > 24LL * 3600 * TicksPerSecond) ticks = 0;
+    if (ticks < 0 || ticks > 24LL * 3600 * TicksPerSecond)
+        ticks = 0;
     if (m_queueMemory.size() >= 20 && !m_queueMemory.contains(key))
         m_queueMemory = {};
-    m_queueMemory.insert(key, QJsonObject{
-        {QStringLiteral("itemId"), m_itemId},
-        {QStringLiteral("positionTicks"), ticks}});
+    m_queueMemory.insert(key, QJsonObject{{QStringLiteral("itemId"), m_itemId},
+                                          {QStringLiteral("positionTicks"), ticks}});
     saveMemory();
 }
 

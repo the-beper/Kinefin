@@ -224,11 +224,20 @@ class TestProfileCommands : public QObject {
         QVERIFY(addProfile(QStringLiteral("old")));
         QVERIFY(addProfile(QStringLiteral("other")));
         const QString id = QStringLiteral("old");
-        QVERIFY(saveServerCredentials(
-            id, {{QStringLiteral("srv1"), QStringLiteral("https://a.example"), QStringLiteral("u"),
-                  QStringLiteral("d"), QStringLiteral("n"), QStringLiteral("name")},
-                 {QStringLiteral("srv2"), QStringLiteral("https://b.example"), QStringLiteral("u"),
-                  QStringLiteral("d"), QStringLiteral("n"), QStringLiteral("name")}}));
+        QVERIFY(saveServerCredentials(id, {{QStringLiteral("srv1"),
+                                            QStringLiteral("https://a.example"),
+                                            QStringLiteral("u"),
+                                            QStringLiteral("d"),
+                                            QStringLiteral("n"),
+                                            QStringLiteral("name"),
+                                            {}},
+                                           {QStringLiteral("srv2"),
+                                            QStringLiteral("https://b.example"),
+                                            QStringLiteral("u"),
+                                            QStringLiteral("d"),
+                                            QStringLiteral("n"),
+                                            QStringLiteral("name"),
+                                            {}}}));
         // The legacy key of one server and the per-user key of the other
         store.tokens.insert(legacyServerTokenKey(id, QStringLiteral("srv1")), QStringLiteral("t1"));
         store.tokens.insert(serverTokenKey(id, QStringLiteral("srv2"), QStringLiteral("u")),
@@ -254,10 +263,13 @@ class TestProfileCommands : public QObject {
         store.failRemoves = true;
         Output output;
         QVERIFY(addProfile(QStringLiteral("old")));
-        QVERIFY(saveServerCredentials(
-            QStringLiteral("old"),
-            {{QStringLiteral("srv1"), QStringLiteral("https://a.example"), QStringLiteral("u"),
-              QStringLiteral("d"), QStringLiteral("n"), QStringLiteral("name")}}));
+        QVERIFY(saveServerCredentials(QStringLiteral("old"), {{QStringLiteral("srv1"),
+                                                               QStringLiteral("https://a.example"),
+                                                               QStringLiteral("u"),
+                                                               QStringLiteral("d"),
+                                                               QStringLiteral("n"),
+                                                               QStringLiteral("name"),
+                                                               {}}}));
         QCOMPARE(run({QStringLiteral("--delete-profile"), QStringLiteral("old")}, store, output),
                  1);
         QVERIFY(output.err.contains(QStringLiteral("wallet")));

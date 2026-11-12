@@ -10,9 +10,8 @@ std::optional<QString> parseItemLink(const QString &input)
 {
     // Match the source text, not a decoded/normalized QUrl path: percent escapes,
     // dot segments, a trailing slash, and attached userinfo must all be refused.
-    static const QRegularExpression pattern(
-        QStringLiteral(R"(\Ajellyfin://item/([a-f0-9]{32})\z)"),
-        QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression pattern(QStringLiteral(R"(\Ajellyfin://item/([a-f0-9]{32})\z)"),
+                                            QRegularExpression::CaseInsensitiveOption);
     const auto match = pattern.match(input);
     if (!match.hasMatch())
         return std::nullopt;

@@ -81,6 +81,24 @@ Kirigami.Dialog {
 
     // Played and Unplayed, HD and SD, and the kinds of episodes exclude each other (an AND of them could never match), and 4K is HD
     function toggle(entry) {
+        if (canAdd(entry))
+            draft = toggled(entry);
+    }
+
+    // Whether the entry may be switched: taking a choice off always may, a value of a list section (genre, tag, rating, year) is refused when the query would be longer than the client sends
+    function canAdd(entry) {
+        switch (entry.facet) {
+        case "genreIds":
+        case "tags":
+        case "officialRatings":
+        case "years":
+            return isSelected(entry) || library.filtersFit(toggled(entry));
+        }
+        return true;
+    }
+
+    // The draft with the entry switched
+    function toggled(entry) {
         const next = copyOf(draft);
         const on = !isSelected(entry);
         switch (entry.facet) {
@@ -115,7 +133,7 @@ Kirigami.Dialog {
                     values.push(entry.value);
             }
         }
-        draft = next;
+        return next;
     }
 
     // The text of an option or chip: the fixed ones are translated, tags, ratings and years show as they are, a genre by the name the server lists for its id (a genre whose list failed to load shows as "Genre")
@@ -405,7 +423,11 @@ Kirigami.Dialog {
                     objectName: "filterOption_" + row.modelData.key
 
                     readonly property bool selected: dialog.isSelected(row.modelData)
+                    // A value that would make the query too long for the server
+                    readonly property bool blocked: !selected && !dialog.canAdd(row.modelData)
+                    readonly property string hint: blocked ? i18nc("@info hint on a filter value that cannot be added", "Too many filters selected: remove one to add this") : ""
 
+                    enabled: !blocked
                     focusPolicy: Qt.NoFocus
                     highlighted: row.ListView.isCurrentItem && list.activeFocus
                     onClicked: {
@@ -418,6 +440,7 @@ Kirigami.Dialog {
                     Accessible.name: row.modelData.label
                     Accessible.checkable: true
                     Accessible.checked: selected
+                    Accessible.description: hint
 
                     contentItem: RowLayout {
                         spacing: Kirigami.Units.largeSpacing
@@ -426,8 +449,7 @@ Kirigami.Dialog {
                             focusPolicy: Qt.NoFocus
                             checked: option.selected
                             Accessible.ignored: true
-                            // Only a user click edits the draft. A changed selection also updates
-                            // `checked`, which emits toggled and must not invert the selection again.
+                            // Only a user click edits the draft: a changed selection also updates `checked`, which emits toggled and must not invert the selection again
                             onClicked: {
                                 list.currentIndex = row.index;
                                 dialog.toggle(row.modelData);
@@ -439,6 +461,15 @@ Kirigami.Dialog {
                             elide: Text.ElideRight
                             textFormat: Text.PlainText
                             text: row.modelData.label
+                        }
+
+                        Controls.Label {
+                            visible: option.blocked
+                            Layout.maximumWidth: row.width / 2
+                            elide: Text.ElideRight
+                            color: Kirigami.Theme.disabledTextColor
+                            textFormat: Text.PlainText
+                            text: option.hint
                         }
                     }
                 }

@@ -100,7 +100,7 @@ FormCard.FormCardPage {
     Component.onDestruction: {
         const state = prefs?.state;
         if (prefs?.dirty && (state === UserConfigurationModel.Ready || state === UserConfigurationModel.Conflict || (state === UserConfigurationModel.Failed && prefs.failure === UserConfigurationModel.SaveFailed)))
-            prefs.discard();
+            prefs.discardDraft();
     }
 
     Connections {
@@ -194,13 +194,7 @@ FormCard.FormCardPage {
                     Qt.callLater(followChoice);
                 }
 
-                contentItem: Controls.Label {
-                    leftPadding: Kirigami.Units.smallSpacing
-                    verticalAlignment: Text.AlignVCenter
-                    textFormat: Text.PlainText
-                    elide: Text.ElideRight
-                    text: box.displayText
-                }
+                // The style paints the selected name itself, as plain text; a custom contentItem breaks it, which reads text input API
                 delegate: Controls.ItemDelegate {
                     id: entry
 
@@ -229,14 +223,14 @@ FormCard.FormCardPage {
         }
     }
 
-    // A switch that follows a value of the draft. The stock delegate writes its own `checked` back while it follows its inner switch, which drops a plain binding on it with the first change: the value source is a Binding, which keeps working
-    component PreferenceSwitch: FormCard.FormSwitchDelegate {
-        id: preferenceSwitch
+    // A check box that follows a value of the draft (nothing applies until Save, so no switch). The stock delegate writes its own `checked` back while it follows its inner check box, which drops a plain binding on it with the first change: the value source is a Binding, which keeps working
+    component PreferenceCheck: FormCard.FormCheckDelegate {
+        id: preferenceCheck
 
         property bool draftValue
 
         Binding on checked {
-            value: preferenceSwitch.draftValue
+            value: preferenceCheck.draftValue
         }
     }
 
@@ -276,9 +270,7 @@ FormCard.FormCardPage {
                 contentItem: null
                 spacing: 0
                 padding: 0
-                // The row is the source of truth: use clicked, not toggled,
-                // because syncing `checked` from the row must never toggle it again.
-                // row.toggle() emits toggled itself, updating the draft once.
+                // The row is the source of truth: use clicked, not toggled, because syncing `checked` from the row must never toggle it again; row.toggle() emits toggled itself, updating the draft once
                 onClicked: row.toggle()
                 Accessible.ignored: true
             }
@@ -351,7 +343,7 @@ FormCard.FormCardPage {
         objectName: "prefsConflict"
         visible: page.prefs.state === UserConfigurationModel.Conflict
         type: Kirigami.MessageType.Warning
-        text: i18n("Some preferences were changed on another device, so nothing was saved: keep editing to review your changes, or discard them")
+        text: i18n("Some preferences were changed on another system, so nothing was saved: keep editing to review your changes, or discard them")
         actions: [
             Kirigami.Action {
                 text: i18nc("@action:button", "Keep Editing")
@@ -386,7 +378,7 @@ FormCard.FormCardPage {
                 code: page.prefs.audioLanguage
                 onPicked: selected => page.prefs.audioLanguage = selected
             }
-            PreferenceSwitch {
+            PreferenceCheck {
                 objectName: "prefPlayDefaultAudioTrack"
 
                 text: i18n("Play the default audio track")
@@ -395,7 +387,7 @@ FormCard.FormCardPage {
                 draftValue: page.prefs.playDefaultAudioTrack
                 onToggled: page.prefs.playDefaultAudioTrack = checked
             }
-            PreferenceSwitch {
+            PreferenceCheck {
                 objectName: "prefRememberAudioSelections"
 
                 text: i18n("Remember the audio track")
@@ -430,7 +422,7 @@ FormCard.FormCardPage {
                 currentIndex: Math.max(0, page.subtitleModeEntries.findIndex(entry => entry.value === page.prefs.subtitleMode))
                 onActivated: page.prefs.subtitleMode = currentValue
             }
-            PreferenceSwitch {
+            PreferenceCheck {
                 objectName: "prefRememberSubtitleSelections"
 
                 text: i18n("Remember the subtitle track")
@@ -445,7 +437,7 @@ FormCard.FormCardPage {
             title: i18nc("@title:group", "Playback")
         }
         FormCard.FormCard {
-            PreferenceSwitch {
+            PreferenceCheck {
                 objectName: "prefEnableNextEpisodeAutoPlay"
 
                 text: i18n("Play the next episode automatically")
@@ -460,7 +452,7 @@ FormCard.FormCardPage {
             title: i18nc("@title:group", "Libraries and Home")
         }
         FormCard.FormCard {
-            PreferenceSwitch {
+            PreferenceCheck {
                 objectName: "prefDisplayMissingEpisodes"
 
                 text: i18n("Show missing episodes")
@@ -469,7 +461,7 @@ FormCard.FormCardPage {
                 draftValue: page.prefs.displayMissingEpisodes
                 onToggled: page.prefs.displayMissingEpisodes = checked
             }
-            PreferenceSwitch {
+            PreferenceCheck {
                 objectName: "prefHidePlayedInLatest"
 
                 text: i18n("Leave played items out of Recently Added")
@@ -534,6 +526,10 @@ FormCard.FormCardPage {
                             text: i18nc("@action:button", "Move Up")
                             icon.name: "arrow-up"
                             display: Controls.AbstractButton.IconOnly
+                            Accessible.name: i18nc("@action:button %1 is a library name", "Move %1 up", orderRow.text)
+                            Controls.ToolTip.text: i18nc("@info:tooltip", "Move up")
+                            Controls.ToolTip.visible: hovered
+                            Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
                             enabled: orderRow.index > 0
                             onClicked: page.moveLibrary(orderRow.index, -1)
                         }
@@ -543,6 +539,10 @@ FormCard.FormCardPage {
                             text: i18nc("@action:button", "Move Down")
                             icon.name: "arrow-down"
                             display: Controls.AbstractButton.IconOnly
+                            Accessible.name: i18nc("@action:button %1 is a library name", "Move %1 down", orderRow.text)
+                            Controls.ToolTip.text: i18nc("@info:tooltip", "Move down")
+                            Controls.ToolTip.visible: hovered
+                            Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
                             enabled: orderRow.index < page.prefs.orderedViews.length - 1
                             onClicked: page.moveLibrary(orderRow.index, 1)
                         }
@@ -556,7 +556,7 @@ FormCard.FormCardPage {
         }
         FormCard.FormCard {
             FormCard.FormSectionText {
-                text: page.isMalformed("MyMediaExcludes") ? page.malformedNote() : i18n("Checked libraries get no tile on Home. Hiding a library here does not remove access to it: it stays available in Movies, TV Shows, Favorites and Search")
+                text: page.isMalformed("MyMediaExcludes") ? page.malformedNote() : i18n("Checked libraries get no tile on Home. Hiding a library here does not remove access to it: it stays available in Movies, Shows, Favorites and Search")
             }
             Repeater {
                 model: page.prefs.libraries
@@ -703,7 +703,7 @@ FormCard.FormCardPage {
         // Runs once the user chose to leave
         property var proceed: null
 
-        title: i18nc("@title:window", "Unsaved Changes")
+        title: i18nc("@title:window", "Save Changes?")
         subtitle: i18n("The changes to your preferences are not saved")
         standardButtons: Kirigami.Dialog.Cancel
         customFooterActions: [

@@ -437,8 +437,7 @@ class TestJellyfinSocketClient : public QObject {
         QVERIFY(flow.waitState(Kinefin::JellyfinSocketClient::State::Reconnecting, 3000));
         // The token survives the re-check, so the ladder keeps climbing instead of stopping
         QSignalSpy cleared(&flow.client, &Kinefin::JellyfinClient::credentialsCleared);
-        QTest::qWaitFor([&flow] { return flow.server.upgradeAttempts >= 3; }, 3000);
-        QVERIFY(flow.server.upgradeAttempts >= 3);
+        QVERIFY(QTest::qWaitFor([&flow] { return flow.server.upgradeAttempts >= 3; }, 3000));
         QCOMPARE(cleared.count(), 0);
     }
 

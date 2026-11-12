@@ -334,15 +334,16 @@ class TestMediaSourceSelection : public QObject {
 
     void authenticatesAndBoundsExternalSubtitleRoutes()
     {
-        const QJsonObject stream{{QStringLiteral("Type"), QStringLiteral("Subtitle")},
-                                 {QStringLiteral("IsExternal"), true},
-                                 {QStringLiteral("IsTextSubtitleStream"), true},
-                                 {QStringLiteral("DeliveryMethod"), QStringLiteral("External")},
-                                 {QStringLiteral("Index"), 3},
-                                 {QStringLiteral("DisplayTitle"), QStringLiteral("Italian subtitles")},
-                                 {QStringLiteral("DeliveryUrl"),
-                                  QStringLiteral("/Videos/%1/Subtitles/3/0/Stream.srt?ApiKey=%2")
-                                      .arg(kItem, QString::fromLatin1(kToken))}};
+        const QJsonObject stream{
+            {QStringLiteral("Type"), QStringLiteral("Subtitle")},
+            {QStringLiteral("IsExternal"), true},
+            {QStringLiteral("IsTextSubtitleStream"), true},
+            {QStringLiteral("DeliveryMethod"), QStringLiteral("External")},
+            {QStringLiteral("Index"), 3},
+            {QStringLiteral("DisplayTitle"), QStringLiteral("Italian subtitles")},
+            {QStringLiteral("DeliveryUrl"),
+             QStringLiteral("/Videos/%1/Subtitles/3/0/Stream.srt?ApiKey=%2")
+                 .arg(kItem, QString::fromLatin1(kToken))}};
         QJsonObject mediaSource = source(kSourceId, true, true);
         mediaSource.insert(QStringLiteral("MediaStreams"), QJsonArray{stream});
         const auto selected = select(response({mediaSource}), kPrefixedBase);
@@ -361,11 +362,12 @@ class TestMediaSourceSelection : public QObject {
 
     void rejectsUnsafeExternalSubtitles()
     {
-        for (const QString &raw : {QStringLiteral("//evil.invalid/Videos/id/Subtitles/0/Stream.srt"),
-                                  QStringLiteral("/Videos/../Users/Me.srt"),
-                                  QStringLiteral("/Videos/id/Subtitles/0/Stream.exe"),
-                                  QStringLiteral("/Videos/id/Subtitles/0/Stream.srt?Other=1"),
-                                  QStringLiteral("/Videos/id/Subtitles/0/Stream.srt#secret")}) {
+        for (const QString &raw :
+             {QStringLiteral("//evil.invalid/Videos/id/Subtitles/0/Stream.srt"),
+              QStringLiteral("/Videos/../Users/Me.srt"),
+              QStringLiteral("/Videos/id/Subtitles/0/Stream.exe"),
+              QStringLiteral("/Videos/id/Subtitles/0/Stream.srt?Other=1"),
+              QStringLiteral("/Videos/id/Subtitles/0/Stream.srt#secret")}) {
             QJsonObject stream{{QStringLiteral("Type"), QStringLiteral("Subtitle")},
                                {QStringLiteral("IsExternal"), true},
                                {QStringLiteral("IsTextSubtitleStream"), true},

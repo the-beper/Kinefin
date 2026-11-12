@@ -392,8 +392,8 @@ void PlayQueue::insert(std::vector<ItemSummary> items, Placement placement, bool
     }
     int first = placement == Next ? 0 : count();
     if (placement == Next && !m_currentPlaybackItemId.isEmpty()) {
-        const auto playing = std::find_if(m_items.begin(), m_items.end(),
-            [this](const ItemSummary &item) {
+        const auto playing =
+            std::find_if(m_items.begin(), m_items.end(), [this](const ItemSummary &item) {
                 return idKey(item.id) == idKey(m_currentPlaybackItemId);
             });
         if (playing != m_items.end())

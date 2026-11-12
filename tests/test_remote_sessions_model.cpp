@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Kinefin contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
-// The remote page's bound, read-only session snapshot and authenticated command path.
+// The Remote Sessions dialog's bound, read-only session snapshot and authenticated command path
 #include "FakeJellyfin.h"
 
 #include "models/RemoteSessionsModel.h"
@@ -20,10 +20,7 @@ const QString kIdleSessionId = QStringLiteral("88888888999900001111222233334444"
 struct Fixture {
     Fixture() { ok = server.listen() && login(client, server); }
 
-    QVariant row(int index, int role) const
-    {
-        return model.data(model.index(index, 0), role);
-    }
+    QVariant row(int index, int role) const { return model.data(model.index(index, 0), role); }
 
     FakeJellyfin server;
     Kinefin::JellyfinClient client;
@@ -40,7 +37,8 @@ class TestRemoteSessionsModel : public QObject {
     {
         Fixture f;
         QVERIFY(f.ok);
-        QAbstractItemModelTester tester(&f.model, QAbstractItemModelTester::FailureReportingMode::QtTest);
+        QAbstractItemModelTester tester(&f.model,
+                                        QAbstractItemModelTester::FailureReportingMode::QtTest);
         QVERIFY(f.model.open());
         QTRY_COMPARE(f.model.status(), RemoteSessionsModel::Ready);
         QCOMPARE(f.model.count(), 2);
@@ -66,14 +64,14 @@ class TestRemoteSessionsModel : public QObject {
         QVERIFY(f.ok);
         QJsonArray sessions;
         sessions.append(QJsonObject{{QStringLiteral("Id"), QStringLiteral("bad/id")}});
-        sessions.append(QJsonObject{{QStringLiteral("Id"), kSessionId},
-                                    {QStringLiteral("DeviceName"), QStringLiteral("<b>bad</b>\n device")},
-                                    {QStringLiteral("Client"), QStringLiteral("client\u202e reversed")}});
+        sessions.append(
+            QJsonObject{{QStringLiteral("Id"), kSessionId},
+                        {QStringLiteral("DeviceName"), QStringLiteral("<b>bad</b>\n device")},
+                        {QStringLiteral("Client"), QStringLiteral("client\u202e reversed")}});
         sessions.append(QJsonObject{{QStringLiteral("Id"), kSessionId.toUpper()}});
         for (int i = 0; i < RemoteSessionsModel::MaxSessions + 2; ++i) {
-            sessions.append(QJsonObject{
-                {QStringLiteral("Id"), QStringLiteral("device-%1").arg(i)},
-                {QStringLiteral("DeviceName"), QStringLiteral("device")}});
+            sessions.append(QJsonObject{{QStringLiteral("Id"), QStringLiteral("device-%1").arg(i)},
+                                        {QStringLiteral("DeviceName"), QStringLiteral("device")}});
         }
         f.server.listingRawBody.insert(QStringLiteral("Sessions"),
                                        QJsonDocument(sessions).toJson(QJsonDocument::Compact));
@@ -115,8 +113,9 @@ class TestRemoteSessionsModel : public QObject {
         QTRY_VERIFY(!f.model.commandPending());
         QTRY_COMPARE(f.model.status(), RemoteSessionsModel::Ready);
         QCOMPARE(f.server.remoteCommandRoutes.size(), 1);
-        QCOMPARE(f.server.remoteCommandRoutes.first(),
-                 QByteArrayLiteral("/jellyfin/Sessions/11111111222233334444555566667777/Playing/Pause"));
+        QCOMPARE(
+            f.server.remoteCommandRoutes.first(),
+            QByteArrayLiteral("/jellyfin/Sessions/11111111222233334444555566667777/Playing/Pause"));
         QVERIFY(f.server.remoteCommandAuthorizations.first().contains("MediaBrowser"));
         QVERIFY(!f.model.commandFailed());
         QCOMPARE(f.server.listingRoutes.value(QStringLiteral("Sessions")).size(), 2);
@@ -196,6 +195,56 @@ class TestRemoteSessionsModel : public QObject {
         QVERIFY(f.model.open());
         QTRY_COMPARE(f.model.status(), RemoteSessionsModel::Ready);
         QCOMPARE(f.model.count(), 2);
+    }
+
+    void aReloadKeepsRowsInPlace()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        QAbstractItemModelTester tester(&f.model,
+                                        QAbstractItemModelTester::FailureReportingMode::QtTest);
+        QVERIFY(f.model.open());
+        QTRY_COMPARE(f.model.status(), RemoteSessionsModel::Ready);
+        QSignalSpy resets(&f.model, &QAbstractItemModel::modelReset);
+        QSignalSpy changes(&f.model, &QAbstractItemModel::dataChanged);
+        QSignalSpy inserts(&f.model, &QAbstractItemModel::rowsInserted);
+        QSignalSpy removals(&f.model, &QAbstractItemModel::rowsRemoved);
+
+        f.model.reload();
+        QTRY_COMPARE(f.model.status(), RemoteSessionsModel::Ready);
+        QCOMPARE(resets.size(), 0);
+        QCOMPARE(changes.size(), 0);
+        QCOMPARE(f.model.count(), 2);
+
+        // The first session pauses, a new one appears, the idle one goes: the answer lists the new one first
+        const QString newId = QStringLiteral("aaaaaaaabbbbccccddddeeeeffff0000");
+        const auto playing = [](const QString &id, bool paused) {
+            return QJsonObject{
+                {QStringLiteral("Id"), id},
+                {QStringLiteral("DeviceName"), QStringLiteral("device")},
+                {QStringLiteral("SupportsMediaControl"), true},
+                {QStringLiteral("NowPlayingItem"),
+                 QJsonObject{
+                     {QStringLiteral("Name"), QStringLiteral("Title")},
+                     {QStringLiteral("Id"), QStringLiteral("f0e1d2c3b4a5968778695a4b3c2d1e0f")}}},
+                {QStringLiteral("PlayState"), QJsonObject{{QStringLiteral("IsPaused"), paused}}}};
+        };
+        f.server.listingRawBody.insert(
+            QStringLiteral("Sessions"),
+            QJsonDocument(QJsonArray{playing(newId, false), playing(kSessionId, true)})
+                .toJson(QJsonDocument::Compact));
+        f.model.reload();
+        QTRY_COMPARE(f.model.status(), RemoteSessionsModel::Ready);
+        QCOMPARE(resets.size(), 0);
+        QVERIFY(changes.size() >= 1);
+        QCOMPARE(inserts.size(), 1);
+        QCOMPARE(removals.size(), 1);
+        QCOMPARE(f.model.count(), 2);
+        // The kept row keeps its place, the new one follows it
+        QCOMPARE(f.row(0, RemoteSessionsModel::SessionIdRole).toString(), kSessionId);
+        QVERIFY(f.row(0, RemoteSessionsModel::PausedRole).toBool());
+        QCOMPARE(f.row(0, RemoteSessionsModel::NowPlayingRole).toString(), QStringLiteral("Title"));
+        QCOMPARE(f.row(1, RemoteSessionsModel::SessionIdRole).toString(), newId);
     }
 
     void expiredAuthenticationClearsTheSessionList()

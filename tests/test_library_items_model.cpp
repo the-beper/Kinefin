@@ -6,6 +6,7 @@
 #include "api/JellyfinClient.h"
 #include "models/ItemSummary.h"
 #include "models/LibraryItemsModel.h"
+#include "models/SearchModel.h"
 #include "settings/BrowseStateStore.h"
 
 #include <QAbstractItemModelTester>
@@ -102,6 +103,27 @@ int searchRequests(const Fixture &f)
     for (const QByteArray &route : f.server.itemsRoutes)
         count += route.contains("searchTerm=") ? 1 : 0;
     return count;
+}
+
+// A valid tag of the longest length whose every character encodes to six characters on the wire: about eight of them fill a query
+QString longTag(int index)
+{
+    return QString(125, QChar(0x00e9)) + QStringLiteral("%1").arg(index, 3, 10, QLatin1Char('0'));
+}
+
+// Adds long tags through the editor's setter until one is refused: the state the model kept
+LibraryFilterState fillWithTags(LibraryItemsModel &model)
+{
+    LibraryFilterState state;
+    for (int i = 0; i < Kinefin::MaxFilterValues; ++i) {
+        LibraryFilterState next = state;
+        next.tags.append(longTag(i));
+        model.setFilterState(next);
+        if (!(model.filterState() == next))
+            break;
+        state = next;
+    }
+    return state;
 }
 } // namespace
 
@@ -388,6 +410,99 @@ class TestLibraryItemsModel : public QObject {
         f.model.setGenreIds({});
         f.model.setFilter(LibraryItemsModel::All);
         QVERIFY(!f.model.filtered());
+    }
+
+    void theFilterEditorCannotBuildAQueryTheClientRefuses()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        // A failed facet list prunes nothing, so the tags below stay
+        f.server.listingStatus.insert(QStringLiteral("Filters"), 500);
+        QVERIFY(f.openMovies());
+        QTRY_COMPARE(f.model.status(), LibraryItemsModel::Ready);
+        QTRY_COMPARE(f.model.filterOptions()->status(), Kinefin::FilterOptionsModel::Failed);
+        LibraryFilterState state = fillWithTags(f.model);
+        QVERIFY(!state.tags.isEmpty() && state.tags.size() < Kinefin::MaxFilterValues);
+        // The tag that did not fit was refused and the state is the last one that did
+        QVERIFY(f.model.filterState() == state);
+        QVERIFY(f.model.filtersFit(LibraryItemsModel::filtersToVariant(state)));
+        LibraryFilterState more = state;
+        more.tags.append(longTag(900));
+        QVERIFY(!f.model.filtersFit(LibraryItemsModel::filtersToVariant(more)));
+        // Trading the last tag for a short year fits
+        LibraryFilterState year = state;
+        year.tags.removeLast();
+        year.years = {2020};
+        QVERIFY(f.model.filtersFit(LibraryItemsModel::filtersToVariant(year)));
+        // What the editor let in is sent, never refused
+        QTRY_COMPARE(f.model.status(), LibraryItemsModel::Ready);
+        QVERIFY(!f.model.queryTooLong());
+    }
+
+    void aQueryThatIsTooLongFailsWithItsReasonAndRetryResendsNothing()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        f.server.listingStatus.insert(QStringLiteral("Filters"), 500);
+        // A saved view past the budget (the editor would not have let it in)
+        LibraryItemsModel::ViewState initial =
+            LibraryItemsModel::defaultViewState(Kinefin::LibraryScope::Movies);
+        for (int i = 0; i < Kinefin::MaxFilterValues; ++i)
+            initial.filters.tags.append(longTag(i));
+        QSignalSpy tooLong(&f.model, &LibraryItemsModel::queryTooLongChanged);
+        QVERIFY(f.model.open(kMoviesLibrary, QStringLiteral("movies"), QStringLiteral("Movies"),
+                             initial));
+        QCOMPARE(f.model.status(), LibraryItemsModel::Failed);
+        QVERIFY(f.model.queryTooLong());
+        QCOMPARE(tooLong.size(), 1);
+        QTest::qWait(100);
+        QVERIFY(f.server.itemsRoutes.isEmpty());
+
+        // Retry would send the same refused query: it does nothing
+        f.model.retry();
+        QCOMPARE(f.model.status(), LibraryItemsModel::Failed);
+        QTest::qWait(100);
+        QVERIFY(f.server.itemsRoutes.isEmpty());
+
+        // An edit that only shortens the query is accepted while it is still too long
+        LibraryFilterState fewer = initial.filters;
+        fewer.tags.removeLast();
+        f.model.setFilterState(fewer);
+        QCOMPARE(f.model.filterState().tags.size(), Kinefin::MaxFilterValues - 1);
+        QCOMPARE(f.model.status(), LibraryItemsModel::Failed);
+        QVERIFY(f.model.queryTooLong());
+        // An edit that lengthens it is not
+        fewer.tags.append(longTag(900));
+        f.model.setFilterState(fewer);
+        QCOMPARE(f.model.filterState().tags.size(), Kinefin::MaxFilterValues - 1);
+
+        // Clearing the filters is the way out
+        f.model.clearFilters();
+        QTRY_COMPARE(f.model.status(), LibraryItemsModel::Ready);
+        QVERIFY(!f.model.queryTooLong());
+        QCOMPARE(tooLong.size(), 2);
+        QCOMPARE(f.server.itemsRoutes.size(), 1);
+    }
+
+    void aLongSearchTermWithFiltersIsReportedAndShorteningItRecovers()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        f.server.listingStatus.insert(QStringLiteral("Filters"), 500);
+        QVERIFY(f.openMovies());
+        QTRY_COMPARE(f.model.status(), LibraryItemsModel::Ready);
+        f.model.setSearchDebounceInterval(0);
+        // The editor leaves less room than the longest term takes
+        QVERIFY(!fillWithTags(f.model).tags.isEmpty());
+        QTRY_COMPARE(f.model.status(), LibraryItemsModel::Ready);
+        QVERIFY(!f.model.queryTooLong());
+        // The longest term (128 characters of three bytes each) does not fit with the tags
+        f.model.setSearchTerm(QString(Kinefin::SearchModel::MaxTermLength, QChar(0x20ac)));
+        QTRY_COMPARE(f.model.status(), LibraryItemsModel::Failed);
+        QVERIFY(f.model.queryTooLong());
+        f.model.setSearchTerm(QString());
+        QTRY_COMPARE(f.model.status(), LibraryItemsModel::Ready);
+        QVERIFY(!f.model.queryTooLong());
     }
 
     void genreIdsAreCleanedAndBounded()
@@ -1245,6 +1360,108 @@ class TestLibraryItemsModel : public QObject {
         QCOMPARE(f.model.sortKeys().size(), 5);
         f.model.setSortBy(QStringLiteral("PlayCount"));
         QCOMPARE(f.model.sortBy(), QStringLiteral("SortName"));
+    }
+
+    void showAllOfAGenreIsOneEditThatDropsTheOtherSections()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        QVERIFY(f.openMovies());
+        QTRY_COMPARE(f.model.status(), LibraryItemsModel::Ready);
+        QTRY_VERIFY(f.model.filterOptions()->available());
+        QTRY_COMPARE(f.model.filterOptions()->legacyStatus(), Kinefin::FilterOptionsModel::Ready);
+        LibraryFilterState state;
+        state.played = PlayedState::Unplayed;
+        state.favorites = true;
+        state.features = LibraryFeature::Subtitles;
+        state.quality = VideoQuality::HD;
+        state.tags = {QStringLiteral("restored-master")};
+        state.officialRatings = {QStringLiteral("PG-13")};
+        state.years = {2019};
+        state.genreIds = {kMystery};
+        f.model.setFilterState(state);
+        QTRY_COMPARE(f.model.status(), LibraryItemsModel::Ready);
+
+        QSignalSpy edits(&f.model, &LibraryItemsModel::viewStateEdited);
+        f.model.setFilterValues({{QStringLiteral("genreIds"), QStringList{kSciFi}}});
+        QCOMPARE(edits.size(), 1);
+        LibraryFilterState only;
+        only.genreIds = {kSciFi};
+        QVERIFY(f.model.filterState() == only);
+        QTRY_COMPARE(f.model.status(), LibraryItemsModel::Ready);
+        const QByteArray route = f.server.itemsRoutes.constLast();
+        QCOMPARE(wireValue(route, "genreIds"), kSciFi);
+        for (const char *name :
+             {"filters", "hasSubtitles", "isHd", "tags", "officialRatings", "years"})
+            QVERIFY2(!hasWire(route, name), name);
+    }
+
+    void episodesStartInTheAiredOrderUnlessAViewWasStored()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        LibraryItemsModel::Constraint episodes;
+        episodes.scope = Kinefin::LibraryScope::Episodes;
+        episodes.includeItemTypes = QStringLiteral("Episode");
+        const auto openEpisodes = [&](const LibraryItemsModel::ViewState &initial) {
+            return f.model.open(kMoviesLibrary, QStringLiteral("tvshows"), QStringLiteral("Shows"),
+                                initial, episodes);
+        };
+        // Nothing stored: the scope's own default
+        const auto fresh = LibraryItemsModel::defaultViewState(Kinefin::LibraryScope::Episodes);
+        QVERIFY(openEpisodes(fresh));
+        QCOMPARE(f.model.sortBy(), QStringLiteral("AiredEpisodeOrder"));
+        QTRY_COMPARE(f.model.status(), LibraryItemsModel::Ready);
+        QCOMPARE(wireValue(f.server.itemsRoutes.constLast(), "sortBy"),
+                 QStringLiteral("AiredEpisodeOrder,SortName"));
+        // A stored choice stays, SortName included
+        LibraryItemsModel::ViewState stored;
+        stored.sortBy = QStringLiteral("SortName");
+        QVERIFY(openEpisodes(stored));
+        QCOMPARE(f.model.sortBy(), QStringLiteral("SortName"));
+        // The other scopes keep SortName as their default
+        for (const Kinefin::LibraryScope scope :
+             {Kinefin::LibraryScope::Movies, Kinefin::LibraryScope::Series,
+              Kinefin::LibraryScope::Collections})
+            QCOMPARE(LibraryItemsModel::defaultViewState(scope).sortBy, QStringLiteral("SortName"));
+    }
+
+    void episodesCarryTheirSeriesAndNumbers()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        const auto item = [](const char *id, const char *type, const char *name) {
+            return QJsonObject{{QStringLiteral("Id"), QString::fromLatin1(id)},
+                               {QStringLiteral("Name"), QString::fromLatin1(name)},
+                               {QStringLiteral("Type"), QString::fromLatin1(type)},
+                               {QStringLiteral("SeriesName"), QStringLiteral("Some Show")}};
+        };
+        QJsonObject episode = item("a0000000000000000000000000000001", "Episode", "Pilot");
+        episode.insert(QStringLiteral("ParentIndexNumber"), 1);
+        episode.insert(QStringLiteral("IndexNumber"), 3);
+        const QJsonObject movie = item("a0000000000000000000000000000002", "Movie", "A Movie");
+        const QJsonObject page{{QStringLiteral("Items"), QJsonArray{episode, movie}},
+                               {QStringLiteral("TotalRecordCount"), 2}};
+        f.server.generatedItemTotal = -1;
+        f.server.listingRawBody.insert(QStringLiteral("Items"),
+                                       QJsonDocument(page).toJson(QJsonDocument::Compact));
+        QVERIFY(f.openMovies());
+        QTRY_COMPARE(f.model.status(), LibraryItemsModel::Ready);
+        const auto role = [&f](int row, int which) {
+            return f.model.data(f.model.index(row), which);
+        };
+        QCOMPARE(role(0, LibraryItemsModel::NameRole).toString(), QStringLiteral("Pilot"));
+        QCOMPARE(role(0, LibraryItemsModel::SeriesNameRole).toString(),
+                 QStringLiteral("Some Show"));
+        QCOMPARE(role(0, LibraryItemsModel::SeasonNumberRole).toInt(), 1);
+        QCOMPARE(role(0, LibraryItemsModel::EpisodeNumberRole).toInt(), 3);
+        // Only an episode has a series line
+        QVERIFY(role(1, LibraryItemsModel::SeriesNameRole).toString().isEmpty());
+        QCOMPARE(role(1, LibraryItemsModel::EpisodeNumberRole).toInt(), -1);
+        const QList<QByteArray> names = f.model.roleNames().values();
+        QVERIFY(names.contains("seriesName"));
+        QVERIFY(names.contains("seasonNumber"));
+        QVERIFY(names.contains("episodeNumber"));
     }
 
     void storedSortKeysMapToTheWire()

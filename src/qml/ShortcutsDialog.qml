@@ -14,13 +14,22 @@ Kirigami.Dialog {
         ["Escape", i18nc("@item:intable shortcut action", "Go Back")],
         ["Alt+Left", i18nc("@item:intable shortcut action", "Go Back")],
         ["Ctrl+F", i18nc("@item:intable shortcut action", "Search")],
+        ["F5", i18nc("@item:intable shortcut action", "Refresh")],
         ["Ctrl+1", i18nc("@item:intable shortcut action", "Home")],
         ["Ctrl+2", i18nc("@item:intable shortcut action", "Movies")],
-        ["Ctrl+3", i18nc("@item:intable shortcut action", "TV Shows")],
+        ["Ctrl+3", i18nc("@item:intable shortcut action", "Shows")],
         ["Ctrl+PgUp", i18nc("@item:intable shortcut action", "Previous Tab")],
         ["Ctrl+PgDown", i18nc("@item:intable shortcut action", "Next Tab")],
+        ["Ctrl+[", i18nc("@item:intable shortcut action", "Previous Tab")],
+        ["Ctrl+]", i18nc("@item:intable shortcut action", "Next Tab")],
+        ["Ctrl+Shift+Tab", i18nc("@item:intable shortcut action", "Previous Tab")],
+        ["Ctrl+Tab", i18nc("@item:intable shortcut action", "Next Tab")],
         ["Menu", i18nc("@item:intable shortcut action", "Open Item Menu")],
         ["Shift+F10", i18nc("@item:intable shortcut action", "Open Item Menu")],
+        ["Ctrl+Z", i18nc("@item:intable shortcut action", "Undo Last Queue Change")],
+        ["Ctrl+Up", i18nc("@item:intable shortcut action", "Move Queue Item Up")],
+        ["Ctrl+Down", i18nc("@item:intable shortcut action", "Move Queue Item Down")],
+        ["Delete", i18nc("@item:intable shortcut action", "Remove Queue Item")],
         ["Ctrl+,", i18nc("@item:intable shortcut action", "Settings")],
         ["Ctrl+Shift+/", i18nc("@item:intable shortcut action", "Show Keyboard Shortcuts")]
     ]
@@ -45,12 +54,11 @@ Kirigami.Dialog {
     standardButtons: Kirigami.Dialog.NoButton
     footer: null
     preferredWidth: Kirigami.Units.gridUnit * 24
-    // Room above and below for the opening animation, which moves the dialog: a dialog as tall as the window would be clamped to it and stretch while it moves. A taller content scrolls
-    maximumHeight: absoluteMaximumHeight - Kirigami.Units.gridUnit * 3
+    // Room above and below for the opening animation, which starts the dialog two grid units lower: the dialog must not reach the window edge while it moves, or Qt reports a binding loop on y. A taller content scrolls
+    maximumHeight: absoluteMaximumHeight - Kirigami.Units.gridUnit * 4
 
     header: QQC2.Control {
-        // Every side set on its own: the desktop style ignores `padding` for the top and bottom.
-        // The header spans the dialog border (1 px at the top and the sides); the content sits inside it
+        // Every side is set on its own because the desktop style ignores `padding` for the top and bottom; the header spans the dialog border (1 px at the top and the sides) and the content sits inside it
         topPadding: dialog.margin + 1
         bottomPadding: dialog.margin
         leftPadding: dialog.margin + 1
@@ -112,14 +120,13 @@ Kirigami.Dialog {
                     RowLayout {
                         spacing: Kirigami.Units.smallSpacing
                         // One width for all the rows, so the keys end on the same line and descriptions start on the same line
-                        Layout.minimumWidth: Kirigami.Units.gridUnit * 8
-                        Layout.maximumWidth: Kirigami.Units.gridUnit * 8
-                        Layout.preferredWidth: Kirigami.Units.gridUnit * 8
+                        Layout.minimumWidth: Kirigami.Units.gridUnit * 10
+                        Layout.maximumWidth: Kirigami.Units.gridUnit * 10
+                        Layout.preferredWidth: Kirigami.Units.gridUnit * 10
                         Layout.alignment: Qt.AlignVCenter
 
-                        Item {
-                            Layout.fillWidth: true
-                        }
+                        // Start each shortcut at the same edge; the action labels
+                        // keep their own common left edge after this fixed column.
                         Repeater {
                             model: dialog.keyParts(row.modelData[0])
                             delegate: Rectangle {

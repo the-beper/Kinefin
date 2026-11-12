@@ -34,7 +34,7 @@ class ResumeItemsModel final : public PagedItemsModel {
     // The width requested for a landscape card, as the Home row does
     static constexpr int ImageWidth = ItemRowModel::LandscapeWidth;
 
-    ResumeItemsModel(JellyfinClient *client, QObject *parent = nullptr);
+    explicit ResumeItemsModel(JellyfinClient *client, QObject *parent = nullptr);
 
     // Resets the model and loads the first page; false (and the model stays empty) when the request is refused
     bool open();

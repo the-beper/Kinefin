@@ -38,6 +38,9 @@ constexpr int MaxGenreIds = 50;
 constexpr int MaxFilterValues = 50;
 constexpr int MaxFilterValueChars = 128;
 
+// The longest encoded query of an Items listing: below the 8 KiB request line the server and the usual proxies accept. fetchItems refuses a longer one without a request; the filter UI keeps its selections within it by asking itemsQueryChars()
+constexpr int MaxItemsQueryChars = 7000;
+
 // Random sorting is requested as one page of this many items, never a later one: the order differs on every request
 constexpr int RandomPageSize = 100;
 
@@ -118,6 +121,8 @@ class JellyfinClient final : public QObject {
     bool fetchUserViews();
     // The universal listing of `/Items`: library grids, search and ids= resolution. The members of `query` are validated and composed into the camelCase query the 12.4 routes accept; the ids better than one item are joined comma-only. `channel` names the consumer: a family keeps one request in flight per channel, a new call on the same channel aborts the pending one, and every signal of the call carries the channel back, so independent consumers (the library grid, the home rows) pass distinct channels and ignore the others' replies. Only the families with several consumers (Items, Resume, Latest, NextUp, Similar, Seasons, Episodes, Genres, Filters) take a channel; the others have the single channel 0
     bool fetchItems(const ItemQuery &query, int channel = 0);
+    // The length of the encoded query fetchItems would send for `query` (the current user's id included), to compare with MaxItemsQueryChars; the validity of the members is not checked here
+    int itemsQueryChars(const ItemQuery &query) const;
     // The Continue Watching row: `GET /UserItems/Resume` (the route the upstream resume section speaks on the 12.x generation), video items; the envelope's total is still required and validated and `resumeItemsReady` carries it. A `startIndex` of 0 or more pages the list, -1 sends none
     bool fetchResumeItems(int limit, int channel = 0, int startIndex = -1);
     // One library's Recently Added row: `GET /Items/Latest` — the bare-array endpoint. An empty `parentId` spans the whole library set. An `isPlayed` that is set rides as `isPlayed=true|false` (false asks for unplayed items only, the user's HidePlayedInLatest), unset sends nothing
@@ -147,9 +152,9 @@ class JellyfinClient final : public QObject {
     // The movie recommendation rows: `GET /Movies/Recommendations` (bare array of RecommendationDto, each with its own Items). An empty `parentId` spans every library. `categoryLimit` 1 to 20, `itemLimit` 1 to 100
     bool fetchMovieRecommendations(const QString &parentId, int categoryLimit, int itemLimit,
                                    int channel = 0);
-    // The server's suggestions: `GET /Items/Suggestions`. The route has no parentId, so the answer is always for the whole library set of the user. `type` is a comma-separated BaseItemKind list, `limit` 1 to 100
+    // The server's suggestions: `GET /Items/Suggestions`. The route has no parentId, so the answer is always for the whole library set of the user. `type` is one BaseItemKind, `limit` 1 to 100
     bool fetchSuggestions(const QString &type, int startIndex, int limit, int channel = 0);
-    // Upcoming episodes: `GET /Shows/Upcoming` (not NextUp). An empty `parentId` spans every library. `startIndex` -1 sends none, `limit` is at least 1
+    // Upcoming episodes: `GET /Shows/Upcoming` (not NextUp). An empty `parentId` spans every library. `startIndex` -1 sends none, `limit` is 1 to 100
     bool fetchUpcomingEpisodes(const QString &parentId, int startIndex, int limit, int channel = 0);
     // The studios (the networks of a series library): `GET /Studios`, items with Name and Id. An empty `parentId` sends none; `startIndex` and `limit` -1 send none
     bool fetchStudios(const QString &parentId, const QString &includeItemTypes, int startIndex,
@@ -191,8 +196,8 @@ class JellyfinClient final : public QObject {
     // Trickplay thumbnails are authenticated on the same origin and bounded in
     // size. Superseded image requests never update the currently playing item.
     bool fetchTrickplayInfo(const QString &itemId);
-    bool fetchTrickplayTile(const QString &itemId, const QString &mediaSourceId,
-                            int width, int tileIndex);
+    bool fetchTrickplayTile(const QString &itemId, const QString &mediaSourceId, int width,
+                            int tileIndex);
     // Queues one report for the server, one request at a time and in order (an old session's Stopped always precedes a new session's Start). A newer Progress replaces a queued one, a Stopped drops the queued Progress, only a Stopped is retried (once). Reports never emit a failure signal: playback must not depend on them. Returns false, without a request, when not authenticated or the report is invalid. A 401 expires the session and drops the queue; disconnectFromServer() drops it silently
     bool reportPlayback(const PlaybackReport &report);
     bool hasPendingPlaybackReports() const;
@@ -213,7 +218,7 @@ class JellyfinClient final : public QObject {
     bool fetchCurrentUserConfiguration();
     // Replaces the current user's whole configuration (`POST /Users/Configuration`, the object as the JSON body, no user id: the token names the user). Success is 204 (200 is accepted too) and emits userConfigurationUpdated(), anything else userConfigurationUpdateFailed(); a reply that arrives after the session was lost emits nothing. A new call supersedes a pending one silently. Returns false, without a request, when not authenticated or when the object is empty or its body exceeds the response size cap
     bool updateCurrentUserConfiguration(const QJsonObject &configuration);
-    // The server's language catalog (`GET /Localization/Cultures`): at most MaxCultures entries, each an object, else the call fails
+    // The server's language catalog (`GET /Localization/Cultures`): at most MaxCultures entries, else the call fails
     bool fetchCultures();
     // The `CustomPrefs` of the current user's web display preferences (`GET /DisplayPreferences/usersettings?userId=&client=emby`), values as the server sent them, at most MaxDisplayPreferenceEntries. Read only: nothing in this client ever writes display preferences
     bool fetchDisplayHomeSections();
@@ -275,8 +280,7 @@ class JellyfinClient final : public QObject {
     void externalSubtitleDownloaded(const QUrl &url, const QByteArray &bytes);
     void externalSubtitleFailed(const QUrl &url);
     void trickplayInfoReady(const QString &itemId, const QJsonObject &item);
-    void trickplayTileReady(const QString &itemId, int width, int index,
-                            const QByteArray &jpeg);
+    void trickplayTileReady(const QString &itemId, int width, int index, const QByteArray &jpeg);
     void trickplayTileFailed(const QString &itemId, int width, int index);
     // `reason` is a fixed English string: never a URL, a body or a path from the server
     void playbackInfoFailed(const QString &itemId, int httpStatus, const QString &reason);

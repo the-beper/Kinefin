@@ -108,13 +108,17 @@ class PlanningConsistency(unittest.TestCase):
                 relative = target.split("#", 1)[0]
                 if not relative or relative.startswith(("http:", "https:", "mailto:")):
                     continue
-                decoded = urllib.parse.unquote(relative)
-                if not (document.parent / decoded).exists():
-                    broken.append(f"{document.relative_to(ROOT)} -> {target}")
+                resolved = document.parent / urllib.parse.unquote(relative)
+                if resolved.exists():
+                    continue
+                # docs/ is untracked: its links resolve only in a checkout that holds it
+                if not (ROOT / "docs").exists() and resolved.is_relative_to(ROOT / "docs"):
+                    continue
+                broken.append(f"{document.relative_to(ROOT)} -> {target}")
         self.assertEqual(broken, [])
 
     def test_package_checks_and_snapshot_facts(self) -> None:
-        self.assertTrue((ROOT / ".github/workflows/ci.yml").exists())
+        self.assertTrue((ROOT / ".github/workflows/verify.yml").exists())
         self.assertTrue((ROOT / "scripts/po.py").exists())
         script = content("build/check.sh")
         self.assertIn("po/extract.sh --check", script)

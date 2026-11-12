@@ -93,15 +93,20 @@ class TestUpdateChecker final : public QObject {
                  std::tuple{"3.2-5", "3.2-4", -1},
              }) {
             const auto result = UpdateChecker::compareVersions(QString::fromLatin1(current),
-                                                                QString::fromLatin1(latest));
+                                                               QString::fromLatin1(latest));
             QVERIFY(result);
             QCOMPARE(*result, expected);
         }
         for (const QString &invalid : {
-                 QStringLiteral("v1.2.3"), QStringLiteral("1.2.3-rc1"),
-                 QStringLiteral("1..2"), QStringLiteral("1.2."), QStringLiteral("-1"),
-                 QStringLiteral("1.2+1"), QStringLiteral("1.99999999999999"),
-                 QString(100, QLatin1Char('1')), QStringLiteral(""),
+                 QStringLiteral("v1.2.3"),
+                 QStringLiteral("1.2.3-rc1"),
+                 QStringLiteral("1..2"),
+                 QStringLiteral("1.2."),
+                 QStringLiteral("-1"),
+                 QStringLiteral("1.2+1"),
+                 QStringLiteral("1.99999999999999"),
+                 QString(100, QLatin1Char('1')),
+                 QStringLiteral(""),
              }) {
             QVERIFY2(!UpdateChecker::compareVersions(QStringLiteral("1.2.3"), invalid),
                      qPrintable(invalid));

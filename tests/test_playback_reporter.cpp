@@ -41,7 +41,10 @@ const PlaybackSession::Identity kIdentity{"c7dd3b1ac7dd3b1a9d42f2ab74f8a1b9",
 struct Chain {
     explicit Chain(std::chrono::milliseconds interval = std::chrono::milliseconds(50))
         : reporter(
-              session, client, [this] { return PlaybackReporter::PlayerState{position, true}; },
+              session, client,
+              [this] {
+                  return PlaybackReporter::PlayerState{.positionTicks = position, .canSeek = true};
+              },
               interval)
     {
         ok = server.listen() && login(client, server);

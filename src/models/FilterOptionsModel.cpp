@@ -99,9 +99,9 @@ void FilterOptionsModel::onFiltersReady(const QJsonObject &filters, int channel)
     if (channel != m_channel || m_status != Loading)
         return;
     std::vector<Option> options;
-    QSet<QString> seen;
     const QJsonValue genres = filters.value(QStringLiteral("Genres"));
     if (genres.isArray()) {
+        QSet<QString> seen;
         for (const QJsonValue &entry : genres.toArray()) {
             if (int(options.size()) == MaxOptions)
                 break;

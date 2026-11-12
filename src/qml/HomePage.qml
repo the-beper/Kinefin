@@ -11,6 +11,9 @@ Kirigami.ScrollablePage {
 
     required property ConnectionController connection
 
+    // The row toolbar is ToolBar everywhere (Main.qml): this page keeps its identity and actions in the top bar instead
+    globalToolBarStyle: Kirigami.ApplicationHeaderStyle.None
+
     title: i18n("Home")
 
     actions: [
@@ -69,6 +72,8 @@ Kirigami.ScrollablePage {
 
         Kirigami.CardsLayout {
             Layout.fillWidth: true
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 64
+            Layout.alignment: Qt.AlignHCenter
             visible: page.connection.homeLibraries.length > 0
             Repeater {
                 model: page.connection.homeLibraries
@@ -165,13 +170,15 @@ Kirigami.ScrollablePage {
                     visible: row.status === HomeRowsModel.Failed
                     type: Kirigami.MessageType.Error
                     text: i18n("Could not load this row: check the connection to the server and try again")
-                    actions: [
-                        Kirigami.Action {
-                            text: i18n("Retry")
-                            icon.name: "view-refresh"
-                            onTriggered: page.connection.homeRows.retry(row.index)
-                        }
-                    ]
+                }
+
+                // A row retry button, not a MessageBox action: Kirigami's action toolbar fails when a row flips between states
+                Controls.Button {
+                    visible: row.status === HomeRowsModel.Failed
+                    Layout.alignment: Qt.AlignLeft
+                    text: i18n("Retry")
+                    icon.name: "view-refresh"
+                    onClicked: page.connection.homeRows.retry(row.index)
                 }
 
                 CardRow {

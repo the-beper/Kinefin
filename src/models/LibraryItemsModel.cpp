@@ -132,8 +132,8 @@ LibraryFilterState everySection()
 }
 
 struct FeatureToken {
-    LibraryFeature feature;
-    const char *token;
+    LibraryFeature feature{};
+    const char *token{};
 };
 constexpr FeatureToken kFeatureTokens[] = {{LibraryFeature::Subtitles, "Subtitles"},
                                            {LibraryFeature::Trailer, "Trailer"},
@@ -368,7 +368,7 @@ bool LibraryItemsModel::openScope(const QString &libraryId, const QString &colle
     if (initial)
         applyViewState(*initial);
     else if (!sameLibrary)
-        applyViewState({});
+        applyViewState(defaultViewState(scope()));
     Q_EMIT libraryChanged();
     restartList();
     m_filterOptions.load(libraryId, m_base.includeItemTypes);
@@ -389,6 +389,7 @@ void LibraryItemsModel::clearLibrary()
     m_filterOptions.clear();
     m_clearingOptions = false;
     m_held = false;
+    setQueryTooLong(false);
     clearPaging();
     // The letter belongs to the open view
     assignAlphabet({});
@@ -462,6 +463,13 @@ bool LibraryItemsModel::seriesStatusAvailable() const
 bool LibraryItemsModel::episodeKindAvailable() const
 {
     return isOpen() && everySection().forScope(scope()).episodeKind != EpisodeKind::All;
+}
+
+LibraryItemsModel::ViewState LibraryItemsModel::defaultViewState(LibraryScope scope)
+{
+    ViewState state;
+    state.sortBy = librarySortKeys(scope).constFirst();
+    return state;
 }
 
 LibraryItemsModel::ViewState LibraryItemsModel::viewState() const
@@ -596,10 +604,12 @@ void LibraryItemsModel::refreshFiltered()
 void LibraryItemsModel::restartList()
 {
     m_held = hasPendingSelections();
-    if (m_held)
+    if (m_held) {
+        setQueryTooLong(false);
         holdPaging(heldStatus());
-    else
+    } else {
         restartPaging();
+    }
 }
 
 PagedItemsModel::Status LibraryItemsModel::heldStatus() const
@@ -613,6 +623,9 @@ PagedItemsModel::Status LibraryItemsModel::heldStatus() const
 
 void LibraryItemsModel::retry()
 {
+    // The same query would be refused again
+    if (m_queryTooLong)
+        return;
     if (m_held)
         m_filterOptions.retry();
     else
@@ -718,6 +731,10 @@ void LibraryItemsModel::setDescending(bool descending)
 
 void LibraryItemsModel::setFilterState(const LibraryFilterState &state)
 {
+    const LibraryFilterState clean = cleanedFilters(state);
+    const int chars = queryCharsOf(clean);
+    if (chars > MaxItemsQueryChars && chars >= queryCharsOf(m_filters))
+        return;
     if (!assignFilters(state))
         return;
     if (isOpen())
@@ -728,6 +745,11 @@ void LibraryItemsModel::setFilterState(const LibraryFilterState &state)
 void LibraryItemsModel::setFilterValues(const QVariantMap &values)
 {
     setFilterState(filtersFromVariant(values));
+}
+
+bool LibraryItemsModel::filtersFit(const QVariantMap &filters) const
+{
+    return queryCharsOf(cleanedFilters(filtersFromVariant(filters))) <= MaxItemsQueryChars;
 }
 
 void LibraryItemsModel::setFilter(Filter filter)
@@ -769,6 +791,12 @@ void LibraryItemsModel::setAlphabet(const QString &letter)
     if (!valid || (isRandom() && !clean.isEmpty()))
         return;
     if (assignAlphabet(clean) && isOpen())
+        restartList();
+}
+
+void LibraryItemsModel::reload()
+{
+    if (isOpen())
         restartList();
 }
 
@@ -883,7 +911,10 @@ QHash<int, QByteArray> LibraryItemsModel::roleNames() const
                                  {UnplayedCountRole, "unplayedCount"},
                                  {PlayedPercentageRole, "playedPercentage"},
                                  {FavoriteRole, "favorite"},
-                                 {LoadedRole, "loaded"}};
+                                 {LoadedRole, "loaded"},
+                                 {SeriesNameRole, "seriesName"},
+                                 {SeasonNumberRole, "seasonNumber"},
+                                 {EpisodeNumberRole, "episodeNumber"}};
     names.insert(cardRoleNames());
     return names;
 }
@@ -915,6 +946,12 @@ QVariant LibraryItemsModel::rowData(const ItemSummary &item, bool loaded, int ro
     switch (role) {
     case LoadedRole:
         return loaded;
+    case SeriesNameRole:
+        return item.type == QLatin1String("Episode") ? item.seriesName : QString();
+    case SeasonNumberRole:
+        return item.seasonNumber;
+    case EpisodeNumberRole:
+        return item.episodeNumber;
     case Qt::DisplayRole:
     case NameRole:
         return item.name;
@@ -939,17 +976,43 @@ QVariant LibraryItemsModel::rowData(const ItemSummary &item, bool loaded, int ro
     }
 }
 
+std::optional<ItemQuery> LibraryItemsModel::composedQuery(const LibraryFilterState &filters,
+                                                          int start, int limit) const
+{
+    ItemQuery base = m_base;
+    base.searchTerm = m_appliedTerm;
+    base.cardImageType = extraImageType(m_imageType);
+    return composeLibraryQuery(base, scope(), filters, LibrarySort{m_sortBy, m_descending},
+                               m_alphabet, start, limit);
+}
+
+int LibraryItemsModel::queryCharsOf(const LibraryFilterState &filters) const
+{
+    // The widest start index and page size a request can carry (Random is the one first page)
+    const std::optional<ItemQuery> query =
+        composedQuery(filters, isRandom() ? 0 : MaxRows, PageSize);
+    return query && m_client ? m_client->itemsQueryChars(*query) : -1;
+}
+
+void LibraryItemsModel::setQueryTooLong(bool tooLong)
+{
+    if (tooLong == m_queryTooLong)
+        return;
+    m_queryTooLong = tooLong;
+    Q_EMIT queryTooLongChanged();
+}
+
 bool LibraryItemsModel::sendPage(int start, int limit)
 {
     // A pending tag or rating is part of the saved view: sending without it would list more than the user kept
     if (hasPendingSelections())
         return false;
-    ItemQuery base = m_base;
-    base.searchTerm = m_appliedTerm;
-    base.cardImageType = extraImageType(m_imageType);
-    const std::optional<ItemQuery> query = composeLibraryQuery(
-        base, scope(), m_filters, LibrarySort{m_sortBy, m_descending}, m_alphabet, start, limit);
-    return query && m_client && m_client->fetchItems(*query, m_channel);
+    const std::optional<ItemQuery> query = composedQuery(m_filters, start, limit);
+    if (!query || !m_client)
+        return false;
+    // The client would refuse it too: say why instead of failing without a word
+    setQueryTooLong(m_client->itemsQueryChars(*query) > MaxItemsQueryChars);
+    return !m_queryTooLong && m_client->fetchItems(*query, m_channel);
 }
 
 void LibraryItemsModel::onItemsReady(const QJsonArray &items, int total, int channel)

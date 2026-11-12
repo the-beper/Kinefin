@@ -24,6 +24,7 @@ jobs:
     outputs:
       code: ${{ steps.changes.outputs.code }}
       packaging: ${{ steps.changes.outputs.packaging }}
+      images: ${{ steps.changes.outputs.images }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -35,7 +36,65 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
         run: build/ci/changes.sh
+
+  # A push to main that changes a build image starts publish-images.yml at the same time as this workflow. The jobs that run in those images pull them when they start, so they `needs` this job, which waits for the Images run of the same commit. `images=true`: the push changed an image input, the run must exist. `images=maybe`: the previous head is not in the checkout (force-push), so the push cannot be judged: wait only if an Images run is created within three minutes. Skipped when the push did not change an image input (and on pull requests, which never run publish-images.yml).
+  images:
+    needs: changes
+    if: contains(fromJSON('["true", "maybe"]'), needs.changes.outputs.images)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      actions: read
+    steps:
+      - name: Wait for the Images run of this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          IMAGES_MODE: ${{ needs.changes.outputs.images }}
+        run: |
+          start=$(date +%s)
+          deadline=$(( start + 1200 ))
+          missing=0
+          errors=0
+          while :; do
+            # The run of a push can appear a few seconds after this one starts: a missing run is retried, then it is an error
+            if ! runs=$(gh run list --workflow publish-images.yml --event push --branch main --commit "$GITHUB_SHA" --json status,conclusion,databaseId); then
+              errors=$((errors + 1))
+              echo "gh run list failed ($errors of 5)" >&2
+              [ "$errors" -lt 5 ] || exit 1
+              sleep 15
+              continue
+            fi
+            errors=0
+            state=$(printf '%s' "$runs" | jq -r 'sort_by(.databaseId) | last | if . == null then "none" else "\(.status) \(.conclusion)" end')
+            echo "Images run of the push of $GITHUB_SHA to main: $state"
+            case $state in
+              none)
+                missing=$((missing + 1))
+                if [ "$IMAGES_MODE" = maybe ]; then
+                  if [ "$(date +%s)" -ge $(( start + 180 )) ]; then
+                    echo "::notice::No Images run appeared for $GITHUB_SHA within 3 minutes: the push (previous head not available) is taken not to have changed an image input"
+                    exit 0
+                  fi
+                elif [ "$missing" -ge 8 ]; then
+                  echo "No Images run exists for $GITHUB_SHA although the push changed an image input: check that publish-images.yml was triggered by this push" >&2
+                  exit 1
+                fi
+                ;;
+              "completed success") exit 0 ;;
+              "completed "*)
+                echo "The Images run failed (${state#completed }): the build images were not published, fix it and push again" >&2
+                exit 1
+                ;;
+            esac
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "The Images run did not finish within 20 minutes" >&2
+              exit 1
+            fi
+            sleep 15
+          done
 
   lint:
     if: github.event_name != 'schedule'
@@ -70,7 +129,7 @@ jobs:
       - name: shellcheck
         run: |
           shellcheck --version
-          find build scripts po \( -name '*.sh' -o -name '*.hook' \) -print0 | xargs -0 shellcheck --severity=warning
+          find build scripts po \( -name '*.sh' -o -name '*.hook' \) -print0 | xargs -0 shellcheck -x --severity=warning
 
       - name: Install actionlint
         run: |
@@ -86,14 +145,27 @@ jobs:
         run: actionlint -color
 
   check:
-    needs: changes
-    if: needs.changes.outputs.code == 'true'
+    needs: [changes, images]
+    # `!cancelled()` lets it run after a skipped `images`; a failed `images` (or `changes`) still keeps it from starting, and `required` fails on that
+    if: >-
+      !cancelled() && needs.changes.result == 'success'
+      && contains(fromJSON('["success", "skipped"]'), needs.images.result)
+      && needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     permissions:
       contents: read
       # The build image is private on ghcr: reading it needs this token.
       packages: read
+    env:
+      # The UI tests wait this many times longer: the runner is several times slower than a development machine
+      KINEFIN_TEST_TIMEOUT_SCALE: 3
+      # The compiler cache lives outside the checkout (the REUSE gate scans it); the source and build paths are the same on every run, so the hashes match
+      CCACHE_DIR: /buildtmp/ccache
+      CCACHE_MAXSIZE: 600M
+      CCACHE_COMPRESS: "1"
+      CCACHE_BASEDIR: ${{ github.workspace }}
+      CCACHE_NOHASHDIR: "1"
     container:
       image: ghcr.io/the-beper/kinefin-build:fedora45
       # Without credentials the pull is anonymous, and ghcr answers 403 for a private image.
@@ -105,12 +177,34 @@ jobs:
         with:
           persist-credentials: false
 
+      # The key is unique per commit, so every run saves its objects and the next one restores the newest cache of the same image
+      - name: Restore the compiler cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /buildtmp/ccache
+          key: ccache-fedora45-${{ hashFiles('build/Containerfile') }}-${{ github.sha }}
+          restore-keys: |
+            ccache-fedora45-${{ hashFiles('build/Containerfile') }}-
+            ccache-fedora45-
+
       - name: Checks
         run: build/check.sh
 
+      # Also after failing tests: the compiled objects are worth keeping
+      - name: Save the compiler cache
+        if: always()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /buildtmp/ccache
+          key: ccache-fedora45-${{ hashFiles('build/Containerfile') }}-${{ github.sha }}
+
   flatpak:
-    needs: changes
-    if: needs.changes.outputs.packaging == 'true'
+    needs: [changes, images]
+    # As in `check`
+    if: >-
+      !cancelled() && needs.changes.result == 'success'
+      && contains(fromJSON('["success", "skipped"]'), needs.images.result)
+      && needs.changes.outputs.packaging == 'true'
     # Pinned runner image, as the release's build-flatpak: the same podman, flatpak and ostree.
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -123,7 +217,7 @@ jobs:
         with:
           persist-credentials: false
 
-      # On the plain runner, as the release's build job: the scripts run the image from images.yml with rootless podman (no job container, no --privileged). The release pins the image by digest; CI tests the one the tag points to now.
+      # On the plain runner, as the release's build job: the scripts run the image from publish-images.yml with rootless podman (no job container, no --privileged). The release pins the image by digest; CI tests the one the tag points to now.
       - name: Pull the build image
         env:
           GHCR_TOKEN: ${{ github.token }}
@@ -146,10 +240,10 @@ jobs:
           retention-days: 3
           compression-level: 0
 
-  # The one check to require (branch protection and the release gate): green only when every job that had to run succeeded. A job that was skipped because the change did not need it counts as done; any other skip, failure or cancellation fails it.
+  # The one check to require (branch protection and the release gate): green only when every job that had to run succeeded. A job that was skipped because the change did not need it counts as done; any other skip, failure or cancellation fails it. `images` may be `maybe` (previous head unknown after a force-push): the job runs then and succeeds even when no Images run exists.
   required:
     if: always()
-    needs: [changes, lint, check, flatpak]
+    needs: [changes, images, lint, check, flatpak]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions: {}
@@ -165,6 +259,7 @@ jobs:
           needs = json.loads(os.environ["NEEDS"])
           # job -> the `changes` output that makes it mandatory (None: always)
           flag_of = {
+              "images": "images",
               "lint": None,
               "check": "code",
               "flatpak": "packaging",
@@ -183,8 +278,9 @@ jobs:
               result = needs.get(job, {}).get("result", "missing")
               if flag is None:
                   wanted = True
-              elif flags.get(flag) in ("true", "false"):
-                  wanted = flags[flag] == "true"
+              elif flags.get(flag) in ("true", "false", "maybe"):
+                  # "maybe" (images, unknown pushed range): the job runs, so only a skip is wrong
+                  wanted = flags[flag] != "false"
               else:
                   rows.append((job, result, "?", "FAIL (changes gave no '%s' flag)" % flag))
                   failed = True
@@ -196,7 +292,8 @@ jobs:
               else:
                   verdict = "FAIL"
                   failed = True
-              rows.append((job, result, "yes" if wanted else "no", verdict))
+              needed = "maybe" if flags.get(flag) == "maybe" else "yes" if wanted else "no"
+              rows.append((job, result, needed, verdict))
 
           print("%-10s %-10s %-7s %s" % ("job", "result", "needed", "verdict"))
           for row in rows:

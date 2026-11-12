@@ -105,7 +105,7 @@ jobs:
         run: |
           deadline=$(( $(date +%s) + 1200 ))
           while :; do
-            state=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&event=push&branch=main&per_page=50" \
+            state=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/verify.yml/runs?head_sha=$GITHUB_SHA&event=push&branch=main&per_page=50" \
               --jq '.workflow_runs | sort_by(.id) | last | if . == null then "none" else "\(.status) \(.conclusion)" end')
             echo "CI run of the push of $GITHUB_SHA to main: $state"
             case $state in

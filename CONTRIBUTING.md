@@ -32,8 +32,12 @@ The build image exists because a bare host `cmake` misses ECM and friends; Fedor
 ```sh
 build/build-env.sh cmake -S . -B "${KINEFIN_BUILD_DIR:-/buildtmp/check}" -G Ninja -DBUILD_TESTING=ON
 build/build-env.sh cmake --build "${KINEFIN_BUILD_DIR:-/buildtmp/check}"
-build/build-env.sh ctest --test-dir "${KINEFIN_BUILD_DIR:-/buildtmp/check}" --output-on-failure
+build/build-env.sh ctest --test-dir "${KINEFIN_BUILD_DIR:-/buildtmp/check}" --output-on-failure -j 4
 ```
+
+The UI tests (`test_ui_pages`) run as the shards `ui_pages_0` to `ui_pages_5`, which CMake builds from the test class, so they run side by side under `-j` (each counts as two processors, so `-j4` runs two at a time); `ui_pages_shards` fails when a test function is in no shard. `KINEFIN_TEST_TIMEOUT_SCALE` (integer 1 to 10, default 1) multiplies every wait of `test_ui_pages`; CI sets it to 3. One UI test alone: `build/build-env.sh /buildtmp/check/bin/test_ui_pages <function>`.
+
+`build/check.sh` uses ccache automatically when the image has it (cache in `/buildtmp/ccache`, the same build volume); CI keeps that directory between runs with `actions/cache`.
 
 The build tree defaults to `/buildtmp/check` (a named podman volume build-env.sh mounts — incremental between runs). Keep CMake build trees outside the checkout: the `dist/` tree is scanned by the REUSE gate, which would otherwise have to cover the fetched third-party mpvqt sources. `dist/` is not in git. To run the built app in the container you are on your own — playback needs a real session; do that on the host once it can be host-built, or inside the container for offscreen-only experiments.
 

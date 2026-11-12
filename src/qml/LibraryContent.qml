@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import QtQuick
 import QtQuick.Controls as Controls
-import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 
 // The items of a LibraryItemsModel as a grid of cards or a list of rows, by its `viewMode`: one tab stop for the view (arrows to move, Return and Space to open, the Menu key and Shift+F10 for the card menu), its scroll position kept for the page's Back, the scroll back at the first row when the order, filters, letter or view change, and the placeholders of the empty, loading and filtered-empty states
@@ -130,8 +129,8 @@ Item {
             id: grid
             objectName: "libraryGrid"
 
-            // Tiles of the width the image type needs, at least two to a row
-            readonly property int columns: Math.max(2, Math.floor(width / (Kirigami.Units.gridUnit * (content.tileUnits[content.listModel.imageType] ?? 10))))
+            // A narrow window must be allowed a single legible poster instead of squeezing two cards below their minimum useful width
+            readonly property int columns: Math.max(1, Math.floor(width / (Kirigami.Units.gridUnit * (content.tileUnits[content.listModel.imageType] ?? 10))))
 
             clip: true
             boundsBehavior: Flickable.StopAtBounds
@@ -154,6 +153,10 @@ Item {
             Keys.onPressed: event => content.handleKey(event)
 
             delegate: MediaCard {
+                required property string seriesName
+                required property int seasonNumber
+                required property int episodeNumber
+
                 width: grid.cellWidth
                 height: grid.cellHeight
                 // The grid is the one tab stop, the arrow keys move inside it
@@ -164,6 +167,19 @@ Item {
                 showTitle: content.listModel.showTitle
                 showYear: content.listModel.showYear
                 cardLayout: content.listModel.cardLayout
+                // An episode is named by its title: the series and the numbers go under it
+                subtitle: {
+                    if (type !== "Episode" || episodeNumber < 0)
+                        return "";
+                    const label = seasonNumber >= 0 ? i18nc("season and episode number", "S%1:E%2", seasonNumber, episodeNumber) : i18nc("episode number", "E%1", episodeNumber);
+                    return seriesName.length > 0 ? i18nc("series name and episode label", "%1 · %2", seriesName, label) : label;
+                }
+                spokenSubtitle: {
+                    if (type !== "Episode" || episodeNumber < 0)
+                        return "";
+                    const label = seasonNumber >= 0 ? i18nc("season and episode number spoken", "Season %1, Episode %2", seasonNumber, episodeNumber) : i18nc("episode number spoken", "Episode %1", episodeNumber);
+                    return seriesName.length > 0 ? i18nc("series name and episode label", "%1 · %2", seriesName, label) : label;
+                }
                 onClicked: content.ownerPage.Window.window.openItem(itemId, content.ownerPage)
             }
         }

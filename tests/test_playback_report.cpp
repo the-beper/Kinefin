@@ -136,7 +136,8 @@ class TestPlaybackReport : public QObject {
         QCOMPARE(body->value(QStringLiteral("VolumeLevel")).toInt(), 64);
         QCOMPARE(body->value(QStringLiteral("IsMuted")).toBool(), false);
         QCOMPARE(body->value(QStringLiteral("RepeatMode")).toString(), QStringLiteral("RepeatAll"));
-        QCOMPARE(body->value(QStringLiteral("PlaybackOrder")).toString(), QStringLiteral("Shuffle"));
+        QCOMPARE(body->value(QStringLiteral("PlaybackOrder")).toString(),
+                 QStringLiteral("Shuffle"));
         QCOMPARE(body->value(QStringLiteral("NowPlayingQueue")).toArray().size(), 2);
         QCOMPARE(body->value(QStringLiteral("PlaylistItemId")).toString(), value.itemId);
         value.kind = PlaybackReport::Kind::Stopped;
@@ -156,9 +157,10 @@ class TestPlaybackReport : public QObject {
         value.playlistItemId = QStringLiteral("bad/id");
         const auto body = playbackReportBody(value);
         QVERIFY(body);
-        for (const QString &key : {QStringLiteral("VolumeLevel"), QStringLiteral("RepeatMode"),
-                                   QStringLiteral("AudioStreamIndex"), QStringLiteral("NowPlayingQueue"),
-                                   QStringLiteral("PlaylistItemId")})
+        for (const QString &key :
+             {QStringLiteral("VolumeLevel"), QStringLiteral("RepeatMode"),
+              QStringLiteral("AudioStreamIndex"), QStringLiteral("NowPlayingQueue"),
+              QStringLiteral("PlaylistItemId")})
             QVERIFY2(!body->contains(key), qPrintable(key));
     }
 

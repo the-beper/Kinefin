@@ -4,19 +4,23 @@
 #include "app/ImageNetworkFactory.h"
 #include "app/Logging.h"
 #include "app/ProfileCommands.h"
-#include "player/PlayerController.h"
 #include "integration/LinkRouter.h"
+#include "player/PlayerController.h"
 #include "settings/ClientSettings.h"
 #include "settings/KWalletTokenStore.h"
 #include "settings/ProfileIdentity.h"
 #include "settings/ProfileIndex.h"
 #include "settings/ProfilePaths.h"
 
+#include <QApplication>
 #include <QCommandLineParser>
 #include <QCoreApplication>
 #include <QGuiApplication>
+#include <QIcon>
+#include <QMessageBox>
 #include <QPointer>
 #include <QQmlApplicationEngine>
+#include <QQuickStyle>
 #include <QQuickWindow>
 #include <QSGRendererInterface>
 #include <QTextStream>
@@ -33,11 +37,19 @@ int main(int argc, char *argv[])
     // mpvqt uses QQuickFramebufferObject, which requires Qt Quick's OpenGL
     // graphics API. Select it before any QQuickWindow is constructed.
     QQuickWindow::setGraphicsApi(QSGRendererInterface::OpenGL);
-    QGuiApplication app(argc, argv);
+    QApplication app(argc, argv);
+    // org.kde.desktop needs QApplication; an environment variable naming another style wins
+    if (qEnvironmentVariableIsEmpty("QT_QUICK_CONTROLS_STYLE"))
+        QQuickStyle::setStyle(QStringLiteral("org.kde.desktop"));
     QCoreApplication::setApplicationName(QStringLiteral("Kinefin"));
     // Reversed by KDBusService: io.github.the_beper.Kinefin
     QCoreApplication::setOrganizationDomain(QStringLiteral("the_beper.github.io"));
     QGuiApplication::setDesktopFileName(QStringLiteral("io.github.the_beper.Kinefin"));
+    // Stock icons come from Breeze when the platform theme names a theme that lacks them; the window icon falls back to a stock one while the app icon is not installed
+    QIcon::setFallbackThemeName(QStringLiteral("breeze"));
+    QApplication::setWindowIcon(
+        QIcon::fromTheme(QStringLiteral("io.github.the_beper.Kinefin"),
+                         QIcon::fromTheme(QStringLiteral("video-television"))));
     KLocalizedString::setApplicationDomain("kinefin");
     KAboutData aboutData(QStringLiteral("Kinefin"), QStringLiteral("Kinefin"),
                          QStringLiteral(KINEFIN_VERSION));
@@ -169,10 +181,10 @@ int main(int argc, char *argv[])
         return 1;
     }
     Kinefin::ConnectionController connection(profileId, deviceId, QStringLiteral(KINEFIN_VERSION));
-    Kinefin::PlayerController player(connection.playbackClient(), *connection.queue(),
-                                     settings, profileId);
-    QObject::connect(&connection, &Kinefin::ConnectionController::aboutToLeaveSession,
-                     &player, &Kinefin::PlayerController::onAccountLeaving);
+    Kinefin::PlayerController player(connection.playbackClient(), *connection.queue(), settings,
+                                     profileId);
+    QObject::connect(&connection, &Kinefin::ConnectionController::aboutToLeaveSession, &player,
+                     &Kinefin::PlayerController::onAccountLeaving);
     QObject::connect(&connection, &Kinefin::ConnectionController::stateChanged, &player,
                      [&connection, &player] {
                          if (connection.state() != Kinefin::ConnectionController::Authenticated)
@@ -202,6 +214,12 @@ int main(int argc, char *argv[])
     engine.loadFromModule(QStringLiteral("org.kde.kinefin"), QStringLiteral("Main"));
     if (engine.rootObjects().isEmpty()) {
         qCritical("Could not load the Kinefin QML shell");
+        // Only where a user can see it: the offscreen and minimal platforms (tests, headless runs) must not block on a dialog
+        const QString platform = QGuiApplication::platformName();
+        if (!platform.startsWith(QLatin1String("offscreen"))
+            && !platform.startsWith(QLatin1String("minimal")))
+            QMessageBox::critical(nullptr, QCoreApplication::applicationName(),
+                                  i18n("The Kinefin interface could not be loaded"));
         return 1;
     }
     window = qobject_cast<QQuickWindow *>(engine.rootObjects().constFirst());

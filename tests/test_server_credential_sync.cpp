@@ -46,7 +46,7 @@ QByteArray credentialsFile()
 }
 
 // The restart: a fresh client with the same device identity probes the server; returns once the probe answered
-bool probe(JellyfinClient &client, FakeJellyfin &server)
+bool probe(JellyfinClient &client, const FakeJellyfin &server)
 {
     QSignalSpy ready(&client, &JellyfinClient::serverReady);
     if (!prepare(client, server))
@@ -89,7 +89,7 @@ void makeLegacyOwner(const QString &userId = kUserId)
 }
 
 // A first run that stores a session, then closes the app
-void storeASession(FakeJellyfin &server, MemoryTokenStore &store)
+void storeASession(const FakeJellyfin &server, MemoryTokenStore &store)
 {
     JellyfinClient first;
     ServerCredentialSync sync(&first, &store, kProfile);

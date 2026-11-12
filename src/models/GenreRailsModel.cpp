@@ -124,7 +124,7 @@ void GenreRailsModel::onGenresReady(const QJsonArray &items, int total, int chan
     if (!added.empty()) {
         const int first = int(m_rails.size());
         beginInsertRows(QModelIndex(), first, first + int(added.size()) - 1);
-        for (Rail &rail : added)
+        for (const Rail &rail : added)
             m_rails.push_back(rail);
         endInsertRows();
     }

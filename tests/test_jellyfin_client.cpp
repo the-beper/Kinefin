@@ -24,7 +24,7 @@ const QString kAliceId = QStringLiteral("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1");
 const QString kBobId = QStringLiteral("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb2");
 
 // Connects to the fake and signs `name` in (a QTRY_* macro cannot live in a helper that returns a value)
-bool loginAs(Kinefin::JellyfinClient &client, FakeJellyfin &server, const QString &name)
+bool loginAs(Kinefin::JellyfinClient &client, const FakeJellyfin &server, const QString &name)
 {
     QSignalSpy ready(&client, &Kinefin::JellyfinClient::serverReady);
     QSignalSpy loggedIn(&client, &Kinefin::JellyfinClient::loginSucceeded);
@@ -83,17 +83,20 @@ class TestJellyfinClient : public QObject {
     {
         FakeJellyfin server;
         QVERIFY(server.listen());
-        server.mediaSegmentsBody = QJsonDocument(QJsonObject{
-            {QStringLiteral("Items"), QJsonArray{
-                QJsonObject{{QStringLiteral("Type"), QStringLiteral("Intro")},
-                            {QStringLiteral("StartTicks"), qint64(10'000'000)},
-                            {QStringLiteral("EndTicks"), qint64(30'000'000)}},
-                QJsonObject{{QStringLiteral("Type"), QStringLiteral("Recap")},
-                            {QStringLiteral("StartTicks"), qint64(-1)},
-                            {QStringLiteral("EndTicks"), qint64(30'000'000)}},
-                QJsonObject{{QStringLiteral("Type"), QStringLiteral("Invalid")},
-                            {QStringLiteral("StartTicks"), qint64(0)},
-                            {QStringLiteral("EndTicks"), qint64(30'000'000)}}}}}).toJson();
+        server.mediaSegmentsBody =
+            QJsonDocument(
+                QJsonObject{
+                    {QStringLiteral("Items"),
+                     QJsonArray{QJsonObject{{QStringLiteral("Type"), QStringLiteral("Intro")},
+                                            {QStringLiteral("StartTicks"), qint64(10'000'000)},
+                                            {QStringLiteral("EndTicks"), qint64(30'000'000)}},
+                                QJsonObject{{QStringLiteral("Type"), QStringLiteral("Recap")},
+                                            {QStringLiteral("StartTicks"), qint64(-1)},
+                                            {QStringLiteral("EndTicks"), qint64(30'000'000)}},
+                                QJsonObject{{QStringLiteral("Type"), QStringLiteral("Invalid")},
+                                            {QStringLiteral("StartTicks"), qint64(0)},
+                                            {QStringLiteral("EndTicks"), qint64(30'000'000)}}}}})
+                .toJson();
         Kinefin::JellyfinClient client;
         QVERIFY(login(client, server));
         QSignalSpy segments(&client, &Kinefin::JellyfinClient::mediaSegmentsReady);
@@ -117,7 +120,8 @@ class TestJellyfinClient : public QObject {
         QVERIFY(server.listen());
         Kinefin::JellyfinClient client;
         QVERIFY(login(client, server));
-        const QUrl allowed = server.url(QStringLiteral("/jellyfin/Videos/%1/Subtitles/3/0/Stream.srt").arg(kPlayItem));
+        const QUrl allowed = server.url(
+            QStringLiteral("/jellyfin/Videos/%1/Subtitles/3/0/Stream.srt").arg(kPlayItem));
         QSignalSpy downloaded(&client, &Kinefin::JellyfinClient::externalSubtitleDownloaded);
         QSignalSpy failed(&client, &Kinefin::JellyfinClient::externalSubtitleFailed);
         QVERIFY(client.downloadExternalSubtitle(allowed));
@@ -125,7 +129,8 @@ class TestJellyfinClient : public QObject {
         QCOMPARE(downloaded.takeFirst().at(1).toByteArray(), server.subtitleDownloadBody);
         QVERIFY(server.subtitleDownloadAuth.contains(kTokenField));
         const int count = server.subtitleDownloadRequests;
-        QVERIFY(!client.downloadExternalSubtitle(QUrl(QStringLiteral("https://evil.invalid/Videos/id/Subtitles/0/Stream.srt"))));
+        QVERIFY(!client.downloadExternalSubtitle(
+            QUrl(QStringLiteral("https://evil.invalid/Videos/id/Subtitles/0/Stream.srt"))));
         QVERIFY(!client.downloadExternalSubtitle(server.url(QStringLiteral("/jellyfin/Users/Me"))));
         QCOMPARE(server.subtitleDownloadRequests, count);
         server.redirectSubtitleDownload = true;
@@ -139,16 +144,14 @@ class TestJellyfinClient : public QObject {
     {
         FakeJellyfin server;
         QVERIFY(server.listen());
-        const QJsonObject thumbnail{{QStringLiteral("Width"), 320},
-                                    {QStringLiteral("Height"), 180},
-                                    {QStringLiteral("TileWidth"), 5},
-                                    {QStringLiteral("TileHeight"), 4},
-                                    {QStringLiteral("ThumbnailCount"), 40},
-                                    {QStringLiteral("Interval"), 10000}};
+        const QJsonObject thumbnail{
+            {QStringLiteral("Width"), 320},         {QStringLiteral("Height"), 180},
+            {QStringLiteral("TileWidth"), 5},       {QStringLiteral("TileHeight"), 4},
+            {QStringLiteral("ThumbnailCount"), 40}, {QStringLiteral("Interval"), 10000}};
         const QJsonObject widths{{QStringLiteral("320"), thumbnail}};
         const QJsonObject indexed{{kPlayItem, widths}};
-        server.trickplayMetadataBody = QJsonDocument(QJsonObject{
-            {QStringLiteral("Trickplay"), indexed}}).toJson();
+        server.trickplayMetadataBody =
+            QJsonDocument(QJsonObject{{QStringLiteral("Trickplay"), indexed}}).toJson();
         Kinefin::JellyfinClient client;
         QVERIFY(login(client, server));
         QSignalSpy info(&client, &Kinefin::JellyfinClient::trickplayInfoReady);
@@ -2141,6 +2144,49 @@ class TestJellyfinClient : public QObject {
         QCOMPARE(ready.size(), 1);
     }
 
+    void theItemsQueryLengthIsTheBoundFetchItemsEnforces()
+    {
+        using namespace Kinefin;
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        JellyfinClient client;
+        QVERIFY(login(client, server));
+        QSignalSpy ready(&client, &JellyfinClient::itemsReady);
+        ItemQuery query;
+        query.includeItemTypes = QStringLiteral("Movie");
+        const int base = client.itemsQueryChars(query);
+        QVERIFY(base > 0 && base < MaxItemsQueryChars);
+        // The count is of the wire form: a '+' goes as %2B and a three-byte character as nine characters
+        ItemQuery plus = query;
+        plus.searchTerm = QStringLiteral("C++");
+        ItemQuery plain = query;
+        plain.searchTerm = QStringLiteral("Cab");
+        QCOMPARE(client.itemsQueryChars(plus), client.itemsQueryChars(plain) + 4);
+
+        // Tags are added up to the last one that fits: the client sends that query and refuses the next
+        QStringList tags;
+        const auto tagAt = [](int index) {
+            return QString(125, QChar(0x00e9))
+                   + QStringLiteral("%1").arg(index, 3, 10, QLatin1Char('0'));
+        };
+        for (int i = 0; i < MaxFilterValues; ++i) {
+            tags.append(tagAt(i));
+            query.tags = tags;
+            if (client.itemsQueryChars(query) > MaxItemsQueryChars)
+                break;
+        }
+        QVERIFY(tags.size() > 1 && tags.size() <= MaxFilterValues);
+        QVERIFY(client.itemsQueryChars(query) > MaxItemsQueryChars);
+        const int before = server.listingRequests;
+        QVERIFY(!client.fetchItems(query));
+        QCOMPARE(server.listingRequests, before);
+        tags.removeLast();
+        query.tags = tags;
+        QVERIFY(client.itemsQueryChars(query) <= MaxItemsQueryChars);
+        QVERIFY(client.fetchItems(query));
+        QTRY_COMPARE(ready.size(), 1);
+    }
+
     void legacyFiltersHaveTheirOwnFamilyAndSignals()
     {
         using namespace Kinefin;
@@ -2300,10 +2346,13 @@ class TestJellyfinClient : public QObject {
         QCOMPARE(wire.queryItemValue(QStringLiteral("startIndex")), QStringLiteral("0"));
         QCOMPARE(wire.queryItemValue(QStringLiteral("limit")), QStringLiteral("24"));
         QVERIFY(wire.hasQueryItem(QStringLiteral("userId")));
+        QCOMPARE(wire.queryItemValue(QStringLiteral("enableTotalRecordCount")),
+                 QStringLiteral("true"));
         QVERIFY(!wire.hasQueryItem(QStringLiteral("parentId")));
         const int before = server.listingRequests;
         QVERIFY(!client.fetchSuggestions({}, 0, 24, 3075));
         QVERIFY(!client.fetchSuggestions(QStringLiteral("Series,EvilType"), 0, 24, 3075));
+        QVERIFY(!client.fetchSuggestions(QStringLiteral("Series,Movie"), 0, 24, 3075));
         QVERIFY(!client.fetchSuggestions(QStringLiteral("Series"), -2, 24, 3075));
         QVERIFY(!client.fetchSuggestions(QStringLiteral("Series"), 0, 0, 3075));
         QVERIFY(!client.fetchSuggestions(QStringLiteral("Series"), 0, 101, 3075));
@@ -2329,6 +2378,7 @@ class TestJellyfinClient : public QObject {
         QVERIFY(!wire.hasQueryItem(QStringLiteral("startIndex")));
         QVERIFY(!client.fetchUpcomingEpisodes(QStringLiteral("a/b"), 0, 30, 3076));
         QVERIFY(!client.fetchUpcomingEpisodes(library, 0, 0, 3076));
+        QVERIFY(!client.fetchUpcomingEpisodes(library, 0, 101, 3076));
         QVERIFY(!client.fetchUpcomingEpisodes(library, -2, 10, 3076));
 
         // Studios (the networks of the series library)

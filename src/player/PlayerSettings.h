@@ -13,12 +13,13 @@ class ClientSettings;
 // video. Settings changes are reflected live; the user-owned other_conf wins last.
 class PlayerSettings final : public QObject {
     Q_OBJECT
-public:
+  public:
     PlayerSettings(ClientSettings &settings, PlaybackEngine &engine, QObject *parent = nullptr);
     void apply();
     void setAudioOffset(double seconds);
     void setSubtitleOffset(double seconds);
-private:
+
+  private:
     void applyAudio();
     void applyVideo();
     void applySubtitles();

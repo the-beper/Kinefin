@@ -18,15 +18,19 @@ std::optional<TrickplayLayout> parseTrickplayLayout(const QJsonObject &item,
     if (widths.isEmpty() && !map.isEmpty()) {
         bool isWidth = false;
         map.constBegin().key().toInt(&isWidth);
-        if (isWidth) widths = map;
-        else if (map.size() == 1) widths = map.constBegin().value().toObject();
+        if (isWidth)
+            widths = map;
+        else if (map.size() == 1)
+            widths = map.constBegin().value().toObject();
     }
-    if (widths.isEmpty()) return std::nullopt;
+    if (widths.isEmpty())
+        return std::nullopt;
     std::optional<TrickplayLayout> best;
     for (auto it = widths.constBegin(); it != widths.constEnd(); ++it) {
         bool ok = false;
         const int keyWidth = it.key().toInt(&ok);
-        if (!ok || keyWidth < 16 || keyWidth > 640 || !it.value().isObject()) continue;
+        if (!ok || keyWidth < 16 || keyWidth > 640 || !it.value().isObject())
+            continue;
         const QJsonObject value = it.value().toObject();
         TrickplayLayout layout;
         layout.width = value.value(QStringLiteral("Width")).toInt();
@@ -36,11 +40,10 @@ std::optional<TrickplayLayout> parseTrickplayLayout(const QJsonObject &item,
         layout.imageCount = value.value(QStringLiteral("ThumbnailCount")).toInt();
         layout.intervalMs = value.value(QStringLiteral("Interval")).toInt();
         if (layout.width != keyWidth || layout.width < 16 || layout.width > 640
-            || layout.height < 16 || layout.height > 360
-            || layout.columns < 1 || layout.columns > 20
-            || layout.rows < 1 || layout.rows > 20
-            || layout.imageCount < 1 || layout.imageCount > 1'000'000
-            || layout.intervalMs < 1000 || layout.intervalMs > 3600'000
+            || layout.height < 16 || layout.height > 360 || layout.columns < 1
+            || layout.columns > 20 || layout.rows < 1 || layout.rows > 20 || layout.imageCount < 1
+            || layout.imageCount > 1'000'000 || layout.intervalMs < 1000
+            || layout.intervalMs > 3600'000
             || qint64(layout.width) * layout.height * layout.columns * layout.rows > 12'000'000)
             continue;
         // Prefer the closest width to the 320px thumbnail target.
@@ -50,17 +53,16 @@ std::optional<TrickplayLayout> parseTrickplayLayout(const QJsonObject &item,
     return best;
 }
 
-std::optional<TrickplayFrame> trickplayFrameAt(const TrickplayLayout &layout,
-                                               qint64 positionTicks)
+std::optional<TrickplayFrame> trickplayFrameAt(const TrickplayLayout &layout, qint64 positionTicks)
 {
-    if (positionTicks < 0 || layout.intervalMs <= 0 || layout.imageCount <= 0
-        || layout.rows < 1 || layout.columns < 1)
+    if (positionTicks < 0 || layout.intervalMs <= 0 || layout.imageCount <= 0 || layout.rows < 1
+        || layout.columns < 1)
         return std::nullopt;
     const qint64 image = (positionTicks / 10'000) / layout.intervalMs;
-    if (image >= layout.imageCount) return std::nullopt;
+    if (image >= layout.imageCount)
+        return std::nullopt;
     const int perTile = layout.rows * layout.columns;
     const int slot = int(image % perTile);
-    return TrickplayFrame{int(image / perTile), slot % layout.columns,
-                          slot / layout.columns};
+    return TrickplayFrame{int(image / perTile), slot % layout.columns, slot / layout.columns};
 }
 } // namespace Kinefin

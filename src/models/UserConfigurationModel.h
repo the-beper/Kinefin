@@ -40,7 +40,7 @@ struct UserPreferencesSnapshot {
     QStringList latestItemsExcludes;
 };
 
-// The editor of the signed-in user's `UserConfiguration` (the user preferences page): the whole read-modify-write cycle in QtCore, so QML only sees typed properties and actions, never JSON The configuration is loaded once (`GET /Users/Me`, `Configuration` kept as `baselineRaw`) and edited as a typed draft of the fields the page owns; every other field (GroupedFolders, nulls, nested objects, enum values this client does not know, fields of a newer server) is never parsed into the draft and travels untouched. A field is dirty while its draft differs from the baseline, so setting it back clears it. save() reads the configuration again right before writing: a dirty field that changed on the server since the baseline (and is not already what the draft says) is a conflict and nothing is written; otherwise the draft is merged over that fresh object, the whole object is posted and read once more to verify the written fields. The server offers no compare-and-swap, so two clients saving at the same moment can still overwrite each other The id lists (OrderedViews, MyMediaExcludes, LatestItemsExcludes) are edited as the ids of the libraries the user can see (setLibraries): ids the server holds that are not visible stay exactly where they are in the merged array. Display preferences are only read (the home sections preview) and never written. Everything the server sends is plain text; a language the catalog does not know and an enum value this client does not know stay selected until the user picks another one. Losing the session (credentialsCleared) empties everything and cancels the cycle: nothing is retried and no later reply reaches another session
+// The editor of the signed-in user's `UserConfiguration` (the user preferences page): the whole read-modify-write cycle in QtCore, so QML only sees typed properties and actions, never JSON. The configuration is loaded once (`GET /Users/Me`, `Configuration` kept as `m_baselineRaw`) and edited as a typed draft of the fields the page owns; every other field (GroupedFolders, nulls, nested objects, enum values this client does not know, fields of a newer server) is never parsed into the draft and travels untouched. A field is dirty while its draft differs from the baseline, so setting it back clears it. save() reads the configuration again right before writing: a dirty field that changed on the server since the baseline (and is not already what the draft says) is a conflict and nothing is written; otherwise the draft is merged over that fresh object, the whole object is posted and read once more to verify the written fields. The server offers no compare-and-swap, so two clients saving at the same moment can still overwrite each other. The id lists (OrderedViews, MyMediaExcludes, LatestItemsExcludes) are edited as the ids of the libraries the user can see (setLibraries): ids the server holds that are not visible stay exactly where they are in the merged array. Display preferences are only read (the home sections preview) and never written. Everything the server sends is plain text; a language the catalog does not know and an enum value this client does not know stay selected until the user picks another one. Losing the session (credentialsCleared) empties everything and cancels the cycle: nothing is retried and no later reply reaches another session
 class UserConfigurationModel : public QObject {
     Q_OBJECT
     Q_PROPERTY(State state READ state NOTIFY stateChanged)
@@ -129,9 +129,11 @@ class UserConfigurationModel : public QObject {
     Q_INVOKABLE void save();
     // From Failed: a failed write is sent again (the sequence restarts with the fresh read), anything else reloads
     Q_INVOKABLE void retry();
-    // Resets the draft to the baseline. From a failure that left the baseline unreliable it reloads instead
+    // Resets the draft to the baseline. From a failure that left the baseline unreliable, or once a write was sent without a verified outcome, it reloads instead
     Q_INVOKABLE void discard();
-    // Leaves Conflict, or a failed write, and returns to editing the draft: the next save() checks again against the server
+    // Drops the draft without a network read, for a page that goes away: nothing happens after a write of unknown outcome, the next visit loads again
+    Q_INVOKABLE void discardDraft();
+    // Leaves Conflict, or a failed write, and returns to editing the draft: the next save() checks again against the server. From Conflict the server's values become the baseline, so that save overwrites them
     Q_INVOKABLE void keepEditing();
     // Moves a library one place in the draft order of OrderedViews (the keyboard reorder); out-of-range indexes do nothing
     Q_INVOKABLE void moveOrderedView(int from, int to);
@@ -221,6 +223,7 @@ class UserConfigurationModel : public QObject {
     void setState(State state, Step step);
     void fail(Failure failure);
     void adoptBaseline(const QJsonObject &configuration);
+    void rebaseOntoLatest();
     bool userMatches(const QJsonObject &user) const;
     QVariant project(const QJsonObject &configuration, Field field) const;
     QVariant defaultValue(Field field) const;
@@ -248,6 +251,8 @@ class UserConfigurationModel : public QObject {
     bool m_hasBaseline = false;
     QJsonObject m_baselineRaw;
     QJsonObject m_latestRaw;
+    // The write was handed to the client and no verified read followed: the server may or may not have applied it
+    bool m_postSent = false;
     std::array<QVariant, FieldCount> m_draft;
     std::bitset<FieldCount> m_malformed;
     QList<Field> m_saving;

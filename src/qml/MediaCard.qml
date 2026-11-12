@@ -37,6 +37,8 @@ Controls.ItemDelegate {
     property bool landscape: false
     // The second text line, the year when empty
     property string subtitle: ""
+    // What a screen reader says in place of `subtitle` when that is not readable aloud
+    property string spokenSubtitle: subtitle
     // How a library page presents the card: the height of the image area over its width (0: from `landscape`), the image fitted instead of cropped, the title and year lines, and the text footer at all
     property real imageAspect: 0
     property bool fitImage: false
@@ -139,7 +141,7 @@ Controls.ItemDelegate {
 
     padding: Kirigami.Units.smallSpacing
     Accessible.ignored: !loaded
-    Accessible.name: countsLine.length > 0 ? name + ", " + countsLine : (subtitle.length > 0 ? name + ", " + subtitle : (year > 0 ? name + " (" + year + ")" : name))
+    Accessible.name: countsLine.length > 0 ? name + ", " + countsLine : (spokenSubtitle.length > 0 ? name + ", " + spokenSubtitle : (year > 0 ? name + " (" + year + ")" : name))
     Accessible.description: description
 
     contentItem: ColumnLayout {

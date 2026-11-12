@@ -30,8 +30,12 @@ Kirigami.Page {
     // Whether the Genres sub-tab is on: the rails are its, and the toolbar action that opens them as a page of their own makes way
     readonly property bool genresSubtab: hasSubtabs && subtabs.available.indexOf("genres") >= 0
 
-    title: tabType === "movies" ? i18n("Movies") : tabType === "tvshows" ? i18n("TV Shows") : libraryName
+    title: tabType === "movies" ? i18n("Movies") : tabType === "tvshows" ? i18n("Shows") : libraryName
     padding: 0
+    // The row toolbar is ToolBar everywhere (Main.qml): the page of a tab has no title row, the tab itself says where the user is, and the title stays for the accessible name
+    globalToolBarStyle: tabType !== "" ? Kirigami.ApplicationHeaderStyle.None : Kirigami.ApplicationHeaderStyle.Auto
+    Accessible.role: Accessible.Pane
+    Accessible.name: title
 
     // The scroll position and the current tile, for the tab to come back as it was left
     function viewPosition() {
@@ -66,10 +70,17 @@ Kirigami.Page {
             subtabs.retry();
     }
 
-    // Show All of a genre rail: the main list, from that genre alone
+    // What the main menu's Refresh calls while this page is in front: the list or the sub-tab showing is asked for again
+    function refreshPage() {
+        if (subtab === "main")
+            model.reload();
+        else
+            subtabs.reload();
+    }
+
+    // Show All of a genre rail: the main list, from that genre alone (one edit that replaces every filter section)
     function showGenre(genreId) {
-        model.filter = LibraryItemsModel.All;
-        model.genreIds = [genreId];
+        model.filters = { genreIds: [genreId] };
         if (hasSubtabs)
             subtabs.select("main");
     }
@@ -91,7 +102,7 @@ Kirigami.Page {
         case "episodes":
             return i18nc("@title:tab sub-tab of TV Shows", "Episodes");
         }
-        return tabType === "movies" ? i18nc("@title:tab main sub-tab of Movies", "Movies") : i18nc("@title:tab main sub-tab of TV Shows", "Shows");
+        return title;
     }
 
     // What the placeholder of an empty list says
@@ -181,6 +192,18 @@ Kirigami.Page {
         onChosen: list.imageType = token
     }
 
+    // One sub-tab as a checkable entry of the toolbar, shown while the settings turn it on: the entry that is checked leads back to the main list
+    component SubtabAction: ChoiceAction {
+        property string subtabId
+
+        objectName: "subtab_" + subtabId
+        text: page.subtabTitle(subtabId)
+        tooltip: text
+        visible: page.hasSubtabs && page.subtabs.available.indexOf(subtabId) >= 0
+        current: page.subtab === subtabId
+        onChosen: page.subtabs.select(current ? "main" : subtabId)
+    }
+
     FilterDialog {
         id: filterDialog
 
@@ -207,53 +230,10 @@ Kirigami.Page {
         }
     }
 
-    // Everything in the page body, in the order of the Tab stops: sub-tabs, library, toolbar, chips, alphabet, then the list
+    // Everything in the page body, in the order of the Tab stops: library, toolbar (sub-tabs first), chips, alphabet, then the list
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
-
-        // The sub-tabs the settings turn on: plain buttons, each one a tab stop after the shell's own tabs
-        Flow {
-            id: subtabBar
-            objectName: "subtabBar"
-
-            Layout.fillWidth: true
-            Layout.leftMargin: Kirigami.Units.largeSpacing
-            Layout.rightMargin: Kirigami.Units.largeSpacing
-            visible: page.hasSubtabs && page.subtabs.available.length > 1
-            spacing: Kirigami.Units.smallSpacing
-            Accessible.role: Accessible.PageTabList
-            Accessible.name: i18nc("@label accessible name of the sub-tabs of a page", "Sections")
-
-            Repeater {
-                model: page.hasSubtabs ? page.subtabs.available : []
-
-                delegate: Controls.ToolButton {
-                    id: tab
-
-                    required property string modelData
-                    readonly property bool current: page.subtab === modelData
-
-                    objectName: "subtab_" + modelData
-                    text: page.subtabTitle(modelData)
-                    Accessible.role: Accessible.PageTab
-                    Accessible.selected: current
-                    onClicked: page.subtabs.select(modelData)
-
-                    // The tab showing carries the accent underneath
-                    Rectangle {
-                        anchors {
-                            left: parent.left
-                            right: parent.right
-                            bottom: parent.bottom
-                        }
-                        height: 2
-                        visible: tab.current
-                        color: Kirigami.Theme.highlightColor
-                    }
-                }
-            }
-        }
 
         RowLayout {
             Layout.margins: Kirigami.Units.largeSpacing
@@ -271,7 +251,7 @@ Kirigami.Page {
                 focusSequences: []
                 maximumLength: 128
                 autoAccept: false
-                placeholderText: page.tabType === "movies" ? i18nc("@info:placeholder", "Search in Movies") : i18nc("@info:placeholder", "Search in TV Shows")
+                placeholderText: page.tabType === "movies" ? i18nc("@info:placeholder", "Search in Movies") : i18nc("@info:placeholder", "Search in Shows")
 
                 // The field is the source of truth while it holds the focus, and follows the term the header box changes
                 onTextChanged: {
@@ -301,6 +281,8 @@ Kirigami.Page {
                     return index < 0 ? 0 : index;
                 }
 
+                // A long library name never pushes the search field out
+                Layout.maximumWidth: Kirigami.Units.gridUnit * 16
                 visible: page.tabType !== "" && page.libraries.length > 1
                 model: entries
                 textRole: "name"
@@ -311,14 +293,7 @@ Kirigami.Page {
                     currentIndex = Qt.binding(() => selector.scopeIndex());
                 }
 
-                // Library names come from the server: plain text only
-                contentItem: Controls.Label {
-                    leftPadding: Kirigami.Units.smallSpacing
-                    verticalAlignment: Text.AlignVCenter
-                    textFormat: Text.PlainText
-                    elide: Text.ElideRight
-                    text: selector.displayText
-                }
+                // Library names come from the server: plain text only (the style paints the selected name itself, as plain text; a custom contentItem breaks it, which reads text input API)
                 delegate: Controls.ItemDelegate {
                     id: entry
 
@@ -387,7 +362,7 @@ Kirigami.Page {
             }
         }
 
-        // Filters, sort, view and view options; what does not fit goes into the overflow menu, and below the Wide mode the buttons are icons with tooltips
+        // The sub-tabs the settings turn on (the main list is none of them), then filters, sort, view and view options; what does not fit goes into the overflow menu, and below the Wide mode the buttons are icons with tooltips. A sub-tab without a list of the model leaves the sub-tab entries alone in the toolbar
         Kirigami.ActionToolBar {
             id: toolbar
             objectName: "libraryToolbar"
@@ -395,15 +370,48 @@ Kirigami.Page {
             Layout.fillWidth: true
             Layout.leftMargin: Kirigami.Units.largeSpacing
             Layout.rightMargin: Kirigami.Units.largeSpacing
-            visible: page.listModel !== null
+            visible: page.listModel !== null || page.hasSubtabs
             display: page.wideShell ? Controls.AbstractButton.TextBesideIcon : Controls.AbstractButton.IconOnly
 
             actions: [
+                SubtabAction {
+                    subtabId: "suggestions"
+                    icon.name: "starred-symbolic"
+                },
+                SubtabAction {
+                    subtabId: "favorites"
+                    icon.name: "bookmarks"
+                },
+                SubtabAction {
+                    subtabId: "collections"
+                    icon.name: "folder-video"
+                },
+                SubtabAction {
+                    subtabId: "upcoming"
+                    icon.name: "view-calendar-upcoming-events"
+                },
+                SubtabAction {
+                    subtabId: "genres"
+                    icon.name: "tag"
+                },
+                SubtabAction {
+                    subtabId: "networks"
+                    icon.name: "globe"
+                },
+                SubtabAction {
+                    subtabId: "episodes"
+                    icon.name: "format-list-ordered"
+                },
+                Kirigami.Action {
+                    separator: true
+                    visible: page.hasSubtabs && page.subtabs.available.length > 1 && page.listModel !== null
+                },
                 Kirigami.Action {
                     objectName: "filtersAction"
                     text: i18n("Filters")
                     tooltip: text
                     icon.name: "view-filter"
+                    visible: page.listModel !== null
                     onTriggered: filterDialog.open()
                 },
                 Kirigami.Action {
@@ -411,6 +419,7 @@ Kirigami.Page {
                     text: i18n("Sort")
                     tooltip: text
                     icon.name: "view-sort"
+                    visible: page.listModel !== null
 
                     SortAction {
                         token: "SortName"
@@ -505,6 +514,7 @@ Kirigami.Page {
                     text: listMode ? i18n("Grid View") : i18n("List View")
                     tooltip: text
                     icon.name: listMode ? "view-list-icons" : "view-list-details"
+                    visible: page.listModel !== null
                     onTriggered: page.listModel.viewMode = listMode ? "grid" : "list"
                 },
                 Kirigami.Action {
@@ -512,6 +522,7 @@ Kirigami.Page {
                     text: i18n("View Options")
                     tooltip: text
                     icon.name: "configure"
+                    visible: page.listModel !== null
 
                     ImageAction {
                         token: "Primary"
@@ -564,8 +575,8 @@ Kirigami.Page {
                     objectName: "browseGenresAction"
                     text: i18n("Browse by Genre")
                     tooltip: text
-                    icon.name: "view-list-details"
-                    visible: page.listModel !== null && page.subtab === "main" && !page.genresSubtab && page.listModel.genreOptions.available
+                    icon.name: "tag"
+                    visible: page.listModel !== null && page.subtab === "main" && !page.genresSubtab && page.listModel.filterOptions.available
                     onTriggered: page.Window.window.openGenres(page)
                 }
             ]
@@ -714,22 +725,33 @@ Kirigami.Page {
         }
 
         MessageBox {
+            id: libraryFailedBox
             objectName: "libraryFailedBox"
             Layout.margins: Kirigami.Units.largeSpacing
             visible: page.listModel !== null && page.listModel.status === LibraryItemsModel.Failed
             type: Kirigami.MessageType.Error
-            text: i18n("Could not load this library: check the connection to the server and try again")
+            readonly property bool tooLong: page.listModel !== null && page.listModel.queryTooLong
+            text: tooLong ? i18n("The filters and search are too long for the server: clear the filters or shorten the search") : i18n("Could not load this library: check the connection to the server and try again")
             actions: [
                 Kirigami.Action {
+                    visible: !libraryFailedBox.tooLong
                     text: i18n("Retry")
                     icon.name: "view-refresh"
                     onTriggered: page.retryList()
+                },
+                Kirigami.Action {
+                    objectName: "libraryFailedClearFilters"
+                    visible: libraryFailedBox.tooLong
+                    text: i18n("Clear Filters")
+                    icon.name: "edit-clear-all"
+                    onTriggered: page.listModel.clearFilters()
                 }
             ]
         }
 
         MessageBox {
-            Layout.margins: Kirigami.Units.largeSpacing
+            Layout.fillWidth: true
+            Layout.topMargin: Kirigami.Units.largeSpacing
             visible: page.listModel !== null && page.listModel.pageError && page.listModel.status !== LibraryItemsModel.Failed
             type: Kirigami.MessageType.Warning
             text: i18n("Some items could not be loaded")
@@ -870,13 +892,13 @@ Kirigami.Page {
                         case RecommendationRowsModel.SimilarToLikedItem:
                             return i18n("Because you liked %1", baselineName);
                         case RecommendationRowsModel.HasDirectorFromRecentlyPlayed:
-                            return i18n("Because you watched films directed by %1", baselineName);
+                            return i18n("Because you watched movies directed by %1", baselineName);
                         case RecommendationRowsModel.HasActorFromRecentlyPlayed:
-                            return i18n("Because you watched films with %1", baselineName);
+                            return i18n("Because you watched movies with %1", baselineName);
                         case RecommendationRowsModel.HasLikedDirector:
-                            return i18n("Because you like films directed by %1", baselineName);
+                            return i18n("Because you like movies directed by %1", baselineName);
                         case RecommendationRowsModel.HasLikedActor:
-                            return i18n("Because you like films with %1", baselineName);
+                            return i18n("Because you like movies with %1", baselineName);
                         }
                         return i18n("Suggested for you");
                     }

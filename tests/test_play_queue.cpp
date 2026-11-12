@@ -98,7 +98,7 @@ struct Fixture {
         return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
     }
     void write(const QByteArray &bytes) const { writeAt(path, bytes); }
-    void writeAt(const QString &target, const QByteArray &bytes) const
+    static void writeAt(const QString &target, const QByteArray &bytes)
     {
         QDir().mkpath(QFileInfo(target).absolutePath());
         QFile file(target);
@@ -110,8 +110,8 @@ struct Fixture {
         QFile file(target);
         return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
     }
-    QByteArray fileFor(const QStringList &ids, const QString &serverId, const QString &userId,
-                       int version = 1) const
+    static QByteArray fileFor(const QStringList &ids, const QString &serverId,
+                              const QString &userId, int version = 1)
     {
         QJsonArray array;
         for (const QString &id : ids)

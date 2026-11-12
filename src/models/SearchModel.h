@@ -84,7 +84,7 @@ class SearchModel final : public QAbstractListModel {
     void resetGroups();
     void onItemsReady(const QJsonArray &items, int total, int channel);
     void onListingFailed(const QString &family, int status, const QString &reason, int channel);
-    int groupFor(int channel) const;
+    static int groupFor(int channel);
     void setGroupStatus(int group, Status status);
     void updateState();
     void setState(State state);

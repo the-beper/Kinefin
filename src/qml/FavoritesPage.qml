@@ -16,8 +16,9 @@ Kirigami.ScrollablePage {
 
     readonly property FavoritesModel favorites: connection.favorites
     readonly property FavoritesGroupsModel groups: connection.favoriteGroups
-    // Idle counts as loading: the scan starts as the page is created
-    readonly property bool loading: favorites.status === FavoritesModel.Loading || favorites.status === FavoritesModel.Idle
+    readonly property bool loading: favorites.status === FavoritesModel.Loading
+    // The page starts the scan as it is created, so Idle here means the scan could not start
+    readonly property bool idle: favorites.status === FavoritesModel.Idle
     // The poster ratios match MediaCard: the height is the poster plus the two text lines
     readonly property real cardWidth: Kirigami.Units.gridUnit * 8
     readonly property real cardHeight: Math.round((cardWidth - Kirigami.Units.smallSpacing * 2) * 3 / 2) + Kirigami.Units.gridUnit * 3.5
@@ -29,6 +30,12 @@ Kirigami.ScrollablePage {
         connection.openFavorites();
     }
     Component.onDestruction: shell?.favoritesPageGone?.()
+
+    // What the main menu's Refresh calls while this page is in front
+    function refreshPage() {
+        if (!loading)
+            favorites.reload();
+    }
 
     // The first row of cards, or the grid, takes the keys
     function focusPrimary() {
@@ -61,7 +68,7 @@ Kirigami.ScrollablePage {
             case "Movie":
                 return i18nc("favorites grouped by type", "Movies");
             case "Series":
-                return i18nc("favorites grouped by type", "TV Shows");
+                return i18nc("favorites grouped by type", "Shows");
             case "Season":
                 return i18nc("favorites grouped by type", "Seasons");
             case "Episode":
@@ -71,13 +78,13 @@ Kirigami.ScrollablePage {
             }
             return i18nc("favorites grouped by type", "Other");
         case FavoritesGroupsModel.MoreLibrariesGroup:
-            return i18nc("favorites listed by several libraries", "More libraries");
+            return i18nc("favorites listed by several libraries", "More Libraries");
         case FavoritesGroupsModel.NoGenreGroup:
-            return i18nc("favorites without a genre", "No genre");
+            return i18nc("favorites without a genre", "No Genre");
         case FavoritesGroupsModel.NoYearGroup:
-            return i18nc("favorites without a year", "No year");
+            return i18nc("favorites without a year", "No Year");
         case FavoritesGroupsModel.AllGroup:
-            return i18nc("all favorites in one group", "All favorites");
+            return i18nc("all favorites in one group", "All Favorites");
         }
         return title;
     }
@@ -176,7 +183,7 @@ Kirigami.ScrollablePage {
             Layout.margins: Kirigami.Units.largeSpacing
             visible: page.favorites.capped
             type: Kirigami.MessageType.Information
-            text: i18n("Showing %1 favorites: the list may be incomplete", page.favorites.count)
+            text: i18np("Showing %1 favorite: the list may be incomplete", "Showing %1 favorites: the list may be incomplete", page.favorites.count)
         }
 
         MessageBox {
@@ -203,8 +210,17 @@ Kirigami.ScrollablePage {
         spacing: Kirigami.Units.largeSpacing
         topMargin: Kirigami.Units.largeSpacing
         bottomMargin: Kirigami.Units.largeSpacing
-        // Every group is built at once: Up and Down walk the rows along the focus chain, which holds only the rows that exist
+        // Every group is built at once; DelegateModel still warns about a cancelled index in aLostSessionEmptiesTheFavorites under the desktop style, harmless because the page is empty and closed (the view resets while a group is being created asynchronously)
         cacheBuffer: 1000000
+
+        // Moves the focus to the group above or below `from`: that row may not exist yet, so the view scrolls to it first
+        function focusGroup(from, step) {
+            const at = from + step;
+            if (at < 0 || at >= groupsList.count)
+                return;
+            groupsList.positionViewAtIndex(at, ListView.Contain);
+            groupsList.itemAtIndex(at)?.focusPrimary(step > 0 ? Qt.TabFocusReason : Qt.BacktabFocusReason);
+        }
 
         Kirigami.LoadingPlaceholder {
             objectName: "favoritesLoading"
@@ -212,16 +228,31 @@ Kirigami.ScrollablePage {
             width: parent.width - Kirigami.Units.gridUnit * 4
             visible: page.loading
             text: i18n("Loading favorites…")
-            explanation: page.favorites.libraryCount > 0 ? i18n("%1 favorites found, %2 of %3 libraries read", page.favorites.loadedCount, page.favorites.librariesDone, page.favorites.libraryCount) : ""
+            explanation: page.favorites.libraryCount > 0 ? i18np("%1 favorite found, %2 of %3 libraries read", "%1 favorites found, %2 of %3 libraries read", page.favorites.loadedCount, page.favorites.librariesDone, page.favorites.libraryCount) : ""
             determinate: page.favorites.libraryCount > 0
             progressBar.value: page.favorites.libraryCount > 0 ? 100 * page.favorites.librariesDone / page.favorites.libraryCount : 0
+        }
+
+        Kirigami.PlaceholderMessage {
+            objectName: "favoritesNotLoaded"
+            anchors.centerIn: parent
+            width: parent.width - Kirigami.Units.gridUnit * 4
+            visible: page.idle
+            icon.name: "dialog-warning"
+            text: i18n("Favorites could not be loaded")
+            explanation: i18n("The favorites could not be read from the server: try again")
+            helpfulAction: Kirigami.Action {
+                text: i18n("Retry")
+                icon.name: "view-refresh"
+                onTriggered: page.favorites.reload()
+            }
         }
 
         Kirigami.PlaceholderMessage {
             objectName: "favoritesNoLibraries"
             anchors.centerIn: parent
             width: parent.width - Kirigami.Units.gridUnit * 4
-            visible: !page.loading && page.favorites.libraryCount === 0
+            visible: !page.loading && !page.idle && page.favorites.libraryCount === 0
             icon.name: "folder-video"
             text: i18n("No libraries to show")
             explanation: i18n("Favorites come from your movie, TV show and collection libraries")
@@ -237,7 +268,7 @@ Kirigami.ScrollablePage {
             objectName: "favoritesEmpty"
             anchors.centerIn: parent
             width: parent.width - Kirigami.Units.gridUnit * 4
-            visible: !page.loading && page.favorites.libraryCount > 0 && page.favorites.count === 0 && !page.favorites.libraryFailed
+            visible: !page.loading && !page.idle && page.favorites.libraryCount > 0 && page.favorites.count === 0 && !page.favorites.libraryFailed
             icon.name: "favorite"
             text: i18n("No favorites yet")
             explanation: i18n("Movies, shows and collections you mark as favorites on the server show up here")
@@ -306,6 +337,7 @@ Kirigami.ScrollablePage {
                             objectName: "favoritesGroupTitle_" + group.index
                             Layout.fillWidth: true
                             level: 2
+                            Accessible.role: Accessible.Heading
                             // Library and genre names come from the server: plain text only
                             textFormat: Text.PlainText
                             elide: Text.ElideRight
@@ -337,6 +369,9 @@ Kirigami.ScrollablePage {
                         cardHeight: page.cardHeight
                         accessibleName: group.heading
                         pageFlickable: groupsList
+                        externalVerticalNavigation: true
+                        onUpRequested: groupsList.focusGroup(group.index, -1)
+                        onDownRequested: groupsList.focusGroup(group.index, 1)
 
                         delegate: FavoriteCard {
                             width: page.cardWidth
@@ -355,8 +390,8 @@ Kirigami.ScrollablePage {
                     id: grid
                     objectName: "favoritesGrid"
 
-                    // Poster tiles of about ten grid units, at least two to a row
-                    readonly property int columns: Math.max(2, Math.floor(width / (Kirigami.Units.gridUnit * 10)))
+                    // Poster tiles of about ten grid units, at least one to a row
+                    readonly property int columns: Math.max(1, Math.floor(width / (Kirigami.Units.gridUnit * 10)))
 
                     function focusPrimary(reason) {
                         grid.forceActiveFocus(reason);

@@ -6,8 +6,8 @@
 
 #include <QTimer>
 
-#include <MpvController>
 #include <MpvAbstractItem>
+#include <MpvController>
 
 #include "api/JellyfinClient.h"
 
@@ -172,8 +172,7 @@ void PlaybackEngine::applyStreamAuthorization()
         return;
     }
     const QByteArray entry = QByteArrayLiteral("Authorization: ") + authorization;
-    setProperty(QStringLiteral("http-header-fields"),
-                              QVariantList{QString::fromUtf8(entry)});
+    setProperty(QStringLiteral("http-header-fields"), QVariantList{QString::fromUtf8(entry)});
     // The exact value is never logged (project note: no tokens in URLs, signals or logs)
 }
 
@@ -212,8 +211,8 @@ bool PlaybackEngine::open(const PlaybackSource &source)
     qCDebug(playerLog) << "opening"
                        << (route == PlaybackSession::Route::Transcoded ? "a transcoded stream"
                                                                        : "a direct stream");
-    const QVariant load = command(
-        {QStringLiteral("loadfile"), source.url.toString(QUrl::FullyEncoded)});
+    const QVariant load =
+        command({QStringLiteral("loadfile"), source.url.toString(QUrl::FullyEncoded)});
     if (load.canConvert<ErrorReturn>()) {
         // mpv refused the command outright: no stream ever started, so the session drops the phantom server session without a report
         m_session.failed();
@@ -284,8 +283,7 @@ void PlaybackEngine::seekTo(qint64 ticks)
         return;
     }
     const double seconds = static_cast<double>(ticks) / 1e7;
-    command(
-        {QStringLiteral("seek"), QString::number(seconds, 'f', 3), QStringLiteral("absolute")});
+    command({QStringLiteral("seek"), QString::number(seconds, 'f', 3), QStringLiteral("absolute")});
 }
 
 void PlaybackEngine::settleFailure()
