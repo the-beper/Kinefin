@@ -7,6 +7,7 @@
 #include <QNetworkReply>
 #include <QObject>
 #include <QPointer>
+#include <QSet>
 #include <QString>
 #include <QTimer>
 #include <QUrl>
@@ -120,6 +121,11 @@ class ConnectionController : public QObject {
     bool hasSavedUsers() const { return !m_users.isEmpty(); }
     QVariantList libraries() const { return m_libraries; }
     bool librariesLoaded() const { return m_librariesLoaded; }
+    // The server's EnableNextEpisodeAutoPlay for the signed-in user, true while the configuration is unknown
+    bool nextEpisodeAutoPlay() const
+    {
+        return !m_hasPreferences || m_preferences.enableNextEpisodeAutoPlay;
+    }
     QVariantList movieLibraries() const { return typeLibraries(QStringLiteral("movies")); }
     QVariantList showLibraries() const { return typeLibraries(QStringLiteral("tvshows")); }
     // The `libraries` entries of a tab type ("movies" or "tvshows"); empty for another type
@@ -199,6 +205,8 @@ class ConnectionController : public QObject {
     Q_INVOKABLE bool openResumeItems();
     // Starts a new scan of the favorites into `favorites` (the page that shows it calls its `close()` when it goes), so a visit never shows a snapshot of an earlier one; a scan already under way is kept. False when not signed in
     Q_INVOKABLE bool openFavorites();
+    // Sets the favorite flag of an item for the signed-in user (the card menu); false when the request cannot be sent, such as one already pending for the item. The cards follow `itemFavoriteUpdated` of the client, and a failed answer to a request made here is signalled by `favoriteUpdateFailed`
+    Q_INVOKABLE bool setFavorite(const QString &itemId, bool favorite);
     // Asks the server for the libraries again (the Home page's retry)
     Q_INVOKABLE void reloadLibraries();
     // Removes a stored server with all its users, saved queues and browse state; disconnects first when it is the active one
@@ -214,6 +222,7 @@ class ConnectionController : public QObject {
     Q_INVOKABLE bool openAdminDashboard() const;
 
   Q_SIGNALS:
+    void favoriteUpdateFailed(const QString &itemId);
     void stateChanged();
     void errorTextChanged();
     void serverUrlChanged();
@@ -298,6 +307,8 @@ class ConnectionController : public QObject {
     // Declared before the client so it outlives the signals the client emits while it goes: the models showing a one-off view and the state it was opened with, which is not what is stored for the scope
     QHash<const LibraryItemsModel *, LibraryItemsModel::ViewState> m_oneOff;
     JellyfinClient m_client;
+    // The items whose favorite write came from `setFavorite`, by dashless lower-case id: the details page reports its own failures
+    QSet<QString> m_cardFavoriteRequests;
     ServerCredentialSync m_sync;
     LibraryItemsModel m_library{&m_client, LibraryItemsModel::TileChannel};
     LibraryItemsModel m_movies{&m_client, LibraryItemsModel::MoviesChannel};

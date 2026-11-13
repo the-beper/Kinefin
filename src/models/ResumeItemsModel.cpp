@@ -18,6 +18,10 @@ ResumeItemsModel::ResumeItemsModel(JellyfinClient *client, QObject *parent)
             if (m_open)
                 restartPaging();
         });
+        connect(m_client, &JellyfinClient::itemFavoriteUpdated, this,
+                [this](const QString &id, bool favorite) {
+                    applyFavorite(id, favorite, FavoriteRole);
+                });
         // A 401, a disconnect, a server switch and a sign-out all end with this signal
         connect(m_client, &JellyfinClient::credentialsCleared, this, [this] { close(); });
     }

@@ -63,6 +63,10 @@ SeasonEpisodesModel::SeasonEpisodesModel(JellyfinClient *client, int channel, QO
         connect(m_client, &JellyfinClient::listingFailed, this,
                 &SeasonEpisodesModel::onListingFailed);
         // A 401, a disconnect, a server switch and a sign-out all end with this signal
+        connect(m_client, &JellyfinClient::itemFavoriteUpdated, this,
+                [this](const QString &id, bool favorite) {
+                    applyFavorite(id, favorite, FavoriteRole);
+                });
         connect(m_client, &JellyfinClient::credentialsCleared, this, [this] { clear(); });
     }
 }

@@ -223,6 +223,7 @@ class FakeJellyfin {
     bool redirectSubtitleDownload = false;
     int trickplayMetadataRequests = 0;
     QByteArray trickplayMetadataBody = "{\"Trickplay\":{}}";
+    int trickplayMetadataStatus = 200;
     int trickplayTileRequests = 0;
     QByteArray trickplayTileAuth;
     QByteArray trickplayTileBody = QByteArray::fromHex("ffd8ffe00010ffd9");
@@ -1012,7 +1013,8 @@ class FakeJellyfin {
         if (method == "GET" && route.contains("/Users/") && route.contains("/Items/")
             && route.contains("fields=Trickplay")) {
             ++trickplayMetadataRequests;
-            respond(socket, 200, trickplayMetadataBody);
+            respond(socket, trickplayMetadataStatus,
+                    trickplayMetadataStatus == 200 ? trickplayMetadataBody : QByteArray());
             return;
         }
         if (method == "POST" && route.endsWith("/PlaybackInfo")) {

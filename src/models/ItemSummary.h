@@ -58,6 +58,9 @@ constexpr int NewItemDays = 7;
 // Whether the New badge applies: unplayed and added within `NewItemDays` of `nowUtc` (a date in the future counts as new)
 bool isRecentlyAdded(const ItemSummary &item, const QDateTime &nowUtc);
 
+// Whether two item ids are the same one: a GUID is written dashed or dashless, in either case
+bool sameItemId(const QString &a, const QString &b);
+
 // The item types the player can open directly: the one rule for the details page and the play queue
 bool isPlayableVideo(const QString &type);
 

@@ -12,6 +12,14 @@
 #include <cmath>
 
 namespace Kinefin {
+bool sameItemId(const QString &a, const QString &b)
+{
+    const auto normalized = [](const QString &id) {
+        return QString(id).remove(QLatin1Char('-')).toLower();
+    };
+    return !a.isEmpty() && normalized(a) == normalized(b);
+}
+
 namespace {
 constexpr int kMaxNameLength = 512;
 constexpr int kMaxTokenLength = 64;

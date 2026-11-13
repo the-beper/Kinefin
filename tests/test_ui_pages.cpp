@@ -1771,11 +1771,10 @@ class QuickPlayStub : public QObject {
     struct Call {
         QString id;
         qint64 resumeTicks;
-        QString title;
     };
-    Q_INVOKABLE bool playItem(const QString &id, qint64 resumeTicks, const QString &title)
+    Q_INVOKABLE bool playItem(const QString &id, qint64 resumeTicks)
     {
-        calls.push_back({id, resumeTicks, title});
+        calls.push_back({id, resumeTicks});
         return false;
     }
     QList<Call> calls;
@@ -6472,6 +6471,128 @@ class TestUiPages : public QObject {
         QTRY_COMPARE(ui.currentDetails()->property("itemId").toString(), kSeriesId);
     }
 
+    void cardMenuFavoriteTogglesTheFlagOfTheItem()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        const QString favoredId = QStringLiteral("a1a2a3a4b5b6c7c8d9d0e1e2f3f4a5a6");
+        const QString folderId = QStringLiteral("b1b2b3b4c5c6d7d8e9e0f1f2a3a4b5b6");
+        const auto withFlag = [](const QString &id, const QString &type, bool favorite) {
+            QJsonObject item = fixtureObject(QStringLiteral("movie_item"));
+            item.insert(QStringLiteral("Id"), id);
+            item.insert(QStringLiteral("Type"), type);
+            QJsonObject userData = item.value(QStringLiteral("UserData")).toObject();
+            userData.insert(QStringLiteral("IsFavorite"), favorite);
+            item.insert(QStringLiteral("UserData"), userData);
+            return item;
+        };
+        ui.server.listingRawBody.insert(
+            QStringLiteral("Items"),
+            envelope(QJsonArray{withFlag(kMovieId, QStringLiteral("Movie"), false),
+                                withFlag(favoredId, QStringLiteral("Movie"), true),
+                                withFlag(folderId, QStringLiteral("Folder"), false)}));
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        QQuickItem *page = ui.item(QStringLiteral("libraryPage"));
+        const auto card = [page](const QString &id) {
+            return Ui::itemIn(page, QStringLiteral("mediaCard_") + id);
+        };
+        QTRY_VERIFY(card(kMovieId) && card(favoredId) && card(folderId));
+        const auto menuVisible = [&ui] {
+            QObject *menu = ui.popup(QStringLiteral("cardMenu"));
+            return menu && menu->property("visible").toBool();
+        };
+        const auto openMenuOf = [&](const QString &id) {
+            QQuickItem *target = card(id);
+            const QPointF center =
+                target->mapToScene(QPointF(target->width() / 2, target->height() / 3));
+            QTest::mouseClick(ui.window, Qt::RightButton, Qt::NoModifier, center.toPoint());
+            QTRY_VERIFY(menuVisible());
+        };
+        // Null when the entry never appears: each caller verifies it
+        const auto favoriteEntry = [&ui] {
+            QQuickItem *entry = nullptr;
+            qWaitForScaled(
+                [&] { return (entry = ui.item(QStringLiteral("cardMenuFavorite"))) != nullptr; });
+            return entry;
+        };
+        const auto closeMenu = [&] {
+            QTest::keyClick(ui.window, Qt::Key_Escape);
+            QTRY_VERIFY(!menuVisible());
+        };
+
+        // An unfavored movie offers Add; choosing it sends a POST, and the card and the next menu follow the answer
+        openMenuOf(kMovieId);
+        QQuickItem *entry = favoriteEntry();
+        QVERIFY(entry);
+        QTRY_VERIFY(entry->isVisible());
+        QCOMPARE(entry->property("text").toString(), QStringLiteral("Add to Favorites"));
+        QVERIFY(QMetaObject::invokeMethod(entry, "click"));
+        QTRY_VERIFY(!menuVisible());
+        QTRY_COMPARE(ui.server.favoriteWrites.size(), 1);
+        QCOMPARE(ui.server.favoriteWrites.constLast().method, QByteArrayLiteral("POST"));
+        QCOMPARE(ui.server.favoriteWrites.constLast().route,
+                 QByteArrayLiteral("/jellyfin/UserFavoriteItems/") + kMovieId.toLatin1());
+        QTRY_VERIFY(card(kMovieId)->property("favorite").toBool());
+        openMenuOf(kMovieId);
+        entry = favoriteEntry();
+        QVERIFY(entry);
+        QTRY_COMPARE(entry->property("text").toString(), QStringLiteral("Remove from Favorites"));
+
+        // Remove sends a DELETE and flips the card back
+        QVERIFY(QMetaObject::invokeMethod(entry, "click"));
+        QTRY_VERIFY(!menuVisible());
+        QTRY_COMPARE(ui.server.favoriteWrites.size(), 2);
+        QCOMPARE(ui.server.favoriteWrites.constLast().method, QByteArrayLiteral("DELETE"));
+        QTRY_VERIFY(!card(kMovieId)->property("favorite").toBool());
+
+        // A favored movie starts with Remove
+        openMenuOf(favoredId);
+        entry = favoriteEntry();
+        QVERIFY(entry);
+        QTRY_COMPARE(entry->property("text").toString(), QStringLiteral("Remove from Favorites"));
+        closeMenu();
+
+        // A kind that cannot be a favorite has no entry
+        openMenuOf(folderId);
+        QQuickItem *open = nullptr;
+        QTRY_VERIFY((open = ui.item(QStringLiteral("cardMenuOpen"))) != nullptr
+                    && open->isVisible());
+        entry = ui.item(QStringLiteral("cardMenuFavorite"));
+        QVERIFY(!entry || !entry->isVisible());
+        closeMenu();
+
+        // A write the server refuses leaves the card as it was and is reported
+        ui.server.favoriteWriteStatus = 500;
+        QSignalSpy failed(&ui.controller, &ConnectionController::favoriteUpdateFailed);
+        openMenuOf(kMovieId);
+        entry = favoriteEntry();
+        QVERIFY(entry);
+        QVERIFY(QMetaObject::invokeMethod(entry, "click"));
+        QTRY_COMPARE(failed.size(), 1);
+        QVERIFY(!card(kMovieId)->property("favorite").toBool());
+    }
+
+    void detailsFavoriteButtonShowsItsLabelOnlyWhenWide()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *page = openDetails(ui, kMovieId);
+        QVERIFY(page);
+        QQuickItem *button = nullptr;
+        QTRY_VERIFY((button = Ui::itemIn(page, QStringLiteral("detailsFavoriteButton")))
+                    != nullptr);
+        // AbstractButton::display: IconOnly is 0, TextBesideIcon is 2
+        QVERIFY(ui.opensWindowOfWidth(1400));
+        QTRY_COMPARE(button->property("display").toInt(), 2);
+        QVERIFY(ui.opensWindowOfWidth(500));
+        QTRY_COMPARE(button->property("display").toInt(), 0);
+        // The text stays for assistive technology and the tooltip
+        QCOMPARE(button->property("text").toString(), QStringLiteral("Add to Favorites"));
+    }
+
     void aFailedRestoreOffersRetryOnTheQueuePage()
     {
         Ui ui(m_home->path());
@@ -7179,6 +7300,30 @@ class TestUiPages : public QObject {
         QVERIFY(ui.clickTab(QStringLiteral("Movies")));
         QTRY_COMPARE(ui.rootTab(), QStringLiteral("movies"));
         QCOMPARE(ui.stackDepth(), 1);
+    }
+
+    void queueButtonShowsTheQueueCount()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("home")));
+        QQuickItem *button = ui.item(QStringLiteral("queueButton"));
+        QQuickItem *badge = ui.item(QStringLiteral("queueCountBadge"));
+        QVERIFY(button && badge);
+        QVERIFY(!badge->isVisible());
+        ui.fillQueue();
+        QTRY_COMPARE(ui.controller.queue()->count(), 5);
+        QTRY_VERIFY(badge->isVisible());
+        QVERIFY(!ui.itemsWithText(QStringLiteral("5")).isEmpty());
+        bool inBadge = false;
+        for (QQuickItem *label : ui.itemsWithText(QStringLiteral("5")))
+            inBadge = inBadge || badge->isAncestorOf(label);
+        QVERIFY(inBadge);
+        // The badge sits on the button, inside it
+        QVERIFY(button->mapRectToScene(button->boundingRect())
+                    .contains(badge->mapRectToScene(badge->boundingRect())));
+        ui.controller.queue()->clear();
+        QTRY_VERIFY(!badge->isVisible());
     }
 
     void headerBoxSearchesLocallyInATab()

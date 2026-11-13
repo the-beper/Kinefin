@@ -191,6 +191,12 @@ int main(int argc, char *argv[])
                              player.onAccountLeaving();
                      });
 
+    // A projection change covers a confirmed configuration and the loss of the session (back to the default)
+    QObject::connect(&connection, &Kinefin::ConnectionController::homeProjectionChanged, &player,
+                     [&connection, &player] {
+                         player.setNextEpisodeAutoPlay(connection.nextEpisodeAutoPlay());
+                     });
+
     const auto imageOrigin = std::make_shared<Kinefin::ImageOrigin>();
     connection.setImageOrigin(imageOrigin);
     // The factory is not owned by the engine: it is declared first so it outlives it

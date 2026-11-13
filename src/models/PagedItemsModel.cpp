@@ -202,6 +202,20 @@ void PagedItemsModel::storePage(int page, const QJsonArray &items)
     evictBeyondLimit(page);
 }
 
+void PagedItemsModel::applyFavorite(const QString &itemId, bool favorite, int role)
+{
+    for (auto page = m_pages.begin(); page != m_pages.end(); ++page) {
+        for (size_t i = 0; i < page->size(); ++i) {
+            ItemSummary &item = (*page)[i];
+            if (item.favorite == favorite || !item.valid || !sameItemId(item.id, itemId))
+                continue;
+            item.favorite = favorite;
+            const QModelIndex row = index(page.key() * m_pageSize + int(i));
+            Q_EMIT dataChanged(row, row, {role});
+        }
+    }
+}
+
 void PagedItemsModel::evictBeyondLimit(int keep)
 {
     while (m_residentOrder.size() > MaxResidentPages) {

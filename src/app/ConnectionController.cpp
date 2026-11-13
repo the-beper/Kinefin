@@ -282,6 +282,15 @@ ConnectionController::ConnectionController(const QString &profileId, const QStri
             m_browse.setView(m_client.serverId(), m_client.userId(), key,
                              toStored(list->viewState()));
     });
+    connect(&m_client, &JellyfinClient::itemFavoriteUpdated, this, [this](const QString &id) {
+        m_cardFavoriteRequests.remove(QString(id).remove(QLatin1Char('-')).toLower());
+    });
+    connect(&m_client, &JellyfinClient::itemFavoriteUpdateFailed, this, [this](const QString &id) {
+        if (m_cardFavoriteRequests.remove(QString(id).remove(QLatin1Char('-')).toLower()))
+            Q_EMIT favoriteUpdateFailed(id);
+    });
+    connect(&m_client, &JellyfinClient::credentialsCleared, this,
+            [this] { m_cardFavoriteRequests.clear(); });
     // The favorites are scanned over the libraries the server lists, whatever the Home preferences hide; the model drops its snapshot when the list changes, and a lost session empties the list
     connect(this, &ConnectionController::librariesChanged, this,
             [this] { m_favorites.setLibraries(m_libraries); });
@@ -947,6 +956,14 @@ bool ConnectionController::openGenreRails(LibraryItemsModel *model)
 bool ConnectionController::openResumeItems()
 {
     return m_state == Authenticated && m_resumeItems.open();
+}
+
+bool ConnectionController::setFavorite(const QString &itemId, bool favorite)
+{
+    if (m_state != Authenticated || !m_client.setItemFavorite(itemId, favorite))
+        return false;
+    m_cardFavoriteRequests.insert(QString(itemId).remove(QLatin1Char('-')).toLower());
+    return true;
 }
 
 bool ConnectionController::openFavorites()

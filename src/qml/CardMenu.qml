@@ -24,12 +24,18 @@ Controls.Menu {
     // The kinds the play queue takes, as on the details page: keep the two lists in step
     readonly property bool queueable: ["Movie", "Episode", "Video", "Season", "Series", "BoxSet"].indexOf(itemType) >= 0
 
+    // The favorite state of the item the menu was opened for
+    property bool favorite: false
+    // The kinds the details page can mark as favorite
+    readonly property bool favoritable: ["Movie", "Series", "Season", "Episode", "BoxSet", "Video"].indexOf(itemType) >= 0
+
     // The page that opened the item gives way, as for a click on the card
     signal openRequested(string targetId)
     // A popup is not an Item, so the window that plays is passed in by the owner
     property bool playAvailable: false
     signal playRequested(string targetId)
     signal resumeRequested(string targetId, real ticks)
+    signal favoriteRequested(string targetId, bool favorite)
 
     Controls.MenuItem {
         objectName: "cardMenuResume"
@@ -46,6 +52,14 @@ Controls.Menu {
         text: i18n("Open")
         icon.name: "document-open"
         onTriggered: menu.openRequested(menu.itemId)
+    }
+    Controls.MenuItem {
+        objectName: "cardMenuGoToSeries"
+        text: i18n("Go to Series")
+        icon.name: "go-next"
+        visible: menu.seriesId.length > 0
+        height: visible ? implicitHeight : 0
+        onTriggered: menu.openRequested(menu.seriesId)
     }
     Controls.MenuItem {
         objectName: "cardMenuPlayNow"
@@ -76,12 +90,16 @@ Controls.Menu {
         enabled: !menu.connection.queue.busy
         onTriggered: menu.connection.queue.add(menu.itemId, PlayQueue.Last)
     }
-    Controls.MenuItem {
-        objectName: "cardMenuGoToSeries"
-        text: i18n("Go to Series")
-        icon.name: "go-next"
-        visible: menu.seriesId.length > 0
+    Controls.MenuSeparator {
+        visible: menu.favoritable
         height: visible ? implicitHeight : 0
-        onTriggered: menu.openRequested(menu.seriesId)
+    }
+    Controls.MenuItem {
+        objectName: "cardMenuFavorite"
+        text: menu.favorite ? i18n("Remove from Favorites") : i18n("Add to Favorites")
+        icon.name: menu.favorite ? "starred-symbolic" : "non-starred-symbolic"
+        visible: menu.favoritable
+        height: visible ? implicitHeight : 0
+        onTriggered: menu.favoriteRequested(menu.itemId, !menu.favorite)
     }
 }

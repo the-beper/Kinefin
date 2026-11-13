@@ -266,6 +266,11 @@ if(BUILD_TESTING)
     target_link_libraries(test_playback_engine PRIVATE kinefin_player Qt6::Test)
     add_test(NAME playback_engine COMMAND test_playback_engine)
 
+    add_executable(test_player_controller tests/test_player_controller.cpp)
+    target_compile_definitions(test_player_controller PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    target_link_libraries(test_player_controller PRIVATE kinefin_player kinefin_core Qt6::Test Qt6::Network)
+    add_test(NAME player_controller COMMAND test_player_controller)
+
     add_executable(test_jellyfin_socket tests/test_jellyfin_socket.cpp)
     target_compile_definitions(test_jellyfin_socket PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(test_jellyfin_socket PRIVATE kinefin_core Qt6::Test Qt6::Network Qt6::WebSockets)

@@ -62,6 +62,8 @@ class PagedItemsModel : public QAbstractListModel {
     void clearPaging();
     // Forgets every row and takes `status` (Loading or Failed) without asking for a page: for a derived class that cannot send yet, which then also overrides retry()
     void holdPaging(Status status);
+    // Sets the favorite flag of the resident rows of an item and tells the views about `role`, the favorite role of the derived class
+    void applyFavorite(const QString &itemId, bool favorite, int role);
     bool pageInFlight() const { return m_inFlight >= 0; }
     // The reply of the page in flight, or a failure of it
     void deliverPage(const QJsonArray &items, int total);

@@ -15,14 +15,6 @@ Kirigami.Page {
     readonly property bool isShowing: page.Window.window?.pageStack.currentItem === page
     property bool showChrome: true
 
-    function readableTime(ticks) {
-        const seconds = Math.max(0, Math.floor(ticks / 10000000));
-        const hours = Math.floor(seconds / 3600);
-        const minutes = Math.floor(seconds / 60) % 60;
-        const part = seconds % 60;
-        return hours > 0 ? hours + ":" + String(minutes).padStart(2, "0") + ":" + String(part).padStart(2, "0")
-                         : minutes + ":" + String(part).padStart(2, "0");
-    }
     function focusPrimary() { playButton.forceActiveFocus(Qt.TabFocusReason); }
     function wakeChrome() { showChrome = true; chromeTimer.restart(); }
     function closePlayer() { page.player.stop(); page.Window.window.pageStack.pop(); }
@@ -129,7 +121,7 @@ Kirigami.Page {
             Controls.Label {
                 Layout.alignment: Qt.AlignHCenter
                 color: "white"
-                text: page.readableTime(timeline.dragSeconds * 10000000)
+                text: page.player.timeText(Math.floor(timeline.dragSeconds * 10000000))
             }
         }
     }
@@ -160,11 +152,20 @@ Kirigami.Page {
                 text: page.player.title || i18n("Now Playing")
                 elide: Text.ElideRight
             }
+            Controls.Label {
+                objectName: "playerSubtitle"
+                Layout.fillWidth: true
+                visible: text.length > 0
+                color: "white"
+                textFormat: Text.PlainText
+                text: page.player.subtitle
+                elide: Text.ElideRight
+            }
             RowLayout {
                 Layout.fillWidth: true
                 Controls.Label {
                     color: "white"
-                    text: page.readableTime(page.player.positionTicks)
+                    text: page.player.timeText(page.player.positionTicks)
                 }
                 Controls.Slider {
                     id: timeline
@@ -195,7 +196,7 @@ Kirigami.Page {
                 }
                 Controls.Label {
                     color: "white"
-                    text: page.readableTime(page.player.durationTicks)
+                    text: page.player.timeText(page.player.durationTicks)
                 }
             }
             RowLayout {

@@ -11,6 +11,19 @@ ItemRowModel::ItemRowModel(JellyfinClient *client, bool landscape, QObject *pare
     : QAbstractListModel(parent), m_client(client), m_landscape(landscape),
       m_seasonCounts(seasonCounts)
 {
+    if (!m_client)
+        return;
+    connect(m_client, &JellyfinClient::itemFavoriteUpdated, this,
+            [this](const QString &id, bool favorite) {
+                for (size_t i = 0; i < m_items.size(); ++i) {
+                    ItemSummary &item = m_items[i];
+                    if (item.favorite == favorite || !sameItemId(item.id, id))
+                        continue;
+                    item.favorite = favorite;
+                    const QModelIndex row = index(int(i));
+                    Q_EMIT dataChanged(row, row, {FavoriteRole});
+                }
+            });
 }
 
 void ItemRowModel::setItems(const QJsonArray &items)

@@ -397,8 +397,8 @@ Kirigami.ApplicationWindow {
             connection.reloadHome();
     }
 
-    function playItem(itemId, resumeTicks, title) {
-        if (!window.signedIn || !window.player || !window.player.playItem(itemId, resumeTicks || 0, title || ""))
+    function playItem(itemId, resumeTicks) {
+        if (!window.signedIn || !window.player || !window.player.playItem(itemId, resumeTicks || 0))
             return false;
         if (!showPlayerPage()) { window.player.stop(); return false; }
         return true;
@@ -579,13 +579,14 @@ Kirigami.ApplicationWindow {
 
     // The menu of a card (a right click, the Menu key or the button of the card): it opens at a point of the card, below it by default
     // `resumeTicks` is -1 for a card without a quick play, else its saved position (0: none)
-    function openCardMenu(card, itemId, type, seriesId, x, y, resumeTicks) {
+    function openCardMenu(card, itemId, type, seriesId, x, y, resumeTicks, favorite) {
         if (connection.state !== ConnectionController.Authenticated)
             return;
         cardMenu.itemId = itemId;
         cardMenu.itemType = type;
         cardMenu.seriesId = seriesId;
         cardMenu.resumeTicks = resumeTicks ?? -1;
+        cardMenu.favorite = favorite ?? false;
         cardMenu.popup(card, x ?? 0, y ?? card.height);
     }
 
@@ -597,6 +598,8 @@ Kirigami.ApplicationWindow {
         onOpenRequested: targetId => window.openItem(targetId, window.pageStack.currentItem)
         onPlayRequested: targetId => window.playItem(targetId)
         onResumeRequested: (targetId, ticks) => window.playItem(targetId, ticks)
+        // A refused send means a write for the item already runs: its answer updates the card
+        onFavoriteRequested: (targetId, favorite) => window.connection.setFavorite(targetId, favorite)
     }
 
     // A link opens above the active root tab after sign-in. Incoming links must not bypass the
@@ -903,6 +906,14 @@ Kirigami.ApplicationWindow {
         function onLibrariesChanged() {
             if (window.signedIn && window.connection.state === ConnectionController.Authenticated && window.isTypeTab(window.rootTab) && !window.hasTypeTab(window.rootTab))
                 window.goHome();
+        }
+    }
+
+    // A favorite write started from a card menu that the server refused
+    Connections {
+        target: window.connection
+        function onFavoriteUpdateFailed() {
+            window.showPassiveNotification(i18n("Could not update Favorites. Check the connection and try again"));
         }
     }
 

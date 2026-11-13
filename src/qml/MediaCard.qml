@@ -71,7 +71,7 @@ Controls.ItemDelegate {
     function openMenu(x, y) {
         if (!card.hasMenu)
             return;
-        Window.window?.openCardMenu?.(card, itemId, type, seriesId, x ?? 0, y ?? card.height, card.quickPlayEnabled ? resumeTicks : -1);
+        Window.window?.openCardMenu?.(card, itemId, type, seriesId, x ?? 0, y ?? card.height, card.quickPlayEnabled ? resumeTicks : -1, favorite);
     }
 
     // The description lists only what applies to the item, and stays empty for a placeholder row

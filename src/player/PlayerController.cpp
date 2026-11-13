@@ -4,6 +4,7 @@
 
 #include "api/DeviceProfile.h"
 #include "api/JellyfinClient.h"
+#include "models/ItemSummary.h"
 #include "models/PlayQueue.h"
 #include "settings/ClientSettings.h"
 #include "settings/ProfilePaths.h"
@@ -31,7 +32,45 @@ namespace Kinefin {
 namespace {
 constexpr qint64 TicksPerSecond = 10'000'000;
 constexpr int MaxRememberedItems = 1000;
+// The most episodes of one series the player lists to step through
+constexpr int MaxSeriesEpisodes = 2000;
+// A page of a series' episodes: a whole long series in one answer would pass the client's reply cap
+constexpr int SeriesPageSize = 100;
+
+// `S2:E6 — Weightless`: the same wording as the details page and the episode rows
+QString episodeSubtitle(const ItemSummary &episode)
+{
+    QString label;
+    if (episode.episodeNumber >= 0) {
+        const bool range = episode.episodeNumberEnd > episode.episodeNumber;
+        if (episode.seasonNumber >= 0)
+            label = range ? i18nc("season and episode range", "S%1:E%2–E%3", episode.seasonNumber,
+                                  episode.episodeNumber, episode.episodeNumberEnd)
+                          : i18nc("season and episode number", "S%1:E%2", episode.seasonNumber,
+                                  episode.episodeNumber);
+        else
+            label = range ? i18nc("episode number range", "E%1–E%2", episode.episodeNumber,
+                                  episode.episodeNumberEnd)
+                          : i18nc("episode number", "E%1", episode.episodeNumber);
+    }
+    if (label.isEmpty())
+        return episode.name;
+    return episode.name.isEmpty()
+               ? label
+               : i18nc("episode label and episode title", "%1 — %2", label, episode.name);
+}
 } // namespace
+
+QString playbackTimeText(qint64 ticks, bool withHours)
+{
+    const qint64 seconds = std::max<qint64>(0, ticks) / TicksPerSecond;
+    const auto part = [](qint64 value) {
+        return QString::number(value).rightJustified(2, QLatin1Char('0'));
+    };
+    const QString minutes = part(withHours ? seconds / 60 % 60 : seconds / 60);
+    const QString text = minutes + QLatin1Char(':') + part(seconds % 60);
+    return withHours ? part(seconds / 3600) + QLatin1Char(':') + text : text;
+}
 
 PlayerController::PlayerController(JellyfinClient &client, PlayQueue &queue,
                                    ClientSettings &settings, const QString &profileId,
@@ -51,10 +90,13 @@ PlayerController::PlayerController(JellyfinClient &client, PlayQueue &queue,
               state.subtitleStreamIndex = m_selectedSubtitleIndex;
               state.volume = m_volume;
               state.muted = m_muted;
-              state.nowPlayingQueue = m_playlist;
+              // The episodes of a series played alone are not a queue the server hears of
+              if (!m_playlistEphemeral)
+                  state.nowPlayingQueue = m_playlist;
               // The item id is the stable queue identity for this session. It is
               // valid even after a user reordered the saved queue in another view.
-              state.playlistItemId = m_queueIndex >= 0 ? m_itemId : QString();
+              state.playlistItemId =
+                  m_queueIndex >= 0 && !m_playlistEphemeral ? m_itemId : QString();
               state.repeatMode = m_repeat;
               state.shuffle = m_shuffle;
               return state;
@@ -90,10 +132,16 @@ PlayerController::PlayerController(JellyfinClient &client, PlayQueue &queue,
             Q_EMIT changed();
         }
     });
-    connect(&client, &JellyfinClient::trickplayInfoReady, this,
-            [this](const QString &id, const QJsonObject &item) {
-                if (id == m_itemId && active())
-                    m_trickplay = parseTrickplayLayout(item, m_source.mediaSourceId);
+    connect(&client, &JellyfinClient::playbackItemReady, this, &PlayerController::onPlaybackItem);
+    connect(&client, &JellyfinClient::episodesReady, this,
+            [this](const QJsonArray &items, int total, int channel) {
+                onSeriesEpisodes(items, total, channel);
+            });
+    // A page that fails ends the listing: what was read so far still serves
+    connect(&client, &JellyfinClient::listingFailed, this,
+            [this](const QString &, int, const QString &, int channel) {
+                if (channel == EpisodesChannel && !m_seriesListItem.isEmpty())
+                    finishSeriesPlaylist();
             });
     connect(&client, &JellyfinClient::trickplayTileFailed, this,
             [this](const QString &id, int width, int index) {
@@ -220,26 +268,34 @@ void PlayerController::onAccountLeaving()
     m_clock.stop();
     if (m_engine.isInitialized())
         m_engine.stop();
+    dropSeriesPlaylist();
     m_playlist.clear();
     m_queueIndex = -1;
+    m_title.clear();
+    m_subtitle.clear();
     m_queue.setCurrentPlaybackItemId({});
     m_pendingSubtitle.clear();
     clearPreview();
     Q_EMIT changed();
 }
 
-bool PlayerController::playItem(const QString &id, qint64 resumeTicks, const QString &title)
+bool PlayerController::playItem(const QString &id, qint64 resumeTicks)
 {
     if (!isValidJellyfinId(id) || resumeTicks < 0 || m_client.userId().isEmpty())
         return false;
     persistQueueCursor();
     m_playlist.clear();
     m_queueIndex = -1;
+    m_playlistEphemeral = false;
     m_queue.setCurrentPlaybackItemId({});
-    return startItem(id, resumeTicks, title);
+    if (!startItem(id, resumeTicks))
+        return false;
+    // An episode started alone learns its series from the item reply and then lists the episodes to step through
+    m_seriesPlaylistWanted = true;
+    return true;
 }
 
-bool PlayerController::startItem(const QString &id, qint64 resumeTicks, const QString &title)
+bool PlayerController::startItem(const QString &id, qint64 resumeTicks)
 {
     if (!isValidJellyfinId(id) || resumeTicks < 0 || m_client.userId().isEmpty())
         return false;
@@ -249,8 +305,11 @@ bool PlayerController::startItem(const QString &id, qint64 resumeTicks, const QS
     // A different item cannot be opened until the old mpv end-file arrived.
     // The pending id survives that stop and is negotiated exactly once.
     m_client.cancelPlaybackInfo();
+    cancelSeriesRequest();
+    m_seriesPlaylistWanted = false;
     m_itemId = id;
-    m_title = title.left(512);
+    m_title.clear();
+    m_subtitle.clear();
     m_resumeTicks = resumeTicks;
     m_errorText.clear();
     m_loading = true;
@@ -262,6 +321,7 @@ bool PlayerController::startItem(const QString &id, qint64 resumeTicks, const QS
     m_subtitleOptions.clear();
     m_pendingSubtitle.clear();
     m_trickplay.reset();
+    m_trickplayInfo = {};
     m_requestedFrame.reset();
     m_lastTile = {};
     m_cachedTileIndex = -1;
@@ -274,6 +334,8 @@ bool PlayerController::startItem(const QString &id, qint64 resumeTicks, const QS
     m_selectedAudioId = 0;
     m_selectedSubtitleId = 0;
     Q_EMIT tracksChanged();
+    // The title and the trickplay layout come from the item itself, asked alongside PlaybackInfo
+    m_client.fetchPlaybackItem(id);
     if (m_session.state() != PlaybackSession::State::Idle)
         m_engine.stop();
     else
@@ -286,11 +348,10 @@ bool PlayerController::playQueue(int index)
 {
     if (index < 0 || index >= m_queue.count())
         return false;
+    dropSeriesPlaylist();
     m_playlist = m_queue.itemIds();
     m_queueIndex = index;
-    const QModelIndex row = m_queue.index(index);
-    const QString name = m_queue.data(row, PlayQueue::NameRole).toString();
-    if (!startItem(m_playlist.at(index), 0, name)) {
+    if (!startItem(m_playlist.at(index), 0)) {
         m_playlist.clear();
         m_queueIndex = -1;
         return false;
@@ -323,10 +384,10 @@ bool PlayerController::resumeQueue()
             }
         }
     }
+    dropSeriesPlaylist();
     m_playlist = ids;
     m_queueIndex = index;
-    const QString name = m_queue.data(m_queue.index(index), PlayQueue::NameRole).toString();
-    if (!startItem(ids.at(index), ticks, name)) {
+    if (!startItem(ids.at(index), ticks)) {
         m_playlist.clear();
         m_queueIndex = -1;
         return false;
@@ -372,8 +433,100 @@ void PlayerController::onSource(const PlaybackSource &source)
         return;
     }
     refreshSegments();
-    m_client.fetchTrickplayInfo(m_itemId);
+    updateTrickplayLayout();
     Q_EMIT changed();
+}
+
+void PlayerController::onPlaybackItem(const QString &id, const QJsonObject &item)
+{
+    // A reply for an item that is no longer the current one must not name or lay out this one
+    if (id != m_itemId || !active())
+        return;
+    const ItemSummary summary = parseItemSummary(item);
+    if (summary.valid) {
+        const bool episode =
+            summary.type == QLatin1String("Episode") && !summary.seriesName.isEmpty();
+        m_title = episode ? summary.seriesName : summary.name;
+        m_subtitle = episode ? episodeSubtitle(summary) : QString();
+        if (m_seriesPlaylistWanted && episode && !summary.seriesId.isEmpty()) {
+            m_seriesId = summary.seriesId;
+            m_seriesEpisodes.clear();
+            m_seriesEpisodeIndex = -1;
+            m_seriesNextStart = 0;
+            if (m_client.fetchEpisodes(m_seriesId, QString(), 0, SeriesPageSize, EpisodesChannel))
+                m_seriesListItem = m_itemId;
+        }
+        m_seriesPlaylistWanted = false;
+    }
+    // The tile layout is picked by media source, which PlaybackInfo may deliver after this reply
+    m_trickplayInfo =
+        QJsonObject{{QStringLiteral("Trickplay"), item.value(QStringLiteral("Trickplay"))}};
+    updateTrickplayLayout();
+    Q_EMIT changed();
+}
+
+void PlayerController::updateTrickplayLayout()
+{
+    if (!m_trickplayInfo.isEmpty() && !m_source.mediaSourceId.isEmpty())
+        m_trickplay = parseTrickplayLayout(m_trickplayInfo, m_source.mediaSourceId);
+}
+
+void PlayerController::onSeriesEpisodes(const QJsonArray &items, int total, int channel)
+{
+    if (channel != EpisodesChannel || m_seriesListItem.isEmpty() || m_seriesListItem != m_itemId)
+        return;
+    for (const QJsonValue &value : items) {
+        const ItemSummary episode = parseItemSummary(value.toObject());
+        // An episode the library lists without a file cannot be played
+        if (!episode.valid || episode.virtualItem || m_seriesEpisodes.size() >= MaxSeriesEpisodes)
+            continue;
+        if (sameItemId(episode.id, m_itemId))
+            m_seriesEpisodeIndex = m_seriesEpisodes.size();
+        m_seriesEpisodes.append(episode.id);
+    }
+    m_seriesNextStart += items.size();
+    const bool more = items.size() == SeriesPageSize && m_seriesNextStart < total
+                      && m_seriesNextStart < MaxSeriesEpisodes;
+    if (more
+        && m_client.fetchEpisodes(m_seriesId, QString(), m_seriesNextStart, SeriesPageSize,
+                                  EpisodesChannel))
+        return;
+    finishSeriesPlaylist();
+}
+
+void PlayerController::finishSeriesPlaylist()
+{
+    const QStringList ids = std::exchange(m_seriesEpisodes, {});
+    const int index = std::exchange(m_seriesEpisodeIndex, -1);
+    cancelSeriesRequest();
+    // An episode the listing does not hold plays alone, as before
+    if (index < 0)
+        return;
+    m_playlist = ids;
+    m_queueIndex = index;
+    m_playlistEphemeral = true;
+    Q_EMIT changed();
+}
+
+void PlayerController::cancelSeriesRequest()
+{
+    m_seriesEpisodes.clear();
+    m_seriesEpisodeIndex = -1;
+    if (m_seriesListItem.isEmpty())
+        return;
+    m_seriesListItem.clear();
+    m_client.releaseListingChannel(EpisodesChannel);
+}
+
+void PlayerController::dropSeriesPlaylist()
+{
+    cancelSeriesRequest();
+    m_seriesPlaylistWanted = false;
+    if (!m_playlistEphemeral)
+        return;
+    m_playlistEphemeral = false;
+    m_playlist.clear();
+    m_queueIndex = -1;
 }
 
 void PlayerController::onState(PlaybackSession::State, PlaybackSession::State to)
@@ -399,10 +552,12 @@ void PlayerController::onEnd(const QString &reason)
         QTimer::singleShot(0, this, &PlayerController::requestPending);
         return;
     }
-    if (reason == QLatin1String("eof") && !m_stopping && next())
+    // The saved queue always advances; the episodes of a series follow the user's autoplay preference, which never stops Repeat One
+    const bool advance = !m_playlistEphemeral || m_nextEpisodeAutoPlay || m_repeat == 2;
+    if (reason == QLatin1String("eof") && !m_stopping && advance && next())
         return;
-    if (reason == QLatin1String("eof") && !m_playlist.isEmpty() && !m_client.serverId().isEmpty()
-        && !m_client.userId().isEmpty()) {
+    if (reason == QLatin1String("eof") && !m_playlist.isEmpty() && !m_playlistEphemeral
+        && !m_client.serverId().isEmpty() && !m_client.userId().isEmpty()) {
         m_queueMemory.remove(m_client.serverId().toLower() + QLatin1Char('/')
                              + m_client.userId().toLower());
         saveMemory();
@@ -415,8 +570,10 @@ void PlayerController::onEnd(const QString &reason)
 
 void PlayerController::clearCurrent()
 {
+    dropSeriesPlaylist();
     m_itemId.clear();
     m_title.clear();
+    m_subtitle.clear();
     m_errorText.clear();
     m_loading = false;
     m_stopping = false;
@@ -458,14 +615,16 @@ void PlayerController::stop()
     Q_EMIT changed();
 }
 
-int PlayerController::nextIndex(int direction) const
+int PlayerController::nextIndex(int direction, bool pick) const
 {
     if (m_playlist.isEmpty() || m_queueIndex < 0 || m_queueIndex >= m_playlist.size())
         return -1;
     if (m_repeat == 2 && direction > 0)
         return m_queueIndex;
-    if (m_shuffle && direction > 0 && m_playlist.size() > 1) {
-        const int offset = QRandomGenerator::global()->bounded(int(m_playlist.size()) - 1) + 1;
+    // Shuffle is a queue mode: a series played alone keeps its airing order
+    if (m_shuffle && !m_playlistEphemeral && direction > 0 && m_playlist.size() > 1) {
+        const int offset =
+            pick ? QRandomGenerator::global()->bounded(int(m_playlist.size()) - 1) + 1 : 1;
         return (m_queueIndex + offset) % m_playlist.size();
     }
     const int candidate = m_queueIndex + direction;
@@ -483,11 +642,9 @@ bool PlayerController::next()
         return false;
     m_queueIndex = next;
     const QString id = m_playlist.at(next);
-    const int row = m_queue.itemIds().indexOf(id);
-    const QString title =
-        row < 0 ? QString() : m_queue.data(m_queue.index(row), PlayQueue::NameRole).toString();
-    m_queue.setCurrentPlaybackItemId(id);
-    const bool started = startItem(id, 0, title);
+    if (!m_playlistEphemeral)
+        m_queue.setCurrentPlaybackItemId(id);
+    const bool started = startItem(id, 0);
     if (started)
         persistQueueCursor();
     return started;
@@ -503,11 +660,9 @@ bool PlayerController::previous()
         return false;
     m_queueIndex = prev;
     const QString id = m_playlist.at(prev);
-    const int row = m_queue.itemIds().indexOf(id);
-    m_queue.setCurrentPlaybackItemId(id);
-    const bool started = startItem(
-        id, 0,
-        row < 0 ? QString() : m_queue.data(m_queue.index(row), PlayQueue::NameRole).toString());
+    if (!m_playlistEphemeral)
+        m_queue.setCurrentPlaybackItemId(id);
+    const bool started = startItem(id, 0);
     if (started)
         persistQueueCursor();
     return started;
@@ -559,6 +714,11 @@ void PlayerController::setRepeatMode(int mode)
         return;
     m_repeat = mode;
     Q_EMIT changed();
+}
+
+QString PlayerController::timeText(qint64 ticks) const
+{
+    return playbackTimeText(ticks, durationTicks() >= 3600 * TicksPerSecond);
 }
 
 void PlayerController::refreshTracks()
@@ -860,7 +1020,7 @@ void PlayerController::clearPreview()
 
 void PlayerController::updatePlaylist()
 {
-    if (m_playlist.isEmpty() || m_queueIndex < 0 || m_itemId.isEmpty())
+    if (m_playlistEphemeral || m_playlist.isEmpty() || m_queueIndex < 0 || m_itemId.isEmpty())
         return;
     QStringList updated = m_queue.itemIds();
     const int current = updated.indexOf(m_itemId);
@@ -880,8 +1040,12 @@ void PlayerController::updatePlaylist()
 
 void PlayerController::persistQueueCursor()
 {
-    if (m_playlist.isEmpty() || m_queueIndex < 0 || m_itemId.isEmpty()
+    if (m_playlistEphemeral || m_playlist.isEmpty() || m_queueIndex < 0 || m_itemId.isEmpty()
         || m_client.serverId().isEmpty() || m_client.userId().isEmpty())
+        return;
+    // An item that left the queue, or one played before the queue started, has no cursor to keep there
+    if (!std::any_of(m_playlist.cbegin(), m_playlist.cend(),
+                     [this](const QString &id) { return sameItemId(id, m_itemId); }))
         return;
     const QString key =
         m_client.serverId().toLower() + QLatin1Char('/') + m_client.userId().toLower();

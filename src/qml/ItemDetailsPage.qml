@@ -93,8 +93,7 @@ Kirigami.ScrollablePage {
         icon.name: "media-playback-start"
         visible: page.details.playable
         enabled: page.details.status === ItemDetailsModel.Ready && !!page.Window.window?.player
-        onTriggered: page.Window.window.playItem(page.details.itemId,
-            page.details.canResume ? page.details.resumePositionTicks : 0, page.details.name)
+        onTriggered: page.Window.window.playItem(page.details.itemId, page.details.canResume ? page.details.resumePositionTicks : 0)
     }
     readonly property Kirigami.Action playNextAction: Kirigami.Action {
         objectName: "playNextAction"
@@ -115,7 +114,7 @@ Kirigami.ScrollablePage {
     readonly property Kirigami.Action favoriteAction: Kirigami.Action {
         objectName: "toggleFavoriteAction"
         text: page.details.favorite ? i18n("Remove from Favorites") : i18n("Add to Favorites")
-        // The icon shows the state too: the inline button is icon-only
+        // The icon shows the state too: on a narrow window the inline button is icon-only
         icon.name: page.details.favorite ? "starred-symbolic" : "non-starred-symbolic"
         visible: page.details.status === ItemDetailsModel.Ready
         enabled: !page.details.favoriteBusy
@@ -706,10 +705,12 @@ Kirigami.ScrollablePage {
                         }
 
                         ActionButton {
+                            objectName: "detailsFavoriteButton"
                             command: page.favoriteAction
-                            display: Controls.AbstractButton.IconOnly
+                            // The label shows while there is room; a narrow window keeps the icon and the tooltip
+                            display: hero.narrow ? Controls.AbstractButton.IconOnly : Controls.AbstractButton.TextBesideIcon
                             Controls.ToolTip.text: text
-                            Controls.ToolTip.visible: hovered || visualFocus
+                            Controls.ToolTip.visible: hero.narrow && (hovered || visualFocus)
                             Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
                             Accessible.name: text
                         }

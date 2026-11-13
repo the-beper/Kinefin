@@ -70,7 +70,7 @@ Controls.ItemDelegate {
 
     // Opens the card menu of the window: at the given point of the row, below it when none
     function openMenu(x, y) {
-        Window.window?.openCardMenu?.(row, itemId, type, seriesId, x ?? 0, y ?? row.height);
+        Window.window?.openCardMenu?.(row, itemId, type, seriesId, x ?? 0, y ?? row.height, -1, favorite);
     }
 
     // A click makes this row the current one and gives its list the focus, so the focus comes back to this row after Back

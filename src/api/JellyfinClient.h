@@ -193,9 +193,10 @@ class JellyfinClient final : public QObject {
     // Authenticated subtitle files are downloaded via Qt, never opened by mpv
     // over the network (which could forward player headers on redirects).
     bool downloadExternalSubtitle(const QUrl &url);
+    // The item being played (`GET /Users/{id}/Items/{id}`): its title fields and trickplay metadata; a stale reply is dropped and a failed one is silent
+    bool fetchPlaybackItem(const QString &itemId);
     // Trickplay thumbnails are authenticated on the same origin and bounded in
     // size. Superseded image requests never update the currently playing item.
-    bool fetchTrickplayInfo(const QString &itemId);
     bool fetchTrickplayTile(const QString &itemId, const QString &mediaSourceId, int width,
                             int tileIndex);
     // Queues one report for the server, one request at a time and in order (an old session's Stopped always precedes a new session's Start). A newer Progress replaces a queued one, a Stopped drops the queued Progress, only a Stopped is retried (once). Reports never emit a failure signal: playback must not depend on them. Returns false, without a request, when not authenticated or the report is invalid. A 401 expires the session and drops the queue; disconnectFromServer() drops it silently
@@ -281,7 +282,7 @@ class JellyfinClient final : public QObject {
     void mediaSegmentsReady(const QString &itemId, const QJsonArray &segments);
     void externalSubtitleDownloaded(const QUrl &url, const QByteArray &bytes);
     void externalSubtitleFailed(const QUrl &url);
-    void trickplayInfoReady(const QString &itemId, const QJsonObject &item);
+    void playbackItemReady(const QString &itemId, const QJsonObject &item);
     void trickplayTileReady(const QString &itemId, int width, int index, const QByteArray &jpeg);
     void trickplayTileFailed(const QString &itemId, int width, int index);
     // `reason` is a fixed English string: never a URL, a body or a path from the server
@@ -382,7 +383,7 @@ class JellyfinClient final : public QObject {
     quint64 m_playbackSerial = 0;
     quint64 m_segmentsSerial = 0;
     quint64 m_subtitleSerial = 0;
-    quint64 m_trickplayInfoSerial = 0;
+    quint64 m_playbackItemSerial = 0;
     quint64 m_trickplayTileSerial = 0;
     QPointer<QNetworkReply> m_subtitleReply;
     QPointer<QNetworkReply> m_trickplayTileReply;

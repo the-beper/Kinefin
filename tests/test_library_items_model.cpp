@@ -176,6 +176,27 @@ class TestLibraryItemsModel : public QObject {
         QVERIFY(f.model.data(placeholder, LibraryItemsModel::ImageUrlRole).toUrl().isEmpty());
     }
 
+    void aFavoriteAnswerUpdatesTheResidentRowOnly()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        QVERIFY(f.openMovies());
+        QTRY_COMPARE(f.model.status(), LibraryItemsModel::Ready);
+        const QModelIndex first = f.model.index(0);
+        const QString id = f.model.data(first, LibraryItemsModel::ItemIdRole).toString();
+        QVERIFY(!f.model.data(first, LibraryItemsModel::FavoriteRole).toBool());
+        QSignalSpy changed(&f.model, &LibraryItemsModel::dataChanged);
+        QVERIFY(f.client.setItemFavorite(id, true));
+        QTRY_VERIFY(f.model.data(first, LibraryItemsModel::FavoriteRole).toBool());
+        QVERIFY(!changed.isEmpty());
+        QCOMPARE(changed.constLast().at(2).value<QList<int>>(),
+                 QList<int>{LibraryItemsModel::FavoriteRole});
+        // Another row keeps its flag
+        QVERIFY(!f.model.data(f.model.index(1), LibraryItemsModel::FavoriteRole).toBool());
+        QVERIFY(f.client.setItemFavorite(id, false));
+        QTRY_VERIFY(!f.model.data(first, LibraryItemsModel::FavoriteRole).toBool());
+    }
+
     void wireCarriesTheLibraryQuery()
     {
         Fixture f;

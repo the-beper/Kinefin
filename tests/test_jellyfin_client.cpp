@@ -154,9 +154,9 @@ class TestJellyfinClient : public QObject {
             QJsonDocument(QJsonObject{{QStringLiteral("Trickplay"), indexed}}).toJson();
         Kinefin::JellyfinClient client;
         QVERIFY(login(client, server));
-        QSignalSpy info(&client, &Kinefin::JellyfinClient::trickplayInfoReady);
+        QSignalSpy info(&client, &Kinefin::JellyfinClient::playbackItemReady);
         QSignalSpy tile(&client, &Kinefin::JellyfinClient::trickplayTileReady);
-        QVERIFY(client.fetchTrickplayInfo(kPlayItem));
+        QVERIFY(client.fetchPlaybackItem(kPlayItem));
         QTRY_COMPARE(info.size(), 1);
         QVERIFY(info.takeFirst().at(1).toJsonObject().contains(QStringLiteral("Trickplay")));
         QVERIFY(client.fetchTrickplayTile(kPlayItem, kPlayItem, 320, 2));

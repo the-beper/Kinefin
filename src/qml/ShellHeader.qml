@@ -191,7 +191,7 @@ Item {
         icon.name: "go-previous"
         display: QQC2.AbstractButton.IconOnly
         QQC2.ToolTip.text: text
-        QQC2.ToolTip.visible: hovered
+        QQC2.ToolTip.visible: hovered || visualFocus
         QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
         onClicked: shell.pageStack.goBack()
     }
@@ -212,7 +212,7 @@ Item {
         // Only the icon; the text is for screen readers
         display: QQC2.AbstractButton.IconOnly
         QQC2.ToolTip.text: text
-        QQC2.ToolTip.visible: hovered
+        QQC2.ToolTip.visible: hovered || visualFocus
         QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
         // The menu marks where its entries lead while one of them shows
         down: shell.currentSection === "settings" || shell.currentSection === "about"
@@ -351,7 +351,7 @@ Item {
             icon.name: refreshAction.icon.name
             display: QQC2.AbstractButton.IconOnly
             QQC2.ToolTip.text: text
-            QQC2.ToolTip.visible: hovered
+            QQC2.ToolTip.visible: hovered || visualFocus
             QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
             onClicked: refreshAction.trigger()
         }
@@ -365,7 +365,7 @@ Item {
             icon.name: "favorite"
             display: QQC2.AbstractButton.IconOnly
             QQC2.ToolTip.text: text
-            QQC2.ToolTip.visible: hovered
+            QQC2.ToolTip.visible: hovered || visualFocus
             QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
             enabled: root.signedIn
             down: shell.currentSection === "favorites"
@@ -373,19 +373,49 @@ Item {
         }
 
         QQC2.ToolButton {
+            id: queueButton
             objectName: "queueButton"
+
+            readonly property int queued: root.signedIn ? root.connection.queue.count : 0
 
             Layout.alignment: Qt.AlignVCenter
             visible: !root.compact
             text: i18nc("@action:button", "Queue")
             icon.name: "view-media-playlist"
             display: QQC2.AbstractButton.IconOnly
-            QQC2.ToolTip.text: text
-            QQC2.ToolTip.visible: hovered
+            QQC2.ToolTip.text: queued > 0 ? i18ncp("@info:tooltip the queue button and how many items the queue holds", "Queue, %1 item", "Queue, %1 items", queued) : text
+            QQC2.ToolTip.visible: hovered || visualFocus
             QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
+            Accessible.name: QQC2.ToolTip.text
             enabled: root.signedIn
             down: shell.currentSection === "queue"
             onClicked: shell.openSection("queuePage", "QueuePage.qml", { connection: shell.connection })
+
+            // How many items wait in the queue, on the icon's corner; the accessible name says it in words
+            Rectangle {
+                objectName: "queueCountBadge"
+                visible: queueButton.queued > 0
+                anchors {
+                    top: parent.top
+                    right: parent.right
+                    topMargin: Kirigami.Units.smallSpacing / 2
+                    rightMargin: Kirigami.Units.smallSpacing / 2
+                }
+                height: Math.round(Kirigami.Units.gridUnit * 0.8)
+                width: Math.max(height, badgeLabel.implicitWidth + Kirigami.Units.smallSpacing)
+                radius: height / 2
+                color: Kirigami.Theme.highlightColor
+                Accessible.ignored: true
+
+                QQC2.Label {
+                    id: badgeLabel
+                    anchors.centerIn: parent
+                    font.pixelSize: Math.round(parent.height * 0.7)
+                    color: Kirigami.Theme.highlightedTextColor
+                    textFormat: Text.PlainText
+                    text: queueButton.queued > 99 ? i18nc("@label more than 99 items in the queue badge", "99+") : Number(queueButton.queued).toLocaleString(Qt.locale(), "f", 0)
+                }
+            }
         }
 
         QQC2.ToolButton {
@@ -427,7 +457,7 @@ Item {
             display: QQC2.AbstractButton.IconOnly
             visible: root.signedIn || root.serverChosen
             QQC2.ToolTip.text: text
-            QQC2.ToolTip.visible: hovered
+            QQC2.ToolTip.visible: hovered || visualFocus
             QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
             onClicked: accountMenu.popup(accountButton, 0, accountButton.height)
 
@@ -756,7 +786,7 @@ Item {
             action: signOutAction
             Accessible.description: signOutAction.tooltip
             QQC2.ToolTip.text: signOutAction.tooltip
-            QQC2.ToolTip.visible: hovered
+            QQC2.ToolTip.visible: hovered || visualFocus
             QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
         }
         QQC2.MenuItem {

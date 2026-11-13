@@ -1804,18 +1804,18 @@ bool JellyfinClient::downloadExternalSubtitle(const QUrl &url)
     return true;
 }
 
-bool JellyfinClient::fetchTrickplayInfo(const QString &itemId)
+bool JellyfinClient::fetchPlaybackItem(const QString &itemId)
 {
     if (m_state != State::Authenticated || !isValidJellyfinId(itemId))
         return false;
-    const quint64 serial = ++m_trickplayInfoSerial;
+    const quint64 serial = ++m_playbackItemSerial;
     QUrl url = endpoint(QStringLiteral("/Users/") + m_userId + QStringLiteral("/Items/") + itemId);
     QUrlQuery query;
     query.addQueryItem(QStringLiteral("fields"), QStringLiteral("Trickplay"));
     url.setQuery(query);
     QNetworkReply *reply = m_network.get(requestFor(url, true));
     attach(reply, m_generation, [this, itemId, serial](QNetworkReply *finished) {
-        if (serial != m_trickplayInfoSerial)
+        if (serial != m_playbackItemSerial)
             return;
         const int status = finished->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         if (status == 401) {
@@ -1825,7 +1825,7 @@ bool JellyfinClient::fetchTrickplayInfo(const QString &itemId)
         QJsonObject item;
         if (status == 200 && finished->error() == QNetworkReply::NoError
             && parseObject(finished, &item))
-            Q_EMIT trickplayInfoReady(itemId, item);
+            Q_EMIT playbackItemReady(itemId, item);
     });
     return true;
 }
