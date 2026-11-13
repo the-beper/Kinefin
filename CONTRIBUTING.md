@@ -8,16 +8,16 @@ A scaffold-forward project of one developer. These are the real rules; the layou
 | --- | --- |
 | `build/Containerfile` | The build/check image (Fedora 45, Qt 6/KF6/ECM, mpv-devel, gettext) |
 | `build/build-env.sh` | Runs any command in that image: the only supported way to build and check locally |
-| `build/check.sh` | Every automated check (build, ctest, qmllint, metainfo, desktop file, catalogs): the one list |
+| `build/check.sh` | Every automated check (clang-format, cppcheck, build, ctest, qmllint, metainfo, desktop file, translation consistency, Python contract tests, `reuse lint`, catalogs): the one list |
 | `build/flatpak/` | The Flatpak image (`Containerfile`), the manifest (`io.github.the_beper.Kinefin.yml`), and its build/test scripts |
 | `build/release/` | Version bump, Flatpak source/runtime/permission/Action gates, Flathub manifest generator, artifact verification, attestation checks, release publisher and first-release checklist |
 | `data/` | Desktop file, AppStream metainfo and icons (`icons/hicolor`: the scalable SVG source and the 128/256 px PNG renders) |
 | `po/` | Gettext: `LINGUAS`, `POTFILES.in`, `extract.sh`, per-language catalogs |
 | `src/api/` | Jellyfin REST client (auth, discovery, device profile, media sources, reporting) |
 | `src/downloads/` | Not started: download queue, tracked-series auto rules, portal export (feature doc: parity §10) |
-| `src/app/` | `ConnectionController`: the one object the QML pages talk to (servers, sign-in, Quick Connect, session restore); profile commands and logging; `ClientSettingsQml.h`, which exposes the settings object to QML |
-| `src/player/` | Playback session state machine, server reporting (`PlaybackReporter`) and the mpv engine (`PlaybackEngine`); property mapping and subtitles come later |
-| `src/integration/` | Validated `jellyfin://item/<id>` routing and registered desktop protocol; the remaining MPRIS, screensaver/power, Wayland/libkscreen display switching and SDL3/optional CEC work belongs to P6 |
+| `src/app/` | `ConnectionController`: the one object the QML pages talk to (servers, sign-in, Quick Connect, session restore); profile commands and logging; `ClientSettingsQml.h`, which exposes the settings object to QML, and `MpvVideoItem`, the mpvqt video renderer item |
+| `src/player/` | Playback session state machine, server reporting (`PlaybackReporter`), the mpv engine (`PlaybackEngine`), `PlayerController` (what `PlayerPage.qml` talks to: queue and series stepping, tracks, segments, sleep timer, screenshots), `PlayerSettings` and trickplay |
+| `src/integration/` | Validated `jellyfin://item/<id>` routing and registered desktop protocol, and the update check; MPRIS, screensaver/power, Wayland/libkscreen display switching and SDL3/optional CEC are not built yet |
 | `src/settings/` | Profile index and identity, server credentials, KConfig client settings (`SettingDefinitions`, `ClientSettings`, `SettingsSectionModel`) |
 | `src/models/` | API-backed listing, details, search, genre and Remote sessions models; `PlayQueue` persists the video up-next list per owner in `queues/<serverId>_<userId>.json` and supports one-level undo |
 | `src/imagecache/` | Image origin lock and the restricted network access (allowed image URLs only, disk cache with a cap); the subtitle cache is not started |
@@ -55,8 +55,9 @@ Run the whole suite:
 
 ```sh
 build/build-env.sh build/check.sh
-python3 scripts/po.py status        # 0 pending per language
 ```
+
+`python3 scripts/po.py status` alone shows the pending translations per language (zero is required).
 
 `tests/shell_smoke.py` starts the binary offscreen three times (Servers, then Settings and About through the `KINEFIN_START_PAGE` start-up hook) and fails on any QML problem. `tests/test_kwallet_host.cpp` runs against the session's real KWallet and is skipped unless `KINEFIN_TEST_KWALLET=1`; the command is in the plan's "KWallet host checks". Run it before proposing a commit. Shell scripts (`build/`, `scripts/`, `po/`) are shellcheck-clean (`--severity=warning`); C++ code follows the Qt-like style of `.clang-format` (LLVM base with explicit knobs: the image's clang-format has no `Qt` preset) (`clang-format -i <files>` before proposing — the image gate fails on drift; `.editorconfig` governs the non-C++ text files).
 
