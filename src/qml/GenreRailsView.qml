@@ -134,6 +134,7 @@ ListView {
 
             Kirigami.Heading {
                 Layout.fillWidth: true
+                Layout.leftMargin: Kirigami.Units.largeSpacing
                 level: 2
                 // Genre names come from the server: plain text only
                 textFormat: Text.PlainText
@@ -188,6 +189,7 @@ ListView {
             listObjectName: "genreRailRow_" + row.index
             model: row.items
             cardHeight: row.cardHeight
+            edgeMargin: Kirigami.Units.largeSpacing
             accessibleName: row.name
             pageFlickable: view
             externalVerticalNavigation: true

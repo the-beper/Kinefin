@@ -152,7 +152,7 @@ Item {
 
     // The list the box searches: the model of the type tab at the root of the stack; on any other page the box feeds the global search
     readonly property var localModel: {
-        // The user preferences and Favorites pages opened over a tab are no part of it: the box searches the whole server there
+        // The Settings and Favorites pages opened over a tab are no part of it: the box searches the whole server there
         if (shell.globalSearchPage)
             return null;
         switch (shell.rootTab) {
@@ -547,7 +547,7 @@ Item {
         text: i18nc("@action:inmenu", "Settings")
         icon.name: "configure"
         shortcut: "Ctrl+,"
-        onTriggered: shell.openSection("settingsPage", "SettingsPage.qml", { settings: shell.settings })
+        onTriggered: shell.openSection("settingsPage", "SettingsPage.qml", { settings: shell.settings, connection: shell.connection })
     }
     Kirigami.Action {
         id: shortcutsAction
@@ -590,7 +590,7 @@ Item {
 
         text: i18nc("@action:inmenu", "Admin Dashboard")
         icon.name: "preferences-system-network"
-        visible: root.signedIn
+        visible: root.signedIn && root.connection.currentUserIsAdministrator
         onTriggered: {
             if (!root.connection.openAdminDashboard())
                 shell.showPassiveNotification(i18n("The admin dashboard could not be opened: check the default browser"));
@@ -642,21 +642,10 @@ Item {
 
     // The account menu: what a session can lose, and what a chosen server can still be left for
     Kirigami.Action {
-        id: userPreferencesAction
-        objectName: "userPreferencesAction"
-
-        text: i18nc("@action:inmenu", "User Preferences")
-        tooltip: i18nc("@info:tooltip", "Language, subtitle and Home preferences of this user, kept on the server")
-        icon.name: "preferences-desktop-user"
-        visible: root.signedIn
-        onTriggered: shell.openSection("userPreferencesPage", "UserPreferencesPage.qml", { connection: shell.connection })
-    }
-    Kirigami.Action {
         id: switchUserAction
         objectName: "switchUserAction"
 
         text: i18nc("@action:inmenu Opens the list of the saved users of this server", "Switch User")
-        tooltip: i18nc("@info:tooltip", "Choose another user without signing out")
         icon.name: "system-switch-user"
         visible: root.signedIn
         onTriggered: root.afterUnsavedSettled(() => root.connection.switchUser())
@@ -685,11 +674,18 @@ Item {
     QQC2.Menu {
         id: mainMenu
         objectName: "mainMenu"
-        // Reserve a separate column for displayed shortcuts; otherwise the
-        // keyboard-shortcuts entry overlaps its own Ctrl+Shift+/ annotation.
-        implicitWidth: Math.min(Kirigami.Units.gridUnit * 23,
-                                Math.max(Kirigami.Units.gridUnit * 16,
-                                         shell.width - Kirigami.Units.largeSpacing * 2))
+        // The widest shown entry (its label plus the shortcut column, which the style's MenuItem counts in its implicit width) and the menu's paddings, never wider than the window
+        readonly property real widestEntry: {
+            let widest = 0;
+            for (let i = 0; i < count; ++i) {
+                const entry = itemAt(i);
+                if (entry?.visible)
+                    widest = Math.max(widest, entry.implicitWidth);
+            }
+            return widest;
+        }
+        implicitWidth: Math.min(Math.max(implicitBackgroundWidth + leftInset + rightInset, widestEntry + leftPadding + rightPadding),
+                                shell.width - Kirigami.Units.largeSpacing * 2)
 
         QQC2.MenuItem {
             objectName: "menuRefreshItem"
@@ -724,7 +720,7 @@ Item {
         }
         QQC2.MenuItem {
             objectName: "menuAdminItem"
-            visible: root.signedIn
+            visible: adminDashboardAction.visible
             action: adminDashboardAction
         }
         QQC2.MenuSeparator {
@@ -750,22 +746,9 @@ Item {
         objectName: "accountMenu"
 
         QQC2.MenuItem {
-            objectName: "userPreferencesItem"
-            visible: root.signedIn
-            action: userPreferencesAction
-            Accessible.description: userPreferencesAction.tooltip
-            QQC2.ToolTip.text: userPreferencesAction.tooltip
-            QQC2.ToolTip.visible: hovered
-            QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
-        }
-        QQC2.MenuItem {
             objectName: "switchUserItem"
             visible: root.signedIn
             action: switchUserAction
-            Accessible.description: switchUserAction.tooltip
-            QQC2.ToolTip.text: switchUserAction.tooltip
-            QQC2.ToolTip.visible: hovered
-            QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
         }
         QQC2.MenuItem {
             objectName: "signOutItem"

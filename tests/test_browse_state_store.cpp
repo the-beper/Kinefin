@@ -801,6 +801,8 @@ class TestBrowseStateStore : public QObject {
                                 QStringLiteral("movies/favorites"),
                                 QStringLiteral("movies/favorites:") + id,
                                 QStringLiteral("movies/collections"),
+                                QStringLiteral("tvshows/favorites"),
+                                QStringLiteral("tvshows/favorites:") + id,
                                 QStringLiteral("tvshows/episodes"),
                                 QStringLiteral("tvshows/episodes:") + id,
                                 QStringLiteral("tvshows/network:") + id};
@@ -812,7 +814,8 @@ class TestBrowseStateStore : public QObject {
                                   QStringLiteral("tvshows/network:Studio Name"),
                                   QStringLiteral("tvshows/network:"),
                                   QStringLiteral("movies/episodes"),
-                                  QStringLiteral("tvshows/favorites"),
+                                  QStringLiteral("tvshows/favorites:"),
+                                  QStringLiteral("tvshows/collections"),
                                   QStringLiteral("boxsets"),
                                   QStringLiteral("boxsets/x"),
                                   QStringLiteral("music")};
@@ -852,6 +855,8 @@ class TestBrowseStateStore : public QObject {
         auto store = f.open();
         for (const QString &scope :
              QStringList{QStringLiteral("tvshows"), QString(QStringLiteral("tvshows:") + kLibrary),
+                         QStringLiteral("tvshows/favorites"),
+                         QString(QStringLiteral("tvshows/favorites:") + kLibrary),
                          QString(QStringLiteral("tvshows/network:") + kLibrary)}) {
             store->setView(kServer, kUser, scope, resumable);
             QVERIFY2(holds(*store, kServer, kUser, scope, favorite), qPrintable(scope));

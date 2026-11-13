@@ -73,7 +73,7 @@ class PlanningConsistency(unittest.TestCase):
         # filter draft or toggle the wrapping preference delegate.
         for file, start in (
             ("src/qml/FilterDialog.qml", "id: optionComponent"),
-            ("src/qml/UserPreferencesPage.qml", "component LibraryCheckRow:"),
+            ("src/qml/UserPreferencesForm.qml", "component LibraryCheckRow:"),
         ):
             with self.subTest(file=file):
                 body = content(file).split(start, 1)[1]

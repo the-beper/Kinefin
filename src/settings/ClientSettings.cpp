@@ -214,12 +214,28 @@ void ClientSettings::setWindowGeometry(const QRect &geometry)
           false);
 }
 
-QObject *ClientSettings::sectionModel(const QString &section)
+QObject *ClientSettings::sectionModel(const QString &section, const QString &group)
 {
-    auto it = m_models.find(section);
+    // One model per section and group; an empty group is the whole section
+    const QString id = section + QLatin1Char('/') + group;
+    auto it = m_models.find(id);
     if (it == m_models.end())
-        it = m_models.insert(section, new SettingsSectionModel(*this, section, this));
+        it = m_models.insert(id, new SettingsSectionModel(*this, section, group, this));
     return it.value();
+}
+
+QStringList ClientSettings::sectionGroups(const QString &section) const
+{
+    QStringList groups;
+    for (const SettingDefinition &definition : settingDefinitions()) {
+        if (definition.section != section || definition.hidden)
+            continue;
+        const QString heading =
+            definition.group.isEmpty() ? QString() : definition.group.toString();
+        if (!groups.contains(heading))
+            groups.append(heading);
+    }
+    return groups;
 }
 
 DeviceProfileOptions ClientSettings::deviceProfileOptions() const

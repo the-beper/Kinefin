@@ -32,6 +32,8 @@ Controls.ItemDelegate {
     required property int seasonCount
     required property int episodeCount
     required property real seriesProgress
+    // The saved playback position in ticks, 0 when there is none
+    required property real resumeTicks
 
     // A 16:9 image area instead of the 2:3 poster
     property bool landscape: false
@@ -41,6 +43,8 @@ Controls.ItemDelegate {
     property string spokenSubtitle: subtitle
     // How a library page presents the card: the height of the image area over its width (0: from `landscape`), the image fitted instead of cropped, the title and year lines, and the text footer at all
     property real imageAspect: 0
+    // A playable card of Continue Watching: a Play button shows over the poster while the mouse is over the card, and the card menu has the same action
+    property bool quickPlay: false
     property bool fitImage: false
     property bool showTitle: true
     property bool showYear: true
@@ -57,11 +61,17 @@ Controls.ItemDelegate {
     readonly property bool inProgress: loaded && progress > 0 && progress < 1
     readonly property bool showsNew: loaded && isNew && (Window.window?.newBadgeEnabled ?? false)
 
+    // The kinds the card menu plays: keep the two lists in step
+    readonly property bool playable: ["Movie", "Episode", "Video"].indexOf(type) >= 0
+    readonly property bool quickPlayEnabled: quickPlay && loaded && playable
+    // Asks the owner to start the item, from its saved position when it has one
+    signal quickPlayRequested
+
     // Opens the card menu of the window: at the given point of the card, below it when none
     function openMenu(x, y) {
         if (!card.hasMenu)
             return;
-        Window.window?.openCardMenu?.(card, itemId, type, seriesId, x ?? 0, y ?? card.height);
+        Window.window?.openCardMenu?.(card, itemId, type, seriesId, x ?? 0, y ?? card.height, card.quickPlayEnabled ? resumeTicks : -1);
     }
 
     // The description lists only what applies to the item, and stays empty for a placeholder row
@@ -84,6 +94,14 @@ Controls.ItemDelegate {
         if (remainingMinutes > 0)
             parts.push(i18np("%1 minute left", "%1 minutes left", remainingMinutes));
         return parts.join(", ");
+    }
+
+    // The button is for the mouse alone: keyboard focus and touch leave it hidden, the card menu has the same action
+    HoverHandler {
+        id: cardHover
+        objectName: "cardHover"
+        enabled: card.quickPlayEnabled
+        acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
     }
 
     TapHandler {
@@ -291,6 +309,34 @@ Controls.ItemDelegate {
                     font.bold: true
                     textFormat: Text.PlainText
                     text: String(card.unplayedCount)
+                }
+            }
+
+            Controls.RoundButton {
+                id: quickPlayButton
+                objectName: "cardQuickPlay"
+                readonly property real diameter: Math.round(Math.min(parent.width, parent.height) * 0.4)
+                anchors.centerIn: parent
+                width: Math.max(diameter, Kirigami.Units.iconSizes.large)
+                height: width
+                visible: card.quickPlayEnabled && cardHover.hovered
+                focusPolicy: Qt.NoFocus
+                display: Controls.AbstractButton.IconOnly
+                icon.name: "media-playback-start"
+                // One value for both sides: `icon` is a grouped value, so reading it inside its own binding loops
+                readonly property int glyph: Math.round(width / 2)
+                icon.width: glyph
+                icon.height: glyph
+                text: card.resumeTicks > 0 ? i18n("Resume") : i18n("Play")
+                // The card name is plain server text
+                Accessible.name: card.resumeTicks > 0 ? i18n("Resume %1", card.name) : i18n("Play %1", card.name)
+                Controls.ToolTip.text: text
+                Controls.ToolTip.visible: hovered
+                Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
+                // The press never reaches the card, so the card becomes current here and Back returns to it
+                onClicked: {
+                    card.makeCurrent();
+                    card.quickPlayRequested();
                 }
             }
         }

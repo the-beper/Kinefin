@@ -7,24 +7,26 @@ import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 import org.kde.kirigamiaddons.formcard as FormCard
 
-// The preferences the signed-in user keeps on the Jellyfin server (UserConfiguration). The model holds the draft and the whole read-modify-write cycle; this page only edits it, and leaving with a draft asks first (the shell calls askBeforeLeaving before it drops the page)
-FormCard.FormCardPage {
+// The preferences the signed-in user keeps on the Jellyfin server (UserConfiguration). The model holds the draft and the whole read-modify-write cycle; this form only edits it, and leaving it with a draft asks first (the Settings page and the shell call askBeforeLeaving before the form is dropped). The Save bar is UserPreferencesSaveBar.qml, shown by the page that holds the form
+ColumnLayout {
     id: page
-    objectName: "userPreferencesPage"
+    objectName: "userPreferencesForm"
 
     required property ConnectionController connection
 
+    // The Settings page opens this entry of its own list: "audio", "subtitles" or "library"
+    signal linkRequested(string section)
+
     readonly property UserConfigurationModel prefs: connection.userConfiguration
-    // The shell reads this before it drops the page
+    // The Settings page and the shell read this before they drop the form
     readonly property bool hasUnsavedChanges: prefs.dirty
     readonly property bool saving: prefs.state === UserConfigurationModel.Saving || prefs.state === UserConfigurationModel.Verifying
-    readonly property bool busy: saving || prefs.state === UserConfigurationModel.Loading
     // What to do once a save started from the unsaved changes dialog is confirmed
     property var pendingLeave: null
     // True while the form could not be edited: the keyboard goes back to it when it can
     property bool wasBlocked: true
 
-    title: i18n("User Preferences")
+    spacing: 0
 
     function focusPrimary() {
         if (prefs.editable)
@@ -67,7 +69,7 @@ FormCard.FormCardPage {
         return entries;
     }
 
-    // The shell asks before it drops this page (a section or a tab opens, Ctrl+F, closing the window): `proceed` runs at once when no draft is at stake, else once the user chose to save or discard it. Cancel, and a save that does not end well, drop it
+    // Asked before the form is dropped (another entry of Settings opens, Back, a tab opens, Ctrl+F, closing the window): `proceed` runs at once when no draft is at stake, else once the user chose to save or discard it. Cancel, and a save that does not end well, drop it
     function askBeforeLeaving(proceed) {
         if (!prefs.dirty) {
             proceed();
@@ -86,13 +88,6 @@ FormCard.FormCardPage {
             return;
         prefs.moveOrderedView(from, to);
         Qt.callLater(() => orderRepeater.itemAt(to)?.forceActiveFocus(Qt.TabFocusReason));
-    }
-
-    onBackRequested: event => {
-        if (!prefs.dirty)
-            return;
-        event.accepted = true;
-        askBeforeLeaving(() => page.Window.window.pageStack.goBack());
     }
 
     Component.onCompleted: prefs.load()
@@ -284,7 +279,7 @@ FormCard.FormCardPage {
         }
     }
 
-    // A message of the page, as wide as the cards
+    // A message of the form, as wide as the cards
     component PageMessage: MessageBox {
         Layout.maximumWidth: Kirigami.Units.gridUnit * 30
         Layout.alignment: Qt.AlignHCenter
@@ -396,6 +391,12 @@ FormCard.FormCardPage {
                 draftValue: page.prefs.rememberAudioSelections
                 onToggled: page.prefs.rememberAudioSelections = checked
             }
+            FormCard.FormButtonDelegate {
+                objectName: "userLinkToDevice_audio"
+
+                text: i18n("Audio on this system")
+                onClicked: page.linkRequested("audio")
+            }
         }
 
         FormCard.FormHeader {
@@ -430,6 +431,12 @@ FormCard.FormCardPage {
                 enabled: !page.isMalformed("RememberSubtitleSelections")
                 draftValue: page.prefs.rememberSubtitleSelections
                 onToggled: page.prefs.rememberSubtitleSelections = checked
+            }
+            FormCard.FormButtonDelegate {
+                objectName: "userLinkToDevice_subtitles"
+
+                text: i18n("Subtitles on this system")
+                onClicked: page.linkRequested("subtitles")
             }
         }
 
@@ -469,6 +476,12 @@ FormCard.FormCardPage {
                 enabled: !page.isMalformed("HidePlayedInLatest")
                 draftValue: page.prefs.hidePlayedInLatest
                 onToggled: page.prefs.hidePlayedInLatest = checked
+            }
+            FormCard.FormButtonDelegate {
+                objectName: "userLinkToDevice_library"
+
+                text: i18n("Library tabs on this system")
+                onClicked: page.linkRequested("library")
             }
         }
 
@@ -651,47 +664,6 @@ FormCard.FormCardPage {
                         return i18nc("@item:intable Home section", "Section not supported by Kinefin");
                     }
                 }
-            }
-        }
-    }
-
-    footer: Controls.ToolBar {
-        visible: page.prefs.loaded
-        position: Controls.ToolBar.Footer
-
-        contentItem: RowLayout {
-            spacing: Kirigami.Units.largeSpacing
-
-            Controls.BusyIndicator {
-                Layout.preferredHeight: Kirigami.Units.iconSizes.smallMedium
-                Layout.preferredWidth: Kirigami.Units.iconSizes.smallMedium
-                visible: page.saving
-                running: visible
-                Accessible.ignored: true
-            }
-            Controls.Label {
-                visible: page.saving
-                textFormat: Text.PlainText
-                text: i18n("Saving…")
-            }
-            Item {
-                Layout.fillWidth: true
-            }
-            Controls.Button {
-                objectName: "prefsDiscardButton"
-
-                text: i18nc("@action:button", "Discard")
-                icon.name: "edit-undo"
-                enabled: page.prefs.dirty && !page.busy
-                onClicked: page.prefs.discard()
-            }
-            Controls.Button {
-                objectName: "prefsSaveButton"
-
-                text: i18nc("@action:button", "Save")
-                icon.name: "document-save"
-                enabled: page.prefs.canSave
-                onClicked: page.prefs.save()
             }
         }
     }

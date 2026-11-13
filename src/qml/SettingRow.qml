@@ -17,6 +17,9 @@ Loader {
     required property var value
     required property real minimum
     required property real maximum
+    // The heading of the group the row sits under: a short label ("Color" under Border) is read with it
+    property string groupTitle: ""
+    readonly property string accessibleLabel: groupTitle.length > 0 ? i18nc("@info:accessible a settings group heading and a setting under it", "%1: %2", groupTitle, label) : label
 
     Layout.fillWidth: true
     sourceComponent: {
@@ -37,6 +40,7 @@ Loader {
     Component {
         id: switchDelegate
         FormCard.FormSwitchDelegate {
+            Accessible.name: row.accessibleLabel
             text: row.label
             description: row.key === "newBadge" ? i18n("Items added within the last 7 days are marked New until they are played") : ""
             checked: row.value
@@ -47,6 +51,7 @@ Loader {
     Component {
         id: choiceDelegate
         FormCard.FormComboBoxDelegate {
+            Accessible.name: row.accessibleLabel
             text: row.label
             model: row.options
             textRole: "text"
@@ -59,6 +64,7 @@ Loader {
     Component {
         id: numberDelegate
         FormCard.FormSpinBoxDelegate {
+            Accessible.name: row.accessibleLabel
             // Only a decimal setting (the playback speed) has a range; it is edited in hundredths because a spin box counts integers
             readonly property bool fractional: row.maximum > row.minimum
             readonly property int divisor: fractional ? 100 : 1
@@ -99,6 +105,7 @@ Loader {
     Component {
         id: textDelegate
         FormCard.FormTextFieldDelegate {
+            Accessible.name: row.accessibleLabel
             label: row.label
             text: row.value
             onEditingFinished: row.model.value = text
@@ -108,6 +115,7 @@ Loader {
     Component {
         id: multilineDelegate
         FormCard.FormTextAreaDelegate {
+            Accessible.name: row.accessibleLabel
             label: row.label
             text: row.value
             onEditingFinished: row.model.value = text

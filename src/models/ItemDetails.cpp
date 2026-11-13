@@ -66,6 +66,32 @@ QString validId(const QJsonValue &value)
     return isValidJellyfinId(id) ? id : QString();
 }
 
+// The day of an ISO 8601 timestamp: the server writes midnight UTC, and a time zone must not move the day
+QDate dateOf(const QJsonValue &value)
+{
+    const QDate date = QDate::fromString(text(value, kMaxToken).left(10), Qt::ISODate);
+    return date.isValid() && date.year() >= 1800 ? date : QDate();
+}
+
+// The names of a list of `NameGuidPair` entries; an entry with no name is dropped
+QStringList pairNames(const QJsonValue &value, int count)
+{
+    QStringList result;
+    if (!value.isArray())
+        return result;
+    for (const QJsonValue &entry : value.toArray()) {
+        if (result.size() == count)
+            break;
+        if (!entry.isObject())
+            continue;
+        const QJsonObject pair = entry.toObject();
+        const QString name = text(pair.value(QStringLiteral("Name")), 128);
+        if (!name.isEmpty())
+            result.append(name);
+    }
+    return result;
+}
+
 StreamSummary parseStream(const QJsonObject &stream)
 {
     StreamSummary summary;
@@ -78,6 +104,8 @@ StreamSummary parseStream(const QJsonObject &stream)
     summary.width = boundedInt(stream.value(QStringLiteral("Width")), 0, 100000, 0);
     summary.height = boundedInt(stream.value(QStringLiteral("Height")), 0, 100000, 0);
     summary.channels = boundedInt(stream.value(QStringLiteral("Channels")), 0, 64, 0);
+    summary.videoRangeType = text(stream.value(QStringLiteral("VideoRangeType")), kMaxToken);
+    summary.channelLayout = text(stream.value(QStringLiteral("ChannelLayout")), kMaxToken);
     summary.bitrate = boundedInt64(stream.value(QStringLiteral("BitRate")), 0, 100'000'000'000, 0);
     summary.isDefault = stream.value(QStringLiteral("IsDefault")).toBool(false);
     summary.isForced = stream.value(QStringLiteral("IsForced")).toBool(false);
@@ -134,6 +162,16 @@ ItemDetails parseItemDetails(const QJsonObject &item)
         details.communityRating = rating.toDouble();
     details.officialRating = text(item.value(QStringLiteral("OfficialRating")), kMaxToken);
     details.genres = stringList(item.value(QStringLiteral("Genres")), ItemDetails::MaxGenres, 128);
+    details.studios = pairNames(item.value(QStringLiteral("Studios")), ItemDetails::MaxStudios);
+    details.premiereDate = dateOf(item.value(QStringLiteral("PremiereDate")));
+    details.endDate = dateOf(item.value(QStringLiteral("EndDate")));
+    const QString status = text(item.value(QStringLiteral("Status")), kMaxToken);
+    if (status == QLatin1String("Continuing") || status == QLatin1String("Ended")
+        || status == QLatin1String("Unreleased"))
+        details.seriesStatus = status;
+    const QJsonValue critic = item.value(QStringLiteral("CriticRating"));
+    if (critic.isDouble() && critic.toDouble() >= 0 && critic.toDouble() <= 100)
+        details.criticRating = critic.toDouble();
 
     const QJsonValue data = item.value(QStringLiteral("UserData"));
     if (data.isObject()) {

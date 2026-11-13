@@ -3,7 +3,7 @@
 import QtQuick
 import QtQuick.Controls as Controls
 
-// The menu of a card, shared by every page: it acts on the item it was opened for and shows no server text. Playing is left out on purpose, the details page does that
+// The menu of a card, shared by every page: it acts on the item it was opened for and shows no server text
 Controls.Menu {
     id: menu
     objectName: "cardMenu"
@@ -15,6 +15,10 @@ Controls.Menu {
     // The series of an episode or season; empty for anything else
     property string seriesId: ""
 
+    // The saved position of a card with a quick play (0: none), -1 for a card without one: then the menu has no Resume or Play entry
+    property real resumeTicks: -1
+    readonly property bool quickPlay: resumeTicks >= 0 && playable
+
     readonly property bool playable: ["Movie", "Episode", "Video"].indexOf(itemType) >= 0
 
     // The kinds the play queue takes, as on the details page: keep the two lists in step
@@ -25,6 +29,17 @@ Controls.Menu {
     // A popup is not an Item, so the window that plays is passed in by the owner
     property bool playAvailable: false
     signal playRequested(string targetId)
+    signal resumeRequested(string targetId, real ticks)
+
+    Controls.MenuItem {
+        objectName: "cardMenuResume"
+        text: menu.resumeTicks > 0 ? i18n("Resume") : i18n("Play")
+        icon.name: "media-playback-start"
+        visible: menu.quickPlay
+        height: visible ? implicitHeight : 0
+        enabled: menu.playAvailable
+        onTriggered: menu.resumeRequested(menu.itemId, menu.resumeTicks)
+    }
 
     Controls.MenuItem {
         objectName: "cardMenuOpen"
@@ -34,9 +49,11 @@ Controls.Menu {
     }
     Controls.MenuItem {
         objectName: "cardMenuPlayNow"
-        text: i18n("Play Now")
-        icon.name: "media-playback-start"
-        visible: menu.playable
+        // Beside Resume it starts over, so it says so and takes another icon
+        readonly property bool besideResume: menu.quickPlay && menu.resumeTicks > 0
+        text: besideResume ? i18n("Play from Beginning") : i18n("Play Now")
+        icon.name: besideResume ? "media-skip-backward" : "media-playback-start"
+        visible: menu.playable && !(menu.quickPlay && menu.resumeTicks <= 0)
         height: visible ? implicitHeight : 0
         enabled: menu.playAvailable
         onTriggered: menu.playRequested(menu.itemId)

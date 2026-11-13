@@ -120,17 +120,17 @@ Kirigami.Dialog {
                     RowLayout {
                         spacing: Kirigami.Units.smallSpacing
                         // One width for all the rows, so the keys end on the same line and descriptions start on the same line
-                        Layout.minimumWidth: Kirigami.Units.gridUnit * 10
-                        Layout.maximumWidth: Kirigami.Units.gridUnit * 10
-                        Layout.preferredWidth: Kirigami.Units.gridUnit * 10
+                        Layout.minimumWidth: Kirigami.Units.gridUnit * 12
+                        Layout.maximumWidth: Kirigami.Units.gridUnit * 12
+                        Layout.preferredWidth: Kirigami.Units.gridUnit * 12
                         Layout.alignment: Qt.AlignVCenter
 
-                        // Start each shortcut at the same edge; the action labels
-                        // keep their own common left edge after this fixed column.
+                        // The parts sit left-aligned at a constant gap; the spacer takes the rest of the fixed column, so the descriptions start at one x
                         Repeater {
                             model: dialog.keyParts(row.modelData[0])
                             delegate: Rectangle {
                                 id: key
+                                objectName: "shortcutsKeyPart"
 
                                 required property string modelData
                                 readonly property bool plus: modelData === "+"
@@ -151,8 +151,12 @@ Kirigami.Dialog {
                                 }
                             }
                         }
+                        Item {
+                            Layout.fillWidth: true
+                        }
                     }
                     QQC2.Label {
+                        objectName: "shortcutsDescription"
                         text: row.modelData[1]
                         wrapMode: Text.Wrap
                         Layout.fillWidth: true

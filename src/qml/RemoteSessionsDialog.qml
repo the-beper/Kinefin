@@ -36,8 +36,7 @@ Kirigami.Dialog {
             objectName: "remoteRefreshAction"
             text: i18nc("@action:button", "Refresh")
             icon.name: "view-refresh"
-            // The placeholder offers its own Refresh while it shows
-            visible: !dialog.showsEmpty
+            // Always shown, also under the empty placeholder: a footer that came and went would resize the dialog
             onTriggered: dialog.remote.reload()
         }
     ]
@@ -112,6 +111,8 @@ Kirigami.Dialog {
         id: body
 
         padding: Kirigami.Units.largeSpacing
+        // A floor that fits the empty placeholder and the error box, so the dialog opens at the size it keeps when the first answer arrives; only more rows than fit make it taller
+        implicitHeight: Math.max(implicitContentHeight + topPadding + bottomPadding, Kirigami.Units.gridUnit * 16)
 
         contentItem: ColumnLayout {
             spacing: Kirigami.Units.largeSpacing
@@ -129,12 +130,6 @@ Kirigami.Dialog {
                 visible: dialog.showsEmpty
                 icon.name: "input-tvremote"
                 text: i18n("No connected devices found")
-                helpfulAction: Kirigami.Action {
-                    objectName: "remoteEmptyRefreshAction"
-                    text: i18nc("@action:button", "Refresh")
-                    icon.name: "view-refresh"
-                    onTriggered: dialog.remote.reload()
-                }
             }
 
             MessageBox {

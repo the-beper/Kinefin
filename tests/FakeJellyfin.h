@@ -21,6 +21,8 @@
 #include <QUrlQuery>
 #include <QtTest>
 
+#include <optional>
+
 namespace {
 
 // A valid 1x1 PNG, the body of every image route
@@ -89,9 +91,15 @@ class FakeJellyfin {
     {
         auto document = QJsonDocument::fromJson(fixture(QStringLiteral("authenticate_success")));
         QJsonObject object = document.object();
-        if (!users.isEmpty()) {
-            const FakeUser *found = userByName(username);
-            const FakeUser &user = found ? *found : users.constFirst();
+        const FakeUser *found = userByName(username);
+        const FakeUser *account = found ? found : (users.isEmpty() ? nullptr : &users.constFirst());
+        QJsonObject policedUser = object.value(QStringLiteral("User")).toObject();
+        QJsonObject policy = policedUser.value(QStringLiteral("Policy")).toObject();
+        policy.insert(QStringLiteral("IsAdministrator"), administratorValue(account));
+        policedUser.insert(QStringLiteral("Policy"), policy);
+        object.insert(QStringLiteral("User"), policedUser);
+        if (account) {
+            const FakeUser &user = *account;
             QJsonObject userObject = object.value(QStringLiteral("User")).toObject();
             userObject.insert(QStringLiteral("Id"), user.id);
             userObject.insert(QStringLiteral("Name"), user.name);
@@ -114,8 +122,18 @@ class FakeJellyfin {
         QString name;
         QString tag; // empty: no avatar (the field is absent and /UserImage answers 404)
         bool hidden = false;
+        bool administrator = true;
     };
     QList<FakeUser> users;
+    // `Policy.IsAdministrator` of the single fixture user (the login reply and /Users/Me); a user of the table has its own. `administratorRaw`, when set, replaces the value for everyone and is sent as is (an Undefined value leaves the field out)
+    bool administrator = true;
+    std::optional<QJsonValue> administratorRaw;
+    QJsonValue administratorValue(const FakeUser *user) const
+    {
+        if (administratorRaw)
+            return *administratorRaw;
+        return user ? user->administrator : administrator;
+    }
     // Tokens /Users/Me answers 401 to (the per-user deny switch)
     QSet<QByteArray> deniedUsersMeTokens;
     const FakeUser *userByName(const QString &name) const
@@ -340,6 +358,20 @@ class FakeJellyfin {
 
     // How many replies are being held; a test waits for it before releasing, as the request may not have reached the server yet
     qsizetype heldCount() const { return m_held.size(); }
+
+    // `snapshotItemsReads` answers each /Items read from the state at request time, but only on releaseSnapshots(): a read the server served before a concurrent write was applied, delivered after that write's answer
+    bool snapshotItemsReads = false;
+    qsizetype snapshotCount() const { return m_snapshots.size(); }
+
+    void releaseSnapshots()
+    {
+        const auto snapshots = m_snapshots;
+        m_snapshots.clear();
+        for (const auto &snapshot : snapshots) {
+            if (snapshot.first)
+                respond(snapshot.first, 200, snapshot.second);
+        }
+    }
 
     void releaseHeld()
     {
@@ -670,18 +702,23 @@ class FakeJellyfin {
                     respond(socket, 401, {});
                     return;
                 }
-                QJsonObject me{{QStringLiteral("Id"), user->id},
-                               {QStringLiteral("Name"), user->name},
-                               {QStringLiteral("Policy"),
-                                QJsonObject{{QStringLiteral("IsAdministrator"), false}}},
-                               {QStringLiteral("Configuration"), QJsonObject()}};
+                QJsonObject me{
+                    {QStringLiteral("Id"), user->id},
+                    {QStringLiteral("Name"), user->name},
+                    {QStringLiteral("Policy"),
+                     QJsonObject{{QStringLiteral("IsAdministrator"), administratorValue(user)}}},
+                    {QStringLiteral("Configuration"), QJsonObject()}};
                 if (!user->tag.isEmpty())
                     me.insert(QStringLiteral("PrimaryImageTag"), user->tag);
                 respond(socket, 200, QJsonDocument(me).toJson(QJsonDocument::Compact));
             } else {
-                respond(socket, 200,
-                        "{\"Id\":\"d5ed5d4e2e5447b58e9f2b6f7bd5c96a\",\"Name\":\"bepi\","
-                        "\"Policy\":{\"IsAdministrator\":false},\"Configuration\":{}}");
+                const QJsonObject me{
+                    {QStringLiteral("Id"), QStringLiteral("d5ed5d4e2e5447b58e9f2b6f7bd5c96a")},
+                    {QStringLiteral("Name"), QStringLiteral("bepi")},
+                    {QStringLiteral("Policy"),
+                     QJsonObject{{QStringLiteral("IsAdministrator"), administratorValue(nullptr)}}},
+                    {QStringLiteral("Configuration"), QJsonObject()}};
+                respond(socket, 200, QJsonDocument(me).toJson(QJsonDocument::Compact));
             }
             return;
         }
@@ -773,6 +810,10 @@ class FakeJellyfin {
             lastListingAuth.insert(listingFamily, authorization);
             if (listingFamily == QLatin1String("Items"))
                 itemsRoutes.append(route);
+            if (listingFamily == QLatin1String("Items") && snapshotItemsReads) {
+                m_snapshots.append({socket, itemsByIdBody(route)});
+                return;
+            }
             if (holdListings || heldFamilies.contains(listingFamily) || holdFirstListings-- > 0) {
                 m_held.append(socket);
                 return;
@@ -1033,6 +1074,7 @@ class FakeJellyfin {
     QHash<QTcpSocket *, QByteArray> m_buffers;
     QHash<QTcpSocket *, FakeSocketConnection *> m_wsTaken;
     QList<QPointer<QTcpSocket>> m_held;
+    QList<QPair<QPointer<QTcpSocket>, QByteArray>> m_snapshots;
     QTcpServer m_server;
     QList<FakeSocketConnection *> m_wsConnections;
 };

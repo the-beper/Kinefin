@@ -58,6 +58,9 @@ class ConnectionController : public QObject {
     Q_PROPERTY(bool hasSavedUsers READ hasSavedUsers NOTIFY usersChanged)
     // The id of the signed-in user, empty while nobody is (also during a restore that has not landed yet): the page matches it against the `id` of `users`
     Q_PROPERTY(QString currentUserId READ currentUserId NOTIFY currentUserIdChanged)
+    // `Policy.IsAdministrator` of the signed-in user, false while unknown (a restored session until its re-check answers): only for showing or hiding entries, the server enforces the rights
+    Q_PROPERTY(bool currentUserIsAdministrator READ currentUserIsAdministrator NOTIFY
+                   currentUserIsAdministratorChanged)
     Q_PROPERTY(QVariantList libraries READ libraries NOTIFY librariesChanged)
     // True only after a successful /UserViews response in this session; an
     // empty list before that is loading or a failed request, not an empty library.
@@ -113,6 +116,7 @@ class ConnectionController : public QObject {
     QVariantList publicUsers() const { return m_publicUsers; }
     QString loginUserName() const { return m_loginUserName; }
     QString currentUserId() const { return m_client.userId(); }
+    bool currentUserIsAdministrator() const { return m_client.isAdministrator(); }
     bool hasSavedUsers() const { return !m_users.isEmpty(); }
     QVariantList libraries() const { return m_libraries; }
     bool librariesLoaded() const { return m_librariesLoaded; }
@@ -143,7 +147,7 @@ class ConnectionController : public QObject {
     // For tests; the default is 5 s
     void setQuickConnectPollInterval(std::chrono::milliseconds interval);
 
-    // The key the browse state store keeps a view under, `libraryId` lower-cased without dashes. Without a `subtab` it is the scope of a tab or a collection library: `movies`, `tvshows:<id>`, `boxsets:<id>` (an empty `libraryId` is all libraries). The sub-tabs are `movies` + `favorites` (`movies/favorites[:<id>]`), `movies` + `collections` (`movies/collections`, `libraryId` ignored: collections belong to no one library), `tvshows` + `episodes` (`tvshows/episodes[:<id>]`) and `tvshows` + `network`, where `libraryId` is the studio id (`tvshows/network:<studioId>`, required). Empty for any other combination
+    // The key the browse state store keeps a view under, `libraryId` lower-cased without dashes. Without a `subtab` it is the scope of a tab or a collection library: `movies`, `tvshows:<id>`, `boxsets:<id>` (an empty `libraryId` is all libraries). The sub-tabs are `movies` or `tvshows` + `favorites` (`movies/favorites[:<id>]`, `tvshows/favorites[:<id>]`), `movies` or `tvshows` + `collections` (`movies/collections` for both, `libraryId` ignored: collections belong to no one library), `tvshows` + `episodes` (`tvshows/episodes[:<id>]`) and `tvshows` + `network`, where `libraryId` is the studio id (`tvshows/network:<studioId>`, required). Empty for any other combination
     static QString scopeKey(const QString &type, const QString &subtab, const QString &libraryId);
 
     // Connects to the most recently used stored server, if there is one
@@ -220,6 +224,7 @@ class ConnectionController : public QObject {
     void publicUsersChanged();
     void loginUserNameChanged();
     void currentUserIdChanged();
+    void currentUserIsAdministratorChanged();
     void librariesChanged();
     // `homeLibraries` or `recentLibraries` may have changed (also with every librariesChanged)
     void homeProjectionChanged();
@@ -281,6 +286,8 @@ class ConnectionController : public QObject {
     void setLoginUserName(const QString &name);
     // Emits currentUserIdChanged when the client's user differs from the last one announced
     void refreshCurrentUserId();
+    // Emits currentUserIsAdministratorChanged when the client's flag differs from the last one announced
+    void refreshCurrentUserIsAdministrator();
     // Takes the configuration the server confirmed (null: it could not be loaded, Home goes unprojected) as the Home projection and rebuilds the Home rows when what they ask for changed
     void applyPreferences(const UserPreferencesSnapshot *snapshot);
     // Forgets the projection of the session that ended
@@ -328,8 +335,9 @@ class ConnectionController : public QObject {
         m_publicSource; // what the server listed, before the saved users are taken out
     QVariantList m_publicUsers;
     QString m_loginUserName;
-    QString m_currentUserId;   // the last value announced
-    QString m_restoringUserId; // the saved user a restore in flight is for
+    QString m_currentUserId;                   // the last value announced
+    bool m_currentUserIsAdministrator = false; // the last value announced
+    QString m_restoringUserId;                 // the saved user a restore in flight is for
     QVariantList m_libraries;
     bool m_identityValid = false;
     bool m_libraryError = false; // errorText currently shows the libraries' failure

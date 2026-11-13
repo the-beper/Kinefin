@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <QDate>
 #include <QJsonObject>
 #include <QList>
 #include <QString>
@@ -29,6 +30,9 @@ struct StreamSummary {
     int width = 0;
     int height = 0;
     int channels = 0;
+    // The server's `VideoRangeType` and `ChannelLayout` tokens, empty when it sends none
+    QString videoRangeType;
+    QString channelLayout;
     qint64 bitrate = 0;
     bool isDefault = false;
     bool isForced = false;
@@ -50,6 +54,7 @@ struct ItemDetails {
     static constexpr int MaxOverview = 16384;
     static constexpr int MaxShort = 256;
     static constexpr int MaxGenres = 20;
+    static constexpr int MaxStudios = 8;
     static constexpr int MaxPeople = 100;
     static constexpr int MaxChapters = 200;
     static constexpr int MaxSources = 8;
@@ -66,6 +71,15 @@ struct ItemDetails {
     qreal communityRating = -1;
     QString officialRating;
     QStringList genres;
+    // The studios, or the networks of a series
+    QStringList studios;
+    // Invalid when the server sends no date; the time of day is dropped
+    QDate premiereDate;
+    QDate endDate;
+    // Continuing, Ended or Unreleased; empty for anything else
+    QString seriesStatus;
+    // Percent (0 to 100), -1 when unknown
+    qreal criticRating = -1;
     QStringList directors;
     QStringList writers;
     bool played = false;

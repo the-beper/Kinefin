@@ -31,14 +31,14 @@ bool validScope(const QString &scope)
         return true;
     for (const QLatin1String exact :
          {QLatin1String("movies/favorites"), QLatin1String("movies/collections"),
-          QLatin1String("tvshows/episodes")}) {
+          QLatin1String("tvshows/favorites"), QLatin1String("tvshows/episodes")}) {
         if (scope == exact)
             return true;
     }
     for (const QLatin1String prefix :
          {QLatin1String("tvshows:"), QLatin1String("movies:"), QLatin1String("boxsets:"),
-          QLatin1String("movies/favorites:"), QLatin1String("tvshows/episodes:"),
-          QLatin1String("tvshows/network:")}) {
+          QLatin1String("movies/favorites:"), QLatin1String("tvshows/favorites:"),
+          QLatin1String("tvshows/episodes:"), QLatin1String("tvshows/network:")}) {
         if (scope.startsWith(prefix))
             return isValidJellyfinId(QStringView(scope).mid(prefix.size()));
     }
@@ -49,6 +49,8 @@ bool validScope(const QString &scope)
 bool seriesScope(const QString &scope)
 {
     return scope == QLatin1String("tvshows") || scope.startsWith(QLatin1String("tvshows:"))
+           || scope == QLatin1String("tvshows/favorites")
+           || scope.startsWith(QLatin1String("tvshows/favorites:"))
            || scope.startsWith(QLatin1String("tvshows/network:"));
 }
 

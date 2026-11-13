@@ -29,6 +29,16 @@ class ItemDetailsModel final : public QObject {
     Q_PROPERTY(qreal communityRating READ communityRating NOTIFY detailsChanged)
     Q_PROPERTY(QString officialRating READ officialRating NOTIFY detailsChanged)
     Q_PROPERTY(QStringList genres READ genres NOTIFY detailsChanged)
+    Q_PROPERTY(QStringList studios READ studios NOTIFY detailsChanged)
+    // yyyy-MM-dd, empty without a date: a string, so that no time zone can move the day on its way to QML
+    Q_PROPERTY(QString premiereDate READ premiereDate NOTIFY detailsChanged)
+    Q_PROPERTY(QString endDate READ endDate NOTIFY detailsChanged)
+    // Continuing, Ended, Unreleased or empty
+    Q_PROPERTY(QString seriesStatus READ seriesStatus NOTIFY detailsChanged)
+    // Percent, -1 when unknown
+    Q_PROPERTY(qreal criticRating READ criticRating NOTIFY detailsChanged)
+    // Entries of the first media source: kind (resolution, hdr, video, audio or subtitles), text (a count for subtitles, which the page words), in that order
+    Q_PROPERTY(QVariantList mediaBadges READ mediaBadges NOTIFY detailsChanged)
     Q_PROPERTY(QStringList directors READ directors NOTIFY detailsChanged)
     Q_PROPERTY(QStringList writers READ writers NOTIFY detailsChanged)
     Q_PROPERTY(bool played READ played NOTIFY detailsChanged)
@@ -96,6 +106,12 @@ class ItemDetailsModel final : public QObject {
     qreal communityRating() const { return m_details.communityRating; }
     QString officialRating() const { return m_details.officialRating; }
     QStringList genres() const { return m_details.genres; }
+    QStringList studios() const { return m_details.studios; }
+    QString premiereDate() const { return m_details.premiereDate.toString(Qt::ISODate); }
+    QString endDate() const { return m_details.endDate.toString(Qt::ISODate); }
+    QString seriesStatus() const { return m_details.seriesStatus; }
+    qreal criticRating() const { return m_details.criticRating; }
+    QVariantList mediaBadges() const;
     QStringList directors() const { return m_details.directors; }
     QStringList writers() const { return m_details.writers; }
     bool played() const { return m_details.played; }
@@ -149,8 +165,12 @@ class ItemDetailsModel final : public QObject {
     ItemDetails m_details;
     bool m_favoriteBusy = false;
     bool m_favoriteError = false;
+    // A reload that started while a favorite write was in flight may have been answered before the server applied it
+    bool m_reloadOverlapsFavoriteWrite = false;
     bool m_playedBusy = false;
     bool m_playedError = false;
+    // The same for a watched-state write: its answer also sets the resume point and the played share
+    bool m_reloadOverlapsPlayedWrite = false;
     ItemRowModel m_similar;
     ItemChildrenModel m_below;
 };

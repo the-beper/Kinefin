@@ -6,6 +6,7 @@
 #include <QRect>
 #include <QSet>
 #include <QString>
+#include <QStringList>
 #include <QVariant>
 
 #include <memory>
@@ -39,8 +40,10 @@ class ClientSettings final : public QObject {
     // Hidden keys can be read by the program but not changed through here; they are only hand-edited
     Q_INVOKABLE bool setValue(const QString &section, const QString &key, const QVariant &value);
     Q_INVOKABLE bool isDefault(const QString &section, const QString &key) const;
-    // The visible settings of one section, owned by this object
-    Q_INVOKABLE QObject *sectionModel(const QString &section);
+    // The visible settings of one section, or only those of the group with this heading, owned by this object
+    Q_INVOKABLE QObject *sectionModel(const QString &section, const QString &group = {});
+    // The group headings of a section in table order; a section that is one card has one empty heading
+    Q_INVOKABLE QStringList sectionGroups(const QString &section) const;
 
     // The window geometry of the last session (`state.geometry`, parity §2.6): a hidden key with its own accessors because the settings page never shows it. Empty when nothing usable is stored
     Q_INVOKABLE QRect windowGeometry() const;

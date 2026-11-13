@@ -4,14 +4,15 @@ import QtQuick
 import QtQuick.Controls as Controls
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
+import org.kde.kirigamiaddons.delegates as Delegates
 import org.kde.kirigamiaddons.formcard as FormCard
 
-// System Settings-style split view. In a narrow window the category list is
-// shown first and a category opens as its own page (with the normal Back key).
+// The settings of this device and, while signed in, the preferences the user keeps on the Jellyfin server: a list of entries beside one content pane. The client settings apply at once; the User entry is a draft with its own Save bar. In a narrow window the list shows alone and an entry opens in place of it (Back closes the entry before it leaves Settings)
 Kirigami.Page {
     id: page
     objectName: "settingsPage"
     required property ClientSettings settings
+    required property ConnectionController connection
 
     // The row toolbar is ToolBar everywhere (Main.qml): this page keeps its identity in the top bar instead
     globalToolBarStyle: Kirigami.ApplicationHeaderStyle.None
@@ -19,30 +20,156 @@ Kirigami.Page {
     title: i18n("Settings")
     padding: 0
 
-    readonly property var sections: [
+    readonly property bool signedIn: connection.state === ConnectionController.Authenticated
+    readonly property var deviceEntries: [
         { section: "main", title: i18n("General"), icon: "preferences-system-windows" },
         { section: "audio", title: i18n("Audio"), icon: "audio-speakers" },
         { section: "video", title: i18n("Video"), icon: "video-display" },
         { section: "subtitles", title: i18n("Subtitles"), icon: "media-view-subtitles-symbolic" },
         { section: "library", title: i18n("Library"), icon: "folder-videos" },
-        { section: "other", title: i18n("mpv"), icon: "preferences-other" }
+        { section: "other", title: i18n("mpv Configuration"), icon: "preferences-other" }
     ]
+    readonly property var accountEntries: signedIn ? [{ section: "user", title: i18n("User"), icon: "preferences-desktop-user" }] : []
+    readonly property var entries: deviceEntries.concat(accountEntries)
     property string activeSection: "main"
-    // The category list folds where the shell's wide mode ends (Main.qml owns the limit)
+    // Narrow windows only: the entry shows in place of the list
+    property bool entryOpen: false
+    // The list folds where the shell's wide mode ends (Main.qml owns the limit)
     readonly property bool narrow: width < (page.Window.window?.wideLimit ?? 0)
-    readonly property var activeEntry: sections.find(entry => entry.section === activeSection) ?? sections[0]
+    readonly property var activeEntry: entries.find(entry => entry.section === activeSection) ?? entries[0]
+    readonly property real contentMargin: Kirigami.Units.largeSpacing * 2
+    // The Flickable the scroll view makes of its content
+    readonly property var scroller: settingsView.contentItem
+    // The form of the User entry while it is alive: one form at a time, whatever the width (the Loader is the same in both modes)
+    readonly property var userFormItem: userForm.item
+    // The shell reads this before it drops the page
+    readonly property bool hasUnsavedChanges: userFormItem?.hasUnsavedChanges ?? false
+    // The entry of the other list that holds the same kind of choice: the preferences on the server and the settings of this device overlap on audio, subtitles and libraries
+    readonly property string twinText: {
+        switch (activeSection) {
+        case "audio":
+            return i18n("Audio language and tracks");
+        case "subtitles":
+            return i18n("Subtitle language and mode");
+        case "library":
+            return i18n("Libraries on Home and their order");
+        }
+        return "";
+    }
 
+    // Runs `proceed` at once, or once the user saved or discarded the draft of the User entry
+    function askBeforeLeaving(proceed) {
+        if (hasUnsavedChanges)
+            userFormItem.askBeforeLeaving(proceed);
+        else
+            proceed();
+    }
+
+    // Leaving the User entry for another asks first; the entry already showing is not opened again
     function selectSection(section) {
-        if (narrow) {
-            const entry = sections.find(candidate => candidate.section === section);
-            if (entry)
-                page.Window.window.pageStack.push(Qt.resolvedUrl("SettingsSectionPage.qml"), {
-                    settings: page.settings, section: entry.section, title: entry.title
-                });
-        } else {
+        if (section === activeSection && entryOpen)
+            return;
+        const open = () => {
             activeSection = section;
-            if (settingsView.contentItem)
-                settingsView.contentItem.contentY = 0;
+            entryOpen = true;
+            if (scroller)
+                scroller.contentY = 0;
+        };
+        if (activeSection === "user" && section !== "user")
+            askBeforeLeaving(open);
+        else
+            open();
+    }
+
+    function focusPrimary() {
+        if (narrow && entryOpen) {
+            if (activeSection === "user" && userFormItem)
+                userFormItem.focusPrimary();
+            else
+                settingsView.forceActiveFocus(Qt.TabFocusReason);
+            return;
+        }
+        const index = entries.findIndex(entry => entry.section === activeSection);
+        const row = index < deviceEntries.length ? deviceRepeater.itemAt(index) : accountRepeater.itemAt(index - deviceEntries.length);
+        row?.forceActiveFocus(Qt.TabFocusReason);
+    }
+
+    // Tab through a long form scrolls the view to the row that takes the keyboard
+    function revealFocus() {
+        const flickable = scroller;
+        const target = page.Window.window?.activeFocusItem;
+        if (!target || !flickable?.contentItem)
+            return;
+        let inside = false;
+        for (let item = target; item && !inside; item = item.parent)
+            inside = item === flickable.contentItem;
+        if (!inside)
+            return;
+        const top = target.mapToItem(flickable.contentItem, 0, 0).y;
+        const bottom = top + target.height;
+        const margin = Kirigami.Units.largeSpacing;
+        const last = Math.max(0, flickable.contentHeight - flickable.height);
+        if (top < flickable.contentY + margin)
+            flickable.contentY = Math.max(0, top - margin);
+        else if (bottom > flickable.contentY + flickable.height - margin)
+            flickable.contentY = Math.min(last, bottom - flickable.height + margin);
+    }
+
+    onBackRequested: event => {
+        if (narrow && entryOpen) {
+            // The entry closes first, and with a draft it asks
+            event.accepted = true;
+            askBeforeLeaving(() => page.entryOpen = false);
+            return;
+        }
+        if (!hasUnsavedChanges)
+            return;
+        event.accepted = true;
+        askBeforeLeaving(() => page.Window.window.pageStack.goBack());
+    }
+    onEntryOpenChanged: {
+        if (narrow)
+            Qt.callLater(focusPrimary);
+    }
+    // The session ended under the User entry
+    onSignedInChanged: {
+        if (!signedIn && activeSection === "user") {
+            activeSection = "main";
+            entryOpen = false;
+        }
+    }
+
+    Connections {
+        target: page.Window.window
+        function onActiveFocusItemChanged() {
+            page.revealFocus();
+        }
+    }
+
+    Component {
+        id: entryDelegate
+
+        Delegates.RoundedItemDelegate {
+            id: entry
+
+            required property var modelData
+
+            objectName: "settingsCategory_" + modelData.section
+            Layout.fillWidth: true
+            text: modelData.title
+            icon.name: modelData.icon
+            checked: !page.narrow && page.activeSection === modelData.section
+            onClicked: page.selectSection(modelData.section)
+            Accessible.name: modelData.title
+        }
+    }
+
+    Component {
+        id: userFormComponent
+
+        UserPreferencesForm {
+            connection: page.connection
+            onLinkRequested: section => page.selectSection(section)
         }
     }
 
@@ -50,39 +177,50 @@ Kirigami.Page {
         anchors.fill: parent
         spacing: 0
 
-        Rectangle {
-            Layout.preferredWidth: Math.min(Kirigami.Units.gridUnit * 16, page.width * 0.36)
+        Item {
+            id: listPane
+            objectName: "settingsEntryList"
             Layout.fillHeight: true
-            color: Kirigami.Theme.alternateBackgroundColor
-            visible: !page.narrow
+            Layout.fillWidth: page.narrow
+            Layout.preferredWidth: Kirigami.Units.gridUnit * 13
+            visible: !page.narrow || !page.entryOpen
+
+            Kirigami.Theme.colorSet: Kirigami.Theme.View
+            Kirigami.Theme.inherit: false
+
+            Rectangle {
+                anchors.fill: parent
+                color: Kirigami.Theme.backgroundColor
+            }
 
             Controls.ScrollView {
                 anchors.fill: parent
                 contentWidth: availableWidth
+
                 ColumnLayout {
                     width: Math.max(0, parent.width)
-                    spacing: Kirigami.Units.smallSpacing
-                    Kirigami.Heading {
+                    spacing: 0
+
+                    Kirigami.ListSectionHeader {
+                        objectName: "settingsDeviceCaption"
                         Layout.fillWidth: true
-                        Layout.margins: Kirigami.Units.largeSpacing
-                        level: 2
-                        text: i18n("Settings")
+                        text: i18nc("@title:group", "This system")
                     }
                     Repeater {
-                        model: page.sections
-                        delegate: Controls.ItemDelegate {
-                            id: entry
-                            required property var modelData
-                            objectName: "settingsCategory_" + modelData.section
-                            Layout.fillWidth: true
-                            Layout.leftMargin: Kirigami.Units.smallSpacing
-                            Layout.rightMargin: Kirigami.Units.smallSpacing
-                            text: modelData.title
-                            icon.name: modelData.icon
-                            highlighted: page.activeSection === modelData.section
-                            onClicked: page.selectSection(modelData.section)
-                            Accessible.name: modelData.title
-                        }
+                        id: deviceRepeater
+                        model: page.deviceEntries
+                        delegate: entryDelegate
+                    }
+                    Kirigami.ListSectionHeader {
+                        objectName: "settingsAccountCaption"
+                        Layout.fillWidth: true
+                        visible: page.accountEntries.length > 0
+                        text: i18nc("@title:group", "Jellyfin account")
+                    }
+                    Repeater {
+                        id: accountRepeater
+                        model: page.accountEntries
+                        delegate: entryDelegate
                     }
                 }
             }
@@ -91,75 +229,109 @@ Kirigami.Page {
             Layout.fillHeight: true
             visible: !page.narrow
         }
-        Controls.ScrollView {
-            id: settingsView
-            objectName: "settingsContentView"
+        ColumnLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            visible: !page.narrow
-            contentWidth: availableWidth
+            visible: !page.narrow || page.entryOpen
+            spacing: 0
 
-            ColumnLayout {
-                width: settingsView.availableWidth
-                spacing: Kirigami.Units.largeSpacing
-                Kirigami.Heading {
-                    objectName: "settingsContentHeading"
-                    Layout.fillWidth: true
-                    Layout.maximumWidth: contentCard.maximumWidth
-                    Layout.alignment: Qt.AlignHCenter
-                    Layout.topMargin: Kirigami.Units.largeSpacing * 2
-                    Layout.leftMargin: Kirigami.Units.largeSpacing * 2
-                    Layout.rightMargin: Kirigami.Units.largeSpacing * 2
-                    level: 1
-                    text: page.activeEntry.title
-                }
-                FormCard.FormCard {
-                    id: contentCard
-                    objectName: "settingsContentCard"
-                    Layout.fillWidth: true
-                    Layout.leftMargin: Kirigami.Units.largeSpacing * 2
-                    Layout.rightMargin: Kirigami.Units.largeSpacing * 2
-                    Repeater {
-                        model: page.settings.sectionModel(page.activeSection)
-                        delegate: SettingRow {}
+            Controls.ScrollView {
+                id: settingsView
+                objectName: "settingsContentView"
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                contentWidth: availableWidth
+
+                ColumnLayout {
+                    width: settingsView.availableWidth
+                    spacing: Kirigami.Units.largeSpacing
+
+                    Kirigami.Heading {
+                        objectName: "settingsContentHeading"
+                        Layout.fillWidth: true
+                        Layout.maximumWidth: Kirigami.Units.gridUnit * 30
+                        Layout.alignment: Qt.AlignHCenter
+                        Layout.topMargin: Kirigami.Units.largeSpacing * 2
+                        Layout.leftMargin: page.contentMargin
+                        Layout.rightMargin: page.contentMargin
+                        level: 1
+                        textFormat: Text.PlainText
+                        text: page.activeEntry.title
                     }
-                }
-                Item { Layout.preferredHeight: Kirigami.Units.largeSpacing }
-            }
-        }
-        // Narrow windows use a single column; no horizontally clipped forms.
-        Controls.ScrollView {
-            id: narrowSettingsView
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            visible: page.narrow
-            contentWidth: availableWidth
-            ColumnLayout {
-                width: narrowSettingsView.availableWidth
-                spacing: Kirigami.Units.smallSpacing
-                Kirigami.Heading {
-                    Layout.fillWidth: true
-                    Layout.maximumWidth: categoryCard.maximumWidth
-                    Layout.alignment: Qt.AlignHCenter
-                    Layout.margins: Kirigami.Units.largeSpacing
-                    level: 2
-                    text: i18n("Settings")
-                }
-                FormCard.FormCard {
-                    id: categoryCard
-                    Layout.fillWidth: true
-                    Layout.margins: Kirigami.Units.largeSpacing
-                    Repeater {
-                        model: page.sections
-                        delegate: FormCard.FormButtonDelegate {
-                            required property var modelData
-                            objectName: "settingsCompactCategory_" + modelData.section
-                            text: modelData.title
-                            icon.name: modelData.icon
-                            onClicked: page.selectSection(modelData.section)
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        Layout.leftMargin: page.contentMargin
+                        Layout.rightMargin: page.contentMargin
+                        spacing: 0
+                        visible: page.activeSection !== "user"
+
+                        Repeater {
+                            model: page.settings.sectionGroups(page.activeSection)
+                            delegate: ColumnLayout {
+                                id: group
+
+                                required property string modelData
+                                required property int index
+
+                                Layout.fillWidth: true
+                                spacing: 0
+
+                                FormCard.FormHeader {
+                                    visible: group.modelData.length > 0
+                                    title: group.modelData
+                                }
+                                FormCard.FormCard {
+                                    objectName: "settingsGroupCard_" + group.index
+                                    Layout.fillWidth: true
+
+                                    Repeater {
+                                        model: page.settings.sectionModel(page.activeSection, group.modelData)
+                                        delegate: SettingRow {
+                                            groupTitle: group.modelData
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        FormCard.FormHeader {
+                            visible: twinCard.visible
+                            title: i18nc("@title:group", "Jellyfin account")
+                        }
+                        FormCard.FormCard {
+                            id: twinCard
+                            objectName: "settingsTwinCard"
+                            Layout.fillWidth: true
+                            visible: page.signedIn && page.twinText.length > 0
+
+                            FormCard.FormButtonDelegate {
+                                objectName: "settingsLinkToUser_" + page.activeSection
+                                text: page.twinText
+                                description: i18n("Stored on your Jellyfin server")
+                                onClicked: page.selectSection("user")
+                            }
                         }
                     }
+                    Loader {
+                        id: userForm
+                        objectName: "userPreferencesLoader"
+                        Layout.fillWidth: true
+                        Layout.leftMargin: page.contentMargin
+                        Layout.rightMargin: page.contentMargin
+                        active: page.signedIn && page.activeSection === "user"
+                        visible: active
+                        sourceComponent: userFormComponent
+                    }
+                    Item {
+                        Layout.preferredHeight: Kirigami.Units.largeSpacing
+                    }
                 }
+            }
+
+            UserPreferencesSaveBar {
+                objectName: "settingsSaveBar"
+                Layout.fillWidth: true
+                prefs: page.connection.userConfiguration
+                visible: page.activeSection === "user" && page.userFormItem !== null && page.connection.userConfiguration.loaded
             }
         }
     }

@@ -144,7 +144,7 @@ if(mpvqt_BINARY_DIR)
 endif()
 
 # The QML module lives in a static library of its own so that the UI tests can import it like the application does
-foreach(page Main PlayerPage ShellHeader AboutDialog ShortcutsDialog RemoteSessionsDialog HomePage LibraryTile LibraryPage ResumeItemsPage MediaCard CardMenu CardRow EpisodeRow ItemDetailsPage SearchPage QueuePage FilterDialog GenreRailsView GenreRailsPage LibraryContent ItemListRow ItemRowGrid LoginPage UserPickerPage MessageBox ServersPage SettingsPage SettingsSectionPage SettingRow UserPreferencesPage FavoritesPage FavoritesGroupPage)
+foreach(page Main PlayerPage ShellHeader AboutDialog ShortcutsDialog RemoteSessionsDialog HomePage LibraryTile LibraryPage ResumeItemsPage MediaCard CardMenu CardRow EpisodeRow ItemDetailsPage SearchPage QueuePage FilterDialog GenreRailsView GenreRailsPage LibraryContent ItemListRow ItemRowGrid LoginPage UserPickerPage MessageBox ServersPage SettingsPage SettingRow UserPreferencesForm UserPreferencesSaveBar FavoritesPage FavoritesGroupPage)
     set_source_files_properties(src/qml/${page}.qml PROPERTIES QT_RESOURCE_ALIAS ${page}.qml)
 endforeach()
 qt_add_library(kinefin_ui STATIC)
@@ -180,9 +180,9 @@ qt_add_qml_module(kinefin_ui
         src/qml/MessageBox.qml
         src/qml/ServersPage.qml
         src/qml/SettingsPage.qml
-        src/qml/SettingsSectionPage.qml
         src/qml/SettingRow.qml
-        src/qml/UserPreferencesPage.qml
+        src/qml/UserPreferencesForm.qml
+        src/qml/UserPreferencesSaveBar.qml
         src/qml/FavoritesPage.qml
         src/qml/FavoritesGroupPage.qml
     SOURCES

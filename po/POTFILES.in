@@ -33,6 +33,7 @@ src/qml/ShortcutsDialog.qml
 src/qml/ServersPage.qml
 src/qml/SettingRow.qml
 src/qml/SettingsPage.qml
-src/qml/UserPreferencesPage.qml
+src/qml/UserPreferencesForm.qml
+src/qml/UserPreferencesSaveBar.qml
 src/qml/FavoritesPage.qml
 src/qml/FavoritesGroupPage.qml

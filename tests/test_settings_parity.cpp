@@ -108,15 +108,17 @@ class TestSettingsParity : public QObject {
         const auto *newBadge =
             Kinefin::findSetting(QStringLiteral("library"), QStringLiteral("newBadge"));
         QVERIFY(newBadge && !newBadge->hidden && newBadge->defaultValue == true);
-        // The library sub-tab switches: only Movies Favorites and Collections are on by default
+        // The library sub-tab switches: only the Favorites and Collections of Movies and TV Shows are on by default
         const QStringList subTabs{
             QStringLiteral("tabs.movies.suggestions"), QStringLiteral("tabs.movies.favorites"),
             QStringLiteral("tabs.movies.collections"), QStringLiteral("tabs.movies.genres"),
-            QStringLiteral("tabs.tv.suggestions"),     QStringLiteral("tabs.tv.upcoming"),
+            QStringLiteral("tabs.tv.suggestions"),     QStringLiteral("tabs.tv.favorites"),
+            QStringLiteral("tabs.tv.collections"),     QStringLiteral("tabs.tv.upcoming"),
             QStringLiteral("tabs.tv.genres"),          QStringLiteral("tabs.tv.networks"),
             QStringLiteral("tabs.tv.episodes")};
-        const QStringList enabledByDefault{QStringLiteral("tabs.movies.favorites"),
-                                           QStringLiteral("tabs.movies.collections")};
+        const QStringList enabledByDefault{
+            QStringLiteral("tabs.movies.favorites"), QStringLiteral("tabs.movies.collections"),
+            QStringLiteral("tabs.tv.favorites"), QStringLiteral("tabs.tv.collections")};
         for (const QString &key : subTabs) {
             const auto *subTab = Kinefin::findSetting(QStringLiteral("library"), key);
             QVERIFY2(subTab && !subTab->hidden && !subTab->label.isEmpty()

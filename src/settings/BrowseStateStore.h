@@ -80,7 +80,7 @@ class BrowseStateStore final : public QObject {
     void setSelection(const QString &serverId, const QString &userId, const QString &type,
                       const QString &libraryId);
 
-    // The scope key is `movies`, `tvshows`, `movies:<id>`, `tvshows:<id>`, `boxsets:<id>`, `movies/favorites`, `movies/favorites:<id>`, `movies/collections`, `tvshows/episodes`, `tvshows/episodes:<id>` or `tvshows/network:<studioId>`, ids lower case without dashes by the caller's convention. `IsResumable` is dropped from the flags in a scope that lists series (`tvshows`, `tvshows:<id>`, `tvshows/network:<studioId>`): there is no such filter over series
+    // The scope key is `movies`, `tvshows`, `movies:<id>`, `tvshows:<id>`, `boxsets:<id>`, `movies/favorites`, `movies/favorites:<id>`, `movies/collections`, `tvshows/favorites`, `tvshows/favorites:<id>`, `tvshows/episodes`, `tvshows/episodes:<id>` or `tvshows/network:<studioId>`, ids lower case without dashes by the caller's convention. `IsResumable` is dropped from the flags in a scope that lists series (`tvshows`, `tvshows:<id>`, `tvshows/favorites`, `tvshows/favorites:<id>`, `tvshows/network:<studioId>`): there is no such filter over series
     std::optional<ViewState> view(const QString &serverId, const QString &userId,
                                   const QString &scopeKey) const;
     // Writing the state a scope already has changes nothing; an invalid argument is ignored

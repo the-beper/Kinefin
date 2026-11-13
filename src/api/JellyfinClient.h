@@ -209,7 +209,7 @@ class JellyfinClient final : public QObject {
     QByteArray streamAuthorization() const;
     // The request the WebSocket component opens for `<base>/socket` (https→wss, ws only on a transport that may carry credentials): a fresh attempt asks every time, so the token is never copied anywhere. Empty and invalid unless authenticated. The token travels only in the `Authorization` header, never in a query parameter
     [[nodiscard]] QNetworkRequest webSocketRequest() const;
-    // Re-checks a live session against the server (`GET /Users/Me`): a 401 expires it, anything else that fails is silent; a good reply for the session's own user refreshes userName() and userImageTag() and emits userProfileRefreshed, one for another user is treated like a 401. One request in flight at a time. Returns false when it cannot even be sent
+    // Re-checks a live session against the server (`GET /Users/Me`): a 401 expires it, anything else that fails is silent; a good reply for the session's own user refreshes userName(), userImageTag() and isAdministrator() and emits userProfileRefreshed, one for another user is treated like a 401. One request in flight at a time. Returns false when it cannot even be sent
     bool verifySession();
     // The most entries of the lists the account preference calls take from the server: a longer list fails the call
     static constexpr int MaxCultures = 1000;
@@ -240,6 +240,8 @@ class JellyfinClient final : public QObject {
     // The signed-in user's display name and avatar tag as the server last reported them (login reply, then `/Users/Me`); empty when unknown or invalid (a name longer than MaxUserNameChars or with a line break or control character, a tag outside letters, digits and '-'). Empty unless authenticated; a restored session knows neither until verifySession() answers. The name is remote text: show it as plain text
     QString userName() const;
     QString userImageTag() const;
+    // `Policy.IsAdministrator` of the signed-in user as the server last reported it (login reply, then `/Users/Me`); false when unknown, absent or not a bool, and unless authenticated (a restored session knows it only once verifySession() answers). A convenience for hiding entries: the server enforces the rights
+    bool isAdministrator() const;
     QString deviceId() const;
     QString deviceName() const;
     // For the credential store only (ServerCredentialSync): it is the one place allowed to put the token on disk. Empty unless authenticated; never log it
@@ -247,7 +249,7 @@ class JellyfinClient final : public QObject {
 
   Q_SIGNALS:
     void serverReady(const QString &serverId);
-    // userName() and userImageTag() are already set when this fires
+    // userName(), userImageTag() and isAdministrator() are already set when this fires
     void loginSucceeded(const QString &userId);
     // A `/Users/Me` reply for the current session's user: `userName` is the last known good name, `imageTag` empty when the user has no avatar
     void userProfileRefreshed(const QString &userId, const QString &userName,
@@ -363,6 +365,7 @@ class JellyfinClient final : public QObject {
     QString m_userId;
     QString m_userName;
     QString m_userImageTag;
+    bool m_isAdministrator = false;
     QByteArray m_token;
     QByteArray m_quickConnectSecret;
     struct QueuedReport {

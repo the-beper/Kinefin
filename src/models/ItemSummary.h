@@ -35,6 +35,8 @@ struct ItemSummary {
     int runtimeMinutes = -1;
     int unplayedCount = -1;
     int remainingMinutes = -1;
+    // The saved playback position (`UserData.PlaybackPositionTicks`), 0 when there is none
+    qint64 positionTicks = 0;
     // Seasons (`ChildCount`) and episodes (`RecursiveItemCount`) of a series
     int childCount = -1;
     int recursiveItemCount = -1;

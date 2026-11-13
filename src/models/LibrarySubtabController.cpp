@@ -136,7 +136,7 @@ QList<LibrarySubtabController::Subtab> LibrarySubtabController::subtabsOf(const 
     if (type == kMovies)
         return {Main, Suggestions, Favorites, Collections, Genres};
     if (type == kTvShows)
-        return {Main, Suggestions, Upcoming, Genres, Networks, Episodes};
+        return {Main, Suggestions, Favorites, Collections, Upcoming, Genres, Networks, Episodes};
     return {};
 }
 
@@ -261,10 +261,11 @@ void LibrarySubtabController::start(Subtab subtab)
         break;
     case Favorites:
         constraint.filters = QStringLiteral("IsFavorite");
-        openList(&m_movieList, m_libraryId, kMovies, m_libraryName, constraint);
+        openList(m_type == kMovies ? &m_movieList : &m_showList, m_libraryId, m_type, m_libraryName,
+                 constraint);
         break;
     case Collections:
-        // The collections have no reliable library: the list is the user's whole set
+        // The collections have no reliable library: the list is the user's whole set, the same for both types
         openList(&m_movieList, {}, QStringLiteral("boxsets"), {}, constraint);
         break;
     case Genres:
@@ -310,6 +311,14 @@ void LibrarySubtabController::teardown()
         }
         break;
     case Favorites:
+        if (m_type == kMovies) {
+            m_movieList.clear();
+            if (m_client)
+                m_client->releaseListingChannel(MovieListChannel);
+        } else {
+            clearShowList();
+        }
+        break;
     case Collections:
         m_movieList.clear();
         if (m_client)
@@ -433,6 +442,8 @@ void LibrarySubtabController::retry()
         retrySource(m_type == kMovies ? Recommendations : TvSuggestions);
         break;
     case Favorites:
+        retryList(m_type == kMovies ? &m_movieList : &m_showList);
+        break;
     case Collections:
         retryList(&m_movieList);
         break;
@@ -522,6 +533,7 @@ LibrarySubtabController::Status LibrarySubtabController::status() const
     case Suggestions:
         return m_sourceStatus[m_type == kMovies ? Recommendations : TvSuggestions];
     case Favorites:
+        return statusOf((m_type == kMovies ? m_movieList : m_showList).status());
     case Collections:
         return statusOf(m_movieList.status());
     case Genres:
@@ -546,6 +558,7 @@ bool LibrarySubtabController::isEmpty() const
     case Suggestions:
         return m_type == kMovies ? m_recommendations.count() == 0 : m_suggestions.count() == 0;
     case Favorites:
+        return (m_type == kMovies ? m_movieList : m_showList).totalCount() == 0;
     case Collections:
         return m_movieList.totalCount() == 0;
     case Genres:
@@ -578,7 +591,7 @@ QString LibrarySubtabController::scopeKey() const
     case Main:
         return m_type + suffix;
     case Favorites:
-        return QStringLiteral("movies/favorites") + suffix;
+        return m_type + QStringLiteral("/favorites") + suffix;
     case Collections:
         return QStringLiteral("movies/collections");
     case Episodes:
@@ -601,6 +614,7 @@ LibraryItemsModel *LibrarySubtabController::activeList()
         return nullptr;
     switch (m_current) {
     case Favorites:
+        return m_type == kMovies ? &m_movieList : &m_showList;
     case Collections:
         return &m_movieList;
     case Episodes:

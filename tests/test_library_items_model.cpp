@@ -1932,6 +1932,20 @@ class TestLibraryItemsModel : public QObject {
         QCOMPARE(summaryOf(json).communityRating, 10.0);
     }
 
+    void parsesTheResumePosition()
+    {
+        QCOMPARE(summaryOf(userData(18e9)).positionTicks, qint64(18000000000));
+        // Nothing saved, nothing sane: no position
+        QCOMPARE(summaryOf({}).positionTicks, qint64(0));
+        QCOMPARE(summaryOf(userData(0)).positionTicks, qint64(0));
+        QCOMPARE(summaryOf(userData(-5)).positionTicks, qint64(0));
+        QCOMPARE(summaryOf(userData(1e14)).positionTicks, qint64(0));
+        QJsonObject text;
+        text.insert(QStringLiteral("UserData"),
+                    QJsonObject{{QStringLiteral("PlaybackPositionTicks"), QStringLiteral("100")}});
+        QCOMPARE(summaryOf(text).positionTicks, qint64(0));
+    }
+
     void rejectsBadCardFields()
     {
         for (const QJsonValue &rating : {QJsonValue(QStringLiteral("NaN")), QJsonValue(11),

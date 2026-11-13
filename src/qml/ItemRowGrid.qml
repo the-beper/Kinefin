@@ -17,11 +17,16 @@ GridView {
     signal activated(string itemId)
 
     readonly property real tileWidth: Kirigami.Units.gridUnit * (landscape ? 14 : 10)
-    readonly property int columns: Math.max(1, Math.floor(width / tileWidth))
+    readonly property int columns: Math.max(1, Math.floor(usableWidth / tileWidth))
+    // The gap between two cards and the margin around them; the width the page margin and the vertical scroll bar take is not shared out to the cells, so no card sits under the bar
+    readonly property real gutter: Kirigami.Units.largeSpacing
+    readonly property real usableWidth: Math.max(0, width - leftMargin - vbar.implicitWidth)
     readonly property real aspect: landscape ? 9 / 16 : 3 / 2
 
-    cellWidth: Math.floor(width / columns)
-    cellHeight: Math.round((cellWidth - Kirigami.Units.smallSpacing * 2) * aspect) + Kirigami.Units.gridUnit * 3.5
+    cellWidth: Math.floor(usableWidth / columns)
+    cellHeight: Math.round((cellWidth - gutter - Kirigami.Units.smallSpacing * 2) * aspect) + Kirigami.Units.gridUnit * 3.5 + gutter
+    leftMargin: gutter
+    topMargin: gutter
     clip: true
     boundsBehavior: Flickable.StopAtBounds
     activeFocusOnTab: true
@@ -30,7 +35,9 @@ GridView {
     Accessible.role: Accessible.List
     Accessible.name: grid.accessibleName
 
-    Controls.ScrollBar.vertical: Controls.ScrollBar {}
+    Controls.ScrollBar.vertical: Controls.ScrollBar {
+        id: vbar
+    }
 
     // The tiles are not tab stops: the grid is, and it opens the current one
     function openCurrent() {
@@ -53,8 +60,8 @@ GridView {
         required property int episodeNumber
         required property string episodeTitle
 
-        width: grid.cellWidth
-        height: grid.cellHeight
+        width: grid.cellWidth - grid.gutter
+        height: grid.cellHeight - grid.gutter
         // The grid is the one tab stop, the arrow keys move inside it
         focusPolicy: Qt.NoFocus
         landscape: grid.landscape

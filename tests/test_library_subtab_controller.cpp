@@ -53,7 +53,8 @@ struct Fixture {
                         {LibrarySubtabController::Suggestions, LibrarySubtabController::Favorites,
                          LibrarySubtabController::Collections, LibrarySubtabController::Genres});
         tabs.setEnabled(kTvShows,
-                        {LibrarySubtabController::Suggestions, LibrarySubtabController::Upcoming,
+                        {LibrarySubtabController::Suggestions, LibrarySubtabController::Favorites,
+                         LibrarySubtabController::Collections, LibrarySubtabController::Upcoming,
                          LibrarySubtabController::Genres, LibrarySubtabController::Networks,
                          LibrarySubtabController::Episodes});
     }
@@ -117,8 +118,9 @@ class TestLibrarySubtabController : public QObject {
         QVERIFY(!S::subtabFromId(QStringLiteral("nope")));
         QCOMPARE(S::subtabsOf(kMovies), (QList<S::Subtab>{S::Main, S::Suggestions, S::Favorites,
                                                           S::Collections, S::Genres}));
-        QCOMPARE(S::subtabsOf(kTvShows), (QList<S::Subtab>{S::Main, S::Suggestions, S::Upcoming,
-                                                           S::Genres, S::Networks, S::Episodes}));
+        QCOMPARE(S::subtabsOf(kTvShows),
+                 (QList<S::Subtab>{S::Main, S::Suggestions, S::Favorites, S::Collections,
+                                   S::Upcoming, S::Genres, S::Networks, S::Episodes}));
         QVERIFY(S::subtabsOf(QStringLiteral("music")).isEmpty());
     }
 
@@ -160,6 +162,7 @@ class TestLibrarySubtabController : public QObject {
         QVERIFY(f.tabs.open(kTvShows, {}));
         QCOMPARE(f.tabs.available(),
                  (QStringList{QStringLiteral("main"), QStringLiteral("suggestions"),
+                              QStringLiteral("favorites"), QStringLiteral("collections"),
                               QStringLiteral("upcoming"), QStringLiteral("genres"),
                               QStringLiteral("networks"), QStringLiteral("episodes")}));
     }
@@ -266,6 +269,88 @@ class TestLibrarySubtabController : public QObject {
         QCOMPARE(items.constLast().at(2).toInt(), int(LibrarySubtabController::MovieListChannel));
         QVERIFY(f.tabs.select(LibrarySubtabController::Favorites));
         QVERIFY(!f.tabs.crossLibrary());
+    }
+
+    void tvFavoritesAreTheFavoriteSeriesOfTheScope()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        QSignalSpy items(&f.client, &JellyfinClient::itemsReady);
+        QVERIFY(f.tabs.open(kTvShows, kShowsLibrary, QStringLiteral("Serie")));
+        QVERIFY(f.tabs.select(LibrarySubtabController::Favorites));
+        QTRY_COMPARE(f.tabs.status(), LibrarySubtabController::Ready);
+        QCOMPARE(f.tabs.activeList(), f.tabs.showList());
+        QVERIFY(!f.tabs.movieList()->isOpen());
+        QCOMPARE(f.tabs.showList()->totalCount(), 250);
+        QVERIFY(!f.tabs.crossLibrary());
+        QCOMPARE(f.tabs.scopeKey(), QString(QStringLiteral("tvshows/favorites:") + kShowsLibrary));
+        QCOMPARE(f.wire(QStringLiteral("Items"), "filters"), QStringLiteral("IsFavorite"));
+        QCOMPARE(f.wire(QStringLiteral("Items"), "parentId"), kShowsLibrary);
+        QCOMPARE(f.wire(QStringLiteral("Items"), "includeItemTypes"), QStringLiteral("Series"));
+        QCOMPARE(items.constFirst().at(2).toInt(), int(LibrarySubtabController::ShowListChannel));
+        QCOMPARE(f.tabs.showList()->libraryName(), QStringLiteral("Serie"));
+
+        // The filter is as fixed as the one of the movies
+        f.tabs.showList()->clearFilters();
+        QTRY_COMPARE(f.wire(QStringLiteral("Items"), "filters"), QStringLiteral("IsFavorite"));
+
+        // Every library: no parent, the key without a library
+        QVERIFY(f.tabs.open(kTvShows, {}));
+        QCOMPARE(f.tabs.scopeKey(), QStringLiteral("tvshows/favorites"));
+        QTRY_COMPARE(f.tabs.status(), LibrarySubtabController::Ready);
+        QVERIFY(!f.wireHas(QStringLiteral("Items"), "parentId"));
+        QCOMPARE(f.wire(QStringLiteral("Items"), "filters"), QStringLiteral("IsFavorite"));
+    }
+
+    void tvCollectionsAreTheSameBoxSetsAsMovies()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        QSignalSpy items(&f.client, &JellyfinClient::itemsReady);
+        QVERIFY(f.tabs.open(kTvShows, kShowsLibrary));
+        QVERIFY(f.tabs.select(LibrarySubtabController::Collections));
+        QTRY_COMPARE(f.tabs.status(), LibrarySubtabController::Ready);
+        QCOMPARE(f.tabs.activeList(), f.tabs.movieList());
+        QCOMPARE(f.wire(QStringLiteral("Items"), "includeItemTypes"), QStringLiteral("BoxSet"));
+        QVERIFY(!f.wireHas(QStringLiteral("Items"), "parentId"));
+        QVERIFY(f.tabs.crossLibrary());
+        QCOMPARE(f.tabs.scopeKey(), QStringLiteral("movies/collections"));
+        QCOMPARE(items.constLast().at(2).toInt(), int(LibrarySubtabController::MovieListChannel));
+    }
+
+    void leavingTheTvFavoritesAndCollectionsReleasesTheirChannels()
+    {
+        using S = LibrarySubtabController;
+        Fixture f;
+        QVERIFY(f.ok);
+        QVERIFY(f.tabs.open(kTvShows, kShowsLibrary));
+        QVERIFY(f.tabs.select(S::Favorites));
+        QTRY_COMPARE(f.tabs.status(), S::Ready);
+        QVERIFY(f.tabs.select(S::Collections));
+        QVERIFY(!f.tabs.showList()->isOpen());
+        QTRY_COMPARE(f.tabs.status(), S::Ready);
+        QVERIFY(f.tabs.select(S::Upcoming));
+        QVERIFY(!f.tabs.movieList()->isOpen());
+        QTRY_COMPARE(f.tabs.status(), S::Ready);
+
+        // An answer in flight when the sub-tab is left never reaches the next view
+        f.server.heldFamilies.insert(QStringLiteral("Items"));
+        QVERIFY(f.tabs.select(S::Favorites));
+        QCOMPARE(f.tabs.status(), S::Loading);
+        QTRY_VERIFY(f.requests(QStringLiteral("Items")) >= 3);
+        QVERIFY(f.tabs.select(S::Upcoming));
+        QVERIFY(!f.tabs.showList()->isOpen());
+        f.server.releaseHeld();
+        QTRY_COMPARE(f.tabs.status(), S::Ready);
+        QTest::qWait(200);
+        QCOMPARE(f.tabs.showList()->rowCount(), 0);
+        QCOMPARE(f.tabs.showList()->totalCount(), 0);
+
+        // Closing the page leaves none of the lists open
+        QVERIFY(f.tabs.select(S::Favorites));
+        f.tabs.close();
+        QVERIFY(!f.tabs.showList()->isOpen());
+        QVERIFY(!f.tabs.movieList()->isOpen());
     }
 
     void episodesAreListedAndCountedOnTheirOwnChannels()
@@ -766,7 +851,8 @@ class TestLibrarySubtabController : public QObject {
             QTRY_COMPARE(f.tabs.status(), S::Ready);
         }
         QVERIFY(f.tabs.open(kTvShows, {}));
-        for (const S::Subtab subtab : {S::Suggestions, S::Upcoming, S::Episodes, S::Networks}) {
+        for (const S::Subtab subtab : {S::Suggestions, S::Favorites, S::Collections, S::Upcoming,
+                                       S::Episodes, S::Networks}) {
             QVERIFY(f.tabs.select(subtab));
             QTRY_COMPARE(f.tabs.status(), S::Ready);
         }

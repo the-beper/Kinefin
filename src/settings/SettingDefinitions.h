@@ -29,6 +29,8 @@ struct SettingDefinition {
     // A string with line breaks, e.g. `other_conf`
     bool multiline = false;
     KLazyLocalizedString label;
+    // The heading of the card the setting sits in on the Settings page; empty for a section that is one card. The visible rows of a group are consecutive in the table
+    KLazyLocalizedString group;
 };
 
 [[nodiscard]] const QList<SettingDefinition> &settingDefinitions();

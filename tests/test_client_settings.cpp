@@ -271,6 +271,58 @@ class TestClientSettings : public QObject {
         QCOMPARE(settings.sectionModel(QStringLiteral("video")), model);
     }
 
+    void settingsGroupsCoverEveryVisibleSetting()
+    {
+        ClientSettings settings(path());
+        QHash<QString, QStringList> visible;
+        for (const auto &definition : Kinefin::settingDefinitions()) {
+            if (!definition.hidden)
+                visible[definition.section].append(definition.key);
+        }
+        QVERIFY(!visible.isEmpty());
+        for (auto it = visible.cbegin(); it != visible.cend(); ++it) {
+            const QString &section = it.key();
+            const QStringList groups = settings.sectionGroups(section);
+            QVERIFY2(!groups.isEmpty(), qPrintable(section));
+            QStringList unique = groups;
+            unique.removeDuplicates();
+            QVERIFY2(unique.size() == groups.size(), qPrintable(section));
+            // A section is one card without a heading, or only named groups
+            QVERIFY2(groups == QStringList{QString()} || !groups.contains(QString()),
+                     qPrintable(section));
+            QStringList covered;
+            for (const QString &group : groups) {
+                auto *model =
+                    qobject_cast<QAbstractItemModel *>(settings.sectionModel(section, group));
+                QVERIFY2(model && model->rowCount() > 0, qPrintable(section + group));
+                const int keyRole = model->roleNames().key("key");
+                QStringList keys;
+                for (int row = 0; row < model->rowCount(); ++row)
+                    keys.append(model->index(row, 0).data(keyRole).toString());
+                // The rows of a group are consecutive in the table
+                QCOMPARE(it.value().mid(it.value().indexOf(keys.constFirst()), keys.size()), keys);
+                covered += keys;
+            }
+            QStringList expected = it.value();
+            expected.sort();
+            covered.sort();
+            QCOMPARE(covered, expected);
+            // The whole section is still one model of every visible row
+            QVERIFY(qobject_cast<QAbstractItemModel *>(settings.sectionModel(section))->rowCount()
+                    == it.value().size());
+        }
+        // Hidden-only and unknown sections have no group
+        QVERIFY(settings.sectionGroups(QStringLiteral("state")).isEmpty());
+        QVERIFY(settings.sectionGroups(QStringLiteral("nope")).isEmpty());
+        // The group model follows the same settings
+        auto *passthrough = qobject_cast<QAbstractItemModel *>(settings.sectionModel(
+            QStringLiteral("audio"), settings.sectionGroups(QStringLiteral("audio")).constLast()));
+        QSignalSpy changed(passthrough, &QAbstractItemModel::dataChanged);
+        QVERIFY(
+            settings.setValue(QStringLiteral("audio"), QStringLiteral("passthrough.ac3"), true));
+        QCOMPARE(changed.size(), 1);
+    }
+
     void theDeviceProfileOptionsStartAtTheirDefaults()
     {
         ClientSettings settings(path());

@@ -2884,6 +2884,141 @@ class TestJellyfinClient : public QObject {
         QCOMPARE(client.userImageTag(), QStringLiteral("t1"));
     }
 
+    void loginReadsTheAdministratorFlag()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(!client.isAdministrator());
+        // The flag is already set when loginSucceeded fires
+        bool flagAtSignal = false;
+        connect(&client, &Kinefin::JellyfinClient::loginSucceeded, this,
+                [&] { flagAtSignal = client.isAdministrator(); });
+        server.administrator = true;
+        QVERIFY(login(client, server));
+        QVERIFY(client.isAdministrator());
+        QVERIFY(flagAtSignal);
+
+        // false, a missing field and a value that is not a bool all read as not an administrator
+        const QList<QJsonValue> notAdministrator{false, QJsonValue(QJsonValue::Undefined),
+                                                 QStringLiteral("true"), 1, QJsonValue::Null};
+        for (const QJsonValue &value : notAdministrator) {
+            client.forgetSession();
+            QVERIFY(!client.isAdministrator());
+            server.administratorRaw = value;
+            QVERIFY(login(client, server));
+            QVERIFY2(!client.isAdministrator(), qPrintable(QString::number(value.type())));
+        }
+        client.forgetSession();
+        server.administratorRaw = true;
+        QVERIFY(login(client, server));
+        QVERIFY(client.isAdministrator());
+        client.disconnectFromServer();
+        QVERIFY(!client.isAdministrator());
+    }
+
+    void verifySessionRefreshesTheAdministratorFlag()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        server.users = {{kAliceId, "tokenalice", QStringLiteral("Alice"), {}}};
+        Kinefin::JellyfinClient client;
+        QVERIFY(loginAs(client, server, QStringLiteral("Alice")));
+        QVERIFY(client.isAdministrator());
+        QSignalSpy refreshed(&client, &Kinefin::JellyfinClient::userProfileRefreshed);
+
+        // The flag is set when the signal fires; a demotion on the server shows on the next re-check
+        bool flagAtSignal = true;
+        connect(&client, &Kinefin::JellyfinClient::userProfileRefreshed, this,
+                [&] { flagAtSignal = client.isAdministrator(); });
+        server.users[0].administrator = false;
+        QVERIFY(client.verifySession());
+        QTRY_COMPARE(refreshed.size(), 1);
+        QVERIFY(!client.isAdministrator());
+        QVERIFY(!flagAtSignal);
+        server.users[0].administrator = true;
+        QVERIFY(client.verifySession());
+        QTRY_COMPARE(refreshed.size(), 2);
+        QVERIFY(client.isAdministrator());
+
+        // A non-bool or missing flag in the reply reads as false
+        server.administratorRaw = QStringLiteral("yes");
+        QVERIFY(client.verifySession());
+        QTRY_COMPARE(refreshed.size(), 3);
+        QVERIFY(!client.isAdministrator());
+        server.administratorRaw = true;
+        QVERIFY(client.verifySession());
+        QTRY_COMPARE(refreshed.size(), 4);
+        QVERIFY(client.isAdministrator());
+        server.administratorRaw = QJsonValue(QJsonValue::Undefined);
+        QVERIFY(client.verifySession());
+        QTRY_COMPARE(refreshed.size(), 5);
+        QVERIFY(!client.isAdministrator());
+
+        // A failed re-check changes nothing
+        server.administratorRaw = true;
+        QVERIFY(client.verifySession());
+        QTRY_COMPARE(refreshed.size(), 6);
+        QVERIFY(client.isAdministrator());
+        server.usersMeStatus = 500;
+        QVERIFY(client.verifySession());
+        QTRY_COMPARE(server.usersMeRequests, 7);
+        // A new re-check is refused while one is in flight: once it is sent, the failed reply was handled (QTRY evaluates its expression once more after success, hence the latch)
+        bool sent = false;
+        QTRY_VERIFY(sent || (sent = client.verifySession()));
+        QVERIFY(client.isAdministrator());
+    }
+
+    void restoredSessionLearnsTheAdministratorFlagFromVerify()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        server.users = {{kAliceId, "tokenalice", QStringLiteral("Alice"), {}}};
+        Kinefin::JellyfinClient client;
+        QSignalSpy ready(&client, &Kinefin::JellyfinClient::serverReady);
+        QVERIFY(prepare(client, server));
+        QTRY_COMPARE(ready.size(), 1);
+        QVERIFY(client.restoreSession(kAliceId, QStringLiteral("tokenalice")));
+        QVERIFY(!client.isAdministrator());
+        QSignalSpy refreshed(&client, &Kinefin::JellyfinClient::userProfileRefreshed);
+        QVERIFY(client.verifySession());
+        QTRY_COMPARE(refreshed.size(), 1);
+        QVERIFY(client.isAdministrator());
+    }
+
+    void administratorFlagIsClearedWithTheSession()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        server.users = {{kAliceId, "tokenalice", QStringLiteral("Alice"), {}},
+                        {kBobId, "tokenbob", QStringLiteral("Bob"), {}}};
+        Kinefin::JellyfinClient client;
+        QVERIFY(loginAs(client, server, QStringLiteral("Alice")));
+        QVERIFY(client.isAdministrator());
+        // A 401 on the re-check
+        QSignalSpy expired(&client, &Kinefin::JellyfinClient::sessionExpired);
+        server.deniedUsersMeTokens.insert("tokenalice");
+        QVERIFY(client.verifySession());
+        QTRY_COMPARE(expired.size(), 1);
+        QVERIFY(!client.isAdministrator());
+        // A reply for another user than the session's
+        server.deniedUsersMeTokens.clear();
+        QVERIFY(loginAs(client, server, QStringLiteral("Alice")));
+        QVERIFY(client.isAdministrator());
+        server.users[0].id = kBobId;
+        QVERIFY(client.verifySession());
+        QTRY_COMPARE(expired.size(), 2);
+        QVERIFY(!client.isAdministrator());
+        // Another user signing in after an administrator does not inherit the flag
+        server.users[0].id = kAliceId;
+        QVERIFY(loginAs(client, server, QStringLiteral("Alice")));
+        QVERIFY(client.isAdministrator());
+        client.forgetSession();
+        server.users[1].administrator = false;
+        QVERIFY(loginAs(client, server, QStringLiteral("Bob")));
+        QVERIFY(!client.isAdministrator());
+    }
+
     void sessionExpiredNamesTheUser()
     {
         FakeJellyfin server;

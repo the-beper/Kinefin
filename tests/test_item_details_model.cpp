@@ -218,6 +218,68 @@ class TestItemDetailsModel : public QObject {
                  QByteArrayLiteral("/jellyfin/UserFavoriteItems/") + kMovie.toLatin1());
     }
 
+    void favoriteWriteAnsweredBeforeAStaleReloadKeepsItsValue()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        auto details = f.open(kMovie);
+        QTRY_COMPARE(details->status(), ItemDetailsModel::Ready);
+        QVERIFY(!details->favorite());
+
+        // The write is in flight when a reload asks again, and the server serves that read before it applies the write
+        f.server.holdFavoriteWrites = true;
+        QVERIFY(details->toggleFavorite());
+        QTRY_COMPARE(f.server.heldCount(), qsizetype(1));
+        f.server.snapshotItemsReads = true;
+        details->reload();
+        QTRY_COMPARE(f.server.snapshotCount(), qsizetype(1));
+
+        // The write is answered first, the old read second
+        f.server.releaseHeld();
+        QTRY_VERIFY(!details->favoriteBusy());
+        QVERIFY(!details->favoriteError());
+        QVERIFY(details->favorite());
+        f.server.releaseSnapshots();
+        QTRY_COMPARE(details->status(), ItemDetailsModel::Ready);
+        QVERIFY(details->favorite());
+
+        // A reload that starts after the write is answered is trusted again (the held write never reached the fake's store)
+        f.server.snapshotItemsReads = false;
+        details->reload();
+        QTRY_COMPARE(details->status(), ItemDetailsModel::Ready);
+        QVERIFY(!details->favorite());
+    }
+
+    void playedWriteAnsweredBeforeAStaleReloadKeepsItsValue()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        auto details = f.open(kMovie);
+        QTRY_COMPARE(details->status(), ItemDetailsModel::Ready);
+        QVERIFY(!details->played());
+
+        f.server.holdPlayedWrites = true;
+        QVERIFY(details->togglePlayed());
+        QTRY_COMPARE(f.server.heldCount(), qsizetype(1));
+        f.server.snapshotItemsReads = true;
+        details->reload();
+        QTRY_COMPARE(f.server.snapshotCount(), qsizetype(1));
+
+        f.server.releaseHeld();
+        QTRY_VERIFY(!details->playedBusy());
+        QVERIFY(!details->playedError());
+        QVERIFY(details->played());
+        f.server.releaseSnapshots();
+        QTRY_COMPARE(details->status(), ItemDetailsModel::Ready);
+        QVERIFY(details->played());
+
+        // The held write never reached the fake's store, so a trusted reload shows it unplayed again
+        f.server.snapshotItemsReads = false;
+        details->reload();
+        QTRY_COMPARE(details->status(), ItemDetailsModel::Ready);
+        QVERIFY(!details->played());
+    }
+
     void favoriteWriteFailureLeavesOldStateAndCanRetry()
     {
         Fixture f;
@@ -375,6 +437,134 @@ class TestItemDetailsModel : public QObject {
         QVERIFY(!source.contains(QStringLiteral("Path")));
     }
 
+    void parsesDatesStatusCriticRatingAndStudios()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        auto movie = f.open(kMovie);
+        QTRY_COMPARE(movie->status(), ItemDetailsModel::Ready);
+        QCOMPARE(movie->premiereDate(), QStringLiteral("2012-06-15"));
+        QVERIFY(movie->endDate().isEmpty());
+        QVERIFY(movie->seriesStatus().isEmpty());
+        QCOMPARE(movie->criticRating(), 88.0);
+        QCOMPARE(movie->studios(), QStringList{QStringLiteral("Vega Pictures")});
+
+        const QJsonObject item{
+            {QStringLiteral("Id"), kMovie},
+            {QStringLiteral("Type"), QStringLiteral("Series")},
+            {QStringLiteral("PremiereDate"), QStringLiteral("2015-02-08T00:00:00.0000000Z")},
+            {QStringLiteral("EndDate"), QStringLiteral("2022-08-15T00:00:00.0000000Z")},
+            {QStringLiteral("Status"), QStringLiteral("Ended")},
+            {QStringLiteral("CriticRating"), 97.5},
+            {QStringLiteral("Studios"),
+             QJsonArray{QJsonObject{{QStringLiteral("Name"), QStringLiteral("AMC")}},
+                        QJsonObject{{QStringLiteral("Id"), kMovie}},
+                        QStringLiteral("not an object")}}};
+        const Kinefin::ItemDetails parsed = Kinefin::parseItemDetails(item);
+        QVERIFY(parsed.valid);
+        QCOMPARE(parsed.premiereDate, QDate(2015, 2, 8));
+        QCOMPARE(parsed.endDate, QDate(2022, 8, 15));
+        QCOMPARE(parsed.seriesStatus, QStringLiteral("Ended"));
+        QCOMPARE(parsed.criticRating, 97.5);
+        // An entry with no name is dropped
+        QCOMPARE(parsed.studios, QStringList{QStringLiteral("AMC")});
+
+        // Wrong types and out-of-range values are ignored
+        QJsonObject hostile = item;
+        hostile.insert(QStringLiteral("PremiereDate"), 20150208);
+        hostile.insert(QStringLiteral("EndDate"), QStringLiteral("not a date"));
+        hostile.insert(QStringLiteral("Status"), QStringLiteral("Cancelled"));
+        hostile.insert(QStringLiteral("CriticRating"), 120);
+        hostile.insert(QStringLiteral("Studios"), QStringLiteral("AMC"));
+        const Kinefin::ItemDetails ignored = Kinefin::parseItemDetails(hostile);
+        QVERIFY(!ignored.premiereDate.isValid());
+        QVERIFY(!ignored.endDate.isValid());
+        QVERIFY(ignored.seriesStatus.isEmpty());
+        QCOMPARE(ignored.criticRating, -1.0);
+        QVERIFY(ignored.studios.isEmpty());
+
+        // An item that carries none of the new fields reads as empty
+        const Kinefin::ItemDetails bare =
+            Kinefin::parseItemDetails(QJsonObject{{QStringLiteral("Id"), kMovie}});
+        QVERIFY(!bare.premiereDate.isValid());
+        QVERIFY(bare.seriesStatus.isEmpty());
+        QCOMPARE(bare.criticRating, -1.0);
+    }
+
+    void mediaBadgesComeFromTheFirstSource()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        const auto badges = [](const ItemDetailsModel &model) {
+            QStringList result;
+            for (const QVariant &entry : model.mediaBadges())
+                result << entry.toMap().value(QStringLiteral("kind")).toString() + QLatin1Char('=')
+                              + entry.toMap().value(QStringLiteral("text")).toString();
+            return result;
+        };
+        auto movie = f.open(kMovie);
+        QTRY_COMPARE(movie->status(), ItemDetailsModel::Ready);
+        QCOMPARE(badges(*movie),
+                 (QStringList{QStringLiteral("resolution=1080p"), QStringLiteral("hdr=HDR10"),
+                              QStringLiteral("video=HEVC"),
+                              QStringLiteral("audio=Dolby Digital Plus 5.1"),
+                              QStringLiteral("subtitles=1")}));
+
+        const auto stream = [](const QString &type, const QJsonObject &fields) {
+            QJsonObject object{{QStringLiteral("Type"), type}};
+            for (auto it = fields.begin(); it != fields.end(); ++it)
+                object.insert(it.key(), it.value());
+            return object;
+        };
+        const QString other = QStringLiteral("0123456789abcdef0123456789abcdef");
+        const QJsonObject first{
+            {QStringLiteral("Id"), QStringLiteral("a")},
+            {QStringLiteral("MediaStreams"),
+             QJsonArray{
+                 stream(QStringLiteral("Video"),
+                        {{QStringLiteral("Codec"), QStringLiteral("someveryverylongcodec")},
+                         {QStringLiteral("Width"), 1280},
+                         {QStringLiteral("Height"), 720},
+                         {QStringLiteral("VideoRangeType"), QStringLiteral("DOVIWithHDR10")}}),
+                 stream(QStringLiteral("Audio"), {{QStringLiteral("Codec"), QStringLiteral("aac")},
+                                                  {QStringLiteral("Channels"), 2}}),
+                 stream(QStringLiteral("Audio"),
+                        {{QStringLiteral("Codec"), QStringLiteral("truehd")},
+                         {QStringLiteral("ChannelLayout"), QStringLiteral("7.1(wide)")},
+                         {QStringLiteral("IsDefault"), true}}),
+                 stream(QStringLiteral("Subtitle"), {}), stream(QStringLiteral("Subtitle"), {}),
+                 stream(QStringLiteral("Attachment"), {})}}};
+        const QJsonObject second{
+            {QStringLiteral("Id"), QStringLiteral("b")},
+            {QStringLiteral("MediaStreams"),
+             QJsonArray{
+                 stream(QStringLiteral("Video"), {{QStringLiteral("Codec"), QStringLiteral("av1")},
+                                                  {QStringLiteral("Width"), 3840}})}}};
+        const QJsonObject item{{QStringLiteral("Id"), other},
+                               {QStringLiteral("Type"), QStringLiteral("Movie")},
+                               {QStringLiteral("MediaSources"), QJsonArray{first, second}}};
+        f.server.itemsById.insert(other, QJsonDocument(item).toJson(QJsonDocument::Compact));
+        auto model = f.open(other, ItemDetailsModel::FirstChannel + 2);
+        QTRY_COMPARE(model->status(), ItemDetailsModel::Ready);
+        // The second source's 4K and AV1 do not show; the unknown codec is upper-cased and capped; the default audio track wins; the Dolby Vision variant is one badge
+        QCOMPARE(badges(*model),
+                 (QStringList{QStringLiteral("resolution=720p"), QStringLiteral("hdr=Dolby Vision"),
+                              QStringLiteral("video=SOMEVERYVERY"),
+                              QStringLiteral("audio=TrueHD 7.1"), QStringLiteral("subtitles=2")}));
+
+        // No source, no badge
+        auto episode = f.open(kEpisode, ItemDetailsModel::FirstChannel + 4);
+        QTRY_COMPARE(episode->status(), ItemDetailsModel::Ready);
+        QCOMPARE(badges(*episode),
+                 (QStringList{QStringLiteral("resolution=1080p"), QStringLiteral("video=H.264")}));
+        const QString empty = QStringLiteral("fedcba9876543210fedcba9876543210");
+        f.server.itemsById.insert(empty, QJsonDocument(QJsonObject{{QStringLiteral("Id"), empty}})
+                                             .toJson(QJsonDocument::Compact));
+        auto none = f.open(empty, ItemDetailsModel::FirstChannel + 6);
+        QTRY_COMPARE(none->status(), ItemDetailsModel::Ready);
+        QVERIFY(none->mediaBadges().isEmpty());
+    }
+
     void requestCarriesExactlyIdsFieldsUserIdOnItsChannel()
     {
         Fixture f;
@@ -386,10 +576,10 @@ class TestItemDetailsModel : public QObject {
             FakeJellyfin::capturedListingQuery(f.server.itemsRoutes.constFirst());
         QCOMPARE(wire.queryItemValue(QStringLiteral("ids")), kMovie);
         const QString fields = wire.queryItemValue(QStringLiteral("fields"));
-        for (const QString &field :
-             {QStringLiteral("Overview"), QStringLiteral("Genres"), QStringLiteral("People"),
-              QStringLiteral("Chapters"), QStringLiteral("MediaSources"),
-              QStringLiteral("Taglines"), QStringLiteral("OriginalTitle")})
+        for (const QString &field : {QStringLiteral("Overview"), QStringLiteral("Genres"),
+                                     QStringLiteral("People"), QStringLiteral("Chapters"),
+                                     QStringLiteral("MediaSources"), QStringLiteral("Taglines"),
+                                     QStringLiteral("OriginalTitle"), QStringLiteral("Studios")})
             QVERIFY2(fields.contains(field), qPrintable(field));
         QVERIFY(!wire.hasQueryItem(QStringLiteral("parentId")));
         QVERIFY(!wire.hasQueryItem(QStringLiteral("limit")));

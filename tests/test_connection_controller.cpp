@@ -1641,6 +1641,13 @@ class TestConnectionController : public QObject {
                  QStringLiteral("movies/collections"));
         QCOMPARE(Controller::scopeKey(movies, QStringLiteral("collections"), id),
                  QStringLiteral("movies/collections"));
+        QCOMPARE(Controller::scopeKey(shows, QStringLiteral("favorites"), {}),
+                 QStringLiteral("tvshows/favorites"));
+        QCOMPARE(Controller::scopeKey(shows, QStringLiteral("favorites"), dashed),
+                 QString(QStringLiteral("tvshows/favorites:") + id));
+        // The collections list is the same under both types
+        QCOMPARE(Controller::scopeKey(shows, QStringLiteral("collections"), id),
+                 QStringLiteral("movies/collections"));
         QCOMPARE(Controller::scopeKey(shows, QStringLiteral("episodes"), {}),
                  QStringLiteral("tvshows/episodes"));
         QCOMPARE(Controller::scopeKey(shows, QStringLiteral("episodes"), id),
@@ -1649,7 +1656,8 @@ class TestConnectionController : public QObject {
                  QString(QStringLiteral("tvshows/network:") + id));
         // A network needs its studio, and a sub-tab belongs to its own type
         QVERIFY(Controller::scopeKey(shows, QStringLiteral("network"), {}).isEmpty());
-        QVERIFY(Controller::scopeKey(shows, QStringLiteral("favorites"), {}).isEmpty());
+        QVERIFY(Controller::scopeKey(QStringLiteral("boxsets"), QStringLiteral("favorites"), {})
+                    .isEmpty());
         QVERIFY(Controller::scopeKey(movies, QStringLiteral("episodes"), {}).isEmpty());
         QVERIFY(Controller::scopeKey(movies, QStringLiteral("unknown"), {}).isEmpty());
 
@@ -1660,6 +1668,8 @@ class TestConnectionController : public QObject {
         const QList<QString> keys{Controller::scopeKey(movies, QStringLiteral("favorites"), {}),
                                   Controller::scopeKey(movies, QStringLiteral("favorites"), id),
                                   Controller::scopeKey(movies, QStringLiteral("collections"), {}),
+                                  Controller::scopeKey(shows, QStringLiteral("favorites"), {}),
+                                  Controller::scopeKey(shows, QStringLiteral("favorites"), id),
                                   Controller::scopeKey(shows, QStringLiteral("episodes"), {}),
                                   Controller::scopeKey(shows, QStringLiteral("episodes"), id),
                                   Controller::scopeKey(shows, QStringLiteral("network"), id)};
@@ -2523,6 +2533,62 @@ class TestConnectionController : public QObject {
         controller->chooseUser(kAnna);
         QTRY_COMPARE(controller->state(), ConnectionController::NeedsLogin);
         QVERIFY(controller->currentUserId().isEmpty());
+        QCOMPARE(changed.size(), 6);
+    }
+
+    void currentUserIsAdministratorFollowsTheSession()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        server.administrator = false;
+        auto controller = makeController();
+        QSignalSpy changed(controller.get(),
+                           &ConnectionController::currentUserIsAdministratorChanged);
+        QVERIFY(!controller->currentUserIsAdministrator());
+        controller->connectTo(address(server));
+        QTRY_VERIFY(controller->state() == ConnectionController::NeedsLogin);
+        controller->login(QStringLiteral("fixture-user"), QStringLiteral("fixture-password"));
+        QTRY_VERIFY(controller->state() == ConnectionController::Authenticated);
+        QVERIFY(!controller->currentUserIsAdministrator());
+        QCOMPARE(changed.size(), 0);
+        controller->signOut();
+        QCOMPARE(changed.size(), 0);
+
+        // An administrator signing in: the flag is there with the session
+        server.administrator = true;
+        controller->connectTo(address(server));
+        QTRY_VERIFY(controller->state() == ConnectionController::NeedsLogin);
+        controller->login(QStringLiteral("fixture-user"), QStringLiteral("fixture-password"));
+        QTRY_VERIFY(controller->state() == ConnectionController::Authenticated);
+        QVERIFY(controller->currentUserIsAdministrator());
+        QCOMPARE(changed.size(), 1);
+
+        // Leaving the server clears it, the saved session brings it back once the re-check answered
+        controller->cancel();
+        QVERIFY(!controller->currentUserIsAdministrator());
+        QCOMPARE(changed.size(), 2);
+        controller->start();
+        QTRY_VERIFY(controller->state() == ConnectionController::Authenticated);
+        QTRY_VERIFY(controller->currentUserIsAdministrator());
+        QCOMPARE(changed.size(), 3);
+
+        // A revoked token ends the restored session and nothing of the flag is left
+        controller->cancel();
+        QCOMPARE(changed.size(), 4);
+        server.denyUsersMe = true;
+        controller->start();
+        QTRY_COMPARE(controller->state(), ConnectionController::NeedsLogin);
+        QVERIFY(!controller->currentUserIsAdministrator());
+        QCOMPARE(changed.size(), 4);
+
+        // Signing in again, then out
+        server.denyUsersMe = false;
+        controller->login(QStringLiteral("fixture-user"), QStringLiteral("fixture-password"));
+        QTRY_VERIFY(controller->state() == ConnectionController::Authenticated);
+        QVERIFY(controller->currentUserIsAdministrator());
+        QCOMPARE(changed.size(), 5);
+        controller->signOut();
+        QVERIFY(!controller->currentUserIsAdministrator());
         QCOMPARE(changed.size(), 6);
     }
 

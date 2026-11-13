@@ -320,6 +320,14 @@ QString validUserImageTag(const QJsonValue &value)
     return isValidUserImageTag(tag) ? tag : QString();
 }
 
+// `Policy.IsAdministrator` of a UserDto: false when the policy or the flag is absent or the flag is not a bool
+bool userIsAdministrator(const QJsonObject &user)
+{
+    const QJsonValue flag =
+        user.value(QStringLiteral("Policy")).toObject().value(QStringLiteral("IsAdministrator"));
+    return flag.isBool() && flag.toBool();
+}
+
 // Splits a comma-separated query value into tokens, refusing empty members
 bool splitTokenList(const QString &value, QList<QString> *tokens)
 {
@@ -611,6 +619,7 @@ void JellyfinClient::finishAuthentication(QNetworkReply *finished)
     m_userId = userId;
     m_userName = validUserName(user.value(QStringLiteral("Name")));
     m_userImageTag = validUserImageTag(user.value(QStringLiteral("PrimaryImageTag")));
+    m_isAdministrator = userIsAdministrator(user);
     m_state = State::Authenticated;
     Q_EMIT loginSucceeded(m_userId);
 }
@@ -2033,6 +2042,7 @@ bool JellyfinClient::verifySession()
         if (!name.isEmpty())
             m_userName = name;
         m_userImageTag = validUserImageTag(me.value(QStringLiteral("PrimaryImageTag")));
+        m_isAdministrator = userIsAdministrator(me);
         Q_EMIT userProfileRefreshed(m_userId, m_userName, m_userImageTag);
     });
     return true;
@@ -2324,6 +2334,7 @@ void JellyfinClient::clearToken()
     m_userId.clear();
     m_userName.clear();
     m_userImageTag.clear();
+    m_isAdministrator = false;
     if (hadToken)
         Q_EMIT credentialsCleared();
 }
@@ -2417,6 +2428,10 @@ QString JellyfinClient::userName() const
 QString JellyfinClient::userImageTag() const
 {
     return m_userImageTag;
+}
+bool JellyfinClient::isAdministrator() const
+{
+    return m_isAdministrator;
 }
 QString JellyfinClient::deviceId() const
 {

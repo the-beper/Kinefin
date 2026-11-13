@@ -202,6 +202,9 @@ Kirigami.ScrollablePage {
                         loaded: true
                         highlighted: ListView.isCurrentItem && ListView.view.activeFocus
                         onClicked: page.Window.window.openItem(itemId, page)
+                        quickPlay: row.kind === HomeRowsModel.ContinueWatching
+                        // An episode card is named after its series: the player shows the episode title, as from the details page
+                        onQuickPlayRequested: page.Window.window.playItem(itemId, resumeTicks, episodeTitle.length > 0 ? episodeTitle : name)
                         subtitle: {
                             if (episodeNumber >= 0) {
                                 const label = seasonNumber >= 0 ? i18nc("season and episode number", "S%1:E%2", seasonNumber, episodeNumber) : i18nc("episode number", "E%1", episodeNumber);

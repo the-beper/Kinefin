@@ -34,11 +34,12 @@ QString label(const KLazyLocalizedString &text)
 } // namespace
 
 SettingsSectionModel::SettingsSectionModel(ClientSettings &settings, const QString &section,
-                                           QObject *parent)
+                                           const QString &group, QObject *parent)
     : QAbstractListModel(parent), m_settings(settings), m_section(section)
 {
     for (const SettingDefinition &definition : settingDefinitions()) {
-        if (definition.section == section && !definition.hidden)
+        if (definition.section == section && !definition.hidden
+            && (group.isEmpty() || label(definition.group) == group))
             m_rows.append(&definition);
     }
     connect(&settings, &ClientSettings::valueChanged, this,

@@ -13,7 +13,25 @@
         "Mystery"
       ],
       "CommunityRating": 7.1,
+      "CriticRating": 88,
       "OfficialRating": "PG-13",
+      "PremiereDate": "2012-06-15T00:00:00.0000000Z",
+      "GenreItems": [
+        {
+          "Name": "Science Fiction",
+          "Id": "d1d2d3d4d5d6d7d8d9dadbdcdddedfe0"
+        },
+        {
+          "Name": "Mystery",
+          "Id": "d1d2d3d4d5d6d7d8d9dadbdcdddedfe1"
+        }
+      ],
+      "Studios": [
+        {
+          "Name": "Vega Pictures",
+          "Id": "e1e2e3e4e5e6e7e8e9eaebecedeeefe0"
+        }
+      ],
       "UserData": {
         "Key": "arcturus",
         "Played": false,
@@ -42,6 +60,7 @@
               "Codec": "hevc",
               "Width": 1920,
               "Height": 1080,
+              "VideoRangeType": "HDR10",
               "BitRate": 6800000,
               "IsDefault": true,
               "DisplayTitle": "1080p HEVC"
@@ -51,6 +70,7 @@
               "Codec": "eac3",
               "Language": "eng",
               "Channels": 6,
+              "ChannelLayout": "5.1",
               "BitRate": 640000,
               "IsDefault": true,
               "DisplayTitle": "English EAC3 5.1"

@@ -173,8 +173,10 @@ ItemSummary parseItemSummary(const QJsonObject &item)
         const QJsonValue percentage = userData.value(QStringLiteral("PlayedPercentage"));
         if (percentage.isDouble() && percentage.toDouble() >= 0 && percentage.toDouble() <= 100)
             summary.playedPercentage = percentage.toDouble();
-        summary.remainingMinutes = remainingMinutesOf(
-            userData.value(QStringLiteral("PlaybackPositionTicks")).toDouble(0), ticks);
+        const double position = userData.value(QStringLiteral("PlaybackPositionTicks")).toDouble(0);
+        summary.remainingMinutes = remainingMinutesOf(position, ticks);
+        if (position > 0 && position < kMaxTicks)
+            summary.positionTicks = qint64(position);
     }
     return summary;
 }

@@ -65,7 +65,7 @@ Kirigami.ScrollablePage {
         model: page.items
         cellWidth: Math.floor(width / columns)
         // A 2:3 poster inside the tile margins, then the name and the second line
-        cellHeight: Math.round((cellWidth - Kirigami.Units.smallSpacing * 2) * 1.5) + Kirigami.Units.gridUnit * 3.5
+        cellHeight: Math.round((cellWidth - Kirigami.Units.largeSpacing - Kirigami.Units.smallSpacing * 2) * 1.5) + Kirigami.Units.gridUnit * 3.5 + Kirigami.Units.largeSpacing
         activeFocusOnTab: true
         keyNavigationEnabled: true
         currentIndex: 0
@@ -93,8 +93,8 @@ Kirigami.ScrollablePage {
             required property int episodeNumber
             required property string episodeTitle
 
-            width: grid.cellWidth
-            height: grid.cellHeight
+            width: grid.cellWidth - Kirigami.Units.largeSpacing
+            height: grid.cellHeight - Kirigami.Units.largeSpacing
             // The grid is the one tab stop, the arrow keys move inside it
             focusPolicy: Qt.NoFocus
             loaded: true

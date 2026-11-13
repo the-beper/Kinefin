@@ -25,9 +25,11 @@
 #include <QQmlApplicationEngine>
 #include <QQmlIncubator>
 #include <QQmlListReference>
+#include <QQmlProperty>
 #include <QQuickItem>
 #include <QQuickStyle>
 #include <QQuickWindow>
+#include <QScopeGuard>
 #include <QSet>
 #include <QTemporaryDir>
 #include <QtTest/QtTest>
@@ -330,6 +332,9 @@ struct Ui {
     void revealAndClick(QQuickItem *page, QQuickItem *target)
     {
         auto *flickable = page->property("flickable").value<QQuickItem *>();
+        // The Settings page scrolls its form in a plain scroll view and has no such property
+        if (!flickable)
+            flickable = enclosingFlickable(target);
         const qreal itemTop = target->mapToScene(QPointF(0, 0)).y();
         const qreal viewTop = flickable->mapToScene(QPointF(0, 0)).y();
         flickable->setProperty("contentY",
@@ -582,8 +587,10 @@ struct Ui {
     {
         auto *stack = window->property("pageStack").value<QObject *>();
         QObject *column = stack ? stack->property("columnView").value<QObject *>() : nullptr;
-        return !column || !column->property("moving").toBool();
+        return !column || (!column->property("moving").toBool() && !tabSwitching());
     }
+    // True from a tab switch until its fade and slide are over
+    bool tabSwitching() const { return window->property("tabSwitching").toBool(); }
     void clickCenter(QQuickItem *target)
     {
         qWaitForScaled([this] { return columnSettled(); }, 1000);
@@ -949,16 +956,30 @@ struct RemotePreferences {
     bool stores = true;
 };
 
-// Opens the page from the account menu action and waits until the configuration is loaded; null when it did not come up
+// Opens Settings from its menu action unless it is open; the page, or null when it did not come up
+QQuickItem *openSettings(Ui &ui)
+{
+    if (!ui.item(QStringLiteral("settingsPage"))) {
+        if (!QMetaObject::invokeMethod(ui.shellAction(QStringLiteral("settingsAction")), "trigger")
+            || !qWaitForScaled([&] { return ui.item(QStringLiteral("settingsPage")) != nullptr; },
+                               10000))
+            return nullptr;
+    }
+    return ui.item(QStringLiteral("settingsPage"));
+}
+
+// Opens Settings, selects the User entry and waits until the configuration is loaded; the form, or null when it did not come up
 QQuickItem *openPreferences(Ui &ui)
 {
-    if (!QMetaObject::invokeMethod(ui.shellAction(QStringLiteral("userPreferencesAction")),
-                                   "trigger"))
+    QQuickItem *page = openSettings(ui);
+    if (!page
+        || !QMetaObject::invokeMethod(page, "selectSection",
+                                      Q_ARG(QVariant, QStringLiteral("user"))))
         return nullptr;
-    if (!qWaitForScaled([&] { return ui.item(QStringLiteral("userPreferencesPage")) != nullptr; },
+    if (!qWaitForScaled([&] { return ui.item(QStringLiteral("userPreferencesForm")) != nullptr; },
                         10000))
         return nullptr;
-    // The page asks for a load when it is created; one the sign-in started for Home may still be under way, and the page then waits for that one, so no new load is to be expected here
+    // The form asks for a load when it is created; one the sign-in started for Home may still be under way, and the form then waits for that one, so no new load is to be expected here
     return qWaitForScaled(
                [&] {
                    const auto *prefs = ui.controller.userConfiguration();
@@ -966,7 +987,7 @@ QQuickItem *openPreferences(Ui &ui)
                           && prefs->loaded();
                },
                10000)
-               ? ui.item(QStringLiteral("userPreferencesPage"))
+               ? ui.item(QStringLiteral("userPreferencesForm"))
                : nullptr;
 }
 
@@ -979,7 +1000,7 @@ QQuickItem *comboBoxIn(QQuickItem *root)
     return nullptr;
 }
 
-// Clicks the button with this text inside a dialog: the page footer has a Discard button of its own
+// Clicks the button with this text inside a dialog: the Save bar has a Discard button of its own
 bool clickInDialog(const Ui &ui, const QString &dialogName, const QString &text)
 {
     QObject *dialog = ui.popup(dialogName);
@@ -1150,26 +1171,22 @@ bool buildState(Ui &ui, const QString &state)
         const QString file = QStringLiteral("SettingsPage.qml");
         QVariantMap properties;
         properties.insert(QStringLiteral("settings"), QVariant::fromValue(&ui.settings));
+        properties.insert(QStringLiteral("connection"), QVariant::fromValue(&ui.controller));
         QMetaObject::invokeMethod(root, "openSection", Q_ARG(QVariant, name), Q_ARG(QVariant, file),
                                   Q_ARG(QVariant, properties));
         if (!wait(name))
             return false;
         if (state != QLatin1String("settingsSection"))
             return true;
-        const QVariantMap first = ui.item(QStringLiteral("settingsPage"))
-                                      ->property("sections")
-                                      .toList()
-                                      .constFirst()
-                                      .toMap();
-        QVariantMap sectionProperties = properties;
-        sectionProperties.insert(QStringLiteral("section"), first.value(QStringLiteral("section")));
-        sectionProperties.insert(QStringLiteral("title"), first.value(QStringLiteral("title")));
-        const QUrl sectionUrl(
-            QStringLiteral("qrc:/qt/qml/org/kde/kinefin/SettingsSectionPage.qml"));
-        auto *stack = ui.window->property("pageStack").value<QObject *>();
-        QMetaObject::invokeMethod(stack, "push", Q_ARG(QVariant, sectionUrl),
-                                  Q_ARG(QVariant, sectionProperties));
-        return qWaitForScaled([&] { return ui.stackDepth() == 3; }, 5000);
+        // A category with two cards: Audio
+        QQuickItem *page = ui.item(QStringLiteral("settingsPage"));
+        return QMetaObject::invokeMethod(page, "selectSection",
+                                         Q_ARG(QVariant, QStringLiteral("audio")))
+               && qWaitForScaled(
+                   [&] {
+                       return page->property("activeSection").toString() == QLatin1String("audio");
+                   },
+                   5000);
     }
     if (state == QLatin1String("homeFailedRow"))
         ui.server.listingStatus.insert(QStringLiteral("Resume"), 500);
@@ -1378,7 +1395,7 @@ QStringList formCardProblems(QQuickItem *root)
     return problems;
 }
 
-// The Settings page at this window width: the category list folds below the wide limit; above it the heading and the card sit on one centred column at the FormCard default width. Empty when all is well
+// The Settings page at this window width: the list of entries sits at 13 grid units beside the content in a wide window, and shows alone below the wide limit until an entry opens in place of it; the heading and the cards sit on one centred column at the FormCard default width. Empty when all is well
 QStringList settingsFormProblems(const Ui &ui, int width)
 {
     QStringList problems;
@@ -1387,25 +1404,40 @@ QStringList settingsFormProblems(const Ui &ui, int width)
         const QQuickItem *entry = ui.item(name);
         return entry && entry->isVisible();
     };
-    if (shown(QStringLiteral("settingsCategory_main")) != wide
-        || shown(QStringLiteral("settingsCompactCategory_main")) == wide)
-        problems << QStringLiteral("the category list is %1 at %2 px, the limit is %3")
-                        .arg(wide ? QStringLiteral("not beside the form")
-                                  : QStringLiteral("not folded"))
+    const QQuickItem *page = ui.item(QStringLiteral("settingsPage"));
+    const bool entryOpen = page && page->property("entryOpen").toBool();
+    const bool listShown = shown(QStringLiteral("settingsCategory_main"));
+    const bool paneShown = shown(QStringLiteral("settingsContentView"));
+    if (listShown != (wide || !entryOpen))
+        problems << QStringLiteral(
+                        "the list of entries is %1 at %2 px (wide mode from %3, entry open: %4)")
+                        .arg(listShown ? QStringLiteral("showing") : QStringLiteral("hidden"))
                         .arg(width)
-                        .arg(ui.window->property("wideLimit").toInt());
-    if (!wide)
+                        .arg(ui.window->property("wideLimit").toInt())
+                        .arg(entryOpen);
+    if (paneShown != (wide || entryOpen))
+        problems << QStringLiteral("the content is %1 at %2 px (entry open: %3)")
+                        .arg(paneShown ? QStringLiteral("showing") : QStringLiteral("hidden"))
+                        .arg(width)
+                        .arg(entryOpen);
+    const QQuickItem *list = ui.item(QStringLiteral("settingsEntryList"));
+    if (wide && list && qAbs(sceneRect(list).width() - 13 * gridUnitOf(ui)) > 1)
+        problems << QStringLiteral("the list is %1 px wide, the sidebar width is 13 grid units")
+                        .arg(sceneRect(list).width());
+    if (!paneShown)
         return problems;
     QQuickItem *view = ui.item(QStringLiteral("settingsContentView"));
-    QQuickItem *card = ui.item(QStringLiteral("settingsContentCard"));
     const QQuickItem *heading = ui.item(QStringLiteral("settingsContentHeading"));
-    if (!view || !card || !heading || !view->isVisible() || !card->isVisible())
+    const QList<QQuickItem *> cards = visibleFormCards(view);
+    if (!heading || cards.isEmpty())
         return problems << QStringLiteral("the form is not showing");
-    if (card->property("maximumWidth").toReal() > 30 * gridUnitOf(ui) + 0.5)
-        problems << QStringLiteral("the card maximum is %1 px, over the default of 30 grid units")
-                        .arg(card->property("maximumWidth").toReal());
+    for (const QQuickItem *card : cards) {
+        if (card->property("maximumWidth").toReal() > 30 * gridUnitOf(ui) + 0.5)
+            problems << QStringLiteral("a card maximum is %1 px, over the default of 30 grid units")
+                            .arg(card->property("maximumWidth").toReal());
+    }
     problems << formCardProblems(view);
-    const QRectF surface = cardSurface(card);
+    const QRectF surface = cardSurface(cards.constFirst());
     if (qAbs(sceneRect(heading).left() - surface.left()) > 1)
         problems << QStringLiteral("the heading starts at %1 px, the card at %2")
                         .arg(sceneRect(heading).left())
@@ -1413,23 +1445,30 @@ QStringList settingsFormProblems(const Ui &ui, int width)
     return problems;
 }
 
-// The columns of a grid view: at least one, and the cells fill the grid's width up to a pixel per column
+// The columns of a grid view: at least one, and the cells fill the grid's usable width (without the page margin and the scroll bar, where the grid reserves them) up to a pixel per column
 QStringList gridProblems(const QQuickItem *grid, qreal tileWidth)
 {
     QStringList problems;
     const int columns = grid->property("columns").toInt();
     const qreal cells = columns * grid->property("cellWidth").toReal();
+    const QVariant reserved = grid->property("usableWidth");
+    const qreal usable = reserved.isValid() ? reserved.toReal() : grid->width();
     if (columns < 1)
         problems << QStringLiteral("%1 has %2 columns").arg(Ui::describe(grid)).arg(columns);
-    if (tileWidth > 0 && columns != qMax(1, qFloor(grid->width() / tileWidth)))
+    if (tileWidth > 0 && columns != qMax(1, qFloor(usable / tileWidth)))
         problems << QStringLiteral("%1 has %2 columns for %3 px")
                         .arg(Ui::describe(grid))
                         .arg(columns)
-                        .arg(grid->width());
-    if (cells > grid->width() || cells <= grid->width() - columns - 1)
+                        .arg(usable);
+    if (cells > usable || cells <= usable - columns - 1)
         problems << QStringLiteral("the cells of %1 cover %2 px of %3")
                         .arg(Ui::describe(grid))
                         .arg(cells)
+                        .arg(usable);
+    if (usable > grid->width())
+        problems << QStringLiteral("%1 has %2 usable px of %3")
+                        .arg(Ui::describe(grid))
+                        .arg(usable)
                         .arg(grid->width());
     return problems;
 }
@@ -1464,11 +1503,12 @@ QStringList pageWidthProblems(const Ui &ui, const QString &state, int width)
     if (state == QLatin1String("settings")) {
         problems << settingsFormProblems(ui, width);
     } else if (state == QLatin1String("preferences")) {
-        QQuickItem *page = ui.item(QStringLiteral("userPreferencesPage"));
-        if (!page || visibleFormCards(page).isEmpty()) {
+        // The User entry of Settings: the form in the content pane, the list folded as for any entry
+        QQuickItem *form = ui.item(QStringLiteral("userPreferencesForm"));
+        if (!form || visibleFormCards(form).isEmpty()) {
             problems << QStringLiteral("no form card showing");
         } else
-            problems << formCardProblems(page);
+            problems << formCardProblems(form) << settingsFormProblems(ui, width);
     } else if (state == QLatin1String("details")) {
         const QQuickItem *header = ui.item(QStringLiteral("detailsHeaderContent"));
         if (header)
@@ -1685,6 +1725,145 @@ QString describeButtons(const Ui &ui)
     return parts.isEmpty() ? QStringLiteral("no abstract button exists in the filter dialog footer")
                            : parts.join(QStringLiteral("; "));
 }
+
+// The first row of cards of the library grid, left to right (scene coordinates), with the grid, its scroll bar and its gutter
+struct CardGridGeometry {
+    QList<QRectF> firstRow;
+    QRectF scrollBar;
+    QRectF grid;
+    qreal gutter = 0;
+};
+
+CardGridGeometry cardGridGeometry(Ui &ui)
+{
+    CardGridGeometry geometry;
+    QQuickItem *grid = ui.item(QStringLiteral("libraryGrid"));
+    QQuickItem *bar = ui.item(QStringLiteral("libraryGridScrollBar"));
+    if (!grid || !bar)
+        return geometry;
+    geometry.gutter = grid->property("gutter").toReal();
+    geometry.grid = QRectF(grid->mapToScene(QPointF(0, 0)), QSizeF(grid->width(), grid->height()));
+    geometry.scrollBar =
+        QRectF(bar->mapToScene(QPointF(0, 0)), QSizeF(bar->width(), bar->height()));
+    QList<QRectF> cards;
+    const QList<QQuickItem *> items = ui.itemsStartingWith(QStringLiteral("mediaCard_"));
+    for (QQuickItem *card : items) {
+        if (card->isVisible() && card->isEnabled())
+            cards.append(
+                QRectF(card->mapToScene(QPointF(0, 0)), QSizeF(card->width(), card->height())));
+    }
+    std::sort(cards.begin(), cards.end(), [](const QRectF &a, const QRectF &b) {
+        return a.y() < b.y() || (qFuzzyCompare(a.y() + 1, b.y() + 1) && a.x() < b.x());
+    });
+    for (const QRectF &card : std::as_const(cards)) {
+        if (!qFuzzyCompare(card.y() + 1, cards.constFirst().y() + 1))
+            break;
+        geometry.firstRow.append(card);
+    }
+    return geometry;
+}
+} // namespace
+
+// A stand-in for the player of the window: it records what the shell asked it to play and refuses, so no player page opens
+class QuickPlayStub : public QObject {
+    Q_OBJECT
+  public:
+    struct Call {
+        QString id;
+        qint64 resumeTicks;
+        QString title;
+    };
+    Q_INVOKABLE bool playItem(const QString &id, qint64 resumeTicks, const QString &title)
+    {
+        calls.push_back({id, resumeTicks, title});
+        return false;
+    }
+    QList<Call> calls;
+};
+
+// Every value a QML property takes, taken from its notify signal: a poll misses a motion that a stalled thread finishes in one tick, and the animators of the render thread write only their end value back
+class PropertyRecorder : public QObject {
+    Q_OBJECT
+  public:
+    PropertyRecorder(QObject *source, const char *name)
+        : m_property(source, QString::fromLatin1(name))
+    {
+        m_property.connectNotifySignal(this, SLOT(record()));
+    }
+    QList<qreal> values;
+
+  public Q_SLOTS:
+    void record() { values.push_back(m_property.read().toReal()); }
+
+  private:
+    QQmlProperty m_property;
+};
+
+// The card of the fixture movie in a Home row (0: Continue Watching, 1: Next Up)
+QQuickItem *homeRowMovieCard(const Ui &ui, int row)
+{
+    QQuickItem *list = ui.item(QStringLiteral("homeRowList_") + QString::number(row));
+    return list ? Ui::itemIn(list, QStringLiteral("mediaCard_") + kMovieId) : nullptr;
+}
+
+// A point over the poster of a card, in window coordinates
+QPoint cardPoint(const QQuickItem *card)
+{
+    return card->mapToScene(QPointF(card->width() / 2, card->height() / 4)).toPoint();
+}
+
+// Scrolls the page in front until the poster of the card is inside the window: the Home rows below the tiles start out of view
+bool revealCard(const Ui &ui, QQuickItem *card)
+{
+    QQuickItem *page = ui.currentDetails();
+    auto *flickable = page ? page->property("flickable").value<QQuickItem *>() : nullptr;
+    if (!flickable)
+        return false;
+    QElapsedTimer timer;
+    timer.start();
+    while (timer.elapsed() < scaled(8000)) {
+        // Inside the page's own view, not only the window: a card under the header gets no pointer events
+        const QRectF view = flickable->mapRectToScene(flickable->boundingRect());
+        if (view.contains(cardPoint(card))
+            && view.contains(card->mapToScene(QPointF(card->width() / 2, card->height() / 2))))
+            return true;
+        const qreal itemTop = card->mapToScene(QPointF(0, 0)).y();
+        const qreal viewTop = flickable->mapToScene(QPointF(0, 0)).y();
+        flickable->setProperty("contentY",
+                               flickable->property("contentY").toReal() + itemTop - viewTop - 50);
+        QTest::qWait(100);
+    }
+    return false;
+}
+
+namespace {
+// Opens the details of an item through the shell; the page in front once it holds the item, or null
+QQuickItem *openDetails(Ui &ui, const QString &id)
+{
+    if (!QMetaObject::invokeMethod(ui.engine.rootObjects().constFirst(), "openItem",
+                                   Q_ARG(QVariant, id), Q_ARG(QVariant, QVariant())))
+        return nullptr;
+    QQuickItem *page = nullptr;
+    const bool ready = qWaitForScaled(
+        [&] {
+            page = ui.currentDetails();
+            return page && page->objectName() == QStringLiteral("itemDetailsPage")
+                   && page->property("itemId").toString() == id
+                   && page->property("showContent").toBool();
+        },
+        10000);
+    return ready ? page : nullptr;
+}
+
+// The page's end time for the given clock, as the page words it
+QString endsAtText(QQuickItem *page, const QDateTime &now)
+{
+    QVariant text;
+    const QVariant clock(now);
+    QMetaObject::invokeMethod(page, "endsAtText", Q_RETURN_ARG(QVariant, text),
+                              Q_ARG(QVariant, clock));
+    return text.toString();
+}
 } // namespace
 
 class TestUiPages : public QObject {
@@ -1875,6 +2054,47 @@ class TestUiPages : public QObject {
         QTRY_COMPARE(ui.controller.movies()->status(), Kinefin::LibraryItemsModel::Ready);
     }
 
+    void cardGridKeepsTheCardsOutOfTheScrollBar()
+    {
+        Ui ui(m_home->path());
+        ui.server.generatedItemTotal = 120;
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QTRY_VERIFY(ui.item(QStringLiteral("libraryCard_") + kMovies) != nullptr);
+        QVERIFY(ui.openLibraryTile(kMovies));
+        QTRY_COMPARE(ui.controller.movies()->status(), Kinefin::LibraryItemsModel::Ready);
+        QTRY_VERIFY(cardGridGeometry(ui).firstRow.size() > 1);
+        const CardGridGeometry geometry = cardGridGeometry(ui);
+        QVERIFY(geometry.scrollBar.width() > 0);
+        // The right-most card ends left of the bar
+        const QRectF last = geometry.firstRow.constLast();
+        QVERIFY2(last.right() <= geometry.scrollBar.x(),
+                 qPrintable(QStringLiteral("card right %1, scroll bar x %2")
+                                .arg(last.right())
+                                .arg(geometry.scrollBar.x())));
+    }
+
+    void cardGridSeparatesTheCardsAndKeepsAPageMargin()
+    {
+        Ui ui(m_home->path());
+        ui.server.generatedItemTotal = 120;
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QTRY_VERIFY(ui.item(QStringLiteral("libraryCard_") + kMovies) != nullptr);
+        QVERIFY(ui.openLibraryTile(kMovies));
+        QTRY_COMPARE(ui.controller.movies()->status(), Kinefin::LibraryItemsModel::Ready);
+        QTRY_VERIFY(cardGridGeometry(ui).firstRow.size() > 1);
+        const CardGridGeometry geometry = cardGridGeometry(ui);
+        QVERIFY(geometry.gutter > 0);
+        // The first card starts at least the page margin (the gutter) from the window's left edge
+        QVERIFY(geometry.firstRow.constFirst().x() >= geometry.gutter - 0.5);
+        // Two neighbours are at least the gutter apart
+        for (qsizetype i = 1; i < geometry.firstRow.size(); ++i) {
+            const qreal gap = geometry.firstRow.at(i).x() - geometry.firstRow.at(i - 1).right();
+            QVERIFY2(gap >= geometry.gutter - 0.5, qPrintable(QStringLiteral("gap %1").arg(gap)));
+        }
+    }
+
     void emptyAndFailedStatesAreShown()
     {
         Ui ui(m_home->path());
@@ -1971,17 +2191,12 @@ class TestUiPages : public QObject {
             QTRY_VERIFY2(ui.showsText(heading), qPrintable(heading));
         QVERIFY(ui.showsText(QStringLiteral("Mira Vale"), false));
         QVERIFY(ui.showsText(QStringLiteral("The Ship"), false));
-        // Playback is not wired yet: the Resume action is there and disabled
-        QQmlListReference actions(ui.item(QStringLiteral("itemDetailsPage")), "actions");
-        bool foundPlay = false;
-        for (qsizetype i = 0; i < actions.count(); ++i) {
-            // The fixture movie has a resume point: the action reads Resume
-            if (actions.at(i)->property("text").toString() == QStringLiteral("Resume")) {
-                foundPlay = true;
-                QVERIFY(!actions.at(i)->property("enabled").toBool());
-            }
-        }
-        QVERIFY(foundPlay);
+        // Playback is not wired yet: the Resume action is there and disabled; the fixture movie has a resume point
+        const QObject *play = ui.item(QStringLiteral("itemDetailsPage"))
+                                  ->findChild<QObject *>(QStringLiteral("playAction"));
+        QVERIFY(play);
+        QCOMPARE(play->property("text").toString(), QStringLiteral("Resume"));
+        QVERIFY(!play->property("enabled").toBool());
     }
 
     void returnOnAHomeRowOpensDetailsAndBackReturns()
@@ -2020,6 +2235,9 @@ class TestUiPages : public QObject {
             {QStringLiteral("Overview"), with(QStringLiteral(" overview"))},
             {QStringLiteral("Taglines"), QJsonArray{with(QStringLiteral(" tagline"))}},
             {QStringLiteral("Genres"), QJsonArray{with(QStringLiteral(" genre"))}},
+            {QStringLiteral("Studios"),
+             QJsonArray{QJsonObject{{QStringLiteral("Name"), with(QStringLiteral(" studio"))}}}},
+            {QStringLiteral("OfficialRating"), with(QStringLiteral(" rating"))},
             {QStringLiteral("People"),
              QJsonArray{QJsonObject{{QStringLiteral("Name"), with(QStringLiteral(" person"))},
                                     {QStringLiteral("Role"), with(QStringLiteral(" role"))},
@@ -2033,8 +2251,10 @@ class TestUiPages : public QObject {
                  {QStringLiteral("Container"), with(QStringLiteral(" container"))},
                  {QStringLiteral("MediaStreams"),
                   QJsonArray{QJsonObject{
-                      {QStringLiteral("Type"), QStringLiteral("Audio")},
-                      {QStringLiteral("DisplayTitle"), with(QStringLiteral(" stream"))}}}}}}}};
+                                 {QStringLiteral("Type"), QStringLiteral("Audio")},
+                                 {QStringLiteral("DisplayTitle"), with(QStringLiteral(" stream"))}},
+                             QJsonObject{{QStringLiteral("Type"), QStringLiteral("Video")},
+                                         {QStringLiteral("Codec"), hostile}}}}}}}};
         ui.server.itemsById.insert(kMovieId, QJsonDocument(item).toJson(QJsonDocument::Compact));
         ui.server.listingRawBody.insert(QStringLiteral("Items"), envelope(QJsonArray{item}));
         QVERIFY(ui.load());
@@ -2052,14 +2272,201 @@ class TestUiPages : public QObject {
              {QStringLiteral(" name"), QStringLiteral(" series"), QStringLiteral(" overview"),
               QStringLiteral(" tagline"), QStringLiteral(" genre"), QStringLiteral(" person"),
               QStringLiteral(" role"), QStringLiteral(" chapter"), QStringLiteral(" container"),
-              QStringLiteral(" stream")}) {
+              QStringLiteral(" studio"), QStringLiteral(" rating"), QStringLiteral(" stream")}) {
             QTRY_VERIFY2(!ui.itemsWithText(with(part), false).isEmpty(), qPrintable(part));
             for (QQuickItem *label : ui.itemsWithText(with(part), false)) {
                 QVERIFY(label->property("textFormat").isValid());
                 QCOMPARE(label->property("textFormat").toInt(), int(Qt::PlainText));
             }
         }
+        // An unknown codec becomes a badge, upper-cased and capped: still plain text
+        QTRY_VERIFY(!ui.itemsWithText(QStringLiteral("<B>BOLD</B>"), false).isEmpty());
+        for (QQuickItem *label : ui.itemsWithText(QStringLiteral("<B>BOLD</B>"), false))
+            QCOMPARE(label->property("textFormat").toInt(), int(Qt::PlainText));
         QVERIFY(gWarnings.filter(QStringLiteral("evil.invalid")).isEmpty());
+    }
+
+    void detailsFactsDifferByType_data()
+    {
+        QTest::addColumn<QString>("id");
+        QTest::addColumn<QStringList>("shown");
+        QTest::addColumn<QStringList>("hidden");
+        QTest::addColumn<QStringList>("texts");
+        const auto words = [](const QString &list, QChar separator = QLatin1Char(' ')) {
+            return list.split(separator);
+        };
+        QTest::newRow("movie")
+            << kMovieId
+            << words(QStringLiteral(
+                   "factYear certificateBadge factRating factCritic factRuntime factEndsAt"))
+            << words(QStringLiteral("factEpisode factStatus factSeasons factEpisodes factUnplayed "
+                                    "factPlayed factFavorite"))
+            << words(QStringLiteral("factYear=2012;factCritic=88%;factRuntime=18 min"),
+                     QLatin1Char(';'));
+        QTest::newRow("series")
+            << kSeriesId
+            << words(
+                   QStringLiteral("factYear certificateBadge factRating factSeasons factUnplayed"))
+            << words(QStringLiteral("factEpisode factStatus factEpisodes factCritic factRuntime "
+                                    "factEndsAt factPlayed"))
+            << words(QStringLiteral("factYear=2021–present;factSeasons=3 seasons;"
+                                    "factUnplayed=8 unplayed"),
+                     QLatin1Char(';'));
+        QTest::newRow("season")
+            << kSeasonId << words(QStringLiteral("factEpisodes factUnplayed"))
+            << words(QStringLiteral("factYear factEpisode factSeasons factRuntime factEndsAt "
+                                    "certificateBadge factRating"))
+            << words(QStringLiteral("factEpisodes=4 episodes;factUnplayed=6 unplayed"),
+                     QLatin1Char(';'));
+        QTest::newRow("episode")
+            << kEpisodeId << words(QStringLiteral("factEpisode factYear factRuntime factEndsAt"))
+            << words(QStringLiteral("factSeasons factEpisodes factUnplayed factCritic factStatus "
+                                    "certificateBadge factRating"))
+            << words(QStringLiteral("factEpisode=S2:E6;factYear=%1;factRuntime=28 min")
+                         .arg(QLocale().toString(QDate(2026, 2, 13), QLocale::ShortFormat)),
+                     QLatin1Char(';'));
+    }
+
+    void detailsFactsDifferByType()
+    {
+        QFETCH(QString, id);
+        QFETCH(QStringList, shown);
+        QFETCH(QStringList, hidden);
+        QFETCH(QStringList, texts);
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        ui.serveShow();
+        ui.server.generatedEpisodeTotal = 4;
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *page = openDetails(ui, id);
+        QVERIFY(page);
+        const auto fact = [page](const QString &name) {
+            const QQuickItem *item = Ui::itemIn(page, name);
+            return item && item->isVisible() ? item : nullptr;
+        };
+        for (const QString &name : shown)
+            QTRY_VERIFY2(fact(name), qPrintable(name));
+        for (const QString &name : hidden)
+            QVERIFY2(!fact(name), qPrintable(name));
+        for (const QString &pair : texts) {
+            const QString name = pair.section(QLatin1Char('='), 0, 0);
+            // A badge carries its words as `caption`, a label as `text`
+            const auto words = [&fact, &name] {
+                const QQuickItem *item = fact(name);
+                if (!item)
+                    return QString();
+                const QVariant caption = item->property("caption");
+                return (caption.isValid() ? caption : item->property("text")).toString();
+            };
+            QTRY_COMPARE(words(), pair.section(QLatin1Char('='), 1));
+        }
+    }
+
+    void detailsCertificateIsABadgeWithAnAccessibleName()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *page = openDetails(ui, kMovieId);
+        QVERIFY(page);
+        QQuickItem *badge = nullptr;
+        QTRY_VERIFY((badge = Ui::itemIn(page, QStringLiteral("certificateBadge"))) != nullptr
+                    && badge->isVisible());
+        QCOMPARE(badge->property("accessibleName").toString(), QStringLiteral("Rated PG-13"));
+        // The certificate is one plain-text label inside the badge, and nowhere else on the page
+        int labels = 0;
+        for (QQuickItem *label : ui.itemsWithText(QStringLiteral("PG-13"), false)) {
+            if (!page->isAncestorOf(label))
+                continue;
+            ++labels;
+            QVERIFY2(badge->isAncestorOf(label), qPrintable(Ui::describe(label)));
+            QCOMPARE(label->property("textFormat").toInt(), int(Qt::PlainText));
+        }
+        QCOMPARE(labels, 1);
+    }
+
+    void detailsOverviewCollapsesAndExpands()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        ui.serveShow();
+        QJsonObject movie = fixtureObject(QStringLiteral("movie_item"));
+        QString overview;
+        for (int i = 0; i < 60; ++i)
+            overview += QStringLiteral("The survey ship drifts on. ");
+        movie.insert(QStringLiteral("Overview"), overview);
+        ui.server.itemsById.insert(kMovieId, QJsonDocument(movie).toJson(QJsonDocument::Compact));
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *page = openDetails(ui, kMovieId);
+        QVERIFY(page);
+        QQuickItem *label = Ui::itemIn(page, QStringLiteral("overviewLabel"));
+        QQuickItem *toggle = Ui::itemIn(page, QStringLiteral("overviewToggle"));
+        QVERIFY(label && toggle);
+        // Long text: four lines, elided, and a button to open it
+        QCOMPARE(label->property("maximumLineCount").toInt(), 4);
+        QTRY_VERIFY(label->property("truncated").toBool());
+        QTRY_VERIFY(toggle->isVisible());
+        QCOMPARE(toggle->property("text").toString(), QStringLiteral("Show More"));
+        QVERIFY(QMetaObject::invokeMethod(toggle, "click"));
+        QTRY_COMPARE(toggle->property("text").toString(), QStringLiteral("Show Less"));
+        QVERIFY(label->property("maximumLineCount").toInt() > 4);
+        QTRY_VERIFY(!label->property("truncated").toBool());
+        QVERIFY(toggle->isVisible());
+        QVERIFY(QMetaObject::invokeMethod(toggle, "click"));
+        QTRY_COMPARE(toggle->property("text").toString(), QStringLiteral("Show More"));
+        QCOMPARE(label->property("maximumLineCount").toInt(), 4);
+        QTRY_VERIFY(label->property("truncated").toBool());
+
+        // Short text fits in four lines: no button
+        QQuickItem *series = openDetails(ui, kSeriesId);
+        QVERIFY(series);
+        QQuickItem *shortLabel = Ui::itemIn(series, QStringLiteral("overviewLabel"));
+        QVERIFY(shortLabel && shortLabel->isVisible());
+        QTRY_VERIFY(!shortLabel->property("truncated").toBool());
+        QVERIFY(!Ui::itemIn(series, QStringLiteral("overviewToggle"))->isVisible());
+    }
+
+    void detailsEndsAtFollowsRuntimeAndResume()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        ui.serveShow();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *page = openDetails(ui, kMovieId);
+        QVERIFY(page);
+        const QDateTime now(QDate(2026, 11, 13), QTime(20, 0));
+        const auto endsAt = [](int hour, int minute) {
+            return QStringLiteral("Ends at %1")
+                .arg(QLocale().toString(QTime(hour, minute), QLocale::ShortFormat));
+        };
+        // 18 minutes of runtime with 3.9 watched: 14.1 left
+        QCOMPARE(endsAtText(page, now), endsAt(20, 14));
+        QQuickItem *label = Ui::itemIn(page, QStringLiteral("factEndsAt"));
+        QTRY_VERIFY(label && label->isVisible()
+                    && label->property("text").toString().startsWith(QStringLiteral("Ends at ")));
+        // The clock moves once a minute, only while the page is in view
+        QObject *timer = page->findChild<QObject *>(QStringLiteral("endsAtTimer"));
+        QVERIFY(timer);
+        QCOMPARE(timer->property("interval").toInt(), 60000);
+        QTRY_VERIFY(timer->property("running").toBool());
+        // Marking it watched drops the resume point: the whole runtime counts
+        QObject *mark = page->findChild<QObject *>(QStringLiteral("togglePlayedAction"));
+        QVERIFY(mark);
+        QVERIFY(QMetaObject::invokeMethod(mark, "trigger"));
+        QTRY_COMPARE(endsAtText(page, now), endsAt(20, 18));
+        QCOMPARE(endsAtText(page, now.addSecs(3600)), endsAt(21, 18));
+        // A series has no runtime, and the page below it is out of view
+        QQuickItem *series = openDetails(ui, kSeriesId);
+        QVERIFY(series);
+        QCOMPARE(endsAtText(series, now), QString());
+        QVERIFY(!series->findChild<QObject *>(QStringLiteral("endsAtTimer"))
+                     ->property("running")
+                     .toBool());
+        QTRY_VERIFY(!timer->property("running").toBool());
     }
 
     void aMissingItemShowsNotFound()
@@ -2157,7 +2564,7 @@ class TestUiPages : public QObject {
             clickInDialog(ui, QStringLiteral("unsavedChangesDialog"), QStringLiteral("Cancel")));
         QTRY_VERIFY(!dialog->property("visible").toBool());
         QVERIFY(prefs->dirty());
-        QVERIFY(ui.item(QStringLiteral("userPreferencesPage")) != nullptr);
+        QVERIFY(ui.item(QStringLiteral("userPreferencesForm")) != nullptr);
         // The same URL can be delivered again after Cancel.
         ui.window->setProperty("requestedItemId", kMovieId);
         QTRY_VERIFY(dialog->property("opened").toBool());
@@ -3474,6 +3881,38 @@ class TestUiPages : public QObject {
         QVERIFY(gWarnings.filter(QStringLiteral("evil.invalid")).isEmpty());
     }
 
+    void tvShowsSubtabsMatchMovies()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("tvTab")));
+        QTRY_VERIFY(ui.layoutProblems().isEmpty());
+        auto *subtabs = ui.controller.subtabs();
+        // Favorites and Collections are on at first, as in Movies, and the main list is no entry
+        QTRY_COMPARE(subtabIds(ui),
+                     (QStringList{QStringLiteral("favorites"), QStringLiteral("collections")}));
+        settleToolbar(ui);
+        QVERIFY(selectSubtab(ui, QStringLiteral("favorites")));
+        QTRY_COMPARE(subtabs->current(), QStringLiteral("favorites"));
+        QTRY_COMPARE(subtabs->status(), Kinefin::LibrarySubtabController::Ready);
+        QCOMPARE(subtabs->activeList(), subtabs->showList());
+        const QUrlQuery query = lastItemsQuery(ui);
+        QCOMPARE(query.queryItemValue(QStringLiteral("includeItemTypes")),
+                 QStringLiteral("Series"));
+        QVERIFY(
+            query.queryItemValue(QStringLiteral("filters")).contains(QStringLiteral("IsFavorite")));
+        QCOMPARE(ui.rootTab(), QStringLiteral("tvshows"));
+        settleToolbar(ui);
+        // The switches turn them off, and the showing one gives way to the main list
+        setSubtabSetting(ui, QStringLiteral("tv.favorites"), false);
+        QTRY_COMPARE(subtabs->current(), QStringLiteral("main"));
+        QTRY_COMPARE(subtabIds(ui), QStringList{QStringLiteral("collections")});
+        settleToolbar(ui);
+        setSubtabSetting(ui, QStringLiteral("tv.collections"), false);
+        QTRY_VERIFY(subtabIds(ui).isEmpty());
+        settleToolbar(ui);
+    }
+
     void theEpisodesSubtabShowsTheCountAndItsOwnFilters()
     {
         Ui ui(m_home->path());
@@ -3575,6 +4014,7 @@ class TestUiPages : public QObject {
         QVERIFY(ui.load());
         QVERIFY2(buildState(ui, state), qPrintable(state));
         QTRY_VERIFY(ui.layoutProblems().isEmpty());
+        QTRY_VERIFY(!ui.tabSwitching());
         if (ui.item(QStringLiteral("libraryToolbar")))
             settleToolbar(ui);
         ui.settle();
@@ -4149,6 +4589,77 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(ui.server.viewRequests > before);
     }
 
+    void mainMenuIsAsWideAsItsWidestEntry()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("home")));
+        QObject *menu = ui.popup(QStringLiteral("mainMenu"));
+        QVERIFY(menu);
+        QVERIFY(QMetaObject::invokeMethod(menu, "open"));
+        QTRY_VERIFY(menu->property("opened").toBool());
+        // Wide, Medium and Compact (where the menu is longest)
+        for (const int width : {2400, 900, 500}) {
+            QVERIFY(ui.opensWindowOfWidth(width));
+            const qreal paddings =
+                menu->property("leftPadding").toReal() + menu->property("rightPadding").toReal();
+            qreal widest = 0;
+            for (QQuickItem *entry : ui.menuItems(QStringLiteral("mainMenu"))) {
+                if (entry->isVisible())
+                    widest = qMax(widest, entry->implicitWidth());
+            }
+            QVERIFY(widest > 0);
+            const QString label = QStringLiteral("%1 px").arg(width);
+            // No wider than the widest shown entry needs, and inside the window
+            QTRY_VERIFY2(menu->property("width").toReal() <= widest + paddings + 2,
+                         qPrintable(label));
+            QVERIFY2(menu->property("width").toReal() <= width, qPrintable(label));
+            // A window narrower than the menu needs caps it: the entries are squeezed by design then
+            if (menu->property("width").toReal() + 1 < widest + paddings)
+                continue;
+            // Every entry gets what it asks for: no label of it (the shortcut included) is squeezed
+            for (QQuickItem *entry : ui.menuItems(QStringLiteral("mainMenu"))) {
+                if (!entry->isVisible())
+                    continue;
+                QVERIFY2(entry->width() + 0.5 >= entry->implicitWidth(), qPrintable(label));
+                auto *content = entry->property("contentItem").value<QQuickItem *>();
+                if (!content)
+                    continue;
+                for (QQuickItem *part : content->childItems()) {
+                    if (part->isVisible() && part->inherits("QQuickText"))
+                        QVERIFY2(part->width() + 0.5 >= part->implicitWidth(),
+                                 qPrintable(label + QStringLiteral(": ")
+                                            + part->property("text").toString()));
+                }
+            }
+        }
+        QVERIFY(QMetaObject::invokeMethod(menu, "close"));
+        QTRY_VERIFY(!menu->property("visible").toBool());
+    }
+
+    void adminDashboardEntryIsForAdministratorsOnly()
+    {
+        const auto shown = [this](bool administrator) {
+            Ui ui(m_home->path());
+            ui.server.administrator = administrator;
+            if (!ui.load() || !buildState(ui, QStringLiteral("home")))
+                return QStringLiteral("no session");
+            QObject *action = ui.shellAction(QStringLiteral("adminDashboardAction"));
+            QObject *menu = ui.popup(QStringLiteral("mainMenu"));
+            QObject *entry = ui.popup(QStringLiteral("menuAdminItem"));
+            if (!action || !menu || !entry || !QMetaObject::invokeMethod(menu, "open")
+                || !QTest::qWaitFor([menu] { return menu->property("opened").toBool(); }, 5000))
+                return QStringLiteral("no menu");
+            const bool actionVisible = action->property("visible").toBool();
+            // The menu entry follows its action
+            return entry->property("visible").toBool() == actionVisible
+                       ? (actionVisible ? QStringLiteral("shown") : QStringLiteral("hidden"))
+                       : QStringLiteral("entry and action disagree");
+        };
+        QCOMPARE(shown(false), QStringLiteral("hidden"));
+        QCOMPARE(shown(true), QStringLiteral("shown"));
+    }
+
     void theMainMenuRefreshReloadsTheFavoritesPage()
     {
         Ui ui(m_home->path());
@@ -4417,14 +4928,12 @@ class TestUiPages : public QObject {
         QVERIFY(!ui.item(QStringLiteral("remoteSessionsFailed"))->isVisible());
         QVERIFY(ui.itemsStartingWith(QStringLiteral("remoteSessionRow")).isEmpty());
 
-        // The placeholder offers the Refresh: the footer does not repeat it
+        // The footer keeps its Refresh under the placeholder, so the dialog keeps its size
         QObject *footerRefresh = ui.popup(QStringLiteral("remoteRefreshAction"));
-        QObject *ownRefresh = ui.popup(QStringLiteral("remoteEmptyRefreshAction"));
-        QVERIFY(footerRefresh && ownRefresh);
-        QVERIFY(!footerRefresh->property("visible").toBool());
-        QVERIFY(ownRefresh->property("visible").toBool());
+        QVERIFY(footerRefresh);
+        QVERIFY(footerRefresh->property("visible").toBool());
         const int asked = ui.server.listingRoutes.value(QStringLiteral("Sessions")).size();
-        QVERIFY(QMetaObject::invokeMethod(ownRefresh, "trigger"));
+        QVERIFY(QMetaObject::invokeMethod(footerRefresh, "trigger"));
         QTRY_VERIFY(ui.server.listingRoutes.value(QStringLiteral("Sessions")).size() > asked);
         QTRY_COMPARE(ui.controller.remoteSessions()->status(), Kinefin::RemoteSessionsModel::Ready);
         QVERIFY(empty->isVisible());
@@ -4726,6 +5235,108 @@ class TestUiPages : public QObject {
         QTest::qWait(200);
     }
 
+    void remoteDialogKeepsItsSizeFromOpeningToTheAnswer_data()
+    {
+        QTest::addColumn<bool>("empty");
+        QTest::newRow("no sessions") << true;
+        QTest::newRow("sessions") << false;
+    }
+
+    void remoteDialogKeepsItsSizeFromOpeningToTheAnswer()
+    {
+        QFETCH(bool, empty);
+        Ui ui(m_home->path());
+        if (empty)
+            ui.server.listingRawBody.insert(QStringLiteral("Sessions"), QByteArrayLiteral("[]"));
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("home")));
+        // The answer is held, so the size is taken while the dialog still only spins
+        ui.server.heldFamilies.insert(QStringLiteral("Sessions"));
+        QVERIFY(QMetaObject::invokeMethod(ui.shellAction(QStringLiteral("remoteSessionsAction")),
+                                          "trigger"));
+        QObject *dialog = ui.popup(QStringLiteral("remoteSessionsDialog"));
+        QVERIFY(dialog);
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QTRY_VERIFY(ui.server.heldCount() >= 1);
+        // The baseline is taken once the popup's size pass has settled: two reads apart agree
+        const auto settledSize = [dialog] {
+            QSizeF last(-1, -1);
+            for (int i = 0; i < 50; ++i) {
+                const QSizeF now(dialog->property("width").toReal(),
+                                 dialog->property("height").toReal());
+                if (now == last)
+                    return now;
+                last = now;
+                QTest::qWait(50);
+            }
+            return QSizeF();
+        };
+        const QSizeF opened = settledSize();
+        const qreal width = opened.width();
+        const qreal height = opened.height();
+        QVERIFY(height > 0);
+
+        // The fake answers a held request with an empty body, which fails it: the footer's Refresh then asks again at once instead of the next poll
+        ui.server.heldFamilies.clear();
+        ui.server.releaseHeld();
+        QTRY_COMPARE(ui.controller.remoteSessions()->status(),
+                     Kinefin::RemoteSessionsModel::Failed);
+        QVERIFY(
+            QMetaObject::invokeMethod(ui.popup(QStringLiteral("remoteRefreshAction")), "trigger"));
+        QTRY_COMPARE(ui.controller.remoteSessions()->status(), Kinefin::RemoteSessionsModel::Ready);
+        if (empty)
+            QTRY_VERIFY(ui.item(QStringLiteral("remoteSessionsEmpty"))->isVisible());
+        else
+            QTRY_VERIFY(!ui.itemsStartingWith(QStringLiteral("remoteSessionRow")).isEmpty());
+        QVERIFY(settledSize().isValid());
+        QVERIFY(qAbs(dialog->property("width").toReal() - width) <= 1);
+        QVERIFY2(
+            qAbs(dialog->property("height").toReal() - height) <= 1,
+            qPrintable(
+                QStringLiteral("%1 -> %2").arg(height).arg(dialog->property("height").toReal())));
+    }
+
+    void shortcutsDialogAlignsTheKeysAndTheDescriptions()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("home")));
+        QMetaObject::invokeMethod(ui.shellAction(QStringLiteral("shortcutsAction")), "trigger");
+        QObject *dialog = ui.popup(QStringLiteral("shortcutsDialog"));
+        QVERIFY(dialog);
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QTest::qWait(500);
+        const QList<QQuickItem *> parts = ui.itemsStartingWith(QStringLiteral("shortcutsKeyPart"));
+        QVERIFY(!parts.isEmpty());
+        QMap<QQuickItem *, QList<QQuickItem *>> rows;
+        for (QQuickItem *part : parts)
+            rows[part->parentItem()].append(part);
+        const auto left = [](const QQuickItem *item) {
+            return item->mapToScene(QPointF(0, 0)).x();
+        };
+        qreal gap = -1;
+        int combinations = 0;
+        for (QList<QQuickItem *> &row : rows) {
+            std::sort(row.begin(), row.end(),
+                      [&](const QQuickItem *a, const QQuickItem *b) { return left(a) < left(b); });
+            if (row.size() > 1)
+                ++combinations;
+            for (qsizetype i = 1; i < row.size(); ++i) {
+                const qreal between =
+                    left(row.at(i)) - (left(row.at(i - 1)) + row.at(i - 1)->width());
+                if (gap < 0)
+                    gap = between;
+                QVERIFY2(qAbs(between - gap) <= 1, qPrintable(QString::number(between)));
+            }
+        }
+        QVERIFY(combinations > 1);
+        const QList<QQuickItem *> descriptions =
+            ui.itemsStartingWith(QStringLiteral("shortcutsDescription"));
+        QCOMPARE(descriptions.size(), rows.size());
+        for (const QQuickItem *description : descriptions)
+            QVERIFY(qAbs(left(description) - left(descriptions.constFirst())) <= 1);
+    }
+
     void typingInTheHeaderBoxOpensTheSearchPage()
     {
         Ui ui(m_home->path());
@@ -4860,13 +5471,24 @@ class TestUiPages : public QObject {
         ui.clickCenter(audio);
         QTRY_COMPARE(page->property("activeSection").toString(), QStringLiteral("audio"));
         QCOMPARE(ui.stackDepth(), 2);
+        // The groups of the category are cards of their own, each under its heading
+        QTRY_VERIFY(ui.item(QStringLiteral("settingsGroupCard_1")) != nullptr);
+        QVERIFY(ui.showsText(QStringLiteral("Output")));
+        QVERIFY(ui.showsText(QStringLiteral("Passthrough")));
+        // Narrow: the entry that was open stays open in place of the list, and Back brings the list back
         QVERIFY(ui.opensWindowOfWidth(440));
         QTRY_VERIFY(page->property("narrow").toBool());
-        audio = ui.item(QStringLiteral("settingsCompactCategory_audio"));
-        QVERIFY(audio);
-        ui.clickCenter(audio);
-        QTRY_VERIFY(ui.item(QStringLiteral("settingsSectionPage")) != nullptr);
-        QTRY_COMPARE(ui.stackDepth(), 3);
+        QTRY_VERIFY(ui.item(QStringLiteral("settingsContentView"))->isVisible());
+        QTRY_VERIFY(!ui.item(QStringLiteral("settingsCategory_main"))->isVisible());
+        QTest::keyClick(ui.window, Qt::Key_Escape);
+        QTRY_VERIFY(ui.item(QStringLiteral("settingsCategory_main"))->isVisible());
+        QVERIFY(!ui.item(QStringLiteral("settingsContentView"))->isVisible());
+        QCOMPARE(ui.stackDepth(), 2);
+        // An entry of the list opens in place, and the stack stays as deep
+        ui.clickCenter(ui.item(QStringLiteral("settingsCategory_video")));
+        QTRY_COMPARE(page->property("activeSection").toString(), QStringLiteral("video"));
+        QTRY_VERIFY(ui.item(QStringLiteral("settingsContentView"))->isVisible());
+        QCOMPARE(ui.stackDepth(), 2);
     }
 
     void theSettingsFormIsCenteredAtEveryWidth_data()
@@ -5644,13 +6266,14 @@ class TestUiPages : public QObject {
         Ui ui(m_home->path());
         QVERIFY(ui.load());
         QVERIFY(buildState(ui, QStringLiteral("details")));
-        QQmlListReference actions(ui.item(QStringLiteral("itemDetailsPage")), "actions");
-        const auto action = [&actions](const QString &text) {
-            for (qsizetype i = 0; i < actions.count(); ++i) {
-                if (actions.at(i)->property("text").toString() == text)
-                    return actions.at(i);
-            }
-            return static_cast<QObject *>(nullptr);
+        // The hero shows these actions inline: the page keeps them out of its toolbar
+        QQuickItem *page = ui.item(QStringLiteral("itemDetailsPage"));
+        const auto action = [page](const QString &text) {
+            const QString name = text == QStringLiteral("Add to Queue")
+                                     ? QStringLiteral("addToQueueAction")
+                                     : QStringLiteral("playNextAction");
+            QObject *found = page->findChild<QObject *>(name);
+            return found && found->property("text").toString() == text ? found : nullptr;
         };
         QVERIFY(action(QStringLiteral("Add to Queue")));
         QVERIFY(action(QStringLiteral("Play Next")));
@@ -5679,15 +6302,11 @@ class TestUiPages : public QObject {
         QVERIFY(QMetaObject::invokeMethod(ui.engine.rootObjects().constFirst(), "openItem",
                                           Q_ARG(QVariant, kSeriesId), Q_ARG(QVariant, QVariant())));
         QTRY_VERIFY(ui.item(QStringLiteral("itemDetailsPage")) != nullptr);
-        QQmlListReference actions(ui.item(QStringLiteral("itemDetailsPage")), "actions");
         QObject *playNext = nullptr;
         QTRY_VERIFY([&] {
-            for (qsizetype i = 0; i < actions.count(); ++i) {
-                if (actions.at(i)->property("text").toString() == QStringLiteral("Play Next")
-                    && actions.at(i)->property("visible").toBool())
-                    playNext = actions.at(i);
-            }
-            return playNext != nullptr;
+            playNext = ui.item(QStringLiteral("itemDetailsPage"))
+                           ->findChild<QObject *>(QStringLiteral("playNextAction"));
+            return playNext && playNext->property("visible").toBool();
         }());
         QMetaObject::invokeMethod(playNext, "trigger");
         QTRY_COMPARE(ui.controller.queue()->count(), 4);
@@ -6282,6 +6901,131 @@ class TestUiPages : public QObject {
         QCOMPARE(ui.rootTab(), QStringLiteral("movies"));
     }
 
+    // The animators of the render thread write only their end value back: the row is dark from the switch (before the push) and whole again at the end
+    void aTabSwitchFadesTheNewPageIn()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(1000));
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        QTRY_VERIFY(!ui.tabSwitching());
+        auto *stack = ui.window->property("pageStack").value<QObject *>();
+        QVERIFY(stack);
+        PropertyRecorder opacity(stack, "opacity");
+        PropertyRecorder switching(ui.window, "tabSwitching");
+        QVERIFY(ui.clickTab(QStringLiteral("Home")));
+        QTRY_COMPARE(ui.rootTab(), QStringLiteral("home"));
+        QTRY_VERIFY(!ui.tabSwitching());
+        QVERIFY(!opacity.values.isEmpty());
+        QCOMPARE(opacity.values.first(), 0.0);
+        QTRY_COMPARE(stack->property("opacity").toReal(), 1.0);
+        QVERIFY(switching.values.contains(1.0));
+        QCOMPARE(switching.values.last(), 0.0);
+        QCOMPARE(ui.stackDepth(), 1);
+        QCOMPARE(ui.currentDetails()->objectName(), QStringLiteral("homePage"));
+    }
+
+    void aTabSwitchSlidesFromTheTabSide_data()
+    {
+        QTest::addColumn<QString>("fromLabel");
+        QTest::addColumn<QString>("fromTab");
+        QTest::addColumn<QString>("toLabel");
+        QTest::addColumn<QString>("toTab");
+        QTest::addColumn<bool>("rightToLeft");
+        QTest::addColumn<bool>("entersFromRight");
+        const QString home = QStringLiteral("home"), movies = QStringLiteral("movies"),
+                      shows = QStringLiteral("tvshows");
+        QTest::newRow("home to movies") << "Home" << home << "Movies" << movies << false << true;
+        QTest::newRow("movies to home") << "Movies" << movies << "Home" << home << false << false;
+        QTest::newRow("movies to shows") << "Movies" << movies << "Shows" << shows << false << true;
+        QTest::newRow("shows to home") << "Shows" << shows << "Home" << home << false << false;
+        QTest::newRow("home to movies, right to left")
+            << "Home" << home << "Movies" << movies << true << false;
+        QTest::newRow("shows to movies, right to left")
+            << "Shows" << shows << "Movies" << movies << true << true;
+    }
+
+    // The new tab comes in from the side it has in the tab bar (mirrored in right-to-left): the sign of every offset the slide takes
+    void aTabSwitchSlidesFromTheTabSide()
+    {
+        QFETCH(QString, fromLabel);
+        QFETCH(QString, fromTab);
+        QFETCH(QString, toLabel);
+        QFETCH(QString, toTab);
+        QFETCH(bool, rightToLeft);
+        QFETCH(bool, entersFromRight);
+        const Qt::LayoutDirection direction = QGuiApplication::layoutDirection();
+        QGuiApplication::setLayoutDirection(rightToLeft ? Qt::RightToLeft : Qt::LeftToRight);
+        const auto restoreDirection =
+            qScopeGuard([direction] { QGuiApplication::setLayoutDirection(direction); });
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(1000));
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        // A click on a mirrored tab bar does not switch tabs offscreen: the right-to-left rows switch through the shell, as the tab actions do
+        const auto switchTo = [&ui, rightToLeft](const QString &label, const QString &tab) {
+            if (!rightToLeft)
+                return ui.clickTab(label);
+            return QMetaObject::invokeMethod(ui.engine.rootObjects().constFirst(), "openTab",
+                                             Q_ARG(QVariant, tab), Q_ARG(QVariant, QString()));
+        };
+        if (fromTab != QLatin1String("movies")) {
+            QVERIFY(switchTo(fromLabel, fromTab));
+            QTRY_COMPARE(ui.rootTab(), fromTab);
+        }
+        QTRY_VERIFY(!ui.tabSwitching());
+        auto *stack = ui.window->property("pageStack").value<QObject *>();
+        QVERIFY(stack);
+        const QQmlListReference transforms(stack, "transform");
+        QVERIFY(transforms.isValid() && transforms.count() == 1);
+        QObject *shift = transforms.at(0);
+        PropertyRecorder offsets(shift, "x");
+        QVERIFY(switchTo(toLabel, toTab));
+        QTRY_COMPARE(ui.rootTab(), toTab);
+        QTRY_VERIFY(!ui.tabSwitching());
+        QVERIFY(!offsets.values.isEmpty());
+        QVERIFY(std::any_of(offsets.values.cbegin(), offsets.values.cend(),
+                            [](qreal x) { return qAbs(x) > 1; }));
+        const bool onTheRightSide =
+            std::all_of(offsets.values.cbegin(), offsets.values.cend(),
+                        [entersFromRight](qreal x) { return entersFromRight ? x >= 0 : x <= 0; });
+        QVERIFY(onTheRightSide);
+        QCOMPARE(shift->property("x").toReal(), 0.0);
+    }
+
+    // A switch that begins while the first one still runs ends the first at once: one page at the root, the row whole and in place
+    void aSecondTabClickDuringTheSwitchEndsOnTheSecondTab()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(1000));
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        QTRY_VERIFY(!ui.tabSwitching());
+        auto *stack = ui.window->property("pageStack").value<QObject *>();
+        QVERIFY(stack);
+        const QQmlListReference transforms(stack, "transform");
+        QVERIFY(transforms.isValid() && transforms.count() == 1);
+        QObject *shift = transforms.at(0);
+        QObject *root = ui.engine.rootObjects().constFirst();
+        const auto openTab = [root](const QString &name) {
+            return QMetaObject::invokeMethod(root, "openTab", Q_ARG(QVariant, name),
+                                             Q_ARG(QVariant, QString()));
+        };
+        // Back to back, then with the first motion under way
+        QVERIFY(openTab(QStringLiteral("tvshows")));
+        QVERIFY(openTab(QStringLiteral("home")));
+        QTRY_COMPARE(ui.rootTab(), QStringLiteral("home"));
+        QTRY_VERIFY(!ui.tabSwitching());
+        QVERIFY(openTab(QStringLiteral("movies")));
+        QTest::qWait(60);
+        QVERIFY(openTab(QStringLiteral("tvshows")));
+        QTRY_COMPARE(ui.rootTab(), QStringLiteral("tvshows"));
+        QTRY_VERIFY(!ui.tabSwitching());
+        QCOMPARE(ui.stackDepth(), 1);
+        QTRY_COMPARE(stack->property("opacity").toReal(), 1.0);
+        QTRY_COMPARE(shift->property("x").toReal(), 0.0);
+    }
+
     void selectorFromTwoLibraries()
     {
         Ui ui(m_home->path());
@@ -6449,8 +7193,13 @@ class TestUiPages : public QObject {
         QVERIFY(field);
         // The placeholder names the tab, never a library of the server
         QCOMPARE(field->property("placeholderText").toString(), QStringLiteral("Search in Movies"));
-        // A page above the tab: the first keystroke pops back to the tab
-        QMetaObject::invokeMethod(ui.shellAction(QStringLiteral("settingsAction")), "trigger");
+        // A page above the tab: the first keystroke pops back to the tab (not over Settings or Favorites, where the box is global)
+        QVariantMap queueProperties;
+        queueProperties.insert(QStringLiteral("connection"), QVariant::fromValue(&ui.controller));
+        QMetaObject::invokeMethod(ui.engine.rootObjects().constFirst(), "openSection",
+                                  Q_ARG(QVariant, QStringLiteral("queuePage")),
+                                  Q_ARG(QVariant, QStringLiteral("QueuePage.qml")),
+                                  Q_ARG(QVariant, queueProperties));
         QTRY_COMPARE(ui.stackDepth(), 2);
         field->forceActiveFocus(Qt::TabFocusReason);
         QTRY_VERIFY(field->hasActiveFocus());
@@ -6711,44 +7460,75 @@ class TestUiPages : public QObject {
         QTRY_COMPARE(ui.controller.movies()->status(), Kinefin::LibraryItemsModel::Ready);
     }
 
-    void userPreferencesNeedASession()
+    void settingsShowsTheUserEntryOnlyWithASession()
     {
         Ui ui(m_home->path());
         QVERIFY(ui.load());
-        QVERIFY(buildState(ui, QStringLiteral("servers")));
-        QObject *action = ui.shellAction(QStringLiteral("userPreferencesAction"));
-        QVERIFY(action);
-        QVERIFY(!action->property("visible").toBool());
-        QVERIFY(buildState(ui, QStringLiteral("login")));
-        QVERIFY(!action->property("visible").toBool());
-        QVERIFY(ui.signInAs(QStringLiteral("fixture-user")));
-        QVERIFY(action->property("visible").toBool());
+        QVERIFY(buildState(ui, QStringLiteral("settings")));
+        QQuickItem *page = ui.item(QStringLiteral("settingsPage"));
+        QVERIFY(page);
+        // Signed out: the entries of this device only, no account caption and no link to the server preferences
+        QVERIFY(ui.item(QStringLiteral("settingsCategory_main"))->isVisible());
+        QVERIFY(ui.item(QStringLiteral("settingsCategory_user")) == nullptr);
+        QVERIFY(!ui.item(QStringLiteral("settingsAccountCaption"))->isVisible());
+        QVERIFY(QMetaObject::invokeMethod(page, "selectSection",
+                                          Q_ARG(QVariant, QStringLiteral("audio"))));
+        QTRY_COMPARE(page->property("activeSection").toString(), QStringLiteral("audio"));
+        QVERIFY(!ui.item(QStringLiteral("settingsTwinCard"))->isVisible());
+        // Signed in: the entry sits alone under its own caption, after the entries of this device
+        QVERIFY(ui.signIn());
+        QTRY_VERIFY(ui.item(QStringLiteral("settingsPage")) == nullptr);
+        QVERIFY(
+            QMetaObject::invokeMethod(ui.shellAction(QStringLiteral("settingsAction")), "trigger"));
+        QTRY_VERIFY(ui.item(QStringLiteral("settingsCategory_user")) != nullptr);
+        QQuickItem *user = ui.item(QStringLiteral("settingsCategory_user"));
+        QVERIFY(user->isVisible());
+        QCOMPARE(user->property("text").toString(), QStringLiteral("User"));
+        QVERIFY(ui.item(QStringLiteral("settingsAccountCaption"))->isVisible());
+        QVERIFY(ui.item(QStringLiteral("settingsCategory_other"))->mapToScene(QPointF(0, 0)).y()
+                < user->mapToScene(QPointF(0, 0)).y());
+        QCOMPARE(ui.item(QStringLiteral("settingsCategory_other"))->property("text").toString(),
+                 QStringLiteral("mpv Configuration"));
+        // The form is not alive until the entry is chosen
+        QVERIFY(ui.item(QStringLiteral("userPreferencesForm")) == nullptr);
+        ui.clickCenter(user);
+        QTRY_VERIFY(ui.item(QStringLiteral("userPreferencesForm")) != nullptr);
+        QCOMPARE(ui.item(QStringLiteral("settingsContentHeading"))->property("text").toString(),
+                 QStringLiteral("User"));
+        QCOMPARE(ui.stackDepth(), 2);
     }
 
-    void userPreferencesOpenFromTheAccountMenuAndShowTheStoredValues()
+    void accountMenuOffersNoUserPreferences()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(ui.shellAction(QStringLiteral("userPreferencesAction")) == nullptr);
+        ui.clickCenter(ui.item(QStringLiteral("accountButton")));
+        QObject *menu = ui.popup(QStringLiteral("accountMenu"));
+        QVERIFY(menu);
+        QTRY_VERIFY(menu->property("opened").toBool());
+        QStringList names;
+        for (const QQuickItem *entry : ui.menuItems(QStringLiteral("accountMenu")))
+            names << entry->objectName();
+        QCOMPARE(names,
+                 QStringList({QStringLiteral("switchUserItem"), QStringLiteral("signOutItem"),
+                              QStringLiteral("switchServerItem")}));
+        QVERIFY(QMetaObject::invokeMethod(menu, "close"));
+        QTRY_VERIFY(!menu->property("visible").toBool());
+    }
+
+    void userPreferencesOpenFromSettingsAndShowTheStoredValues()
     {
         Ui ui(m_home->path());
         RemotePreferences remote(ui);
         QVERIFY(ui.load());
         QVERIFY(ui.signIn());
-        // The account menu lists the entry first, and it is not part of Settings
-        ui.clickCenter(ui.item(QStringLiteral("accountButton")));
-        QObject *menu = ui.popup(QStringLiteral("accountMenu"));
-        QVERIFY(menu);
-        QTRY_VERIFY(menu->property("opened").toBool());
-        const QList<QQuickItem *> entries = ui.menuItems(QStringLiteral("accountMenu"));
-        QVERIFY(!entries.isEmpty());
-        QCOMPARE(entries.constFirst()->objectName(), QStringLiteral("userPreferencesItem"));
-        QVERIFY(entries.constFirst()->isVisible());
-        QCOMPARE(entries.constFirst()->property("text").toString(),
-                 QStringLiteral("User Preferences"));
-        QVERIFY(QMetaObject::invokeMethod(menu, "close"));
-        QTRY_VERIFY(!menu->property("visible").toBool());
         QVERIFY(openPreferences(ui) != nullptr);
-        // No tab and no menu button marks the page
-        QCOMPARE(ui.window->property("currentSection").toString(),
-                 QStringLiteral("userPreferences"));
-        QVERIFY(!ui.item(QStringLiteral("mainMenuButton"))->property("down").toBool());
+        // Settings marks the menu button, no tab is marked, and the form is a page of its own no more
+        QCOMPARE(ui.window->property("currentSection").toString(), QStringLiteral("settings"));
+        QVERIFY(ui.item(QStringLiteral("mainMenuButton"))->property("down").toBool());
+        QCOMPARE(ui.stackDepth(), 2);
         // The stored values: the language names come from the catalog
         QQuickItem *audio = ui.item(QStringLiteral("prefAudioLanguage"));
         QQuickItem *subtitles = ui.item(QStringLiteral("prefSubtitleLanguage"));
@@ -6874,35 +7654,36 @@ class TestUiPages : public QObject {
         auto *prefs = ui.controller.userConfiguration();
         QObject *dialog = ui.popup(QStringLiteral("unsavedChangesDialog"));
         QVERIFY(dialog);
-        // Without a draft Escape just goes back
+        // Without a draft Escape just leaves Settings
         QTest::keyClick(ui.window, Qt::Key_Escape);
-        QTRY_VERIFY(ui.item(QStringLiteral("userPreferencesPage")) == nullptr);
+        QTRY_VERIFY(ui.item(QStringLiteral("userPreferencesForm")) == nullptr);
+        QTRY_VERIFY(ui.item(QStringLiteral("settingsPage")) == nullptr);
         QVERIFY(openPreferences(ui) != nullptr);
         dialog = ui.popup(QStringLiteral("unsavedChangesDialog"));
         QVERIFY(dialog);
         prefs->setSubtitleMode(QStringLiteral("Always"));
         QTRY_VERIFY(prefs->dirty());
-        // With one it asks before the page is popped, and Cancel stays
+        // With one it asks before Settings is popped, and Cancel stays
         QTest::keyClick(ui.window, Qt::Key_Escape);
         QTRY_VERIFY(dialog->property("opened").toBool());
         QCOMPARE(ui.stackDepth(), 2);
-        QVERIFY(ui.item(QStringLiteral("userPreferencesPage")) != nullptr);
+        QVERIFY(ui.item(QStringLiteral("userPreferencesForm")) != nullptr);
         QVERIFY(
             clickInDialog(ui, QStringLiteral("unsavedChangesDialog"), QStringLiteral("Cancel")));
         QTRY_VERIFY(!dialog->property("visible").toBool());
         QCOMPARE(ui.stackDepth(), 2);
         QVERIFY(prefs->dirty());
         QCOMPARE(prefs->subtitleMode(), QStringLiteral("Always"));
-        // A section asks the same, and Discard opens it
-        QVERIFY(
-            QMetaObject::invokeMethod(ui.shellAction(QStringLiteral("settingsAction")), "trigger"));
+        // Another entry asks the same, and Discard opens it
+        QQuickItem *settingsPage = ui.item(QStringLiteral("settingsPage"));
+        ui.clickCenter(ui.item(QStringLiteral("settingsCategory_audio")));
         QTRY_VERIFY(dialog->property("opened").toBool());
-        QVERIFY(ui.item(QStringLiteral("settingsPage")) == nullptr);
-        QVERIFY(ui.item(QStringLiteral("userPreferencesPage")) != nullptr);
+        QCOMPARE(settingsPage->property("activeSection").toString(), QStringLiteral("user"));
+        QVERIFY(ui.item(QStringLiteral("userPreferencesForm")) != nullptr);
         QVERIFY(
             clickInDialog(ui, QStringLiteral("unsavedChangesDialog"), QStringLiteral("Discard")));
-        QTRY_VERIFY(ui.item(QStringLiteral("settingsPage")) != nullptr);
-        QTRY_VERIFY(ui.item(QStringLiteral("userPreferencesPage")) == nullptr);
+        QTRY_COMPARE(settingsPage->property("activeSection").toString(), QStringLiteral("audio"));
+        QTRY_VERIFY(ui.item(QStringLiteral("userPreferencesForm")) == nullptr);
         QVERIFY(!prefs->dirty());
         QVERIFY(remote.posts.isEmpty());
         // A tab asks too, and Save writes the draft and then leaves
@@ -6915,7 +7696,8 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(dialog->property("opened").toBool());
         QVERIFY(clickInDialog(ui, QStringLiteral("unsavedChangesDialog"), QStringLiteral("Save")));
         QTRY_COMPARE(remote.posts.size(), 1);
-        QTRY_VERIFY(ui.item(QStringLiteral("userPreferencesPage")) == nullptr);
+        QTRY_VERIFY(ui.item(QStringLiteral("userPreferencesForm")) == nullptr);
+        QTRY_VERIFY(ui.item(QStringLiteral("settingsPage")) == nullptr);
         QTRY_VERIFY(ui.item(QStringLiteral("homePage")) != nullptr);
         QCOMPARE(ui.stackDepth(), 1);
         QVERIFY(!prefs->dirty());
@@ -6955,7 +7737,7 @@ class TestUiPages : public QObject {
         QCOMPARE(ui.controller.state(), ConnectionController::Authenticated);
         QVERIFY(prefs->dirty());
         QCOMPARE(prefs->subtitleMode(), QStringLiteral("Always"));
-        QVERIFY(ui.item(QStringLiteral("userPreferencesPage")) != nullptr);
+        QVERIFY(ui.item(QStringLiteral("userPreferencesForm")) != nullptr);
         // Discard settles the draft, then the action goes on
         QVERIFY(QMetaObject::invokeMethod(ui.shellAction(action), "trigger"));
         QTRY_VERIFY(dialog->property("opened").toBool());
@@ -6991,7 +7773,7 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(dialog->property("opened").toBool());
         QCOMPARE(ui.stackDepth(), 2);
         // The page is brought back to the front under the dialog
-        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("userPreferencesPage"));
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("settingsPage"));
         QVERIFY(
             clickInDialog(ui, QStringLiteral("unsavedChangesDialog"), QStringLiteral("Cancel")));
         QTRY_VERIFY(!dialog->property("visible").toBool());
@@ -7007,7 +7789,7 @@ class TestUiPages : public QObject {
         QVERIFY(prefs->dirty());
     }
 
-    void theHeaderSearchIsGlobalOnThePreferencesPage()
+    void theHeaderSearchIsGlobalOnTheSettingsPage()
     {
         Ui ui(m_home->path());
         RemotePreferences remote(ui);
@@ -7021,8 +7803,7 @@ class TestUiPages : public QObject {
         QVERIFY(openPreferences(ui) != nullptr);
         // The Movies tab stays at the root of the stack but is not marked, and the box searches the server
         QCOMPARE(ui.rootTab(), QStringLiteral("movies"));
-        QCOMPARE(ui.window->property("currentSection").toString(),
-                 QStringLiteral("userPreferences"));
+        QCOMPARE(ui.window->property("currentSection").toString(), QStringLiteral("settings"));
         QTRY_COMPARE(field->property("placeholderText").toString(), QStringLiteral("Search"));
         for (int index = 0; index < 3; ++index)
             QTRY_VERIFY(!ui.tabButtons().value(index)->property("checked").toBool());
@@ -7033,7 +7814,7 @@ class TestUiPages : public QObject {
         QCOMPARE(ui.controller.search()->term(), QStringLiteral("ab"));
         QCOMPARE(ui.controller.movies()->searchTerm(), QString());
         QCOMPARE(ui.stackDepth(), 3);
-        QVERIFY(ui.item(QStringLiteral("userPreferencesPage")) != nullptr);
+        QVERIFY(ui.item(QStringLiteral("userPreferencesForm")) != nullptr);
     }
 
     void aFailedLoadOffersRetryAndAMissingCatalogKeepsTheStoredLanguage()
@@ -7048,8 +7829,11 @@ class TestUiPages : public QObject {
         // That read must be over before the failure below is set: the page does not start a load while one is under way
         QTRY_VERIFY(prefs->state() == Kinefin::UserConfigurationModel::Ready && prefs->loaded());
         ui.server.usersMeStatus = 500;
-        QVERIFY(QMetaObject::invokeMethod(ui.shellAction(QStringLiteral("userPreferencesAction")),
-                                          "trigger"));
+        QVERIFY(
+            QMetaObject::invokeMethod(ui.shellAction(QStringLiteral("settingsAction")), "trigger"));
+        QTRY_VERIFY(ui.item(QStringLiteral("settingsPage")) != nullptr);
+        QVERIFY(QMetaObject::invokeMethod(ui.item(QStringLiteral("settingsPage")), "selectSection",
+                                          Q_ARG(QVariant, QStringLiteral("user"))));
         QTRY_COMPARE(prefs->state(), Kinefin::UserConfigurationModel::Failed);
         QTRY_VERIFY(ui.showsText(QStringLiteral(
             "Could not load the preferences: check the connection to the server and try again")));
@@ -7127,7 +7911,7 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(prefs->dirty());
         // The session ends without asking: nothing of the draft can reach the next one
         ui.controller.switchUser();
-        QTRY_VERIFY(ui.item(QStringLiteral("userPreferencesPage")) == nullptr);
+        QTRY_VERIFY(ui.item(QStringLiteral("userPreferencesForm")) == nullptr);
         QTRY_COMPARE(prefs->state(), Kinefin::UserConfigurationModel::Idle);
         QVERIFY(!prefs->dirty());
         QVERIFY(!prefs->loaded());
@@ -7159,6 +7943,312 @@ class TestUiPages : public QObject {
         // The id the user cannot see keeps its slot
         QCOMPARE(remote.posts.constFirst().value(QStringLiteral("OrderedViews")).toArray(),
                  QJsonArray({kHiddenId, kSeries, kMovies, kMusicLibrary}));
+    }
+
+    void leavingTheUserEntryAsksAboutTheDraft_data()
+    {
+        QTest::addColumn<QString>("exit");
+        QTest::addColumn<QString>("outcome");
+        for (const QString &exit :
+             {QStringLiteral("another entry"), QStringLiteral("escape"),
+              QStringLiteral("header back"), QStringLiteral("mouse back"),
+              QStringLiteral("tab shortcut"), QStringLiteral("narrow back")}) {
+            for (const QString &outcome :
+                 {QStringLiteral("cancel"), QStringLiteral("discard"), QStringLiteral("save")})
+                QTest::addRow("%s, %s", qPrintable(exit), qPrintable(outcome)) << exit << outcome;
+        }
+        // Closing ends the process of the test window: only the answer that keeps it open is run
+        QTest::addRow("close window, cancel")
+            << QStringLiteral("close window") << QStringLiteral("cancel");
+    }
+
+    void leavingTheUserEntryAsksAboutTheDraft()
+    {
+        QFETCH(QString, exit);
+        QFETCH(QString, outcome);
+        Ui ui(m_home->path());
+        RemotePreferences remote(ui);
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        if (exit == QLatin1String("narrow back"))
+            QVERIFY(ui.opensWindowOfWidth(440));
+        QQuickItem *page = openPreferences(ui);
+        QVERIFY(page != nullptr);
+        QQuickItem *settingsPage = ui.item(QStringLiteral("settingsPage"));
+        auto *prefs = ui.controller.userConfiguration();
+        QObject *dialog = ui.popup(QStringLiteral("unsavedChangesDialog"));
+        QVERIFY(dialog);
+        prefs->setSubtitleMode(QStringLiteral("Always"));
+        QTRY_VERIFY(prefs->dirty());
+        // The ways out, each as the user would take it
+        if (exit == QLatin1String("another entry")) {
+            ui.clickCenter(ui.item(QStringLiteral("settingsCategory_audio")));
+        } else if (exit == QLatin1String("escape") || exit == QLatin1String("narrow back")) {
+            QTest::keyClick(ui.window, Qt::Key_Escape);
+        } else if (exit == QLatin1String("header back")) {
+            ui.clickCenter(ui.item(QStringLiteral("headerBackButton")));
+        } else if (exit == QLatin1String("mouse back")) {
+            QTest::mouseClick(ui.window, Qt::BackButton, Qt::NoModifier,
+                              QPoint(ui.window->width() / 2, ui.window->height() / 2));
+        } else if (exit == QLatin1String("tab shortcut")) {
+            QTest::keyClick(ui.window, Qt::Key_1, Qt::ControlModifier);
+        } else {
+            ui.window->close();
+        }
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        // Nothing has moved under the question
+        QVERIFY(ui.window->isVisible());
+        QCOMPARE(ui.stackDepth(), 2);
+        QCOMPARE(settingsPage->property("activeSection").toString(), QStringLiteral("user"));
+        QVERIFY(ui.item(QStringLiteral("userPreferencesForm")) != nullptr);
+        QVERIFY(prefs->dirty());
+        QVERIFY(remote.posts.isEmpty());
+        if (outcome == QLatin1String("cancel")) {
+            QVERIFY(clickInDialog(ui, QStringLiteral("unsavedChangesDialog"),
+                                  QStringLiteral("Cancel")));
+            QTRY_VERIFY(!dialog->property("visible").toBool());
+            QVERIFY(prefs->dirty());
+            QCOMPARE(prefs->subtitleMode(), QStringLiteral("Always"));
+            QCOMPARE(ui.stackDepth(), 2);
+            QCOMPARE(settingsPage->property("activeSection").toString(), QStringLiteral("user"));
+            QVERIFY(ui.window->isVisible());
+            QVERIFY(remote.posts.isEmpty());
+            return;
+        }
+        QVERIFY(clickInDialog(ui, QStringLiteral("unsavedChangesDialog"),
+                              outcome == QLatin1String("save") ? QStringLiteral("Save")
+                                                               : QStringLiteral("Discard")));
+        if (outcome == QLatin1String("save"))
+            QTRY_COMPARE(remote.posts.size(), 1);
+        // The way out goes on, after the draft was saved once or dropped without a request
+        const auto left = [&]() -> bool {
+            const bool gone = ui.item(QStringLiteral("settingsPage")) == nullptr;
+            if (exit == QLatin1String("another entry"))
+                return settingsPage->property("activeSection").toString() == QLatin1String("audio")
+                       && ui.item(QStringLiteral("userPreferencesForm")) == nullptr;
+            if (exit == QLatin1String("narrow back"))
+                return !gone && !settingsPage->property("entryOpen").toBool();
+            if (exit == QLatin1String("tab shortcut"))
+                return gone && ui.item(QStringLiteral("homePage")) != nullptr;
+            return gone;
+        };
+        QVERIFY(qWaitForScaled(left, 10000));
+        QVERIFY(!prefs->dirty());
+        QCOMPARE(remote.posts.size(), outcome == QLatin1String("save") ? 1 : 0);
+    }
+
+    void theUserFormSurvivesAWidthChange()
+    {
+        Ui ui(m_home->path());
+        RemotePreferences remote(ui);
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *form = openPreferences(ui);
+        QVERIFY(form != nullptr);
+        auto *prefs = ui.controller.userConfiguration();
+        QObject *dialog = ui.popup(QStringLiteral("unsavedChangesDialog"));
+        QVERIFY(dialog);
+        prefs->setSubtitleMode(QStringLiteral("Always"));
+        QTRY_VERIFY(prefs->dirty());
+        // A form created again would read the server and drop the draft
+        for (const int width : {440, 1000, 560, 1600}) {
+            QVERIFY(ui.opensWindowOfWidth(width));
+            QTRY_VERIFY(ui.item(QStringLiteral("settingsContentView"))->isVisible());
+            QCOMPARE(ui.item(QStringLiteral("userPreferencesForm")), form);
+            QCOMPARE(ui.itemsStartingWith(QStringLiteral("userPreferencesForm")).size(), 1);
+            QVERIFY(prefs->dirty());
+            QCOMPARE(prefs->subtitleMode(), QStringLiteral("Always"));
+            QVERIFY(remote.posts.isEmpty());
+        }
+        QVERIFY(!dialog->property("visible").toBool());
+    }
+
+    void narrowSettingsOpenEntriesInPlace()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(440));
+        QVERIFY(ui.signIn());
+        QQuickItem *page = openSettings(ui);
+        QVERIFY(page != nullptr);
+        QTRY_VERIFY(page->property("narrow").toBool());
+        // The list shows alone, the account entry in it
+        QTRY_VERIFY(ui.item(QStringLiteral("settingsCategory_user")) != nullptr);
+        QVERIFY(ui.item(QStringLiteral("settingsCategory_user"))->isVisible());
+        QVERIFY(!ui.item(QStringLiteral("settingsContentView"))->isVisible());
+        QCOMPARE(ui.stackDepth(), 2);
+        // An entry opens in place of the list and the stack stays as deep
+        ui.clickCenter(ui.item(QStringLiteral("settingsCategory_audio")));
+        QTRY_VERIFY(ui.item(QStringLiteral("settingsContentView"))->isVisible());
+        QVERIFY(!ui.item(QStringLiteral("settingsCategory_audio"))->isVisible());
+        QCOMPARE(ui.item(QStringLiteral("settingsContentHeading"))->property("text").toString(),
+                 QStringLiteral("Audio"));
+        QCOMPARE(ui.stackDepth(), 2);
+        QTRY_VERIFY(ui.layoutProblems().isEmpty());
+        // The first Escape closes the entry, the second leaves Settings
+        QTest::keyClick(ui.window, Qt::Key_Escape);
+        QTRY_VERIFY(ui.item(QStringLiteral("settingsCategory_audio"))->isVisible());
+        QVERIFY(!ui.item(QStringLiteral("settingsContentView"))->isVisible());
+        QCOMPARE(ui.stackDepth(), 2);
+        QTest::keyClick(ui.window, Qt::Key_Escape);
+        QTRY_VERIFY(ui.item(QStringLiteral("settingsPage")) == nullptr);
+        QCOMPARE(ui.stackDepth(), 1);
+        // The header Back button and the mouse back button do the same
+        QVERIFY(openSettings(ui) != nullptr);
+        ui.clickCenter(ui.item(QStringLiteral("settingsCategory_video")));
+        QTRY_VERIFY(ui.item(QStringLiteral("settingsContentView"))->isVisible());
+        ui.clickCenter(ui.item(QStringLiteral("headerBackButton")));
+        QTRY_VERIFY(!ui.item(QStringLiteral("settingsContentView"))->isVisible());
+        ui.clickCenter(ui.item(QStringLiteral("settingsCategory_subtitles")));
+        QTRY_VERIFY(ui.item(QStringLiteral("settingsContentView"))->isVisible());
+        QTest::mouseClick(ui.window, Qt::BackButton, Qt::NoModifier,
+                          QPoint(ui.window->width() / 2, ui.window->height() / 2));
+        QTRY_VERIFY(!ui.item(QStringLiteral("settingsContentView"))->isVisible());
+        QCOMPARE(ui.stackDepth(), 2);
+    }
+
+    void reopeningSettingsKeepsTheDraft()
+    {
+        Ui ui(m_home->path());
+        RemotePreferences remote(ui);
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(openPreferences(ui) != nullptr);
+        QQuickItem *page = ui.item(QStringLiteral("settingsPage"));
+        QQuickItem *form = ui.item(QStringLiteral("userPreferencesForm"));
+        auto *prefs = ui.controller.userConfiguration();
+        QObject *dialog = ui.popup(QStringLiteral("unsavedChangesDialog"));
+        QVERIFY(dialog);
+        prefs->setSubtitleMode(QStringLiteral("Always"));
+        QTRY_VERIFY(prefs->dirty());
+        // The menu entry of the page that is open brings it back as it is: nothing is asked and nothing is read again
+        QVERIFY(
+            QMetaObject::invokeMethod(ui.shellAction(QStringLiteral("settingsAction")), "trigger"));
+        QVERIFY(!dialog->property("visible").toBool());
+        QCOMPARE(ui.item(QStringLiteral("settingsPage")), page);
+        QCOMPARE(ui.item(QStringLiteral("userPreferencesForm")), form);
+        QCOMPARE(ui.stackDepth(), 2);
+        QVERIFY(prefs->dirty());
+        QCOMPARE(prefs->subtitleMode(), QStringLiteral("Always"));
+        QVERIFY(remote.posts.isEmpty());
+    }
+
+    void typingInTheHeaderOverSettingsKeepsTheDraft()
+    {
+        Ui ui(m_home->path());
+        RemotePreferences remote(ui);
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(openPreferences(ui) != nullptr);
+        QQuickItem *form = ui.item(QStringLiteral("userPreferencesForm"));
+        auto *prefs = ui.controller.userConfiguration();
+        QObject *dialog = ui.popup(QStringLiteral("unsavedChangesDialog"));
+        QVERIFY(dialog);
+        prefs->setSubtitleMode(QStringLiteral("Always"));
+        QTRY_VERIFY(prefs->dirty());
+        QQuickItem *field = ui.item(QStringLiteral("headerSearchField"));
+        QVERIFY(field);
+        field->forceActiveFocus(Qt::TabFocusReason);
+        QTRY_VERIFY(field->hasActiveFocus());
+        ui.type(QStringLiteral("ab"));
+        // The results open above Settings: the page below keeps its form and its draft, and nothing asks
+        QTRY_VERIFY(ui.item(QStringLiteral("searchPage")) != nullptr);
+        QCOMPARE(ui.controller.search()->term(), QStringLiteral("ab"));
+        QCOMPARE(ui.stackDepth(), 3);
+        QCOMPARE(ui.item(QStringLiteral("userPreferencesForm")), form);
+        QVERIFY(prefs->dirty());
+        QVERIFY(!dialog->property("visible").toBool());
+        QTRY_VERIFY(field->hasActiveFocus());
+        QVERIFY(remote.posts.isEmpty());
+    }
+
+    void settingsTabOrderIsListThenFormThenSaveBar()
+    {
+        Ui ui(m_home->path());
+        RemotePreferences remote(ui);
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(openPreferences(ui) != nullptr);
+        // A draft turns the buttons of the bar on, so they are tab stops
+        ui.controller.userConfiguration()->setSubtitleMode(QStringLiteral("Always"));
+        QTRY_VERIFY(ui.item(QStringLiteral("prefsSaveButton"))->isEnabled());
+        QQuickItem *first = ui.item(QStringLiteral("settingsCategory_main"));
+        first->forceActiveFocus(Qt::TabFocusReason);
+        QTRY_VERIFY(first->hasActiveFocus());
+        // 0 the list, 1 the form, 2 the Save bar, -1 the rest of the window
+        const auto areaOf = [](const QQuickItem *item) {
+            for (const QQuickItem *parent = item; parent; parent = parent->parentItem()) {
+                const QString name = parent->objectName();
+                if (name == QLatin1String("settingsEntryList"))
+                    return 0;
+                if (name == QLatin1String("userPreferencesForm"))
+                    return 1;
+                if (name == QLatin1String("settingsSaveBar"))
+                    return 2;
+            }
+            return -1;
+        };
+        QStringList trail;
+        int area = 0;
+        bool sawForm = false;
+        bool sawBar = false;
+        for (int step = 0; step < 100; ++step) {
+            QTest::keyClick(ui.window, Qt::Key_Tab);
+            const QQuickItem *focused = ui.window->activeFocusItem();
+            QVERIFY(focused);
+            const int now = areaOf(focused);
+            trail << QStringLiteral("%1: %2").arg(now).arg(Ui::describe(focused));
+            // A stop outside the three areas (a scroll view) is neutral; once the bar is behind, the Tab goes on to the shell
+            if (now < 0) {
+                if (sawBar)
+                    break;
+                continue;
+            }
+            QVERIFY2(now >= area, qPrintable(trail.join(QLatin1Char('\n'))));
+            sawForm = sawForm || now == 1;
+            sawBar = sawBar || now == 2;
+            area = now;
+        }
+        QVERIFY2(sawForm && sawBar, qPrintable(trail.join(QLatin1Char('\n'))));
+    }
+
+    void twinEntriesLinkToEachOther_data()
+    {
+        QTest::addColumn<QString>("section");
+        for (const QString &section :
+             {QStringLiteral("audio"), QStringLiteral("subtitles"), QStringLiteral("library")})
+            QTest::newRow(qPrintable(section)) << section;
+    }
+
+    void twinEntriesLinkToEachOther()
+    {
+        QFETCH(QString, section);
+        Ui ui(m_home->path());
+        RemotePreferences remote(ui);
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *page = openSettings(ui);
+        QVERIFY(page != nullptr);
+        // No twin on an entry that has none
+        QVERIFY(!ui.item(QStringLiteral("settingsTwinCard"))->isVisible());
+        ui.clickCenter(ui.item(QStringLiteral("settingsCategory_") + section));
+        QTRY_COMPARE(page->property("activeSection").toString(), section);
+        QQuickItem *link = ui.item(QStringLiteral("settingsLinkToUser_") + section);
+        QVERIFY(link);
+        QTRY_VERIFY(ui.item(QStringLiteral("settingsTwinCard"))->isVisible());
+        // To the User entry, and back to the entry the link came from
+        QVERIFY(ui.revealAndClickUntil(page, link, [&] {
+            return page->property("activeSection").toString() == QLatin1String("user");
+        }));
+        QTRY_VERIFY(ui.item(QStringLiteral("userLinkToDevice_") + section) != nullptr);
+        QQuickItem *back = ui.item(QStringLiteral("userLinkToDevice_") + section);
+        QTRY_VERIFY(ui.controller.userConfiguration()->state()
+                        == Kinefin::UserConfigurationModel::Ready
+                    && ui.controller.userConfiguration()->loaded());
+        QVERIFY(ui.revealAndClickUntil(
+            page, back, [&] { return page->property("activeSection").toString() == section; }));
+        QTRY_VERIFY(ui.item(QStringLiteral("userPreferencesForm")) == nullptr);
+        QVERIFY(remote.posts.isEmpty());
     }
 
     void preferencesTabStaysInThePage()
@@ -7661,6 +8751,137 @@ class TestUiPages : public QObject {
             QVERIFY2(item->isVisible(), qPrintable(seen.join(QLatin1Char('\n'))));
             QVERIFY2(!ui.inAnotherPage(item), qPrintable(seen.join(QLatin1Char('\n'))));
         }
+    }
+
+    void continueWatchingCardShowsPlayOnMouseHoverOnly()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *card = nullptr;
+        QTRY_VERIFY((card = homeRowMovieCard(ui, 0)) != nullptr);
+        QQuickItem *button = Ui::itemIn(card, QStringLiteral("cardQuickPlay"));
+        QVERIFY(button);
+        QVERIFY(!button->isVisible());
+        // Keyboard focus on the row does not show it
+        QQuickItem *list = ui.item(QStringLiteral("homeRowList_0"));
+        list->forceActiveFocus(Qt::TabFocusReason);
+        QTRY_VERIFY(list->hasActiveFocus());
+        QVERIFY(!button->isVisible());
+        QVERIFY(revealCard(ui, card));
+        QTest::mouseMove(ui.window, cardPoint(card));
+        QTRY_VERIFY(button->isVisible());
+        // The pointer moving onto the button keeps it shown
+        QTest::mouseMove(
+            ui.window,
+            button->mapToScene(QPointF(button->width() / 2, button->height() / 2)).toPoint());
+        QTest::qWait(100);
+        QVERIFY(button->isVisible());
+        // The button stays inside the card
+        const QRectF area = button->mapRectToItem(card, QRectF(QPointF(0, 0), button->size()));
+        QVERIFY(card->boundingRect().contains(area));
+        QTest::mouseMove(ui.window, QPoint(ui.window->width() - 2, ui.window->height() - 2));
+        QTRY_VERIFY(!button->isVisible());
+    }
+
+    void continueWatchingCardPlayButtonResumesTheItem()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QuickPlayStub stub;
+        QVERIFY(ui.engine.rootObjects().constFirst()->setProperty(
+            "player", QVariant::fromValue<QObject *>(&stub)));
+        QQuickItem *card = nullptr;
+        QTRY_VERIFY((card = homeRowMovieCard(ui, 0)) != nullptr);
+        QQuickItem *button = Ui::itemIn(card, QStringLiteral("cardQuickPlay"));
+        QVERIFY(button);
+        QVERIFY(revealCard(ui, card));
+        QTest::mouseMove(ui.window, cardPoint(card));
+        QTRY_VERIFY(button->isVisible());
+        const QPoint center =
+            button->mapToScene(QPointF(button->width() / 2, button->height() / 2)).toPoint();
+        QTest::mouseClick(ui.window, Qt::LeftButton, Qt::NoModifier, center);
+        QTRY_COMPARE(stub.calls.size(), 1);
+        QCOMPARE(stub.calls.constFirst().id, kMovieId);
+        QCOMPARE(stub.calls.constFirst().resumeTicks, qint64(2340000000));
+        // The click does not open the details page as well
+        QVERIFY(!ui.item(QStringLiteral("itemDetailsPage")));
+        QCOMPARE(ui.stackDepth(), 1);
+    }
+
+    void continueWatchingCardIsTheOnlyOneWithTheQuickPlay()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        ui.server.listingRawBody.insert(
+            QStringLiteral("NextUp"),
+            envelope(QJsonArray{fixtureObject(QStringLiteral("movie_item"))}));
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *resumeCard = nullptr;
+        QQuickItem *nextUpCard = nullptr;
+        QTRY_VERIFY((resumeCard = homeRowMovieCard(ui, 0)) != nullptr);
+        QTRY_VERIFY((nextUpCard = homeRowMovieCard(ui, 1)) != nullptr);
+        QVERIFY(resumeCard->property("quickPlay").toBool());
+        QVERIFY(!nextUpCard->property("quickPlay").toBool());
+        QQuickItem *button = Ui::itemIn(nextUpCard, QStringLiteral("cardQuickPlay"));
+        QVERIFY(button);
+        QVERIFY(revealCard(ui, nextUpCard));
+        QTest::mouseMove(ui.window, cardPoint(nextUpCard));
+        QTRY_VERIFY(nextUpCard->property("hovered").toBool());
+        QVERIFY(!button->isVisible());
+    }
+
+    void continueWatchingCardMenuHasResumeOnlyThere()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        ui.server.listingRawBody.insert(
+            QStringLiteral("NextUp"),
+            envelope(QJsonArray{fixtureObject(QStringLiteral("movie_item"))}));
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QuickPlayStub stub;
+        QVERIFY(ui.engine.rootObjects().constFirst()->setProperty(
+            "player", QVariant::fromValue<QObject *>(&stub)));
+        const auto menuVisible = [&ui] {
+            QObject *menu = ui.popup(QStringLiteral("cardMenu"));
+            return menu && menu->property("visible").toBool();
+        };
+        // The Menu key opens the menu of the current card of the focused row: no pointer involved
+        QQuickItem *list = nullptr;
+        QTRY_VERIFY((list = ui.item(QStringLiteral("homeRowList_0"))) != nullptr);
+        QTRY_VERIFY(list->property("count").toInt() > 0);
+        list->forceActiveFocus(Qt::TabFocusReason);
+        QTRY_VERIFY(list->hasActiveFocus());
+        QTest::keyClick(ui.window, Qt::Key_Menu);
+        QTRY_VERIFY(menuVisible());
+        QQuickItem *entry = nullptr;
+        QTRY_VERIFY((entry = ui.item(QStringLiteral("cardMenuResume"))) != nullptr);
+        QTRY_VERIFY(entry->isVisible() && entry->isEnabled());
+        QCOMPARE(entry->property("text").toString(), QStringLiteral("Resume"));
+        QVERIFY(QMetaObject::invokeMethod(entry, "click"));
+        QTRY_COMPARE(stub.calls.size(), 1);
+        QCOMPARE(stub.calls.constFirst().id, kMovieId);
+        QCOMPARE(stub.calls.constFirst().resumeTicks, qint64(2340000000));
+        QTRY_VERIFY(!menuVisible());
+        // The Next Up row has no such entry
+        QQuickItem *nextUp = nullptr;
+        QTRY_VERIFY((nextUp = ui.item(QStringLiteral("homeRowList_1"))) != nullptr);
+        QTRY_VERIFY(nextUp->property("count").toInt() > 0);
+        nextUp->forceActiveFocus(Qt::TabFocusReason);
+        QTRY_VERIFY(nextUp->hasActiveFocus());
+        QTest::keyClick(ui.window, Qt::Key_Menu);
+        QTRY_VERIFY(menuVisible());
+        QQuickItem *playNow = nullptr;
+        QTRY_VERIFY((playNow = ui.item(QStringLiteral("cardMenuPlayNow"))) != nullptr);
+        QTRY_VERIFY(playNow->isVisible());
+        QQuickItem *resume = ui.item(QStringLiteral("cardMenuResume"));
+        QVERIFY(!resume || !resume->isVisible());
+        QCOMPARE(stub.calls.size(), 1);
     }
 
   private:

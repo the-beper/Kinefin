@@ -5,6 +5,14 @@
       "Id": "aa11bb22cc33dd44ee55ff6677889900",
       "Type": "Series",
       "ProductionYear": 2021,
+      "PremiereDate": "2021-03-01T00:00:00.0000000Z",
+      "Status": "Continuing",
+      "Studios": [
+        {
+          "Name": "Abyss Network",
+          "Id": "e1e2e3e4e5e6e7e8e9eaebecedeeefe1"
+        }
+      ],
       "Overview": "A research station at the bottom of a sea nobody mapped.",
       "Genres": [
         "Drama",

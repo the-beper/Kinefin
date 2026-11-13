@@ -90,9 +90,9 @@ Kirigami.Page {
         case "suggestions":
             return i18nc("@title:tab sub-tab of Movies and TV Shows", "Suggestions");
         case "favorites":
-            return i18nc("@title:tab sub-tab of Movies", "Favorites");
+            return i18nc("@title:tab sub-tab of Movies and TV Shows", "Favorites");
         case "collections":
-            return i18nc("@title:tab sub-tab of Movies", "Collections");
+            return i18nc("@title:tab sub-tab of Movies and TV Shows", "Collections");
         case "genres":
             return i18nc("@title:tab sub-tab of Movies and TV Shows", "Genres");
         case "upcoming":
@@ -109,7 +109,7 @@ Kirigami.Page {
     readonly property string emptyText: {
         switch (subtab) {
         case "favorites":
-            return i18n("No movie is marked as a favorite yet");
+            return tabType === "tvshows" ? i18n("No TV show is marked as a favorite yet") : i18n("No movie is marked as a favorite yet");
         case "collections":
             return i18n("There are no collections yet");
         case "episodes":
@@ -921,6 +921,7 @@ Kirigami.Page {
                         listObjectName: "recommendationRowList_" + rail.index
                         model: rail.items
                         cardHeight: rail.cardHeight
+                        edgeMargin: Kirigami.Units.largeSpacing
                         accessibleName: rail.title
                         pageFlickable: rows
 

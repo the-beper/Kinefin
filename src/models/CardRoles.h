@@ -22,7 +22,9 @@ enum CardRole {
     SeasonCountRole,
     EpisodeCountRole,
     // The share of a series' episodes watched, 0 to 1
-    SeriesProgressRole
+    SeriesProgressRole,
+    // The saved playback position in ticks, 0 when there is none
+    ResumeTicksRole
 };
 
 QHash<int, QByteArray> cardRoleNames();

@@ -405,7 +405,7 @@ Kirigami.ScrollablePage {
 
                     model: group.items
                     cellWidth: Math.floor(width / columns)
-                    cellHeight: Math.round((cellWidth - Kirigami.Units.smallSpacing * 2) * 1.5) + Kirigami.Units.gridUnit * 3.5
+                    cellHeight: Math.round((cellWidth - Kirigami.Units.largeSpacing - Kirigami.Units.smallSpacing * 2) * 1.5) + Kirigami.Units.gridUnit * 3.5 + Kirigami.Units.largeSpacing
                     activeFocusOnTab: true
                     keyNavigationEnabled: true
                     currentIndex: 0
@@ -424,8 +424,8 @@ Kirigami.ScrollablePage {
                     }
 
                     delegate: FavoriteCard {
-                        width: grid.cellWidth
-                        height: grid.cellHeight
+                        width: grid.cellWidth - Kirigami.Units.largeSpacing
+                        height: grid.cellHeight - Kirigami.Units.largeSpacing
                         highlighted: GridView.isCurrentItem && grid.activeFocus
                         onClicked: page.Window.window.openItem(itemId, page)
                     }

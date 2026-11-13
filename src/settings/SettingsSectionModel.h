@@ -9,7 +9,7 @@ namespace Kinefin {
 class ClientSettings;
 struct SettingDefinition;
 
-// The visible settings of one section for the Settings page: one row per setting, `value` writable through setData, changes made from C++ arrive as dataChanged of that row only
+// The visible settings of one section for the Settings page, or only those of one group of it: one row per setting, `value` writable through setData, changes made from C++ arrive as dataChanged of that row only
 class SettingsSectionModel final : public QAbstractListModel {
     Q_OBJECT
 
@@ -25,7 +25,9 @@ class SettingsSectionModel final : public QAbstractListModel {
         MaximumRole,
     };
 
-    SettingsSectionModel(ClientSettings &settings, const QString &section, QObject *parent);
+    // An empty `group` keeps every row of the section
+    SettingsSectionModel(ClientSettings &settings, const QString &section, const QString &group,
+                         QObject *parent);
 
     int rowCount(const QModelIndex &parent = {}) const override;
     QVariant data(const QModelIndex &index, int role) const override;

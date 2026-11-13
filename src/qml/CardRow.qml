@@ -20,6 +20,8 @@ Item {
     property string listObjectName: ""
     // A page that builds its rows lazily moves between them itself: Up and Down then emit the signals below instead of moving the focus
     property bool externalVerticalNavigation: false
+    // The room left before the first and after the last card: zero in a page that pads its content, Kirigami.Units.largeSpacing where the row sits against the window edge, so the focus frame is never cut
+    property real edgeMargin: 0
 
     signal upRequested
     signal downRequested
@@ -65,7 +67,10 @@ Item {
 
         anchors.fill: parent
         orientation: ListView.Horizontal
+        // The gap between two cards, the same as the grids
         spacing: Kirigami.Units.largeSpacing
+        leftMargin: root.edgeMargin
+        rightMargin: root.edgeMargin
         clip: true
         boundsBehavior: Flickable.StopAtBounds
         readonly property bool isCardRowList: true

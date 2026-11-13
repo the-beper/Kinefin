@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Kinefin contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
 import QtQuick
+import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
 
 Kirigami.ApplicationWindow {
@@ -61,6 +62,8 @@ Kirigami.ApplicationWindow {
     pageStack.globalToolBar.style: Kirigami.ApplicationHeaderStyle.ToolBar
     // One page at a time: the default switches to side-by-side columns from 40 grid units, which pushes the pages beyond the window
     pageStack.columnView.columnResizeMode: Kirigami.ColumnView.SingleColumn
+    // The tab switch slides the whole row: Kirigami binds the transform and the opacity of every page, so a page is never the target
+    pageStack.transform: Translate { id: tabShift }
     pageStack.globalToolBar.showNavigationButtons: Kirigami.ApplicationHeaderStyle.ShowBackButton
 
     // The bar with the menus and the Home tab; it spans the window above the pages
@@ -138,9 +141,12 @@ Kirigami.ApplicationWindow {
                 width: Kirigami.Units.iconSizes.huge
                 height: width
             }
-            Kirigami.LoadingPlaceholder {
+            // A plain bar rather than a LoadingPlaceholder, which has no accessible name without its text
+            QQC2.ProgressBar {
                 anchors.horizontalCenter: parent.horizontalCenter
-                text: i18n("Preparing Kinefin…")
+                width: Kirigami.Units.gridUnit * 12
+                indeterminate: true
+                Accessible.name: i18n("Preparing Kinefin…")
             }
         }
     }
@@ -156,17 +162,17 @@ Kirigami.ApplicationWindow {
         if (index < 1 || pageStack.layers.depth > 1)
             return;
         const leaving = pageStack.get(index);
+        // The page may take the back itself (unsaved changes ask first, an open entry closes), as it does for Esc: the signature is Kirigami's, PageRow.goBack
+        if (leaving?.backRequested) {
+            const event = { accepted: false };
+            leaving.backRequested(event);
+            if (event.accepted)
+                return;
+        }
         // The page leaves the stack at once: going back by moving the index leaves it there until a scroll animation ends
         const target = pageStack.get(index - 1);
-        const leave = () => {
-            if (pageStack.get(index) === leaving)
-                pageStack.pop(target);
-        };
-        // A page with unsaved changes asks first, as it does for Esc
-        if (leaving?.hasUnsavedChanges)
-            leaving.askBeforeLeaving(leave);
-        else
-            leave();
+        if (pageStack.get(index) === leaving)
+            pageStack.pop(target);
     }
 
     // A back that only moves the index (Esc, the header button, the toolbar back button) leaves the
@@ -282,7 +288,7 @@ Kirigami.ApplicationWindow {
     }
 
     function readSubTabs() {
-        const ids = ["movies.suggestions", "movies.favorites", "movies.collections", "movies.genres", "tv.suggestions", "tv.upcoming", "tv.genres", "tv.networks", "tv.episodes"];
+        const ids = ["movies.suggestions", "movies.favorites", "movies.collections", "movies.genres", "tv.suggestions", "tv.favorites", "tv.collections", "tv.upcoming", "tv.genres", "tv.networks", "tv.episodes"];
         const tabs = {};
         for (const id of ids)
             tabs[id] = settings.value("library", "tabs." + id);
@@ -364,6 +370,7 @@ Kirigami.ApplicationWindow {
             Qt.callLater(settleStartup);
             return;
         }
+        finishTabMotion();
         pageStack.clear();
         const shown = pageStack.push(Qt.resolvedUrl(page), properties);
         openRequestedItem(shown);
@@ -378,9 +385,16 @@ Kirigami.ApplicationWindow {
             return false;
         if (playbackPageShowing)
             return true;
+        finishTabMotion();
         return !!pageStack.push(Qt.resolvedUrl("PlayerPage.qml"), {
             player: window.player, connection: connection
         });
+    }
+
+    // Positions and the Continue Watching row change while something plays: Home asks again once the player page is gone
+    onPlaybackPageShowingChanged: {
+        if (!playbackPageShowing && signedIn)
+            connection.reloadHome();
     }
 
     function playItem(itemId, resumeTicks, title) {
@@ -445,7 +459,7 @@ Kirigami.ApplicationWindow {
         return -1;
     }
 
-    // The page above the first one that holds changes the user has not saved (the user preferences), or null
+    // The page above the first one that holds changes the user has not saved (the User entry of Settings), or null
     function unsavedPage() {
         for (let i = 1; i < pageStack.depth; ++i) {
             const page = pageStack.get(i);
@@ -564,12 +578,14 @@ Kirigami.ApplicationWindow {
     }
 
     // The menu of a card (a right click, the Menu key or the button of the card): it opens at a point of the card, below it by default
-    function openCardMenu(card, itemId, type, seriesId, x, y) {
+    // `resumeTicks` is -1 for a card without a quick play, else its saved position (0: none)
+    function openCardMenu(card, itemId, type, seriesId, x, y, resumeTicks) {
         if (connection.state !== ConnectionController.Authenticated)
             return;
         cardMenu.itemId = itemId;
         cardMenu.itemType = type;
         cardMenu.seriesId = seriesId;
+        cardMenu.resumeTicks = resumeTicks ?? -1;
         cardMenu.popup(card, x ?? 0, y ?? card.height);
     }
 
@@ -580,6 +596,7 @@ Kirigami.ApplicationWindow {
         playAvailable: !!window.player
         onOpenRequested: targetId => window.openItem(targetId, window.pageStack.currentItem)
         onPlayRequested: targetId => window.playItem(targetId)
+        onResumeRequested: (targetId, ticks) => window.playItem(targetId, ticks)
     }
 
     // A link opens above the active root tab after sign-in. Incoming links must not bypass the
@@ -639,11 +656,10 @@ Kirigami.ApplicationWindow {
     // A link that arrives while Home is already showing (a second launch) opens at once
     onRequestedItemIdChanged: openRequestedItem(pageStack.get(0))
 
-    // The section the page in front belongs to: the header marks it (a tab, the main menu button, the queue button); a page opened above a type tab belongs to that tab, and one opened from a collections tile to that library; the user preferences page and the Favorites page (with what opens above it) belong to no tab, and the header search is global there. Settings and About need no session, so they are marked whatever the connection is
+    // The section the page in front belongs to: the header marks it (a tab, the main menu button, the queue button); a page opened above a type tab belongs to that tab, and one opened from a collections tile to that library; the Settings page and the Favorites page (with what opens above it) belong to no tab, and the header search is global there. Settings and About need no session, so they are marked whatever the connection is
     readonly property string currentSection: {
         switch (pageStack.currentItem?.objectName) {
         case "settingsPage":
-        case "settingsSectionPage":
             return "settings";
         case "aboutPage":
             return "about";
@@ -660,8 +676,6 @@ Kirigami.ApplicationWindow {
             return "search";
         case "queuePage":
             return "queue";
-        case "userPreferencesPage":
-            return "userPreferences";
         }
         // The Favorites page and what opens above it (a group, an item) belong to the star: no tab is marked
         if (favoritesPageIndex() >= 0)
@@ -680,14 +694,14 @@ Kirigami.ApplicationWindow {
         return -1;
     }
 
-    // True while the user preferences page or the Favorites page is in the stack, whatever page lies above it (the search page the header box opens included): the box stays on the global search then, or the page it opens would turn it back to the list of the tab at the root and pop everything
+    // True while the Settings page or the Favorites page is in the stack, whatever page lies above it (the search page the header box opens included): the box stays on the global search then, or the page it opens would turn it back to the list of the tab at the root and pop everything
     readonly property bool globalSearchPage: {
         // The current item is read for the dependency: the stack changes with every push and pop
         if (!pageStack.currentItem)
             return false;
         for (let i = 1; i < pageStack.depth; ++i) {
             const name = pageStack.get(i)?.objectName;
-            if (name === "userPreferencesPage" || name === "favoritesPage")
+            if (name === "settingsPage" || name === "favoritesPage")
                 return true;
         }
         return false;
@@ -750,6 +764,9 @@ Kirigami.ApplicationWindow {
         }
         if (leavingTab !== "" && leaving?.viewPosition)
             tabState[leavingTab] = leaving.viewPosition();
+        // Queued before the stack changes, so an error on the way cannot leave the row invisible
+        if (leavingTab !== "" && prepareTabMotion())
+            Qt.callLater(startTabMotion, leavingTab, name);
         pageStack.clear();
         // Leaving the type pages gives the sub-tab's data and channels back
         if (name === "home")
@@ -761,6 +778,44 @@ Kirigami.ApplicationWindow {
             page = pageStack.push(Qt.resolvedUrl("LibraryPage.qml"), { model: name === "movies" ? connection.movies : connection.shows, tabType: name, connection: connection });
         if (tabState[name] && page?.restoreViewPosition)
             page.restoreViewPosition(tabState[name]);
+    }
+
+    // The visible order of the tabs, which decides the side the new one slides in from
+    function tabOrder(name) {
+        return name === "home" ? 0 : name === "movies" ? 1 : 2;
+    }
+
+    // The new tab enters from the side it has in the tab bar; the row stays invisible from before the push until the motion starts, so the new page never shows one frame at rest
+    property bool tabMotionQueued: false
+    readonly property bool tabSwitching: tabMotionQueued || tabMotion.running
+    ParallelAnimation {
+        id: tabMotion
+        OpacityAnimator { target: pageStack; from: 0; to: 1; duration: Kirigami.Units.longDuration; easing.type: Easing.InOutCubic }
+        NumberAnimation { target: tabShift; property: "x"; to: 0; duration: Kirigami.Units.longDuration; easing.type: Easing.OutCubic }
+    }
+    // A running or waiting motion ends at once, with the row fully visible and in place; true when a new one is queued (no animation speed, no motion)
+    function prepareTabMotion() {
+        finishTabMotion();
+        if (Kirigami.Units.longDuration === 0)
+            return false;
+        pageStack.opacity = 0;
+        tabMotionQueued = true;
+        return true;
+    }
+    function finishTabMotion() {
+        tabMotionQueued = false;
+        // stop, not complete: a group with an animator may still count as running after complete, and the next start would then do nothing
+        tabMotion.stop();
+        pageStack.opacity = 1;
+        tabShift.x = 0;
+    }
+    function startTabMotion(fromTab, toTab) {
+        if (!tabMotionQueued)
+            return;
+        const fromRight = (tabOrder(toTab) > tabOrder(fromTab)) !== (Qt.application.layoutDirection === Qt.RightToLeft);
+        tabShift.x = (fromRight ? 1 : -1) * Kirigami.Units.gridUnit * 2;
+        tabMotion.restart();
+        tabMotionQueued = false;
     }
 
     // See All of a Recently Added row: the type tab opens from the top on the library's items by date added, newest first, and the sort saved for the tab stays as it was
@@ -892,7 +947,7 @@ Kirigami.ApplicationWindow {
         if (startupPage === "about") {
             shellHeader.showAboutDialog();
         } else if (startupPage === "settings") {
-            pageStack.push(Qt.resolvedUrl("SettingsPage.qml"), { settings: settings });
+            pageStack.push(Qt.resolvedUrl("SettingsPage.qml"), { settings: settings, connection: connection });
         }
     }
 

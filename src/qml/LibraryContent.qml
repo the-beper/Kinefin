@@ -130,21 +130,29 @@ Item {
             objectName: "libraryGrid"
 
             // A narrow window must be allowed a single legible poster instead of squeezing two cards below their minimum useful width
-            readonly property int columns: Math.max(1, Math.floor(width / (Kirigami.Units.gridUnit * (content.tileUnits[content.listModel.imageType] ?? 10))))
+            readonly property int columns: Math.max(1, Math.floor(usableWidth / (Kirigami.Units.gridUnit * (content.tileUnits[content.listModel.imageType] ?? 10))))
+            // The gap between two cards and the margin around them; the width the page margin and the vertical scroll bar take is not shared out to the cells, so no card sits under the bar
+            readonly property real gutter: Kirigami.Units.largeSpacing
+            readonly property real usableWidth: Math.max(0, width - leftMargin - vbar.implicitWidth)
 
             clip: true
+            leftMargin: gutter
+            topMargin: gutter
             boundsBehavior: Flickable.StopAtBounds
             model: content.listModel
-            cellWidth: Math.floor(width / columns)
-            // The image area inside the tile margins, then the text under it
-            cellHeight: Math.round((cellWidth - Kirigami.Units.smallSpacing * 2) * content.aspect) + content.footerHeight
+            cellWidth: Math.floor(usableWidth / columns)
+            // The image area inside the tile margins, then the text under it, then the gutter
+            cellHeight: Math.round((cellWidth - gutter - Kirigami.Units.smallSpacing * 2) * content.aspect) + content.footerHeight + gutter
             activeFocusOnTab: true
             keyNavigationEnabled: true
             currentIndex: 0
             Accessible.role: Accessible.List
             Accessible.name: content.accessibleName
 
-            Controls.ScrollBar.vertical: Controls.ScrollBar {}
+            Controls.ScrollBar.vertical: Controls.ScrollBar {
+                id: vbar
+                objectName: "libraryGridScrollBar"
+            }
 
             Keys.onReturnPressed: content.openCurrent()
             Keys.onEnterPressed: content.openCurrent()
@@ -157,8 +165,8 @@ Item {
                 required property int seasonNumber
                 required property int episodeNumber
 
-                width: grid.cellWidth
-                height: grid.cellHeight
+                width: grid.cellWidth - grid.gutter
+                height: grid.cellHeight - grid.gutter
                 // The grid is the one tab stop, the arrow keys move inside it
                 focusPolicy: Qt.NoFocus
                 highlighted: GridView.isCurrentItem && grid.activeFocus

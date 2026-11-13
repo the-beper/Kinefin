@@ -47,10 +47,10 @@ QString ConnectionController::scopeKey(const QString &type, const QString &subta
         return withLibrary(type);
     const bool movies = type == QLatin1String("movies");
     const bool shows = type == QLatin1String("tvshows");
-    if (movies && subtab == QLatin1String("favorites"))
-        return withLibrary(QStringLiteral("movies/favorites"));
-    // Collections belong to no one library of the type
-    if (movies && subtab == QLatin1String("collections"))
+    if ((movies || shows) && subtab == QLatin1String("favorites"))
+        return withLibrary(type + QStringLiteral("/favorites"));
+    // Collections belong to no one library, and the list is the same under both types
+    if ((movies || shows) && subtab == QLatin1String("collections"))
         return QStringLiteral("movies/collections");
     if (shows && subtab == QLatin1String("episodes"))
         return withLibrary(QStringLiteral("tvshows/episodes"));
@@ -247,9 +247,16 @@ ConnectionController::ConnectionController(const QString &profileId, const QStri
     // The models empty themselves on the same signal: nothing is left to be a one-off view
     connect(&m_client, &JellyfinClient::credentialsCleared, this, [this] { m_oneOff.clear(); });
     // Before the handlers that change the state, so a page reading the user in a state binding sees the new one
-    connect(&m_client, &JellyfinClient::credentialsCleared, this,
-            [this] { refreshCurrentUserId(); });
-    connect(&m_client, &JellyfinClient::loginSucceeded, this, [this] { refreshCurrentUserId(); });
+    connect(&m_client, &JellyfinClient::credentialsCleared, this, [this] {
+        refreshCurrentUserId();
+        refreshCurrentUserIsAdministrator();
+    });
+    connect(&m_client, &JellyfinClient::loginSucceeded, this, [this] {
+        refreshCurrentUserId();
+        refreshCurrentUserIsAdministrator();
+    });
+    connect(&m_client, &JellyfinClient::userProfileRefreshed, this,
+            [this] { refreshCurrentUserIsAdministrator(); });
     connect(&m_browse, &BrowseStateStore::saveFailed, this,
             [] { qCWarning(controllerLog) << "could not save the browse state"; });
     connectViewPersistence(&m_movies);
@@ -1472,6 +1479,15 @@ void ConnectionController::refreshCurrentUserId()
         return;
     m_currentUserId = userId;
     Q_EMIT currentUserIdChanged();
+}
+
+void ConnectionController::refreshCurrentUserIsAdministrator()
+{
+    const bool administrator = m_client.isAdministrator();
+    if (administrator == m_currentUserIsAdministrator)
+        return;
+    m_currentUserIsAdministrator = administrator;
+    Q_EMIT currentUserIsAdministratorChanged();
 }
 
 void ConnectionController::setLoginUserName(const QString &name)

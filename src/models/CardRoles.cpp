@@ -17,7 +17,8 @@ QHash<int, QByteArray> cardRoleNames()
             {IsNewRole, "isNew"},
             {SeasonCountRole, "seasonCount"},
             {EpisodeCountRole, "episodeCount"},
-            {SeriesProgressRole, "seriesProgress"}};
+            {SeriesProgressRole, "seriesProgress"},
+            {ResumeTicksRole, "resumeTicks"}};
 }
 
 QVariant cardRoleData(const ItemSummary &item, int role)
@@ -36,6 +37,8 @@ QVariant cardRoleData(const ItemSummary &item, int role)
         return series ? item.childCount : -1;
     case EpisodeCountRole:
         return series ? item.recursiveItemCount : -1;
+    case ResumeTicksRole:
+        return item.positionTicks;
     case SeriesProgressRole: {
         if (!series || item.recursiveItemCount <= 0 || item.unplayedCount < 0)
             return qreal(-1);
