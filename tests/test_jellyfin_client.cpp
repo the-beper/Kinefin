@@ -1755,11 +1755,9 @@ class TestJellyfinClient : public QObject {
         // An empty state adds nothing to the base query
         wire = send({}, LibraryScope::Movies, base);
         for (const char *name :
-             {"filters",      "hasSubtitles",    "hasTrailer",     "hasSpecialFeature",
-              "hasThemeSong", "hasThemeVideo",   "isHd",           "is4K",
-              "is3D",         "videoTypes",      "seriesStatus",   "genreIds",
-              "tags",         "officialRatings", "years",          "parentIndexNumber",
-              "isMissing",    "isUnaired",       "nameStartsWith", "nameLessThan",
+             {"filters", "hasSubtitles", "hasTrailer", "hasSpecialFeature", "hasThemeSong",
+              "hasThemeVideo", "isHd", "is4K", "is3D", "videoTypes", "seriesStatus", "genreIds",
+              "tags", "officialRatings", "years", "parentIndexNumber", "isMissing", "isUnaired",
               "studioIds"})
             QVERIFY2(!wire.hasQueryItem(QLatin1String(name)), name);
 
@@ -2002,7 +2000,7 @@ class TestJellyfinClient : public QObject {
         QCOMPARE(query.sortBy, QStringLiteral("SortName"));
         QCOMPARE(query.sortOrder, QStringLiteral("Descending"));
         query = composeLibraryQuery({}, LibraryScope::Series, {},
-                                    {QStringLiteral("DateLastContentAdded"), false}, {}, 24, 12)
+                                    {QStringLiteral("DateLastContentAdded"), false}, 24, 12)
                     .value();
         QCOMPARE(query.sortBy, QStringLiteral("DateLastContentAdded,SortName"));
         QCOMPARE(query.sortOrder, QStringLiteral("Ascending"));
@@ -2017,15 +2015,15 @@ class TestJellyfinClient : public QObject {
         QCOMPARE(query.startIndex, 0);
         QCOMPARE(query.limit, RandomPageSize);
         QCOMPARE(RandomPageSize, 100);
-        query = composeLibraryQuery({}, LibraryScope::Movies, {}, random, {}, 0, 500).value();
+        query = composeLibraryQuery({}, LibraryScope::Movies, {}, random, 0, 500).value();
         QCOMPARE(query.limit, 100);
-        query = composeLibraryQuery({}, LibraryScope::Movies, {}, random, {}, 0, 24).value();
+        query = composeLibraryQuery({}, LibraryScope::Movies, {}, random, 0, 24).value();
         QCOMPARE(query.limit, 24);
-        QVERIFY(!composeLibraryQuery({}, LibraryScope::Movies, {}, random, {}, 100, 100));
-        QVERIFY(!composeLibraryQuery({}, LibraryScope::Movies, {}, random, {}, 1, 24));
+        QVERIFY(!composeLibraryQuery({}, LibraryScope::Movies, {}, random, 100, 100));
+        QVERIFY(!composeLibraryQuery({}, LibraryScope::Movies, {}, random, 1, 24));
     }
 
-    void randomAndAlphabetReachTheWire()
+    void randomReachesTheWire()
     {
         using namespace Kinefin;
         FakeJellyfin server;
@@ -2035,10 +2033,9 @@ class TestJellyfinClient : public QObject {
         QSignalSpy ready(&client, &JellyfinClient::itemsReady);
         ItemQuery base;
         base.includeItemTypes = QStringLiteral("Series");
-        const auto send = [&](const LibrarySort &sort, const QString &alphabet, int start,
-                              int limit) {
+        const auto send = [&](const LibrarySort &sort, int start, int limit) {
             const auto query =
-                composeLibraryQuery(base, LibraryScope::Series, {}, sort, alphabet, start, limit);
+                composeLibraryQuery(base, LibraryScope::Series, {}, sort, start, limit);
             const int expected = ready.size() + 1;
             if (!query || !client.fetchItems(*query)
                 || !QTest::qWaitFor([&] { return ready.size() == expected; }, 5000))
@@ -2046,32 +2043,10 @@ class TestJellyfinClient : public QObject {
             return FakeJellyfin::capturedListingQuery(server.itemsRoutes.constLast());
         };
 
-        QUrlQuery wire = send({QStringLiteral("Random"), false}, {}, -1, -1);
+        const QUrlQuery wire = send({QStringLiteral("Random"), false}, -1, -1);
         QCOMPARE(wire.queryItemValue(QStringLiteral("sortBy")), QStringLiteral("Random"));
         QCOMPARE(wire.queryItemValue(QStringLiteral("startIndex")), QStringLiteral("0"));
         QCOMPARE(wire.queryItemValue(QStringLiteral("limit")), QStringLiteral("100"));
-        // The letter picker is not offered with Random
-        wire = send({QStringLiteral("Random"), false}, QStringLiteral("B"), 0, 100);
-        QVERIFY(!wire.hasQueryItem(QStringLiteral("nameStartsWith")));
-        QVERIFY(!wire.hasQueryItem(QStringLiteral("nameLessThan")));
-
-        wire = send({}, QStringLiteral("#"), 0, 100);
-        QCOMPARE(wire.queryItemValue(QStringLiteral("nameLessThan")), QStringLiteral("A"));
-        QVERIFY(!wire.hasQueryItem(QStringLiteral("nameStartsWith")));
-        for (const QString &letter : {QStringLiteral("A"), QStringLiteral("Z")}) {
-            wire = send({}, letter, 100, 100);
-            QCOMPARE(wire.queryItemValue(QStringLiteral("nameStartsWith")), letter);
-            QVERIFY(!wire.hasQueryItem(QStringLiteral("nameLessThan")));
-            QCOMPARE(wire.queryItemValue(QStringLiteral("startIndex")), QStringLiteral("100"));
-        }
-        wire = send({}, {}, 0, 100);
-        QVERIFY(!wire.hasQueryItem(QStringLiteral("nameStartsWith")));
-        QVERIFY(!wire.hasQueryItem(QStringLiteral("nameLessThan")));
-        // Anything but "#" and A to Z is refused by the composer
-        for (const QString &bad : {QStringLiteral("a"), QStringLiteral("AB"), QStringLiteral("1"),
-                                   QStringLiteral("%"), QStringLiteral("É")})
-            QVERIFY2(!composeLibraryQuery(base, LibraryScope::Series, {}, {}, bad),
-                     qPrintable(bad));
     }
 
     void libraryFilterValuesAreRefusedWithoutARequest()
@@ -2123,10 +2098,6 @@ class TestJellyfinClient : public QObject {
         });
         refuse("genre id with the delimiter",
                [](ItemQuery &q) { q.genreIds = {QStringLiteral("aa|bb")}; });
-        refuse("letters of the alphabet picker",
-               [](ItemQuery &q) { q.nameStartsWith = QStringLiteral("A&b=c"); });
-        refuse("long name bound",
-               [](ItemQuery &q) { q.nameLessThan = QString(17, QLatin1Char('A')); });
         refuse("negative parent index", [](ItemQuery &q) { q.parentIndexNumber = -2; });
         // Each text is valid, the whole URL is too long: refused, and the pending request of the channel survives
         server.holdFirstListings = 1;

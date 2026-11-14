@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Kinefin contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
-// The paging model of the library grid against the fake server: placeholders, one page in flight, the most recently read pages first, least-recently-used eviction, a changing total, failures and the loss of the session; the typed filters, sorts, the Random page, the alphabet and the view options as they reach the wire
+// The paging model of the library grid against the fake server: placeholders, one page in flight, the most recently read pages first, least-recently-used eviction, a changing total, failures and the loss of the session; the typed filters, sorts, the Random page and the view options as they reach the wire
 #include "FakeJellyfin.h"
 
 #include "api/JellyfinClient.h"
@@ -816,11 +816,10 @@ class TestLibraryItemsModel : public QObject {
         QTRY_COMPARE(f.model.filterState().years, QList<int>({2019}));
         QCOMPARE(edits.size(), 0);
         QTRY_COMPARE(f.model.status(), LibraryItemsModel::Ready);
-        // The search term and the alphabet are not part of the view state either
+        // The search term is not part of the view state either
         f.model.setSearchDebounceInterval(20);
         f.model.setSearchTerm(QStringLiteral("dune"));
         QTRY_COMPARE(searchRequests(f), 1);
-        f.model.setAlphabet(QStringLiteral("B"));
         QCOMPARE(edits.size(), 0);
         // The user's own changes are edits, one each, and a repeated value is none
         f.model.setSortBy(QStringLiteral("SortName"));
@@ -1556,65 +1555,7 @@ class TestLibraryItemsModel : public QObject {
         QVERIFY(!f.model.isRandom());
     }
 
-    void alphabetIsServerSideAndGoesBackToTheFirstRow()
-    {
-        Fixture f;
-        f.server.generatedItemTotal = 1000;
-        QVERIFY(f.ok);
-        QVERIFY(f.openMovies());
-        QTRY_COMPARE(f.model.status(), LibraryItemsModel::Ready);
-        QSignalSpy edits(&f.model, &LibraryItemsModel::viewStateEdited);
-        QSignalSpy resets(&f.model, &QAbstractItemModel::modelReset);
-        QVERIFY(f.model.alphabet().isEmpty());
-        QVERIFY(!f.model.filtered());
-        f.loadedRow(250);
-        QTRY_VERIFY(f.loadedRow(250));
-
-        f.model.setAlphabet(QStringLiteral("c"));
-        QCOMPARE(f.model.alphabet(), QStringLiteral("C"));
-        QVERIFY(f.model.filtered());
-        // The rows of the old list are gone at once and the first page is asked for again
-        QCOMPARE(resets.size(), 1);
-        QCOMPARE(f.model.status(), LibraryItemsModel::Loading);
-        QCOMPARE(f.model.rowCount(), 0);
-        QVERIFY(f.model.residentPages().isEmpty());
-        QTRY_COMPARE(f.model.status(), LibraryItemsModel::Ready);
-        QCOMPARE(f.model.residentPages(), QList<int>({0}));
-        QByteArray route = f.server.itemsRoutes.constLast();
-        QCOMPARE(wireValue(route, "nameStartsWith"), QStringLiteral("C"));
-        QVERIFY(!hasWire(route, "nameLessThan"));
-        QCOMPARE(wireValue(route, "startIndex"), QStringLiteral("0"));
-
-        f.model.setAlphabet(QStringLiteral("#"));
-        QTRY_COMPARE(f.model.status(), LibraryItemsModel::Ready);
-        route = f.server.itemsRoutes.constLast();
-        QCOMPARE(wireValue(route, "nameLessThan"), QStringLiteral("A"));
-        QVERIFY(!hasWire(route, "nameStartsWith"));
-
-        f.model.setAlphabet(QStringLiteral("Z"));
-        QTRY_COMPARE(f.model.status(), LibraryItemsModel::Ready);
-        QCOMPARE(wireValue(f.server.itemsRoutes.constLast(), "nameStartsWith"),
-                 QStringLiteral("Z"));
-        // Not "#" or one letter: ignored
-        const int requests = f.server.itemsRoutes.size();
-        for (const QString &bad : {QStringLiteral("AB"), QStringLiteral("1"), QStringLiteral("é"),
-                                   QStringLiteral("%"), QStringLiteral("a b")})
-            f.model.setAlphabet(bad);
-        QCOMPARE(f.model.alphabet(), QStringLiteral("Z"));
-        QTest::qWait(100);
-        QCOMPARE(f.server.itemsRoutes.size(), requests);
-
-        f.model.setAlphabet(QString());
-        QTRY_COMPARE(f.model.status(), LibraryItemsModel::Ready);
-        route = f.server.itemsRoutes.constLast();
-        QVERIFY(!hasWire(route, "nameStartsWith"));
-        QVERIFY(!hasWire(route, "nameLessThan"));
-        QVERIFY(!f.model.filtered());
-        // The letter is not part of the view state
-        QCOMPARE(edits.size(), 0);
-    }
-
-    void aNewLetterCancelsThePageInFlight()
+    void aNewSortCancelsThePageInFlight()
     {
         Fixture f;
         f.server.generatedItemTotal = 1000;
@@ -1625,67 +1566,15 @@ class TestLibraryItemsModel : public QObject {
         f.server.holdListings = true;
         f.loadedRow(250);
         QTRY_COMPARE(f.server.itemsRoutes.size(), before + 1);
-        f.model.setAlphabet(QStringLiteral("B"));
+        f.model.setSortBy(QStringLiteral("DateCreated"));
         QTRY_COMPARE(f.server.itemsRoutes.size(), before + 2);
         const QByteArray route = f.server.itemsRoutes.constLast();
         QCOMPARE(wireValue(route, "startIndex"), QStringLiteral("0"));
-        QCOMPARE(wireValue(route, "nameStartsWith"), QStringLiteral("B"));
+        QCOMPARE(wireValue(route, "sortBy"), QStringLiteral("DateCreated,SortName"));
         QCOMPARE(f.model.status(), LibraryItemsModel::Loading);
         QCOMPARE(f.model.rowCount(), 0);
         QVERIFY(!f.model.pageError());
         f.model.clear();
-    }
-
-    void alphabetAndSearchAreIndependent()
-    {
-        Fixture f;
-        QVERIFY(f.ok);
-        f.model.setSearchDebounceInterval(20);
-        QVERIFY(f.openMovies());
-        QTRY_COMPARE(f.model.status(), LibraryItemsModel::Ready);
-        f.model.setAlphabet(QStringLiteral("D"));
-        QTRY_COMPARE(f.model.status(), LibraryItemsModel::Ready);
-        f.model.setSearchTerm(QStringLiteral("dune"));
-        QTRY_VERIFY(f.server.itemsRoutes.constLast().contains("searchTerm=dune"));
-        QTRY_COMPARE(f.model.status(), LibraryItemsModel::Ready);
-        QCOMPARE(wireValue(f.server.itemsRoutes.constLast(), "nameStartsWith"),
-                 QStringLiteral("D"));
-        QCOMPARE(f.model.alphabet(), QStringLiteral("D"));
-        // Dropping the term keeps the letter
-        f.model.setSearchTerm(QString());
-        QTRY_VERIFY(!f.server.itemsRoutes.constLast().contains("searchTerm="));
-        QTRY_COMPARE(f.model.status(), LibraryItemsModel::Ready);
-        QCOMPARE(wireValue(f.server.itemsRoutes.constLast(), "nameStartsWith"),
-                 QStringLiteral("D"));
-        QCOMPARE(f.model.alphabet(), QStringLiteral("D"));
-        QVERIFY(f.model.filtered());
-    }
-
-    void randomAndOpenDropTheLetter()
-    {
-        Fixture f;
-        QVERIFY(f.ok);
-        QVERIFY(f.openMovies());
-        QTRY_COMPARE(f.model.status(), LibraryItemsModel::Ready);
-        f.model.setAlphabet(QStringLiteral("C"));
-        QTRY_COMPARE(f.model.status(), LibraryItemsModel::Ready);
-        f.model.setSortBy(QStringLiteral("Random"));
-        QVERIFY(f.model.alphabet().isEmpty());
-        QTRY_COMPARE(f.model.status(), LibraryItemsModel::Ready);
-        QVERIFY(!hasWire(f.server.itemsRoutes.constLast(), "nameStartsWith"));
-        // A random list has no letters
-        f.model.setAlphabet(QStringLiteral("C"));
-        QVERIFY(f.model.alphabet().isEmpty());
-        f.model.setSortBy(QStringLiteral("SortName"));
-        f.model.setAlphabet(QStringLiteral("C"));
-        QCOMPARE(f.model.alphabet(), QStringLiteral("C"));
-        // Opening a view starts without a letter, the same library or another
-        QVERIFY(f.openMovies());
-        QVERIFY(f.model.alphabet().isEmpty());
-        f.model.setAlphabet(QStringLiteral("C"));
-        f.model.clear();
-        QVERIFY(f.model.alphabet().isEmpty());
-        QVERIFY(!f.model.filtered());
     }
 
     void viewOptionsAreEditsThatDoNotReloadTheList()

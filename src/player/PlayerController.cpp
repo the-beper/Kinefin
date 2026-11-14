@@ -729,6 +729,8 @@ void PlayerController::refreshTracks()
     QVariantList audio, subs;
     m_selectedAudioIndex.reset();
     m_selectedSubtitleIndex.reset();
+    // Subtitles turned off leave no selected track: the remembered choice is then none, not the last one
+    m_selectedSubtitleId = 0;
     for (const QVariant &entry : tracks) {
         const QVariantMap map = entry.toMap();
         const QString type = map.value(QStringLiteral("type")).toString();
@@ -789,6 +791,7 @@ void PlayerController::selectSubtitleTrack(int id)
         return;
     m_engine.setMpvProperty(QStringLiteral("sid"),
                             id == 0 ? QVariant(QStringLiteral("no")) : QVariant(id));
+    m_selectedSubtitleId = id;
     rememberTracks(m_selectedAudioId, id);
     QTimer::singleShot(0, this, &PlayerController::refreshTracks);
     m_reporter.reportNow();

@@ -189,6 +189,8 @@ class ConnectionController : public QObject {
     Q_INVOKABLE Kinefin::ItemDetailsModel *createItemDetails(const QString &itemId, QObject *owner);
     // Loads the home rows again (the libraries are kept)
     Q_INVOKABLE void reloadHome();
+    // Turns the Home Favorites row on or off (the Show on Home setting): off makes no request for it, and a change shows at once without reloading the other rows
+    Q_INVOKABLE void setHomeFavoritesEnabled(bool enabled) { m_home.setFavoritesEnabled(enabled); }
     // Whether a library of this tab type ("movies" or "tvshows") is listed
     Q_INVOKABLE bool hasType(const QString &type) const;
     // Loads a tab type's items into `movies` or `shows`, with the sort order, filters and view options last used for that scope (a saved tag or rating is resolved by the model once its facet list has loaded, see LibraryItemsModel). An empty `libraryId` is the library selected last (kept per server and user); an id that is not a library of the type, "*" say, selects all libraries of it. With fewer than two libraries of the type the scope is always all of them. Nothing is reloaded when the scope is already open. False when signed out, for another type or when no library of the type is listed

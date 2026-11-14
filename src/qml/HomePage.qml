@@ -118,6 +118,8 @@ Kirigami.ScrollablePage {
                         return i18n("Continue Watching");
                     case HomeRowsModel.NextUp:
                         return i18n("Next Up");
+                    case HomeRowsModel.Favorites:
+                        return i18n("Favorites");
                     default:
                         return i18n("Recently Added in %1", libraryName);
                     }
@@ -125,12 +127,14 @@ Kirigami.ScrollablePage {
 
                 // The type tab a Recently Added row lists in full, empty for the other rows
                 readonly property string seeAllTab: kind === HomeRowsModel.RecentlyAdded ? (page.connection.libraries.find(entry => entry.id === libraryId)?.tab ?? "") : ""
-                // Continue Watching and Recently Added have a list of their own, Next Up has none
-                readonly property bool hasSeeAll: kind === HomeRowsModel.ContinueWatching || seeAllTab !== ""
+                // Continue Watching, Favorites and Recently Added have a list of their own, Next Up has none
+                readonly property bool hasSeeAll: kind === HomeRowsModel.ContinueWatching || kind === HomeRowsModel.Favorites || seeAllTab !== ""
 
                 function seeAll() {
                     if (kind === HomeRowsModel.ContinueWatching)
                         page.Window.window.openResumeItems();
+                    else if (kind === HomeRowsModel.Favorites)
+                        page.Window.window.openFavorites();
                     else
                         page.Window.window.openRecentlyAdded(seeAllTab, libraryId);
                 }

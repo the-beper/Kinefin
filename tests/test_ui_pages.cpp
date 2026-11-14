@@ -210,6 +210,8 @@ struct Ui {
     {
         if (!server.listen())
             return false;
+        // The Favorites row is off here so that the rows and the Items requests stay as the other tests count them; the tests of the row switch it on
+        settings.setValue(QStringLiteral("library"), QStringLiteral("home.favorites"), false);
         engine.setNetworkAccessManagerFactory(&imageFactory);
         KLocalization::setupLocalizedContext(&engine);
         engine.setInitialProperties(
@@ -1280,14 +1282,13 @@ bool buildState(Ui &ui, const QString &state)
             },
             10000);
     if (state == QLatin1String("browse")) {
-        // The Favorites and Genres sub-tabs on, the list view, a status and a feature filter and a letter: every row of the page showing
+        // The Favorites and Genres sub-tabs on, the list view, a status and a feature filter: every row of the page showing
         ui.settings.setValue(QStringLiteral("library"), QStringLiteral("tabs.movies.genres"), true);
         auto *movies = ui.controller.movies();
         movies->setViewMode(QStringLiteral("list"));
         movies->setFilterValues(
             QVariantMap{{QStringLiteral("played"), QStringLiteral("Unplayed")},
                         {QStringLiteral("features"), QStringList{QStringLiteral("Subtitles")}}});
-        movies->setAlphabet(QStringLiteral("A"));
         return qWaitForScaled(
             [&] {
                 return movies->status() != Kinefin::LibraryItemsModel::Loading
@@ -1800,6 +1801,7 @@ class PlayerStub : public QObject {
     Q_PROPERTY(bool shuffle MEMBER shuffle NOTIFY changed)
     Q_PROPERTY(int repeatMode MEMBER repeatMode NOTIFY changed)
     Q_PROPERTY(int currentIndex MEMBER currentIndex NOTIFY changed)
+    Q_PROPERTY(int queueCount MEMBER queueCount NOTIFY changed)
     Q_PROPERTY(bool hasNext MEMBER hasNext NOTIFY changed)
     Q_PROPERTY(bool hasPrevious MEMBER hasPrevious NOTIFY changed)
     Q_PROPERTY(QVariantList audioTracks MEMBER audioTracks NOTIFY changed)
@@ -1875,6 +1877,7 @@ class PlayerStub : public QObject {
     bool shuffle = false;
     int repeatMode = 0;
     int currentIndex = -1;
+    int queueCount = 0;
     bool hasNext = false;
     bool hasPrevious = false;
     QVariantList audioTracks;
@@ -3400,7 +3403,6 @@ class TestUiPages : public QObject {
             QVariantMap{{QStringLiteral("played"), QStringLiteral("Unplayed")},
                         {QStringLiteral("favorites"), true},
                         {QStringLiteral("features"), QStringList{QStringLiteral("Subtitles")}}});
-        movies->setAlphabet(QStringLiteral("B"));
         QTRY_VERIFY(shownItem(ui, QStringLiteral("filterChip_2")) != nullptr);
         QVERIFY(!ui.item(QStringLiteral("filterChip_3")));
         // One chip, one remove button: Favorites goes, the other filters stay
@@ -3412,13 +3414,12 @@ class TestUiPages : public QObject {
         QCOMPARE(movies->filterState().played, Kinefin::PlayedState::Unplayed);
         QVERIFY(movies->filterState().features.testFlag(Kinefin::LibraryFeature::Subtitles));
         QTRY_VERIFY(!ui.item(QStringLiteral("filterChip_2")));
-        // Clear Filters takes the filters and nothing else: not the sort, the letter or the library
+        // Clear Filters takes the filters and nothing else: not the sort or the library
         QQuickItem *clear = nullptr;
         QTRY_VERIFY((clear = shownItem(ui, QStringLiteral("clearFiltersButton"))) != nullptr);
         QVERIFY(QMetaObject::invokeMethod(clear, "click"));
         QTRY_VERIFY(movies->filterState().isEmpty());
         QCOMPARE(movies->sortBy(), QStringLiteral("Runtime"));
-        QCOMPARE(movies->alphabet(), QStringLiteral("B"));
         QTRY_VERIFY(!ui.item(QStringLiteral("filterChip_0")));
     }
 
@@ -3477,44 +3478,9 @@ class TestUiPages : public QObject {
         QCOMPARE(query.queryItemValue(QStringLiteral("sortBy")), QStringLiteral("Random"));
         QVERIFY(
             query.queryItemValue(QStringLiteral("filters")).contains(QStringLiteral("IsUnplayed")));
-        // The alphabet picker is not offered for a random order
-        QVERIFY(!ui.item(QStringLiteral("alphabetPicker"))->isVisible());
 
         QVERIFY(triggerAction(ui, QStringLiteral("sortKey_SortName")));
         QTRY_VERIFY(!ui.popup(QStringLiteral("reshuffleAction"))->property("visible").toBool());
-        QTRY_VERIFY(ui.item(QStringLiteral("alphabetPicker"))->isVisible());
-    }
-
-    void theAlphabetPickerAsksTheServerForTheLetter()
-    {
-        Ui ui(m_home->path());
-        QVERIFY(ui.load());
-        QVERIFY(buildState(ui, QStringLiteral("library")));
-        QTRY_VERIFY(ui.layoutProblems().isEmpty());
-        auto *movies = ui.controller.movies();
-        QQuickItem *letter = nullptr;
-        QTRY_VERIFY((letter = shownItem(ui, QStringLiteral("letter_B"))) != nullptr);
-        ui.clickCenter(letter);
-        QTRY_COMPARE(movies->alphabet(), QStringLiteral("B"));
-        QTRY_COMPARE(lastItemsQuery(ui).queryItemValue(QStringLiteral("nameStartsWith")),
-                     QStringLiteral("B"));
-        // The search is independent of the letter
-        movies->setSearchTerm(QStringLiteral("abyss"));
-        QCOMPARE(movies->alphabet(), QStringLiteral("B"));
-        movies->setSearchTerm(QString());
-        // # is the names before A
-        QQuickItem *hash = nullptr;
-        QTRY_VERIFY((hash = shownItem(ui, QStringLiteral("letter_hash"))) != nullptr);
-        ui.clickCenter(hash);
-        QTRY_COMPARE(movies->alphabet(), QStringLiteral("#"));
-        QTRY_COMPARE(lastItemsQuery(ui).queryItemValue(QStringLiteral("nameLessThan")),
-                     QStringLiteral("A"));
-        QVERIFY(lastItemsQuery(ui).queryItemValue(QStringLiteral("nameStartsWith")).isEmpty());
-        // The same letter again takes it off
-        ui.clickCenter(hash);
-        QTRY_VERIFY(movies->alphabet().isEmpty());
-        QTRY_VERIFY(lastItemsQuery(ui).queryItemValue(QStringLiteral("nameLessThan")).isEmpty());
-        QVERIFY(lastItemsQuery(ui).queryItemValue(QStringLiteral("nameStartsWith")).isEmpty());
     }
 
     void theViewModeIsKeptPerLibraryAndTheListShowsRows()
@@ -4095,7 +4061,7 @@ class TestUiPages : public QObject {
             }
             return qsizetype(-1);
         };
-        // After the tabs of the shell: the toolbar, the alphabet, the grid. Kirigami stacks the buttons of an ActionToolBar last to first, and the Tab chain follows the stacking, so the order inside the toolbar is not asserted: its buttons (the sub-tab entries and the list actions) are one block of stops
+        // After the tabs of the shell: the toolbar, the grid. Kirigami stacks the buttons of an ActionToolBar last to first, and the Tab chain follows the stacking, so the order inside the toolbar is not asserted: its buttons (the sub-tab entries and the list actions) are one block of stops
         const auto indexOfButton = [&](const QString &actionName) {
             const QQuickItem *button = toolbarButton(ui, actionName);
             return button ? visited.indexOf(button) : qsizetype(-1);
@@ -4121,10 +4087,8 @@ class TestUiPages : public QObject {
             const qsizetype at = indexOfButton(name);
             QVERIFY2(at >= first && at <= last, qPrintable(name));
         }
-        const qsizetype alphabetAt = indexOfItem(QStringLiteral("alphabetPicker"));
         const qsizetype gridAt = indexOfItem(QStringLiteral("libraryGrid"));
-        QVERIFY(alphabetAt > last);
-        QVERIFY(gridAt > alphabetAt);
+        QVERIFY(gridAt > last);
         for (QQuickItem *item : visited) {
             QVERIFY2(item->isVisible(), qPrintable(Ui::describe(item)));
             QVERIFY2(ui.insideWindow(item), qPrintable(Ui::describe(item)));
@@ -9520,6 +9484,230 @@ class TestUiPages : public QObject {
         QTest::qWait(300);
         QTRY_COMPARE(qRound(cardEdges().left()), qRound(without.left()));
         QCOMPARE(qRound(cardEdges().right()), qRound(without.right()));
+    }
+
+    void theHomeFavoritesRowOpensTheFavoritesPage()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Continue Watching")));
+        QVERIFY(ui.settings.setValue(QStringLiteral("library"), QStringLiteral("home.favorites"),
+                                     true));
+        // Right after Next Up, before Recently Added
+        QQuickItem *row = nullptr;
+        QTRY_VERIFY((row = ui.item(QStringLiteral("homeRow_2"))) != nullptr && row->isVisible());
+        QCOMPARE(row->property("title").toString(), QStringLiteral("Favorites"));
+        auto *rows = ui.controller.homeRows();
+        QCOMPARE(rows->data(rows->index(1), Kinefin::HomeRowsModel::KindRole).toInt(),
+                 int(Kinefin::HomeRowsModel::NextUp));
+        QCOMPARE(rows->data(rows->index(2), Kinefin::HomeRowsModel::KindRole).toInt(),
+                 int(Kinefin::HomeRowsModel::Favorites));
+        QCOMPARE(rows->data(rows->index(3), Kinefin::HomeRowsModel::KindRole).toInt(),
+                 int(Kinefin::HomeRowsModel::RecentlyAdded));
+        QQuickItem *button = nullptr;
+        QTRY_VERIFY((button = ui.item(QStringLiteral("homeRowSeeAll_2"))) != nullptr
+                    && button->isVisible());
+        QCOMPARE(button->property("text").toString(), QStringLiteral("See All"));
+        QVERIFY(QMetaObject::invokeMethod(button, "click"));
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("favoritesPage"));
+        QCOMPARE(ui.stackDepth(), 2);
+    }
+
+    void theHomeFavoritesSettingAddsAndRemovesTheRowAtOnce()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Continue Watching")));
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Recently Added in Series")));
+        const auto rowRequests = [&ui] {
+            return std::count_if(
+                ui.server.itemsRoutes.cbegin(), ui.server.itemsRoutes.cend(),
+                [](const QByteArray &route) { return route.contains("sortBy=Random"); });
+        };
+        // Off: no Favorites row and no request for it
+        QCOMPARE(ui.controller.homeRows()->rowCount(), 4);
+        QCOMPARE(rowRequests(), 0);
+        QVERIFY(ui.settings.setValue(QStringLiteral("library"), QStringLiteral("home.favorites"),
+                                     true));
+        QTRY_VERIFY(ui.item(QStringLiteral("homeRow_2")) != nullptr
+                    && ui.item(QStringLiteral("homeRow_2"))->property("title").toString()
+                           == QStringLiteral("Favorites"));
+        QTRY_COMPARE(rowRequests(), 1);
+        QCOMPARE(ui.controller.homeRows()->rowCount(), 5);
+        // The other rows stay
+        QVERIFY(ui.showsText(QStringLiteral("Continue Watching")));
+        QVERIFY(ui.showsText(QStringLiteral("Next Up"), false));
+        QVERIFY(ui.showsText(QStringLiteral("Recently Added in Series")));
+        QVERIFY(ui.settings.setValue(QStringLiteral("library"), QStringLiteral("home.favorites"),
+                                     false));
+        QTRY_COMPARE(ui.controller.homeRows()->rowCount(), 4);
+        // The slot of the row now holds the first Recently Added row (the star of the header is also called Favorites)
+        QTRY_VERIFY(ui.item(QStringLiteral("homeRow_2")) != nullptr
+                    && ui.item(QStringLiteral("homeRow_2"))->property("title").toString()
+                           == QStringLiteral("Recently Added in Movies"));
+        QVERIFY(ui.showsText(QStringLiteral("Continue Watching")));
+        QVERIFY(ui.showsText(QStringLiteral("Recently Added in Series")));
+        // Off again: nothing more was asked
+        QCOMPARE(rowRequests(), 1);
+    }
+
+    void playerPreviousAndNextShowOnlyWithSomewhereToGo()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(openPlayer(ui, stub));
+        QQuickItem *previous = ui.item(QStringLiteral("playerPreviousButton"));
+        QQuickItem *next = ui.item(QStringLiteral("playerNextButton"));
+        QVERIFY(previous && next);
+        QVERIFY(!previous->isVisible() && !next->isVisible());
+        stub.hasNext = true;
+        Q_EMIT stub.changed();
+        QTRY_VERIFY(next->isVisible());
+        QVERIFY(!previous->isVisible());
+        ui.clickCenter(next);
+        QTRY_VERIFY(stub.calls.contains(QStringLiteral("next")));
+        stub.hasPrevious = true;
+        Q_EMIT stub.changed();
+        QTRY_VERIFY(previous->isVisible());
+        // No Stop in the row: Back stops
+        for (const QQuickItem *item : allItems(ui.item(QStringLiteral("playerControlRow"))))
+            QVERIFY(item->property("text").toString() != QLatin1String("Stop"));
+    }
+
+    void playerMoreMenuHoldsShuffleRepeatAndSpeed()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *page = openPlayer(ui, stub);
+        QVERIFY(page);
+        QObject *menu = ui.popup(QStringLiteral("playerMoreMenu"));
+        QVERIFY(menu);
+        ui.clickCenter(ui.item(QStringLiteral("playerMoreButton")));
+        QTRY_VERIFY(menu->property("opened").toBool());
+        // The bars stay while a menu is open
+        QObject *timer = page->findChild<QObject *>(QStringLiteral("playerChromeTimer"));
+        QVERIFY(timer);
+        timer->setProperty("interval", 300);
+        QTest::qWait(800);
+        QVERIFY(ui.item(QStringLiteral("playerOsd"))->isVisible());
+        // Shuffle only for a queue: a series started from an episode plays in order
+        QObject *shuffle = menu->findChild<QObject *>(QStringLiteral("playerShuffleItem"));
+        QVERIFY(shuffle);
+        QVERIFY(!shuffle->property("enabled").toBool());
+        // Repeat too: an item played alone has nothing to repeat into
+        QObject *repeat = menu->findChild<QObject *>(QStringLiteral("playerRepeatMenu"));
+        QVERIFY(repeat);
+        const auto repeatEntry = [menu, repeat]() -> QQuickItem * {
+            for (int i = 0; i < menu->property("count").toInt(); ++i) {
+                QQuickItem *entry = nullptr;
+                QMetaObject::invokeMethod(menu, "itemAt", Q_RETURN_ARG(QQuickItem *, entry),
+                                          Q_ARG(int, i));
+                if (entry && entry->property("subMenu").value<QObject *>() == repeat)
+                    return entry;
+            }
+            return nullptr;
+        };
+        QVERIFY(repeatEntry());
+        QVERIFY(!repeatEntry()->isEnabled());
+        stub.queueCount = 3;
+        Q_EMIT stub.changed();
+        QTRY_VERIFY(shuffle->property("enabled").toBool());
+        QTRY_VERIFY(repeatEntry()->isEnabled());
+        QVERIFY(QMetaObject::invokeMethod(shuffle, "click"));
+        QTRY_VERIFY(stub.calls.contains(QStringLiteral("setShuffle true")));
+        QObject *repeatAll = menu->findChild<QObject *>(QStringLiteral("playerRepeatAll"));
+        QVERIFY(repeatAll);
+        QVERIFY(QMetaObject::invokeMethod(repeatAll, "click"));
+        QTRY_VERIFY(stub.calls.contains(QStringLiteral("setRepeatMode 1")));
+        QObject *speed = menu->findChild<QObject *>(QStringLiteral("playerSpeedMenu"));
+        QVERIFY(speed);
+        QTRY_COMPARE(speed->property("count").toInt(), 8);
+        // Closing the menu lets the bars go again
+        QVERIFY(QMetaObject::invokeMethod(menu, "close"));
+        QTRY_VERIFY(!ui.item(QStringLiteral("playerOsd"))->isVisible());
+    }
+
+    void playerTimeButtonShowsTheRemainingTime()
+    {
+        PlayerStub stub;
+        stub.positionTicks = 21500000000;
+        stub.durationTicks = 72000000000;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(1000));
+        QVERIFY(ui.signIn());
+        QVERIFY(openPlayer(ui, stub));
+        QQuickItem *time = ui.item(QStringLiteral("playerTimeButton"));
+        QVERIFY(time);
+        // The stub writes the seconds: 2150 elapsed of 7200
+        QCOMPARE(time->property("text").toString(), QStringLiteral("2150 / 7200"));
+        ui.clickCenter(time);
+        QTRY_COMPARE(time->property("text").toString(), QStringLiteral("2150 / \u22125050"));
+        // A narrow row keeps one time: the one the button was switched to
+        QVERIFY(ui.opensWindowOfWidth(440));
+        QTRY_COMPARE(time->property("text").toString(), QStringLiteral("\u22125050"));
+        ui.clickCenter(time);
+        QTRY_COMPARE(time->property("text").toString(), QStringLiteral("2150"));
+    }
+
+    void playerControlRowTurnsToIconsWhenNarrow()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(1000));
+        QVERIFY(ui.signIn());
+        QVERIFY(openPlayer(ui, stub));
+        QQuickItem *row = ui.item(QStringLiteral("playerControlRow"));
+        QQuickItem *subtitles = ui.item(QStringLiteral("playerSubtitlesButton"));
+        QVERIFY(row && subtitles);
+        // AbstractButton.TextBesideIcon, then IconOnly
+        QCOMPARE(subtitles->property("display").toInt(), 2);
+        QVERIFY(ui.item(QStringLiteral("playerVolumeSlider"))->isVisible());
+        QVERIFY(ui.opensWindowOfWidth(440));
+        QTRY_COMPARE(subtitles->property("display").toInt(), 0);
+        QTRY_VERIFY(!ui.item(QStringLiteral("playerVolumeSlider"))->isVisible());
+        // Every button keeps its text for the tooltip and the screen reader, and the row stays inside the window
+        int buttons = 0;
+        for (const QQuickItem *item : allItems(row)) {
+            if (!item->isVisible() || !item->inherits("QQuickToolButton"))
+                continue;
+            ++buttons;
+            QVERIFY(!item->property("text").toString().isEmpty());
+            const QRectF rect = item->mapRectToScene(QRectF(0, 0, item->width(), item->height()));
+            QVERIFY2(rect.right() <= ui.window->width() && rect.left() >= 0,
+                     qPrintable(item->property("text").toString()));
+        }
+        QVERIFY(buttons >= 6);
+    }
+
+    void playerFullScreenButtonFollowsTheWindow()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(openPlayer(ui, stub));
+        QQuickItem *button = ui.item(QStringLiteral("playerFullScreenButton"));
+        QVERIFY(button);
+        QCOMPARE(button->property("text").toString(), QStringLiteral("Full Screen Mode"));
+        ui.clickCenter(button);
+        QTRY_COMPARE(ui.window->visibility(), QWindow::FullScreen);
+        QTRY_COMPARE(button->property("text").toString(), QStringLiteral("Exit Full Screen Mode"));
+        ui.clickCenter(button);
+        QTRY_COMPARE(ui.window->visibility(), QWindow::Windowed);
+        QTRY_COMPARE(button->property("text").toString(), QStringLiteral("Full Screen Mode"));
     }
 
   private:

@@ -48,6 +48,7 @@ Kirigami.ApplicationWindow {
     property string fullscreenOutput: settings.value("main", "forceFSScreen")
     property bool newBadgeEnabled: settings.value("library", "newBadge")
     property bool homeLibrariesEnabled: settings.value("library", "home.libraries")
+    property bool homeFavoritesEnabled: settings.value("library", "home.favorites")
     // Which library sub-tabs are switched on, by setting id without the "tabs." prefix (e.g. "movies.favorites"); replaced as a whole on a change so bindings re-evaluate
     property var subTabs: readSubTabs()
     readonly property bool wantsFullscreen: startupWindowMode === "fullscreen" || (startupWindowMode !== "windowed" && fullscreenSetting)
@@ -273,6 +274,7 @@ Kirigami.ApplicationWindow {
             if (section === "library") {
                 window.newBadgeEnabled = window.settings.value("library", "newBadge");
                 window.homeLibrariesEnabled = window.settings.value("library", "home.libraries");
+                window.homeFavoritesEnabled = window.settings.value("library", "home.favorites");
                 if (key.startsWith("tabs."))
                     window.subTabs = window.readSubTabs();
                 return;
@@ -304,6 +306,7 @@ Kirigami.ApplicationWindow {
             connection.setSubtabsEnabled(type, Object.keys(subTabs).filter(id => id.startsWith(prefix) && subTabs[id]).map(id => id.slice(prefix.length)));
     }
     onSubTabsChanged: applySubTabs()
+    onHomeFavoritesEnabledChanged: connection.setHomeFavoritesEnabled(homeFavoritesEnabled)
 
     // Full screen goes to the output named by "Force Full Screen Display" when that output exists
     function showFullScreenOnOutput() {
@@ -997,6 +1000,7 @@ Kirigami.ApplicationWindow {
 
     Component.onCompleted: {
         applySubTabs();
+        connection.setHomeFavoritesEnabled(homeFavoritesEnabled);
         if (wantsFullscreen)
             applyFullscreen();
         else

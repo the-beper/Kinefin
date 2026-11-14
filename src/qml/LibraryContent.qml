@@ -4,7 +4,7 @@ import QtQuick
 import QtQuick.Controls as Controls
 import org.kde.kirigami as Kirigami
 
-// The items of a LibraryItemsModel as a grid of cards or a list of rows, by its `viewMode`: one tab stop for the view (arrows to move, Return and Space to open, the Menu key and Shift+F10 for the card menu), its scroll position kept for the page's Back, the scroll back at the first row when the order, filters, letter or view change, and the placeholders of the empty, loading and filtered-empty states
+// The items of a LibraryItemsModel as a grid of cards or a list of rows, by its `viewMode`: one tab stop for the view (arrows to move, Return and Space to open, the Menu key and Shift+F10 for the card menu), its scroll position kept for the page's Back, the scroll back at the first row when the order, filters or view change, and the placeholders of the empty, loading and filtered-empty states
 Item {
     id: content
     objectName: "libraryContent"
@@ -15,7 +15,7 @@ Item {
     required property string accessibleName
     // What the placeholder says when the list has no item and nothing narrows it
     property string emptyText: ""
-    // Whether the page has filters (or a letter) the filtered-empty placeholder can clear
+    // Whether the page has filters the filtered-empty placeholder can clear
     property bool canClear: false
 
     // Set once the content is built: a change of `listModel` before that is only its first binding (an onChanged handler fires for it), which must not scroll away from a position the page restores
@@ -64,7 +64,7 @@ Item {
         view?.forceActiveFocus(Qt.TabFocusReason);
     }
 
-    // A new order, filter, letter or view starts from the first result
+    // A new order, filter or view starts from the first result
     function scrollToStart() {
         pendingPosition = null;
         if (!view)
@@ -82,9 +82,6 @@ Item {
             Qt.callLater(content.scrollToStart);
         }
         function onFiltersChanged() {
-            Qt.callLater(content.scrollToStart);
-        }
-        function onAlphabetChanged() {
             Qt.callLater(content.scrollToStart);
         }
         function onSearchTermChanged() {
@@ -245,7 +242,7 @@ Item {
         explanation: content.emptyText
     }
 
-    // The filters, the letter or the search leave no item: the library is not empty
+    // The filters or the search leave no item: the library is not empty
     Kirigami.PlaceholderMessage {
         objectName: "libraryFilteredEmpty"
         anchors.centerIn: parent

@@ -111,6 +111,12 @@ class TestSettingsParity : public QObject {
         const auto *homeLibraries =
             Kinefin::findSetting(QStringLiteral("library"), QStringLiteral("home.libraries"));
         QVERIFY(homeLibraries && !homeLibraries->hidden && homeLibraries->defaultValue == true);
+        const auto *homeFavorites =
+            Kinefin::findSetting(QStringLiteral("library"), QStringLiteral("home.favorites"));
+        QVERIFY(homeFavorites && !homeFavorites->hidden && homeFavorites->defaultValue == true);
+        QCOMPARE(homeFavorites->type, SettingDefinition::Type::Bool);
+        QCOMPARE(QString::fromUtf8(homeFavorites->group.untranslatedText()),
+                 QString::fromUtf8(homeLibraries->group.untranslatedText()));
         // The library sub-tab switches: only the Favorites and Collections of Movies and TV Shows are on by default
         const QStringList subTabs{
             QStringLiteral("tabs.movies.suggestions"), QStringLiteral("tabs.movies.favorites"),
@@ -129,7 +135,7 @@ class TestSettingsParity : public QObject {
                      qPrintable(key));
             QCOMPARE(subTab->defaultValue, QVariant(enabledByDefault.contains(key)));
         }
-        QCOMPARE(Kinefin::settingDefinitions().size(), defined + 3 + subTabs.size());
+        QCOMPARE(Kinefin::settingDefinitions().size(), defined + 4 + subTabs.size());
     }
 
     void everyDefaultIsValid()

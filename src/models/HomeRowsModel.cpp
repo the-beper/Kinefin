@@ -27,6 +27,9 @@ HomeRowsModel::HomeRowsModel(JellyfinClient *client, QObject *parent)
     connect(m_client, &JellyfinClient::nextUpReady, this,
             [this](const QJsonArray &items, int, int channel) { deliver(NextUp, channel, items); });
     connect(
+        m_client, &JellyfinClient::itemsReady, this,
+        [this](const QJsonArray &items, int, int channel) { deliver(Favorites, channel, items); });
+    connect(
         m_client, &JellyfinClient::latestItemsReady, this,
         [this](const QJsonArray &items, int channel) { deliver(RecentlyAdded, channel, items); });
     connect(m_client, &JellyfinClient::listingFailed, this,
@@ -55,6 +58,10 @@ void HomeRowsModel::reload()
     rows.push_back(
         {ContinueWatching, {}, {}, Idle, FixedChannel, new ItemRowModel(m_client, true, this)});
     rows.push_back({NextUp, {}, {}, Idle, FixedChannel, new ItemRowModel(m_client, true, this)});
+    if (m_favorites)
+        rows.push_back(favoritesRow());
+    else if (m_client)
+        m_client->releaseListingChannel(FavoritesChannel);
     int index = 0;
     for (const QVariant &entry : std::as_const(m_libraries)) {
         const QVariantMap library = entry.toMap();
@@ -74,6 +81,41 @@ void HomeRowsModel::reload()
         row.items->deleteLater();
     for (int row = 0; row < int(m_rows.size()); ++row)
         request(row);
+}
+
+HomeRowsModel::Row HomeRowsModel::favoritesRow()
+{
+    return {Favorites, {}, {}, Idle, FavoritesChannel, new ItemRowModel(m_client, false, this)};
+}
+
+void HomeRowsModel::setFavoritesEnabled(bool enabled)
+{
+    if (enabled == m_favorites)
+        return;
+    m_favorites = enabled;
+    // Without rows there is nothing to change: the next load() reads the flag
+    if (m_rows.empty())
+        return;
+    // Continue Watching and Next Up always come first
+    constexpr int position = 2;
+    if (enabled) {
+        beginInsertRows({}, position, position);
+        m_rows.insert(m_rows.begin() + position, favoritesRow());
+        endInsertRows();
+        request(position);
+        return;
+    }
+    const int row = rowFor(Favorites, FavoritesChannel);
+    if (row < 0)
+        return;
+    beginRemoveRows({}, row, row);
+    ItemRowModel *items = m_rows[size_t(row)].items;
+    m_rows.erase(m_rows.begin() + row);
+    endRemoveRows();
+    // The delegate may still be bound to the list for a turn
+    items->deleteLater();
+    if (m_client)
+        m_client->releaseListingChannel(FavoritesChannel);
 }
 
 void HomeRowsModel::retry(int row)
@@ -98,6 +140,8 @@ void HomeRowsModel::clearRows()
     const std::vector<Row> old = std::move(m_rows);
     m_rows.clear();
     endResetModel();
+    if (m_client)
+        m_client->releaseListingChannel(FavoritesChannel);
     // The Repeater destroys its delegates after the reset: the inner lists may still be bound to these for a turn
     for (const Row &row : old)
         row.items->deleteLater();
@@ -122,6 +166,20 @@ void HomeRowsModel::request(int row)
                 QDate::currentDate().addDays(-NextUpDays).toString(QStringLiteral("yyyy-MM-dd")),
                 false, ItemsPerRow, channel);
             break;
+        case Favorites: {
+            ItemQuery query;
+            query.includeItemTypes = QStringLiteral("Movie,Series");
+            query.recursive = true;
+            query.filters = QStringLiteral("IsFavorite");
+            query.sortBy = QStringLiteral("Random");
+            // The season and episode counts of a series card
+            query.fields = {QStringLiteral("PrimaryImageAspectRatio"), QStringLiteral("ChildCount"),
+                            QStringLiteral("RecursiveItemCount")};
+            query.cardImages = true;
+            query.limit = ItemsPerRow;
+            started = m_client->fetchItems(query, channel);
+            break;
+        }
         case RecentlyAdded:
             started = m_client->fetchLatestItems(libraryId, ItemsPerRow, channel,
                                                  m_unplayedOnly ? std::optional<bool>(false)
@@ -160,6 +218,8 @@ void HomeRowsModel::fail(const QString &family, int channel)
         kind = NextUp;
     else if (family == QLatin1String("Latest"))
         kind = RecentlyAdded;
+    else if (family == QLatin1String("Items"))
+        kind = Favorites;
     else
         return;
     const int row = rowFor(kind, channel);

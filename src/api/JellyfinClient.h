@@ -85,9 +85,6 @@ struct ItemQuery {
     int parentIndexNumber = -1;
     bool isMissing = false;
     bool isUnaired = false;
-    // The alphabet picker: `nameStartsWith` is one letter, `nameLessThan` the bound of the "#" bucket; letters or digits only, at most 16 characters
-    QString nameStartsWith;
-    QString nameLessThan;
 };
 
 // One entry of `GET /Users/Public`, already validated: a Jellyfin id, a bounded single-line name and a safe avatar tag (empty when the user has no avatar)

@@ -538,6 +538,162 @@ class TestHomeRowsModel : public QObject {
         QTRY_VERIFY(f.status(0) == int(HomeRowsModel::Failed));
     }
 
+    void theFavoritesRowSitsAfterNextUpWithItsRequest()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        QAbstractItemModelTester tester(&f.rows);
+        f.rows.setFavoritesEnabled(true);
+        f.rows.load(libraries());
+        // Continue Watching, Next Up, Favorites, then Recently Added of the two libraries
+        QCOMPARE(f.rows.rowCount(), 5);
+        QTRY_VERIFY(f.allSettled());
+        QCOMPARE(f.rows.data(f.rows.index(1), HomeRowsModel::KindRole).toInt(),
+                 int(HomeRowsModel::NextUp));
+        QCOMPARE(f.rows.data(f.rows.index(2), HomeRowsModel::KindRole).toInt(),
+                 int(HomeRowsModel::Favorites));
+        QCOMPARE(f.rows.data(f.rows.index(3), HomeRowsModel::KindRole).toInt(),
+                 int(HomeRowsModel::RecentlyAdded));
+        QCOMPARE(f.status(2), int(HomeRowsModel::Ready));
+        QVERIFY(f.shown(2));
+        QVERIFY(f.items(2)->count() > 0);
+        // A poster row
+        QVERIFY(!f.items(2)->landscape());
+        // One request on the Items listing, across every library, for the user's favorites only
+        const QList<QByteArray> routes = f.server.listingRoutes.value(QStringLiteral("Items"));
+        QCOMPARE(routes.size(), 1);
+        const QUrlQuery wire = FakeJellyfin::capturedListingQuery(routes.constFirst());
+        const auto value = [&wire](const char *key) {
+            return wire.queryItemValue(QString::fromLatin1(key), QUrl::FullyDecoded);
+        };
+        QVERIFY(!wire.hasQueryItem(QStringLiteral("parentId")));
+        QCOMPARE(value("includeItemTypes"), QStringLiteral("Movie,Series"));
+        QCOMPARE(value("filters"), QStringLiteral("IsFavorite"));
+        QCOMPARE(value("recursive"), QStringLiteral("true"));
+        QCOMPARE(value("sortBy"), QStringLiteral("Random"));
+        QCOMPARE(value("limit"), QStringLiteral("24"));
+        QCOMPARE(
+            value("fields"),
+            QStringLiteral("PrimaryImageAspectRatio,ChildCount,RecursiveItemCount,DateCreated"));
+        QCOMPARE(value("imageTypeLimit"), QStringLiteral("1"));
+        QVERIFY(value("enableImageTypes").contains(QStringLiteral("Thumb")));
+        QVERIFY(!value("userId").isEmpty());
+        // The other rows keep their requests
+        QCOMPARE(f.server.listingRoutes.value(QStringLiteral("Resume")).size(), 1);
+        QCOMPARE(f.server.listingRoutes.value(QStringLiteral("NextUp")).size(), 1);
+        QCOMPARE(f.server.listingRoutes.value(QStringLiteral("Latest")).size(), 2);
+    }
+
+    void theFavoritesRowIsNotRequestedWhileOff()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        f.rows.load(libraries());
+        QCOMPARE(f.rows.rowCount(), 4);
+        QTRY_VERIFY(f.allSettled());
+        for (int row = 0; row < f.rows.rowCount(); ++row)
+            QVERIFY(f.rows.data(f.rows.index(row), HomeRowsModel::KindRole).toInt()
+                    != int(HomeRowsModel::Favorites));
+        QVERIFY(f.server.listingRoutes.value(QStringLiteral("Items")).isEmpty());
+    }
+
+    void anEmptyFavoritesRowIsHiddenAndItsNeighboursStay()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        f.server.listingRawBody.insert(QStringLiteral("Items"), Fixture::envelope({}));
+        f.rows.setFavoritesEnabled(true);
+        f.rows.load(libraries());
+        QTRY_VERIFY(f.allSettled());
+        QCOMPARE(f.status(2), int(HomeRowsModel::Ready));
+        QVERIFY(!f.shown(2));
+        QVERIFY(f.shown(1));
+        QVERIFY(f.shown(3));
+    }
+
+    void aFailedFavoritesRowIsAloneAndRetryable()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        f.server.listingStatus.insert(QStringLiteral("Items"), 500);
+        f.rows.setFavoritesEnabled(true);
+        f.rows.load(libraries());
+        QTRY_VERIFY(f.allSettled());
+        QCOMPARE(f.status(2), int(HomeRowsModel::Failed));
+        QVERIFY(f.shown(2));
+        for (const int row : {0, 1, 3, 4})
+            QCOMPARE(f.status(row), int(HomeRowsModel::Ready));
+        f.server.listingStatus.clear();
+        f.rows.retry(2);
+        QCOMPARE(f.status(2), int(HomeRowsModel::Loading));
+        QTRY_COMPARE(f.status(2), int(HomeRowsModel::Ready));
+        QVERIFY(f.items(2)->count() > 0);
+    }
+
+    void switchingTheFavoritesRowAddsAndRemovesOnlyThatRow()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        QAbstractItemModelTester tester(&f.rows);
+        // No rows yet: the switch only sets what the next load reads
+        f.rows.setFavoritesEnabled(true);
+        f.rows.setFavoritesEnabled(false);
+        f.rows.load(libraries());
+        QTRY_VERIFY(f.allSettled());
+        QCOMPARE(f.rows.rowCount(), 4);
+        ItemRowModel *resume = f.items(0);
+        ItemRowModel *latest = f.items(2);
+        QSignalSpy inserted(&f.rows, &QAbstractItemModel::rowsInserted);
+        QSignalSpy removed(&f.rows, &QAbstractItemModel::rowsRemoved);
+        QSignalSpy reset(&f.rows, &QAbstractItemModel::modelReset);
+        f.rows.setFavoritesEnabled(true);
+        QCOMPARE(inserted.size(), 1);
+        QCOMPARE(inserted.constFirst().at(1).toInt(), 2);
+        QCOMPARE(f.rows.rowCount(), 5);
+        QCOMPARE(f.status(2), int(HomeRowsModel::Loading));
+        QTRY_COMPARE(f.status(2), int(HomeRowsModel::Ready));
+        // The other rows were neither reloaded nor replaced
+        QCOMPARE(f.items(0), resume);
+        QCOMPARE(f.items(3), latest);
+        QCOMPARE(f.server.listingRoutes.value(QStringLiteral("Resume")).size(), 1);
+        QCOMPARE(f.server.listingRoutes.value(QStringLiteral("Latest")).size(), 2);
+        QCOMPARE(f.server.listingRoutes.value(QStringLiteral("Items")).size(), 1);
+        f.rows.setFavoritesEnabled(false);
+        QCOMPARE(removed.size(), 1);
+        QCOMPARE(removed.constFirst().at(1).toInt(), 2);
+        QCOMPARE(f.rows.rowCount(), 4);
+        QCOMPARE(f.items(0), resume);
+        QCOMPARE(f.items(2), latest);
+        QCOMPARE(reset.size(), 0);
+    }
+
+    void aFavoritesRequestInFlightGoesWithItsSwitch()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        QAbstractItemModelTester tester(&f.rows);
+        f.rows.load(libraries());
+        QTRY_VERIFY(f.allSettled());
+        // The Favorites reply is held back while the switch goes off again
+        f.server.heldFamilies.insert(QStringLiteral("Items"));
+        f.rows.setFavoritesEnabled(true);
+        QTRY_COMPARE(f.server.listingRoutes.value(QStringLiteral("Items")).size(), 1);
+        f.rows.setFavoritesEnabled(false);
+        QCOMPARE(f.rows.rowCount(), 4);
+        f.server.heldFamilies.clear();
+        f.server.releaseHeld();
+        QTest::qWait(200);
+        QCOMPARE(f.rows.rowCount(), 4);
+        for (int row = 0; row < f.rows.rowCount(); ++row)
+            QVERIFY(f.rows.data(f.rows.index(row), HomeRowsModel::KindRole).toInt()
+                    != int(HomeRowsModel::Favorites));
+        // On again: one new request, and the row ends ready
+        f.rows.setFavoritesEnabled(true);
+        QTRY_COMPARE(f.status(2), int(HomeRowsModel::Ready));
+        QVERIFY(f.items(2)->count() > 0);
+        QCOMPARE(f.server.listingRoutes.value(QStringLiteral("Items")).size(), 2);
+    }
+
     void theGridAndTheRowsLoadTogether()
     {
         Fixture f;

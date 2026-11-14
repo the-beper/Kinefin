@@ -395,8 +395,6 @@ void LibraryItemsModel::clearLibrary()
     m_held = false;
     setQueryTooLong(false);
     clearPaging();
-    // The letter belongs to the open view
-    assignAlphabet({});
     m_constraint = {};
     m_libraryId.clear();
     m_collectionType.clear();
@@ -568,16 +566,6 @@ bool LibraryItemsModel::assignPending(const QStringList &tagHashes, const QStrin
     return true;
 }
 
-bool LibraryItemsModel::assignAlphabet(const QString &letter)
-{
-    if (letter == m_alphabet)
-        return false;
-    m_alphabet = letter;
-    Q_EMIT alphabetChanged();
-    refreshFiltered();
-    return true;
-}
-
 bool LibraryItemsModel::assignViewMode(const QString &mode)
 {
     if (mode == m_viewMode)
@@ -709,8 +697,6 @@ void LibraryItemsModel::setSortBy(const QString &key)
     if (key == m_sortBy || !acceptsSortKey(key))
         return;
     assignSortBy(key);
-    if (isRandomSort(key))
-        assignAlphabet({});
     if (isOpen())
         restartList();
     Q_EMIT viewStateEdited();
@@ -782,20 +768,6 @@ void LibraryItemsModel::clearFilters()
     if (isOpen())
         restartList();
     Q_EMIT viewStateEdited();
-}
-
-void LibraryItemsModel::setAlphabet(const QString &letter)
-{
-    QString clean = letter;
-    if (clean.size() == 1 && clean.at(0) >= QLatin1Char('a') && clean.at(0) <= QLatin1Char('z'))
-        clean = clean.toUpper();
-    const bool valid = clean.isEmpty() || clean == QLatin1String("#")
-                       || (clean.size() == 1 && clean.at(0) >= QLatin1Char('A')
-                           && clean.at(0) <= QLatin1Char('Z'));
-    if (!valid || (isRandom() && !clean.isEmpty()))
-        return;
-    if (assignAlphabet(clean) && isOpen())
-        restartList();
 }
 
 void LibraryItemsModel::reload()
@@ -986,8 +958,8 @@ std::optional<ItemQuery> LibraryItemsModel::composedQuery(const LibraryFilterSta
     ItemQuery base = m_base;
     base.searchTerm = m_appliedTerm;
     base.cardImageType = extraImageType(m_imageType);
-    return composeLibraryQuery(base, scope(), filters, LibrarySort{m_sortBy, m_descending},
-                               m_alphabet, start, limit);
+    return composeLibraryQuery(base, scope(), filters, LibrarySort{m_sortBy, m_descending}, start,
+                               limit);
 }
 
 int LibraryItemsModel::queryCharsOf(const LibraryFilterState &filters) const

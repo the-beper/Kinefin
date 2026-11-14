@@ -704,10 +704,6 @@ void addLibraryFilterParameters(QUrlQuery &wire, const ItemQuery &query)
                           QString::number(query.parentIndexNumber));
     addTrue("isMissing", query.isMissing);
     addTrue("isUnaired", query.isUnaired);
-    if (!query.nameStartsWith.isEmpty())
-        wire.addQueryItem(QStringLiteral("nameStartsWith"), encodedText(query.nameStartsWith));
-    if (!query.nameLessThan.isEmpty())
-        wire.addQueryItem(QStringLiteral("nameLessThan"), encodedText(query.nameLessThan));
 }
 
 // The /Items query of one item listing, or when `query.itemIds` is set an ids= resolution that carries only the ids and the fields (the details-refresh form): documented by ItemQuery. `userId` rides along on every listing call
@@ -794,18 +790,6 @@ bool validTokenList(const QStringList &list, std::initializer_list<QStringView> 
     return true;
 }
 
-// The alphabet picker's value: a few letters or digits
-bool validNamePrefix(const QString &prefix)
-{
-    if (prefix.isEmpty() || prefix.size() > 16)
-        return false;
-    for (const QChar c : prefix) {
-        if (!c.isLetterOrNumber())
-            return false;
-    }
-    return true;
-}
-
 // The library filter members of an `ItemQuery`: bounded lists, whitelisted tokens, valid ids and texts, and no contradiction (Played with Unplayed, SD with 4K)
 bool validLibraryFilters(const ItemQuery &query)
 {
@@ -834,10 +818,6 @@ bool validLibraryFilters(const ItemQuery &query)
     }
     if (query.parentIndexNumber < -1 || query.parentIndexNumber > 9999)
         return false;
-    for (const QString &prefix : {query.nameStartsWith, query.nameLessThan}) {
-        if (!prefix.isEmpty() && !validNamePrefix(prefix))
-            return false;
-    }
     return !(query.isHd.has_value() && !*query.isHd && query.is4K);
 }
 

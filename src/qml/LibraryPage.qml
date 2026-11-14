@@ -212,10 +212,6 @@ Kirigami.Page {
         favoritesFixed: page.subtab === "favorites"
     }
 
-    function toggleLetter(letter) {
-        listModel.alphabet = listModel.alphabet === letter ? "" : letter;
-    }
-
     onListModelChanged: {
         if (listModel !== null)
             listContent.heldModel = listModel;
@@ -230,7 +226,7 @@ Kirigami.Page {
         }
     }
 
-    // Everything in the page body, in the order of the Tab stops: library, toolbar (sub-tabs first), chips, alphabet, then the list
+    // Everything in the page body, in the order of the Tab stops: library, toolbar (sub-tabs first), chips, then the list
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
@@ -661,69 +657,6 @@ Kirigami.Page {
             }
         }
 
-        // The alphabet picker: # and A to Z from the server's names, independent of the search, never kept. One tab stop, Left and Right move over the letters, Return and Space pick one
-        FocusScope {
-            id: alphabet
-            objectName: "alphabetPicker"
-
-            readonly property var letters: ["#", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"]
-            property int currentIndex: 0
-
-            Layout.fillWidth: true
-            Layout.leftMargin: Kirigami.Units.largeSpacing
-            Layout.rightMargin: Kirigami.Units.largeSpacing
-            Layout.preferredHeight: letterFlow.implicitHeight
-            visible: page.listModel !== null && !page.listModel.random
-            activeFocusOnTab: true
-            Accessible.role: Accessible.Grouping
-            Accessible.name: i18nc("@label accessible name of the alphabet picker", "Alphabet")
-
-            Keys.onLeftPressed: currentIndex = Math.max(0, currentIndex - 1)
-            Keys.onRightPressed: currentIndex = Math.min(letters.length - 1, currentIndex + 1)
-            Keys.onReturnPressed: page.toggleLetter(letters[currentIndex])
-            Keys.onEnterPressed: page.toggleLetter(letters[currentIndex])
-            Keys.onSpacePressed: page.toggleLetter(letters[currentIndex])
-
-            Flow {
-                id: letterFlow
-
-                anchors {
-                    left: parent.left
-                    right: parent.right
-                }
-                spacing: 0
-
-                Repeater {
-                    model: alphabet.letters
-
-                    delegate: Controls.ToolButton {
-                        id: letter
-
-                        required property string modelData
-                        required property int index
-                        readonly property bool picked: page.listModel !== null && page.listModel.alphabet === modelData
-
-                        objectName: "letter_" + (modelData === "#" ? "hash" : modelData)
-                        width: Math.max(Kirigami.Units.gridUnit * 1.6, implicitHeight)
-                        focusPolicy: Qt.NoFocus
-                        padding: Kirigami.Units.smallSpacing
-                        text: modelData
-                        // The letter picked looks pressed; the one the keys are on has the focus mark
-                        down: picked || pressed
-                        highlighted: alphabet.activeFocus && alphabet.currentIndex === index
-                        Accessible.role: Accessible.Button
-                        Accessible.name: modelData === "#" ? i18nc("accessible name of the alphabet picker button for the names that do not start with a letter", "Numbers and symbols") : modelData
-                        Accessible.checkable: true
-                        Accessible.checked: picked
-                        onClicked: {
-                            alphabet.currentIndex = index;
-                            page.toggleLetter(modelData);
-                        }
-                    }
-                }
-            }
-        }
-
         MessageBox {
             id: libraryFailedBox
             objectName: "libraryFailedBox"
@@ -802,10 +735,9 @@ Kirigami.Page {
                     ownerPage: page
                     accessibleName: page.title
                     emptyText: page.emptyText
-                    canClear: filterDialog.chips.length > 0 || listContent.heldModel.alphabet.length > 0 || listContent.heldModel.searchTerm.length > 0 || listContent.heldModel.resolvingFacets
+                    canClear: filterDialog.chips.length > 0 || listContent.heldModel.searchTerm.length > 0 || listContent.heldModel.resolvingFacets
                     onClearRequested: {
                         listContent.heldModel.clearFilters();
-                        listContent.heldModel.alphabet = "";
                         listContent.heldModel.searchTerm = "";
                     }
                     // A model of another list shows from its first item

@@ -16,11 +16,33 @@ Kirigami.Page {
     globalToolBarStyle: Kirigami.ApplicationHeaderStyle.None
     readonly property bool isShowing: page.Window.window?.pageStack.currentItem === page
     property bool showChrome: true
+    // Below the window's wide limit the controls row shows icons only, each with its text as tooltip and accessible name
+    readonly property bool narrow: width < (page.Window.window?.wideLimit ?? 0)
+    // The time button shows the remaining time instead of the total, for as long as this page lives
+    property bool showRemaining: false
+    readonly property bool fullScreen: page.Window.window?.visibility === Window.FullScreen
+    readonly property string timeLabel: {
+        const elapsed = page.player.timeText(page.player.positionTicks);
+        // An unknown length has neither a total nor a remaining time
+        if (page.player.durationTicks <= 0)
+            return elapsed;
+        const remaining = i18nc("@action:button remaining playback time, with a minus sign", "−%1", page.player.timeText(Math.max(0, page.player.durationTicks - page.player.positionTicks)));
+        if (page.narrow)
+            return page.showRemaining ? remaining : elapsed;
+        return i18nc("@action:button elapsed playback time, then the total or the remaining time", "%1 / %2", elapsed, page.showRemaining ? remaining : page.player.timeText(page.player.durationTicks));
+    }
+    // An open menu or the queue panel keeps the bars up
+    readonly property bool menuOpen: queuePanel.opened || audioMenu.opened || subtitlesMenu.opened || moreMenu.opened
 
     // The page keeps the keyboard: the controls of the bars take it only through Tab, so the keys work whatever was clicked
     function focusPrimary() { page.forceActiveFocus(Qt.TabFocusReason); }
     function wakeChrome() { showChrome = true; chromeTimer.restart(); }
     function closePlayer() { page.player.stop(); page.Window.window.pageStack.pop(); }
+    // A menu of the bottom bar opens above its button, aligned to the button's far edge
+    function openMenu(menu, button) {
+        const corner = button.mapToItem(page, page.mirrored ? 0 : button.width, 0);
+        menu.popup(page.mirrored ? corner.x : corner.x - menu.implicitWidth, corner.y - menu.implicitHeight);
+    }
     function focusIsInOsd() {
         for (let item = page.Window.window?.activeFocusItem; item; item = item.parent) {
             if (item === osd)
@@ -81,7 +103,7 @@ Kirigami.Page {
         objectName: "playerChromeTimer"
         interval: 5000
         onTriggered: {
-            if (!page.player.active || queuePanel.opened)
+            if (!page.player.active || page.menuOpen)
                 return;
             // A control of a hidden bar would keep the keys: the page takes them back
             if (page.focusIsInOsd())
@@ -199,7 +221,7 @@ Kirigami.Page {
         id: osd
         objectName: "playerOsd"
         anchors.fill: parent
-        readonly property bool wanted: page.showChrome || !page.player.active || queuePanel.opened
+        readonly property bool wanted: page.showChrome || !page.player.active || page.menuOpen
         enabled: wanted
         opacity: wanted ? 1 : 0
         // Visible as soon as it is wanted, so the Tab that wakes the bars finds their controls while they fade in
@@ -228,16 +250,11 @@ Kirigami.Page {
                 anchors.top: parent.top
                 anchors.margins: Kirigami.Units.largeSpacing
                 spacing: Kirigami.Units.largeSpacing
-                Controls.ToolButton {
+                OsdButton {
                     objectName: "playerBackButton"
                     Layout.alignment: Qt.AlignTop
-                    focusPolicy: Qt.TabFocus
-                    display: Controls.AbstractButton.IconOnly
                     icon.name: page.mirrored ? "go-previous-symbolic-rtl" : "go-previous-symbolic"
                     text: i18nc("@action:button", "Back")
-                    Controls.ToolTip.text: text
-                    Controls.ToolTip.visible: hovered || visualFocus
-                    Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
                     onClicked: page.closePlayer()
                 }
                 ColumnLayout {
@@ -281,230 +298,128 @@ Kirigami.Page {
                 anchors.bottom: parent.bottom
                 anchors.margins: Kirigami.Units.largeSpacing
                 spacing: Kirigami.Units.smallSpacing
-                RowLayout {
+                Controls.Slider {
+                    id: timeline
+                    objectName: "playbackTimeline"
                     Layout.fillWidth: true
-                    Controls.Label {
-                        text: page.player.timeText(page.player.positionTicks)
+                    focusPolicy: Qt.TabFocus
+                    enabled: page.player.canSeek && page.player.durationTicks > 0
+                    from: 0
+                    to: Math.max(1, page.player.durationTicks / 10000000)
+                    // The arrow keys move the timeline by ten seconds once Tab reached it
+                    stepSize: 10
+                    property real dragSeconds: 0
+                    value: pressed ? dragSeconds : page.player.positionTicks / 10000000
+                    onMoved: {
+                        page.wakeChrome();
+                        if (!pressed) {
+                            page.player.seek(Math.round(value * 10000000));
+                            return;
+                        }
+                        dragSeconds = value;
+                        previewTimer.restart();
                     }
-                    Controls.Slider {
-                        id: timeline
-                        objectName: "playbackTimeline"
-                        Layout.fillWidth: true
-                        focusPolicy: Qt.TabFocus
-                        enabled: page.player.canSeek && page.player.durationTicks > 0
-                        from: 0
-                        to: Math.max(1, page.player.durationTicks / 10000000)
-                        // The arrow keys move the timeline by ten seconds once Tab reached it
-                        stepSize: 10
-                        property real dragSeconds: 0
-                        value: pressed ? dragSeconds : page.player.positionTicks / 10000000
-                        onMoved: {
+                    onPressedChanged: {
+                        if (pressed) {
+                            dragSeconds = page.player.positionTicks / 10000000;
                             page.wakeChrome();
-                            if (!pressed) {
-                                page.player.seek(Math.round(value * 10000000));
-                                return;
-                            }
-                            dragSeconds = value;
-                            previewTimer.restart();
+                        } else {
+                            previewTimer.stop();
+                            page.player.seek(Math.round(dragSeconds * 10000000));
+                            page.player.clearPreview();
+                            page.wakeChrome();
                         }
-                        onPressedChanged: {
-                            if (pressed) {
-                                dragSeconds = page.player.positionTicks / 10000000;
-                                page.wakeChrome();
-                            } else {
-                                previewTimer.stop();
-                                page.player.seek(Math.round(dragSeconds * 10000000));
-                                page.player.clearPreview();
-                                page.wakeChrome();
-                            }
-                        }
-                        Accessible.name: i18n("Playback position")
                     }
-                    Controls.Label {
-                        text: page.player.timeText(page.player.durationTicks)
-                    }
+                    Accessible.name: i18n("Playback position")
                 }
                 RowLayout {
+                    objectName: "playerControlRow"
                     Layout.fillWidth: true
                     spacing: Kirigami.Units.smallSpacing
-                    Controls.ToolButton {
-                        focusPolicy: Qt.TabFocus
+                    OsdButton {
+                        objectName: "playerPreviousButton"
+                        visible: page.player.hasPrevious
                         icon.name: "media-skip-backward"
                         text: i18n("Previous")
                         onClicked: { page.player.previous(); page.wakeChrome(); }
                     }
-                    Controls.ToolButton {
+                    OsdButton {
                         id: playButton
                         objectName: "playerPauseButton"
-                        focusPolicy: Qt.TabFocus
                         text: page.player.paused ? i18n("Resume") : i18n("Pause")
                         icon.name: page.player.paused ? "media-playback-start" : "media-playback-pause"
                         enabled: page.player.active && !page.player.loading
                         onClicked: { page.player.togglePause(); page.wakeChrome(); }
                     }
-                    Controls.ToolButton {
-                        focusPolicy: Qt.TabFocus
-                        icon.name: "media-playback-stop"
-                        text: i18n("Stop")
-                        onClicked: page.player.stop()
-                    }
-                    Controls.ToolButton {
-                        focusPolicy: Qt.TabFocus
+                    OsdButton {
+                        objectName: "playerNextButton"
+                        visible: page.player.hasNext
                         icon.name: "media-skip-forward"
                         text: i18n("Next")
                         onClicked: { page.player.next(); page.wakeChrome(); }
                     }
-                    Controls.ToolButton {
-                        focusPolicy: Qt.TabFocus
-                        checkable: true
-                        checked: page.player.shuffle
-                        icon.name: "media-playlist-shuffle"
-                        text: i18n("Shuffle")
-                        onClicked: page.player.setShuffle(!page.player.shuffle)
-                    }
-                    Controls.ToolButton {
-                        focusPolicy: Qt.TabFocus
-                        icon.name: "media-playlist-repeat"
-                        text: [i18n("Repeat Off"), i18n("Repeat All"), i18n("Repeat One")][page.player.repeatMode]
-                        onClicked: page.player.setRepeatMode((page.player.repeatMode + 1) % 3)
-                    }
-                    Item { Layout.fillWidth: true }
-                    Controls.ToolButton {
-                        focusPolicy: Qt.TabFocus
+                    OsdButton {
+                        objectName: "playerMuteButton"
                         icon.name: page.player.muted ? "audio-volume-muted" : "audio-volume-high"
                         text: page.player.muted ? i18n("Unmute") : i18n("Mute")
-                        onClicked: page.player.toggleMute()
+                        onClicked: { page.player.toggleMute(); page.wakeChrome(); }
                     }
                     Controls.Slider {
                         objectName: "playerVolumeSlider"
                         Layout.preferredWidth: Kirigami.Units.gridUnit * 5
+                        // A narrow row has no room for it
+                        visible: !page.narrow
                         focusPolicy: Qt.TabFocus
                         from: 0
                         to: 100
                         stepSize: 5
                         value: page.player.volume
-                        onMoved: page.player.setVolume(Math.round(value))
+                        onMoved: { page.player.setVolume(Math.round(value)); page.wakeChrome(); }
                         Accessible.name: i18n("Volume")
                     }
                     Controls.ToolButton {
+                        objectName: "playerTimeButton"
                         focusPolicy: Qt.TabFocus
-                        text: i18n("Tracks")
+                        text: page.timeLabel
+                        Accessible.description: Controls.ToolTip.text
+                        Controls.ToolTip.text: !page.showRemaining ? i18nc("@info:tooltip", "Show remaining time") : page.narrow ? i18nc("@info:tooltip", "Show elapsed time") : i18nc("@info:tooltip", "Show total time")
+                        Controls.ToolTip.visible: hovered || visualFocus
+                        Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
+                        onClicked: { page.showRemaining = !page.showRemaining; page.wakeChrome(); }
+                    }
+                    Item { Layout.fillWidth: true }
+                    OsdButton {
+                        id: audioButton
+                        objectName: "playerAudioButton"
+                        display: page.narrow ? Controls.AbstractButton.IconOnly : Controls.AbstractButton.TextBesideIcon
+                        enabled: page.player.audioTracks.length > 0
+                        // The menu role draws the style's menu arrow beside the label
+                        Accessible.role: Accessible.ButtonMenu
                         icon.name: "audio-headphones"
-                        onClicked: tracksMenu.popup()
-                        Controls.Menu {
-                            id: tracksMenu
-                            Kirigami.Theme.colorSet: Kirigami.Theme.Window
-                            Kirigami.Theme.inherit: false
-                            title: i18n("Audio and Subtitles")
-                            Controls.MenuItem { text: i18n("Audio tracks"); enabled: false }
-                            Instantiator {
-                                model: page.player.audioTracks
-                                delegate: Controls.MenuItem {
-                                    text: modelData.name
-                                    checkable: true
-                                    checked: modelData.selected
-                                    onTriggered: page.player.selectAudioTrack(modelData.id)
-                                }
-                                onObjectAdded: (index, object) => tracksMenu.insertItem(index + 1, object)
-                                onObjectRemoved: (index, object) => tracksMenu.removeItem(object)
-                            }
-                            Controls.MenuSeparator {}
-                            Controls.MenuItem { text: i18n("No subtitles"); onTriggered: page.player.selectSubtitleTrack(0) }
-                            Instantiator {
-                                model: page.player.subtitleTracks
-                                delegate: Controls.MenuItem {
-                                    text: modelData.name
-                                    checkable: true
-                                    checked: modelData.selected
-                                    onTriggered: page.player.selectSubtitleTrack(modelData.id)
-                                }
-                                onObjectAdded: (index, object) => tracksMenu.addItem(object)
-                                onObjectRemoved: (index, object) => tracksMenu.removeItem(object)
-                            }
-                            Controls.MenuSeparator { visible: page.player.externalSubtitles.length > 0 }
-                            Controls.MenuItem {
-                                text: i18n("Download external subtitles")
-                                enabled: false
-                                visible: page.player.externalSubtitles.length > 0
-                            }
-                            Instantiator {
-                                model: page.player.externalSubtitles
-                                delegate: Controls.MenuItem {
-                                    text: modelData.name
-                                    onTriggered: page.player.downloadSubtitle(modelData.index)
-                                }
-                                onObjectAdded: (index, object) => tracksMenu.addItem(object)
-                                onObjectRemoved: (index, object) => tracksMenu.removeItem(object)
-                            }
-                        }
+                        text: i18nc("@action:button audio tracks", "Audio")
+                        onClicked: page.openMenu(audioMenu, audioButton)
                     }
-                    Controls.ComboBox {
-                        id: speed
-                        Layout.preferredWidth: Kirigami.Units.gridUnit * 6
-                        focusPolicy: Qt.TabFocus
-                        model: ["0.5×", "0.75×", "1×", "1.25×", "1.5×", "2×", "3×", "4×"]
-                        currentIndex: {
-                            const values = [0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4];
-                            return values.indexOf(page.player.rate);
-                        }
-                        onActivated: index => page.player.setRate([0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4][index])
-                        Accessible.name: i18n("Playback speed")
+                    OsdButton {
+                        id: subtitlesButton
+                        objectName: "playerSubtitlesButton"
+                        display: page.narrow ? Controls.AbstractButton.IconOnly : Controls.AbstractButton.TextBesideIcon
+                        Accessible.role: Accessible.ButtonMenu
+                        icon.name: "media-view-subtitles-symbolic"
+                        text: i18nc("@action:button subtitle tracks", "Subtitles")
+                        onClicked: page.openMenu(subtitlesMenu, subtitlesButton)
                     }
-                    Controls.ToolButton {
-                        focusPolicy: Qt.TabFocus
-                        icon.name: "settings-configure"
-                        text: i18n("AV Sync")
-                        onClicked: delayMenu.popup()
-                        Controls.Menu {
-                            id: delayMenu
-                            Kirigami.Theme.colorSet: Kirigami.Theme.Window
-                            Kirigami.Theme.inherit: false
-                            Controls.MenuItem { text: i18n("Audio delay: %1 s", page.player.audioDelay.toFixed(1)); enabled: false }
-                            Controls.MenuItem { text: i18n("Audio earlier (-0.1 s)"); onTriggered: page.player.adjustAudioDelay(Math.max(-10, page.player.audioDelay - 0.1)) }
-                            Controls.MenuItem { text: i18n("Audio later (+0.1 s)"); onTriggered: page.player.adjustAudioDelay(Math.min(10, page.player.audioDelay + 0.1)) }
-                            Controls.MenuSeparator {}
-                            Controls.MenuItem { text: i18n("Subtitle delay: %1 s", page.player.subtitleDelay.toFixed(1)); enabled: false }
-                            Controls.MenuItem { text: i18n("Subtitles earlier (-0.1 s)"); onTriggered: page.player.adjustSubtitleDelay(Math.max(-10, page.player.subtitleDelay - 0.1)) }
-                            Controls.MenuItem { text: i18n("Subtitles later (+0.1 s)"); onTriggered: page.player.adjustSubtitleDelay(Math.min(10, page.player.subtitleDelay + 0.1)) }
-                        }
+                    OsdButton {
+                        objectName: "playerFullScreenButton"
+                        icon.name: page.fullScreen ? "view-restore" : "view-fullscreen"
+                        text: page.fullScreen ? i18nc("@action:button", "Exit Full Screen Mode") : i18nc("@action:button", "Full Screen Mode")
+                        onClicked: { page.Window.window.togglePlayerFullscreen(); page.wakeChrome(); }
                     }
-                    Controls.ToolButton {
-                        focusPolicy: Qt.TabFocus
-                        icon.name: "view-list-details"
-                        text: i18n("Now Playing")
-                        onClicked: queuePanel.open()
-                    }
-                    Controls.ToolButton {
-                        focusPolicy: Qt.TabFocus
-                        text: page.player.sleepRemainingMinutes > 0 ? i18n("Sleep: %1 min", page.player.sleepRemainingMinutes) : i18n("Sleep Timer")
-                        icon.name: "chronometer"
-                        onClicked: sleepMenu.popup()
-                        Controls.Menu {
-                            id: sleepMenu
-                            Kirigami.Theme.colorSet: Kirigami.Theme.Window
-                            Kirigami.Theme.inherit: false
-                            Instantiator {
-                                model: [0, 15, 30, 45, 60, 90, 120]
-                                delegate: Controls.MenuItem {
-                                    required property int modelData
-                                    text: modelData === 0 ? i18n("Off") : i18n("%1 minutes", modelData)
-                                    onTriggered: page.player.setSleepTimer(modelData)
-                                }
-                                onObjectAdded: (index, object) => sleepMenu.insertItem(index, object)
-                                onObjectRemoved: (index, object) => sleepMenu.removeItem(object)
-                            }
-                        }
-                    }
-                    Controls.ToolButton {
-                        focusPolicy: Qt.TabFocus
-                        text: i18n("Screenshot")
-                        // The full-colour camera-photo of breeze has path data Qt's SVG renderer truncates, with a warning on every draw
-                        icon.name: "camera-photo-symbolic"
-                        onClicked: {
-                            page.player.screenshot();
-                            page.showChrome = true;
-                            screenshotNotice.restart();
-                        }
+                    OsdButton {
+                        id: moreButton
+                        objectName: "playerMoreButton"
+                        icon.name: "overflow-menu"
+                        text: i18nc("@action:button", "More Actions")
+                        onClicked: page.openMenu(moreMenu, moreButton)
                     }
                 }
                 Controls.Label {
@@ -515,6 +430,172 @@ Kirigami.Page {
                     text: i18n("Screenshot saved to %1", page.player.screenshotPath)
                 }
                 Timer { id: screenshotNotice; interval: 6000 }
+            }
+        }
+    }
+    // The menus of the bottom bar belong to the page, not to the bars: they keep the window's colours over the dark bars
+    Controls.Menu {
+        id: audioMenu
+        objectName: "playerAudioMenu"
+        onClosed: page.wakeChrome()
+        Instantiator {
+            model: page.player.audioTracks
+            delegate: Controls.MenuItem {
+                text: modelData.name
+                checkable: true
+                autoExclusive: true
+                checked: modelData.selected
+                onTriggered: page.player.selectAudioTrack(modelData.id)
+            }
+            onObjectAdded: (index, object) => audioMenu.insertItem(index, object)
+            onObjectRemoved: (index, object) => audioMenu.removeItem(object)
+        }
+    }
+    Controls.Menu {
+        id: subtitlesMenu
+        objectName: "playerSubtitlesMenu"
+        onClosed: page.wakeChrome()
+        Controls.MenuItem {
+            objectName: "playerSubtitlesOff"
+            text: i18nc("@item:inmenu no subtitles", "Off")
+            checkable: true
+            autoExclusive: true
+            checked: !page.player.subtitleTracks.some(track => track.selected)
+            onTriggered: page.player.selectSubtitleTrack(0)
+        }
+        Instantiator {
+            model: page.player.subtitleTracks
+            delegate: Controls.MenuItem {
+                text: modelData.name
+                checkable: true
+                autoExclusive: true
+                checked: modelData.selected
+                onTriggered: page.player.selectSubtitleTrack(modelData.id)
+            }
+            onObjectAdded: (index, object) => subtitlesMenu.insertItem(index + 1, object)
+            onObjectRemoved: (index, object) => subtitlesMenu.removeItem(object)
+        }
+        Controls.MenuSeparator { visible: page.player.externalSubtitles.length > 0 }
+        Controls.MenuItem {
+            text: i18n("Download external subtitles")
+            enabled: false
+            visible: page.player.externalSubtitles.length > 0
+        }
+        Instantiator {
+            model: page.player.externalSubtitles
+            delegate: Controls.MenuItem {
+                text: modelData.name
+                onTriggered: page.player.downloadSubtitle(modelData.index)
+            }
+            onObjectAdded: (index, object) => subtitlesMenu.addItem(object)
+            onObjectRemoved: (index, object) => subtitlesMenu.removeItem(object)
+        }
+    }
+    Controls.Menu {
+        id: moreMenu
+        objectName: "playerMoreMenu"
+        onClosed: page.wakeChrome()
+        Controls.MenuItem {
+            objectName: "playerShuffleItem"
+            text: i18n("Shuffle")
+            icon.name: "media-playlist-shuffle"
+            checkable: true
+            checked: page.player.shuffle
+            // A series started from one of its episodes plays in order: only a queue shuffles, and a shuffle that is on can always be turned off
+            enabled: page.player.queueCount > 1 || page.player.shuffle
+            onTriggered: page.player.setShuffle(!page.player.shuffle)
+        }
+        Controls.Menu {
+            objectName: "playerRepeatMenu"
+            title: i18n("Repeat")
+            icon.name: "media-playlist-repeat"
+            // An item played alone has nothing to repeat into; a repeat that is on can always be turned off
+            enabled: page.player.queueCount > 0 || page.player.hasNext || page.player.hasPrevious || page.player.repeatMode !== 0
+            Controls.MenuItem {
+                objectName: "playerRepeatOff"
+                text: i18nc("@item:inmenu repeat", "Off")
+                checkable: true
+                autoExclusive: true
+                checked: page.player.repeatMode === 0
+                onTriggered: page.player.setRepeatMode(0)
+            }
+            Controls.MenuItem {
+                objectName: "playerRepeatAll"
+                text: i18nc("@item:inmenu repeat", "All")
+                checkable: true
+                autoExclusive: true
+                checked: page.player.repeatMode === 1
+                onTriggered: page.player.setRepeatMode(1)
+            }
+            Controls.MenuItem {
+                objectName: "playerRepeatOne"
+                text: i18nc("@item:inmenu repeat", "Current Item")
+                checkable: true
+                autoExclusive: true
+                checked: page.player.repeatMode === 2
+                onTriggered: page.player.setRepeatMode(2)
+            }
+        }
+        Controls.Menu {
+            id: speedMenu
+            objectName: "playerSpeedMenu"
+            title: i18n("Playback Speed")
+            icon.name: "speedometer"
+            Instantiator {
+                model: [0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4]
+                delegate: Controls.MenuItem {
+                    required property real modelData
+                    text: i18nc("@item:inmenu playback speed, %1 is the factor", "%1×", modelData)
+                    checkable: true
+                    autoExclusive: true
+                    checked: page.player.rate === modelData
+                    onTriggered: page.player.setRate(modelData)
+                }
+                onObjectAdded: (index, object) => speedMenu.insertItem(index, object)
+                onObjectRemoved: (index, object) => speedMenu.removeItem(object)
+            }
+        }
+        Controls.Menu {
+            title: i18n("AV Sync")
+            icon.name: "settings-configure"
+            Controls.MenuItem { text: i18n("Audio delay: %1 s", page.player.audioDelay.toFixed(1)); enabled: false }
+            Controls.MenuItem { text: i18n("Audio earlier (-0.1 s)"); onTriggered: page.player.adjustAudioDelay(Math.max(-10, page.player.audioDelay - 0.1)) }
+            Controls.MenuItem { text: i18n("Audio later (+0.1 s)"); onTriggered: page.player.adjustAudioDelay(Math.min(10, page.player.audioDelay + 0.1)) }
+            Controls.MenuSeparator {}
+            Controls.MenuItem { text: i18n("Subtitle delay: %1 s", page.player.subtitleDelay.toFixed(1)); enabled: false }
+            Controls.MenuItem { text: i18n("Subtitles earlier (-0.1 s)"); onTriggered: page.player.adjustSubtitleDelay(Math.max(-10, page.player.subtitleDelay - 0.1)) }
+            Controls.MenuItem { text: i18n("Subtitles later (+0.1 s)"); onTriggered: page.player.adjustSubtitleDelay(Math.min(10, page.player.subtitleDelay + 0.1)) }
+        }
+        Controls.Menu {
+            id: sleepMenu
+            title: page.player.sleepRemainingMinutes > 0 ? i18n("Sleep: %1 min", page.player.sleepRemainingMinutes) : i18n("Sleep Timer")
+            icon.name: "chronometer"
+            Instantiator {
+                model: [0, 15, 30, 45, 60, 90, 120]
+                delegate: Controls.MenuItem {
+                    required property int modelData
+                    text: modelData === 0 ? i18n("Off") : i18n("%1 minutes", modelData)
+                    onTriggered: page.player.setSleepTimer(modelData)
+                }
+                onObjectAdded: (index, object) => sleepMenu.insertItem(index, object)
+                onObjectRemoved: (index, object) => sleepMenu.removeItem(object)
+            }
+        }
+        Controls.MenuSeparator {}
+        Controls.MenuItem {
+            objectName: "playerQueueItem"
+            text: i18n("Now Playing Queue")
+            icon.name: "view-media-playlist"
+            onTriggered: queuePanel.open()
+        }
+        Controls.MenuItem {
+            text: i18n("Screenshot")
+            // The full-colour camera-photo of breeze has path data Qt's SVG renderer truncates, with a warning on every draw
+            icon.name: "camera-photo-symbolic"
+            onTriggered: {
+                page.player.screenshot();
+                page.wakeChrome();
+                screenshotNotice.restart();
             }
         }
     }
@@ -549,5 +630,14 @@ Kirigami.Page {
                 }
             }
         }
+    }
+
+    // A button of the bars: icon only unless it says otherwise, its text as tooltip and accessible name, and no keyboard focus from a click, so the page keeps the keys
+    component OsdButton: Controls.ToolButton {
+        focusPolicy: Qt.TabFocus
+        display: Controls.AbstractButton.IconOnly
+        Controls.ToolTip.text: text
+        Controls.ToolTip.visible: display === Controls.AbstractButton.IconOnly && (hovered || visualFocus)
+        Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
     }
 }

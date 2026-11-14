@@ -125,21 +125,16 @@ inline bool isRandomSort(const QString &key)
     return key == QLatin1String("Random");
 }
 
-// Turns `base` (the query of the view: parent, item types, recursion, card images, fixed constraints such as the Favorites tab's IsFavorite filter, search term) plus the filters, sort and alphabet letter into the ItemQuery of one page: the sections that do not apply to `scope` are left out, the state's status tokens are merged into `base.filters`. `alphabet` is empty, "#" (names before "A": nameLessThan=A) or one letter A to Z (nameStartsWith); it is ignored for Random. Sorting other than by name or Random keeps SortName as the tie-break. Random is one page, `startIndex` 0 and `limit` at most RandomPageSize: a later start index is refused. Returns nullopt for a sort key the scope does not offer, a bad alphabet value or a Random page past the first; the values themselves are validated by JellyfinClient::fetchItems
+// Turns `base` (the query of the view: parent, item types, recursion, card images, fixed constraints such as the Favorites tab's IsFavorite filter, search term) plus the filters and sort into the ItemQuery of one page: the sections that do not apply to `scope` are left out, the state's status tokens are merged into `base.filters`. Sorting other than by name or Random keeps SortName as the tie-break. Random is one page, `startIndex` 0 and `limit` at most RandomPageSize: a later start index is refused. Returns nullopt for a sort key the scope does not offer or a Random page past the first; the values themselves are validated by JellyfinClient::fetchItems
 inline std::optional<ItemQuery> composeLibraryQuery(const ItemQuery &base, LibraryScope scope,
                                                     const LibraryFilterState &filterState,
-                                                    const LibrarySort &sort,
-                                                    const QString &alphabet = {},
-                                                    int startIndex = -1, int limit = -1)
+                                                    const LibrarySort &sort, int startIndex = -1,
+                                                    int limit = -1)
 {
     if (!librarySortKeys(scope).contains(sort.key))
         return std::nullopt;
     const bool random = isRandomSort(sort.key);
     if (random && startIndex > 0)
-        return std::nullopt;
-    const bool letter = alphabet.size() == 1 && alphabet.at(0) >= QLatin1Char('A')
-                        && alphabet.at(0) <= QLatin1Char('Z');
-    if (!alphabet.isEmpty() && alphabet != QLatin1String("#") && !letter)
         return std::nullopt;
 
     const LibraryFilterState state = filterState.forScope(scope);
@@ -209,10 +204,6 @@ inline std::optional<ItemQuery> composeLibraryQuery(const ItemQuery &base, Libra
         break;
     }
 
-    if (!random && letter)
-        query.nameStartsWith = alphabet;
-    else if (!random && alphabet == QLatin1String("#"))
-        query.nameLessThan = QStringLiteral("A");
     return query;
 }
 
