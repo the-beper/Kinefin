@@ -15,6 +15,7 @@ Kirigami.Page {
     // The video fills the page and the bars float above it: the page row's toolbar would be a strip that never hides
     globalToolBarStyle: Kirigami.ApplicationHeaderStyle.None
     readonly property bool isShowing: page.Window.window?.pageStack.currentItem === page
+    onIsShowingChanged: if (!isShowing) volumePopup.close()
     property bool showChrome: true
     // Below the window's wide limit the controls row shows icons only, each with its text as tooltip and accessible name
     readonly property bool narrow: width < (page.Window.window?.wideLimit ?? 0)
@@ -33,11 +34,27 @@ Kirigami.Page {
     }
     // An open menu or the queue panel keeps the bars up
     readonly property bool menuOpen: queuePanel.opened || audioMenu.opened || subtitlesMenu.opened || moreMenu.opened
+    // The volume slider keeps the bars up only while the pointer is on it or on the speaker, or drags it: one opened by the keyboard or a long press goes with the bars
+    readonly property bool volumeHeld: volumePopup.opened && (muteButton.hovered || volumeHover.hovered || volumeSlider.pressed)
 
     // The page keeps the keyboard: the controls of the bars take it only through Tab, so the keys work whatever was clicked
     function focusPrimary() { page.forceActiveFocus(Qt.TabFocusReason); }
     function wakeChrome() { showChrome = true; chromeTimer.restart(); }
     function closePlayer() { page.player.stop(); page.Window.window.pageStack.pop(); }
+    // The volume slider pops up centred above the speaker button
+    function showVolume() {
+        volumeCloser.stop();
+        // A long press on a touch screen has no hover to hold the bars: they stay their full time from here
+        page.wakeChrome();
+        volumePopup.open();
+    }
+    function stepVolume(steps) {
+        // Turning the volume up is meant to be heard
+        if (steps > 0 && page.player.muted)
+            page.player.toggleMute();
+        page.player.setVolume(Math.max(0, Math.min(100, page.player.volume + steps * 5)));
+        page.wakeChrome();
+    }
     // A menu of the bottom bar opens above its button, aligned to the button's far edge
     function openMenu(menu, button) {
         const corner = button.mapToItem(page, page.mirrored ? 0 : button.width, 0);
@@ -53,7 +70,10 @@ Kirigami.Page {
 
     // Esc, Alt+Left and the mouse back button close the queue panel first, then leave a full screen the player entered, and only then leave the player
     onBackRequested: event => {
-        if (queuePanel.opened) {
+        if (volumePopup.opened) {
+            volumePopup.close();
+            event.accepted = true;
+        } else if (queuePanel.opened) {
             queuePanel.close();
             event.accepted = true;
         } else if (page.Window.window.playerFullscreen) {
@@ -84,6 +104,9 @@ Kirigami.Page {
         case Qt.Key_Right: page.player.seekRelative(10); break;
         case Qt.Key_Up: page.player.seekRelative(60); break;
         case Qt.Key_Down: page.player.seekRelative(-60); break;
+        case Qt.Key_Plus:
+        case Qt.Key_Equal: page.stepVolume(1); break;
+        case Qt.Key_Minus: page.stepVolume(-1); break;
         default: return;
         }
         page.wakeChrome();
@@ -103,12 +126,15 @@ Kirigami.Page {
         objectName: "playerChromeTimer"
         interval: 5000
         onTriggered: {
-            if (!page.player.active || page.menuOpen)
+            if (!page.player.active || page.menuOpen || page.volumeHeld)
                 return;
-            // A control of a hidden bar would keep the keys: the page takes them back
-            if (page.focusIsInOsd())
+            // A control of a hidden bar would keep the keys: the page takes them back. The control gives its focus up first, or the page, a focus scope, would hand it back to it unseen when the bars show again
+            if (page.focusIsInOsd()) {
+                page.Window.window.activeFocusItem.focus = false;
                 page.focusPrimary();
+            }
             page.showChrome = false;
+            volumePopup.close();
         }
     }
     // Moving the keyboard through the bars keeps them up
@@ -221,7 +247,7 @@ Kirigami.Page {
         id: osd
         objectName: "playerOsd"
         anchors.fill: parent
-        readonly property bool wanted: page.showChrome || !page.player.active || page.menuOpen
+        readonly property bool wanted: page.showChrome || !page.player.active || page.menuOpen || page.volumeHeld
         enabled: wanted
         opacity: wanted ? 1 : 0
         // Visible as soon as it is wanted, so the Tab that wakes the bars finds their controls while they fade in
@@ -358,24 +384,25 @@ Kirigami.Page {
                         text: i18n("Next")
                         onClicked: { page.player.next(); page.wakeChrome(); }
                     }
+                    // A click mutes; hover, keyboard focus or a long press show the volume slider; the wheel and, with the focus here, Up and Down change the volume by five
                     OsdButton {
+                        id: muteButton
                         objectName: "playerMuteButton"
-                        icon.name: page.player.muted ? "audio-volume-muted" : "audio-volume-high"
+                        icon.name: page.player.muted || page.player.volume === 0 ? "audio-volume-muted" : page.player.volume < 34 ? "audio-volume-low" : page.player.volume < 67 ? "audio-volume-medium" : "audio-volume-high"
                         text: page.player.muted ? i18n("Unmute") : i18n("Mute")
+                        Accessible.description: i18nc("@info volume level", "Volume %1%", page.player.volume)
+                        // The volume slider takes the tooltip's place above the button (a deliberate HIG exception, see the architecture notes)
+                        Controls.ToolTip.visible: (hovered || visualFocus) && !volumePopup.opened
                         onClicked: { page.player.toggleMute(); page.wakeChrome(); }
-                    }
-                    Controls.Slider {
-                        objectName: "playerVolumeSlider"
-                        Layout.preferredWidth: Kirigami.Units.gridUnit * 5
-                        // A narrow row has no room for it
-                        visible: !page.narrow
-                        focusPolicy: Qt.TabFocus
-                        from: 0
-                        to: 100
-                        stepSize: 5
-                        value: page.player.volume
-                        onMoved: { page.player.setVolume(Math.round(value)); page.wakeChrome(); }
-                        Accessible.name: i18n("Volume")
+                        onPressAndHold: page.showVolume()
+                        onHoveredChanged: hovered ? page.showVolume() : volumeCloser.restart()
+                        onVisualFocusChanged: visualFocus ? page.showVolume() : volumeCloser.restart()
+                        Keys.onUpPressed: event => { page.stepVolume(1); event.accepted = true; }
+                        Keys.onDownPressed: event => { page.stepVolume(-1); event.accepted = true; }
+                        VolumeWheel {
+                            anchors.fill: parent
+                            onStepped: steps => page.stepVolume(steps)
+                        }
                     }
                     Controls.ToolButton {
                         objectName: "playerTimeButton"
@@ -600,6 +627,70 @@ Kirigami.Page {
         }
     }
     Controls.Popup {
+        id: volumePopup
+        objectName: "playerVolumePopup"
+        // Above the speaker and centred on it, whatever the level label's width or the window does
+        parent: muteButton
+        x: Math.round((muteButton.width - width) / 2)
+        y: -height - Kirigami.Units.smallSpacing
+        // The keyboard stays with the speaker button and the page; a press on the speaker mutes and keeps the slider. No CloseOnEscape: its Escape shortcut would make the window's ambiguous and neither would fire, so the page's back closes it
+        focus: false
+        modal: false
+        closePolicy: Controls.Popup.CloseOnPressOutsideParent
+        padding: Kirigami.Units.smallSpacing
+        // The window's colours, like the menus, not the dark bars' its parent has
+        Kirigami.Theme.colorSet: Kirigami.Theme.Window
+        Kirigami.Theme.inherit: false
+        // The bars hiding close it without waking them again
+        onClosed: if (page.showChrome) chromeTimer.restart()
+        contentItem: Item {
+            implicitWidth: volumeColumn.implicitWidth
+            implicitHeight: volumeColumn.implicitHeight
+            HoverHandler {
+                id: volumeHover
+                onHoveredChanged: if (!hovered) volumeCloser.restart()
+            }
+            ColumnLayout {
+                id: volumeColumn
+                anchors.fill: parent
+                spacing: Kirigami.Units.smallSpacing
+                Controls.Label {
+                    Layout.alignment: Qt.AlignHCenter
+                    text: i18nc("@label volume level", "%1%", page.player.volume)
+                }
+                Controls.Slider {
+                    id: volumeSlider
+                    objectName: "playerVolumeSlider"
+                    Layout.alignment: Qt.AlignHCenter
+                    Layout.preferredHeight: Kirigami.Units.gridUnit * 7
+                    orientation: Qt.Vertical
+                    focusPolicy: Qt.NoFocus
+                    from: 0
+                    to: 100
+                    stepSize: 5
+                    value: page.player.volume
+                    onMoved: { page.player.setVolume(Math.round(value)); page.wakeChrome(); }
+                    onPressedChanged: if (!pressed) volumeCloser.restart()
+                    Accessible.name: i18n("Volume")
+                }
+            }
+            // Above the slider for the wheel only: presses go through to it
+            VolumeWheel {
+                anchors.fill: parent
+                onStepped: steps => page.stepVolume(steps)
+            }
+        }
+    }
+    // The slider goes a moment after neither the pointer, the keyboard nor a drag holds it any more
+    Timer {
+        id: volumeCloser
+        interval: 400
+        onTriggered: {
+            if (!muteButton.hovered && !muteButton.visualFocus && !volumeHover.hovered && !volumeSlider.pressed)
+                volumePopup.close();
+        }
+    }
+    Controls.Popup {
         id: queuePanel
         objectName: "nowPlayingPanel"
         modal: false
@@ -632,8 +723,31 @@ Kirigami.Page {
         }
     }
 
+    // The wheel over the speaker and its slider: five per notch, a touchpad's travel added up to whole notches
+    component VolumeWheel: MouseArea {
+        id: wheelArea
+        signal stepped(int steps)
+        property real travel: 0
+        property double lastWheel: 0
+        acceptedButtons: Qt.NoButton
+        onWheel: wheel => {
+            // A half notch left from a pause ago or from the other direction does not count
+            const now = Date.now();
+            if (now - wheelArea.lastWheel > 500 || wheelArea.travel * wheel.angleDelta.y < 0)
+                wheelArea.travel = 0;
+            wheelArea.lastWheel = now;
+            wheelArea.travel += wheel.angleDelta.y;
+            while (Math.abs(wheelArea.travel) >= 120) {
+                const up = wheelArea.travel > 0;
+                wheelArea.travel -= up ? 120 : -120;
+                wheelArea.stepped(up ? 1 : -1);
+            }
+        }
+    }
     // A button of the bars: icon only unless it says otherwise, its text as tooltip and accessible name, and no keyboard focus from a click, so the page keeps the keys
     component OsdButton: Controls.ToolButton {
+        // Hover drives the tooltips and the volume slider whatever the platform's hover hint says
+        hoverEnabled: true
         focusPolicy: Qt.TabFocus
         display: Controls.AbstractButton.IconOnly
         Controls.ToolTip.text: text

@@ -31,6 +31,7 @@
 #include <QQuickWindow>
 #include <QScopeGuard>
 #include <QSet>
+#include <QStyleHints>
 #include <QTemporaryDir>
 #include <QtTest/QtTest>
 
@@ -1833,7 +1834,12 @@ class PlayerStub : public QObject {
     Q_INVOKABLE void seek(qint64 ticks) { record(QStringLiteral("seek"), ticks); }
     Q_INVOKABLE void seekRelative(int seconds) { record(QStringLiteral("seekRelative"), seconds); }
     Q_INVOKABLE void setRate(double value) { record(QStringLiteral("setRate"), value); }
-    Q_INVOKABLE void setVolume(int level) { record(QStringLiteral("setVolume"), level); }
+    Q_INVOKABLE void setVolume(int level)
+    {
+        record(QStringLiteral("setVolume"), level);
+        volume = level;
+        Q_EMIT changed();
+    }
     Q_INVOKABLE void setShuffle(bool on) { record(QStringLiteral("setShuffle"), on); }
     Q_INVOKABLE void setRepeatMode(int mode) { record(QStringLiteral("setRepeatMode"), mode); }
     Q_INVOKABLE void selectAudioTrack(int id) { record(QStringLiteral("selectAudioTrack"), id); }
@@ -5251,6 +5257,15 @@ class TestUiPages : public QObject {
         for (const QString &key :
              {QStringLiteral("Ctrl"), QStringLiteral("Shift"), QStringLiteral("/")})
             QTRY_VERIFY2(ui.showsText(key), qPrintable(key));
+        // The "+" of Volume Up is a key in its own box, not the separator of a combination
+        bool plusKey = false;
+        for (const QQuickItem *part : ui.itemsStartingWith(QStringLiteral("shortcutsKeyPart"))) {
+            if (part->property("plus").toBool())
+                continue;
+            for (const QQuickItem *label : part->childItems())
+                plusKey = plusKey || label->property("text").toString() == QLatin1String("+");
+        }
+        QVERIFY(plusKey);
         // Every sequence the header answers with is listed, read from the actions and the tab shortcuts rather than written down here
         QSet<QKeySequence> listed;
         for (const QVariant &row : dialog->property("rows").value<QJSValue>().toVariant().toList())
@@ -9323,14 +9338,15 @@ class TestUiPages : public QObject {
         QTest::qWait(500);
         QVERIFY(!osd->isVisible());
         stub.calls.clear();
-        for (const Qt::Key key :
-             {Qt::Key_Space, Qt::Key_M, Qt::Key_Left, Qt::Key_Right, Qt::Key_Up, Qt::Key_Down})
+        for (const Qt::Key key : {Qt::Key_Space, Qt::Key_M, Qt::Key_Left, Qt::Key_Right, Qt::Key_Up,
+                                  Qt::Key_Down, Qt::Key_Minus, Qt::Key_Plus})
             QTest::keyClick(ui.window, key);
-        QCOMPARE(
-            stub.calls,
-            QStringList({QStringLiteral("togglePause"), QStringLiteral("toggleMute"),
-                         QStringLiteral("seekRelative -10"), QStringLiteral("seekRelative 10"),
-                         QStringLiteral("seekRelative 60"), QStringLiteral("seekRelative -60")}));
+        // The stub starts at full volume: minus takes five off, plus puts them back
+        QCOMPARE(stub.calls,
+                 QStringList({QStringLiteral("togglePause"), QStringLiteral("toggleMute"),
+                              QStringLiteral("seekRelative -10"), QStringLiteral("seekRelative 10"),
+                              QStringLiteral("seekRelative 60"), QStringLiteral("seekRelative -60"),
+                              QStringLiteral("setVolume 95"), QStringLiteral("setVolume 100")}));
         // A key shows the bars again, and so does a move of the pointer once they are gone
         QTRY_VERIFY(osd->isVisible());
         QTRY_VERIFY(!osd->isVisible());
@@ -9349,6 +9365,14 @@ class TestUiPages : public QObject {
         QVERIFY(focused && osd->isAncestorOf(focused));
         QTRY_VERIFY(!osd->isVisible());
         QCOMPARE(ui.window->activeFocusItem(), page);
+        // A key shows the bars again with the keys still on the page: Space pauses, it does not press the control Tab had reached
+        stub.calls.clear();
+        QTest::keyClick(ui.window, Qt::Key_Space);
+        QTRY_VERIFY(osd->isVisible());
+        QCOMPARE(ui.window->activeFocusItem(), page);
+        QTest::keyClick(ui.window, Qt::Key_Space);
+        QCOMPARE(stub.calls,
+                 QStringList({QStringLiteral("togglePause"), QStringLiteral("togglePause")}));
     }
 
     void shellShortcutsLeaveThePlayerAlone()
@@ -9673,10 +9697,9 @@ class TestUiPages : public QObject {
         QVERIFY(row && subtitles);
         // AbstractButton.TextBesideIcon, then IconOnly
         QCOMPARE(subtitles->property("display").toInt(), 2);
-        QVERIFY(ui.item(QStringLiteral("playerVolumeSlider"))->isVisible());
         QVERIFY(ui.opensWindowOfWidth(440));
         QTRY_COMPARE(subtitles->property("display").toInt(), 0);
-        QTRY_VERIFY(!ui.item(QStringLiteral("playerVolumeSlider"))->isVisible());
+        QVERIFY(ui.item(QStringLiteral("playerMuteButton"))->isVisible());
         // Every button keeps its text for the tooltip and the screen reader, and the row stays inside the window
         int buttons = 0;
         for (const QQuickItem *item : allItems(row)) {
@@ -9708,6 +9731,146 @@ class TestUiPages : public QObject {
         ui.clickCenter(button);
         QTRY_COMPARE(ui.window->visibility(), QWindow::Windowed);
         QTRY_COMPARE(button->property("text").toString(), QStringLiteral("Full Screen Mode"));
+    }
+
+    void playerVolumePopsUpOverTheSpeakerAndFollowsTheWheel()
+    {
+        PlayerStub stub;
+        stub.volume = 50;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(openPlayer(ui, stub));
+        QQuickItem *speaker = ui.item(QStringLiteral("playerMuteButton"));
+        QObject *popup = ui.popup(QStringLiteral("playerVolumePopup"));
+        QVERIFY(speaker && popup);
+        QVERIFY(!popup->property("opened").toBool());
+        const QPoint onSpeaker =
+            speaker->mapToScene(QPointF(speaker->width() / 2, speaker->height() / 2)).toPoint();
+        // The pointer over the speaker shows a vertical slider with the volume
+        QTest::mouseMove(ui.window, onSpeaker);
+        QTRY_VERIFY(popup->property("opened").toBool());
+        QQuickItem *slider = ui.item(QStringLiteral("playerVolumeSlider"));
+        QVERIFY(slider);
+        QCOMPARE(slider->property("orientation").toInt(), int(Qt::Vertical));
+        QCOMPARE(slider->property("value").toReal(), 50.0);
+        // One notch of the wheel is five, a touchpad's half notches add up
+        const auto wheel = [&ui](const QPoint &at, int delta) {
+            QWheelEvent event(at, ui.window->mapToGlobal(at), QPoint(), QPoint(0, delta),
+                              Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+            QCoreApplication::sendEvent(ui.window, &event);
+        };
+        wheel(onSpeaker, 120);
+        QTRY_COMPARE(stub.volume, 55);
+        wheel(onSpeaker, -60);
+        QTest::qWait(50);
+        QCOMPARE(stub.volume, 55);
+        wheel(onSpeaker, -60);
+        QTRY_COMPARE(stub.volume, 50);
+        // The wheel over the slider works the same, and the slider follows the volume
+        const QPoint onSlider =
+            slider->mapToScene(QPointF(slider->width() / 2, slider->height() / 2)).toPoint();
+        QTest::mouseMove(ui.window, onSlider);
+        wheel(onSlider, -120);
+        QTRY_COMPARE(stub.volume, 45);
+        QTRY_COMPARE(slider->property("value").toReal(), 45.0);
+        QVERIFY(popup->property("opened").toBool());
+        // A click on the speaker mutes and keeps the slider
+        QTest::mouseMove(ui.window, onSpeaker);
+        QTest::mouseClick(ui.window, Qt::LeftButton, Qt::NoModifier, onSpeaker);
+        QTRY_VERIFY(stub.calls.contains(QStringLiteral("toggleMute")));
+        QTest::qWait(100);
+        QVERIFY(popup->property("opened").toBool());
+        // Turning it up while muted unmutes
+        stub.muted = true;
+        Q_EMIT stub.changed();
+        stub.calls.clear();
+        wheel(onSpeaker, 120);
+        QTRY_COMPARE(stub.volume, 50);
+        QVERIFY(stub.calls.contains(QStringLiteral("toggleMute")));
+        // The pointer leaving both lets the slider go
+        QTest::mouseMove(ui.window, QPoint(ui.window->width() / 2, ui.window->height() / 2));
+        QTRY_VERIFY(!popup->property("opened").toBool());
+    }
+
+    void playerVolumeKeysWorkOnTheSpeakerButton()
+    {
+        PlayerStub stub;
+        stub.volume = 50;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *page = openPlayer(ui, stub);
+        QVERIFY(page);
+        QQuickItem *speaker = ui.item(QStringLiteral("playerMuteButton"));
+        QObject *popup = ui.popup(QStringLiteral("playerVolumePopup"));
+        QVERIFY(speaker && popup);
+        // Keyboard focus on the speaker shows the slider; Up and Down change the volume and do not seek
+        speaker->forceActiveFocus(Qt::TabFocusReason);
+        QTRY_VERIFY(popup->property("opened").toBool());
+        QTest::keyClick(ui.window, Qt::Key_Up);
+        QTRY_COMPARE(stub.volume, 55);
+        QTest::keyClick(ui.window, Qt::Key_Down);
+        QTest::keyClick(ui.window, Qt::Key_Down);
+        QTRY_COMPARE(stub.volume, 45);
+        QVERIFY(stub.calls.filter(QStringLiteral("seekRelative")).isEmpty());
+        // Esc closes the slider and stays in the player
+        QTest::keyClick(ui.window, Qt::Key_Escape);
+        QTRY_VERIFY(!popup->property("opened").toBool());
+        QTest::qWait(100);
+        QCOMPARE(ui.currentDetails(), page);
+        // The keyboard resting on the speaker does not keep the bars: they go with the slider, and the page takes the keys back
+        QObject *timer = page->findChild<QObject *>(QStringLiteral("playerChromeTimer"));
+        QVERIFY(timer);
+        QQuickItem *osd = ui.item(QStringLiteral("playerOsd"));
+        ui.item(QStringLiteral("playerTimeButton"))->forceActiveFocus(Qt::TabFocusReason);
+        QTRY_VERIFY(!speaker->property("visualFocus").toBool());
+        speaker->forceActiveFocus(Qt::TabFocusReason);
+        QTRY_VERIFY(popup->property("opened").toBool());
+        timer->setProperty("interval", 1000);
+        QTRY_VERIFY(!osd->isVisible());
+        QVERIFY(!popup->property("opened").toBool());
+        QCOMPARE(ui.window->activeFocusItem(), page);
+        QTest::keyClick(ui.window, Qt::Key_Down);
+        QTRY_VERIFY(stub.calls.contains(QStringLiteral("seekRelative -60")));
+        // The bars coming back do not hand the speaker its focus back unseen: the keys stay with the page
+        QTRY_VERIFY(osd->isVisible());
+        QCOMPARE(ui.window->activeFocusItem(), page);
+        // Back on the speaker, Tab moving on lets the slider go, and Up seeks again
+        timer->setProperty("interval", 5000);
+        speaker->forceActiveFocus(Qt::TabFocusReason);
+        QTRY_VERIFY(popup->property("opened").toBool());
+        QTest::keyClick(ui.window, Qt::Key_Tab);
+        QTRY_VERIFY(!speaker->property("visualFocus").toBool());
+        QTRY_VERIFY(!popup->property("opened").toBool());
+        QTest::keyClick(ui.window, Qt::Key_Up);
+        QTRY_VERIFY(stub.calls.contains(QStringLiteral("seekRelative 60")));
+    }
+
+    void playerVolumeOpensOnALongPressWithoutMuting()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(openPlayer(ui, stub));
+        QQuickItem *speaker = ui.item(QStringLiteral("playerMuteButton"));
+        QObject *popup = ui.popup(QStringLiteral("playerVolumePopup"));
+        QVERIFY(speaker && popup);
+        // Touch has no hover: a long press is the way to the slider, and it does not mute
+        const QPoint onSpeaker =
+            speaker->mapToScene(QPointF(speaker->width() / 2, speaker->height() / 2)).toPoint();
+        QPointingDevice *touch = QTest::createTouchDevice();
+        QTest::touchEvent(ui.window, touch).press(0, onSpeaker);
+        QTest::qWait(QGuiApplication::styleHints()->mousePressAndHoldInterval() + 300);
+        QVERIFY(popup->property("opened").toBool());
+        QTest::touchEvent(ui.window, touch).release(0, onSpeaker);
+        QTest::qWait(100);
+        QVERIFY(!stub.calls.contains(QStringLiteral("toggleMute")));
+        QVERIFY(popup->property("opened").toBool());
     }
 
   private:

@@ -37,6 +37,8 @@ Kirigami.Dialog {
     readonly property var playerRows: [
         ["Space", i18nc("@item:intable shortcut action", "Play or Pause")],
         ["M", i18nc("@item:intable shortcut action", "Mute or Unmute")],
+        ["+", i18nc("@item:intable shortcut action", "Volume Up")],
+        ["-", i18nc("@item:intable shortcut action", "Volume Down")],
         ["F", i18nc("@item:intable shortcut action", "Toggle Full Screen")],
         ["F11", i18nc("@item:intable shortcut action", "Toggle Full Screen")],
         ["Escape", i18nc("@item:intable shortcut action", "Leave Full Screen or Go Back")],
@@ -46,13 +48,15 @@ Kirigami.Dialog {
         ["Up", i18nc("@item:intable shortcut action", "Skip Forward 1 Minute")]
     ]
 
+    // The keys of a combination and the "+" between them; a "+" on its own or at the end ("Ctrl++") is a key
     function keyParts(keys) {
+        const names = keys === "+" ? ["+"] : keys.endsWith("++") ? keys.slice(0, -2).split("+").concat(["+"]) : keys.split("+");
         const parts = [];
-        keys.split("+").forEach((key, i) => {
+        names.forEach((name, i) => {
             if (i > 0) {
-                parts.push("+");
+                parts.push({ text: "+", separator: true });
             }
-            parts.push(key);
+            parts.push({ text: name, separator: false });
         });
         return parts;
     }
@@ -164,8 +168,8 @@ Kirigami.Dialog {
                             id: key
                             objectName: "shortcutsKeyPart"
 
-                            required property string modelData
-                            readonly property bool plus: modelData === "+"
+                            required property var modelData
+                            readonly property bool plus: modelData.separator
 
                             radius: Kirigami.Units.cornerRadius
                             color: plus ? "transparent" : Qt.alpha(Kirigami.Theme.textColor, 0.06)
@@ -178,7 +182,7 @@ Kirigami.Dialog {
                                 id: label
 
                                 anchors.centerIn: parent
-                                text: key.modelData
+                                text: key.modelData.text
                                 opacity: key.plus ? 0.7 : 1
                             }
                         }
