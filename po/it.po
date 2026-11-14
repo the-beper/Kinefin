@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: kinefin 0\n"
 "Report-Msgid-Bugs-To: https://github.com/the-beper/Kinefin/issues\n"
-"POT-Creation-Date: 2026-11-13 18:12+0000\n"
+"POT-Creation-Date: 2026-11-14 15:02+0000\n"
 "PO-Revision-Date: 2026-11-07 00:00+0000\n"
 "Last-Translator: the-beper\n"
 "Language-Team: Italian\n"
@@ -13,7 +13,7 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-#: src/app/ConnectionController.cpp:316
+#: src/app/ConnectionController.cpp:319
 msgid ""
 "Could not save the session in KWallet. You will have to sign in again next "
 "time"
@@ -21,44 +21,44 @@ msgstr ""
 "Impossibile salvare la sessione in KWallet. Dovrai accedere di nuovo al "
 "prossimo avvio"
 
-#: src/app/ConnectionController.cpp:441
+#: src/app/ConnectionController.cpp:444
 msgid "Server not reachable"
 msgstr "Server non raggiungibile"
 
-#: src/app/ConnectionController.cpp:469
+#: src/app/ConnectionController.cpp:472
 msgid "Jellyfin server reachable"
 msgstr "Server Jellyfin raggiungibile"
 
-#: src/app/ConnectionController.cpp:492 src/app/ConnectionController.cpp:514
-#: src/app/ConnectionController.cpp:550
+#: src/app/ConnectionController.cpp:495 src/app/ConnectionController.cpp:517
+#: src/app/ConnectionController.cpp:553
 msgid "Enter a valid server address"
 msgstr "Inserisci un indirizzo di server valido"
 
-#: src/app/ConnectionController.cpp:495
+#: src/app/ConnectionController.cpp:498
 msgid "Testing connection…"
 msgstr "Connessione in corso…"
 
-#: src/app/ConnectionController.cpp:546
+#: src/app/ConnectionController.cpp:549
 msgid "The device identity of this profile is invalid"
 msgstr "L'identità del dispositivo di questo profilo non è valida"
 
-#: src/app/ConnectionController.cpp:583
+#: src/app/ConnectionController.cpp:586
 msgid "Could not read the saved session. Enter the password"
 msgstr "Impossibile leggere la sessione salvata. Inserisci la password"
 
-#: src/app/ConnectionController.cpp:644
+#: src/app/ConnectionController.cpp:647
 msgid "Enter a username and a password"
 msgstr "Inserisci nome utente e password"
 
-#: src/app/ConnectionController.cpp:656
+#: src/app/ConnectionController.cpp:659
 msgid "Quick Connect is not available"
 msgstr "Quick Connect non è disponibile"
 
-#: src/app/ConnectionController.cpp:905
+#: src/app/ConnectionController.cpp:908
 msgid "Your session has expired. Sign in again"
 msgstr "La sessione è scaduta. Accedi di nuovo"
 
-#: src/app/ConnectionController.cpp:919
+#: src/app/ConnectionController.cpp:922
 msgid ""
 "Could not reach a Jellyfin server. Check the address and your network "
 "connection"
@@ -66,23 +66,23 @@ msgstr ""
 "Impossibile raggiungere un server Jellyfin. Controlla l'indirizzo e la "
 "connessione di rete"
 
-#: src/app/ConnectionController.cpp:923
+#: src/app/ConnectionController.cpp:926
 msgid "Wrong username or password"
 msgstr "Nome utente o password errati"
 
-#: src/app/ConnectionController.cpp:924
+#: src/app/ConnectionController.cpp:927
 msgid "Signing in failed. Try again, or check the server"
 msgstr "Accesso non riuscito. Riprova o controlla il server"
 
-#: src/app/ConnectionController.cpp:929
+#: src/app/ConnectionController.cpp:932
 msgid "Quick Connect is not available on this server"
 msgstr "Quick Connect non è disponibile su questo server"
 
-#: src/app/ConnectionController.cpp:930
+#: src/app/ConnectionController.cpp:933
 msgid "Quick Connect failed or expired. Start it again"
 msgstr "Quick Connect non riuscito o scaduto. Avvialo di nuovo"
 
-#: src/app/ConnectionController.cpp:937
+#: src/app/ConnectionController.cpp:940
 msgid "Could not load the libraries. Try again"
 msgstr "Impossibile caricare le librerie. Riprova"
 
@@ -92,7 +92,7 @@ msgctxt "season and episode range"
 msgid "S%1:E%2–E%3"
 msgstr "S%1:E%2–E%3"
 
-#: src/player/PlayerController.cpp:49 src/qml/HomePage.qml:209
+#: src/player/PlayerController.cpp:49 src/qml/HomePage.qml:215
 #: src/qml/EpisodeRow.qml:38 src/qml/ItemDetailsPage.qml:63
 #: src/qml/ResumeItemsPage.qml:121 src/qml/SearchPage.qml:221
 #: src/qml/QueuePage.qml:93 src/qml/GenreRailsView.qml:214
@@ -109,7 +109,7 @@ msgctxt "episode number range"
 msgid "E%1–E%2"
 msgstr "E%1–E%2"
 
-#: src/player/PlayerController.cpp:54 src/qml/HomePage.qml:209
+#: src/player/PlayerController.cpp:54 src/qml/HomePage.qml:215
 #: src/qml/EpisodeRow.qml:41 src/qml/ItemDetailsPage.qml:64
 #: src/qml/ResumeItemsPage.qml:121 src/qml/SearchPage.qml:221
 #: src/qml/QueuePage.qml:93 src/qml/GenreRailsView.qml:214
@@ -120,7 +120,7 @@ msgctxt "episode number"
 msgid "E%1"
 msgstr "E%1"
 
-#: src/player/PlayerController.cpp:60 src/qml/HomePage.qml:210
+#: src/player/PlayerController.cpp:60 src/qml/HomePage.qml:216
 #: src/qml/EpisodeRow.qml:48 src/qml/ResumeItemsPage.qml:122
 #: src/qml/SearchPage.qml:222 src/qml/QueuePage.qml:94
 #: src/qml/GenreRailsView.qml:215 src/qml/ItemRowGrid.qml:75
@@ -507,60 +507,68 @@ msgstr "Sovrascrivi lo stile"
 msgid "Manual MPV Configuration"
 msgstr "Configurazione manuale di MPV"
 
-#: src/settings/SettingDefinitions.cpp:678
+#: src/settings/SettingDefinitions.cpp:678 src/qml/HomePage.qml:74
+msgid "Libraries"
+msgstr "Librerie"
+
+#: src/settings/SettingDefinitions.cpp:679
+msgid "Show on Home"
+msgstr "Mostra nella Home"
+
+#: src/settings/SettingDefinitions.cpp:689
 msgid "Show New Badge on Recently Added Items"
 msgstr "Mostra il badge “Nuovo” sugli elementi aggiunti di recente"
 
-#: src/settings/SettingDefinitions.cpp:679
+#: src/settings/SettingDefinitions.cpp:690
 msgid "Cards"
 msgstr "Riquadri"
 
-#: src/settings/SettingDefinitions.cpp:690
-#: src/settings/SettingDefinitions.cpp:734
+#: src/settings/SettingDefinitions.cpp:701
+#: src/settings/SettingDefinitions.cpp:745
 msgid "Suggestions"
 msgstr "Suggerimenti"
 
-#: src/settings/SettingDefinitions.cpp:691
 #: src/settings/SettingDefinitions.cpp:702
 #: src/settings/SettingDefinitions.cpp:713
 #: src/settings/SettingDefinitions.cpp:724
+#: src/settings/SettingDefinitions.cpp:735
 msgid "Show Tabs in Movies"
 msgstr "Mostra le schede nei film"
 
-#: src/settings/SettingDefinitions.cpp:701
-#: src/settings/SettingDefinitions.cpp:745 src/qml/FavoritesPage.qml:26
+#: src/settings/SettingDefinitions.cpp:712
+#: src/settings/SettingDefinitions.cpp:756 src/qml/FavoritesPage.qml:26
 msgid "Favorites"
 msgstr "Preferiti"
 
-#: src/settings/SettingDefinitions.cpp:712
-#: src/settings/SettingDefinitions.cpp:756 src/qml/SearchPage.qml:155
+#: src/settings/SettingDefinitions.cpp:723
+#: src/settings/SettingDefinitions.cpp:767 src/qml/SearchPage.qml:155
 msgid "Collections"
 msgstr "Raccolte"
 
-#: src/settings/SettingDefinitions.cpp:723
-#: src/settings/SettingDefinitions.cpp:778 src/qml/GenreRailsPage.qml:14
+#: src/settings/SettingDefinitions.cpp:734
+#: src/settings/SettingDefinitions.cpp:789 src/qml/GenreRailsPage.qml:14
 msgid "Genres"
 msgstr "Generi"
 
-#: src/settings/SettingDefinitions.cpp:735
 #: src/settings/SettingDefinitions.cpp:746
 #: src/settings/SettingDefinitions.cpp:757
 #: src/settings/SettingDefinitions.cpp:768
 #: src/settings/SettingDefinitions.cpp:779
 #: src/settings/SettingDefinitions.cpp:790
 #: src/settings/SettingDefinitions.cpp:801
+#: src/settings/SettingDefinitions.cpp:812
 msgid "Show Tabs in Shows"
 msgstr "Mostra le schede nelle serie TV"
 
-#: src/settings/SettingDefinitions.cpp:767
+#: src/settings/SettingDefinitions.cpp:778
 msgid "Upcoming"
 msgstr "In arrivo"
 
-#: src/settings/SettingDefinitions.cpp:789
+#: src/settings/SettingDefinitions.cpp:800
 msgid "Networks"
 msgstr "Reti"
 
-#: src/settings/SettingDefinitions.cpp:800 src/qml/ItemDetailsPage.qml:292
+#: src/settings/SettingDefinitions.cpp:811 src/qml/ItemDetailsPage.qml:292
 #: src/qml/ItemDetailsPage.qml:1157 src/qml/SearchPage.qml:153
 msgid "Episodes"
 msgstr "Episodi"
@@ -573,7 +581,7 @@ msgstr "Home"
 msgid "Refresh"
 msgstr "Aggiorna"
 
-#: src/qml/HomePage.qml:52 src/qml/HomePage.qml:179
+#: src/qml/HomePage.qml:55 src/qml/HomePage.qml:185
 #: src/qml/ItemDetailsPage.qml:332 src/qml/ItemDetailsPage.qml:345
 #: src/qml/ItemDetailsPage.qml:358 src/qml/ItemDetailsPage.qml:855
 #: src/qml/ItemDetailsPage.qml:910 src/qml/ItemDetailsPage.qml:1127
@@ -588,35 +596,31 @@ msgstr "Aggiorna"
 msgid "Retry"
 msgstr "Riprova"
 
-#: src/qml/HomePage.qml:62 src/qml/FavoritesPage.qml:257
+#: src/qml/HomePage.qml:65 src/qml/FavoritesPage.qml:257
 msgid "No libraries to show"
 msgstr "Nessuna libreria da mostrare"
 
-#: src/qml/HomePage.qml:70
-msgid "Libraries"
-msgstr "Librerie"
-
-#: src/qml/HomePage.qml:111 src/qml/ResumeItemsPage.qml:20
+#: src/qml/HomePage.qml:117 src/qml/ResumeItemsPage.qml:20
 msgid "Continue Watching"
 msgstr "Continua a guardare"
 
-#: src/qml/HomePage.qml:113 src/qml/ItemDetailsPage.qml:812
+#: src/qml/HomePage.qml:119 src/qml/ItemDetailsPage.qml:812
 msgid "Next Up"
 msgstr "Prossimi"
 
-#: src/qml/HomePage.qml:115
+#: src/qml/HomePage.qml:121
 msgid "Recently Added in %1"
 msgstr "Aggiunti di recente in %1"
 
-#: src/qml/HomePage.qml:150
+#: src/qml/HomePage.qml:156
 msgid "See All"
 msgstr "Mostra tutto"
 
-#: src/qml/HomePage.qml:152
+#: src/qml/HomePage.qml:158
 msgid "See All in %1"
 msgstr "Mostra tutto in %1"
 
-#: src/qml/HomePage.qml:165 src/qml/ItemDetailsPage.qml:323
+#: src/qml/HomePage.qml:171 src/qml/ItemDetailsPage.qml:323
 #: src/qml/ItemDetailsPage.qml:846 src/qml/ItemDetailsPage.qml:901
 #: src/qml/ItemDetailsPage.qml:1118 src/qml/ItemDetailsPage.qml:1163
 #: src/qml/LibraryPage.qml:845 src/qml/ResumeItemsPage.qml:95
@@ -628,7 +632,7 @@ msgstr "Mostra tutto in %1"
 msgid "Loading…"
 msgstr "Caricamento…"
 
-#: src/qml/HomePage.qml:172
+#: src/qml/HomePage.qml:178
 msgid ""
 "Could not load this row: check the connection to the server and try again"
 msgstr ""
@@ -689,7 +693,7 @@ msgid "Ended"
 msgstr "Terminata"
 
 #: src/qml/ItemDetailsPage.qml:92 src/qml/MediaCard.qml:330
-#: src/qml/CardMenu.qml:42 src/qml/PlayerPage.qml:213
+#: src/qml/CardMenu.qml:42 src/qml/PlayerPage.qml:340
 msgid "Resume"
 msgstr "Riprendi"
 
@@ -797,7 +801,7 @@ msgstr ""
 "Impossibile caricare questo elemento: controlla la connessione al server e "
 "riprova"
 
-#: src/qml/ItemDetailsPage.qml:342 src/qml/Main.qml:916
+#: src/qml/ItemDetailsPage.qml:342 src/qml/Main.qml:949
 msgid "Could not update Favorites. Check the connection and try again"
 msgstr "Impossibile aggiornare i preferiti. Controlla la connessione e riprova"
 
@@ -1294,7 +1298,7 @@ msgstr "Perché ti piacciono i film con %1"
 msgid "Suggested for you"
 msgstr "Consigliati per te"
 
-#: src/qml/LibraryTile.qml:24 src/qml/LibraryTile.qml:72
+#: src/qml/LibraryTile.qml:19 src/qml/LibraryTile.qml:77
 msgid "Not supported yet"
 msgstr "Non ancora supportato"
 
@@ -1920,11 +1924,11 @@ msgctxt "@label %1 is a user name"
 msgid "More Actions for %1"
 msgstr "Altre azioni per %1"
 
-#: src/qml/Main.qml:149
+#: src/qml/Main.qml:150
 msgid "Preparing Kinefin…"
 msgstr "Preparazione di Kinefin…"
 
-#: src/qml/Main.qml:286
+#: src/qml/Main.qml:289
 msgid ""
 "The settings could not be saved: check the free space and the permissions of "
 "the profile folder. Changes last until Kinefin closes"
@@ -1933,23 +1937,23 @@ msgstr ""
 "della cartella del profilo. Le modifiche restano fino alla chiusura di "
 "Kinefin"
 
-#: src/qml/Main.qml:924
+#: src/qml/Main.qml:957
 msgid "The queue is full: some items were left out, remove some to add more"
 msgstr ""
 "La coda è piena: alcuni elementi sono stati esclusi, rimuovine alcuni per "
 "aggiungerne altri"
 
-#: src/qml/Main.qml:924
+#: src/qml/Main.qml:957
 msgid "%1 item added to the queue"
 msgid_plural "%1 items added to the queue"
 msgstr[0] "%1 elemento aggiunto alla coda"
 msgstr[1] "%1 elementi aggiunti alla coda"
 
-#: src/qml/Main.qml:927
+#: src/qml/Main.qml:960
 msgid "There is nothing to play in this item"
 msgstr "Non c'è nulla da riprodurre in questo elemento"
 
-#: src/qml/Main.qml:930
+#: src/qml/Main.qml:963
 msgid ""
 "The queue could not be saved: check the free space and the permissions of "
 "the profile folder. It lasts until Kinefin closes"
@@ -1957,7 +1961,7 @@ msgstr ""
 "Impossibile salvare la coda: controlla lo spazio libero e i permessi della "
 "cartella del profilo. Resta fino alla chiusura di Kinefin"
 
-#: src/qml/Main.qml:933
+#: src/qml/Main.qml:966
 msgid ""
 "Could not add this to the queue: check the connection to the server and try "
 "again"
@@ -1965,144 +1969,149 @@ msgstr ""
 "Impossibile aggiungere questo elemento alla coda: controlla la connessione "
 "al server e riprova"
 
-#: src/qml/PlayerPage.qml:13 src/qml/PlayerPage.qml:152
-#: src/qml/PlayerPage.qml:333
+#: src/qml/PlayerPage.qml:13 src/qml/PlayerPage.qml:251
+#: src/qml/PlayerPage.qml:474
 msgid "Now Playing"
 msgstr "In riproduzione"
 
-#: src/qml/PlayerPage.qml:74
+#: src/qml/PlayerPage.qml:141
 msgid "Opening video…"
 msgstr "Apertura del video…"
 
-#: src/qml/PlayerPage.qml:78
+#: src/qml/PlayerPage.qml:145
 msgid "Close Player"
 msgstr "Chiudi il player"
 
-#: src/qml/PlayerPage.qml:195
+#: src/qml/PlayerPage.qml:237 src/qml/ShellHeader.qml:190
+msgctxt "@action:button"
+msgid "Back"
+msgstr "Indietro"
+
+#: src/qml/PlayerPage.qml:321
 msgid "Playback position"
 msgstr "Posizione di riproduzione"
 
-#: src/qml/PlayerPage.qml:207
+#: src/qml/PlayerPage.qml:333
 msgid "Previous"
 msgstr "Precedente"
 
-#: src/qml/PlayerPage.qml:213
+#: src/qml/PlayerPage.qml:340
 msgid "Pause"
 msgstr "Pausa"
 
-#: src/qml/PlayerPage.qml:220
+#: src/qml/PlayerPage.qml:348
 msgid "Stop"
 msgstr "Interrompi"
 
-#: src/qml/PlayerPage.qml:225
+#: src/qml/PlayerPage.qml:354
 msgid "Next"
 msgstr "Successivo"
 
-#: src/qml/PlayerPage.qml:232
+#: src/qml/PlayerPage.qml:362
 msgid "Shuffle"
 msgstr "Riproduzione casuale"
 
-#: src/qml/PlayerPage.qml:237
+#: src/qml/PlayerPage.qml:368
 msgid "Repeat Off"
 msgstr "Disattiva ripetizione"
 
-#: src/qml/PlayerPage.qml:237
+#: src/qml/PlayerPage.qml:368
 msgid "Repeat All"
 msgstr "Ripeti tutto"
 
-#: src/qml/PlayerPage.qml:237
+#: src/qml/PlayerPage.qml:368
 msgid "Repeat One"
 msgstr "Ripeti uno"
 
-#: src/qml/PlayerPage.qml:243
+#: src/qml/PlayerPage.qml:375
 msgid "Unmute"
 msgstr "Riattiva audio"
 
-#: src/qml/PlayerPage.qml:243
+#: src/qml/PlayerPage.qml:375
 msgid "Mute"
 msgstr "Disattiva audio"
 
-#: src/qml/PlayerPage.qml:254
+#: src/qml/PlayerPage.qml:387
 msgid "Volume"
 msgstr "Volume"
 
-#: src/qml/PlayerPage.qml:257
+#: src/qml/PlayerPage.qml:391
 msgid "Tracks"
 msgstr "Tracce"
 
-#: src/qml/PlayerPage.qml:262
+#: src/qml/PlayerPage.qml:398
 msgid "Audio and Subtitles"
 msgstr "Audio e sottotitoli"
 
-#: src/qml/PlayerPage.qml:263
+#: src/qml/PlayerPage.qml:399
 msgid "Audio tracks"
 msgstr "Tracce audio"
 
-#: src/qml/PlayerPage.qml:276
+#: src/qml/PlayerPage.qml:412
 msgid "No subtitles"
 msgstr "Nessun sottotitolo"
 
-#: src/qml/PlayerPage.qml:290
+#: src/qml/PlayerPage.qml:426
 msgid "Download external subtitles"
 msgstr "Scarica sottotitoli esterni"
 
-#: src/qml/PlayerPage.qml:314
+#: src/qml/PlayerPage.qml:451
 msgid "Playback speed"
 msgstr "Velocità di riproduzione"
 
-#: src/qml/PlayerPage.qml:318
+#: src/qml/PlayerPage.qml:456
 msgid "AV Sync"
 msgstr "Sincronizzazione audio/video"
 
-#: src/qml/PlayerPage.qml:322
+#: src/qml/PlayerPage.qml:462
 msgid "Audio delay: %1 s"
 msgstr "Ritardo audio: %1 s"
 
-#: src/qml/PlayerPage.qml:323
+#: src/qml/PlayerPage.qml:463
 msgid "Audio earlier (-0.1 s)"
 msgstr "Anticipa audio (-0,1 s)"
 
-#: src/qml/PlayerPage.qml:324
+#: src/qml/PlayerPage.qml:464
 msgid "Audio later (+0.1 s)"
 msgstr "Ritarda audio (+0,1 s)"
 
-#: src/qml/PlayerPage.qml:326
+#: src/qml/PlayerPage.qml:466
 msgid "Subtitle delay: %1 s"
 msgstr "Ritardo sottotitoli: %1 s"
 
-#: src/qml/PlayerPage.qml:327
+#: src/qml/PlayerPage.qml:467
 msgid "Subtitles earlier (-0.1 s)"
 msgstr "Anticipa sottotitoli (-0,1 s)"
 
-#: src/qml/PlayerPage.qml:328
+#: src/qml/PlayerPage.qml:468
 msgid "Subtitles later (+0.1 s)"
 msgstr "Ritarda sottotitoli (+0,1 s)"
 
-#: src/qml/PlayerPage.qml:337
+#: src/qml/PlayerPage.qml:479
 msgid "Sleep: %1 min"
 msgstr "Arresto fra %1 min"
 
-#: src/qml/PlayerPage.qml:337
+#: src/qml/PlayerPage.qml:479
 msgid "Sleep Timer"
 msgstr "Timer di arresto"
 
-#: src/qml/PlayerPage.qml:346
+#: src/qml/PlayerPage.qml:490
 msgid "Off"
 msgstr "Disattivato"
 
-#: src/qml/PlayerPage.qml:346
+#: src/qml/PlayerPage.qml:490
 msgid "%1 minutes"
 msgstr "%1 minuti"
 
-#: src/qml/PlayerPage.qml:355
+#: src/qml/PlayerPage.qml:500
 msgid "Screenshot"
 msgstr "Schermata"
 
-#: src/qml/PlayerPage.qml:370
+#: src/qml/PlayerPage.qml:515
 msgid "Screenshot saved to %1"
 msgstr "Schermata salvata in %1"
 
-#: src/qml/PlayerPage.qml:387
+#: src/qml/PlayerPage.qml:535
 msgid "Now Playing Queue"
 msgstr "Coda di riproduzione"
 
@@ -2114,11 +2123,6 @@ msgstr "Kinefin è aggiornato"
 msgid "Could not check for updates. Check the internet connection"
 msgstr ""
 "Impossibile controllare gli aggiornamenti. Verifica la connessione Internet"
-
-#: src/qml/ShellHeader.qml:190
-msgctxt "@action:button"
-msgid "Back"
-msgstr "Indietro"
 
 #: src/qml/ShellHeader.qml:210
 msgctxt "@action:button"
@@ -2162,121 +2166,121 @@ msgctxt "@action:button"
 msgid "Account"
 msgstr "Account"
 
-#: src/qml/ShellHeader.qml:519
+#: src/qml/ShellHeader.qml:522
 msgctxt "@title:tab"
 msgid "Home"
 msgstr "Home"
 
-#: src/qml/ShellHeader.qml:533
+#: src/qml/ShellHeader.qml:536
 msgctxt "@title:tab"
 msgid "Movies"
 msgstr "Film"
 
-#: src/qml/ShellHeader.qml:546
+#: src/qml/ShellHeader.qml:549
 msgctxt "@title:tab"
 msgid "Shows"
 msgstr "Serie TV"
 
-#: src/qml/ShellHeader.qml:577
+#: src/qml/ShellHeader.qml:580
 msgctxt "@action:inmenu"
 msgid "Settings"
 msgstr "Impostazioni"
 
-#: src/qml/ShellHeader.qml:586
+#: src/qml/ShellHeader.qml:589
 msgctxt "@action:inmenu"
 msgid "Keyboard Shortcuts"
 msgstr "Scorciatoie da tastiera"
 
-#: src/qml/ShellHeader.qml:595
+#: src/qml/ShellHeader.qml:598
 msgctxt "@action:inmenu"
 msgid "About Kinefin"
 msgstr "Informazioni su Kinefin"
 
-#: src/qml/ShellHeader.qml:604
+#: src/qml/ShellHeader.qml:607
 msgctxt "@action:inmenu"
 msgid "Refresh"
 msgstr "Aggiorna"
 
-#: src/qml/ShellHeader.qml:621
+#: src/qml/ShellHeader.qml:624
 msgctxt "@action:inmenu"
 msgid "Admin Dashboard"
 msgstr "Pannello di amministrazione"
 
-#: src/qml/ShellHeader.qml:626
+#: src/qml/ShellHeader.qml:629
 msgid "The admin dashboard could not be opened: check the default browser"
 msgstr ""
 "Impossibile aprire il pannello di amministrazione: controlla il browser "
 "predefinito"
 
-#: src/qml/ShellHeader.qml:636
+#: src/qml/ShellHeader.qml:639
 msgctxt "@action:inmenu"
 msgid "Search"
 msgstr "Cerca"
 
-#: src/qml/ShellHeader.qml:646
+#: src/qml/ShellHeader.qml:649
 msgctxt "@action:inmenu"
 msgid "Favorites"
 msgstr "Preferiti"
 
-#: src/qml/ShellHeader.qml:656
+#: src/qml/ShellHeader.qml:659
 msgctxt "@action:inmenu"
 msgid "Queue"
 msgstr "Coda"
 
-#: src/qml/ShellHeader.qml:667
+#: src/qml/ShellHeader.qml:670
 msgctxt "@action:inmenu"
 msgid "Remote Sessions"
 msgstr "Sessioni remote"
 
-#: src/qml/ShellHeader.qml:678
+#: src/qml/ShellHeader.qml:681
 msgctxt "@action:inmenu Opens the list of the saved users of this server"
 msgid "Switch User"
 msgstr "Cambia utente"
 
-#: src/qml/ShellHeader.qml:687
+#: src/qml/ShellHeader.qml:690
 msgctxt "@action:inmenu"
 msgid "Sign Out"
 msgstr "Esci"
 
-#: src/qml/ShellHeader.qml:688
+#: src/qml/ShellHeader.qml:691
 msgctxt "@info:tooltip"
 msgid "Remove this user's saved session from this system"
 msgstr "Rimuovi da questo sistema la sessione salvata di questo utente"
 
-#: src/qml/ShellHeader.qml:698
+#: src/qml/ShellHeader.qml:701
 msgctxt "@action:inmenu Goes back to the list of servers"
 msgid "Switch Server"
 msgstr "Cambia server"
 
-#: src/qml/ShellHeader.qml:806
+#: src/qml/ShellHeader.qml:809
 msgctxt "@title:window"
 msgid "Update Available"
 msgstr "Aggiornamento disponibile"
 
-#: src/qml/ShellHeader.qml:810
+#: src/qml/ShellHeader.qml:813
 msgctxt "@action:button"
 msgid "Open Release Page"
 msgstr "Apri pagina della versione"
 
-#: src/qml/ShellHeader.qml:815
+#: src/qml/ShellHeader.qml:818
 msgid "Could not open the release page in the browser"
 msgstr "Impossibile aprire la pagina della versione nel browser"
 
-#: src/qml/ShellHeader.qml:824
+#: src/qml/ShellHeader.qml:827
 msgid "Kinefin %1 is available. Open its release page in your browser?"
 msgstr "È disponibile Kinefin %1. Aprire la pagina della versione nel browser?"
 
-#: src/qml/ShellHeader.qml:839
+#: src/qml/ShellHeader.qml:842
 msgctxt "@title:window"
 msgid "Sign Out"
 msgstr "Esci"
 
-#: src/qml/ShellHeader.qml:845
+#: src/qml/ShellHeader.qml:848
 msgctxt "@action:button"
 msgid "Sign Out"
 msgstr "Esci"
 
-#: src/qml/ShellHeader.qml:860
+#: src/qml/ShellHeader.qml:863
 msgctxt "@info %1 is a user name"
 msgid ""
 "Sign out %1? Saved credentials and the local queue will be removed. The "
@@ -2285,7 +2289,7 @@ msgstr ""
 "Uscire da %1? Le credenziali salvate e la coda locale verranno rimosse. "
 "L'account sul server non viene modificato."
 
-#: src/qml/ShellHeader.qml:861
+#: src/qml/ShellHeader.qml:864
 msgctxt "@info"
 msgid ""
 "Sign out? Saved credentials and the local queue will be removed. The server "
@@ -2422,14 +2426,64 @@ msgctxt "@item:intable shortcut action"
 msgid "Show Keyboard Shortcuts"
 msgstr "Mostra le scorciatoie da tastiera"
 
-#: src/qml/ShortcutsDialog.qml:53
+#: src/qml/ShortcutsDialog.qml:38
+msgctxt "@item:intable shortcut action"
+msgid "Play or Pause"
+msgstr "Riproduci o metti in pausa"
+
+#: src/qml/ShortcutsDialog.qml:39
+msgctxt "@item:intable shortcut action"
+msgid "Mute or Unmute"
+msgstr "Disattiva o riattiva audio"
+
+#: src/qml/ShortcutsDialog.qml:40 src/qml/ShortcutsDialog.qml:41
+msgctxt "@item:intable shortcut action"
+msgid "Toggle Full Screen"
+msgstr "Attiva o disattiva lo schermo intero"
+
+#: src/qml/ShortcutsDialog.qml:42
+msgctxt "@item:intable shortcut action"
+msgid "Leave Full Screen or Go Back"
+msgstr "Esci dallo schermo intero o torna indietro"
+
+#: src/qml/ShortcutsDialog.qml:43
+msgctxt "@item:intable shortcut action"
+msgid "Skip Back 10 Seconds"
+msgstr "Torna indietro di 10 secondi"
+
+#: src/qml/ShortcutsDialog.qml:44
+msgctxt "@item:intable shortcut action"
+msgid "Skip Forward 10 Seconds"
+msgstr "Vai avanti di 10 secondi"
+
+#: src/qml/ShortcutsDialog.qml:45
+msgctxt "@item:intable shortcut action"
+msgid "Skip Back 1 Minute"
+msgstr "Torna indietro di 1 minuto"
+
+#: src/qml/ShortcutsDialog.qml:46
+msgctxt "@item:intable shortcut action"
+msgid "Skip Forward 1 Minute"
+msgstr "Vai avanti di 1 minuto"
+
+#: src/qml/ShortcutsDialog.qml:65
 msgid "Keyboard Shortcuts"
 msgstr "Scorciatoie da tastiera"
 
-#: src/qml/ShortcutsDialog.qml:85
+#: src/qml/ShortcutsDialog.qml:97
 msgctxt "@action:button"
 msgid "Close"
 msgstr "Chiudi"
+
+#: src/qml/ShortcutsDialog.qml:124
+msgctxt "@title:group keyboard shortcuts"
+msgid "General"
+msgstr "Generale"
+
+#: src/qml/ShortcutsDialog.qml:133
+msgctxt "@title:group keyboard shortcuts"
+msgid "Player"
+msgstr "Player"
 
 #: src/qml/ServersPage.qml:32
 msgid "Servers"
@@ -2566,12 +2620,12 @@ msgctxt "@title:group"
 msgid "This system"
 msgstr "Questo sistema"
 
-#: src/qml/SettingsPage.qml:218 src/qml/SettingsPage.qml:298
+#: src/qml/SettingsPage.qml:218 src/qml/SettingsPage.qml:302
 msgctxt "@title:group"
 msgid "Jellyfin account"
 msgstr "Account Jellyfin"
 
-#: src/qml/SettingsPage.qml:309
+#: src/qml/SettingsPage.qml:313
 msgid "Stored on your Jellyfin server"
 msgstr "Salvato sul tuo server Jellyfin"
 

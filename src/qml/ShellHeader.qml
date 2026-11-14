@@ -215,7 +215,7 @@ Item {
         QQC2.ToolTip.visible: hovered || visualFocus
         QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
         // The menu marks where its entries lead while one of them shows
-        down: shell.currentSection === "settings" || shell.currentSection === "about"
+        down: shell.currentSection === "settings"
         onClicked: mainMenu.popup(menuButton, 0, menuButton.height)
     }
 
@@ -512,6 +512,9 @@ Item {
     }
     Component.onCompleted: syncTabs()
 
+    // The keys that open another page would take the place of the player and end the playback: they rest while it is in front, with the header hidden
+    readonly property bool navigationKeys: !shell.playbackPageShowing
+
     Kirigami.Action {
         id: homeAction
         objectName: "homeTabAction"
@@ -521,7 +524,7 @@ Item {
         icon.name: "go-home"
         enabled: root.signedIn
         onCheckedChanged: Qt.callLater(root.syncTabs)
-        shortcut: "Ctrl+1"
+        shortcut: root.navigationKeys ? "Ctrl+1" : ""
         onTriggered: shell.goHome()
     }
 
@@ -536,7 +539,7 @@ Item {
         visible: root.connection.movieLibraries.length > 0
         enabled: root.signedIn
         onCheckedChanged: Qt.callLater(root.syncTabs)
-        shortcut: visible ? "Ctrl+2" : ""
+        shortcut: visible && root.navigationKeys ? "Ctrl+2" : ""
         onTriggered: shell.openTab("movies")
     }
     Kirigami.Action {
@@ -549,7 +552,7 @@ Item {
         visible: root.connection.showLibraries.length > 0
         enabled: root.signedIn
         onCheckedChanged: Qt.callLater(root.syncTabs)
-        shortcut: visible ? (moviesAction.visible ? "Ctrl+3" : "Ctrl+2") : ""
+        shortcut: visible && root.navigationKeys ? (moviesAction.visible ? "Ctrl+3" : "Ctrl+2") : ""
         onTriggered: shell.openTab("tvshows")
     }
 
@@ -558,14 +561,14 @@ Item {
         objectName: "previousTabShortcut"
         sequences: ["Ctrl+PgUp", "Ctrl+[", "Ctrl+Shift+Tab"]
         context: Qt.WindowShortcut
-        enabled: root.signedIn
+        enabled: root.signedIn && root.navigationKeys
         onActivated: root.switchRelativeTab(-1)
     }
     Shortcut {
         objectName: "nextTabShortcut"
         sequences: ["Ctrl+PgDown", "Ctrl+]", "Ctrl+Tab"]
         context: Qt.WindowShortcut
-        enabled: root.signedIn
+        enabled: root.signedIn && root.navigationKeys
         onActivated: root.switchRelativeTab(1)
     }
 
@@ -576,7 +579,7 @@ Item {
 
         text: i18nc("@action:inmenu", "Settings")
         icon.name: "configure"
-        shortcut: "Ctrl+,"
+        shortcut: root.navigationKeys ? "Ctrl+," : ""
         onTriggered: shell.openSection("settingsPage", "SettingsPage.qml", { settings: shell.settings, connection: shell.connection })
     }
     Kirigami.Action {

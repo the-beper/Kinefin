@@ -5,23 +5,21 @@ import QtQuick.Controls as Controls
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 
-// The tile of a library on Home: its image and its name. A type the app cannot browse yet stays disabled and says so; no tile has a text of its own that could make it wider than the others
+// The tile of a library on Home: its image, which Jellyfin draws the library's name into, so the name shows as text only while there is no image (and in the tooltip). A type the app cannot browse yet stays disabled and says so. Home gives the width
 Kirigami.AbstractCard {
     id: tile
 
     // One entry of `ConnectionController::libraries`: `id`, `name`, `collectionType`, `imageUrl`, `browsable` and `tab` carry server metadata, rendered as plain text
     required property var library
 
-    // The cards share the row by what they ask for: asking the same, whatever the name says, keeps them the same size
-    Layout.fillWidth: true
-    Layout.preferredWidth: Kirigami.Units.gridUnit * 12
-    Layout.minimumWidth: 0
-
     objectName: "libraryCard_" + library.id
     enabled: library.browsable
     showClickFeedback: true
     Accessible.name: library.name
     Accessible.description: library.browsable ? "" : i18n("Not supported yet")
+    Controls.ToolTip.text: library.name
+    Controls.ToolTip.visible: (hovered || visualFocus) && image.status === Image.Ready
+    Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
 
     contentItem: ColumnLayout {
         spacing: Kirigami.Units.smallSpacing
@@ -32,12 +30,29 @@ Kirigami.AbstractCard {
             color: Kirigami.Theme.alternateBackgroundColor
             clip: true
 
-            Kirigami.Icon {
+            ColumnLayout {
                 anchors.centerIn: parent
-                width: Kirigami.Units.iconSizes.huge
-                height: width
-                source: "folder-video"
+                width: Math.max(0, parent.width - Kirigami.Units.largeSpacing * 2)
                 visible: image.status !== Image.Ready
+                spacing: Kirigami.Units.smallSpacing
+
+                Kirigami.Icon {
+                    Layout.alignment: Qt.AlignHCenter
+                    implicitWidth: Kirigami.Units.iconSizes.large
+                    implicitHeight: implicitWidth
+                    source: "folder-video"
+                }
+                Controls.Label {
+                    objectName: "libraryTileName"
+                    Layout.fillWidth: true
+                    // Not while the image loads: the name would flash on every tile that has one
+                    visible: image.status === Image.Null || image.status === Image.Error
+                    horizontalAlignment: Text.AlignHCenter
+                    // Library names come from the server: plain text only
+                    textFormat: Text.PlainText
+                    elide: Text.ElideRight
+                    text: tile.library.name
+                }
             }
 
             Image {
@@ -53,14 +68,6 @@ Kirigami.AbstractCard {
                 // Only URLs built by JellyfinClient::imageUrl belong here: the image fetcher allows nothing else, but a raw server string must never become a source
                 source: tile.library.imageUrl
             }
-        }
-
-        Controls.Label {
-            Layout.fillWidth: true
-            // Library names come from the server: plain text only
-            textFormat: Text.PlainText
-            elide: Text.ElideRight
-            text: tile.library.name
         }
 
         Controls.Label {

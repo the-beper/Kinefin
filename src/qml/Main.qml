@@ -14,7 +14,7 @@ Kirigami.ApplicationWindow {
     property var player: null
     // "fullscreen" or "windowed" when a command line flag decides this run; empty to follow the setting. Changing the setting from the Settings page ends the override
     property string startupWindowMode: ""
-    // "settings" or "about": a page to open right after the shell loads (the smoke test uses it to render pages no server is needed for)
+    // "settings" or "about": the Settings page or the About dialog to open right after the shell loads (the smoke test uses it to render what needs no server)
     property string startupPage: ""
     // An item link from the command line: opened once Home shows, then cleared
     property string requestedItemId: ""
@@ -47,6 +47,7 @@ Kirigami.ApplicationWindow {
     property bool alwaysOnTopSetting: settings.value("main", "alwaysOnTop")
     property string fullscreenOutput: settings.value("main", "forceFSScreen")
     property bool newBadgeEnabled: settings.value("library", "newBadge")
+    property bool homeLibrariesEnabled: settings.value("library", "home.libraries")
     // Which library sub-tabs are switched on, by setting id without the "tabs." prefix (e.g. "movies.favorites"); replaced as a whole on a change so bindings re-evaluate
     property var subTabs: readSubTabs()
     readonly property bool wantsFullscreen: startupWindowMode === "fullscreen" || (startupWindowMode !== "windowed" && fullscreenSetting)
@@ -195,9 +196,10 @@ Kirigami.ApplicationWindow {
         enabled: window.pageStack.currentIndex > 0 && window.pageStack.layers.depth <= 1
         onActivated: window.pageStack.goBack()
     }
+    // The search would take the place of the player and end the playback
     Shortcut {
         sequences: [StandardKey.Find]
-        enabled: window.signedIn
+        enabled: window.signedIn && !window.playbackPageShowing
         onActivated: window.openSearch()
     }
 
@@ -270,6 +272,7 @@ Kirigami.ApplicationWindow {
         function onValueChanged(section, key) {
             if (section === "library") {
                 window.newBadgeEnabled = window.settings.value("library", "newBadge");
+                window.homeLibrariesEnabled = window.settings.value("library", "home.libraries");
                 if (key.startsWith("tabs."))
                     window.subTabs = window.readSubTabs();
                 return;
@@ -303,15 +306,45 @@ Kirigami.ApplicationWindow {
     onSubTabsChanged: applySubTabs()
 
     // Full screen goes to the output named by "Force Full Screen Display" when that output exists
+    function showFullScreenOnOutput() {
+        const output = Application.screens.find(screen => screen.name === fullscreenOutput);
+        if (output)
+            window.screen = output;
+        window.visibility = Window.FullScreen;
+    }
     function applyFullscreen() {
-        if (wantsFullscreen) {
-            const output = Application.screens.find(screen => screen.name === fullscreenOutput);
-            if (output)
-                window.screen = output;
-            window.visibility = Window.FullScreen;
-        } else if (window.visibility === Window.FullScreen) {
+        if (wantsFullscreen)
+            showFullScreenOnOutput();
+        else if (window.visibility === Window.FullScreen)
             window.visibility = Window.Windowed;
+    }
+
+    // The visibility the window had when the player first switched full screen, given back when the player page goes; -1 while the player has not switched it
+    property int visibilityBeforePlayer: -1
+    // What the window was before the player's last switch to full screen, which leaving that full screen gives back: maximized or a window with this geometry
+    property int visibilityBeforeFullscreen: Window.Windowed
+    property rect geometryBeforeFullscreen
+    // A full screen the player entered: Back leaves it before it leaves the player. One that came from the setting, the command line or the window manager is not the player's
+    readonly property bool playerFullscreen: visibilityBeforePlayer >= 0 && visibilityBeforePlayer !== Window.FullScreen && visibility === Window.FullScreen
+    function togglePlayerFullscreen() {
+        if (visibilityBeforePlayer < 0)
+            visibilityBeforePlayer = visibility;
+        if (visibility === Window.FullScreen) {
+            visibility = visibilityBeforeFullscreen;
+        } else {
+            visibilityBeforeFullscreen = visibility === Window.Maximized ? Window.Maximized : Window.Windowed;
+            geometryBeforeFullscreen = Qt.rect(x, y, width, height);
+            showFullScreenOnOutput();
         }
+    }
+    function restoreVisibilityAfterPlayer() {
+        const before = visibilityBeforePlayer;
+        visibilityBeforePlayer = -1;
+        if (before === Window.FullScreen && visibility !== Window.FullScreen)
+            showFullScreenOnOutput();
+        else if (before >= 0 && before !== Window.FullScreen && visibility === Window.FullScreen)
+            visibility = visibilityBeforeFullscreen;
+        visibilityBeforeFullscreen = Window.Windowed;
     }
     onWantsFullscreenChanged: applyFullscreen()
     onFullscreenOutputChanged: if (wantsFullscreen) applyFullscreen()
@@ -339,9 +372,11 @@ Kirigami.ApplicationWindow {
             close.accepted = false;
             return;
         }
-        // A full-screen or maximized window has no geometry of its own to keep
+        // A full-screen or maximized window has no geometry of its own to keep; a full screen the player entered keeps the window it came from
         if (window.visibility === Window.Windowed)
             settings.setWindowGeometry(Qt.rect(x, y, width, height));
+        else if (playerFullscreen && visibilityBeforeFullscreen === Window.Windowed)
+            settings.setWindowGeometry(geometryBeforeFullscreen);
     }
 
     // The page follows the connection state: Servers until a server is chosen, the user picker while one of several saved users is to be chosen, sign-in until there is a session, Home after
@@ -393,7 +428,10 @@ Kirigami.ApplicationWindow {
 
     // Positions and the Continue Watching row change while something plays: Home asks again once the player page is gone
     onPlaybackPageShowingChanged: {
-        if (!playbackPageShowing && signedIn)
+        if (playbackPageShowing)
+            return;
+        restoreVisibilityAfterPlayer();
+        if (signedIn)
             connection.reloadHome();
     }
 
@@ -656,17 +694,12 @@ Kirigami.ApplicationWindow {
     }
 
     // A link that arrives while Home is already showing (a second launch) opens at once
-    // A link that arrives while Home is already showing (a second launch) opens at once
     onRequestedItemIdChanged: openRequestedItem(pageStack.get(0))
 
-    // The section the page in front belongs to: the header marks it (a tab, the main menu button, the queue button); a page opened above a type tab belongs to that tab, and one opened from a collections tile to that library; the Settings page and the Favorites page (with what opens above it) belong to no tab, and the header search is global there. Settings and About need no session, so they are marked whatever the connection is
+    // The section the page in front belongs to: the header marks it (a tab, the main menu button, the queue button); a page opened above a type tab belongs to that tab, and one opened from a collections tile to that library; the Settings page and the Favorites page (with what opens above it) belong to no tab, and the header search is global there. Settings needs no session, so it is marked whatever the connection is
     readonly property string currentSection: {
-        switch (pageStack.currentItem?.objectName) {
-        case "settingsPage":
+        if (pageStack.currentItem?.objectName === "settingsPage")
             return "settings";
-        case "aboutPage":
-            return "about";
-        }
         if (!signedIn)
             return "";
         for (let i = 0; i <= pageStack.currentIndex; ++i) {

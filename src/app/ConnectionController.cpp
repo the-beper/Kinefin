@@ -59,6 +59,9 @@ QString ConnectionController::scopeKey(const QString &type, const QString &subta
     return {};
 }
 namespace {
+// The library tiles of Home: Jellyfin draws the library's name into its image, which stays sharp only with the pixels of a tile on a HiDPI screen
+constexpr int kLibraryImageWidth = 960;
+
 bool isLoopbackHost(const QUrl &url)
 {
     if (url.host().compare(QLatin1String("localhost"), Qt::CaseInsensitive) == 0)
@@ -1251,8 +1254,7 @@ void ConnectionController::onUserViews(const QJsonArray &items)
             {QStringLiteral("imageUrl"),
              tag.isEmpty()
                  ? QString()
-                 : m_client
-                       .imageUrl(id, QStringLiteral("Primary"), LibraryItemsModel::ImageWidth, tag)
+                 : m_client.imageUrl(id, QStringLiteral("Primary"), kLibraryImageWidth, tag)
                        .toString(QUrl::FullyEncoded)},
             {QStringLiteral("browsable"),
              LibraryItemsModel::browseQuery(collectionType).has_value()}});

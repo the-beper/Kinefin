@@ -40,7 +40,10 @@ Kirigami.ScrollablePage {
         });
     }
 
+    readonly property bool showLibraries: page.connection.homeLibraries.length > 0 && (page.Window.window?.homeLibrariesEnabled ?? true)
+
     ColumnLayout {
+        id: homeColumn
         spacing: Kirigami.Units.largeSpacing
 
         MessageBox {
@@ -63,23 +66,27 @@ Kirigami.ScrollablePage {
             icon.name: "folder-video"
         }
 
-        // The tiles follow the user's preferences (order and hidden libraries); the placeholder above is about the libraries themselves, so hiding every tile leaves the rows without it
+        // The tiles follow the user's preferences (order and hidden libraries) and the Show on Home setting; the placeholder above is about the libraries themselves, so hiding every tile leaves the rows without it
         Kirigami.Heading {
-            visible: page.connection.homeLibraries.length > 0
+            objectName: "homeLibrariesHeading"
+            visible: page.showLibraries
             level: 2
             text: i18n("Libraries")
         }
 
-        Kirigami.CardsLayout {
+        Flow {
+            objectName: "homeLibraries"
             Layout.fillWidth: true
-            Layout.maximumWidth: Kirigami.Units.gridUnit * 64
-            Layout.alignment: Qt.AlignHCenter
-            visible: page.connection.homeLibraries.length > 0
+            visible: page.showLibraries
+            spacing: Kirigami.Units.largeSpacing
             Repeater {
-                model: page.connection.homeLibraries
+                // No tile is built while the section is off, so no image is fetched for it
+                model: page.showLibraries ? page.connection.homeLibraries : []
                 delegate: LibraryTile {
                     id: tile
                     required property var modelData
+                    // From the page's column, not from the Flow: a Flow child sized by the Flow's own width never settles under the software renderer
+                    width: Math.min(Kirigami.Units.gridUnit * 16, homeColumn.width)
                     library: tile.modelData
                     // A movies or TV shows library opens its tab on that library; the other types open above Home
                     onClicked: tile.library.tab ? page.Window.window.openTab(tile.library.tab, tile.library.id) : page.Window.window.openLibrary(tile.library.id, tile.library.name)

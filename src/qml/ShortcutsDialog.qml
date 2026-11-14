@@ -33,6 +33,18 @@ Kirigami.Dialog {
         ["Ctrl+,", i18nc("@item:intable shortcut action", "Settings")],
         ["Ctrl+Shift+/", i18nc("@item:intable shortcut action", "Show Keyboard Shortcuts")]
     ]
+    // The keys of the player page (PlayerPage.qml)
+    readonly property var playerRows: [
+        ["Space", i18nc("@item:intable shortcut action", "Play or Pause")],
+        ["M", i18nc("@item:intable shortcut action", "Mute or Unmute")],
+        ["F", i18nc("@item:intable shortcut action", "Toggle Full Screen")],
+        ["F11", i18nc("@item:intable shortcut action", "Toggle Full Screen")],
+        ["Escape", i18nc("@item:intable shortcut action", "Leave Full Screen or Go Back")],
+        ["Left", i18nc("@item:intable shortcut action", "Skip Back 10 Seconds")],
+        ["Right", i18nc("@item:intable shortcut action", "Skip Forward 10 Seconds")],
+        ["Down", i18nc("@item:intable shortcut action", "Skip Back 1 Minute")],
+        ["Up", i18nc("@item:intable shortcut action", "Skip Forward 1 Minute")]
+    ]
 
     function keyParts(keys) {
         const parts = [];
@@ -107,61 +119,80 @@ Kirigami.Dialog {
             }
             spacing: Kirigami.Units.largeSpacing
 
+            Kirigami.Heading {
+                level: 4
+                text: i18nc("@title:group keyboard shortcuts", "General")
+            }
             Repeater {
                 model: dialog.rows
-                delegate: RowLayout {
-                    id: row
+                delegate: shortcutRow
+            }
+            Kirigami.Heading {
+                level: 4
+                Layout.topMargin: Kirigami.Units.largeSpacing
+                text: i18nc("@title:group keyboard shortcuts", "Player")
+            }
+            Repeater {
+                model: dialog.playerRows
+                delegate: shortcutRow
+            }
+        }
 
-                    required property var modelData
+        Component {
+            id: shortcutRow
 
-                    spacing: Kirigami.Units.largeSpacing * 2
-                    Layout.fillWidth: true
+            RowLayout {
+                id: row
 
-                    RowLayout {
-                        spacing: Kirigami.Units.smallSpacing
-                        // One width for all the rows, so the keys end on the same line and descriptions start on the same line
-                        Layout.minimumWidth: Kirigami.Units.gridUnit * 12
-                        Layout.maximumWidth: Kirigami.Units.gridUnit * 12
-                        Layout.preferredWidth: Kirigami.Units.gridUnit * 12
-                        Layout.alignment: Qt.AlignVCenter
+                required property var modelData
 
-                        // The parts sit left-aligned at a constant gap; the spacer takes the rest of the fixed column, so the descriptions start at one x
-                        Repeater {
-                            model: dialog.keyParts(row.modelData[0])
-                            delegate: Rectangle {
-                                id: key
-                                objectName: "shortcutsKeyPart"
+                spacing: Kirigami.Units.largeSpacing * 2
+                Layout.fillWidth: true
 
-                                required property string modelData
-                                readonly property bool plus: modelData === "+"
+                RowLayout {
+                    spacing: Kirigami.Units.smallSpacing
+                    // One width for all the rows, so the keys end on the same line and descriptions start on the same line
+                    Layout.minimumWidth: Kirigami.Units.gridUnit * 12
+                    Layout.maximumWidth: Kirigami.Units.gridUnit * 12
+                    Layout.preferredWidth: Kirigami.Units.gridUnit * 12
+                    Layout.alignment: Qt.AlignVCenter
 
-                                radius: Kirigami.Units.cornerRadius
-                                color: plus ? "transparent" : Qt.alpha(Kirigami.Theme.textColor, 0.06)
-                                border.width: plus ? 0 : 1
-                                border.color: Qt.alpha(Kirigami.Theme.textColor, 0.25)
-                                implicitWidth: plus ? label.implicitWidth : Math.max(label.implicitWidth + Kirigami.Units.largeSpacing * 2, implicitHeight)
-                                implicitHeight: label.implicitHeight + Kirigami.Units.smallSpacing * 2
+                    // The parts sit left-aligned at a constant gap; the spacer takes the rest of the fixed column, so the descriptions start at one x
+                    Repeater {
+                        model: dialog.keyParts(row.modelData[0])
+                        delegate: Rectangle {
+                            id: key
+                            objectName: "shortcutsKeyPart"
 
-                                QQC2.Label {
-                                    id: label
+                            required property string modelData
+                            readonly property bool plus: modelData === "+"
 
-                                    anchors.centerIn: parent
-                                    text: key.modelData
-                                    opacity: key.plus ? 0.7 : 1
-                                }
+                            radius: Kirigami.Units.cornerRadius
+                            color: plus ? "transparent" : Qt.alpha(Kirigami.Theme.textColor, 0.06)
+                            border.width: plus ? 0 : 1
+                            border.color: Qt.alpha(Kirigami.Theme.textColor, 0.25)
+                            implicitWidth: plus ? label.implicitWidth : Math.max(label.implicitWidth + Kirigami.Units.largeSpacing * 2, implicitHeight)
+                            implicitHeight: label.implicitHeight + Kirigami.Units.smallSpacing * 2
+
+                            QQC2.Label {
+                                id: label
+
+                                anchors.centerIn: parent
+                                text: key.modelData
+                                opacity: key.plus ? 0.7 : 1
                             }
                         }
-                        Item {
-                            Layout.fillWidth: true
-                        }
                     }
-                    QQC2.Label {
-                        objectName: "shortcutsDescription"
-                        text: row.modelData[1]
-                        wrapMode: Text.Wrap
+                    Item {
                         Layout.fillWidth: true
-                        Layout.minimumWidth: 0
                     }
+                }
+                QQC2.Label {
+                    objectName: "shortcutsDescription"
+                    text: row.modelData[1]
+                    wrapMode: Text.Wrap
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
                 }
             }
         }

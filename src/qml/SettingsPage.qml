@@ -243,7 +243,11 @@ Kirigami.Page {
                 contentWidth: availableWidth
 
                 ColumnLayout {
-                    width: settingsView.availableWidth
+                    // The room of the vertical scroll bar stays free while the bar hides, so the centred content keeps its place when the bar comes and goes (the bar takes the left side in a right-to-left layout)
+                    readonly property var scrollBar: settingsView.Controls.ScrollBar.vertical
+                    readonly property real scrollBarRoom: scrollBar && scrollBar.interactive && !scrollBar.visible ? scrollBar.width : 0
+                    x: settingsView.mirrored ? scrollBarRoom : 0
+                    width: settingsView.availableWidth - scrollBarRoom
                     spacing: Kirigami.Units.largeSpacing
 
                     Kirigami.Heading {

@@ -1780,6 +1780,124 @@ class QuickPlayStub : public QObject {
     QList<Call> calls;
 };
 
+// What the player page reads and calls, without mpv (the video item takes only the real controller and stays empty): the calls are recorded by name and argument
+class PlayerStub : public QObject {
+    Q_OBJECT
+    Q_PROPERTY(bool active MEMBER active NOTIFY changed)
+    Q_PROPERTY(bool loading MEMBER loading NOTIFY changed)
+    Q_PROPERTY(bool paused MEMBER paused NOTIFY changed)
+    Q_PROPERTY(QString title MEMBER title NOTIFY changed)
+    Q_PROPERTY(QString subtitle MEMBER subtitle NOTIFY changed)
+    Q_PROPERTY(QString errorText MEMBER errorText NOTIFY changed)
+    Q_PROPERTY(qint64 positionTicks MEMBER positionTicks NOTIFY changed)
+    Q_PROPERTY(qint64 durationTicks MEMBER durationTicks NOTIFY changed)
+    Q_PROPERTY(bool canSeek MEMBER canSeek NOTIFY changed)
+    Q_PROPERTY(double rate MEMBER rate NOTIFY changed)
+    Q_PROPERTY(int volume MEMBER volume NOTIFY changed)
+    Q_PROPERTY(bool muted MEMBER muted NOTIFY changed)
+    Q_PROPERTY(double audioDelay MEMBER audioDelay NOTIFY changed)
+    Q_PROPERTY(double subtitleDelay MEMBER subtitleDelay NOTIFY changed)
+    Q_PROPERTY(bool shuffle MEMBER shuffle NOTIFY changed)
+    Q_PROPERTY(int repeatMode MEMBER repeatMode NOTIFY changed)
+    Q_PROPERTY(int currentIndex MEMBER currentIndex NOTIFY changed)
+    Q_PROPERTY(bool hasNext MEMBER hasNext NOTIFY changed)
+    Q_PROPERTY(bool hasPrevious MEMBER hasPrevious NOTIFY changed)
+    Q_PROPERTY(QVariantList audioTracks MEMBER audioTracks NOTIFY changed)
+    Q_PROPERTY(QVariantList subtitleTracks MEMBER subtitleTracks NOTIFY changed)
+    Q_PROPERTY(QVariantList externalSubtitles MEMBER externalSubtitles NOTIFY changed)
+    Q_PROPERTY(QString previewImage MEMBER previewImage NOTIFY changed)
+    Q_PROPERTY(QString screenshotPath MEMBER screenshotPath NOTIFY changed)
+    Q_PROPERTY(QString skipLabel MEMBER skipLabel NOTIFY changed)
+    Q_PROPERTY(int sleepRemainingMinutes MEMBER sleepRemainingMinutes NOTIFY changed)
+  public:
+    Q_INVOKABLE bool playItem(const QString &id, qint64)
+    {
+        record(QStringLiteral("playItem"), id);
+        active = true;
+        Q_EMIT changed();
+        return true;
+    }
+    Q_INVOKABLE bool playQueue(int index) { return record(QStringLiteral("playQueue"), index); }
+    Q_INVOKABLE void togglePause() { record(QStringLiteral("togglePause")); }
+    Q_INVOKABLE void toggleMute() { record(QStringLiteral("toggleMute")); }
+    Q_INVOKABLE void stop()
+    {
+        record(QStringLiteral("stop"));
+        active = false;
+        Q_EMIT changed();
+    }
+    Q_INVOKABLE bool next() { return record(QStringLiteral("next")); }
+    Q_INVOKABLE bool previous() { return record(QStringLiteral("previous")); }
+    Q_INVOKABLE void seek(qint64 ticks) { record(QStringLiteral("seek"), ticks); }
+    Q_INVOKABLE void seekRelative(int seconds) { record(QStringLiteral("seekRelative"), seconds); }
+    Q_INVOKABLE void setRate(double value) { record(QStringLiteral("setRate"), value); }
+    Q_INVOKABLE void setVolume(int level) { record(QStringLiteral("setVolume"), level); }
+    Q_INVOKABLE void setShuffle(bool on) { record(QStringLiteral("setShuffle"), on); }
+    Q_INVOKABLE void setRepeatMode(int mode) { record(QStringLiteral("setRepeatMode"), mode); }
+    Q_INVOKABLE void selectAudioTrack(int id) { record(QStringLiteral("selectAudioTrack"), id); }
+    Q_INVOKABLE void selectSubtitleTrack(int id)
+    {
+        record(QStringLiteral("selectSubtitleTrack"), id);
+    }
+    Q_INVOKABLE void adjustAudioDelay(double s) { record(QStringLiteral("adjustAudioDelay"), s); }
+    Q_INVOKABLE void adjustSubtitleDelay(double s)
+    {
+        record(QStringLiteral("adjustSubtitleDelay"), s);
+    }
+    Q_INVOKABLE void setSleepTimer(int minutes)
+    {
+        record(QStringLiteral("setSleepTimer"), minutes);
+    }
+    Q_INVOKABLE void screenshot() { record(QStringLiteral("screenshot")); }
+    Q_INVOKABLE void skipSegment() { record(QStringLiteral("skipSegment")); }
+    Q_INVOKABLE bool downloadSubtitle(int index)
+    {
+        return record(QStringLiteral("downloadSubtitle"), index);
+    }
+    Q_INVOKABLE void previewAt(qint64 ticks) { record(QStringLiteral("previewAt"), ticks); }
+    Q_INVOKABLE void clearPreview() {}
+    Q_INVOKABLE QString timeText(qint64 ticks) const { return QString::number(ticks / 10000000); }
+
+    bool active = false;
+    bool loading = false;
+    bool paused = false;
+    QString title = QStringLiteral("Abyss Station");
+    QString subtitle = QStringLiteral("S2:E6 — Weightless");
+    QString errorText;
+    qint64 positionTicks = 0;
+    qint64 durationTicks = 72000000000;
+    bool canSeek = true;
+    double rate = 1;
+    int volume = 100;
+    bool muted = false;
+    double audioDelay = 0;
+    double subtitleDelay = 0;
+    bool shuffle = false;
+    int repeatMode = 0;
+    int currentIndex = -1;
+    bool hasNext = false;
+    bool hasPrevious = false;
+    QVariantList audioTracks;
+    QVariantList subtitleTracks;
+    QVariantList externalSubtitles;
+    QString previewImage;
+    QString screenshotPath;
+    QString skipLabel;
+    int sleepRemainingMinutes = 0;
+    QStringList calls;
+
+  Q_SIGNALS:
+    void changed();
+    void finished();
+
+  private:
+    bool record(const QString &name, const QVariant &argument = {})
+    {
+        calls.append(argument.isValid() ? name + QLatin1Char(' ') + argument.toString() : name);
+        return true;
+    }
+};
+
 // Every value a QML property takes, taken from its notify signal: a poll misses a motion that a stalled thread finishes in one tick, and the animators of the render thread write only their end value back
 class PropertyRecorder : public QObject {
     Q_OBJECT
@@ -1836,6 +1954,25 @@ bool revealCard(const Ui &ui, QQuickItem *card)
 }
 
 namespace {
+// Plays the fixture movie through the shell on a stub player; the player page once it is in front and its focus is set, or null. The stub must outlive the window, so it is declared before the Ui
+QQuickItem *openPlayer(Ui &ui, PlayerStub &stub)
+{
+    QObject *root = ui.engine.rootObjects().constFirst();
+    QVariant shown;
+    if (!root->setProperty("player", QVariant::fromValue<QObject *>(&stub))
+        || !QMetaObject::invokeMethod(root, "playItem", Q_RETURN_ARG(QVariant, shown),
+                                      Q_ARG(QVariant, kMovieId), Q_ARG(QVariant, 0))
+        || !shown.toBool())
+        return nullptr;
+    QQuickItem *page = nullptr;
+    const bool ready = qWaitForScaled([&] {
+        page = ui.currentDetails();
+        return page && page->objectName() == QStringLiteral("playerPage")
+               && page->property("isShowing").toBool() && ui.window->activeFocusItem() == page;
+    });
+    return ready ? page : nullptr;
+}
+
 // Opens the details of an item through the shell; the page in front once it holds the item, or null
 QQuickItem *openDetails(Ui &ui, const QString &id)
 {
@@ -5142,7 +5279,10 @@ class TestUiPages : public QObject {
         // The rows: every action the shell answers with, and the keys of the row that shows two modifiers (the keys sit in their own boxes, one label per part)
         for (const QString &action :
              {QStringLiteral("Quit Kinefin"), QStringLiteral("Search"), QStringLiteral("Home"),
-              QStringLiteral("Settings"), QStringLiteral("Show Keyboard Shortcuts")})
+              QStringLiteral("Settings"), QStringLiteral("Show Keyboard Shortcuts"),
+              QStringLiteral("Player"), QStringLiteral("Play or Pause"),
+              QStringLiteral("Mute or Unmute"), QStringLiteral("Leave Full Screen or Go Back"),
+              QStringLiteral("Skip Forward 1 Minute")})
             QTRY_VERIFY2(ui.showsText(action), qPrintable(action));
         for (const QString &key :
              {QStringLiteral("Ctrl"), QStringLiteral("Shift"), QStringLiteral("/")})
@@ -5212,7 +5352,7 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(dialog->property("opened").toBool());
         // The opening animation moves the dialog; a binding loop shows as a warning (the harness fails the test on any)
         QTest::qWait(500);
-        const QString lastRow = QStringLiteral("Show Keyboard Shortcuts");
+        const QString lastRow = QStringLiteral("Skip Forward 1 Minute");
         QQuickItem *label = nullptr;
         for (QQuickItem *candidate : ui.itemsWithText(lastRow)) {
             if (candidate->isVisible() && candidate->inherits("QQuickText"))
@@ -9027,6 +9167,359 @@ class TestUiPages : public QObject {
         QQuickItem *resume = ui.item(QStringLiteral("cardMenuResume"));
         QVERIFY(!resume || !resume->isVisible());
         QCOMPARE(stub.calls.size(), 1);
+    }
+
+    void playerVideoFillsTheWindowUnderFloatingBars()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *page = openPlayer(ui, stub);
+        QVERIFY(page);
+        // No toolbar strip and no shell header: the video takes the whole window, the bars lie on it at the top and the bottom
+        QQuickItem *video = ui.item(QStringLiteral("videoRenderer"));
+        QVERIFY(video);
+        const QRectF window(QPointF(0, 0), QSizeF(ui.window->size()));
+        QTRY_COMPARE(video->mapRectToScene(video->boundingRect()), window);
+        QQuickItem *topBar = ui.item(QStringLiteral("playerTopBar"));
+        QQuickItem *bottomBar = ui.item(QStringLiteral("playerBottomBar"));
+        QVERIFY(topBar && topBar->isVisible());
+        QVERIFY(bottomBar && bottomBar->isVisible());
+        QCOMPARE(topBar->mapRectToScene(topBar->boundingRect()).top(), 0.0);
+        QCOMPARE(bottomBar->mapRectToScene(bottomBar->boundingRect()).bottom(), window.bottom());
+        // The title once, in the top bar, with the numbered episode under it, both plain text
+        QQuickItem *title = Ui::itemIn(topBar, QStringLiteral("playerTitle"));
+        QQuickItem *subtitle = Ui::itemIn(topBar, QStringLiteral("playerSubtitle"));
+        QVERIFY(title && subtitle);
+        QCOMPARE(title->property("text").toString(), stub.title);
+        QCOMPARE(subtitle->property("text").toString(), stub.subtitle);
+        QVERIFY(showsPlainText(title) && showsPlainText(subtitle));
+        int titles = 0;
+        for (const QQuickItem *item : allItems(page))
+            titles += item->isVisible() && item->property("text").toString() == stub.title;
+        QCOMPARE(titles, 1);
+    }
+
+    void playerBackLeavesItsFullScreenFirst_data()
+    {
+        QTest::addColumn<QString>("way");
+        QTest::newRow("escape") << QStringLiteral("escape");
+        QTest::newRow("alt-left") << QStringLiteral("alt-left");
+        QTest::newRow("mouse back") << QStringLiteral("mouse back");
+    }
+
+    void playerBackLeavesItsFullScreenFirst()
+    {
+        QFETCH(QString, way);
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *page = openPlayer(ui, stub);
+        QVERIFY(page);
+        QCOMPARE(ui.window->visibility(), QWindow::Windowed);
+        QTest::keyClick(ui.window, Qt::Key_F);
+        QTRY_COMPARE(ui.window->visibility(), QWindow::FullScreen);
+        const auto back = [&] {
+            if (way == QLatin1String("escape"))
+                QTest::keyClick(ui.window, Qt::Key_Escape);
+            else if (way == QLatin1String("alt-left"))
+                QTest::keyClick(ui.window, Qt::Key_Left, Qt::AltModifier);
+            else
+                QTest::mouseClick(ui.window, Qt::BackButton, Qt::NoModifier,
+                                  QPoint(ui.window->width() / 2, ui.window->height() / 2));
+        };
+        back();
+        QTRY_COMPARE(ui.window->visibility(), QWindow::Windowed);
+        QTest::qWait(100);
+        QCOMPARE(ui.currentDetails(), page);
+        back();
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("homePage"));
+        QTRY_COMPARE(ui.stackDepth(), 1);
+        QCOMPARE(ui.window->visibility(), QWindow::Windowed);
+    }
+
+    void playerBackButtonLeavesAndGivesTheWindowBack()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(openPlayer(ui, stub));
+        QTest::keyClick(ui.window, Qt::Key_F);
+        QTRY_COMPARE(ui.window->visibility(), QWindow::FullScreen);
+        QQuickItem *back = ui.item(QStringLiteral("playerBackButton"));
+        QVERIFY(back && back->isVisible());
+        // AbstractButton.IconOnly
+        QCOMPARE(back->property("display").toInt(), 0);
+        QCOMPARE(back->property("text").toString(), QStringLiteral("Back"));
+        QTest::mouseClick(
+            ui.window, Qt::LeftButton, Qt::NoModifier,
+            back->mapToScene(QPointF(back->width() / 2, back->height() / 2)).toPoint());
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("homePage"));
+        QVERIFY(stub.calls.contains(QStringLiteral("stop")));
+        QTRY_COMPARE(ui.window->visibility(), QWindow::Windowed);
+    }
+
+    void playerLeavesAFullScreenItDidNotEnterAlone()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        // Full screen from the setting, the command line or the window manager: Esc leaves the player and the window stays full screen
+        ui.window->setVisibility(QWindow::FullScreen);
+        QTRY_COMPARE(ui.window->visibility(), QWindow::FullScreen);
+        QVERIFY(openPlayer(ui, stub));
+        QTest::keyClick(ui.window, Qt::Key_Escape);
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("homePage"));
+        QTRY_COMPARE(ui.stackDepth(), 1);
+        QCOMPARE(ui.window->visibility(), QWindow::FullScreen);
+        // F in the player leaves it for a window, and leaving the player gives the full screen back
+        QVERIFY(openPlayer(ui, stub));
+        QTest::keyClick(ui.window, Qt::Key_F);
+        QTRY_COMPARE(ui.window->visibility(), QWindow::Windowed);
+        QTest::keyClick(ui.window, Qt::Key_Escape);
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("homePage"));
+        QTRY_COMPARE(ui.window->visibility(), QWindow::FullScreen);
+    }
+
+    void playerFullScreenGivesBackAMaximizedWindow()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        ui.window->showMaximized();
+        QTRY_COMPARE(ui.window->visibility(), QWindow::Maximized);
+        QVERIFY(openPlayer(ui, stub));
+        QTest::keyClick(ui.window, Qt::Key_F);
+        QTRY_COMPARE(ui.window->visibility(), QWindow::FullScreen);
+        QTest::keyClick(ui.window, Qt::Key_F);
+        QTRY_COMPARE(ui.window->visibility(), QWindow::Maximized);
+        QTest::keyClick(ui.window, Qt::Key_F);
+        QTRY_COMPARE(ui.window->visibility(), QWindow::FullScreen);
+        QTest::keyClick(ui.window, Qt::Key_Escape);
+        QTRY_COMPARE(ui.window->visibility(), QWindow::Maximized);
+        QTest::keyClick(ui.window, Qt::Key_Escape);
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("homePage"));
+        QCOMPARE(ui.window->visibility(), QWindow::Maximized);
+    }
+
+    void closingInThePlayersFullScreenKeepsTheWindowSize()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        ui.window->resize(700, 500);
+        QTRY_COMPARE(ui.window->size(), QSize(700, 500));
+        QVERIFY(openPlayer(ui, stub));
+        QTest::keyClick(ui.window, Qt::Key_F);
+        QTRY_COMPARE(ui.window->visibility(), QWindow::FullScreen);
+        QGuiApplication::setQuitOnLastWindowClosed(false);
+        const auto quitAgain =
+            qScopeGuard([] { QGuiApplication::setQuitOnLastWindowClosed(true); });
+        ui.window->close();
+        QTRY_VERIFY(!ui.window->isVisible());
+        QCOMPARE(ui.settings.windowGeometry().size(), QSize(700, 500));
+    }
+
+    void playerKeysWorkAfterAClickAndWithTheBarsHidden()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *page = openPlayer(ui, stub);
+        QVERIFY(page);
+        QObject *timer = page->findChild<QObject *>(QStringLiteral("playerChromeTimer"));
+        QVERIFY(timer);
+        QQuickItem *osd = ui.item(QStringLiteral("playerOsd"));
+        QVERIFY(osd && osd->isVisible());
+        // A click on a control of the bars leaves the keyboard with the page
+        QQuickItem *pause = ui.item(QStringLiteral("playerPauseButton"));
+        QVERIFY(pause);
+        QTest::mouseClick(
+            ui.window, Qt::LeftButton, Qt::NoModifier,
+            pause->mapToScene(QPointF(pause->width() / 2, pause->height() / 2)).toPoint());
+        QTRY_COMPARE(stub.calls.count(QStringLiteral("togglePause")), 1);
+        QCOMPARE(ui.window->activeFocusItem(), page);
+        // A pointer at rest lets the bars go (sooner than the five seconds of the app; the change restarts the timer)
+        timer->setProperty("interval", 1000);
+        QTRY_VERIFY(!osd->isVisible());
+        QTest::qWait(500);
+        QVERIFY(!osd->isVisible());
+        stub.calls.clear();
+        for (const Qt::Key key :
+             {Qt::Key_Space, Qt::Key_M, Qt::Key_Left, Qt::Key_Right, Qt::Key_Up, Qt::Key_Down})
+            QTest::keyClick(ui.window, key);
+        QCOMPARE(
+            stub.calls,
+            QStringList({QStringLiteral("togglePause"), QStringLiteral("toggleMute"),
+                         QStringLiteral("seekRelative -10"), QStringLiteral("seekRelative 10"),
+                         QStringLiteral("seekRelative 60"), QStringLiteral("seekRelative -60")}));
+        // A key shows the bars again, and so does a move of the pointer once they are gone
+        QTRY_VERIFY(osd->isVisible());
+        QTRY_VERIFY(!osd->isVisible());
+        QTest::mouseMove(ui.window, QPoint(ui.window->width() / 3, ui.window->height() / 3));
+        QTRY_VERIFY(osd->isVisible());
+        // A combination belongs to the window: Ctrl+M does not mute
+        stub.calls.clear();
+        QTest::keyClick(ui.window, Qt::Key_M, Qt::ControlModifier);
+        QTest::qWait(100);
+        QVERIFY(stub.calls.isEmpty());
+        // Tab with the bars gone shows them and goes into them; once they hide again the page takes the keys back
+        QTRY_VERIFY(!osd->isVisible());
+        QTest::keyClick(ui.window, Qt::Key_Tab);
+        QTRY_VERIFY(osd->isVisible());
+        QQuickItem *focused = ui.window->activeFocusItem();
+        QVERIFY(focused && osd->isAncestorOf(focused));
+        QTRY_VERIFY(!osd->isVisible());
+        QCOMPARE(ui.window->activeFocusItem(), page);
+    }
+
+    void shellShortcutsLeaveThePlayerAlone()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *page = openPlayer(ui, stub);
+        QVERIFY(page);
+        for (const QKeySequence &keys :
+             {QKeySequence(QKeySequence::Find), QKeySequence(Qt::CTRL | Qt::Key_1),
+              QKeySequence(Qt::CTRL | Qt::Key_2), QKeySequence(Qt::CTRL | Qt::Key_PageDown),
+              QKeySequence(Qt::CTRL | Qt::Key_Comma)}) {
+            QTest::keySequence(ui.window, keys);
+            QTest::qWait(200);
+            QVERIFY2(ui.currentDetails() == page, qPrintable(keys.toString()));
+        }
+        QVERIFY(!stub.calls.contains(QStringLiteral("stop")));
+    }
+
+    void homeLibrariesFollowTheSetting()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *heading = nullptr;
+        QTRY_VERIFY((heading = ui.item(QStringLiteral("homeLibrariesHeading"))) != nullptr
+                    && heading->isVisible());
+        QQuickItem *tiles = ui.item(QStringLiteral("homeLibraries"));
+        QVERIFY(tiles && tiles->isVisible());
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Continue Watching")));
+        // Off hides the heading and the tiles at once, the rows stay; on brings them back
+        QVERIFY(ui.settings.setValue(QStringLiteral("library"), QStringLiteral("home.libraries"),
+                                     false));
+        QTRY_VERIFY(!tiles->isVisible());
+        QVERIFY(!heading->isVisible());
+        QVERIFY(ui.showsText(QStringLiteral("Continue Watching")));
+        QVERIFY(ui.settings.setValue(QStringLiteral("library"), QStringLiteral("home.libraries"),
+                                     true));
+        QTRY_VERIFY(tiles->isVisible() && heading->isVisible());
+    }
+
+    void libraryTilesShowTheNameOnlyWithoutAnImage()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(1000));
+        QVERIFY(ui.signIn());
+        const auto name = [&ui](const QString &id) {
+            QQuickItem *tile = ui.item(QStringLiteral("libraryCard_") + id);
+            return tile ? Ui::itemIn(tile, QStringLiteral("libraryTileName")) : nullptr;
+        };
+        // Movies has an image, which carries its name: once it is there the tile shows no text of its own
+        QTRY_VERIFY(name(kMovies) && name(kSeries));
+        QTRY_VERIFY(!name(kMovies)->isVisible());
+        QVERIFY(name(kSeries)->isVisible());
+        QCOMPARE(name(kSeries)->property("text").toString(), QStringLiteral("Series"));
+        QVERIFY(showsPlainText(name(kSeries)));
+        // The image is asked wide enough for a tile on a HiDPI screen
+        QString moviesImage;
+        for (const QVariant &library : ui.controller.property("libraries").toList()) {
+            if (library.toMap().value(QStringLiteral("id")).toString() == kMovies)
+                moviesImage = library.toMap().value(QStringLiteral("imageUrl")).toString();
+        }
+        QVERIFY2(moviesImage.contains(QStringLiteral("maxWidth=960")), qPrintable(moviesImage));
+        // A fixed width, the same for every tile, from the left edge of the heading
+        QQuickItem *movies = ui.item(QStringLiteral("libraryCard_") + kMovies);
+        QQuickItem *series = ui.item(QStringLiteral("libraryCard_") + kSeries);
+        QQuickItem *heading = ui.item(QStringLiteral("homeLibrariesHeading"));
+        QCOMPARE(movies->width(), gridUnitOf(ui) * 16);
+        QCOMPARE(series->width(), movies->width());
+        QCOMPARE(movies->mapToScene(QPointF(0, 0)).x(), heading->mapToScene(QPointF(0, 0)).x());
+        // A narrow window wraps the tiles inside the page, and the first row starts below them
+        QVERIFY(ui.opensWindowOfWidth(440));
+        QQuickItem *flow = ui.item(QStringLiteral("homeLibraries"));
+        QQuickItem *firstRow = nullptr;
+        QTRY_VERIFY((firstRow = ui.item(QStringLiteral("homeRow_0"))) != nullptr);
+        QTRY_VERIFY(series->mapToScene(QPointF(0, 0)).y() > movies->mapToScene(QPointF(0, 0)).y());
+        const QRectF tiles = flow->mapRectToScene(QRectF(0, 0, flow->width(), flow->height()));
+        for (const QQuickItem *tile : {movies, series}) {
+            const QRectF rect = tile->mapRectToScene(QRectF(0, 0, tile->width(), tile->height()));
+            QVERIFY(rect.right() <= ui.window->width());
+            QVERIFY(tiles.contains(rect));
+        }
+        QTRY_VERIFY(firstRow->mapToScene(QPointF(0, 0)).y() >= tiles.bottom());
+    }
+
+    void settingsContentKeepsItsPlaceWhenTheScrollBarShows_data()
+    {
+        QTest::addColumn<bool>("rightToLeft");
+        QTest::newRow("left to right") << false;
+        QTest::newRow("right to left") << true;
+    }
+
+    void settingsContentKeepsItsPlaceWhenTheScrollBarShows()
+    {
+        QFETCH(bool, rightToLeft);
+        const Qt::LayoutDirection direction = QGuiApplication::layoutDirection();
+        QGuiApplication::setLayoutDirection(rightToLeft ? Qt::RightToLeft : Qt::LeftToRight);
+        const auto restoreDirection =
+            qScopeGuard([direction] { QGuiApplication::setLayoutDirection(direction); });
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        ui.window->resize(1000, 800);
+        QTRY_COMPARE(ui.window->height(), 800);
+        QQuickItem *page = openSettings(ui);
+        QVERIFY(page);
+        QQuickItem *view = ui.item(QStringLiteral("settingsContentView"));
+        QVERIFY(view);
+        auto *flickable = view->property("contentItem").value<QQuickItem *>();
+        QVERIFY(flickable);
+        const auto scrolls = [flickable] {
+            return flickable->property("contentHeight").toReal() > flickable->height() + 1;
+        };
+        const auto cardEdges = [&ui] {
+            QQuickItem *card = ui.item(QStringLiteral("settingsGroupCard_0"));
+            return card ? card->mapRectToScene(QRectF(0, 0, card->width(), card->height()))
+                        : QRectF();
+        };
+        const auto select = [page](const QString &section) {
+            return QMetaObject::invokeMethod(page, "selectSection", Q_ARG(QVariant, section));
+        };
+        QVERIFY(select(QStringLiteral("main")));
+        QTRY_VERIFY(cardEdges().width() > 0);
+        QTest::qWait(300);
+        QVERIFY(!scrolls());
+        const QRectF without = cardEdges();
+        QVERIFY(select(QStringLiteral("video")));
+        QTRY_VERIFY(scrolls());
+        // The bar shows a frame after the content grows; the card keeps its edges all the same
+        QTest::qWait(300);
+        QTRY_COMPARE(qRound(cardEdges().left()), qRound(without.left()));
+        QCOMPARE(qRound(cardEdges().right()), qRound(without.right()));
     }
 
   private:
