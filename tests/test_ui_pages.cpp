@@ -1299,9 +1299,13 @@ bool buildState(Ui &ui, const QString &state)
             },
             10000);
     }
+    // The grid is built asynchronously after the first page, failed or not
     if (state == QLatin1String("library") || state == QLatin1String("libraryFailed"))
         return qWaitForScaled(
-            [&] { return ui.controller.movies()->status() != Kinefin::LibraryItemsModel::Loading; },
+            [&] {
+                return ui.controller.movies()->status() != Kinefin::LibraryItemsModel::Loading
+                       && ui.item(QStringLiteral("libraryGrid")) != nullptr;
+            },
             10000);
     if (state == QLatin1String("rails")) {
         if (!qWaitForScaled([&] { return ui.controller.movies()->genreOptions()->available(); },
@@ -2189,8 +2193,8 @@ class TestUiPages : public QObject {
         QVERIFY(ui.signIn());
         QTRY_VERIFY(ui.item(QStringLiteral("libraryCard_") + kMovies) != nullptr);
         QVERIFY(ui.openLibraryTile(kMovies));
-        QQuickItem *grid = ui.item(QStringLiteral("libraryGrid"));
-        QVERIFY(grid);
+        QQuickItem *grid = nullptr;
+        QTRY_VERIFY((grid = ui.item(QStringLiteral("libraryGrid"))) != nullptr);
         QTRY_COMPARE(ui.controller.movies()->status(), Kinefin::LibraryItemsModel::Ready);
         QCOMPARE(ui.controller.movies()->rowCount(), 450);
         QTRY_COMPARE(grid->property("count").toInt(), 450);
@@ -2205,6 +2209,109 @@ class TestUiPages : public QObject {
         // A sort change from the page's own action list restarts the model
         ui.controller.movies()->setSortKey(Kinefin::LibraryItemsModel::Runtime);
         QTRY_COMPARE(ui.controller.movies()->status(), Kinefin::LibraryItemsModel::Ready);
+    }
+
+    void theLibraryViewComesWithItsFirstPage()
+    {
+        Ui ui(m_home->path());
+        ui.server.generatedItemTotal = 60;
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QTRY_VERIFY(ui.item(QStringLiteral("libraryCard_") + kMovies) != nullptr);
+        QVERIFY(!ui.window->property("compactHeader").toBool());
+        // While the first page is out the page shows its spinner and builds no view
+        ui.server.heldFamilies.insert(QStringLiteral("Items"));
+        QVERIFY(ui.clickTab(QStringLiteral("Movies")));
+        QTRY_VERIFY(shownItem(ui, QStringLiteral("libraryLoading")) != nullptr);
+        QVERIFY(!ui.item(QStringLiteral("libraryGrid")));
+        // One library of the type in a wide window: the row of the tab's search field and library selector is not built
+        QVERIFY(!ui.item(QStringLiteral("librarySearchField")));
+        QVERIFY(!ui.item(QStringLiteral("librarySelector")));
+        // A position restored before the view comes is what the tab keeps if it is left meanwhile
+        QQuickItem *page = ui.item(QStringLiteral("libraryPage"));
+        QVERIFY(page);
+        const QVariantMap restored{{QStringLiteral("currentIndex"), 7},
+                                   {QStringLiteral("contentY"), 0.0}};
+        QVERIFY(QMetaObject::invokeMethod(page, "restoreViewPosition", Q_ARG(QVariant, restored)));
+        QVariant kept;
+        QVERIFY(QMetaObject::invokeMethod(page, "viewPosition", Q_RETURN_ARG(QVariant, kept)));
+        QCOMPARE(kept.toMap().value(QStringLiteral("currentIndex")).toInt(), 7);
+
+        // The tab gave the keys to a view that did not exist yet: the view takes them when it comes
+        ui.server.heldFamilies.clear();
+        ui.controller.movies()->reload();
+        QQuickItem *grid = nullptr;
+        QTRY_VERIFY((grid = ui.item(QStringLiteral("libraryGrid"))) != nullptr);
+        QTRY_VERIFY(grid->property("count").toInt() > 0);
+        QTRY_VERIFY(grid->hasActiveFocus());
+        QTRY_COMPARE(grid->property("currentIndex").toInt(), 7);
+        QVERIFY(!shownItem(ui, QStringLiteral("libraryLoading")));
+
+        // A reload keeps the view
+        ui.controller.movies()->reload();
+        QCOMPARE(ui.controller.movies()->status(), Kinefin::LibraryItemsModel::Loading);
+        QCOMPARE(ui.item(QStringLiteral("libraryGrid")), grid);
+        QTRY_COMPARE(ui.controller.movies()->status(), Kinefin::LibraryItemsModel::Ready);
+        QCOMPARE(ui.item(QStringLiteral("libraryGrid")), grid);
+    }
+
+    void theLibraryViewLeavesTheKeysWhereTheUserMovedThem()
+    {
+        Ui ui(m_home->path());
+        ui.server.generatedItemTotal = 60;
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QTRY_VERIFY(ui.item(QStringLiteral("libraryCard_") + kMovies) != nullptr);
+        ui.server.heldFamilies.insert(QStringLiteral("Items"));
+        QVERIFY(ui.clickTab(QStringLiteral("Movies")));
+        QTRY_VERIFY(shownItem(ui, QStringLiteral("libraryLoading")) != nullptr);
+        QQuickItem *field = ui.item(QStringLiteral("headerSearchField"));
+        QVERIFY(field);
+        field->forceActiveFocus(Qt::TabFocusReason);
+        QTRY_VERIFY(field->hasActiveFocus());
+
+        ui.server.heldFamilies.clear();
+        ui.controller.movies()->reload();
+        QQuickItem *grid = nullptr;
+        QTRY_VERIFY((grid = ui.item(QStringLiteral("libraryGrid"))) != nullptr);
+        QTRY_VERIFY(grid->property("count").toInt() > 0);
+        QVERIFY(field->hasActiveFocus());
+        QVERIFY(!grid->hasActiveFocus());
+    }
+
+    void aMessageBoxIsBuiltWhenItFirstShowsAndKept()
+    {
+        Ui ui(m_home->path());
+        ui.server.generatedItemTotal = 30;
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QTRY_VERIFY(ui.item(QStringLiteral("libraryCard_") + kMovies) != nullptr);
+        QVERIFY(ui.openLibraryTile(kMovies));
+        QTRY_COMPARE(ui.controller.movies()->status(), Kinefin::LibraryItemsModel::Ready);
+        QQuickItem *box = ui.item(QStringLiteral("libraryFailedBox"));
+        QVERIFY(box);
+        const auto built = [box] {
+            for (const QQuickItem *child : box->childItems()) {
+                if (child->inherits("QQuickLoader"))
+                    return child->property("item").value<QObject *>() != nullptr;
+            }
+            return false;
+        };
+        // A page holds several hidden boxes: none of them builds its Kirigami message
+        QVERIFY(!box->isVisible());
+        QVERIFY(!built());
+
+        ui.server.listingStatus.insert(QStringLiteral("Items"), 500);
+        ui.controller.movies()->reload();
+        QTRY_VERIFY(box->isVisible());
+        QVERIFY(built());
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Could not load this library"), false));
+
+        // Hidden again, the box keeps what it built
+        ui.server.listingStatus.clear();
+        QVERIFY(ui.clickButton(QStringLiteral("Retry")));
+        QTRY_VERIFY(!box->isVisible());
+        QVERIFY(built());
     }
 
     void cardGridKeepsTheCardsOutOfTheScrollBar()

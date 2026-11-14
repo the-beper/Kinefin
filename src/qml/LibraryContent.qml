@@ -20,7 +20,10 @@ Item {
 
     // Set once the content is built: a change of `listModel` before that is only its first binding (an onChanged handler fires for it), which must not scroll away from a position the page restores
     property bool ready: false
-    Component.onCompleted: ready = true
+    Component.onCompleted: {
+        ready = true;
+        viewKept = viewKept || firstPageIn;
+    }
 
     signal clearRequested
 
@@ -38,6 +41,9 @@ Item {
 
     // The scroll position and the current item, for the tab to come back as it was left
     function viewPosition() {
+        // A position still waiting for the view is the one to keep
+        if (!view && pendingPosition)
+            return pendingPosition;
         return { currentIndex: view ? view.currentIndex : 0, contentY: view ? view.contentY : 0 };
     }
 
@@ -61,7 +67,26 @@ Item {
     }
 
     function focusView() {
-        view?.forceActiveFocus(Qt.TabFocusReason);
+        if (view) {
+            view.forceActiveFocus(Qt.TabFocusReason);
+            return;
+        }
+        focusPending = true;
+        focusBefore = Window.activeFocusItem;
+    }
+
+    // Asked before the view exists: the view takes the keys when it comes, unless the focus moved meanwhile
+    property bool focusPending: false
+    property var focusBefore: null
+
+    onViewChanged: {
+        if (!view)
+            return;
+        applyPendingPosition();
+        if (focusPending && Window.activeFocusItem === focusBefore)
+            view.forceActiveFocus(Qt.TabFocusReason);
+        focusPending = false;
+        focusBefore = null;
     }
 
     // A new order, filter or view starts from the first result
@@ -112,10 +137,20 @@ Item {
         }
     }
 
+    // The view comes once the first page of items is in, and stays: built asynchronously, its visible cards arrive a few per frame (a view created in an asynchronous incubation creates its delegates the same way), where items reaching a view that already exists would build them all in one frame
+    readonly property bool firstPageIn: listModel.status !== LibraryItemsModel.Loading || listModel.totalCount > 0
+    property bool viewKept: false
+    onFirstPageInChanged: {
+        if (firstPageIn)
+            viewKept = true;
+    }
+
     Loader {
         id: loader
 
         anchors.fill: parent
+        asynchronous: true
+        active: content.viewKept
         sourceComponent: content.listMode ? listComponent : gridComponent
     }
 
@@ -227,7 +262,8 @@ Item {
     Kirigami.LoadingPlaceholder {
         objectName: "libraryLoading"
         anchors.centerIn: parent
-        visible: content.listModel.status === LibraryItemsModel.Loading && content.count === 0
+        // Until the view shows the items that are already in
+        visible: content.count === 0 && (content.listModel.status === LibraryItemsModel.Loading || (content.listModel.totalCount > 0 && !content.view))
         text: content.listModel.resolvingFacets ? i18n("Applying the saved filters…") : i18n("Loading…")
     }
 

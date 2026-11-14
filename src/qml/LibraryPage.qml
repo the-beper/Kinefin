@@ -49,9 +49,7 @@ Kirigami.Page {
 
     // The tab's search field takes the keyboard
     function focusSearchField() {
-        const field = tabSearch.visible ? tabSearch : null;
-        field?.forceActiveFocus(Qt.TabFocusReason);
-        field?.selectAll();
+        topRow.item?.focusSearchField();
     }
 
     // The view takes the keys as soon as the page shows
@@ -231,77 +229,91 @@ Kirigami.Page {
         anchors.fill: parent
         spacing: 0
 
-        RowLayout {
+        // Built only while it shows: a wide window with one library of the type, the usual case, would pay its creation on every push
+        Loader {
+            id: topRow
+
             Layout.margins: Kirigami.Units.largeSpacing
-            visible: page.tabType !== "" && (page.compactShell || page.libraries.length > 1)
-            spacing: Kirigami.Units.largeSpacing
+            active: page.tabType !== "" && (page.compactShell || page.libraries.length > 1)
+            visible: active
 
-            Kirigami.SearchField {
-                id: tabSearch
-                objectName: "librarySearchField"
-
-                Layout.fillWidth: true
-                Layout.maximumWidth: Kirigami.Units.gridUnit * 30
-                visible: page.tabType !== "" && page.compactShell
-                // The shell owns Ctrl+F: the field's own sequence would make it ambiguous
-                focusSequences: []
-                maximumLength: 128
-                autoAccept: false
-                placeholderText: page.tabType === "movies" ? i18nc("@info:placeholder", "Search in Movies") : i18nc("@info:placeholder", "Search in Shows")
-
-                // The field is the source of truth while it holds the focus, and follows the term the header box changes
-                onTextChanged: {
-                    if (text !== page.model.searchTerm)
-                        page.model.searchTerm = text;
-                }
-                Keys.onDownPressed: page.focusPrimary()
-                Component.onCompleted: text = page.model.searchTerm
-            }
-
-            Connections {
-                target: page.model
-                function onSearchTermChanged() {
-                    if (tabSearch.text !== page.model.searchTerm)
-                        tabSearch.text = page.model.searchTerm;
-                }
-            }
-
-            Controls.ComboBox {
-                id: selector
-                objectName: "librarySelector"
-
-                // "*" is no Jellyfin id: openType takes any id that is not a library of the type as All
-                readonly property var entries: [{ id: "*", name: i18n("All libraries") }].concat(page.libraries)
-                function scopeIndex() {
-                    const index = entries.findIndex(entry => entry.id === page.model.libraryId);
-                    return index < 0 ? 0 : index;
+            sourceComponent: RowLayout {
+                function focusSearchField() {
+                    if (!tabSearch.visible)
+                        return;
+                    tabSearch.forceActiveFocus(Qt.TabFocusReason);
+                    tabSearch.selectAll();
                 }
 
-                // A long library name never pushes the search field out
-                Layout.maximumWidth: Kirigami.Units.gridUnit * 16
-                visible: page.tabType !== "" && page.libraries.length > 1
-                model: entries
-                textRole: "name"
-                currentIndex: scopeIndex()
-                Accessible.name: i18nc("@label:listbox", "Library")
-                onActivated: index => {
-                    page.connection.openType(page.tabType, entries[index].id);
-                    currentIndex = Qt.binding(() => selector.scopeIndex());
+                spacing: Kirigami.Units.largeSpacing
+
+                Kirigami.SearchField {
+                    id: tabSearch
+                    objectName: "librarySearchField"
+
+                    Layout.fillWidth: true
+                    Layout.maximumWidth: Kirigami.Units.gridUnit * 30
+                    visible: page.tabType !== "" && page.compactShell
+                    // The shell owns Ctrl+F: the field's own sequence would make it ambiguous
+                    focusSequences: []
+                    maximumLength: 128
+                    autoAccept: false
+                    placeholderText: page.tabType === "movies" ? i18nc("@info:placeholder", "Search in Movies") : i18nc("@info:placeholder", "Search in Shows")
+
+                    // The field is the source of truth while it holds the focus, and follows the term the header box changes
+                    onTextChanged: {
+                        if (text !== page.model.searchTerm)
+                            page.model.searchTerm = text;
+                    }
+                    Keys.onDownPressed: page.focusPrimary()
+                    Component.onCompleted: text = page.model.searchTerm
                 }
 
-                // Library names come from the server: plain text only (the style paints the selected name itself, as plain text; a custom contentItem breaks it, which reads text input API)
-                delegate: Controls.ItemDelegate {
-                    id: entry
+                Connections {
+                    target: page.model
+                    function onSearchTermChanged() {
+                        if (tabSearch.text !== page.model.searchTerm)
+                            tabSearch.text = page.model.searchTerm;
+                    }
+                }
 
-                    required property var modelData
-                    required property int index
+                Controls.ComboBox {
+                    id: selector
+                    objectName: "librarySelector"
 
-                    width: ListView.view ? ListView.view.width : implicitWidth
-                    highlighted: selector.highlightedIndex === entry.index
-                    contentItem: Controls.Label {
-                        textFormat: Text.PlainText
-                        elide: Text.ElideRight
-                        text: entry.modelData.name
+                    // "*" is no Jellyfin id: openType takes any id that is not a library of the type as All
+                    readonly property var entries: [{ id: "*", name: i18n("All libraries") }].concat(page.libraries)
+                    function scopeIndex() {
+                        const index = entries.findIndex(entry => entry.id === page.model.libraryId);
+                        return index < 0 ? 0 : index;
+                    }
+
+                    // A long library name never pushes the search field out
+                    Layout.maximumWidth: Kirigami.Units.gridUnit * 16
+                    visible: page.tabType !== "" && page.libraries.length > 1
+                    model: entries
+                    textRole: "name"
+                    currentIndex: scopeIndex()
+                    Accessible.name: i18nc("@label:listbox", "Library")
+                    onActivated: index => {
+                        page.connection.openType(page.tabType, entries[index].id);
+                        currentIndex = Qt.binding(() => selector.scopeIndex());
+                    }
+
+                    // Library names come from the server: plain text only (the style paints the selected name itself, as plain text; a custom contentItem breaks it, which reads text input API)
+                    delegate: Controls.ItemDelegate {
+                        id: entry
+
+                        required property var modelData
+                        required property int index
+
+                        width: ListView.view ? ListView.view.width : implicitWidth
+                        highlighted: selector.highlightedIndex === entry.index
+                        contentItem: Controls.Label {
+                            textFormat: Text.PlainText
+                            elide: Text.ElideRight
+                            text: entry.modelData.name
+                        }
                     }
                 }
             }
