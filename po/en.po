@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: kinefin 0\n"
 "Report-Msgid-Bugs-To: https://github.com/the-beper/Kinefin/issues\n"
-"POT-Creation-Date: 2026-11-14 16:13+0000\n"
+"POT-Creation-Date: 2026-11-14 16:47+0000\n"
 "PO-Revision-Date: 2026-11-07 00:00+0000\n"
 "Last-Translator: the-beper\n"
 "Language-Team: English\n"
@@ -695,7 +695,7 @@ msgid "Ended"
 msgstr "Ended"
 
 #: src/qml/ItemDetailsPage.qml:92 src/qml/MediaCard.qml:330
-#: src/qml/CardMenu.qml:42 src/qml/PlayerPage.qml:375
+#: src/qml/CardMenu.qml:42 src/qml/PlayerPage.qml:446
 msgid "Resume"
 msgstr "Resume"
 
@@ -1895,7 +1895,7 @@ msgctxt "@action:button"
 msgid "Add User"
 msgstr "Add User"
 
-#: src/qml/UserPickerPage.qml:284 src/qml/PlayerPage.qml:448
+#: src/qml/UserPickerPage.qml:284 src/qml/PlayerPage.qml:519
 msgctxt "@action:button"
 msgid "More Actions"
 msgstr "More Actions"
@@ -1947,203 +1947,208 @@ msgstr ""
 "Could not add this to the queue: check the connection to the server and try "
 "again"
 
-#: src/qml/PlayerPage.qml:13 src/qml/PlayerPage.qml:294
+#: src/qml/PlayerPage.qml:13 src/qml/PlayerPage.qml:347
 msgid "Now Playing"
 msgstr "Now Playing"
 
-#: src/qml/PlayerPage.qml:30
+#: src/qml/PlayerPage.qml:35
 msgctxt "@action:button remaining playback time, with a minus sign"
 msgid "−%1"
 msgstr "−%1"
 
-#: src/qml/PlayerPage.qml:33
+#: src/qml/PlayerPage.qml:38
 msgctxt ""
 "@action:button elapsed playback time, then the total or the remaining time"
 msgid "%1 / %2"
 msgstr "%1 / %2"
 
-#: src/qml/PlayerPage.qml:189
+#: src/qml/PlayerPage.qml:234
 msgid "Opening video…"
 msgstr "Opening video…"
 
-#: src/qml/PlayerPage.qml:193
+#: src/qml/PlayerPage.qml:238
 msgid "Close Player"
 msgstr "Close Player"
 
-#: src/qml/PlayerPage.qml:283 src/qml/ShellHeader.qml:190
+#: src/qml/PlayerPage.qml:336 src/qml/ShellHeader.qml:190
 msgctxt "@action:button"
 msgid "Back"
 msgstr "Back"
 
-#: src/qml/PlayerPage.qml:359
+#: src/qml/PlayerPage.qml:367
+msgctxt "@action:button"
+msgid "Keep Controls Visible"
+msgstr "Keep Controls Visible"
+
+#: src/qml/PlayerPage.qml:430
 msgid "Playback position"
 msgstr "Playback position"
 
-#: src/qml/PlayerPage.qml:369
+#: src/qml/PlayerPage.qml:440
 msgid "Previous"
 msgstr "Previous"
 
-#: src/qml/PlayerPage.qml:375
+#: src/qml/PlayerPage.qml:446
 msgid "Pause"
 msgstr "Pause"
 
-#: src/qml/PlayerPage.qml:384
+#: src/qml/PlayerPage.qml:455
 msgid "Next"
 msgstr "Next"
 
-#: src/qml/PlayerPage.qml:392
+#: src/qml/PlayerPage.qml:463
 msgid "Unmute"
 msgstr "Unmute"
 
-#: src/qml/PlayerPage.qml:392
+#: src/qml/PlayerPage.qml:463
 msgid "Mute"
 msgstr "Mute"
 
-#: src/qml/PlayerPage.qml:393
+#: src/qml/PlayerPage.qml:464
 #, javascript-format
 msgctxt "@info volume level"
 msgid "Volume %1%"
 msgstr "Volume %1%"
 
-#: src/qml/PlayerPage.qml:412
+#: src/qml/PlayerPage.qml:483
 msgctxt "@info:tooltip"
 msgid "Show remaining time"
 msgstr "Show remaining time"
 
-#: src/qml/PlayerPage.qml:412
+#: src/qml/PlayerPage.qml:483
 msgctxt "@info:tooltip"
 msgid "Show elapsed time"
 msgstr "Show elapsed time"
 
-#: src/qml/PlayerPage.qml:412
+#: src/qml/PlayerPage.qml:483
 msgctxt "@info:tooltip"
 msgid "Show total time"
 msgstr "Show total time"
 
-#: src/qml/PlayerPage.qml:426
+#: src/qml/PlayerPage.qml:497
 msgctxt "@action:button audio tracks"
 msgid "Audio"
 msgstr "Audio"
 
-#: src/qml/PlayerPage.qml:435
+#: src/qml/PlayerPage.qml:506
 msgctxt "@action:button subtitle tracks"
 msgid "Subtitles"
 msgstr "Subtitles"
 
-#: src/qml/PlayerPage.qml:441
+#: src/qml/PlayerPage.qml:512
 msgctxt "@action:button"
 msgid "Exit Full Screen Mode"
 msgstr "Exit Full Screen Mode"
 
-#: src/qml/PlayerPage.qml:441
+#: src/qml/PlayerPage.qml:512
 msgctxt "@action:button"
 msgid "Full Screen Mode"
 msgstr "Full Screen Mode"
 
-#: src/qml/PlayerPage.qml:457
+#: src/qml/PlayerPage.qml:528
 msgid "Screenshot saved to %1"
 msgstr "Screenshot saved to %1"
 
-#: src/qml/PlayerPage.qml:487
+#: src/qml/PlayerPage.qml:558
 msgctxt "@item:inmenu no subtitles"
 msgid "Off"
 msgstr "Off"
 
-#: src/qml/PlayerPage.qml:507
+#: src/qml/PlayerPage.qml:578
 msgid "Download external subtitles"
 msgstr "Download external subtitles"
 
-#: src/qml/PlayerPage.qml:527
+#: src/qml/PlayerPage.qml:598
 msgid "Shuffle"
 msgstr "Shuffle"
 
-#: src/qml/PlayerPage.qml:537
+#: src/qml/PlayerPage.qml:608
 msgid "Repeat"
 msgstr "Repeat"
 
-#: src/qml/PlayerPage.qml:543
+#: src/qml/PlayerPage.qml:614
 msgctxt "@item:inmenu repeat"
 msgid "Off"
 msgstr "Off"
 
-#: src/qml/PlayerPage.qml:551
+#: src/qml/PlayerPage.qml:622
 msgctxt "@item:inmenu repeat"
 msgid "All"
 msgstr "All"
 
-#: src/qml/PlayerPage.qml:559
+#: src/qml/PlayerPage.qml:630
 msgctxt "@item:inmenu repeat"
 msgid "Current Item"
 msgstr "Current Item"
 
-#: src/qml/PlayerPage.qml:569
+#: src/qml/PlayerPage.qml:640
 msgid "Playback Speed"
 msgstr "Playback Speed"
 
-#: src/qml/PlayerPage.qml:575
+#: src/qml/PlayerPage.qml:646
 msgctxt "@item:inmenu playback speed, %1 is the factor"
 msgid "%1×"
 msgstr "%1×"
 
-#: src/qml/PlayerPage.qml:586
+#: src/qml/PlayerPage.qml:657
 msgid "AV Sync"
 msgstr "AV Sync"
 
-#: src/qml/PlayerPage.qml:588
+#: src/qml/PlayerPage.qml:659
 msgid "Audio delay: %1 s"
 msgstr "Audio delay: %1 s"
 
-#: src/qml/PlayerPage.qml:589
+#: src/qml/PlayerPage.qml:660
 msgid "Audio earlier (-0.1 s)"
 msgstr "Audio earlier (-0.1 s)"
 
-#: src/qml/PlayerPage.qml:590
+#: src/qml/PlayerPage.qml:661
 msgid "Audio later (+0.1 s)"
 msgstr "Audio later (+0.1 s)"
 
-#: src/qml/PlayerPage.qml:592
+#: src/qml/PlayerPage.qml:663
 msgid "Subtitle delay: %1 s"
 msgstr "Subtitle delay: %1 s"
 
-#: src/qml/PlayerPage.qml:593
+#: src/qml/PlayerPage.qml:664
 msgid "Subtitles earlier (-0.1 s)"
 msgstr "Subtitles earlier (-0.1 s)"
 
-#: src/qml/PlayerPage.qml:594
+#: src/qml/PlayerPage.qml:665
 msgid "Subtitles later (+0.1 s)"
 msgstr "Subtitles later (+0.1 s)"
 
-#: src/qml/PlayerPage.qml:598
+#: src/qml/PlayerPage.qml:669
 msgid "Sleep: %1 min"
 msgstr "Sleep: %1 min"
 
-#: src/qml/PlayerPage.qml:598
+#: src/qml/PlayerPage.qml:669
 msgid "Sleep Timer"
 msgstr "Sleep Timer"
 
-#: src/qml/PlayerPage.qml:604
+#: src/qml/PlayerPage.qml:675
 msgid "Off"
 msgstr "Off"
 
-#: src/qml/PlayerPage.qml:604
+#: src/qml/PlayerPage.qml:675
 msgid "%1 minutes"
 msgstr "%1 minutes"
 
-#: src/qml/PlayerPage.qml:614 src/qml/PlayerPage.qml:707
+#: src/qml/PlayerPage.qml:685 src/qml/PlayerPage.qml:779
 msgid "Now Playing Queue"
 msgstr "Now Playing Queue"
 
-#: src/qml/PlayerPage.qml:619
+#: src/qml/PlayerPage.qml:690
 msgid "Screenshot"
 msgstr "Screenshot"
 
-#: src/qml/PlayerPage.qml:659
+#: src/qml/PlayerPage.qml:731
 #, javascript-format
 msgctxt "@label volume level"
 msgid "%1%"
 msgstr "%1%"
 
-#: src/qml/PlayerPage.qml:674
+#: src/qml/PlayerPage.qml:746
 msgid "Volume"
 msgstr "Volume"
 
@@ -2505,21 +2510,21 @@ msgctxt "@item:intable shortcut action"
 msgid "Skip Forward 1 Minute"
 msgstr "Skip Forward 1 Minute"
 
-#: src/qml/ShortcutsDialog.qml:67
+#: src/qml/ShortcutsDialog.qml:69
 msgid "Keyboard Shortcuts"
 msgstr "Keyboard Shortcuts"
 
-#: src/qml/ShortcutsDialog.qml:99
+#: src/qml/ShortcutsDialog.qml:101
 msgctxt "@action:button"
 msgid "Close"
 msgstr "Close"
 
-#: src/qml/ShortcutsDialog.qml:126
+#: src/qml/ShortcutsDialog.qml:128
 msgctxt "@title:group keyboard shortcuts"
 msgid "General"
 msgstr "General"
 
-#: src/qml/ShortcutsDialog.qml:135
+#: src/qml/ShortcutsDialog.qml:137
 msgctxt "@title:group keyboard shortcuts"
 msgid "Player"
 msgstr "Player"

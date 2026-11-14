@@ -15,7 +15,12 @@ Kirigami.Page {
     // The video fills the page and the bars float above it: the page row's toolbar would be a strip that never hides
     globalToolBarStyle: Kirigami.ApplicationHeaderStyle.None
     readonly property bool isShowing: page.Window.window?.pageStack.currentItem === page
-    onIsShowingChanged: if (!isShowing) volumePopup.close()
+    onIsShowingChanged: {
+        if (isShowing)
+            return;
+        volumePopup.close();
+        clickTimer.stop();
+    }
     property bool showChrome: true
     // Below the window's wide limit the controls row shows icons only, each with its text as tooltip and accessible name
     readonly property bool narrow: width < (page.Window.window?.wideLimit ?? 0)
@@ -34,13 +39,27 @@ Kirigami.Page {
     }
     // An open menu or the queue panel keeps the bars up
     readonly property bool menuOpen: queuePanel.opened || audioMenu.opened || subtitlesMenu.opened || moreMenu.opened
+    // The lock keeps the bars up until it is opened again
+    property bool osdLocked: false
+    // What else keeps the bars up whatever the timer says: the lock, a pause, the pointer on a bar, a drag of the timeline
+    readonly property bool barsHeld: osdLocked || page.player.paused || pointerOnBars || timeline.pressed
+    // The pointer in the window over a bar, its controls or its shade, read from the one hover of the page: it follows every move and ends when the pointer leaves the window
+    readonly property bool pointerOnBars: pointer.hovered && osd.visible && (pointer.point.position.y < topBar.height || pointer.point.position.y > page.height - bottomBar.height)
+    // Once nothing holds them, the bars get their full time again before they go
+    onBarsHeldChanged: if (!barsHeld && showChrome) chromeTimer.restart()
     // The volume slider keeps the bars up only while the pointer is on it or on the speaker, or drags it: one opened by the keyboard or a long press goes with the bars
     readonly property bool volumeHeld: volumePopup.opened && (muteButton.hovered || volumeHover.hovered || volumeSlider.pressed)
 
     // The page keeps the keyboard: the controls of the bars take it only through Tab, so the keys work whatever was clicked
     function focusPrimary() { page.forceActiveFocus(Qt.TabFocusReason); }
     function wakeChrome() { showChrome = true; chromeTimer.restart(); }
-    function closePlayer() { page.player.stop(); page.Window.window.pageStack.pop(); }
+    function closePlayer() { clickTimer.stop(); page.player.stop(); page.Window.window.pageStack.pop(); }
+    // When a menu or popup last began to close: the click that closes one is not a click on the video
+    property double popupClosedAt: 0
+    function popupGone() {
+        popupClosedAt = Date.now();
+        wakeChrome();
+    }
     // The volume slider pops up centred above the speaker button
     function showVolume() {
         volumeCloser.stop();
@@ -126,7 +145,7 @@ Kirigami.Page {
         objectName: "playerChromeTimer"
         interval: 5000
         onTriggered: {
-            if (!page.player.active || page.menuOpen || page.volumeHeld)
+            if (!page.player.active || page.menuOpen || page.volumeHeld || page.barsHeld)
                 return;
             // A control of a hidden bar would keep the keys: the page takes them back. The control gives its focus up first, or the page, a focus scope, would hand it back to it unseen when the bars show again
             if (page.focusIsInOsd()) {
@@ -161,8 +180,11 @@ Kirigami.Page {
         anchors.fill: parent
         player: page.player
     }
-    // Only a move of the pointer wakes the bars: the scene repeats the last hover position on every frame that changes something under it
+    // Only a move of the pointer wakes the bars: the scene repeats the last hover position on every frame that changes something under it. The pointer hides with the bars
     HoverHandler {
+        id: pointer
+        objectName: "playerPointer"
+        cursorShape: osd.wanted ? Qt.ArrowCursor : Qt.BlankCursor
         property point lastPosition: Qt.point(-1, -1)
         onPointChanged: {
             if (point.position.x === lastPosition.x && point.position.y === lastPosition.y)
@@ -171,7 +193,30 @@ Kirigami.Page {
             page.wakeChrome();
         }
     }
-    TapHandler { onTapped: page.wakeChrome() }
+    // A click on the video pauses once the double-click interval has passed without a second click; a double click toggles full screen instead; a tap on a touch screen only shows the bars
+    TapHandler {
+        id: videoTap
+        onTapped: (eventPoint, button) => {
+            page.wakeChrome();
+            // Only the first click of a run starts the pause: the second is a double click, a third neither; and a click that closed a menu or popup is spent
+            if (eventPoint.device.type === PointerDevice.TouchScreen || videoTap.tapCount > 1 || page.menuOpen || volumePopup.opened || Date.now() - page.popupClosedAt < Qt.styleHints.mouseDoubleClickInterval)
+                return;
+            clickTimer.restart();
+        }
+        onDoubleTapped: (eventPoint, button) => {
+            clickTimer.stop();
+            if (eventPoint.device.type === PointerDevice.TouchScreen)
+                return;
+            page.Window.window.togglePlayerFullscreen();
+            page.wakeChrome();
+        }
+    }
+    Timer {
+        id: clickTimer
+        interval: Qt.styleHints.mouseDoubleClickInterval
+        // Nothing to pause while an item opens or after it failed
+        onTriggered: if (page.player.active && !page.player.loading) page.player.togglePause()
+    }
 
     // The loading and error overlay stays visible when the bars hide
     ColumnLayout {
@@ -247,7 +292,7 @@ Kirigami.Page {
         id: osd
         objectName: "playerOsd"
         anchors.fill: parent
-        readonly property bool wanted: page.showChrome || !page.player.active || page.menuOpen || page.volumeHeld
+        readonly property bool wanted: page.showChrome || !page.player.active || page.menuOpen || page.volumeHeld || page.barsHeld
         enabled: wanted
         opacity: wanted ? 1 : 0
         // Visible as soon as it is wanted, so the Tab that wakes the bars finds their controls while they fade in
@@ -269,6 +314,14 @@ Kirigami.Page {
                 GradientStop { position: 0; color: Qt.alpha(Kirigami.Theme.backgroundColor, 0.8) }
                 GradientStop { position: 1; color: Qt.alpha(Kirigami.Theme.backgroundColor, 0) }
             }
+            // The bar slides out of the window as it fades
+            transform: Translate {
+                y: osd.wanted ? 0 : -Kirigami.Units.gridUnit
+                Behavior on y {
+                    NumberAnimation { duration: Kirigami.Units.longDuration; easing.type: Easing.OutCubic }
+                }
+            }
+            BarClickGuard { onClicked: page.wakeChrome() }
             RowLayout {
                 id: topRow
                 anchors.left: parent.left
@@ -303,6 +356,17 @@ Kirigami.Page {
                         elide: Text.ElideRight
                     }
                 }
+                // A checkable button with one icon and one label: the pressed look says whether it holds (a deliberate HIG exception, see the architecture notes)
+                OsdButton {
+                    objectName: "playerLockButton"
+                    Layout.alignment: Qt.AlignTop
+                    display: page.narrow ? Controls.AbstractButton.IconOnly : Controls.AbstractButton.TextBesideIcon
+                    checkable: true
+                    checked: page.osdLocked
+                    icon.name: "object-locked"
+                    text: i18nc("@action:button", "Keep Controls Visible")
+                    onToggled: page.osdLocked = checked
+                }
             }
         }
 
@@ -317,6 +381,13 @@ Kirigami.Page {
                 GradientStop { position: 0; color: Qt.alpha(Kirigami.Theme.backgroundColor, 0) }
                 GradientStop { position: 1; color: Qt.alpha(Kirigami.Theme.backgroundColor, 0.85) }
             }
+            transform: Translate {
+                y: osd.wanted ? 0 : Kirigami.Units.gridUnit
+                Behavior on y {
+                    NumberAnimation { duration: Kirigami.Units.longDuration; easing.type: Easing.OutCubic }
+                }
+            }
+            BarClickGuard { onClicked: page.wakeChrome() }
             ColumnLayout {
                 id: controls
                 anchors.left: parent.left
@@ -464,7 +535,7 @@ Kirigami.Page {
     Controls.Menu {
         id: audioMenu
         objectName: "playerAudioMenu"
-        onClosed: page.wakeChrome()
+        onAboutToHide: page.popupGone()
         Instantiator {
             model: page.player.audioTracks
             delegate: Controls.MenuItem {
@@ -481,7 +552,7 @@ Kirigami.Page {
     Controls.Menu {
         id: subtitlesMenu
         objectName: "playerSubtitlesMenu"
-        onClosed: page.wakeChrome()
+        onAboutToHide: page.popupGone()
         Controls.MenuItem {
             objectName: "playerSubtitlesOff"
             text: i18nc("@item:inmenu no subtitles", "Off")
@@ -521,7 +592,7 @@ Kirigami.Page {
     Controls.Menu {
         id: moreMenu
         objectName: "playerMoreMenu"
-        onClosed: page.wakeChrome()
+        onAboutToHide: page.popupGone()
         Controls.MenuItem {
             objectName: "playerShuffleItem"
             text: i18n("Shuffle")
@@ -642,6 +713,7 @@ Kirigami.Page {
         Kirigami.Theme.colorSet: Kirigami.Theme.Window
         Kirigami.Theme.inherit: false
         // The bars hiding close it without waking them again
+        onAboutToHide: page.popupClosedAt = Date.now()
         onClosed: if (page.showChrome) chromeTimer.restart()
         contentItem: Item {
             implicitWidth: volumeColumn.implicitWidth
@@ -701,7 +773,7 @@ Kirigami.Page {
         y: page.height - height
         closePolicy: Controls.Popup.CloseOnEscape | Controls.Popup.CloseOnPressOutside
         // The hide timer gives way while the panel is open: it starts again when the panel goes
-        onClosed: page.wakeChrome()
+        onAboutToHide: page.popupGone()
         ColumnLayout {
             anchors.fill: parent
             Controls.Label { text: i18n("Now Playing Queue"); font.bold: true }
@@ -723,6 +795,11 @@ Kirigami.Page {
         }
     }
 
+    // A click on a bar, beside its controls, is not a click on the video: it neither pauses nor toggles full screen; the user's handler wakes the bars
+    component BarClickGuard: MouseArea {
+        anchors.fill: parent
+        acceptedButtons: Qt.AllButtons
+    }
     // The wheel over the speaker and its slider: five per notch, a touchpad's travel added up to whole notches
     component VolumeWheel: MouseArea {
         id: wheelArea

@@ -1982,6 +1982,14 @@ QQuickItem *openPlayer(Ui &ui, PlayerStub &stub)
     return ready ? page : nullptr;
 }
 
+// Puts the pointer at rest in the middle of the window, on the video: two moves, because Qt drops a move to the position it already has for the cursor, and an earlier test may have left it there
+void restPointerOnVideo(const Ui &ui)
+{
+    const QPoint middle(ui.window->width() / 2, ui.window->height() / 2);
+    QTest::mouseMove(ui.window, middle + QPoint(1, 1));
+    QTest::mouseMove(ui.window, middle);
+}
+
 // Opens the details of an item through the shell; the page in front once it holds the item, or null
 QQuickItem *openDetails(Ui &ui, const QString &id)
 {
@@ -9332,7 +9340,8 @@ class TestUiPages : public QObject {
             pause->mapToScene(QPointF(pause->width() / 2, pause->height() / 2)).toPoint());
         QTRY_COMPARE(stub.calls.count(QStringLiteral("togglePause")), 1);
         QCOMPARE(ui.window->activeFocusItem(), page);
-        // A pointer at rest lets the bars go (sooner than the five seconds of the app; the change restarts the timer)
+        // A pointer at rest on the video, off the bars, lets them go (sooner than the five seconds of the app; the change restarts the timer)
+        restPointerOnVideo(ui);
         timer->setProperty("interval", 1000);
         QTRY_VERIFY(!osd->isVisible());
         QTest::qWait(500);
@@ -9654,8 +9663,9 @@ class TestUiPages : public QObject {
         QObject *speed = menu->findChild<QObject *>(QStringLiteral("playerSpeedMenu"));
         QVERIFY(speed);
         QTRY_COMPARE(speed->property("count").toInt(), 8);
-        // Closing the menu lets the bars go again
+        // Closing the menu lets the bars go again, once the pointer leaves them for the video
         QVERIFY(QMetaObject::invokeMethod(menu, "close"));
+        restPointerOnVideo(ui);
         QTRY_VERIFY(!ui.item(QStringLiteral("playerOsd"))->isVisible());
     }
 
@@ -9829,6 +9839,8 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(!speaker->property("visualFocus").toBool());
         speaker->forceActiveFocus(Qt::TabFocusReason);
         QTRY_VERIFY(popup->property("opened").toBool());
+        // The pointer rests on the video, off the bars, so only the keyboard is left on the speaker
+        restPointerOnVideo(ui);
         timer->setProperty("interval", 1000);
         QTRY_VERIFY(!osd->isVisible());
         QVERIFY(!popup->property("opened").toBool());
@@ -9871,6 +9883,146 @@ class TestUiPages : public QObject {
         QTest::qWait(100);
         QVERIFY(!stub.calls.contains(QStringLiteral("toggleMute")));
         QVERIFY(popup->property("opened").toBool());
+    }
+
+    void playerBarsStayWhileLockedPausedOrUnderThePointer()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *page = openPlayer(ui, stub);
+        QVERIFY(page);
+        QObject *timer = page->findChild<QObject *>(QStringLiteral("playerChromeTimer"));
+        QObject *pointer = page->findChild<QObject *>(QStringLiteral("playerPointer"));
+        QQuickItem *osd = ui.item(QStringLiteral("playerOsd"));
+        QQuickItem *bottomBar = ui.item(QStringLiteral("playerBottomBar"));
+        QVERIFY(timer && pointer && osd && bottomBar);
+        timer->setProperty("interval", 300);
+        const QPoint onVideo(ui.window->width() / 2, ui.window->height() / 2);
+        // The shade above the controls is part of the bar, with no control under the pointer
+        const QPoint onBar = bottomBar->mapToScene(QPointF(bottomBar->width() / 2, 4)).toPoint();
+        int nudge = 0;
+        const auto wake = [&] {
+            QTest::mouseMove(ui.window, onVideo + QPoint(++nudge % 2 ? 3 : -3, 0));
+        };
+        // At rest on the video the bars go, and the pointer with them
+        restPointerOnVideo(ui);
+        QCOMPARE(pointer->property("cursorShape").toInt(), int(Qt::ArrowCursor));
+        QTRY_VERIFY(!osd->isVisible());
+        QCOMPARE(pointer->property("cursorShape").toInt(), int(Qt::BlankCursor));
+        // The lock keeps them
+        wake();
+        QTRY_VERIFY(osd->isVisible());
+        QCOMPARE(pointer->property("cursorShape").toInt(), int(Qt::ArrowCursor));
+        QQuickItem *lock = ui.item(QStringLiteral("playerLockButton"));
+        QVERIFY(lock);
+        QCOMPARE(lock->property("text").toString(), QStringLiteral("Keep Controls Visible"));
+        ui.clickCenter(lock);
+        QTRY_VERIFY(page->property("osdLocked").toBool());
+        QVERIFY(lock->property("checked").toBool());
+        QTest::mouseMove(ui.window, onVideo);
+        QTest::qWait(900);
+        QVERIFY(osd->isVisible());
+        ui.clickCenter(lock);
+        QTRY_VERIFY(!page->property("osdLocked").toBool());
+        wake();
+        QTRY_VERIFY(!osd->isVisible());
+        // A pause keeps them, and once it ends they get their time again
+        stub.paused = true;
+        Q_EMIT stub.changed();
+        QTRY_VERIFY(osd->isVisible());
+        QTest::qWait(900);
+        QVERIFY(osd->isVisible());
+        stub.paused = false;
+        Q_EMIT stub.changed();
+        QTRY_VERIFY(!osd->isVisible());
+        // The pointer resting on a bar keeps them, on its shade as on one of its controls
+        QQuickItem *pause = ui.item(QStringLiteral("playerPauseButton"));
+        QVERIFY(pause);
+        for (const QPoint &on :
+             {onBar,
+              pause->mapToScene(QPointF(pause->width() / 2, pause->height() / 2)).toPoint()}) {
+            wake();
+            QTRY_VERIFY(osd->isVisible());
+            QTest::mouseMove(ui.window, on);
+            QTest::qWait(900);
+            QVERIFY(osd->isVisible());
+        }
+        QTest::mouseMove(ui.window, onVideo);
+        QTRY_VERIFY(!osd->isVisible());
+        // The pointer leaving the window from a bar does not keep them
+        wake();
+        QTRY_VERIFY(osd->isVisible());
+        QTest::mouseMove(ui.window, onBar);
+        QEvent leave(QEvent::Leave);
+        QCoreApplication::sendEvent(ui.window, &leave);
+        QTRY_VERIFY(!osd->isVisible());
+    }
+
+    void playerClickPausesAndDoubleClickTogglesFullScreen()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *page = openPlayer(ui, stub);
+        QVERIFY(page);
+        const int interval = QGuiApplication::styleHints()->mouseDoubleClickInterval();
+        const QPoint onVideo(ui.window->width() / 2, ui.window->height() / 2);
+        // One click pauses once the double-click interval has passed
+        restPointerOnVideo(ui);
+        QTest::mouseClick(ui.window, Qt::LeftButton, Qt::NoModifier, onVideo);
+        QTest::qWait(qMin(50, interval / 4));
+        QVERIFY(!stub.calls.contains(QStringLiteral("togglePause")));
+        QTRY_COMPARE(stub.calls.count(QStringLiteral("togglePause")), 1);
+        // A double click toggles full screen and does not pause
+        stub.calls.clear();
+        QTest::mouseDClick(ui.window, Qt::LeftButton, Qt::NoModifier, onVideo);
+        QTRY_COMPARE(ui.window->visibility(), QWindow::FullScreen);
+        QTest::qWait(interval + 200);
+        QVERIFY(!stub.calls.contains(QStringLiteral("togglePause")));
+        // A click on a bar beside its controls is not a click on the video
+        QQuickItem *bottomBar = ui.item(QStringLiteral("playerBottomBar"));
+        QVERIFY(bottomBar);
+        const QPoint onBar = bottomBar->mapToScene(QPointF(bottomBar->width() / 2, 4)).toPoint();
+        QTest::mouseClick(ui.window, Qt::LeftButton, Qt::NoModifier, onBar);
+        QTest::mouseDClick(ui.window, Qt::LeftButton, Qt::NoModifier, onBar);
+        QTest::qWait(interval + 200);
+        QVERIFY(!stub.calls.contains(QStringLiteral("togglePause")));
+        QCOMPARE(ui.window->visibility(), QWindow::FullScreen);
+        // A click that closes a menu is spent on the menu
+        QObject *menu = ui.popup(QStringLiteral("playerMoreMenu"));
+        QVERIFY(menu);
+        ui.clickCenter(ui.item(QStringLiteral("playerMoreButton")));
+        QTRY_VERIFY(menu->property("opened").toBool());
+        QTest::mouseClick(ui.window, Qt::LeftButton, Qt::NoModifier, onVideo);
+        QTRY_VERIFY(!menu->property("visible").toBool());
+        QTest::qWait(interval + 200);
+        QVERIFY(!stub.calls.contains(QStringLiteral("togglePause")));
+        // Nothing to pause while the item opens
+        stub.loading = true;
+        Q_EMIT stub.changed();
+        QTest::mouseClick(ui.window, Qt::LeftButton, Qt::NoModifier, onVideo + QPoint(20, 0));
+        QTest::qWait(interval + 200);
+        QVERIFY(!stub.calls.contains(QStringLiteral("togglePause")));
+        stub.loading = false;
+        Q_EMIT stub.changed();
+        // A tap on a touch screen only shows the bars
+        QObject *timer = page->findChild<QObject *>(QStringLiteral("playerChromeTimer"));
+        QQuickItem *osd = ui.item(QStringLiteral("playerOsd"));
+        QVERIFY(timer && osd);
+        restPointerOnVideo(ui);
+        timer->setProperty("interval", 300);
+        QTRY_VERIFY(!osd->isVisible());
+        QPointingDevice *touch = QTest::createTouchDevice();
+        QTest::touchEvent(ui.window, touch).press(0, onVideo);
+        QTest::touchEvent(ui.window, touch).release(0, onVideo);
+        QTRY_VERIFY(osd->isVisible());
+        QTest::qWait(interval + 200);
+        QVERIFY(!stub.calls.contains(QStringLiteral("togglePause")));
     }
 
   private:
