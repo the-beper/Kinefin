@@ -3302,6 +3302,45 @@ class TestUiPages : public QObject {
                                   QStringLiteral("Ratings"), QStringLiteral("Years")}));
     }
 
+    void theFilterDialogBuildsItsRowsOnlyWhileItShows()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        QTRY_COMPARE(ui.controller.movies()->filterOptions()->legacyStatus(),
+                     Kinefin::FilterOptionsModel::Ready);
+        // The page creates the dialog with it; a closed popup is out of the scene, so the list is looked up as an object
+        QObject *dialog = ui.popup(QStringLiteral("filterDialog"));
+        QObject *list = ui.popup(QStringLiteral("filterOptionsList"));
+        QVERIFY(dialog && list);
+        QCOMPARE(list->property("count").toInt(), 0);
+        // The rows come with the opening, and the dialog has its full height from its first frame
+        QList<qreal> heights;
+        const QMetaObject::Connection frames =
+            QObject::connect(ui.window, &QQuickWindow::frameSwapped, ui.window, [&] {
+                if (dialog->property("visible").toBool())
+                    heights << dialog->property("height").toReal();
+            });
+        QVERIFY(openFilterDialog(ui));
+        QObject::disconnect(frames);
+        QVERIFY(list->property("count").toInt() > 0);
+        QVERIFY(!heights.isEmpty());
+        for (const qreal height : std::as_const(heights))
+            QCOMPARE(height, dialog->property("height").toReal());
+        // Closed, the rows go
+        QVERIFY(QMetaObject::invokeMethod(dialog, "close"));
+        QTRY_VERIFY(!dialog->property("visible").toBool());
+        QCOMPARE(list->property("count").toInt(), 0);
+        // Opened again while it is still closing, the rows stay
+        QVERIFY(openFilterDialog(ui));
+        QVERIFY(QMetaObject::invokeMethod(dialog, "close"));
+        QVERIFY(QMetaObject::invokeMethod(dialog, "open"));
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QTest::qWait(500);
+        QVERIFY(dialog->property("visible").toBool());
+        QVERIFY(list->property("count").toInt() > 0);
+    }
+
     void aSeriesLibraryOffersItsStatusAndNoVideoQuality()
     {
         Ui ui(m_home->path());
@@ -6481,6 +6520,13 @@ class TestUiPages : public QObject {
         QVERIFY(!Ui::cardShows(played, QStringLiteral("cardRating")));
         QVERIFY(!Ui::cardShows(played, QStringLiteral("cardRemaining")));
         QVERIFY(!Ui::cardShows(played, QStringLiteral("cardProgress")));
+        // A hidden overlay is not built at all: a grid fills with dozens of cards at once
+        for (const QString &overlay :
+             {QStringLiteral("cardRating"), QStringLiteral("cardRemaining"),
+              QStringLiteral("cardProgress"), QStringLiteral("cardNew"),
+              QStringLiteral("cardFavorite"), QStringLiteral("cardUnplayed"),
+              QStringLiteral("cardQuickPlay")})
+            QVERIFY2(!Ui::itemIn(played, overlay), qPrintable(overlay));
         // A series: the unplayed count, the counts line and the share of watched episodes
         QQuickItem *show = card(kShowCardId);
         QVERIFY(Ui::cardShows(show, QStringLiteral("cardUnplayed")));
@@ -9099,12 +9145,10 @@ class TestUiPages : public QObject {
         QTRY_VERIFY((nextUpCard = homeRowMovieCard(ui, 1)) != nullptr);
         QVERIFY(resumeCard->property("quickPlay").toBool());
         QVERIFY(!nextUpCard->property("quickPlay").toBool());
-        QQuickItem *button = Ui::itemIn(nextUpCard, QStringLiteral("cardQuickPlay"));
-        QVERIFY(button);
         QVERIFY(revealCard(ui, nextUpCard));
         QTest::mouseMove(ui.window, cardPoint(nextUpCard));
         QTRY_VERIFY(nextUpCard->property("hovered").toBool());
-        QVERIFY(!button->isVisible());
+        QVERIFY(!Ui::cardShows(nextUpCard, QStringLiteral("cardQuickPlay")));
     }
 
     void continueWatchingCardMenuHasResumeOnlyThere()

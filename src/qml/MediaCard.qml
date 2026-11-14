@@ -59,6 +59,7 @@ Controls.ItemDelegate {
     // The watched share, 0 to 1: a series counts its episodes, anything else its playback position
     readonly property real progress: seriesProgress >= 0 ? seriesProgress : playedPercentage / 100
     readonly property bool inProgress: loaded && progress > 0 && progress < 1
+    readonly property real progressHeight: Math.max(2, Kirigami.Units.smallSpacing / 2)
     readonly property bool showsNew: loaded && isNew && (Window.window?.newBadgeEnabled ?? false)
 
     // The kinds the card menu plays: keep the two lists in step
@@ -191,22 +192,24 @@ Controls.ItemDelegate {
                 source: card.loaded ? card.imageUrl : ""
             }
 
-            Rectangle {
-                id: progressBar
-                objectName: "cardProgress"
+            // The overlays are built only while they show: a grid fills with dozens of cards at once, and each hidden overlay would still cost its creation
+            Loader {
                 anchors {
                     left: parent.left
                     right: parent.right
                     bottom: parent.bottom
                 }
-                height: Math.max(2, Kirigami.Units.smallSpacing / 2)
-                visible: card.inProgress
-                color: Qt.rgba(0, 0, 0, 0.6)
+                height: card.progressHeight
+                active: card.inProgress
+                sourceComponent: Rectangle {
+                    objectName: "cardProgress"
+                    color: Qt.rgba(0, 0, 0, 0.6)
 
-                Rectangle {
-                    height: parent.height
-                    width: parent.width * card.progress
-                    color: Kirigami.Theme.highlightColor
+                    Rectangle {
+                        height: parent.height
+                        width: parent.width * card.progress
+                        color: Kirigami.Theme.highlightColor
+                    }
                 }
             }
 
@@ -216,25 +219,31 @@ Controls.ItemDelegate {
                     right: parent.right
                     bottom: parent.bottom
                     margins: Kirigami.Units.smallSpacing
-                    bottomMargin: Kirigami.Units.smallSpacing + (progressBar.visible ? progressBar.height : 0)
+                    bottomMargin: Kirigami.Units.smallSpacing + (card.inProgress ? card.progressHeight : 0)
                 }
                 spacing: Kirigami.Units.smallSpacing
 
-                Pill {
-                    objectName: "cardRating"
-                    visible: card.loaded && card.rating > 0
-                    iconName: "starred-symbolic"
-                    text: card.rating.toLocaleString(Qt.locale(), "f", 1)
+                Loader {
+                    active: card.loaded && card.rating > 0
+                    visible: active
+                    sourceComponent: Pill {
+                        objectName: "cardRating"
+                        iconName: "starred-symbolic"
+                        text: card.rating.toLocaleString(Qt.locale(), "f", 1)
+                    }
                 }
 
                 Item {
                     Layout.fillWidth: true
                 }
 
-                Pill {
-                    objectName: "cardRemaining"
-                    visible: card.loaded && card.remainingMinutes > 0
-                    text: i18np("%1 min left", "%1 min left", card.remainingMinutes)
+                Loader {
+                    active: card.loaded && card.remainingMinutes > 0
+                    visible: active
+                    sourceComponent: Pill {
+                        objectName: "cardRemaining"
+                        text: i18np("%1 min left", "%1 min left", card.remainingMinutes)
+                    }
                 }
             }
 
@@ -246,97 +255,110 @@ Controls.ItemDelegate {
                 }
                 spacing: Kirigami.Units.smallSpacing
 
-                Pill {
-                    objectName: "cardNew"
-                    visible: card.showsNew
-                    text: i18nc("badge on a recently added item", "New")
+                Loader {
+                    active: card.showsNew
+                    visible: active
+                    sourceComponent: Pill {
+                        objectName: "cardNew"
+                        text: i18nc("badge on a recently added item", "New")
+                    }
                 }
 
-                Rectangle {
-                    objectName: "cardFavorite"
-                    width: Kirigami.Units.iconSizes.smallMedium
-                    height: width
-                    radius: width / 2
-                    visible: card.loaded && card.favorite
-                    color: Qt.rgba(0, 0, 0, 0.6)
+                Loader {
+                    active: card.loaded && card.favorite
+                    visible: active
+                    sourceComponent: Rectangle {
+                        objectName: "cardFavorite"
+                        width: Kirigami.Units.iconSizes.smallMedium
+                        height: width
+                        radius: width / 2
+                        color: Qt.rgba(0, 0, 0, 0.6)
 
-                    Kirigami.Icon {
-                        anchors.fill: parent
-                        anchors.margins: Kirigami.Units.smallSpacing / 2
-                        source: "emblem-favorite"
+                        Kirigami.Icon {
+                            anchors.fill: parent
+                            anchors.margins: Kirigami.Units.smallSpacing / 2
+                            source: "emblem-favorite"
+                        }
                     }
                 }
             }
 
-            Rectangle {
-                objectName: "cardPlayed"
+            Loader {
                 anchors {
                     top: parent.top
                     right: parent.right
                     margins: Kirigami.Units.smallSpacing
                 }
-                width: Kirigami.Units.iconSizes.smallMedium
-                height: width
-                radius: width / 2
-                visible: card.loaded && card.played
-                color: Kirigami.Theme.highlightColor
+                active: card.loaded && card.played
+                sourceComponent: Rectangle {
+                    objectName: "cardPlayed"
+                    width: Kirigami.Units.iconSizes.smallMedium
+                    height: width
+                    radius: width / 2
+                    color: Kirigami.Theme.highlightColor
 
-                Kirigami.Icon {
-                    anchors.fill: parent
-                    anchors.margins: Kirigami.Units.smallSpacing / 2
-                    source: "checkmark-symbolic"
-                    color: Kirigami.Theme.highlightedTextColor
+                    Kirigami.Icon {
+                        anchors.fill: parent
+                        anchors.margins: Kirigami.Units.smallSpacing / 2
+                        source: "checkmark-symbolic"
+                        color: Kirigami.Theme.highlightedTextColor
+                    }
                 }
             }
 
-            Rectangle {
-                objectName: "cardUnplayed"
+            Loader {
                 anchors {
                     top: parent.top
                     right: parent.right
                     margins: Kirigami.Units.smallSpacing
                 }
-                width: Math.max(height, unplayedLabel.implicitWidth + Kirigami.Units.largeSpacing)
-                height: unplayedLabel.implicitHeight + Kirigami.Units.smallSpacing
-                radius: height / 2
-                visible: card.loaded && !card.played && card.unplayedCount > 0
-                color: Kirigami.Theme.highlightColor
+                active: card.loaded && !card.played && card.unplayedCount > 0
+                sourceComponent: Rectangle {
+                    objectName: "cardUnplayed"
+                    width: Math.max(height, unplayedLabel.implicitWidth + Kirigami.Units.largeSpacing)
+                    height: unplayedLabel.implicitHeight + Kirigami.Units.smallSpacing
+                    radius: height / 2
+                    color: Kirigami.Theme.highlightColor
 
-                Controls.Label {
-                    id: unplayedLabel
-                    anchors.centerIn: parent
-                    color: Kirigami.Theme.highlightedTextColor
-                    font.bold: true
-                    textFormat: Text.PlainText
-                    text: String(card.unplayedCount)
+                    Controls.Label {
+                        id: unplayedLabel
+                        anchors.centerIn: parent
+                        color: Kirigami.Theme.highlightedTextColor
+                        font.bold: true
+                        textFormat: Text.PlainText
+                        text: String(card.unplayedCount)
+                    }
                 }
             }
 
-            Controls.RoundButton {
-                id: quickPlayButton
-                objectName: "cardQuickPlay"
+            // Only a Continue Watching card has the button
+            Loader {
                 readonly property real diameter: Math.round(Math.min(parent.width, parent.height) * 0.4)
                 anchors.centerIn: parent
                 width: Math.max(diameter, Kirigami.Units.iconSizes.large)
                 height: width
-                visible: card.quickPlayEnabled && cardHover.hovered
-                focusPolicy: Qt.NoFocus
-                display: Controls.AbstractButton.IconOnly
-                icon.name: "media-playback-start"
-                // One value for both sides: `icon` is a grouped value, so reading it inside its own binding loops
-                readonly property int glyph: Math.round(width / 2)
-                icon.width: glyph
-                icon.height: glyph
-                text: card.resumeTicks > 0 ? i18n("Resume") : i18n("Play")
-                // The card name is plain server text
-                Accessible.name: card.resumeTicks > 0 ? i18n("Resume %1", card.name) : i18n("Play %1", card.name)
-                Controls.ToolTip.text: text
-                Controls.ToolTip.visible: hovered
-                Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
-                // The press never reaches the card, so the card becomes current here and Back returns to it
-                onClicked: {
-                    card.makeCurrent();
-                    card.quickPlayRequested();
+                active: card.quickPlayEnabled
+                sourceComponent: Controls.RoundButton {
+                    objectName: "cardQuickPlay"
+                    visible: cardHover.hovered
+                    focusPolicy: Qt.NoFocus
+                    display: Controls.AbstractButton.IconOnly
+                    icon.name: "media-playback-start"
+                    // One value for both sides: `icon` is a grouped value, so reading it inside its own binding loops
+                    readonly property int glyph: Math.round(width / 2)
+                    icon.width: glyph
+                    icon.height: glyph
+                    text: card.resumeTicks > 0 ? i18n("Resume") : i18n("Play")
+                    // The card name is plain server text
+                    Accessible.name: card.resumeTicks > 0 ? i18n("Resume %1", card.name) : i18n("Play %1", card.name)
+                    Controls.ToolTip.text: text
+                    Controls.ToolTip.visible: hovered
+                    Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
+                    // The press never reaches the card, so the card becomes current here and Back returns to it
+                    onClicked: {
+                        card.makeCurrent();
+                        card.quickPlayRequested();
+                    }
                 }
             }
         }

@@ -329,7 +329,11 @@ Kirigami.Dialog {
         }
     }
 
-    onAboutToShow: draft = copyOf(library.filters)
+    onAboutToShow: {
+        draft = copyOf(library.filters);
+        list.model = Qt.binding(() => dialog.entries);
+    }
+    onClosed: list.model = []
     onOpened: {
         list.currentIndex = dialog.nextOption(-1, 1);
         list.forceActiveFocus(Qt.PopupFocusReason);
@@ -345,7 +349,8 @@ Kirigami.Dialog {
         boundsBehavior: Flickable.StopAtBounds
         activeFocusOnTab: true
         currentIndex: 0
-        model: dialog.entries
+        // Rows only while the dialog shows (set when it opens and dropped when it closes): the page creates the dialog with it, and a closed one would rebuild its rows every time the filter values arrive
+        model: []
         Accessible.role: Accessible.List
         Accessible.name: i18n("Filters")
 
