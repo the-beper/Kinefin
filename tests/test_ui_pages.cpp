@@ -986,7 +986,7 @@ QQuickItem *openPreferences(Ui &ui)
     if (!qWaitForScaled([&] { return ui.item(QStringLiteral("userPreferencesForm")) != nullptr; },
                         10000))
         return nullptr;
-    // The form asks for a load when it is created; one the sign-in started for Home may still be under way, and the form then waits for that one, so no new load is to be expected here
+    // The form refreshes when it is created (a load when nothing is loaded yet); one the sign-in started for Home may still be under way, and the form then waits for that one
     return qWaitForScaled(
                [&] {
                    const auto *prefs = ui.controller.userConfiguration();
@@ -1147,6 +1147,12 @@ QQuickItem *toolbarButton(const Ui &ui, const QString &actionName)
 QQuickItem *subtabButton(const Ui &ui, const QString &id)
 {
     return toolbarButton(ui, QStringLiteral("subtab_") + id);
+}
+
+// A row of cards has built its cards: the list is in the scene while it is still being built, its count set before them
+bool listBuilt(const QQuickItem *list)
+{
+    return list && list->property("currentItem").value<QObject *>() != nullptr;
 }
 
 // The item exists and holds the keyboard: a row of cards builds its list asynchronously, so the list may not be there yet
@@ -3331,11 +3337,20 @@ class TestUiPages : public QObject {
         QQuickItem *row = nullptr;
         QTRY_VERIFY((row = ui.item(QStringLiteral("seasonsRow"))) != nullptr);
         QTRY_COMPARE(row->property("count").toInt(), 3);
+        QTRY_VERIFY(listBuilt(row));
         const int seriesDepth = ui.stackDepth();
-        row->forceActiveFocus();
-        row->setProperty("currentIndex", 1);
-        QTest::keyClick(ui.window, Qt::Key_Return);
-        QTRY_COMPARE(ui.stackDepth(), seriesDepth + 1);
+        // The page the link opened hands the keys out once it settles, which can come after this focus under load: the key goes again until the season opens (the push is synchronous, so never twice)
+        QVERIFY(qWaitForScaled(
+            [&] {
+                if (ui.stackDepth() > seriesDepth)
+                    return true;
+                row->forceActiveFocus();
+                row->setProperty("currentIndex", 1);
+                QTest::keyClick(ui.window, Qt::Key_Return);
+                return ui.stackDepth() > seriesDepth;
+            },
+            5000));
+        QCOMPARE(ui.stackDepth(), seriesDepth + 1);
         QQuickItem *episodeRow = nullptr;
         QTRY_VERIFY((episodeRow = Ui::itemIn(ui.currentDetails(),
                                              QStringLiteral("episodeRow_") + kEpisodeId))
@@ -3403,6 +3418,7 @@ class TestUiPages : public QObject {
         QQuickItem *row = nullptr;
         QTRY_VERIFY((row = ui.item(QStringLiteral("searchRow_0"))) != nullptr);
         QTRY_VERIFY(row->property("count").toInt() > 0);
+        QTRY_VERIFY(listBuilt(row));
         const int depth = ui.stackDepth();
         QTest::keyClick(ui.window, Qt::Key_Down);
         QTRY_VERIFY(row->hasActiveFocus());
@@ -3679,6 +3695,7 @@ class TestUiPages : public QObject {
             Q_ARG(QVariant, QVariant::fromValue(ui.item(QStringLiteral("libraryPage"))))));
         QQuickItem *first = nullptr;
         QTRY_VERIFY((first = ui.item(QStringLiteral("genreRailRow_0"))) != nullptr);
+        QTRY_VERIFY(listBuilt(first));
         QTRY_COMPARE(ui.controller.genreRails()
                          ->data(ui.controller.genreRails()->index(1),
                                 Kinefin::GenreRailsModel::RailStatusRole)
@@ -6663,6 +6680,7 @@ class TestUiPages : public QObject {
         QQuickItem *row = nullptr;
         QTRY_VERIFY((row = ui.item(QStringLiteral("homeRowList_0"))) != nullptr);
         QTRY_VERIFY(row->isVisible() && row->property("count").toInt() > 0);
+        QTRY_VERIFY(listBuilt(row));
         QTRY_VERIFY(ui.layoutProblems().isEmpty());
         QVERIFY(QMetaObject::invokeMethod(row, "forceActiveFocus",
                                           Q_ARG(Qt::FocusReason, Qt::TabFocusReason)));
@@ -8320,6 +8338,38 @@ class TestUiPages : public QObject {
         QVERIFY(!ui.item(QStringLiteral("userPreferencesBuilding"))->isVisible());
     }
 
+    void aSecondVisitToUserShowsItsValuesAtOnce()
+    {
+        Ui ui(m_home->path());
+        RemotePreferences remote(ui);
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(1000));
+        QVERIFY(ui.signIn());
+        QVERIFY(openPreferences(ui) != nullptr);
+        QQuickItem *page = ui.item(QStringLiteral("settingsPage"));
+        QVERIFY(QMetaObject::invokeMethod(page, "selectSection",
+                                          Q_ARG(QVariant, QStringLiteral("audio"))));
+        QTRY_VERIFY(ui.item(QStringLiteral("userPreferencesForm")) == nullptr);
+        // Another device changes a value meanwhile
+        auto *prefs = ui.controller.userConfiguration();
+        const bool played = prefs->playDefaultAudioTrack();
+        remote.configuration[QStringLiteral("PlayDefaultAudioTrack")] = !played;
+        // Back on User: the values loaded before show while the server is read again, no Loading on the way
+        PropertyRecorder states(prefs, "state");
+        QVERIFY(QMetaObject::invokeMethod(page, "selectSection",
+                                          Q_ARG(QVariant, QStringLiteral("user"))));
+        QQuickItem *check = nullptr;
+        QTRY_VERIFY((check = ui.item(QStringLiteral("prefPlayDefaultAudioTrack"))) != nullptr);
+        QVERIFY(prefs->loaded());
+        // The user is already in the form when the answer comes: the new value lands and the keys stay where they are
+        check->forceActiveFocus(Qt::TabFocusReason);
+        QTRY_VERIFY(check->hasActiveFocus());
+        QTRY_COMPARE(prefs->playDefaultAudioTrack(), !played);
+        QTest::qWait(100);
+        QVERIFY(check->hasActiveFocus());
+        QVERIFY(!states.values.contains(qreal(Kinefin::UserConfigurationModel::Loading)));
+    }
+
     void aNarrowUserEntryGivesItsFormTheKeys()
     {
         Ui ui(m_home->path());
@@ -8707,14 +8757,14 @@ class TestUiPages : public QObject {
     {
         Ui ui(m_home->path());
         RemotePreferences remote(ui);
-        // The catalog is down from the start: the read the sign-in starts for Home asks for it too
+        // The catalog and the configuration are down from the start: the read the sign-in starts for Home fails, so the page has no values to show and loads
         ui.server.culturesStatus = 500;
+        ui.server.usersMeStatus = 500;
         QVERIFY(ui.load());
         QVERIFY(ui.signIn());
         auto *prefs = ui.controller.userConfiguration();
-        // That read must be over before the failure below is set: the page does not start a load while one is under way
-        QTRY_VERIFY(prefs->state() == Kinefin::UserConfigurationModel::Ready && prefs->loaded());
-        ui.server.usersMeStatus = 500;
+        QTRY_COMPARE(prefs->state(), Kinefin::UserConfigurationModel::Failed);
+        QVERIFY(!prefs->loaded());
         QVERIFY(
             QMetaObject::invokeMethod(ui.shellAction(QStringLiteral("settingsAction")), "trigger"));
         QTRY_VERIFY(ui.item(QStringLiteral("settingsPage")) != nullptr);

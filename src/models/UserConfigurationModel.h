@@ -125,6 +125,8 @@ class UserConfigurationModel : public QObject {
 
     // Loads the configuration of the signed-in user (and, once per session, the language catalog; and the home sections preview): drops any draft. Ignored while a request is in flight. Without a session the state is Failed(LoadFailed)
     Q_INVOKABLE void load();
+    // For a page that shows the configuration again: values already loaded stay on screen (Ready, editable) while the server's configuration is read once more (the catalog and the preview only after a failed try), and the answer replaces them only if the draft is still clean and something changed; a failed read changes nothing. Without trustworthy values (none loaded, not Ready, a write of unknown outcome) it loads instead
+    Q_INVOKABLE void refresh();
     // Starts the save sequence; only from Ready with a dirty field
     Q_INVOKABLE void save();
     // From Failed: a failed write is sent again (the sequence restarts with the fresh read), anything else reloads
@@ -211,7 +213,7 @@ class UserConfigurationModel : public QObject {
     void configurationApplied(const Kinefin::UserPreferencesSnapshot &snapshot);
 
   private:
-    enum class Step { None, LoadFetch, PrefetchFetch, Posting, VerifyFetch };
+    enum class Step { None, LoadFetch, RefreshFetch, PrefetchFetch, Posting, VerifyFetch };
 
     void onUserReady(const QJsonObject &user);
     void onUserFailed();

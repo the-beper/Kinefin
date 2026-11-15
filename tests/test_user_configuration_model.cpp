@@ -12,6 +12,8 @@
 #include <QSignalSpy>
 #include <QtTest/QtTest>
 
+#include <algorithm>
+
 using Kinefin::CultureOptionsModel;
 using Kinefin::LibraryOption;
 using Kinefin::UserConfigurationModel;
@@ -519,6 +521,136 @@ class TestUserConfigurationModel : public QObject {
         f.model.load();
         QVERIFY(f.waitFor(State::Ready));
         QCOMPARE(f.posts.size(), 1);
+    }
+
+    void aRefreshKeepsTheValuesOnScreenAndTakesTheServers()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        QVERIFY(f.loadReady());
+        // Another device changed a value meanwhile
+        f.remote[text("SubtitleMode")] = text("Always");
+        QList<State> seen;
+        QObject::connect(&f.model, &UserConfigurationModel::stateChanged, &f.model,
+                         [&] { seen << f.model.state(); });
+        f.model.refresh();
+        // The values stay, editable, while the server is read
+        QCOMPARE(f.model.state(), State::Ready);
+        QVERIFY(f.model.loaded());
+        QVERIFY(f.model.editable());
+        QCOMPARE(f.model.subtitleMode(), text("Smart"));
+        QTRY_COMPARE(f.model.subtitleMode(), text("Always"));
+        QCOMPARE(f.model.state(), State::Ready);
+        QVERIFY(!f.model.dirty());
+        // Never Loading on the way
+        QVERIFY(!seen.contains(State::Loading));
+        QVERIFY(f.posts.isEmpty());
+    }
+
+    void aRefreshNeverOverwritesADraft()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        QVERIFY(f.loadReady());
+        f.model.setSubtitleMode(text("OnlyForced"));
+        QVERIFY(f.model.dirty());
+        f.remote[text("SubtitleMode")] = text("Always");
+        QSignalSpy answered(&f.client, &Kinefin::JellyfinClient::currentUserConfigurationReady);
+        f.model.refresh();
+        QTRY_COMPARE(answered.size(), 1);
+        QCOMPARE(f.model.subtitleMode(), text("OnlyForced"));
+        QVERIFY(f.model.dirty());
+        QCOMPARE(f.model.state(), State::Ready);
+        // The save still reads the server first and sees the other device's change
+        f.model.save();
+        QVERIFY(f.waitFor(State::Conflict));
+    }
+
+    void aFailedOrUnusableRefreshChangesNothing()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        QVERIFY(f.loadReady());
+        QSignalSpy answered(&f.client, &Kinefin::JellyfinClient::currentUserConfigurationReady);
+        QSignalSpy failed(&f.client, &Kinefin::JellyfinClient::currentUserConfigurationFailed);
+        for (const int status : {500, 0}) {
+            f.server.usersMeStatus = status;
+            f.rawOverride =
+                status == 0 ? QByteArrayLiteral("{\"Id\":\"someone else\"}") : QByteArray();
+            const qsizetype before = answered.size() + failed.size();
+            f.model.refresh();
+            QTRY_COMPARE(answered.size() + failed.size(), before + 1);
+            QCOMPARE(f.model.state(), State::Ready);
+            QCOMPARE(f.model.failure(), UserConfigurationModel::NoFailure);
+            QCOMPARE(f.model.subtitleMode(), text("Smart"));
+            QVERIFY(f.model.editable());
+        }
+        // Nothing is left waiting: the next refresh reads again
+        f.server.usersMeStatus = 0;
+        f.rawOverride.clear();
+        f.remote[text("SubtitleMode")] = text("Always");
+        f.model.refresh();
+        QTRY_COMPARE(f.model.subtitleMode(), text("Always"));
+    }
+
+    void aRefreshReadsTheConfigurationOnlyAndSignalsOnlyAChange()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        QVERIFY(f.loadReady());
+        QTRY_VERIFY(f.model.cultures()->available());
+        QTRY_COMPARE(f.model.homeSectionsStatus(), UserConfigurationModel::HomeSectionsReady);
+        const qsizetype requests = f.server.requestLog.size();
+        QSignalSpy answered(&f.client, &Kinefin::JellyfinClient::currentUserConfigurationReady);
+        QSignalSpy states(&f.model, &UserConfigurationModel::stateChanged);
+        f.model.refresh();
+        QTRY_COMPARE(answered.size(), 1);
+        // One read of the configuration, nothing else; the same values change nothing on screen
+        QCOMPARE(f.server.requestLog.size(), requests + 1);
+        QVERIFY(f.server.requestLog.constLast().second.contains("Users/Me"));
+        QCOMPARE(states.size(), 0);
+    }
+
+    void aSaveDuringARefreshWritesOnce()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        QVERIFY(f.loadReady());
+        f.model.refresh();
+        // The user saves before the refresh answers: the save's own read supersedes it
+        f.model.setSubtitleMode(text("OnlyForced"));
+        f.model.save();
+        QTRY_COMPARE(f.posts.size(), 1);
+        QVERIFY(f.waitFor(State::Ready));
+        QCOMPARE(f.model.failure(), UserConfigurationModel::NoFailure);
+        QCOMPARE(f.lastPost().value(text("SubtitleMode")).toString(), text("OnlyForced"));
+        QVERIFY(!f.model.dirty());
+    }
+
+    void aRefreshWithoutValuesLoads()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        f.model.refresh();
+        QCOMPARE(f.model.state(), State::Loading);
+        QVERIFY(f.waitFor(State::Ready));
+        QCOMPARE(f.model.subtitleMode(), text("Smart"));
+    }
+
+    void aDraftDroppedDuringARefreshTakesTheServersValues()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        QVERIFY(f.loadReady());
+        f.model.setSubtitleMode(text("OnlyForced"));
+        f.remote[text("SubtitleMode")] = text("Always");
+        f.model.refresh();
+        // The page goes before the answer: the draft is dropped, the refresh goes on
+        f.model.discardDraft();
+        QVERIFY(!f.model.dirty());
+        QCOMPARE(f.model.subtitleMode(), text("Smart"));
+        QTRY_COMPARE(f.model.subtitleMode(), text("Always"));
+        QVERIFY(!f.model.dirty());
     }
 
     void aLoadFailureCanBeRetried()

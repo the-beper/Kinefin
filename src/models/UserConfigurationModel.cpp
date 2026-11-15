@@ -104,7 +104,8 @@ UserConfigurationModel::~UserConfigurationModel()
 
 void UserConfigurationModel::load()
 {
-    if (m_step != Step::None)
+    // A background refresh gives way: the load's own read supersedes it
+    if (m_step != Step::None && m_step != Step::RefreshFetch)
         return;
     ++m_generation;
     m_failure = NoFailure;
@@ -138,6 +139,27 @@ void UserConfigurationModel::load()
     setHomeStatus(m_homePending ? HomeSectionsLoading : HomeSectionsUnavailable);
 }
 
+void UserConfigurationModel::refresh()
+{
+    if (!m_hasBaseline || m_state != Ready || m_postSent) {
+        load();
+        return;
+    }
+    if (m_step != Step::None || !m_client)
+        return;
+    m_step = Step::RefreshFetch;
+    if (!m_client->fetchCurrentUserConfiguration())
+        m_step = Step::None;
+    // The catalog and the preview are read again only when the last try failed: their failure never blocks the editor
+    if (!m_cultures->available() && !m_culturesPending)
+        m_culturesPending = m_client->fetchCultures();
+    if (m_homeStatus == HomeSectionsUnavailable && !m_homePending) {
+        m_homePending = m_client->fetchDisplayHomeSections();
+        if (m_homePending)
+            setHomeStatus(HomeSectionsLoading);
+    }
+}
+
 void UserConfigurationModel::save()
 {
     if (m_state == Ready && dirty())
@@ -166,11 +188,12 @@ void UserConfigurationModel::discard()
 
 void UserConfigurationModel::discardDraft()
 {
-    if (m_postSent || !m_hasBaseline || m_step != Step::None)
+    if (m_postSent || !m_hasBaseline || (m_step != Step::None && m_step != Step::RefreshFetch))
         return;
     adoptBaseline(m_baselineRaw);
     m_failure = NoFailure;
-    setState(Ready, Step::None);
+    // A refresh under way goes on: its answer may still replace the clean values
+    setState(Ready, m_step);
 }
 
 void UserConfigurationModel::keepEditing()
@@ -229,11 +252,24 @@ void UserConfigurationModel::startSave()
 void UserConfigurationModel::onUserReady(const QJsonObject &user)
 {
     const Step step = m_step;
-    if (step != Step::LoadFetch && step != Step::PrefetchFetch && step != Step::VerifyFetch)
+    if (step != Step::LoadFetch && step != Step::RefreshFetch && step != Step::PrefetchFetch
+        && step != Step::VerifyFetch)
         return;
     const QJsonValue configuration = user.value(QStringLiteral("Configuration"));
     const bool valid =
         userMatches(user) && configuration.isObject() && fitsBodyCap(configuration.toObject());
+    if (step == Step::RefreshFetch) {
+        m_step = Step::None;
+        // An unusable answer, or a draft the user started meanwhile: the values on screen stay, and a save reads the server again anyway
+        if (!valid || m_state != Ready || dirty())
+            return;
+        // Nothing changed elsewhere: no signal, so the form and Home are left as they are
+        if (configuration.toObject() == m_baselineRaw)
+            return;
+        adoptBaseline(configuration.toObject());
+        setState(Ready, Step::None);
+        return;
+    }
     if (!valid) {
         fail(step == Step::VerifyFetch ? NotVerified : InvalidProfile);
         return;
@@ -304,6 +340,10 @@ void UserConfigurationModel::onUserFailed()
         break;
     case Step::VerifyFetch:
         fail(NotVerified);
+        break;
+    // A background refresh that fails leaves the values on screen as they were
+    case Step::RefreshFetch:
+        m_step = Step::None;
         break;
     default:
         break;

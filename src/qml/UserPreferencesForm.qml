@@ -90,8 +90,12 @@ ColumnLayout {
         Qt.callLater(() => orderRepeater.itemAt(to)?.forceActiveFocus(Qt.TabFocusReason));
     }
 
-    Component.onCompleted: prefs.load()
-    // The draft is not kept: the next visit reads the server again
+    // Values already loaded show at once while the server is read again; without them the form waits for the load. A form that opens editable is not blocked: the answer of the read must not take the keys back
+    Component.onCompleted: {
+        wasBlocked = !prefs.editable;
+        prefs.refresh();
+    }
+    // The draft is not kept: the next visit shows the server's values and reads them again
     Component.onDestruction: {
         const state = prefs?.state;
         if (prefs?.dirty && (state === UserConfigurationModel.Ready || state === UserConfigurationModel.Conflict || (state === UserConfigurationModel.Failed && prefs.failure === UserConfigurationModel.SaveFailed)))
