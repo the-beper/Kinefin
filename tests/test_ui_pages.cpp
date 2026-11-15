@@ -7,6 +7,7 @@
 #include "app/ConnectionController.h"
 #include "app/ImageNetworkFactory.h"
 #include "imagecache/ImageOrigin.h"
+#include "models/SearchModel.h"
 #include "settings/ClientSettings.h"
 
 #include <KLocalizedQmlContext>
@@ -1611,6 +1612,30 @@ bool toggleOption(const Ui &ui, const QString &facet, const QVariant &value)
     entry.insert(QStringLiteral("facet"), facet);
     entry.insert(QStringLiteral("value"), value);
     return dialog && QMetaObject::invokeMethod(dialog, "toggle", Q_ARG(QVariant, entry));
+}
+
+// The tags that leave no room in the query of `model` for another tag: long ones first, then ever shorter ones. The state fits (the filter editor would have taken it), a tag of any usual length does not
+Kinefin::LibraryFilterState tagsFillingTheQuery(const Kinefin::LibraryItemsModel &model)
+{
+    Kinefin::LibraryFilterState state;
+    const auto fits = [&](const Kinefin::LibraryFilterState &candidate) {
+        return candidate.tags.size() <= Kinefin::MaxFilterValues
+               && model.filtersFit(Kinefin::LibraryItemsModel::filtersToVariant(candidate));
+    };
+    int index = 0;
+    for (const int length : {125, 100, 32, 4}) {
+        while (true) {
+            Kinefin::LibraryFilterState next = state;
+            const QString padding(length,
+                                  length == 125 ? QChar(0x00e9) : QChar(u'a' + length % 20));
+            next.tags.append(padding
+                             + QString::number(index++).rightJustified(3, QLatin1Char('0')));
+            if (!fits(next))
+                break;
+            state = next;
+        }
+    }
+    return state;
 }
 
 // Scrolls the list of the open filter dialog towards one entry (its facet and value, or the state row of a failed source when `facet` is empty): a row has no item before it is near the view, so callers look again until the item is there
@@ -3868,6 +3893,116 @@ class TestUiPages : public QObject {
         QVERIFY2(clickActionButtonWhenReady(ui, QStringLiteral("filterApplyAction")),
                  qPrintable(describeButtons(ui)));
         QTRY_VERIFY(!movies->filtered());
+    }
+
+    void aFilterValueThatWouldMakeTheQueryTooLongIsBlocked()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        auto *movies = ui.controller.movies();
+        QTRY_VERIFY(movies->filterOptions()->available());
+        QVERIFY(openFilterDialog(ui));
+        QObject *dialog = ui.popup(QStringLiteral("filterDialog"));
+        QVERIFY(dialog);
+        const QString tag = QStringLiteral("restored-master");
+        // A tag row is named by its place in the list, not by its text
+        QString rowName;
+        QTRY_VERIFY([&] {
+            for (const QVariant &entry : dialog->property("entries").toList()) {
+                const QVariantMap row = entry.toMap();
+                if (row.value(QStringLiteral("facet")).toString() == QLatin1String("tags")
+                    && row.value(QStringLiteral("value")).toString() == tag)
+                    rowName = QStringLiteral("filterOption_")
+                              + row.value(QStringLiteral("key")).toString();
+            }
+            return !rowName.isEmpty();
+        }());
+        const QString hint = QStringLiteral("Too many filters selected: remove one to add this");
+        // The row is looked up on every wait: a changed draft may rebuild it
+        QQuickItem *option = nullptr;
+        const auto rowShown = [&] {
+            revealFilterEntry(ui, QStringLiteral("tags"), tag);
+            return (option = shownItem(ui, rowName)) != nullptr;
+        };
+        QTRY_VERIFY(rowShown());
+        QVERIFY(!option->property("blocked").toBool());
+        QVERIFY(option->isEnabled());
+        QVERIFY(!ui.showsText(hint));
+        // A draft that leaves no room for the tag
+        Kinefin::LibraryFilterState full = tagsFillingTheQuery(*movies);
+        QVERIFY(!full.tags.isEmpty());
+        Kinefin::LibraryFilterState withTag = full;
+        withTag.tags.append(tag);
+        QVERIFY(!movies->filtersFit(Kinefin::LibraryItemsModel::filtersToVariant(withTag)));
+        QVERIFY(dialog->setProperty("draft", Kinefin::LibraryItemsModel::filtersToVariant(full)));
+        QTRY_VERIFY(rowShown() && option->property("blocked").toBool());
+        QVERIFY(!option->isEnabled());
+        QCOMPARE(option->property("hint").toString(), hint);
+        QTRY_VERIFY(ui.showsText(hint));
+        // Neither a click nor the toggle of the dialog adds it
+        const auto draftTags = [&] {
+            return dialog->property("draft").toMap().value(QStringLiteral("tags")).toList();
+        };
+        QCOMPARE(draftTags().size(), full.tags.size());
+        ui.clickCenter(option);
+        QVERIFY(toggleOption(ui, QStringLiteral("tags"), tag));
+        QCOMPARE(draftTags().size(), full.tags.size());
+        QVERIFY(!draftTags().contains(tag));
+        QVERIFY(!option->property("selected").toBool());
+        // Taking one tag off makes room again
+        Kinefin::LibraryFilterState fewer = full;
+        // As many tags off as it takes for this one to fit
+        const auto fitsWithTag = [&] {
+            Kinefin::LibraryFilterState probe = fewer;
+            probe.tags.append(tag);
+            return movies->filtersFit(Kinefin::LibraryItemsModel::filtersToVariant(probe));
+        };
+        while (!fewer.tags.isEmpty() && !fitsWithTag())
+            fewer.tags.removeFirst();
+        QVERIFY(fitsWithTag());
+        QVERIFY(dialog->setProperty("draft", Kinefin::LibraryItemsModel::filtersToVariant(fewer)));
+        QTRY_VERIFY(rowShown() && !option->property("blocked").toBool());
+        QVERIFY(option->isEnabled());
+        QTRY_VERIFY(!ui.showsText(hint));
+        QVERIFY(toggleOption(ui, QStringLiteral("tags"), tag));
+        QTRY_VERIFY(rowShown() && option->property("selected").toBool());
+    }
+
+    void aQueryTooLongForTheServerOffersClearFiltersInTheFailureBox()
+    {
+        Ui ui(m_home->path());
+        // A failed facet list prunes nothing, so the tags below stay
+        ui.server.listingStatus.insert(QStringLiteral("Filters"), 500);
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        auto *movies = ui.controller.movies();
+        QTRY_COMPARE(movies->filterOptions()->status(), Kinefin::FilterOptionsModel::Failed);
+        QTRY_COMPARE(movies->status(), Kinefin::LibraryItemsModel::Ready);
+        const QString message = QStringLiteral("The filters and search are too long for the "
+                                               "server: clear the filters or shorten the search");
+        QVERIFY(!ui.showsText(message));
+        // The editor fills the query with tags; the longest search term then no longer fits
+        const Kinefin::LibraryFilterState full = tagsFillingTheQuery(*movies);
+        movies->setFilterState(full);
+        QVERIFY(movies->filterState() == full);
+        QTRY_COMPARE(movies->status(), Kinefin::LibraryItemsModel::Ready);
+        movies->setSearchDebounceInterval(0);
+        movies->setSearchTerm(QString(Kinefin::SearchModel::MaxTermLength, QChar(0x20ac)));
+        QTRY_COMPARE(movies->status(), Kinefin::LibraryItemsModel::Failed);
+        QVERIFY(movies->queryTooLong());
+        QTRY_VERIFY(ui.showsText(message));
+        QObject *clear = ui.popup(QStringLiteral("libraryFailedClearFilters"));
+        QVERIFY(clear);
+        QTRY_VERIFY(clear->property("visible").toBool());
+        // Clear Filters takes the filters and leaves the search, which fits alone
+        QVERIFY(triggerAction(ui, QStringLiteral("libraryFailedClearFilters")));
+        QTRY_VERIFY(movies->filterState().isEmpty());
+        QTRY_COMPARE(movies->status(), Kinefin::LibraryItemsModel::Ready);
+        QVERIFY(!movies->queryTooLong());
+        QCOMPARE(movies->searchTerm().size(), int(Kinefin::SearchModel::MaxTermLength));
+        QTRY_VERIFY(!ui.showsText(message));
+        QTRY_VERIFY(!clear->property("visible").toBool());
     }
 
     void chipsRemoveOneFilterAndClearFiltersLeavesTheRest()
@@ -9665,6 +9800,64 @@ class TestUiPages : public QObject {
             QVERIFY2(problems.isEmpty(), qPrintable(problems.join(QLatin1Char('\n'))));
             QVERIFY(found > 0);
         }
+    }
+
+    void theFavoritesPlaceholderForAScanThatDidNotRunShowsOnlyThen()
+    {
+        Ui ui(m_home->path());
+        serveFavorites(ui);
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("home")));
+        // A scan that is under way is kept Loading, then dropped: the page is left with no snapshot and no scan
+        ui.server.holdListings = true;
+        QVERIFY(QMetaObject::invokeMethod(ui.engine.rootObjects().constFirst(), "openFavorites"));
+        QTRY_VERIFY(ui.item(QStringLiteral("favoritesPage")) != nullptr);
+        QTRY_COMPARE(ui.controller.favorites()->status(), Kinefin::FavoritesModel::Loading);
+        QTRY_VERIFY(ui.item(QStringLiteral("favoritesLoading"))->isVisible());
+        QVERIFY(!ui.item(QStringLiteral("favoritesNotLoaded"))->isVisible());
+        ui.controller.favorites()->close();
+        QCOMPARE(ui.controller.favorites()->status(), Kinefin::FavoritesModel::Idle);
+        QTRY_VERIFY(ui.item(QStringLiteral("favoritesNotLoaded"))->isVisible());
+        QVERIFY(ui.showsText(QStringLiteral("Favorites could not be loaded")));
+        QVERIFY(!ui.item(QStringLiteral("favoritesLoading"))->isVisible());
+        QVERIFY(!ui.item(QStringLiteral("favoritesEmpty"))->isVisible());
+        QVERIFY(!ui.item(QStringLiteral("favoritesNoLibraries"))->isVisible());
+        // Retry scans again and the placeholder goes with the answer
+        ui.server.holdListings = false;
+        QObject *action = ui.item(QStringLiteral("favoritesNotLoaded"))
+                              ->property("helpfulAction")
+                              .value<QObject *>();
+        QVERIFY(action && action->property("text").toString() == QStringLiteral("Retry"));
+        QVERIFY(QMetaObject::invokeMethod(action, "trigger"));
+        QTRY_COMPARE(ui.controller.favorites()->status(), Kinefin::FavoritesModel::Complete);
+        QTRY_VERIFY(!ui.item(QStringLiteral("favoritesNotLoaded"))->isVisible());
+        QTRY_COMPARE(favoriteGroupTitles(ui).size(), 3);
+    }
+
+    void upAndDownMoveTheKeysBetweenTheFavoritesGroups()
+    {
+        Ui ui(m_home->path());
+        serveFavorites(ui);
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("home")));
+        QVERIFY(openFavorites(ui));
+        // The rows build their lists asynchronously: the keys go once the first cards of both are there
+        QQuickItem *first = nullptr;
+        QQuickItem *second = nullptr;
+        QTRY_VERIFY((first = ui.item(QStringLiteral("favoritesRow_0"))) != nullptr
+                    && first->property("currentItem").value<QObject *>() != nullptr
+                    && first->hasActiveFocus());
+        QTRY_VERIFY((second = ui.item(QStringLiteral("favoritesRow_1"))) != nullptr
+                    && second->property("currentItem").value<QObject *>() != nullptr);
+        QTest::keyClick(ui.window, Qt::Key_Down);
+        QTRY_VERIFY(second->hasActiveFocus());
+        QVERIFY(!first->hasActiveFocus());
+        QTest::keyClick(ui.window, Qt::Key_Up);
+        QTRY_VERIFY(first->hasActiveFocus());
+        QVERIFY(!second->hasActiveFocus());
+        // Up from the first group has nowhere to go
+        QTest::keyClick(ui.window, Qt::Key_Up);
+        QTRY_VERIFY(first->hasActiveFocus());
     }
 
     void theFavoritesCardsKeepTheirKeys()
