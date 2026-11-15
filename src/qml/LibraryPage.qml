@@ -38,7 +38,7 @@ Kirigami.Page {
     Accessible.name: title
 
     // Whether the page shows all it has at once: the toolbar lays its buttons out only once every one is built, the list comes a few frames after its first page (a list still loading shows its spinner); the shell fades a new tab in once this holds
-    readonly property bool contentReady: (!toolbar.visible || toolbar.implicitHeight > 0) && (listModel === null || (listContent.item?.settled ?? false))
+    readonly property bool contentReady: (!toolbarRow.visible || toolbar.implicitHeight > 0) && (listModel === null || (listContent.item?.settled ?? false))
 
     // The scroll position and the current tile, for the tab to come back as it was left
     function viewPosition() {
@@ -213,6 +213,19 @@ Kirigami.Page {
         favoritesFixed: page.subtab === "favorites"
     }
 
+    // Disabled while the list shows its first row; the grid then takes the keys, which the button would lose as it turns itself off
+    Kirigami.Action {
+        id: returnToTopAction
+        objectName: "returnToTopAction"
+        text: i18n("Return to Top")
+        icon.name: "go-top"
+        enabled: !(listContent.item?.atStart ?? true)
+        onTriggered: {
+            listContent.item?.returnToTop();
+            listContent.item?.focusView();
+        }
+    }
+
     onListModelChanged: {
         if (listModel !== null)
             listContent.heldModel = listModel;
@@ -374,241 +387,241 @@ Kirigami.Page {
         }
 
         // The sub-tabs the settings turn on (the main list is none of them), then filters, sort, view and view options; what does not fit goes into the overflow menu, and below the Wide mode the buttons are icons with tooltips. A sub-tab without a list of the model leaves the sub-tab entries alone in the toolbar
-        Kirigami.ActionToolBar {
-            id: toolbar
-            objectName: "libraryToolbar"
+        RowLayout {
+            id: toolbarRow
 
             Layout.fillWidth: true
             Layout.leftMargin: Kirigami.Units.largeSpacing
             Layout.rightMargin: Kirigami.Units.largeSpacing
             visible: page.listModel !== null || page.hasSubtabs
-            display: page.wideShell ? Controls.AbstractButton.TextBesideIcon : Controls.AbstractButton.IconOnly
+            spacing: Kirigami.Units.mediumSpacing
 
-            actions: [
-                // First, so a narrowing window never pushes it into the overflow menu; disabled while the list shows its first row
-                Kirigami.Action {
-                    objectName: "returnToTopAction"
-                    text: i18n("Return to Top")
-                    tooltip: text
-                    icon.name: "go-top"
-                    visible: page.listModel !== null
-                    enabled: !(listContent.item?.atStart ?? true)
-                    // The button turns itself off at the top: the grid takes the keys instead of losing them with it
-                    onTriggered: {
-                        listContent.item.scrollToStart();
-                        listContent.item.focusView();
-                    }
-                },
-                Kirigami.Action {
-                    separator: true
-                    visible: page.listModel !== null
-                },
-                SubtabAction {
-                    subtabId: "suggestions"
-                    icon.name: "starred-symbolic"
-                },
-                SubtabAction {
-                    subtabId: "favorites"
-                    icon.name: "bookmarks"
-                },
-                SubtabAction {
-                    subtabId: "collections"
-                    icon.name: "folder-video"
-                },
-                SubtabAction {
-                    subtabId: "upcoming"
-                    icon.name: "view-calendar-upcoming-events"
-                },
-                SubtabAction {
-                    subtabId: "genres"
-                    icon.name: "tag"
-                },
-                SubtabAction {
-                    subtabId: "networks"
-                    icon.name: "globe"
-                },
-                SubtabAction {
-                    subtabId: "episodes"
-                    icon.name: "format-list-ordered"
-                },
-                Kirigami.Action {
-                    separator: true
-                    visible: page.hasSubtabs && page.subtabs.available.length > 1 && page.listModel !== null
-                },
-                Kirigami.Action {
-                    objectName: "filtersAction"
-                    text: i18n("Filters")
-                    tooltip: text
-                    icon.name: "view-filter"
-                    visible: page.listModel !== null
-                    onTriggered: filterDialog.open()
-                },
-                Kirigami.Action {
-                    objectName: "sortAction"
-                    text: i18n("Sort")
-                    tooltip: text
-                    icon.name: "view-sort"
-                    visible: page.listModel !== null
+            Kirigami.ActionToolBar {
+                id: toolbar
+                objectName: "libraryToolbar"
 
-                    SortAction {
-                        token: "SortName"
-                        list: page.listModel
-                        text: i18n("Name")
-                    }
-                    SortAction {
-                        token: "DateCreated"
-                        list: page.listModel
-                        text: i18n("Date Added")
-                    }
-                    SortAction {
-                        token: "DateLastContentAdded"
-                        list: page.listModel
-                        text: i18n("Date Episode Added")
-                    }
-                    SortAction {
-                        token: "PremiereDate"
-                        list: page.listModel
-                        text: i18n("Release Date")
-                    }
-                    SortAction {
-                        token: "ProductionYear"
-                        list: page.listModel
-                        text: i18n("Year")
-                    }
-                    SortAction {
-                        token: "AiredEpisodeOrder"
-                        list: page.listModel
-                        text: i18n("Episode Order")
-                    }
-                    SortAction {
-                        token: "CommunityRating"
-                        list: page.listModel
-                        text: i18n("Community Rating")
-                    }
-                    SortAction {
-                        token: "CriticRating"
-                        list: page.listModel
-                        text: i18n("Critic Rating")
-                    }
-                    SortAction {
-                        token: "Runtime"
-                        list: page.listModel
-                        text: i18n("Runtime")
-                    }
-                    SortAction {
-                        token: "DatePlayed"
-                        list: page.listModel
-                        text: i18n("Date Played")
-                    }
-                    SortAction {
-                        token: "PlayCount"
-                        list: page.listModel
-                        text: i18n("Play Count")
-                    }
-                    SortAction {
-                        token: "Random"
-                        list: page.listModel
-                        text: i18n("Random")
-                    }
+                Layout.fillWidth: true
+                display: page.wideShell ? Controls.AbstractButton.TextBesideIcon : Controls.AbstractButton.IconOnly
+
+                actions: [
+                    SubtabAction {
+                        subtabId: "suggestions"
+                        icon.name: "starred-symbolic"
+                    },
+                    SubtabAction {
+                        subtabId: "favorites"
+                        icon.name: "bookmarks"
+                    },
+                    SubtabAction {
+                        subtabId: "collections"
+                        icon.name: "folder-video"
+                    },
+                    SubtabAction {
+                        subtabId: "upcoming"
+                        icon.name: "view-calendar-upcoming-events"
+                    },
+                    SubtabAction {
+                        subtabId: "genres"
+                        icon.name: "tag"
+                    },
+                    SubtabAction {
+                        subtabId: "networks"
+                        icon.name: "globe"
+                    },
+                    SubtabAction {
+                        subtabId: "episodes"
+                        icon.name: "format-list-ordered"
+                    },
                     Kirigami.Action {
                         separator: true
-                    }
-                    // The direction of a random order means nothing
-                    ChoiceAction {
-                        objectName: "sortAscending"
-                        text: i18n("Ascending Order")
-                        enabled: page.listModel !== null && !page.listModel.random
-                        current: page.listModel !== null && !page.listModel.descending
-                        onChosen: page.listModel.descending = false
-                    }
-                    ChoiceAction {
-                        objectName: "sortDescending"
-                        text: i18n("Descending Order")
-                        enabled: page.listModel !== null && !page.listModel.random
-                        current: page.listModel !== null && page.listModel.descending
-                        onChosen: page.listModel.descending = true
-                    }
-                },
-                Kirigami.Action {
-                    objectName: "reshuffleAction"
-                    text: i18n("Reshuffle")
-                    tooltip: text
-                    icon.name: "randomize"
-                    visible: page.listModel !== null && page.listModel.random
-                    onTriggered: page.listModel.reshuffle()
-                },
-                Kirigami.Action {
-                    objectName: "viewModeAction"
-                    readonly property bool listMode: page.listModel !== null && page.listModel.viewMode === "list"
-                    text: listMode ? i18n("Grid View") : i18n("List View")
-                    tooltip: text
-                    icon.name: listMode ? "view-list-icons" : "view-list-details"
-                    visible: page.listModel !== null
-                    onTriggered: page.listModel.viewMode = listMode ? "grid" : "list"
-                },
-                Kirigami.Action {
-                    objectName: "viewOptionsAction"
-                    text: i18n("View Options")
-                    tooltip: text
-                    icon.name: "configure"
-                    visible: page.listModel !== null
-
-                    ImageAction {
-                        token: "Primary"
-                        list: page.listModel
-                        text: i18nc("@item:inmenu type of image shown on the cards", "Poster")
-                    }
-                    ImageAction {
-                        token: "Banner"
-                        list: page.listModel
-                        text: i18nc("@item:inmenu type of image shown on the cards", "Banner")
-                    }
-                    ImageAction {
-                        token: "Disc"
-                        list: page.listModel
-                        text: i18nc("@item:inmenu type of image shown on the cards", "Disc")
-                    }
-                    ImageAction {
-                        token: "Logo"
-                        list: page.listModel
-                        text: i18nc("@item:inmenu type of image shown on the cards", "Logo")
-                    }
-                    ImageAction {
-                        token: "Thumb"
-                        list: page.listModel
-                        text: i18nc("@item:inmenu type of image shown on the cards", "Thumbnail")
-                    }
+                        visible: page.hasSubtabs && page.subtabs.available.length > 1 && page.listModel !== null
+                    },
                     Kirigami.Action {
-                        separator: true
+                        objectName: "filtersAction"
+                        text: i18n("Filters")
+                        tooltip: text
+                        icon.name: "view-filter"
+                        visible: page.listModel !== null
+                        onTriggered: filterDialog.open()
+                    },
+                    Kirigami.Action {
+                        objectName: "sortAction"
+                        text: i18n("Sort")
+                        tooltip: text
+                        icon.name: "view-sort"
+                        visible: page.listModel !== null
+
+                        SortAction {
+                            token: "SortName"
+                            list: page.listModel
+                            text: i18n("Name")
+                        }
+                        SortAction {
+                            token: "DateCreated"
+                            list: page.listModel
+                            text: i18n("Date Added")
+                        }
+                        SortAction {
+                            token: "DateLastContentAdded"
+                            list: page.listModel
+                            text: i18n("Date Episode Added")
+                        }
+                        SortAction {
+                            token: "PremiereDate"
+                            list: page.listModel
+                            text: i18n("Release Date")
+                        }
+                        SortAction {
+                            token: "ProductionYear"
+                            list: page.listModel
+                            text: i18n("Year")
+                        }
+                        SortAction {
+                            token: "AiredEpisodeOrder"
+                            list: page.listModel
+                            text: i18n("Episode Order")
+                        }
+                        SortAction {
+                            token: "CommunityRating"
+                            list: page.listModel
+                            text: i18n("Community Rating")
+                        }
+                        SortAction {
+                            token: "CriticRating"
+                            list: page.listModel
+                            text: i18n("Critic Rating")
+                        }
+                        SortAction {
+                            token: "Runtime"
+                            list: page.listModel
+                            text: i18n("Runtime")
+                        }
+                        SortAction {
+                            token: "DatePlayed"
+                            list: page.listModel
+                            text: i18n("Date Played")
+                        }
+                        SortAction {
+                            token: "PlayCount"
+                            list: page.listModel
+                            text: i18n("Play Count")
+                        }
+                        SortAction {
+                            token: "Random"
+                            list: page.listModel
+                            text: i18n("Random")
+                        }
+                        Kirigami.Action {
+                            separator: true
+                        }
+                        // The direction of a random order means nothing
+                        ChoiceAction {
+                            objectName: "sortAscending"
+                            text: i18n("Ascending Order")
+                            enabled: page.listModel !== null && !page.listModel.random
+                            current: page.listModel !== null && !page.listModel.descending
+                            onChosen: page.listModel.descending = false
+                        }
+                        ChoiceAction {
+                            objectName: "sortDescending"
+                            text: i18n("Descending Order")
+                            enabled: page.listModel !== null && !page.listModel.random
+                            current: page.listModel !== null && page.listModel.descending
+                            onChosen: page.listModel.descending = true
+                        }
+                    },
+                    Kirigami.Action {
+                        objectName: "reshuffleAction"
+                        text: i18n("Reshuffle")
+                        tooltip: text
+                        icon.name: "randomize"
+                        visible: page.listModel !== null && page.listModel.random
+                        onTriggered: page.listModel.reshuffle()
+                    },
+                    Kirigami.Action {
+                        objectName: "viewModeAction"
+                        readonly property bool listMode: page.listModel !== null && page.listModel.viewMode === "list"
+                        text: listMode ? i18n("Grid View") : i18n("List View")
+                        tooltip: text
+                        icon.name: listMode ? "view-list-icons" : "view-list-details"
+                        visible: page.listModel !== null
+                        onTriggered: page.listModel.viewMode = listMode ? "grid" : "list"
+                    },
+                    Kirigami.Action {
+                        objectName: "viewOptionsAction"
+                        text: i18n("View Options")
+                        tooltip: text
+                        icon.name: "configure"
+                        visible: page.listModel !== null
+
+                        ImageAction {
+                            token: "Primary"
+                            list: page.listModel
+                            text: i18nc("@item:inmenu type of image shown on the cards", "Poster")
+                        }
+                        ImageAction {
+                            token: "Banner"
+                            list: page.listModel
+                            text: i18nc("@item:inmenu type of image shown on the cards", "Banner")
+                        }
+                        ImageAction {
+                            token: "Disc"
+                            list: page.listModel
+                            text: i18nc("@item:inmenu type of image shown on the cards", "Disc")
+                        }
+                        ImageAction {
+                            token: "Logo"
+                            list: page.listModel
+                            text: i18nc("@item:inmenu type of image shown on the cards", "Logo")
+                        }
+                        ImageAction {
+                            token: "Thumb"
+                            list: page.listModel
+                            text: i18nc("@item:inmenu type of image shown on the cards", "Thumbnail")
+                        }
+                        Kirigami.Action {
+                            separator: true
+                        }
+                        ChoiceAction {
+                            objectName: "showTitleAction"
+                            text: i18n("Show Title")
+                            current: page.listModel !== null && page.listModel.showTitle
+                            onChosen: page.listModel.showTitle = !page.listModel.showTitle
+                        }
+                        ChoiceAction {
+                            objectName: "showYearAction"
+                            text: i18n("Show Year")
+                            current: page.listModel !== null && page.listModel.showYear
+                            onChosen: page.listModel.showYear = !page.listModel.showYear
+                        }
+                        ChoiceAction {
+                            objectName: "cardLayoutAction"
+                            text: i18n("Card Layout")
+                            current: page.listModel !== null && page.listModel.cardLayout
+                            onChosen: page.listModel.cardLayout = !page.listModel.cardLayout
+                        }
+                    },
+                    Kirigami.Action {
+                        objectName: "browseGenresAction"
+                        text: i18n("Browse by Genre")
+                        tooltip: text
+                        icon.name: "tag"
+                        visible: page.listModel !== null && page.subtab === "main" && !page.genresSubtab && page.listModel.filterOptions.available
+                        onTriggered: page.Window.window.openGenres(page)
                     }
-                    ChoiceAction {
-                        objectName: "showTitleAction"
-                        text: i18n("Show Title")
-                        current: page.listModel !== null && page.listModel.showTitle
-                        onChosen: page.listModel.showTitle = !page.listModel.showTitle
-                    }
-                    ChoiceAction {
-                        objectName: "showYearAction"
-                        text: i18n("Show Year")
-                        current: page.listModel !== null && page.listModel.showYear
-                        onChosen: page.listModel.showYear = !page.listModel.showYear
-                    }
-                    ChoiceAction {
-                        objectName: "cardLayoutAction"
-                        text: i18n("Card Layout")
-                        current: page.listModel !== null && page.listModel.cardLayout
-                        onChosen: page.listModel.cardLayout = !page.listModel.cardLayout
-                    }
-                },
-                Kirigami.Action {
-                    objectName: "browseGenresAction"
-                    text: i18n("Browse by Genre")
-                    tooltip: text
-                    icon.name: "tag"
-                    visible: page.listModel !== null && page.subtab === "main" && !page.genresSubtab && page.listModel.filterOptions.available
-                    onTriggered: page.Window.window.openGenres(page)
-                }
-            ]
+                ]
+            }
+
+            // At the right end, apart from the controls of the view, and never in the toolbar's overflow menu
+            Controls.ToolButton {
+                objectName: "returnToTopButton"
+                visible: page.listModel !== null
+                action: returnToTopAction
+                display: page.wideShell ? Controls.AbstractButton.TextBesideIcon : Controls.AbstractButton.IconOnly
+                Controls.ToolTip.text: text
+                Controls.ToolTip.visible: (hovered || visualFocus) && display === Controls.AbstractButton.IconOnly
+                Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
+            }
         }
 
         // The filters of the list as chips with a remove button each, and Clear Filters for all of them (not the search, the sort or the library)

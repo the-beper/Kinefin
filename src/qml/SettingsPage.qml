@@ -32,6 +32,22 @@ Kirigami.Page {
     readonly property var accountEntries: signedIn ? [{ section: "user", title: i18n("User"), icon: "preferences-desktop-user" }] : []
     readonly property var entries: deviceEntries.concat(accountEntries)
     property string activeSection: "main"
+    // The User form holds dozens of rows and takes a moment to build: it starts a few frames after the entry is chosen, so the list, the heading and the spinner show the choice first (built asynchronously instead, it crashed in the tests, cause not found)
+    property bool userFormReady: false
+    onActiveSectionChanged: {
+        userFormReady = false;
+        if (activeSection === "user")
+            userFormDelay.restart();
+    }
+    Component.onCompleted: {
+        if (activeSection === "user")
+            userFormDelay.restart();
+    }
+    Timer {
+        id: userFormDelay
+        interval: 50
+        onTriggered: page.userFormReady = page.activeSection === "user"
+    }
     // Narrow windows only: the entry shows in place of the list
     property bool entryOpen: false
     // The list folds where the shell's wide mode ends (Main.qml owns the limit)
@@ -157,7 +173,11 @@ Kirigami.Page {
             text: modelData.title
             icon.name: modelData.icon
             checked: !page.narrow && page.activeSection === modelData.section
-            onClicked: page.selectSection(modelData.section)
+            onClicked: {
+                // The keys follow the pointer: the row the page focused when it opened would keep its focus frame and look chosen too
+                entry.forceActiveFocus(Qt.MouseFocusReason);
+                page.selectSection(modelData.section);
+            }
             Accessible.name: modelData.title
         }
     }
@@ -303,9 +323,21 @@ Kirigami.Page {
                         Layout.fillWidth: true
                         Layout.leftMargin: page.contentMargin
                         Layout.rightMargin: page.contentMargin
-                        active: page.signedIn && page.activeSection === "user"
+                        active: page.signedIn && page.activeSection === "user" && page.userFormReady
                         visible: active
                         sourceComponent: userFormComponent
+                        // A narrow window opened the entry while the form was still coming: it takes the keys now
+                        onLoaded: {
+                            if (page.narrow && page.entryOpen && settingsView.activeFocus)
+                                page.focusPrimary();
+                        }
+                    }
+                    Kirigami.LoadingPlaceholder {
+                        objectName: "userPreferencesBuilding"
+                        Layout.alignment: Qt.AlignHCenter
+                        Layout.topMargin: Kirigami.Units.gridUnit * 2
+                        visible: page.signedIn && page.activeSection === "user" && userForm.status !== Loader.Ready
+                        text: i18n("Loading…")
                     }
                     Item {
                         Layout.preferredHeight: Kirigami.Units.largeSpacing

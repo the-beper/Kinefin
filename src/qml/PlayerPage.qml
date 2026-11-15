@@ -489,7 +489,7 @@ Kirigami.Page {
                         id: timeButton
                         objectName: "playerTimeButton"
                         // As wide as its widest text, so neither the button's frame nor the controls beside it move while the numbers change
-                        Layout.preferredWidth: Math.ceil(timeMetrics.advanceWidth) + leftPadding + rightPadding
+                        Layout.preferredWidth: Math.max(implicitWidth, widestTime.implicitWidth)
                         focusPolicy: Qt.TabFocus
                         font.features: { "tnum": 1 }
                         text: page.timeLabel
@@ -498,11 +498,13 @@ Kirigami.Page {
                         Controls.ToolTip.visible: hovered || visualFocus
                         Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
                         onClicked: { page.showRemaining = !page.showRemaining; page.wakeChrome(); }
-                        TextMetrics {
-                            id: timeMetrics
-                            font: timeButton.font
-                            text: page.widestTimeLabel
-                        }
+                    }
+                    // The time button with its widest text, never shown: the style paints the text inside margins of its own, so only the style can say how wide that is
+                    Controls.ToolButton {
+                        id: widestTime
+                        visible: false
+                        font: timeButton.font
+                        text: page.widestTimeLabel
                     }
                     Item { Layout.fillWidth: true }
                     OsdButton {
@@ -749,15 +751,17 @@ Kirigami.Page {
                 Controls.Label {
                     id: volumeLevel
                     Layout.alignment: Qt.AlignHCenter
-                    Layout.preferredWidth: Math.ceil(volumeMetrics.advanceWidth)
+                    Layout.preferredWidth: Math.max(implicitWidth, widestVolume.implicitWidth)
                     horizontalAlignment: Text.AlignHCenter
                     font.features: { "tnum": 1 }
                     text: i18nc("@label volume level", "%1%", page.player.volume)
-                    TextMetrics {
-                        id: volumeMetrics
-                        font: volumeLevel.font
-                        text: i18nc("@label volume level", "%1%", 100)
-                    }
+                }
+                // The level label with the widest level, never shown, measured the way the label renders
+                Controls.Label {
+                    id: widestVolume
+                    visible: false
+                    font: volumeLevel.font
+                    text: i18nc("@label volume level", "%1%", 100)
                 }
                 Controls.Slider {
                     id: volumeSlider

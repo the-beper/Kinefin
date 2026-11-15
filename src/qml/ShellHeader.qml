@@ -787,10 +787,8 @@ Item {
             objectName: "signOutItem"
             visible: root.signedIn
             action: signOutAction
+            // No tooltip: the confirmation the entry opens says what signing out removes, the description stays for screen readers
             Accessible.description: signOutAction.tooltip
-            QQC2.ToolTip.text: signOutAction.tooltip
-            QQC2.ToolTip.visible: hovered || visualFocus
-            QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
         }
         QQC2.MenuItem {
             objectName: "switchServerItem"

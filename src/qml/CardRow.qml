@@ -11,7 +11,7 @@ Item {
 
     required property var model
     required property Component delegate
-    // The height of the cards: the row adds the band the horizontal scroll bar takes
+    // The height of the cards, which is the height of the row
     required property real cardHeight
     required property string accessibleName
     // The flickable of the page the row sits in, which receives the vertical wheel
@@ -38,8 +38,7 @@ Item {
     readonly property ListView list: loader.item
 
     Layout.fillWidth: true
-    // The scroll bar is built with the row, the list later: the row has its height from the start
-    implicitHeight: cardHeight + scrollBar.implicitHeight
+    implicitHeight: cardHeight
 
     function focusList(reason) {
         if (list) {
@@ -132,6 +131,8 @@ Item {
             clip: true
             boundsBehavior: Flickable.StopAtBounds
             readonly property bool isCardRowList: true
+            // A drag or a flick takes the row over from the arrows
+            onMovementStarted: pageScroll.stop()
             // The row this list belongs to, for the moves between rows
             readonly property Item cardRow: root
             activeFocusOnTab: true
@@ -173,19 +174,7 @@ Item {
                 }
             }
 
-            Controls.ScrollBar.horizontal: scrollBar
         }
-    }
-
-    Controls.ScrollBar {
-        id: scrollBar
-
-        anchors {
-            left: parent.left
-            right: parent.right
-            bottom: parent.bottom
-        }
-        orientation: Qt.Horizontal
     }
 
     // A horizontal list swallows the vertical wheel without using it: this layer above it takes the vertical deltas for the page and leaves the horizontal ones to the list below
@@ -201,5 +190,61 @@ Item {
                 flick.contentY = Math.max(flick.originY, Math.min(flick.originY + flick.contentHeight - flick.height, flick.contentY - step));
             }
         }
+    }
+
+    // The row has no scroll bar: an arrow at each end moves it by about a view, shown while there is more that way (the wheel, a touchpad and touch scroll it as well)
+    function scrollBy(direction) {
+        if (!list)
+            return;
+        const start = list.originX - list.leftMargin;
+        const end = Math.max(start, list.originX + list.contentWidth + list.rightMargin - list.width);
+        const step = Math.max(list.width - Kirigami.Units.gridUnit * 4, list.width / 2);
+        // A click during the motion adds its step to where the motion is going
+        const base = pageScroll.running ? pageScroll.to : list.contentX;
+        list.cancelFlick();
+        pageScroll.to = Math.max(start, Math.min(end, base + direction * step));
+        pageScroll.restart();
+    }
+
+    NumberAnimation {
+        id: pageScroll
+        target: root.list
+        property: "contentX"
+        duration: Kirigami.Units.longDuration
+        easing.type: Easing.OutCubic
+    }
+
+    component RowArrow: Controls.RoundButton {
+        z: 3
+        anchors.verticalCenter: parent.verticalCenter
+        // The arrow keys move inside the list, which is the row's one tab stop
+        focusPolicy: Qt.NoFocus
+        display: Controls.AbstractButton.IconOnly
+        Controls.ToolTip.text: text
+        Controls.ToolTip.visible: hovered
+        Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
+    }
+
+    RowArrow {
+        objectName: "cardRowPrevious"
+        anchors.left: parent.left
+        anchors.leftMargin: Kirigami.Units.smallSpacing
+        visible: root.list !== null && !root.list.atXBeginning
+        icon.name: "go-previous"
+        text: i18nc("@action:button scroll a row of cards", "Previous")
+        // A page holds several rows: the row's name tells the arrows apart
+        Accessible.name: i18nc("@action:button %1 is the name of a row of cards", "Previous in %1", root.accessibleName)
+        onClicked: root.scrollBy(-1)
+    }
+
+    RowArrow {
+        objectName: "cardRowNext"
+        anchors.right: parent.right
+        anchors.rightMargin: Kirigami.Units.smallSpacing
+        visible: root.list !== null && !root.list.atXEnd
+        icon.name: "go-next"
+        text: i18nc("@action:button scroll a row of cards", "Next")
+        Accessible.name: i18nc("@action:button %1 is the name of a row of cards", "Next in %1", root.accessibleName)
+        onClicked: root.scrollBy(1)
     }
 }

@@ -24,6 +24,10 @@ Kirigami.ScrollablePage {
     readonly property bool inView: Kirigami.ColumnView.inViewport
     readonly property bool showSimilar: details.similarStatus === ItemDetailsModel.Loading || details.similarStatus === ItemDetailsModel.Failed || (details.similarStatus === ItemDetailsModel.Ready && details.similar.count > 0)
 
+    // Set by the first Media Info action: the Loader then builds the dialog, which hands itself back in mediaInfoDialog
+    property bool mediaInfoWanted: false
+    property MediaInfoDialog mediaInfoDialog: null
+
     // What the main menu's Refresh calls while this page is in front
     function refreshPage() {
         details.reload();
@@ -167,49 +171,6 @@ Kirigami.ScrollablePage {
         return i18n("Ends at %1", end.toLocaleTimeString(Qt.locale(), Locale.ShortFormat));
     }
 
-    // One line per stream: codec, resolution or channels, language, title and flags
-    function streamText(stream, kind) {
-        const parts = [];
-        if (stream.codec.length > 0)
-            parts.push(stream.codec.toUpperCase());
-        if (kind === "video" && stream.width > 0 && stream.height > 0)
-            parts.push(stream.width + "×" + stream.height);
-        if (kind === "audio" && stream.channels > 0)
-            parts.push(i18np("%1 channel", "%1 channels", stream.channels));
-        if (stream.language.length > 0)
-            parts.push(stream.language);
-        if (stream.title.length > 0)
-            parts.push(stream.title);
-        if (stream.isDefault)
-            parts.push(i18n("Default"));
-        if (stream.isForced)
-            parts.push(i18n("Forced"));
-        if (stream.isExternal)
-            parts.push(i18n("External"));
-        return parts.join(" · ");
-    }
-
-    // The rows of the media info form of one source: label and value lines
-    function sourceRows(source) {
-        const rows = [];
-        if (source.container.length > 0)
-            rows.push({ label: i18n("Container"), text: source.container });
-        if (source.size > 0)
-            rows.push({ label: i18n("Size"), text: Qt.locale().formattedDataSize(source.size, 1) });
-        if (source.bitrate > 0)
-            rows.push({ label: i18n("Bitrate"), text: i18n("%1 Mbps", (source.bitrate / 1000000).toLocaleString(Qt.locale(), "f", 1)) });
-        const streams = [
-            { label: i18n("Video"), kind: "video", list: source.video },
-            { label: i18n("Audio"), kind: "audio", list: source.audio },
-            { label: i18n("Subtitles"), kind: "subtitles", list: source.subtitles }
-        ];
-        for (const entry of streams) {
-            if (entry.list.length > 0)
-                rows.push({ label: entry.label, text: entry.list.map(stream => streamText(stream, entry.kind)).join("\n") });
-        }
-        return rows;
-    }
-
     actions: [
         Kirigami.Action {
             objectName: "togglePlayedAction"
@@ -218,6 +179,18 @@ Kirigami.ScrollablePage {
             visible: page.details.status === ItemDetailsModel.Ready && page.details.playable
             enabled: !page.details.playedBusy
             onTriggered: page.details.togglePlayed()
+        },
+        Kirigami.Action {
+            objectName: "mediaInfoAction"
+            text: i18n("Media Info")
+            icon.name: "documentinfo"
+            visible: page.details.mediaSources.length > 0
+            onTriggered: {
+                if (page.mediaInfoDialog)
+                    page.mediaInfoDialog.open();
+                else
+                    page.mediaInfoWanted = true;
+            }
         },
         Kirigami.Action {
             text: i18n("Refresh")
@@ -306,6 +279,23 @@ Kirigami.ScrollablePage {
         header: Item {
             width: list.width
             height: headerContent.implicitHeight + page.margin
+
+            // Built on the first use of the Media Info action and kept
+            Loader {
+                id: mediaInfo
+                objectName: "mediaInfoLoader"
+
+                active: page.mediaInfoWanted
+                sourceComponent: MediaInfoDialog {
+                    objectName: "mediaInfoDialog"
+                    sources: page.details.mediaSources
+                    window: page.Window.window
+                }
+                onLoaded: {
+                    page.mediaInfoDialog = item;
+                    item.open();
+                }
+            }
 
             ColumnLayout {
                 id: headerContent
@@ -745,38 +735,6 @@ Kirigami.ScrollablePage {
                         text: page.details.tagline
                     }
 
-                    Controls.Label {
-                        Layout.fillWidth: true
-                        visible: page.details.genres.length > 0
-                        wrapMode: Text.Wrap
-                        textFormat: Text.PlainText
-                        text: i18np("Genre: %2", "Genres: %2", page.details.genres.length, page.details.genres.join(", "))
-                    }
-
-                    Controls.Label {
-                        Layout.fillWidth: true
-                        visible: page.details.studios.length > 0
-                        wrapMode: Text.Wrap
-                        textFormat: Text.PlainText
-                        text: page.isSeries ? i18np("Network: %2", "Networks: %2", page.details.studios.length, page.details.studios.join(", ")) : i18np("Studio: %2", "Studios: %2", page.details.studios.length, page.details.studios.join(", "))
-                    }
-
-                    Controls.Label {
-                        Layout.fillWidth: true
-                        visible: page.details.directors.length > 0
-                        wrapMode: Text.Wrap
-                        textFormat: Text.PlainText
-                        text: i18np("Director: %2", "Directors: %2", page.details.directors.length, page.details.directors.join(", "))
-                    }
-
-                    Controls.Label {
-                        Layout.fillWidth: true
-                        visible: page.details.writers.length > 0
-                        wrapMode: Text.Wrap
-                        textFormat: Text.PlainText
-                        text: i18np("Writer: %2", "Writers: %2", page.details.writers.length, page.details.writers.join(", "))
-                    }
-
                     ColumnLayout {
                         Layout.fillWidth: true
                         Layout.maximumWidth: Kirigami.Units.gridUnit * 43
@@ -802,6 +760,85 @@ Kirigami.ScrollablePage {
                             visible: page.overviewExpanded || overviewLabel.truncated
                             text: page.overviewExpanded ? i18n("Show Less") : i18n("Show More")
                             onClicked: page.overviewExpanded = !page.overviewExpanded
+                        }
+                    }
+
+                    GridLayout {
+                        objectName: "detailsCredits"
+
+                        Layout.fillWidth: true
+                        Layout.maximumWidth: Kirigami.Units.gridUnit * 43
+                        visible: page.details.genres.length > 0 || page.details.studios.length > 0 || page.details.directors.length > 0 || page.details.writers.length > 0
+                        columns: 2
+                        columnSpacing: Kirigami.Units.largeSpacing
+                        rowSpacing: Kirigami.Units.smallSpacing
+
+                        Controls.Label {
+                            objectName: "creditsGenresLabel"
+                            Layout.alignment: Qt.AlignTop
+                            visible: page.details.genres.length > 0
+                            opacity: 0.7
+                            textFormat: Text.PlainText
+                            text: i18np("Genre", "Genres", page.details.genres.length)
+                        }
+                        Controls.Label {
+                            objectName: "creditsGenres"
+                            Layout.fillWidth: true
+                            visible: page.details.genres.length > 0
+                            wrapMode: Text.Wrap
+                            textFormat: Text.PlainText
+                            text: page.details.genres.join(", ")
+                        }
+
+                        Controls.Label {
+                            objectName: "creditsStudiosLabel"
+                            Layout.alignment: Qt.AlignTop
+                            visible: page.details.studios.length > 0
+                            opacity: 0.7
+                            textFormat: Text.PlainText
+                            text: page.isSeries ? i18np("Network", "Networks", page.details.studios.length) : i18np("Studio", "Studios", page.details.studios.length)
+                        }
+                        Controls.Label {
+                            objectName: "creditsStudios"
+                            Layout.fillWidth: true
+                            visible: page.details.studios.length > 0
+                            wrapMode: Text.Wrap
+                            textFormat: Text.PlainText
+                            text: page.details.studios.join(", ")
+                        }
+
+                        Controls.Label {
+                            objectName: "creditsDirectorsLabel"
+                            Layout.alignment: Qt.AlignTop
+                            visible: page.details.directors.length > 0
+                            opacity: 0.7
+                            textFormat: Text.PlainText
+                            text: i18np("Director", "Directors", page.details.directors.length)
+                        }
+                        Controls.Label {
+                            objectName: "creditsDirectors"
+                            Layout.fillWidth: true
+                            visible: page.details.directors.length > 0
+                            wrapMode: Text.Wrap
+                            textFormat: Text.PlainText
+                            text: page.details.directors.join(", ")
+                        }
+
+                        Controls.Label {
+                            objectName: "creditsWritersLabel"
+                            Layout.alignment: Qt.AlignTop
+                            visible: page.details.writers.length > 0
+                            opacity: 0.7
+                            textFormat: Text.PlainText
+                            text: i18np("Writer", "Writers", page.details.writers.length)
+                        }
+                        Controls.Label {
+                            objectName: "creditsWriters"
+                            Layout.fillWidth: true
+                            visible: page.details.writers.length > 0
+                            wrapMode: Text.Wrap
+                            textFormat: Text.PlainText
+                            text: page.details.writers.join(", ")
                         }
                     }
 
@@ -1053,51 +1090,6 @@ Kirigami.ScrollablePage {
                                     wrapMode: Text.Wrap
                                     textFormat: Text.PlainText
                                     text: chapter.modelData.name
-                                }
-                            }
-                        }
-                    }
-
-                    Kirigami.Heading {
-                        Layout.fillWidth: true
-                        visible: page.details.mediaSources.length > 0
-                        level: 2
-                        text: i18n("Media Info")
-                    }
-
-                    Repeater {
-                        model: page.details.mediaSources
-                        delegate: ColumnLayout {
-                            id: mediaSource
-                            required property var modelData
-
-                            Layout.fillWidth: true
-                            spacing: Kirigami.Units.smallSpacing
-
-                            Controls.Label {
-                                Layout.fillWidth: true
-                                visible: text.length > 0
-                                wrapMode: Text.Wrap
-                                font.bold: true
-                                textFormat: Text.PlainText
-                                text: mediaSource.modelData.name
-                            }
-
-                            Kirigami.FormLayout {
-                                Layout.fillWidth: true
-
-                                Repeater {
-                                    model: page.sourceRows(mediaSource.modelData)
-                                    delegate: Controls.Label {
-                                        required property var modelData
-
-                                        Kirigami.FormData.label: modelData.label
-                                        Kirigami.FormData.labelAlignment: Qt.AlignTop
-                                        Layout.fillWidth: true
-                                        wrapMode: Text.Wrap
-                                        textFormat: Text.PlainText
-                                        text: modelData.text
-                                    }
                                 }
                             }
                         }

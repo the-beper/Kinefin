@@ -91,6 +91,7 @@ Item {
     }
 
     onViewChanged: {
+        topFling.stop();
         if (!view)
             return;
         applyPendingPosition();
@@ -109,6 +110,7 @@ Item {
     // A new order, filter or view starts from the first result
     function scrollToStart() {
         pendingPosition = null;
+        topFling.stop();
         if (!view)
             return;
         view.currentIndex = 0;
@@ -137,6 +139,35 @@ Item {
         target: content.view
         function onCountChanged() {
             content.applyPendingPosition();
+        }
+        // The user takes the view over
+        function onMovementStarted() {
+            topFling.stop();
+        }
+    }
+
+    // Return to Top: a fling that slows down at the first row; a long way is cut short first, since every row passed would be built on the way
+    function returnToTop() {
+        if (!view)
+            return;
+        view.cancelFlick();
+        const top = view.originY - view.topMargin;
+        if (view.contentY - top > view.height * 2)
+            view.contentY = top + view.height * 2;
+        topFling.from = view.contentY;
+        topFling.to = top;
+        topFling.restart();
+    }
+
+    NumberAnimation {
+        id: topFling
+        target: content.view
+        property: "contentY"
+        duration: Kirigami.Units.veryLongDuration
+        easing.type: Easing.OutCubic
+        onFinished: {
+            if (content.view)
+                content.view.currentIndex = 0;
         }
     }
 
@@ -274,6 +305,34 @@ Item {
                 focusPolicy: Qt.NoFocus
                 highlighted: ListView.isCurrentItem && list.activeFocus
                 onClicked: content.ownerPage.Window.window.openItem(itemId, content.ownerPage)
+            }
+        }
+    }
+
+    // Under the toolbar: the cards fade into the window colour as they scroll up beneath it, instead of looking cut by its edge
+    Rectangle {
+        objectName: "libraryTopFade"
+        anchors {
+            left: parent.left
+            right: parent.right
+            top: parent.top
+        }
+        height: Kirigami.Units.gridUnit
+        opacity: content.atStart ? 0 : 1
+        gradient: Gradient {
+            GradientStop {
+                position: 0
+                color: Kirigami.Theme.backgroundColor
+            }
+            GradientStop {
+                position: 1
+                color: Qt.alpha(Kirigami.Theme.backgroundColor, 0)
+            }
+        }
+
+        Behavior on opacity {
+            NumberAnimation {
+                duration: Kirigami.Units.shortDuration
             }
         }
     }
