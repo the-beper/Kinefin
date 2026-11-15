@@ -178,7 +178,7 @@ Kirigami.ApplicationWindow {
         // The page leaves the stack at once: going back by moving the index leaves it there until a scroll animation ends
         const target = pageStack.get(index - 1);
         if (pageStack.get(index) === leaving)
-            pageStack.pop(target);
+            popTo(target);
     }
 
     // A back that only moves the index (Esc, the header button, the toolbar back button) leaves the
@@ -207,7 +207,7 @@ Kirigami.ApplicationWindow {
         onActivated: window.escapeBack()
     }
 
-    // What a remote control asks for besides the keys it sends: the player commands reach the player page only while it is in front
+    // What a remote control asks for besides the keys it sends: the player commands reach the player in every mode, the full page or the mini player
     function popupOpen() {
         for (const item of window.overlay?.children ?? []) {
             if (item.visible && String(item).startsWith("QQuickPopupItem"))
@@ -223,12 +223,13 @@ Kirigami.ApplicationWindow {
                 escapeBack();
             break;
         case "home":
-            if (!playbackPageShowing)
-                goHome();
+            goHome();
             break;
         default:
-            if (playbackPageShowing)
-                pageStack.currentItem.playerAction(name);
+            playerAction(name);
+            // The bars of the full player show for what the remote did
+            if (playbackMode === "full")
+                playerPage?.wakeChrome();
         }
     }
     Connections {
@@ -236,11 +237,16 @@ Kirigami.ApplicationWindow {
         function onActionRequested(action) { window.remoteAction(action); }
     }
 
-    // The search would take the place of the player and end the playback
     Shortcut {
         sequences: [StandardKey.Find]
-        enabled: window.signedIn && !window.playbackPageShowing
+        enabled: window.signedIn
         onActivated: window.openSearch()
+    }
+    // Brings the mini player back to the full player
+    Shortcut {
+        sequences: ["Ctrl+Shift+P"]
+        enabled: window.playbackMode === "mini"
+        onActivated: window.expandPlayer()
     }
 
     // The page that comes to the front takes the keyboard focus, so Tab and the arrows work without a mouse click first; a page that already focused one of its own fields (sign-in, search) keeps that focus
@@ -451,33 +457,191 @@ Kirigami.ApplicationWindow {
             return;
         }
         finishTabMotion();
+        parkVideo();
         pageStack.clear();
         const shown = pageStack.push(Qt.resolvedUrl(page), properties);
         openRequestedItem(shown);
         Qt.callLater(settleStartup);
     }
 
-    // The only way to the details of an item: the pages above the one asking give way, and the item already showing is not pushed twice
     readonly property bool playbackPageShowing: pageStack.currentItem?.objectName === "playerPage"
 
+    // How the playback shows: "none" while nothing plays, "full" while the player page is in front, "mini" while it goes on under another page. The C++ side knows nothing of it
+    property string playbackMode: "none"
+    // The player page pushed last; QML clears it when the page is deleted
+    property Item playerPage: null
+    // Where the video item sits in the current mode: the slot of the player page or of the mini player, none without playback
+    readonly property Item videoSlot: playbackMode === "full" ? (playerPage?.videoSlot ?? null) : playbackMode === "mini" ? miniPlayer.videoSlot : null
+    onVideoSlotChanged: placeVideo()
+
+    // The one video item, built when playback starts and deleted only when it ends, so the mpv core and the session outlive every page; it is never a child of a page, only moved between the slots
+    Loader {
+        id: videoLoader
+        objectName: "playbackVideoHolder"
+        // Not hidden and not empty: the item stays in the window and keeps a surface to render in, never shown
+        width: Kirigami.Units.gridUnit
+        height: Kirigami.Units.gridUnit
+        opacity: 0
+        active: window.playbackMode !== "none"
+        sourceComponent: MpvVideoItem {
+            objectName: "videoRenderer"
+            anchors.fill: parent
+            player: window.player
+        }
+        onLoaded: window.placeVideo()
+    }
+
+    // The loader holds the item while no slot is there
+    function placeVideo() {
+        const item = videoLoader.item;
+        if (item)
+            item.parent = videoSlot ?? videoLoader;
+    }
+
+    // Called before any change of the page stack that removes the player page while something plays: the mode moves to the mini player and the video item to its slot first, so the item never leaves its window
+    function parkVideo() {
+        if (playbackMode !== "full" || !playbackPageShowing || !player?.active)
+            return;
+        playbackMode = "mini";
+        placeVideo();
+    }
+
+    // Pops to a page of the stack; the video is parked first when the page in front is the player's, and then, as Kirigami's Back does, only the current index moves: the pages left above are taken once the stack settles, which deletes them (a pop of the page in front does not)
+    function popTo(page) {
+        if (page && page !== pageStack.currentItem && playbackPageShowing) {
+            parkVideo();
+            for (let i = 0; i < pageStack.depth; ++i) {
+                if (pageStack.get(i) === page) {
+                    pageStack.currentIndex = i;
+                    return;
+                }
+            }
+        }
+        pageStack.pop(page);
+    }
+
+    MiniPlayer {
+        id: miniPlayer
+        shell: window
+    }
+    // The height from the bottom of the window that the docked mini player covers, for the content that ends there and has a control in the corner
+    readonly property real miniPlayerSpace: playbackMode === "mini" ? miniPlayer.height + miniPlayer.margin * 2 : 0
+
+    // A playback that fails while the mini player shows brings the page back, with its error and its Close Player button
+    readonly property bool failedInMini: playbackMode === "mini" && !!player && !player.active && !!player.errorText
+    // A turn later: the expansion changes the mode this property is computed from
+    onFailedInMiniChanged: if (failedInMini) Qt.callLater(expandPlayer)
+
+    // A new play always opens the full player, from the mini player too
     function showPlayerPage() {
         if (!window.signedIn || !window.player)
             return false;
         if (playbackPageShowing)
             return true;
         finishTabMotion();
-        return !!pageStack.push(Qt.resolvedUrl("PlayerPage.qml"), {
+        const before = playbackMode;
+        // The page of an earlier visit may still be waiting to be deleted: the video must not go into its slot
+        playerPage = null;
+        playbackMode = "full";
+        const page = pageStack.push(Qt.resolvedUrl("PlayerPage.qml"), {
             player: window.player, connection: connection
         });
+        if (!page) {
+            playbackMode = before;
+            return false;
+        }
+        playerPage = page;
+        placeVideo();
+        return true;
     }
 
-    // Positions and the Continue Watching row change while something plays: Home asks again once the player page is gone
-    onPlaybackPageShowingChanged: {
-        if (playbackPageShowing)
+    function expandPlayer() {
+        if (playbackMode === "mini")
+            showPlayerPage();
+    }
+
+    // Playback is over or was stopped: the video item goes (its player first, so the detach is at once), and the player page with it
+    function endPlayback() {
+        if (playbackMode === "none")
             return;
+        const wasMini = playbackMode === "mini";
+        if (videoLoader.item)
+            videoLoader.item.player = null;
+        playbackMode = "none";
+        const live = connection.state === ConnectionController.Authenticated;
+        if (playbackPageShowing && live)
+            pageStack.pop();
+        playerPage = null;
+        // Home is stale once a playback that outlived the player page ends
+        if (wasMini && live)
+            connection.reloadHome();
+    }
+
+    function stopPlayback() {
+        if (player)
+            player.stop();
+        endPlayback();
+    }
+
+    function stepVolume(steps) {
+        // Turning the volume up is meant to be heard
+        if (steps > 0 && player.muted)
+            player.toggleMute();
+        player.setVolume(Math.max(0, Math.min(100, player.volume + steps * 5)));
+    }
+
+    // The player commands of the keyboard and of the remote socket, in every mode; a name that is no command does nothing
+    function playerAction(name) {
+        if (playbackMode === "none" || !player)
+            return;
+        switch (name) {
+        case "playpause": player.togglePause(); break;
+        case "play": if (player.paused) player.resume(); break;
+        case "pause": if (!player.paused) player.pause(); break;
+        case "stop": stopPlayback(); break;
+        case "next": player.next(); break;
+        case "previous": player.previous(); break;
+        case "fastforward": player.seekRelative(10); break;
+        case "rewind": player.seekRelative(-10); break;
+        case "volumeup": stepVolume(1); break;
+        case "volumedown": stepVolume(-1); break;
+        case "togglemute": player.toggleMute(); break;
+        case "togglefullscreen":
+            // A full screen needs the full player
+            if (playbackMode === "mini" && !showPlayerPage())
+                break;
+            togglePlayerFullscreen();
+            break;
+        }
+    }
+
+    // The player page in front gives way to the mini player, or ends the playback when there is nothing playing (an error shown, an item that ended); Home asks for its rows again once the page is gone, since positions change while something plays
+    onPlaybackPageShowingChanged: {
+        if (playbackPageShowing) {
+            if (playbackMode === "mini")
+                playbackMode = "full";
+            return;
+        }
+        if (playbackMode === "full") {
+            if (player?.active)
+                playbackMode = "mini";
+            else
+                endPlayback();
+        }
         restoreVisibilityAfterPlayer();
         if (signedIn)
             connection.reloadHome();
+    }
+
+    // The end of the playback, in every mode; the check is made a turn later, since the next item of a queue may already be starting
+    Connections {
+        target: window.playbackMode !== "none" ? window.player : null
+        function onFinished() {
+            Qt.callLater(() => {
+                if (window.player && !window.player.active)
+                    window.endPlayback();
+            });
+        }
     }
 
     function playItem(itemId, resumeTicks) {
@@ -501,11 +665,12 @@ Kirigami.ApplicationWindow {
         return true;
     }
 
+    // The only way to the details of an item: the pages above the one asking give way, and the item already showing is not pushed twice
     function openItem(itemId, fromPage) {
         if (connection.state !== ConnectionController.Authenticated)
             return;
         if (fromPage)
-            pageStack.pop(fromPage);
+            popTo(fromPage);
         const current = pageStack.currentItem;
         if (current?.objectName === "itemDetailsPage" && sameItem(current.itemId, itemId))
             return;
@@ -526,7 +691,7 @@ Kirigami.ApplicationWindow {
             if (candidate === fromPage)
                 break;
             if (candidate?.objectName === "itemDetailsPage" && sameItem(candidate.itemId, itemId)) {
-                pageStack.pop(candidate);
+                popTo(candidate);
                 return;
             }
         }
@@ -565,7 +730,7 @@ Kirigami.ApplicationWindow {
     function popToBase() {
         const base = pageStack.get(0);
         if (base)
-            pageStack.pop(base);
+            popTo(base);
     }
 
     // The first keystroke of the header box on a type tab pops the pages above it: the box keeps the keyboard, which the page it pops back to would take
@@ -601,7 +766,7 @@ Kirigami.ApplicationWindow {
         if (index >= 0) {
             page = pageStack.get(index);
             if (index < pageStack.currentIndex)
-                pageStack.pop(page);
+                popTo(page);
         } else {
             popToBase();
             connection.search.clear();
@@ -622,7 +787,7 @@ Kirigami.ApplicationWindow {
         const index = searchPageIndex();
         if (index >= 0) {
             if (index < pageStack.currentIndex)
-                pageStack.pop(pageStack.get(index));
+                popTo(pageStack.get(index));
             return;
         }
         // While the box holds the keyboard, the page it opens must not take it: Kirigami's
@@ -656,7 +821,7 @@ Kirigami.ApplicationWindow {
             return;
         if (!connection.openGenreRails(fromPage.model))
             return;
-        pageStack.pop(fromPage);
+        popTo(fromPage);
         pageStack.push(Qt.resolvedUrl("GenreRailsPage.qml"), { connection: connection });
     }
 
@@ -848,6 +1013,7 @@ Kirigami.ApplicationWindow {
         // Queued before the stack changes, so an error on the way cannot leave the row invisible
         if (leavingTab !== "" && prepareTabMotion())
             Qt.callLater(startTabMotionWhenReady, leavingTab, name);
+        parkVideo();
         pageStack.clear();
         // Leaving the type pages gives the sub-tab's data and channels back
         if (name === "home")
@@ -951,7 +1117,7 @@ Kirigami.ApplicationWindow {
         for (let i = 0; i <= pageStack.currentIndex; ++i) {
             const page = pageStack.get(i);
             if (page?.objectName === "resumeItemsPage") {
-                pageStack.pop(page);
+                popTo(page);
                 return;
             }
         }
@@ -993,13 +1159,13 @@ Kirigami.ApplicationWindow {
         for (let i = 0; i <= pageStack.currentIndex; ++i) {
             const page = pageStack.get(i);
             if (page?.objectName === "libraryPage" && page.tabType === "" && connection.library.libraryId === libraryId) {
-                pageStack.pop(page);
+                popTo(page);
                 return;
             }
         }
         const home = pageStack.get(0);
         if (home)
-            pageStack.pop(home);
+            popTo(home);
         if (connection.openLibrary(libraryId))
             pageStack.push(Qt.resolvedUrl("LibraryPage.qml"), { model: connection.library, libraryName: libraryName, connection: connection });
     }
@@ -1009,8 +1175,10 @@ Kirigami.ApplicationWindow {
         target: window.connection
         // A menu left open over a session that ended would act on an item of the server the user left
         function onStateChanged() {
-            if (window.connection.state !== ConnectionController.Authenticated)
+            if (window.connection.state !== ConnectionController.Authenticated) {
                 cardMenu.close();
+                window.endPlayback();
+            }
         }
         function onLibrariesChanged() {
             if (window.signedIn && window.connection.state === ConnectionController.Authenticated && window.isTypeTab(window.rootTab) && !window.hasTypeTab(window.rootTab))
@@ -1052,7 +1220,7 @@ Kirigami.ApplicationWindow {
     function openSection(name, url, properties) {
         for (let i = 0; i <= pageStack.currentIndex; ++i) {
             if (pageStack.get(i)?.objectName === name) {
-                pageStack.pop(pageStack.get(i));
+                popTo(pageStack.get(i));
                 return;
             }
         }

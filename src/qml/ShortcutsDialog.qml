@@ -31,6 +31,7 @@ Kirigami.Dialog {
         ["Ctrl+Down", i18nc("@item:intable shortcut action", "Move Queue Item Down")],
         ["Delete", i18nc("@item:intable shortcut action", "Remove Queue Item")],
         ["Ctrl+,", i18nc("@item:intable shortcut action", "Settings")],
+        ["Ctrl+Shift+P", i18nc("@item:intable shortcut action", "Expand Player")],
         ["Ctrl+Shift+/", i18nc("@item:intable shortcut action", "Show Keyboard Shortcuts")]
     ]
     // The keys of the player page (PlayerPage.qml)

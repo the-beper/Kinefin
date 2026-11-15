@@ -30,6 +30,7 @@ src/qml/LoginPage.qml
 src/qml/UserPickerPage.qml
 src/qml/Main.qml
 src/qml/PlayerPage.qml
+src/qml/MiniPlayer.qml
 src/qml/PlaybackInfoOverlay.qml
 src/qml/ShellHeader.qml
 src/qml/AboutDialog.qml

@@ -11,12 +11,17 @@
 #include <QHostAddress>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QNetworkRequest>
 #include <QPointer>
 #include <QSignalSpy>
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QUrlQuery>
 #include <QtTest>
+
+#include <functional>
 
 namespace {
 
@@ -32,6 +37,78 @@ bool loginAs(Kinefin::JellyfinClient &client, const FakeJellyfin &server, const 
         return false;
     return client.authenticate(name, QStringLiteral("x"))
            && QTest::qWaitFor([&] { return loggedIn.size() == 1; }, 5000);
+}
+
+using PlaylistOp = Kinefin::JellyfinClient::PlaylistOp;
+
+const QString kItemA = QStringLiteral("aaaa0000aaaa0000aaaa0000aaaa0001");
+const QString kItemB = QStringLiteral("bbbb0000bbbb0000bbbb0000bbbb0002");
+const QString kItemC = QStringLiteral("cccc0000cccc0000cccc0000cccc0003");
+const QString kDashedItem = QStringLiteral("11111111-2222-3333-4444-555555555555");
+
+// `count` distinct valid ids
+QStringList manyIds(int count)
+{
+    QStringList ids;
+    for (int i = 1; i <= count; ++i)
+        ids.append(QString::number(i, 16).rightJustified(32, QLatin1Char('d')));
+    return ids;
+}
+
+// The PlaylistItemId of every item of a page, in order
+QStringList entryIdsOf(const QJsonArray &items)
+{
+    QStringList ids;
+    for (const QJsonValue &item : items)
+        ids.append(item.toObject().value(QStringLiteral("PlaylistItemId")).toString());
+    return ids;
+}
+
+// The item id of one row of a page
+QString idAt(const QJsonArray &items, int row)
+{
+    return items.at(row).toObject().value(QStringLiteral("Id")).toString();
+}
+
+// Whether every recorded playlist request carries the session token in its header and nowhere else (not in the request line, not in the body)
+bool tokenOnlyInTheHeader(const FakeJellyfin &server)
+{
+    for (const auto &request : server.playlistRequests) {
+        if (!request.authorization.contains(kTokenField) || request.route.contains(kFixtureToken)
+            || request.body.contains(kFixtureToken))
+            return false;
+    }
+    return !server.playlistRequests.isEmpty();
+}
+
+// The DELETE /Items/{id} requests the fake saw
+int deleteRequests(const FakeJellyfin &server)
+{
+    int count = 0;
+    for (const auto &request : server.playlistRequests)
+        count += request.method == "DELETE" && request.route.contains("/Items/")
+                 && !request.route.contains("/Playlists/");
+    return count;
+}
+
+// One code point as a string
+// Built by hand: QString::fromUcs4 drops a leading U+FEFF as a byte order mark
+QString codePoint(char32_t cp)
+{
+    if (QChar::requiresSurrogates(cp)) {
+        const QChar pair[2]{QChar(QChar::highSurrogate(cp)), QChar(QChar::lowSurrogate(cp))};
+        return QString(pair, 2);
+    }
+    return QString(QChar(char16_t(cp)));
+}
+
+// `count` copies of one code point
+QString repeated(char32_t cp, int count)
+{
+    QString result;
+    for (int i = 0; i < count; ++i)
+        result += codePoint(cp);
+    return result;
 }
 
 QJsonObject publicEntry(const QString &id, const QString &name, const QString &tag = {})
@@ -3594,6 +3671,934 @@ class TestJellyfinClient : public QObject {
             QCOMPARE(method, QByteArrayLiteral("GET"));
         }
         QCOMPARE(displayRequests, 1);
+    }
+
+    void playlistCreateSendsTheVideoBody()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        QSignalSpy done(&client, &Kinefin::JellyfinClient::playlistWriteSucceeded);
+        QSignalSpy failed(&client, &Kinefin::JellyfinClient::playlistWriteFailed);
+        QVERIFY(client.createPlaylist(QStringLiteral("  Weekend  "), {kItemA, kDashedItem}));
+        QTRY_COMPARE(done.size(), 1);
+        QCOMPARE(failed.size(), 0);
+        const QList<QVariant> result = done.takeFirst();
+        QCOMPARE(result.at(0).value<PlaylistOp>(), PlaylistOp::Create);
+        QVERIFY(result.at(1).toString().isEmpty());
+        QCOMPARE(server.playlists.size(), 1);
+        QCOMPARE(result.at(2).toString(), server.playlists.constFirst().id);
+        QCOMPARE(server.playlists.constFirst().name, QStringLiteral("Weekend"));
+        QCOMPARE(server.playlistItemIds(result.at(2).toString()),
+                 (QStringList{kItemA, kDashedItem}));
+        QCOMPARE(server.playlistRequests.size(), 1);
+        const auto &request = server.playlistRequests.constFirst();
+        QCOMPARE(request.method, QByteArrayLiteral("POST"));
+        QVERIFY(request.route.endsWith("/jellyfin/Playlists"));
+        QVERIFY(request.contentType.startsWith("application/json"));
+        QVERIFY(tokenOnlyInTheHeader(server));
+        const QJsonObject body = QJsonDocument::fromJson(request.body).object();
+        const QJsonObject expected{{QStringLiteral("Name"), QStringLiteral("Weekend")},
+                                   {QStringLiteral("Ids"), QJsonArray{kItemA, kDashedItem}},
+                                   {QStringLiteral("UserId"), client.userId()},
+                                   {QStringLiteral("MediaType"), QStringLiteral("Video")},
+                                   {QStringLiteral("IsPublic"), false}};
+        QVERIFY(body == expected);
+    }
+
+    void playlistCreateAcceptsNoItemsAndTheLimits()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        QSignalSpy done(&client, &Kinefin::JellyfinClient::playlistWriteSucceeded);
+        QVERIFY(client.createPlaylist(QStringLiteral("Empty"), {}));
+        QTRY_COMPARE(done.size(), 1);
+        QVERIFY(server.playlists.constFirst().entries.isEmpty());
+        QVERIFY(client.createPlaylist(QString(Kinefin::MaxPlaylistNameChars, QLatin1Char('n')),
+                                      manyIds(Kinefin::MaxPlaylistWriteIds)));
+        QTRY_COMPARE(done.size(), 2);
+        QCOMPARE(server.playlists.size(), 2);
+        QCOMPARE(server.playlists.constLast().entries.size(), Kinefin::MaxPlaylistWriteIds);
+    }
+
+    void playlistCreateReplyWithoutAValidIdFails()
+    {
+        const QList<QByteArray> replies{QByteArrayLiteral("{}"),
+                                        QByteArrayLiteral("{\"Id\":\"../Users\"}"),
+                                        QByteArrayLiteral("{\"Id\":7}"), QByteArrayLiteral("[]"),
+                                        QByteArrayLiteral("not json")};
+        for (const QByteArray &reply : replies) {
+            FakeJellyfin server;
+            QVERIFY(server.listen());
+            server.playlistCreateRawBody = reply;
+            Kinefin::JellyfinClient client;
+            QVERIFY(login(client, server));
+            QSignalSpy done(&client, &Kinefin::JellyfinClient::playlistWriteSucceeded);
+            QSignalSpy failed(&client, &Kinefin::JellyfinClient::playlistWriteFailed);
+            QVERIFY(client.createPlaylist(QStringLiteral("Name"), {kItemA}));
+            QTRY_COMPARE(failed.size(), 1);
+            QCOMPARE(failed.constFirst().at(0).value<PlaylistOp>(), PlaylistOp::Create);
+            QCOMPARE(failed.constFirst().at(2).toInt(), 200);
+            QCOMPARE(done.size(), 0);
+            // The slot is free again
+            QVERIFY(client.createPlaylist(QStringLiteral("Name"), {kItemA}));
+        }
+    }
+
+    void playlistAddEncodesTheIds()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        const QString playlist = server.seedPlaylist(QStringLiteral("Mine"), {kItemA});
+        QSignalSpy done(&client, &Kinefin::JellyfinClient::playlistWriteSucceeded);
+        QVERIFY(client.addToPlaylist(playlist, {kItemB, kDashedItem}));
+        QTRY_COMPARE(done.size(), 1);
+        QCOMPARE(done.constFirst().at(0).value<PlaylistOp>(), PlaylistOp::Add);
+        QCOMPARE(done.constFirst().at(1).toString(), playlist);
+        QVERIFY(done.constFirst().at(2).toString().isEmpty());
+        QCOMPARE(server.playlistItemIds(playlist), (QStringList{kItemA, kItemB, kDashedItem}));
+        QVERIFY(tokenOnlyInTheHeader(server));
+        const auto &request = server.playlistRequests.constLast();
+        QCOMPARE(request.method, QByteArrayLiteral("POST"));
+        QVERIFY(request.route.contains(
+            QByteArray("/jellyfin/Playlists/" + playlist.toUtf8() + "/Items?")));
+        const QUrlQuery query = FakeJellyfin::capturedListingQuery(request.route);
+        QCOMPARE(query.queryItemValue(QStringLiteral("ids")),
+                 kItemB + QLatin1Char(',') + kDashedItem);
+        QCOMPARE(query.queryItemValue(QStringLiteral("userId")), client.userId());
+    }
+
+    void playlistRemoveUsesEntryIds()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        const QString playlist =
+            server.seedPlaylist(QStringLiteral("Mine"), {kItemA, kItemB, kItemC});
+        const QString entryA = server.entryIdOf(playlist, kItemA);
+        const QString entryC = server.entryIdOf(playlist, kItemC);
+        QVERIFY(!entryA.isEmpty() && entryA != kItemA);
+        QSignalSpy done(&client, &Kinefin::JellyfinClient::playlistWriteSucceeded);
+        // An item id is no entry id: the server ignores it and still answers 204
+        QVERIFY(client.removePlaylistEntries(playlist, {kItemB}));
+        QTRY_COMPARE(done.size(), 1);
+        QCOMPARE(server.playlistItemIds(playlist), (QStringList{kItemA, kItemB, kItemC}));
+        QVERIFY(client.removePlaylistEntries(playlist, {entryA, entryC}));
+        QTRY_COMPARE(done.size(), 2);
+        QCOMPARE(done.constLast().at(0).value<PlaylistOp>(), PlaylistOp::Remove);
+        QCOMPARE(server.playlistItemIds(playlist), (QStringList{kItemB}));
+        const auto &request = server.playlistRequests.constLast();
+        QCOMPARE(request.method, QByteArrayLiteral("DELETE"));
+        QCOMPARE(FakeJellyfin::capturedListingQuery(request.route)
+                     .queryItemValue(QStringLiteral("entryIds")),
+                 entryA + QLatin1Char(',') + entryC);
+    }
+
+    void playlistMoveUsesTheEntryPath()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        const QString playlist =
+            server.seedPlaylist(QStringLiteral("Mine"), {kItemA, kItemB, kItemC});
+        const QString entryC = server.entryIdOf(playlist, kItemC);
+        QSignalSpy done(&client, &Kinefin::JellyfinClient::playlistWriteSucceeded);
+        QSignalSpy failed(&client, &Kinefin::JellyfinClient::playlistWriteFailed);
+        QVERIFY(client.movePlaylistEntry(playlist, entryC, 0));
+        QTRY_COMPARE(done.size(), 1);
+        QCOMPARE(done.constFirst().at(0).value<PlaylistOp>(), PlaylistOp::Move);
+        QCOMPARE(server.playlistItemIds(playlist), (QStringList{kItemC, kItemA, kItemB}));
+        const auto &request = server.playlistRequests.constLast();
+        QCOMPARE(request.method, QByteArrayLiteral("POST"));
+        QVERIFY(request.route.endsWith(QByteArray("/jellyfin/Playlists/" + playlist.toUtf8()
+                                                  + "/Items/" + entryC.toUtf8() + "/Move/0")));
+        // The client sends the index as given: past the end is the server's 500, nothing moves
+        QVERIFY(client.movePlaylistEntry(playlist, entryC, 3));
+        QTRY_COMPARE(failed.size(), 1);
+        QCOMPARE(failed.constFirst().at(0).value<PlaylistOp>(), PlaylistOp::Move);
+        QCOMPARE(failed.constFirst().at(2).toInt(), 500);
+        QCOMPARE(server.playlistItemIds(playlist), (QStringList{kItemC, kItemA, kItemB}));
+        // The last valid index moves it to the end; an item id is a silent no-op
+        QVERIFY(client.movePlaylistEntry(playlist, entryC, 2));
+        QTRY_COMPARE(done.size(), 2);
+        QCOMPARE(server.playlistItemIds(playlist), (QStringList{kItemA, kItemB, kItemC}));
+        QVERIFY(client.movePlaylistEntry(playlist, kItemA, 2));
+        QTRY_COMPARE(done.size(), 3);
+        QCOMPARE(server.playlistItemIds(playlist), (QStringList{kItemA, kItemB, kItemC}));
+    }
+
+    void playlistRenameAndDelete()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        const QString playlist = server.seedPlaylist(QStringLiteral("Old"), {kItemA});
+        const QString other = server.seedPlaylist(QStringLiteral("Other"), {kItemB});
+        QSignalSpy done(&client, &Kinefin::JellyfinClient::playlistWriteSucceeded);
+        QVERIFY(client.renamePlaylist(playlist, QStringLiteral(" New name ")));
+        QTRY_COMPARE(done.size(), 1);
+        QCOMPARE(done.constFirst().at(0).value<PlaylistOp>(), PlaylistOp::Rename);
+        QCOMPARE(server.playlistById(playlist)->name, QStringLiteral("New name"));
+        auto request = server.playlistRequests.constLast();
+        QCOMPARE(request.method, QByteArrayLiteral("POST"));
+        QVERIFY(request.route.endsWith(QByteArray("/jellyfin/Playlists/" + playlist.toUtf8())));
+        QVERIFY(request.contentType.startsWith("application/json"));
+        const QJsonObject renamed{{QStringLiteral("Name"), QStringLiteral("New name")}};
+        QVERIFY(QJsonDocument::fromJson(request.body).object() == renamed);
+        QVERIFY(client.deletePlaylist(playlist));
+        QTRY_COMPARE(done.size(), 2);
+        QCOMPARE(done.constLast().at(0).value<PlaylistOp>(), PlaylistOp::Delete);
+        QCOMPARE(done.constLast().at(1).toString(), playlist);
+        QVERIFY(!server.playlistById(playlist));
+        QVERIFY(server.playlistById(other));
+        request = server.playlistRequests.constLast();
+        QCOMPARE(request.method, QByteArrayLiteral("DELETE"));
+        QVERIFY(request.route.endsWith(QByteArray("/jellyfin/Items/" + playlist.toUtf8())));
+        // The delete is preceded by a read of the same item, with the user
+        const auto &read = server.playlistRequests.at(server.playlistRequests.size() - 2);
+        QCOMPARE(read.method, QByteArrayLiteral("GET"));
+        QVERIFY(read.route.startsWith(QByteArray("/jellyfin/Items/" + playlist.toUtf8() + "?")));
+        QCOMPARE(
+            FakeJellyfin::capturedListingQuery(read.route).queryItemValue(QStringLiteral("userId")),
+            client.userId());
+        QVERIFY(tokenOnlyInTheHeader(server));
+    }
+
+    void playlistRefusedInputSendsNothing()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        const QString playlist = server.seedPlaylist(QStringLiteral("Mine"), {kItemA});
+        const QString entry = server.entryIdOf(playlist, kItemA);
+        QSignalSpy done(&client, &Kinefin::JellyfinClient::playlistWriteSucceeded);
+        QSignalSpy failed(&client, &Kinefin::JellyfinClient::playlistWriteFailed);
+        QSignalSpy entries(&client, &Kinefin::JellyfinClient::playlistEntriesReady);
+        QSignalSpy listingFailures(&client, &Kinefin::JellyfinClient::listingFailed);
+
+        const QStringList badIds{QString(),
+                                 QStringLiteral("a/b"),
+                                 QStringLiteral("a b"),
+                                 QStringLiteral("a?x=1"),
+                                 QStringLiteral("..%2F"),
+                                 QString(65, QLatin1Char('a'))};
+        const auto withChar = [](char16_t c) {
+            return QStringLiteral("a") + QChar(c) + QStringLiteral("b");
+        };
+        const QStringList badNames{QString(),
+                                   QStringLiteral("   "),
+                                   QString(Kinefin::MaxPlaylistNameChars + 1, QLatin1Char('n')),
+                                   withChar(u'\n'),
+                                   withChar(u'\r'),
+                                   withChar(u'\t'),
+                                   withChar(u'\0'),
+                                   withChar(0x7f),
+                                   withChar(0x85),
+                                   withChar(0x2028),
+                                   withChar(0x2029),
+                                   withChar(0x202e),
+                                   withChar(0x200b),
+                                   withChar(0xd800),
+                                   withChar(0xdc00)};
+        for (const QString &id : badIds) {
+            QVERIFY2(!client.createPlaylist(QStringLiteral("Name"), {id}), qPrintable(id));
+            QVERIFY2(!client.createPlaylist(QStringLiteral("Name"), {kItemA, id}), qPrintable(id));
+            QVERIFY2(!client.addToPlaylist(playlist, {id}), qPrintable(id));
+            QVERIFY2(!client.addToPlaylist(id, {kItemA}), qPrintable(id));
+            QVERIFY2(!client.removePlaylistEntries(playlist, {id}), qPrintable(id));
+            QVERIFY2(!client.removePlaylistEntries(id, {entry}), qPrintable(id));
+            QVERIFY2(!client.movePlaylistEntry(playlist, id, 0), qPrintable(id));
+            QVERIFY2(!client.movePlaylistEntry(id, entry, 0), qPrintable(id));
+            QVERIFY2(!client.renamePlaylist(id, QStringLiteral("Name")), qPrintable(id));
+            QVERIFY2(!client.deletePlaylist(id), qPrintable(id));
+            QVERIFY2(!client.fetchPlaylistEntries(id, 0, 10), qPrintable(id));
+        }
+        for (const QString &name : badNames) {
+            QVERIFY2(!client.createPlaylist(name, {kItemA}), qPrintable(name));
+            QVERIFY2(!client.renamePlaylist(playlist, name), qPrintable(name));
+        }
+        const QStringList tooMany = manyIds(Kinefin::MaxPlaylistWriteIds + 1);
+        QVERIFY(!client.createPlaylist(QStringLiteral("Name"), tooMany));
+        QVERIFY(!client.addToPlaylist(playlist, tooMany));
+        QVERIFY(!client.removePlaylistEntries(playlist, tooMany));
+        QVERIFY(!client.addToPlaylist(playlist, {}));
+        QVERIFY(!client.removePlaylistEntries(playlist, {}));
+        QVERIFY(!client.movePlaylistEntry(playlist, entry, -1));
+        QVERIFY(!client.fetchPlaylistEntries(playlist, -1, 10));
+        QVERIFY(!client.fetchPlaylistEntries(playlist, 0, 0));
+        QVERIFY(!client.fetchPlaylistEntries(playlist, 0, -5));
+
+        // A client without a session refuses everything too
+        Kinefin::JellyfinClient offline;
+        QVERIFY(!offline.createPlaylist(QStringLiteral("Name"), {kItemA}));
+        QVERIFY(!offline.addToPlaylist(playlist, {kItemA}));
+        QVERIFY(!offline.removePlaylistEntries(playlist, {entry}));
+        QVERIFY(!offline.movePlaylistEntry(playlist, entry, 0));
+        QVERIFY(!offline.renamePlaylist(playlist, QStringLiteral("Name")));
+        QVERIFY(!offline.deletePlaylist(playlist));
+        QVERIFY(!offline.fetchPlaylistEntries(playlist, 0, 10));
+
+        // The session is still good, and a request sent before the check above would have arrived by now
+        QSignalSpy views(&client, &Kinefin::JellyfinClient::userViewsReady);
+        QVERIFY(client.fetchUserViews());
+        QTRY_COMPARE(views.size(), 1);
+        QCOMPARE(server.playlistRequests.size(), 0);
+        QCOMPARE(done.size() + failed.size() + entries.size() + listingFailures.size(), 0);
+        QCOMPARE(server.playlistItemIds(playlist), (QStringList{kItemA}));
+    }
+
+    void playlistWrite401ExpiresTheSession()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        const QString playlist = server.seedPlaylist(QStringLiteral("Mine"), {kItemA});
+        server.playlistWriteStatus = 401;
+        QSignalSpy expired(&client, &Kinefin::JellyfinClient::sessionExpired);
+        QSignalSpy done(&client, &Kinefin::JellyfinClient::playlistWriteSucceeded);
+        QSignalSpy failed(&client, &Kinefin::JellyfinClient::playlistWriteFailed);
+        QVERIFY(client.addToPlaylist(playlist, {kItemB}));
+        QTRY_COMPARE(failed.size(), 1);
+        QCOMPARE(expired.size(), 1);
+        QCOMPARE(done.size(), 0);
+        QCOMPARE(failed.constFirst().at(0).value<PlaylistOp>(), PlaylistOp::Add);
+        QCOMPARE(failed.constFirst().at(1).toString(), playlist);
+        QCOMPARE(failed.constFirst().at(2).toInt(), 401);
+        QVERIFY(!client.isAuthenticated());
+        QVERIFY(!client.addToPlaylist(playlist, {kItemB}));
+        QCOMPARE(server.playlistItemIds(playlist), (QStringList{kItemA}));
+    }
+
+    void playlistWriteFailuresCarryTheStatus()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        const QString playlist = server.seedPlaylist(QStringLiteral("Mine"), {kItemA});
+        QSignalSpy failed(&client, &Kinefin::JellyfinClient::playlistWriteFailed);
+        server.playlistWriteStatus = 403;
+        QVERIFY(client.renamePlaylist(playlist, QStringLiteral("New")));
+        QTRY_COMPARE(failed.size(), 1);
+        QCOMPARE(failed.constLast().at(0).value<PlaylistOp>(), PlaylistOp::Rename);
+        QCOMPARE(failed.constLast().at(2).toInt(), 403);
+        server.playlistWriteStatus = 404;
+        QVERIFY(client.deletePlaylist(playlist));
+        QTRY_COMPARE(failed.size(), 2);
+        QCOMPARE(failed.constLast().at(2).toInt(), 404);
+        QVERIFY(client.isAuthenticated());
+        QCOMPARE(server.playlistById(playlist)->name, QStringLiteral("Mine"));
+        // A playlist the server does not know
+        server.playlistWriteStatus = 0;
+        QVERIFY(client.deletePlaylist(kItemB));
+        QTRY_COMPARE(failed.size(), 3);
+        QCOMPARE(failed.constLast().at(2).toInt(), 404);
+    }
+
+    void playlistWritesAreOnePerPlaylist()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        const QString first = server.seedPlaylist(QStringLiteral("First"), {kItemA});
+        const QString second = server.seedPlaylist(QStringLiteral("Second"), {kItemA});
+        server.holdPlaylistWrites = true;
+        QSignalSpy done(&client, &Kinefin::JellyfinClient::playlistWriteSucceeded);
+        QVERIFY(client.addToPlaylist(first, {kItemB}));
+        QVERIFY(!client.addToPlaylist(first, {kItemC}));
+        QVERIFY(!client.deletePlaylist(first));
+        QVERIFY(client.addToPlaylist(second, {kItemB}));
+        QVERIFY(client.createPlaylist(QStringLiteral("Third"), {kItemA}));
+        QVERIFY(!client.createPlaylist(QStringLiteral("Fourth"), {kItemA}));
+        QTRY_VERIFY(server.heldPlaylistCount() == 3);
+        QCOMPARE(server.playlistRequests.size(), 3);
+        server.holdPlaylistWrites = false;
+        server.releasePlaylistWrites();
+        QTRY_COMPARE(done.size(), 3);
+        QVERIFY(client.addToPlaylist(first, {kItemC}));
+        QTRY_COMPARE(done.size(), 4);
+        QCOMPARE(server.playlistItemIds(first), (QStringList{kItemA, kItemB, kItemC}));
+    }
+
+    void playlistWriteDroppedWithTheSession()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        const QString playlist = server.seedPlaylist(QStringLiteral("Mine"), {kItemA});
+        server.holdPlaylistWrites = true;
+        QSignalSpy done(&client, &Kinefin::JellyfinClient::playlistWriteSucceeded);
+        QSignalSpy failed(&client, &Kinefin::JellyfinClient::playlistWriteFailed);
+        QVERIFY(client.addToPlaylist(playlist, {kItemB}));
+        QTRY_VERIFY(server.heldPlaylistCount() == 1);
+        client.disconnectFromServer();
+        server.holdPlaylistWrites = false;
+        server.releasePlaylistWrites();
+        // The aborted write reports nothing, and a new session starts with no write pending
+        QVERIFY(login(client, server));
+        QVERIFY(client.addToPlaylist(playlist, {kItemC}));
+        QTRY_COMPARE(done.size(), 1);
+        QCOMPARE(failed.size(), 0);
+    }
+
+    void playlistEntriesPageAndCountTheTotal()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        const QStringList ids = manyIds(5);
+        const QString playlist = server.seedPlaylist(QStringLiteral("Mine"), ids);
+        QSignalSpy entries(&client, &Kinefin::JellyfinClient::playlistEntriesReady);
+        QSignalSpy failures(&client, &Kinefin::JellyfinClient::listingFailed);
+        QVERIFY(client.fetchPlaylistEntries(playlist, 0, 2, 7));
+        QTRY_COMPARE(entries.size(), 1);
+        QList<QVariant> page = entries.takeFirst();
+        QCOMPARE(page.at(0).value<QJsonArray>().size(), 2);
+        QCOMPARE(page.at(1).toInt(), 5);
+        QCOMPARE(page.at(2).toInt(), 7);
+        QCOMPARE(idAt(page.at(0).value<QJsonArray>(), 0), ids.at(0));
+        QVERIFY(client.fetchPlaylistEntries(playlist, 2, 2, 7));
+        QTRY_COMPARE(entries.size(), 1);
+        page = entries.takeFirst();
+        QCOMPARE(idAt(page.at(0).value<QJsonArray>(), 0), ids.at(2));
+        QVERIFY(client.fetchPlaylistEntries(playlist, 4, 100, 7));
+        QTRY_COMPARE(entries.size(), 1);
+        page = entries.takeFirst();
+        QCOMPARE(page.at(0).value<QJsonArray>().size(), 1);
+        QCOMPARE(page.at(1).toInt(), 5);
+        for (const QString &entryId : entryIdsOf(page.at(0).value<QJsonArray>()))
+            QVERIFY(Kinefin::isValidJellyfinId(entryId));
+
+        // The route: paged, the row fields, the user, and no Items family request
+        const QByteArray route = server.playlistRequests.constLast().route;
+        QVERIFY(route.contains(QByteArray("/jellyfin/Playlists/" + playlist.toUtf8() + "/Items?")));
+        const QUrlQuery query = FakeJellyfin::capturedListingQuery(route);
+        QCOMPARE(query.queryItemValue(QStringLiteral("startIndex")), QStringLiteral("4"));
+        QCOMPARE(query.queryItemValue(QStringLiteral("limit")), QStringLiteral("100"));
+        QCOMPARE(query.queryItemValue(QStringLiteral("userId")), client.userId());
+        QVERIFY(query.queryItemValue(QStringLiteral("fields"))
+                    .contains(QStringLiteral("PrimaryImageAspectRatio")));
+        QVERIFY(server.listingRoutes.value(QStringLiteral("Items")).isEmpty());
+        QVERIFY(tokenOnlyInTheHeader(server));
+
+        // A page larger than the cap is asked for at the cap
+        QVERIFY(client.fetchPlaylistEntries(playlist, 0, 1000, 7));
+        QTRY_COMPARE(entries.size(), 1);
+        entries.clear();
+        QCOMPARE(FakeJellyfin::capturedListingQuery(server.playlistRequests.constLast().route)
+                     .queryItemValue(QStringLiteral("limit")),
+                 QString::number(Kinefin::MaxPlaylistPageSize));
+
+        // An unknown playlist is a listing failure of its own family, on its channel
+        QVERIFY(client.fetchPlaylistEntries(kItemC, 0, 10, 9));
+        QTRY_COMPARE(failures.size(), 1);
+        QCOMPARE(failures.constFirst().at(0).toString(), QStringLiteral("PlaylistEntries"));
+        QCOMPARE(failures.constFirst().at(1).toInt(), 404);
+        QCOMPARE(failures.constFirst().at(3).toInt(), 9);
+        QCOMPARE(entries.size(), 0);
+    }
+
+    void playlistEntriesSupersedeAndReleaseByChannel()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        const QString playlist = server.seedPlaylist(QStringLiteral("Mine"), manyIds(3));
+        QSignalSpy entries(&client, &Kinefin::JellyfinClient::playlistEntriesReady);
+        QVERIFY(client.fetchPlaylistEntries(playlist, 0, 1, 5));
+        QVERIFY(client.fetchPlaylistEntries(playlist, 1, 1, 5));
+        QVERIFY(client.fetchPlaylistEntries(playlist, 2, 1, 6));
+        client.releaseListingChannel(6);
+        QTRY_COMPARE(entries.size(), 1);
+        // Two sentinel requests sent after the others, one after the other: once both are answered no reply of the superseded or the released channel can still be on its way
+        QVERIFY(client.fetchPlaylistEntries(playlist, 0, 3, 8));
+        QTRY_VERIFY(entries.constLast().at(2).toInt() == 8);
+        QVERIFY(client.fetchPlaylistEntries(playlist, 0, 3, 9));
+        QTRY_VERIFY(entries.constLast().at(2).toInt() == 9);
+        QList<int> channels;
+        for (const QList<QVariant> &page : entries)
+            channels.append(page.at(2).toInt());
+        QCOMPARE(channels.size(), 3);
+        QVERIFY(channels.contains(5) && channels.contains(8) && channels.contains(9));
+        QVERIFY(!channels.contains(6));
+        for (const QList<QVariant> &page : entries) {
+            if (page.at(2).toInt() == 5) {
+                QCOMPARE(page.at(0).value<QJsonArray>().size(), 1);
+                QCOMPARE(idAt(page.at(0).value<QJsonArray>(), 0), manyIds(3).at(1));
+            }
+        }
+    }
+
+    void playlistCopiesOfAnItemShareOneEntryId()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        QSignalSpy done(&client, &Kinefin::JellyfinClient::playlistWriteSucceeded);
+        QSignalSpy entries(&client, &Kinefin::JellyfinClient::playlistEntriesReady);
+        QVERIFY(client.createPlaylist(QStringLiteral("Twice"), {kItemA, kItemB, kItemA}));
+        QTRY_COMPARE(done.size(), 1);
+        const QString playlist = done.constFirst().at(2).toString();
+        QVERIFY(client.addToPlaylist(playlist, {kItemB}));
+        QTRY_COMPARE(done.size(), 2);
+        QVERIFY(client.fetchPlaylistEntries(playlist, 0, 100));
+        QTRY_COMPARE(entries.size(), 1);
+        const QJsonArray items = entries.constFirst().at(0).value<QJsonArray>();
+        QCOMPARE(items.size(), 4);
+        QCOMPARE(entries.constFirst().at(1).toInt(), 4);
+        const QStringList entryIds = entryIdsOf(items);
+        QCOMPARE(entryIds.at(0), entryIds.at(2));
+        QCOMPARE(entryIds.at(1), entryIds.at(3));
+        QVERIFY(entryIds.at(0) != entryIds.at(1));
+        // Removing the one entry id takes every copy of the item
+        QVERIFY(client.removePlaylistEntries(playlist, {entryIds.at(0)}));
+        QTRY_COMPARE(done.size(), 3);
+        QCOMPARE(server.playlistItemIds(playlist), (QStringList{kItemB, kItemB}));
+    }
+
+    void playlistNameNormalization()
+    {
+        using Kinefin::normalizedPlaylistName;
+        QCOMPARE(normalizedPlaylistName(QStringLiteral("  Weekend \t")), QStringLiteral("Weekend"));
+        const QString plain = QStringLiteral("Film – Serie 日本語 é");
+        QCOMPARE(normalizedPlaylistName(plain), plain);
+        QCOMPARE(normalizedPlaylistName(QStringLiteral("   　 x 　")), QStringLiteral("x"));
+        QVERIFY(normalizedPlaylistName({}).isEmpty());
+        QVERIFY(normalizedPlaylistName(QStringLiteral("    　")).isEmpty());
+
+        // Only invisible characters: nothing to show, even though the string is not empty
+        QVERIFY(normalizedPlaylistName(repeated(0x200b, 3)).isEmpty());
+        QVERIFY(
+            normalizedPlaylistName(QStringLiteral(" ") + codePoint(0x200b) + QStringLiteral(" "))
+                .isEmpty());
+
+        // The limit counts code points: 70 emoji are 140 UTF-16 units and still fit, 129 do not
+        const QString seventy = repeated(0x1f600, 70);
+        QCOMPARE(seventy.size(), 140);
+        QCOMPARE(normalizedPlaylistName(seventy), seventy);
+        const QString full = repeated(0x1f600, Kinefin::MaxPlaylistNameChars);
+        QCOMPARE(normalizedPlaylistName(full), full);
+        QVERIFY(normalizedPlaylistName(full + codePoint(0x1f600)).isEmpty());
+        QVERIFY(!normalizedPlaylistName(QString(Kinefin::MaxPlaylistNameChars, QLatin1Char('n')))
+                     .isEmpty());
+        QVERIFY(normalizedPlaylistName(QString(Kinefin::MaxPlaylistNameChars + 1, QLatin1Char('n')))
+                    .isEmpty());
+
+        // Refused anywhere in the name: controls, line and paragraph separators, format characters (bidi, zero-width, BOM, soft hyphen, tags), unassigned code points and noncharacters
+        const QList<char32_t> refused{0x00,   0x09,   0x0a,   0x0d,   0x1f,   0x7f,    0x85,
+                                      0x9f,   0xad,   0x061c, 0x200b, 0x200c, 0x200d,  0x200e,
+                                      0x200f, 0x2028, 0x2029, 0x202a, 0x202b, 0x202c,  0x202d,
+                                      0x202e, 0x2066, 0x2067, 0x2068, 0x2069, 0xfeff,  0xe0001,
+                                      0x0378, 0xfdd0, 0xfdef, 0xfffe, 0xffff, 0x1fffe, 0x10ffff};
+        for (const char32_t cp : refused) {
+            const QString c = codePoint(cp);
+            const QByteArray label = QByteArray::number(uint(cp), 16);
+            QVERIFY2(
+                normalizedPlaylistName(QStringLiteral("a") + c + QStringLiteral("b")).isEmpty(),
+                label.constData());
+            // At the ends the white space (tab, line breaks, NEL, line and paragraph separators) is trimmed away, not refused
+            if (QChar::isSpace(cp))
+                continue;
+            QVERIFY2(normalizedPlaylistName(QStringLiteral("a") + c).isEmpty(), label.constData());
+            QVERIFY2(normalizedPlaylistName(c + QStringLiteral("a")).isEmpty(), label.constData());
+        }
+
+        // Lone surrogates, a reversed pair included
+        const QString high(QChar(char16_t(0xd83d)));
+        const QString low(QChar(char16_t(0xde00)));
+        QVERIFY(normalizedPlaylistName(QStringLiteral("a") + high).isEmpty());
+        QVERIFY(normalizedPlaylistName(low + QStringLiteral("a")).isEmpty());
+        QVERIFY(normalizedPlaylistName(QStringLiteral("a") + low + high + QStringLiteral("b"))
+                    .isEmpty());
+        QVERIFY(!normalizedPlaylistName(QStringLiteral("a") + high + low + QStringLiteral("b"))
+                     .isEmpty());
+
+        // The calls apply the same rule
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        const QString playlist = server.seedPlaylist(QStringLiteral("Mine"), {kItemA});
+        const QStringList names{QString(QLatin1Char('a')) + QChar(0x202E) + QLatin1Char('b'),
+                                repeated(0x200b, 3), QString(QStringLiteral("a") + high)};
+        for (const QString &name : names) {
+            QVERIFY(!client.createPlaylist(name, {kItemA}));
+            QVERIFY(!client.renamePlaylist(playlist, name));
+        }
+        QSignalSpy done(&client, &Kinefin::JellyfinClient::playlistWriteSucceeded);
+        QVERIFY(client.createPlaylist(seventy, {kItemA}));
+        QTRY_COMPARE(done.size(), 1);
+        QCOMPARE(server.playlists.constLast().name, seventy);
+        QCOMPARE(server.playlistRequests.size(), 1);
+    }
+
+    void playlistWritesSucceedOnlyOnTheirDocumentedStatus()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        const QString playlist = server.seedPlaylist(QStringLiteral("Mine"), {kItemA, kItemB});
+        const QString entry = server.entryIdOf(playlist, kItemB);
+        QSignalSpy done(&client, &Kinefin::JellyfinClient::playlistWriteSucceeded);
+        QSignalSpy failed(&client, &Kinefin::JellyfinClient::playlistWriteFailed);
+        const QList<std::pair<PlaylistOp, std::function<bool()>>> others{
+            {PlaylistOp::Add, [&] { return client.addToPlaylist(playlist, {kItemC}); }},
+            {PlaylistOp::Remove, [&] { return client.removePlaylistEntries(playlist, {entry}); }},
+            {PlaylistOp::Move, [&] { return client.movePlaylistEntry(playlist, entry, 0); }},
+            {PlaylistOp::Rename,
+             [&] { return client.renamePlaylist(playlist, QStringLiteral("New")); }},
+            {PlaylistOp::Delete, [&] { return client.deletePlaylist(playlist); }}};
+        int expected = 0;
+        // A 200 (empty body here) is not the 204 of these writes, whatever a proxy or a server change makes of it
+        for (const int status : {200, 201, 202}) {
+            server.playlistWriteStatus = status;
+            for (const auto &[op, send] : others) {
+                QVERIFY(send());
+                ++expected;
+                QTRY_COMPARE(failed.size(), expected);
+                QCOMPARE(failed.constLast().at(0).value<PlaylistOp>(), op);
+                QCOMPARE(failed.constLast().at(2).toInt(), status);
+            }
+        }
+        // A create wants its 200
+        for (const int status : {201, 204}) {
+            server.playlistWriteStatus = status;
+            QVERIFY(client.createPlaylist(QStringLiteral("New"), {kItemA}));
+            ++expected;
+            QTRY_COMPARE(failed.size(), expected);
+            QCOMPARE(failed.constLast().at(0).value<PlaylistOp>(), PlaylistOp::Create);
+            QCOMPARE(failed.constLast().at(2).toInt(), status);
+        }
+        QCOMPARE(done.size(), 0);
+        QCOMPARE(server.playlistItemIds(playlist), (QStringList{kItemA, kItemB}));
+        QCOMPARE(server.playlistById(playlist)->name, QStringLiteral("Mine"));
+        QCOMPARE(server.playlists.size(), 1);
+        // The slots are free again, and the documented statuses succeed
+        server.playlistWriteStatus = 0;
+        QVERIFY(client.addToPlaylist(playlist, {kItemC}));
+        QTRY_COMPARE(done.size(), 1);
+        QVERIFY(client.createPlaylist(QStringLiteral("New"), {kItemA}));
+        QTRY_COMPARE(done.size(), 2);
+    }
+
+    void playlistDeleteNeverDeletesANonPlaylist()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        const QStringList ids = manyIds(5);
+        const QStringList types{QStringLiteral("Movie"), QStringLiteral("BoxSet"),
+                                QStringLiteral("playlist"), QStringLiteral("Playlist "),
+                                QStringLiteral("Folder")};
+        for (qsizetype i = 0; i < ids.size(); ++i)
+            server.typedItems.insert(ids.at(i), types.at(i));
+        QSignalSpy done(&client, &Kinefin::JellyfinClient::playlistWriteSucceeded);
+        QSignalSpy failed(&client, &Kinefin::JellyfinClient::playlistWriteFailed);
+        for (int i = 0; i < ids.size(); ++i) {
+            QVERIFY(client.deletePlaylist(ids.at(i)));
+            QTRY_COMPARE(failed.size(), i + 1);
+            QCOMPARE(failed.constLast().at(0).value<PlaylistOp>(), PlaylistOp::Delete);
+            QCOMPARE(failed.constLast().at(1).toString(), ids.at(i));
+            QCOMPARE(failed.constLast().at(2).toInt(), 200);
+        }
+        QCOMPARE(done.size(), 0);
+        QCOMPARE(deleteRequests(server), 0);
+        QVERIFY(client.isAuthenticated());
+        // An id the server does not know ends the same way
+        QVERIFY(client.deletePlaylist(kItemA));
+        QTRY_COMPARE(failed.size(), 6);
+        QCOMPARE(failed.constLast().at(2).toInt(), 404);
+        QCOMPARE(deleteRequests(server), 0);
+    }
+
+    void playlistDeleteNeedsAValidTypeReply()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        const QString playlist = server.seedPlaylist(QStringLiteral("Mine"), {kItemA});
+        const QByteArray id = playlist.toUtf8();
+        const QList<QByteArray> bodies{
+            QByteArrayLiteral("{}"),
+            QByteArrayLiteral("[]"),
+            QByteArrayLiteral("not json"),
+            QByteArrayLiteral("{\"Id\":\"") + id + QByteArrayLiteral("\"}"),
+            QByteArrayLiteral("{\"Id\":\"") + id + QByteArrayLiteral("\",\"Type\":7}"),
+            QByteArrayLiteral("{\"Id\":\"") + id + QByteArrayLiteral("\",\"Type\":\"playlist\"}"),
+            QByteArrayLiteral("{\"Type\":\"Playlist\"}"),
+            QByteArrayLiteral("{\"Id\":\"") + kItemB.toUtf8()
+                + QByteArrayLiteral("\",\"Type\":\"Playlist\"}")};
+        QSignalSpy done(&client, &Kinefin::JellyfinClient::playlistWriteSucceeded);
+        QSignalSpy failed(&client, &Kinefin::JellyfinClient::playlistWriteFailed);
+        int expected = 0;
+        for (const QByteArray &body : bodies) {
+            server.playlistItemRawBody = body;
+            QVERIFY(client.deletePlaylist(playlist));
+            ++expected;
+            QTRY_COMPARE(failed.size(), expected);
+            QCOMPARE(failed.constLast().at(2).toInt(), 200);
+        }
+        server.playlistItemRawBody.clear();
+        for (const int status : {204, 403, 404, 500}) {
+            server.playlistItemStatus = status;
+            QVERIFY(client.deletePlaylist(playlist));
+            ++expected;
+            QTRY_COMPARE(failed.size(), expected);
+            QCOMPARE(failed.constLast().at(2).toInt(), status);
+        }
+        QVERIFY(client.isAuthenticated());
+        QCOMPARE(done.size(), 0);
+        QCOMPARE(deleteRequests(server), 0);
+        QVERIFY(server.playlistById(playlist));
+        // A 401 on the read expires the session like any other
+        QSignalSpy expired(&client, &Kinefin::JellyfinClient::sessionExpired);
+        server.playlistItemStatus = 401;
+        QVERIFY(client.deletePlaylist(playlist));
+        QTRY_COMPARE(failed.size(), expected + 1);
+        QCOMPARE(failed.constLast().at(2).toInt(), 401);
+        QCOMPARE(expired.size(), 1);
+        QCOMPARE(deleteRequests(server), 0);
+    }
+
+    void playlistDeleteHoldsTheSlotAcrossBothSteps()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        const QString first = server.seedPlaylist(QStringLiteral("First"), {kItemA});
+        const QString second = server.seedPlaylist(QStringLiteral("Second"), {kItemA});
+        QSignalSpy done(&client, &Kinefin::JellyfinClient::playlistWriteSucceeded);
+        QSignalSpy failed(&client, &Kinefin::JellyfinClient::playlistWriteFailed);
+        // The read is in flight: the playlist is already taken
+        QVERIFY(client.deletePlaylist(second));
+        QVERIFY(!client.deletePlaylist(second));
+        QVERIFY(!client.renamePlaylist(second, QStringLiteral("New")));
+        QVERIFY(!client.addToPlaylist(second, {kItemB}));
+        QTRY_COMPARE(done.size(), 1);
+        QVERIFY(!server.playlistById(second));
+        // The delete is in flight: the same
+        server.holdPlaylistWrites = true;
+        QVERIFY(client.deletePlaylist(first));
+        QTRY_VERIFY(server.heldPlaylistCount() == 1);
+        QVERIFY(!client.deletePlaylist(first));
+        QVERIFY(!client.renamePlaylist(first, QStringLiteral("New")));
+        QVERIFY(client.addToPlaylist(second, {kItemB}));
+        server.holdPlaylistWrites = false;
+        server.releasePlaylistWrites();
+        QTRY_COMPARE(done.size(), 2);
+        QCOMPARE(done.constLast().at(0).value<PlaylistOp>(), PlaylistOp::Delete);
+        QCOMPARE(done.constLast().at(1).toString(), first);
+        QTRY_COMPARE(failed.size(), 1);
+        QCOMPARE(failed.constFirst().at(1).toString(), second);
+        QCOMPARE(failed.constFirst().at(2).toInt(), 404);
+        QVERIFY(!server.playlistById(first));
+        QCOMPARE(deleteRequests(server), 2);
+    }
+
+    void playlistTransportErrorEndsWithStatusZeroAndFreesTheSlot()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        const QString playlist = server.seedPlaylist(QStringLiteral("Mine"), {kItemA});
+        QSignalSpy done(&client, &Kinefin::JellyfinClient::playlistWriteSucceeded);
+        QSignalSpy failed(&client, &Kinefin::JellyfinClient::playlistWriteFailed);
+        // The server applies the write and closes the connection without an answer
+        server.dropPlaylistWrites = true;
+        QVERIFY(client.addToPlaylist(playlist, {kItemB}));
+        QVERIFY(!client.addToPlaylist(playlist, {kItemC}));
+        QTRY_COMPARE(failed.size(), 1);
+        QCOMPARE(failed.constLast().at(0).value<PlaylistOp>(), PlaylistOp::Add);
+        QCOMPARE(failed.constLast().at(2).toInt(), 0);
+        QVERIFY(client.isAuthenticated());
+        QVERIFY(server.playlistItemIds(playlist).contains(kItemB));
+        QVERIFY(client.createPlaylist(QStringLiteral("New"), {kItemA}));
+        QTRY_COMPARE(failed.size(), 2);
+        QCOMPARE(failed.constLast().at(0).value<PlaylistOp>(), PlaylistOp::Create);
+        QCOMPARE(failed.constLast().at(2).toInt(), 0);
+        QVERIFY(client.deletePlaylist(playlist));
+        QTRY_COMPARE(failed.size(), 3);
+        QCOMPARE(failed.constLast().at(0).value<PlaylistOp>(), PlaylistOp::Delete);
+        QCOMPARE(failed.constLast().at(2).toInt(), 0);
+        QCOMPARE(done.size(), 0);
+        // The guards are clear
+        server.dropPlaylistWrites = false;
+        const QString other = server.seedPlaylist(QStringLiteral("Other"), {kItemA});
+        QVERIFY(client.addToPlaylist(other, {kItemB}));
+        QTRY_COMPARE(done.size(), 1);
+        QVERIFY(client.createPlaylist(QStringLiteral("Again"), {}));
+        QTRY_COMPARE(done.size(), 2);
+        // The delete was applied before the connection closed: the playlist is gone
+        QVERIFY(client.renamePlaylist(playlist, QStringLiteral("Renamed")));
+        QTRY_COMPARE(failed.size(), 4);
+        QCOMPARE(failed.constLast().at(2).toInt(), 404);
+    }
+
+    void playlistGuardCoversEverySpellingOfTheId()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        const QString playlist = server.seedPlaylist(QStringLiteral("Mine"), {kItemA});
+        const QString dashed = playlist.left(8) + QLatin1Char('-') + playlist.mid(8, 4)
+                               + QLatin1Char('-') + playlist.mid(12, 4) + QLatin1Char('-')
+                               + playlist.mid(16, 4) + QLatin1Char('-') + playlist.mid(20);
+        QVERIFY(Kinefin::isValidJellyfinId(dashed));
+        server.holdPlaylistWrites = true;
+        QSignalSpy done(&client, &Kinefin::JellyfinClient::playlistWriteSucceeded);
+        QVERIFY(client.addToPlaylist(playlist, {kItemB}));
+        QTRY_VERIFY(server.heldPlaylistCount() == 1);
+        for (const QString &spelling : {playlist.toUpper(), dashed, dashed.toUpper()}) {
+            QVERIFY2(!client.addToPlaylist(spelling, {kItemC}), qPrintable(spelling));
+            QVERIFY2(!client.removePlaylistEntries(spelling, {kItemC}), qPrintable(spelling));
+            QVERIFY2(!client.movePlaylistEntry(spelling, kItemC, 0), qPrintable(spelling));
+            QVERIFY2(!client.renamePlaylist(spelling, QStringLiteral("New")), qPrintable(spelling));
+            QVERIFY2(!client.deletePlaylist(spelling), qPrintable(spelling));
+        }
+        QCOMPARE(server.playlistRequests.size(), 1);
+        server.holdPlaylistWrites = false;
+        server.releasePlaylistWrites();
+        QTRY_COMPARE(done.size(), 1);
+        QVERIFY(client.addToPlaylist(playlist.toUpper(), {kItemC}));
+        QTRY_COMPARE(done.size(), 2);
+        QCOMPARE(server.playlistItemIds(playlist), (QStringList{kItemA, kItemB, kItemC}));
+    }
+
+    void playlistWrite401DropsTheOtherWritesSilently()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        const QString first = server.seedPlaylist(QStringLiteral("First"), {kItemA});
+        const QString second = server.seedPlaylist(QStringLiteral("Second"), {kItemA});
+        QSignalSpy done(&client, &Kinefin::JellyfinClient::playlistWriteSucceeded);
+        QSignalSpy failed(&client, &Kinefin::JellyfinClient::playlistWriteFailed);
+        QSignalSpy expired(&client, &Kinefin::JellyfinClient::sessionExpired);
+        server.holdPlaylistWrites = true;
+        QVERIFY(client.addToPlaylist(first, {kItemB}));
+        QTRY_VERIFY(server.heldPlaylistCount() == 1);
+        server.holdPlaylistWrites = false;
+        server.playlistWriteStatus = 401;
+        QVERIFY(client.addToPlaylist(second, {kItemB}));
+        QTRY_COMPARE(failed.size(), 1);
+        QCOMPARE(failed.constFirst().at(1).toString(), second);
+        QCOMPARE(failed.constFirst().at(2).toInt(), 401);
+        QCOMPARE(expired.size(), 1);
+        QVERIFY(!client.isAuthenticated());
+        // The write of the first playlist is answered late, to a client that has dropped it
+        server.playlistWriteStatus = 0;
+        server.releasePlaylistWrites();
+        // A new session starts with no write pending, and a write after it ends the wait
+        client.disconnectFromServer();
+        QVERIFY(login(client, server));
+        QVERIFY(client.addToPlaylist(first, {kItemC}));
+        QTRY_COMPARE(done.size(), 1);
+        QCOMPARE(done.constFirst().at(1).toString(), first);
+        QCOMPARE(failed.size(), 1);
+    }
+
+    void playlistRoutesRequireTheSessionToken()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        const QString playlist = server.seedPlaylist(QStringLiteral("Mine"), {kItemA});
+        QNetworkAccessManager network;
+        const auto statusWith = [&](const QByteArray &authorization, const QByteArray &method) {
+            QNetworkRequest request(server.url(QStringLiteral("/jellyfin/Playlists/") + playlist
+                                               + QStringLiteral("/Items?limit=1")));
+            if (!authorization.isEmpty())
+                request.setRawHeader("Authorization", authorization);
+            QNetworkReply *reply = network.sendCustomRequest(request, method);
+            QSignalSpy finished(reply, &QNetworkReply::finished);
+            const int status =
+                finished.wait(5000)
+                    ? reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt()
+                    : -1;
+            delete reply;
+            return status;
+        };
+        const auto header = [](const QByteArray &token) {
+            return QByteArrayLiteral("MediaBrowser Client=\"t\", Token=\"") + token
+                   + QByteArrayLiteral("\"");
+        };
+        QCOMPARE(statusWith({}, "GET"), 401);
+        QCOMPARE(statusWith(QByteArrayLiteral("MediaBrowser Client=\"t\""), "GET"), 401);
+        QCOMPARE(statusWith(header({}), "GET"), 401);
+        QCOMPARE(statusWith(header("wrong"), "GET"), 401);
+        QCOMPARE(statusWith(header(kFixtureToken + "0"), "GET"), 401);
+        QCOMPARE(statusWith(header("wrong"), "DELETE"), 401);
+        QCOMPARE(server.playlistRequests.size(), 0);
+        QCOMPARE(statusWith(header(kFixtureToken), "GET"), 200);
+        QCOMPARE(server.playlistRequests.size(), 1);
+    }
+
+    void playlistCallsRefuseAnInvalidSessionUserId()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QSignalSpy ready(&client, &Kinefin::JellyfinClient::serverReady);
+        QVERIFY(prepare(client, server));
+        QTRY_COMPARE(ready.size(), 1);
+        QVERIFY(
+            client.restoreSession(QStringLiteral("bad/user"), QString::fromUtf8(kFixtureToken)));
+        QVERIFY(client.isAuthenticated());
+        QVERIFY(!client.createPlaylist(QStringLiteral("New"), {kItemA}));
+        QVERIFY(!client.addToPlaylist(kItemA, {kItemB}));
+        QVERIFY(!client.deletePlaylist(kItemA));
+        QVERIFY(!client.fetchPlaylistEntries(kItemA, 0, 10));
+        QCOMPARE(server.playlistRequests.size(), 0);
+    }
+
+    void playlistRequestsKeepTheTokenInTheHeader()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        QSignalSpy done(&client, &Kinefin::JellyfinClient::playlistWriteSucceeded);
+        QSignalSpy entries(&client, &Kinefin::JellyfinClient::playlistEntriesReady);
+        QVERIFY(client.createPlaylist(QStringLiteral("Mine"), {kItemA}));
+        QTRY_COMPARE(done.size(), 1);
+        const QString playlist = done.constLast().at(2).toString();
+        QVERIFY(client.addToPlaylist(playlist, {kItemB}));
+        QTRY_COMPARE(done.size(), 2);
+        const QString entryB = server.entryIdOf(playlist, kItemB);
+        QVERIFY(client.movePlaylistEntry(playlist, entryB, 0));
+        QTRY_COMPARE(done.size(), 3);
+        QVERIFY(client.removePlaylistEntries(playlist, {server.entryIdOf(playlist, kItemA)}));
+        QTRY_COMPARE(done.size(), 4);
+        QVERIFY(client.renamePlaylist(playlist, QStringLiteral("Renamed")));
+        QTRY_COMPARE(done.size(), 5);
+        QVERIFY(client.fetchPlaylistEntries(playlist, 0, 10));
+        QTRY_COMPARE(entries.size(), 1);
+        QVERIFY(client.deletePlaylist(playlist));
+        QTRY_COMPARE(done.size(), 6);
+        // Create, add, move, remove, rename, entries, the read of the delete and the delete
+        QCOMPARE(server.playlistRequests.size(), 8);
+        QVERIFY(tokenOnlyInTheHeader(server));
     }
 };
 

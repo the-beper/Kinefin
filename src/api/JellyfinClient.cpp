@@ -345,6 +345,30 @@ QNetworkReply *postEmpty(QNetworkAccessManager &network, QNetworkRequest request
     request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
     return network.post(request, QByteArray());
 }
+
+// A list of Jellyfin ids for a playlist call: at most MaxPlaylistWriteIds, each valid, and not empty unless `allowEmpty`
+bool validPlaylistIds(const QStringList &ids, bool allowEmpty)
+{
+    if ((ids.isEmpty() && !allowEmpty) || ids.size() > MaxPlaylistWriteIds)
+        return false;
+    for (const QString &id : ids) {
+        if (!isValidJellyfinId(id))
+            return false;
+    }
+    return true;
+}
+
+// The key a playlist id is tracked by: a GUID may be written dashed or dashless, and in either case
+QString playlistKey(const QString &playlistId)
+{
+    return QString(playlistId).remove(QLatin1Char('-')).toLower();
+}
+
+// A create has no playlist yet: it takes one slot of its own, which no id can collide with
+QString playlistWriteKey(bool isCreate, const QString &playlistId)
+{
+    return isCreate ? QStringLiteral("+create") : playlistKey(playlistId);
+}
 } // namespace
 
 bool isValidHeaderField(const QString &field)
@@ -362,6 +386,39 @@ bool isValidFilterText(const QString &text)
             return false;
     }
     return true;
+}
+
+QString normalizedPlaylistName(const QString &name)
+{
+    const QString trimmed = name.trimmed();
+    if (trimmed.isEmpty() || !QStringView(trimmed).isValidUtf16())
+        return {};
+    qsizetype codePoints = 0;
+    bool visible = false;
+    for (qsizetype i = 0; i < trimmed.size(); ++i) {
+        char32_t cp = trimmed.at(i).unicode();
+        if (QChar::isHighSurrogate(cp) && i + 1 < trimmed.size()) {
+            cp = QChar::surrogateToUcs4(trimmed.at(i), trimmed.at(i + 1));
+            ++i;
+        }
+        if (++codePoints > MaxPlaylistNameChars)
+            return {};
+        switch (QChar::category(cp)) {
+        case QChar::Other_Control:
+        case QChar::Other_Format:
+        case QChar::Other_Surrogate:
+        case QChar::Other_NotAssigned:
+        case QChar::Separator_Line:
+        case QChar::Separator_Paragraph:
+            return {};
+        default:
+            break;
+        }
+        if (QChar::isNonCharacter(cp))
+            return {};
+        visible = visible || !QChar::isSpace(cp);
+    }
+    return visible ? trimmed : QString();
 }
 
 JellyfinClient::JellyfinClient(QObject *parent) : QObject(parent)
@@ -1383,6 +1440,180 @@ bool JellyfinClient::fetchSessions(bool controllableByUserOnly)
     return true;
 }
 
+bool JellyfinClient::fetchPlaylistEntries(const QString &playlistId, int startIndex, int limit,
+                                          int channel)
+{
+    if (m_state != State::Authenticated || !isValidJellyfinId(playlistId)
+        || !isValidJellyfinId(m_userId) || startIndex < 0 || limit <= 0)
+        return false;
+    const QString family = QStringLiteral("PlaylistEntries");
+    const QString key = listingKey(family, channel);
+    const quint64 serial = supersedeListing(key);
+    QUrl url = endpoint(QStringLiteral("/Playlists/") + playlistId + QStringLiteral("/Items"));
+    QUrlQuery wire;
+    wire.addQueryItem(QStringLiteral("startIndex"), QString::number(startIndex));
+    wire.addQueryItem(QStringLiteral("limit"), QString::number(qMin(limit, MaxPlaylistPageSize)));
+    addRowImageParameters(wire, QStringLiteral(",DateCreated"));
+    wire.addQueryItem(QStringLiteral("userId"), m_userId);
+    url.setQuery(wire);
+    QNetworkReply *reply = m_network.get(requestFor(url, true));
+    m_listingReplies.insert(key, reply);
+    attach(reply, m_generation, [this, family, key, channel, serial](QNetworkReply *finished) {
+        if (listingSuperseded(key, serial))
+            return;
+        QJsonArray items;
+        int total = 0;
+        if (!listingEnvelope(finished, family, channel, &items, &total))
+            return;
+        Q_EMIT playlistEntriesReady(items, total, channel);
+    });
+    return true;
+}
+
+bool JellyfinClient::createPlaylist(const QString &name, const QStringList &itemIds)
+{
+    const QString trimmed = normalizedPlaylistName(name);
+    if (!isAuthenticated() || trimmed.isEmpty() || !validPlaylistIds(itemIds, true)
+        || !isValidJellyfinId(m_userId))
+        return false;
+    const QJsonObject body{{QStringLiteral("Name"), trimmed},
+                           {QStringLiteral("Ids"), QJsonArray::fromStringList(itemIds)},
+                           {QStringLiteral("UserId"), m_userId},
+                           {QStringLiteral("MediaType"), QStringLiteral("Video")},
+                           {QStringLiteral("IsPublic"), false}};
+    return sendPlaylistWrite(PlaylistOp::Create, {}, QByteArrayLiteral("POST"),
+                             endpoint(QStringLiteral("/Playlists")),
+                             QJsonDocument(body).toJson(QJsonDocument::Compact));
+}
+
+bool JellyfinClient::addToPlaylist(const QString &playlistId, const QStringList &itemIds)
+{
+    if (!isAuthenticated() || !isValidJellyfinId(playlistId) || !validPlaylistIds(itemIds, false)
+        || !isValidJellyfinId(m_userId))
+        return false;
+    QUrl url = endpoint(QStringLiteral("/Playlists/") + playlistId + QStringLiteral("/Items"));
+    QUrlQuery wire;
+    wire.addQueryItem(QStringLiteral("ids"), itemIds.join(QLatin1Char(',')));
+    wire.addQueryItem(QStringLiteral("userId"), m_userId);
+    url.setQuery(wire);
+    return sendPlaylistWrite(PlaylistOp::Add, playlistId, QByteArrayLiteral("POST"), url);
+}
+
+bool JellyfinClient::removePlaylistEntries(const QString &playlistId, const QStringList &entryIds)
+{
+    if (!isAuthenticated() || !isValidJellyfinId(playlistId) || !validPlaylistIds(entryIds, false))
+        return false;
+    QUrl url = endpoint(QStringLiteral("/Playlists/") + playlistId + QStringLiteral("/Items"));
+    QUrlQuery wire;
+    wire.addQueryItem(QStringLiteral("entryIds"), entryIds.join(QLatin1Char(',')));
+    url.setQuery(wire);
+    return sendPlaylistWrite(PlaylistOp::Remove, playlistId, QByteArrayLiteral("DELETE"), url);
+}
+
+bool JellyfinClient::movePlaylistEntry(const QString &playlistId, const QString &entryId,
+                                       int newIndex)
+{
+    if (!isAuthenticated() || !isValidJellyfinId(playlistId) || !isValidJellyfinId(entryId)
+        || newIndex < 0)
+        return false;
+    const QUrl url = endpoint(QStringLiteral("/Playlists/") + playlistId + QStringLiteral("/Items/")
+                              + entryId + QStringLiteral("/Move/") + QString::number(newIndex));
+    return sendPlaylistWrite(PlaylistOp::Move, playlistId, QByteArrayLiteral("POST"), url);
+}
+
+bool JellyfinClient::renamePlaylist(const QString &playlistId, const QString &name)
+{
+    const QString trimmed = normalizedPlaylistName(name);
+    if (!isAuthenticated() || !isValidJellyfinId(playlistId) || trimmed.isEmpty())
+        return false;
+    const QJsonObject body{{QStringLiteral("Name"), trimmed}};
+    return sendPlaylistWrite(PlaylistOp::Rename, playlistId, QByteArrayLiteral("POST"),
+                             endpoint(QStringLiteral("/Playlists/") + playlistId),
+                             QJsonDocument(body).toJson(QJsonDocument::Compact));
+}
+
+bool JellyfinClient::deletePlaylist(const QString &playlistId)
+{
+    if (!isAuthenticated() || !isValidJellyfinId(playlistId) || !isValidJellyfinId(m_userId))
+        return false;
+    // DELETE /Items/{id} removes any item and cannot be undone: the id is read first and must name a playlist, the slot is held across both requests
+    const QString key = playlistWriteKey(false, playlistId);
+    if (m_playlistPending.contains(key))
+        return false;
+    m_playlistPending.insert(key);
+    QUrl url = endpoint(QStringLiteral("/Items/") + playlistId);
+    QUrlQuery wire;
+    wire.addQueryItem(QStringLiteral("userId"), m_userId);
+    url.setQuery(wire);
+    QNetworkReply *reply = m_network.get(requestFor(url, true));
+    attach(reply, m_generation, [this, playlistId, key](QNetworkReply *finished) {
+        const int status = finished->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        QJsonObject item;
+        const bool isPlaylist =
+            status == 200 && finished->error() == QNetworkReply::NoError
+            && parseObject(finished, &item)
+            && item.value(QStringLiteral("Type")).toString() == QLatin1String("Playlist")
+            && playlistKey(item.value(QStringLiteral("Id")).toString()) == playlistKey(playlistId);
+        if (isPlaylist) {
+            dispatchPlaylistWrite(PlaylistOp::Delete, playlistId, QByteArrayLiteral("DELETE"),
+                                  endpoint(QStringLiteral("/Items/") + playlistId), {});
+            return;
+        }
+        m_playlistPending.remove(key);
+        if (status == 401)
+            invalidateSession();
+        Q_EMIT playlistWriteFailed(PlaylistOp::Delete, playlistId, status);
+    });
+    return true;
+}
+
+bool JellyfinClient::sendPlaylistWrite(PlaylistOp op, const QString &playlistId,
+                                       const QByteArray &method, const QUrl &url,
+                                       const QByteArray &body)
+{
+    const QString key = playlistWriteKey(op == PlaylistOp::Create, playlistId);
+    if (m_playlistPending.contains(key))
+        return false;
+    m_playlistPending.insert(key);
+    dispatchPlaylistWrite(op, playlistId, method, url, body);
+    return true;
+}
+
+void JellyfinClient::dispatchPlaylistWrite(PlaylistOp op, const QString &playlistId,
+                                           const QByteArray &method, const QUrl &url,
+                                           const QByteArray &body)
+{
+    const QString key = playlistWriteKey(op == PlaylistOp::Create, playlistId);
+    QNetworkRequest request = requestFor(url, true);
+    QNetworkReply *reply = nullptr;
+    if (method == "POST") {
+        request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+        reply = m_network.post(request, body);
+    } else {
+        reply = m_network.sendCustomRequest(request, method);
+    }
+    attach(reply, m_generation, [this, op, playlistId, key](QNetworkReply *finished) {
+        m_playlistPending.remove(key);
+        const int status = finished->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (status == 401)
+            invalidateSession();
+        // Only the documented status counts: 200 with a body for a create, 204 for every other write
+        const int expected = op == PlaylistOp::Create ? 200 : 204;
+        bool ok = finished->error() == QNetworkReply::NoError && status == expected;
+        QString createdId;
+        if (ok && op == PlaylistOp::Create) {
+            QJsonObject data;
+            createdId = parseObject(finished, &data) ? data.value(QStringLiteral("Id")).toString()
+                                                     : QString();
+            ok = isValidJellyfinId(createdId);
+        }
+        if (ok)
+            Q_EMIT playlistWriteSucceeded(op, playlistId, createdId);
+        else
+            Q_EMIT playlistWriteFailed(op, playlistId, status);
+    });
+}
+
 bool JellyfinClient::sendSessionPlaystate(const QString &sessionId, const QString &command)
 {
     if (m_state != State::Authenticated || !isValidJellyfinId(sessionId)
@@ -2185,7 +2416,8 @@ void JellyfinClient::releaseListingChannel(int channel)
           QStringLiteral("NextUp"), QStringLiteral("Similar"), QStringLiteral("Seasons"),
           QStringLiteral("Episodes"), QStringLiteral("Genres"), QStringLiteral("Filters"),
           QStringLiteral("FiltersLegacy"), QStringLiteral("MovieRecommendations"),
-          QStringLiteral("Suggestions"), QStringLiteral("Upcoming"), QStringLiteral("Studios")}) {
+          QStringLiteral("Suggestions"), QStringLiteral("Upcoming"), QStringLiteral("Studios"),
+          QStringLiteral("PlaylistEntries")}) {
         const QString key = listingKey(family, channel);
         if (!m_listingSerials.contains(key))
             continue;
@@ -2295,6 +2527,7 @@ void JellyfinClient::abortPending()
     ++m_generation;
     m_favoritePending.clear();
     m_playedPending.clear();
+    m_playlistPending.clear();
     // Reports die with the pending requests, quietly: the generation bump keeps their handlers from running. The same goes for a session re-check whose flag would otherwise stay set forever
     m_reportQueue.clear();
     m_reportBusy = false;

@@ -10,6 +10,8 @@ Kirigami.Page {
     objectName: "playerPage"
     required property var player
     required property ConnectionController connection
+    // The video item of the shell sits here while this page is in front
+    readonly property Item videoSlot: slot
     title: player?.title || i18n("Now Playing")
     padding: 0
     // The video fills the page and the bars float above it: the page row's toolbar would be a strip that never hides
@@ -56,7 +58,7 @@ Kirigami.Page {
     // The size of the video item in device pixels
     readonly property size videoPixelSize: {
         const ratio = page.Window.window?.devicePixelRatio ?? 1;
-        return Qt.size(Math.round(video.width * ratio), Math.round(video.height * ratio));
+        return Qt.size(Math.round(slot.width * ratio), Math.round(slot.height * ratio));
     }
     // Whether the Playback Info panel is open
     property bool playbackInfoShown: false
@@ -80,7 +82,14 @@ Kirigami.Page {
     // The page keeps the keyboard: the controls of the bars take it only through Tab, so the keys work whatever was clicked
     function focusPrimary() { page.forceActiveFocus(Qt.TabFocusReason); }
     function wakeChrome() { showChrome = true; chromeTimer.restart(); }
-    function closePlayer() { page.player.stop(); page.Window.window.pageStack.pop(); }
+    // Leaving the page keeps the playback going: the shell parks the video in the mini player before the page goes
+    // As Kirigami's Back does, the page in front only moves back one place; the shell takes the page left above once the stack settles, which deletes it (a pop of the page in front does not)
+    function leavePlayer() {
+        const shell = page.Window.window;
+        shell.parkVideo();
+        shell.pageStack.currentIndex = Math.max(0, shell.pageStack.currentIndex - 1);
+    }
+    function closePlayer() { page.Window.window.stopPlayback(); }
     // When a menu or popup last began to close: the click that closes one is not a click on the video
     property double popupClosedAt: 0
     function popupGone() {
@@ -95,29 +104,12 @@ Kirigami.Page {
         volumePopup.open();
     }
     function stepVolume(steps) {
-        // Turning the volume up is meant to be heard
-        if (steps > 0 && page.player.muted)
-            page.player.toggleMute();
-        page.player.setVolume(Math.max(0, Math.min(100, page.player.volume + steps * 5)));
+        page.Window.window.stepVolume(steps);
         page.wakeChrome();
     }
-    // The player commands of the keyboard and of the remote socket; a name that is no command does nothing
+    // The player commands of the keyboard: the shell runs them, in every mode, and the page only wakes its bars
     function playerAction(name) {
-        switch (name) {
-        case "playpause": page.player.togglePause(); break;
-        case "play": if (page.player.paused) page.player.resume(); break;
-        case "pause": if (!page.player.paused) page.player.pause(); break;
-        case "stop": page.closePlayer(); return;
-        case "next": page.player.next(); break;
-        case "previous": page.player.previous(); break;
-        case "fastforward": page.player.seekRelative(10); break;
-        case "rewind": page.player.seekRelative(-10); break;
-        case "volumeup": page.stepVolume(1); break;
-        case "volumedown": page.stepVolume(-1); break;
-        case "togglemute": page.player.toggleMute(); break;
-        case "togglefullscreen": page.Window.window.togglePlayerFullscreen(); break;
-        default: return;
-        }
+        page.Window.window.playerAction(name);
         page.wakeChrome();
     }
     // A menu of the bottom bar opens above its button, aligned to the button's far edge
@@ -224,19 +216,11 @@ Kirigami.Page {
     }
     focus: true
     Component.onCompleted: { wakeChrome(); Qt.callLater(focusPrimary); }
-    Connections {
-        target: page.player
-        function onFinished() {
-            if (page.isShowing && !page.player.active)
-                Qt.callLater(() => { if (page.isShowing) page.Window.window.pageStack.pop(); });
-        }
-    }
     Rectangle { anchors.fill: parent; color: "black" }
-    MpvVideoItem {
-        id: video
-        objectName: "videoRenderer"
+    Item {
+        id: slot
+        objectName: "playerVideoSlot"
         anchors.fill: parent
-        player: page.player
     }
     // Only a move of the pointer wakes the bars: the scene repeats the last hover position on every frame that changes something under it. The pointer hides with the bars
     HoverHandler {
@@ -400,7 +384,7 @@ Kirigami.Page {
                     Layout.alignment: Qt.AlignTop
                     icon.name: page.mirrored ? "go-previous-symbolic-rtl" : "go-previous-symbolic"
                     text: i18nc("@action:button", "Back")
-                    onClicked: page.closePlayer()
+                    onClicked: page.leavePlayer()
                 }
                 ColumnLayout {
                     Layout.fillWidth: true
@@ -619,6 +603,12 @@ Kirigami.Page {
                         icon.name: "media-view-subtitles-symbolic"
                         text: i18nc("@action:button subtitle tracks", "Subtitles")
                         onClicked: page.openMenu(subtitlesMenu, subtitlesButton)
+                    }
+                    OsdButton {
+                        objectName: "playerMiniButton"
+                        icon.name: "window-minimize-pip"
+                        text: i18nc("@action:button", "Show Mini Player")
+                        onClicked: page.leavePlayer()
                     }
                     OsdButton {
                         objectName: "playerFullScreenButton"
@@ -995,15 +985,5 @@ Kirigami.Page {
         autoExclusive: true
         checked: page.player.aspectMode === mode
         onTriggered: page.player.setAspectMode(mode)
-    }
-    // A button of the bars: icon only unless it says otherwise, its text as tooltip and accessible name, and no keyboard focus from a click, so the page keeps the keys
-    component OsdButton: Controls.ToolButton {
-        // Hover drives the tooltips and the volume slider whatever the platform's hover hint says
-        hoverEnabled: true
-        focusPolicy: Qt.TabFocus
-        display: Controls.AbstractButton.IconOnly
-        Controls.ToolTip.text: text
-        Controls.ToolTip.visible: display === Controls.AbstractButton.IconOnly && (hovered || visualFocus)
-        Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
     }
 }

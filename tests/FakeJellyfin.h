@@ -21,6 +21,7 @@
 #include <QUrlQuery>
 #include <QtTest>
 
+#include <algorithm>
 #include <optional>
 
 namespace {
@@ -351,6 +352,92 @@ class FakeJellyfin {
     QHash<QString, QList<QByteArray>> listingRoutes; // family -> every route in arrival order
     QHash<QString, QByteArray> lastListingAuth;      // family -> the Authorization header
 
+    // The playlist routes over an in-memory store, answering as the 12.4 server did (every one answers 401 to an Authorization without the token of the session): create answers 200 `{Id}`; entries carry a `PlaylistItemId` and the copies of one item share it, so removing it removes every copy; a move names the entry, an unknown entry is a silent 204 and an index past the end answers 500; removing an unknown entry is a silent 204; rename and delete answer 204. A write for an unknown playlist answers 404, a create without a name 400. `GET /Items/{id}` answers the item's `Type` (a playlist, or an entry of `typedItems`), 404 otherwise
+    struct FakePlaylistEntry {
+        QString entryId;
+        QString itemId;
+    };
+    struct FakePlaylist {
+        QString id;
+        QString name;
+        QList<FakePlaylistEntry> entries;
+    };
+    struct PlaylistRequest {
+        QByteArray method;
+        QByteArray route;
+        QByteArray body;
+        QByteArray authorization;
+        QByteArray contentType;
+    };
+    QList<FakePlaylist> playlists;
+    // Every request to a /Playlists route, and every DELETE /Items/{id}, in arrival order
+    QList<PlaylistRequest> playlistRequests;
+    // Not 0: every write (not the entries read) answers with this status and leaves the store alone
+    int playlistWriteStatus = 0;
+    // Writes are applied on arrival but answered on releasePlaylistWrites()
+    bool holdPlaylistWrites = false;
+    // When not empty, the body of the 200 a create answers instead of `{Id}` (the playlist is still created)
+    QByteArray playlistCreateRawBody;
+    // Not playlists: item id -> Type, answered by GET /Items/{id} (a DELETE of one still answers 404)
+    QHash<QString, QString> typedItems;
+    // GET /Items/{id}: a non-zero status, or a non-empty raw body, replaces the answer
+    int playlistItemStatus = 0;
+    QByteArray playlistItemRawBody;
+    // Writes are applied, then the connection is closed with no answer (a transport error for the client)
+    bool dropPlaylistWrites = false;
+    qsizetype heldPlaylistCount() const { return m_heldPlaylistWrites.size(); }
+
+    void releasePlaylistWrites()
+    {
+        const auto held = m_heldPlaylistWrites;
+        m_heldPlaylistWrites.clear();
+        for (const auto &write : held) {
+            if (write.socket)
+                respond(write.socket, write.status, write.body);
+        }
+    }
+
+    // A playlist made without a request: its id
+    QString seedPlaylist(const QString &name, const QStringList &itemIds)
+    {
+        FakePlaylist playlist{newFakeId(QLatin1Char('b')), name, {}};
+        appendPlaylistItems(&playlist, itemIds);
+        playlists.append(playlist);
+        return playlist.id;
+    }
+
+    FakePlaylist *playlistById(const QString &id)
+    {
+        for (FakePlaylist &playlist : playlists) {
+            if (playlist.id.compare(id, Qt::CaseInsensitive) == 0)
+                return &playlist;
+        }
+        return nullptr;
+    }
+
+    // The entry id of an item in a playlist, empty when it is not there
+    QString entryIdOf(const QString &playlistId, const QString &itemId)
+    {
+        if (const FakePlaylist *playlist = playlistById(playlistId)) {
+            for (const FakePlaylistEntry &entry : playlist->entries) {
+                if (entry.itemId == itemId)
+                    return entry.entryId;
+            }
+        }
+        return {};
+    }
+
+    // The item ids of a playlist in order
+    QStringList playlistItemIds(const QString &playlistId)
+    {
+        QStringList ids;
+        if (const FakePlaylist *playlist = playlistById(playlistId)) {
+            for (const FakePlaylistEntry &entry : playlist->entries)
+                ids.append(entry.itemId);
+        }
+        return ids;
+    }
+
     // The most recent accepted WebSocket connection (nullptr until one handshake completes)
     FakeSocketConnection *lastConnection() const
     {
@@ -429,6 +516,227 @@ class FakeJellyfin {
     }
 
   private:
+    struct HeldPlaylistWrite {
+        QPointer<QTcpSocket> socket;
+        int status = 204;
+        QByteArray body;
+    };
+
+    QString newFakeId(QChar fill)
+    {
+        return QString::number(++m_nextFakeId, 16).rightJustified(32, fill);
+    }
+
+    // The copies of one item share the entry id of its first one
+    void appendPlaylistItems(FakePlaylist *playlist, const QStringList &itemIds)
+    {
+        for (const QString &itemId : itemIds) {
+            QString entryId;
+            for (const FakePlaylistEntry &entry : std::as_const(playlist->entries)) {
+                if (entry.itemId == itemId)
+                    entryId = entry.entryId;
+            }
+            playlist->entries.append(
+                {entryId.isEmpty() ? newFakeId(QLatin1Char('c')) : entryId, itemId});
+        }
+    }
+
+    QJsonObject playlistEntryJson(const FakePlaylistEntry &entry) const
+    {
+        const QByteArray raw = itemsById.value(entry.itemId.toLower());
+        QJsonObject item = raw.isEmpty()
+                               ? QJsonObject{{QStringLiteral("Id"), entry.itemId},
+                                             {QStringLiteral("Name"),
+                                              QString(QStringLiteral("Item ") + entry.itemId)},
+                                             {QStringLiteral("Type"), QStringLiteral("Movie")}}
+                               : QJsonDocument::fromJson(raw).object();
+        item.insert(QStringLiteral("PlaylistItemId"), entry.entryId);
+        return item;
+    }
+
+    // Whether an Authorization header carries the token the fake issued to the session
+    bool hasSessionToken(const QByteArray &authorization) const
+    {
+        const qsizetype tokenAt = authorization.indexOf("Token=\"");
+        if (tokenAt < 0)
+            return false;
+        const QByteArray token = authorization.mid(tokenAt + 7).split('"').value(0);
+        if (token.isEmpty())
+            return false;
+        if (!users.isEmpty())
+            return userByToken(token) != nullptr;
+        if (rotateSecondLoginToken && successfulLogins >= 2)
+            return token == secondLoginToken;
+        return token
+               == QJsonDocument::fromJson(fixture(QStringLiteral("authenticate_success")))
+                      .object()
+                      .value(QStringLiteral("AccessToken"))
+                      .toString()
+                      .toUtf8();
+    }
+
+    // Answers a write, now or on releasePlaylistWrites()
+    void answerPlaylistWrite(QTcpSocket *socket, int status, const QByteArray &body = {})
+    {
+        if (dropPlaylistWrites)
+            socket->disconnectFromHost();
+        else if (holdPlaylistWrites)
+            m_heldPlaylistWrites.append({socket, status, body});
+        else
+            respond(socket, status, body);
+    }
+
+    // The /Playlists routes and DELETE /Items/{id}; false when the request is none of them
+    bool handlePlaylistRoute(QTcpSocket *socket, const QByteArray &method, const QByteArray &route,
+                             const QByteArray &body, const QByteArray &authorization,
+                             const QByteArray &contentType)
+    {
+        const QList<QByteArray> parts = route.split('?').first().split('/');
+        const qsizetype at = parts.indexOf("Playlists");
+        const bool itemRoute = at < 0 && parts.size() >= 2 && parts.at(parts.size() - 2) == "Items"
+                               && !parts.contains("Users");
+        const bool deleteItem = itemRoute && method == "DELETE";
+        // The listing routes under /Items/ (Latest, Filters, ...) are not ids: a GUID is 32 hex digits, dashed or not
+        const QByteArray lastPart = parts.last();
+        const bool getItem = itemRoute && method == "GET" && lastPart.size() >= 32
+                             && lastPart.size() <= 36
+                             && std::all_of(lastPart.cbegin(), lastPart.cend(), [](char c) {
+                                    return (c >= '0' && c <= '9') || c == '-'
+                                           || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+                                });
+        if (at < 0 && !deleteItem && !getItem)
+            return false;
+        if (!hasSessionToken(authorization)) {
+            respond(socket, 401, {});
+            return true;
+        }
+        const QList<QByteArray> rest = at < 0 ? QList<QByteArray>() : parts.mid(at + 1);
+        const bool read = method == "GET";
+        playlistRequests.append({method, route, body, authorization, contentType});
+        if (getItem) {
+            const QString id = QString::fromUtf8(lastPart);
+            const FakePlaylist *playlist = playlistById(id);
+            const QString type = playlist ? QStringLiteral("Playlist") : typedItems.value(id);
+            if (playlistItemStatus != 0)
+                respond(socket, playlistItemStatus, {});
+            else if (!playlistItemRawBody.isEmpty())
+                respond(socket, 200, playlistItemRawBody);
+            else if (type.isEmpty())
+                respond(socket, 404, {});
+            else
+                respond(socket, 200,
+                        QJsonDocument(QJsonObject{{QStringLiteral("Id"), id},
+                                                  {QStringLiteral("Name"), QStringLiteral("Item")},
+                                                  {QStringLiteral("Type"), type}})
+                            .toJson(QJsonDocument::Compact));
+            return true;
+        }
+        if (!read && playlistWriteStatus != 0) {
+            answerPlaylistWrite(socket, playlistWriteStatus);
+            return true;
+        }
+        const QUrlQuery query = capturedListingQuery(route);
+        const QJsonObject json = QJsonDocument::fromJson(body).object();
+        if (deleteItem) {
+            const QString id = QString::fromUtf8(parts.last());
+            for (qsizetype i = 0; i < playlists.size(); ++i) {
+                if (playlists.at(i).id.compare(id, Qt::CaseInsensitive) == 0) {
+                    playlists.removeAt(i);
+                    answerPlaylistWrite(socket, 204);
+                    return true;
+                }
+            }
+            answerPlaylistWrite(socket, 404);
+            return true;
+        }
+        if (rest.isEmpty() && method == "POST") {
+            const QString name = json.value(QStringLiteral("Name")).toString();
+            if (name.isEmpty()) {
+                answerPlaylistWrite(socket, 400);
+                return true;
+            }
+            QStringList ids;
+            for (const QJsonValue &id : json.value(QStringLiteral("Ids")).toArray())
+                ids.append(id.toString());
+            const QString id = seedPlaylist(name, ids);
+            answerPlaylistWrite(socket, 200,
+                                playlistCreateRawBody.isEmpty()
+                                    ? QJsonDocument(QJsonObject{{QStringLiteral("Id"), id}})
+                                          .toJson(QJsonDocument::Compact)
+                                    : playlistCreateRawBody);
+            return true;
+        }
+        if (rest.isEmpty() || (rest.size() != 1 && rest.size() != 2 && rest.size() != 5))
+            return false;
+        FakePlaylist *playlist = playlistById(QString::fromUtf8(rest.at(0)));
+        if (!playlist) {
+            if (read)
+                respond(socket, 404, {});
+            else
+                answerPlaylistWrite(socket, 404);
+            return true;
+        }
+        if (rest.size() == 1 && method == "POST") {
+            if (json.value(QStringLiteral("Name")).isString())
+                playlist->name = json.value(QStringLiteral("Name")).toString();
+            answerPlaylistWrite(socket, 204);
+            return true;
+        }
+        if (rest.size() == 2 && rest.at(1) == "Items") {
+            if (read) {
+                const int start = query.queryItemValue(QStringLiteral("startIndex")).toInt();
+                const int limit = query.queryItemValue(QStringLiteral("limit")).toInt();
+                QJsonArray items;
+                for (qsizetype row = start; row < start + limit && row < playlist->entries.size();
+                     ++row)
+                    items.append(playlistEntryJson(playlist->entries.at(row)));
+                respond(socket, 200,
+                        QJsonDocument(QJsonObject{{QStringLiteral("Items"), items},
+                                                  {QStringLiteral("StartIndex"), start},
+                                                  {QStringLiteral("TotalRecordCount"),
+                                                   int(playlist->entries.size())}})
+                            .toJson(QJsonDocument::Compact));
+                return true;
+            }
+            if (method == "POST") {
+                appendPlaylistItems(playlist,
+                                    query.queryItemValue(QStringLiteral("ids"), QUrl::FullyDecoded)
+                                        .split(QLatin1Char(','), Qt::SkipEmptyParts));
+                answerPlaylistWrite(socket, 204);
+                return true;
+            }
+            if (method == "DELETE") {
+                const QStringList entryIds =
+                    query.queryItemValue(QStringLiteral("entryIds"), QUrl::FullyDecoded)
+                        .split(QLatin1Char(','), Qt::SkipEmptyParts);
+                playlist->entries.removeIf([&entryIds](const FakePlaylistEntry &entry) {
+                    return entryIds.contains(entry.entryId);
+                });
+                answerPlaylistWrite(socket, 204);
+                return true;
+            }
+        }
+        if (rest.size() == 5 && rest.at(1) == "Items" && rest.at(3) == "Move" && method == "POST") {
+            const QString entryId = QString::fromUtf8(rest.at(2));
+            const int newIndex = rest.at(4).toInt();
+            qsizetype from = -1;
+            for (qsizetype i = 0; i < playlist->entries.size() && from < 0; ++i) {
+                if (playlist->entries.at(i).entryId == entryId)
+                    from = i;
+            }
+            if (from < 0) {
+                answerPlaylistWrite(socket, 204);
+            } else if (newIndex >= playlist->entries.size()) {
+                answerPlaylistWrite(socket, 500);
+            } else {
+                playlist->entries.move(from, newIndex);
+                answerPlaylistWrite(socket, 204);
+            }
+            return true;
+        }
+        return false;
+    }
+
     QByteArray generatedGenresBody(const QByteArray &route) const
     {
         const QUrlQuery query = capturedListingQuery(route);
@@ -802,6 +1110,9 @@ class FakeJellyfin {
             }
             return;
         }
+        // Before the listing routes: `/Playlists/{id}/Items?` would read as the Items family
+        if (handlePlaylistRoute(socket, method, route, body, authorization, contentType))
+            return;
         // The listing routes classify by fragment; `listingFamily` keeps the order so the more specific fragments win (/Items/Latest before /Items, /Sessions before the POST-only playback routes never match a GET)
         const QString listingFamily = classifyListingRoute(route);
         if (method == "GET" && !listingFamily.isEmpty()) {
@@ -1077,6 +1388,8 @@ class FakeJellyfin {
     QHash<QTcpSocket *, FakeSocketConnection *> m_wsTaken;
     QList<QPointer<QTcpSocket>> m_held;
     QList<QPair<QPointer<QTcpSocket>, QByteArray>> m_snapshots;
+    QList<HeldPlaylistWrite> m_heldPlaylistWrites;
+    quint64 m_nextFakeId = 0;
     QTcpServer m_server;
     QList<FakeSocketConnection *> m_wsConnections;
 };

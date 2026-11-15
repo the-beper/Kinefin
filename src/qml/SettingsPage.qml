@@ -21,6 +21,8 @@ Kirigami.Page {
     padding: 0
 
     readonly property bool signedIn: connection.state === ConnectionController.Authenticated
+    // The height of the bar at the bottom of the page: the mini player docks above it instead of over its buttons
+    readonly property real miniPlayerClearance: saveBar.visible ? saveBar.height : 0
     readonly property var deviceEntries: [
         { section: "main", title: i18n("General"), icon: "preferences-system-windows" },
         { section: "audio", title: i18n("Audio"), icon: "audio-speakers" },
@@ -355,6 +357,7 @@ Kirigami.Page {
             }
 
             UserPreferencesSaveBar {
+                id: saveBar
                 objectName: "settingsSaveBar"
                 Layout.fillWidth: true
                 prefs: page.connection.userConfiguration

@@ -488,179 +488,193 @@ Kirigami.ScrollablePage {
                                 text: page.details.seriesName
                             }
 
-                            Flow {
-                                id: facts
-                                objectName: "detailsFacts"
-
-                                // Every fact has the height of a badge, so a row of mixed facts stays level
-                                readonly property real rowHeight: Kirigami.Units.gridUnit + Kirigami.Units.smallSpacing
-
+                            // On a wide window Play sits at the end of the facts row and uses the room beside them; a narrow one gives it the whole width below
+                            RowLayout {
                                 Layout.fillWidth: true
                                 spacing: Kirigami.Units.largeSpacing
 
-                                Badge {
-                                    objectName: "factEpisode"
-                                    height: facts.rowHeight
-                                    visible: page.episodeCode.length > 0
-                                    caption: page.episodeCode
-                                }
+                                Flow {
+                                    id: facts
+                                    objectName: "detailsFacts"
 
-                                Controls.Label {
-                                    objectName: "factYear"
-                                    height: facts.rowHeight
-                                    verticalAlignment: Text.AlignVCenter
-                                    visible: text.length > 0
-                                    textFormat: Text.PlainText
-                                    text: page.yearText
-                                }
+                                    // Every fact has the height of a badge, so a row of mixed facts stays level
+                                    readonly property real rowHeight: Kirigami.Units.gridUnit + Kirigami.Units.smallSpacing
 
-                                Controls.Label {
-                                    objectName: "factStatus"
-                                    height: facts.rowHeight
-                                    verticalAlignment: Text.AlignVCenter
-                                    visible: text.length > 0
-                                    textFormat: Text.PlainText
-                                    text: page.statusText
-                                }
+                                    Layout.fillWidth: true
+                                    spacing: Kirigami.Units.largeSpacing
 
-                                Badge {
-                                    objectName: "certificateBadge"
-                                    height: facts.rowHeight
-                                    visible: page.details.officialRating.length > 0
-                                    caption: page.details.officialRating
-                                    accessibleName: i18n("Rated %1", page.details.officialRating)
-                                }
-
-                                RowLayout {
-                                    id: ratingRow
-                                    objectName: "factRating"
-                                    height: facts.rowHeight
-                                    visible: page.details.communityRating > 0
-                                    spacing: Kirigami.Units.smallSpacing
-                                    Accessible.role: Accessible.StaticText
-                                    Accessible.name: i18n("Community Rating")
-                                    Accessible.description: ratingLabel.text
-
-                                    Kirigami.Icon {
-                                        Layout.preferredWidth: Kirigami.Units.iconSizes.small
-                                        Layout.preferredHeight: Kirigami.Units.iconSizes.small
-                                        source: "starred-symbolic"
-                                        Accessible.ignored: true
+                                    Badge {
+                                        objectName: "factEpisode"
+                                        height: facts.rowHeight
+                                        visible: page.episodeCode.length > 0
+                                        caption: page.episodeCode
                                     }
 
                                     Controls.Label {
-                                        id: ratingLabel
+                                        objectName: "factYear"
+                                        height: facts.rowHeight
+                                        verticalAlignment: Text.AlignVCenter
+                                        visible: text.length > 0
                                         textFormat: Text.PlainText
-                                        text: page.details.communityRating.toLocaleString(Qt.locale(), "f", 1)
-                                    }
-                                }
-
-                                Controls.Label {
-                                    objectName: "factCritic"
-                                    height: facts.rowHeight
-                                    verticalAlignment: Text.AlignVCenter
-                                    visible: page.details.criticRating >= 0
-                                    textFormat: Text.PlainText
-                                    text: i18nc("critic rating in percent", "%1%", Math.round(page.details.criticRating))
-                                    Accessible.name: i18n("Critic Rating: %1", text)
-                                }
-
-                                Controls.Label {
-                                    objectName: "factSeasons"
-                                    height: facts.rowHeight
-                                    verticalAlignment: Text.AlignVCenter
-                                    visible: page.showSeasonCount
-                                    textFormat: Text.PlainText
-                                    text: i18np("%1 season", "%1 seasons", page.childModel.seasons.count)
-                                }
-
-                                Controls.Label {
-                                    objectName: "factEpisodes"
-                                    height: facts.rowHeight
-                                    verticalAlignment: Text.AlignVCenter
-                                    visible: page.showEpisodeCount
-                                    textFormat: Text.PlainText
-                                    text: i18np("%1 episode", "%1 episodes", page.childModel.episodes.totalCount)
-                                }
-
-                                Controls.Label {
-                                    objectName: "factUnplayed"
-                                    height: facts.rowHeight
-                                    verticalAlignment: Text.AlignVCenter
-                                    visible: (page.isSeries || page.isSeason) && page.details.unplayedCount > 0
-                                    textFormat: Text.PlainText
-                                    text: i18np("%1 unplayed", "%1 unplayed", page.details.unplayedCount)
-                                }
-
-                                Controls.Label {
-                                    objectName: "factRuntime"
-                                    height: facts.rowHeight
-                                    verticalAlignment: Text.AlignVCenter
-                                    visible: page.showsEndsAt
-                                    textFormat: Text.PlainText
-                                    text: page.runtimeText(page.details.runtimeMinutes)
-                                }
-
-                                Controls.Label {
-                                    objectName: "factEndsAt"
-                                    height: facts.rowHeight
-                                    verticalAlignment: Text.AlignVCenter
-                                    visible: text.length > 0
-                                    textFormat: Text.PlainText
-                                    text: page.endsAtText(page.now)
-                                }
-
-                                RowLayout {
-                                    objectName: "factPlayed"
-                                    height: facts.rowHeight
-                                    visible: page.details.played
-                                    spacing: Kirigami.Units.smallSpacing
-                                    Accessible.role: Accessible.StaticText
-                                    Accessible.name: playedLabel.text
-
-                                    Kirigami.Icon {
-                                        Layout.preferredWidth: Kirigami.Units.iconSizes.small
-                                        Layout.preferredHeight: Kirigami.Units.iconSizes.small
-                                        source: "emblem-checked"
-                                        Accessible.ignored: true
+                                        text: page.yearText
                                     }
 
                                     Controls.Label {
-                                        id: playedLabel
+                                        objectName: "factStatus"
+                                        height: facts.rowHeight
+                                        verticalAlignment: Text.AlignVCenter
+                                        visible: text.length > 0
                                         textFormat: Text.PlainText
-                                        text: i18nc("state of an item", "Played")
+                                        text: page.statusText
                                     }
-                                }
 
-                                RowLayout {
-                                    objectName: "factFavorite"
-                                    height: facts.rowHeight
-                                    visible: page.details.favorite
-                                    spacing: Kirigami.Units.smallSpacing
-                                    Accessible.role: Accessible.StaticText
-                                    Accessible.name: favoriteLabel.text
+                                    Badge {
+                                        objectName: "certificateBadge"
+                                        height: facts.rowHeight
+                                        visible: page.details.officialRating.length > 0
+                                        caption: page.details.officialRating
+                                        accessibleName: i18n("Rated %1", page.details.officialRating)
+                                    }
 
-                                    Kirigami.Icon {
-                                        Layout.preferredWidth: Kirigami.Units.iconSizes.small
-                                        Layout.preferredHeight: Kirigami.Units.iconSizes.small
-                                        source: "emblem-favorite"
-                                        Accessible.ignored: true
+                                    RowLayout {
+                                        id: ratingRow
+                                        objectName: "factRating"
+                                        height: facts.rowHeight
+                                        visible: page.details.communityRating > 0
+                                        spacing: Kirigami.Units.smallSpacing
+                                        Accessible.role: Accessible.StaticText
+                                        Accessible.name: i18n("Community Rating")
+                                        Accessible.description: ratingLabel.text
+
+                                        Kirigami.Icon {
+                                            Layout.preferredWidth: Kirigami.Units.iconSizes.small
+                                            Layout.preferredHeight: Kirigami.Units.iconSizes.small
+                                            source: "starred-symbolic"
+                                            Accessible.ignored: true
+                                        }
+
+                                        Controls.Label {
+                                            id: ratingLabel
+                                            textFormat: Text.PlainText
+                                            text: page.details.communityRating.toLocaleString(Qt.locale(), "f", 1)
+                                        }
                                     }
 
                                     Controls.Label {
-                                        id: favoriteLabel
+                                        objectName: "factCritic"
+                                        height: facts.rowHeight
+                                        verticalAlignment: Text.AlignVCenter
+                                        visible: page.details.criticRating >= 0
                                         textFormat: Text.PlainText
-                                        text: i18n("Favorite")
+                                        text: i18nc("critic rating in percent", "%1%", Math.round(page.details.criticRating))
+                                        Accessible.name: i18n("Critic Rating: %1", text)
                                     }
+
+                                    Controls.Label {
+                                        objectName: "factSeasons"
+                                        height: facts.rowHeight
+                                        verticalAlignment: Text.AlignVCenter
+                                        visible: page.showSeasonCount
+                                        textFormat: Text.PlainText
+                                        text: i18np("%1 season", "%1 seasons", page.childModel.seasons.count)
+                                    }
+
+                                    Controls.Label {
+                                        objectName: "factEpisodes"
+                                        height: facts.rowHeight
+                                        verticalAlignment: Text.AlignVCenter
+                                        visible: page.showEpisodeCount
+                                        textFormat: Text.PlainText
+                                        text: i18np("%1 episode", "%1 episodes", page.childModel.episodes.totalCount)
+                                    }
+
+                                    Controls.Label {
+                                        objectName: "factUnplayed"
+                                        height: facts.rowHeight
+                                        verticalAlignment: Text.AlignVCenter
+                                        visible: (page.isSeries || page.isSeason) && page.details.unplayedCount > 0
+                                        textFormat: Text.PlainText
+                                        text: i18np("%1 unplayed", "%1 unplayed", page.details.unplayedCount)
+                                    }
+
+                                    Controls.Label {
+                                        objectName: "factRuntime"
+                                        height: facts.rowHeight
+                                        verticalAlignment: Text.AlignVCenter
+                                        visible: page.showsEndsAt
+                                        textFormat: Text.PlainText
+                                        text: page.runtimeText(page.details.runtimeMinutes)
+                                    }
+
+                                    Controls.Label {
+                                        objectName: "factEndsAt"
+                                        height: facts.rowHeight
+                                        verticalAlignment: Text.AlignVCenter
+                                        visible: text.length > 0
+                                        textFormat: Text.PlainText
+                                        text: page.endsAtText(page.now)
+                                    }
+
+                                    RowLayout {
+                                        objectName: "factPlayed"
+                                        height: facts.rowHeight
+                                        visible: page.details.played
+                                        spacing: Kirigami.Units.smallSpacing
+                                        Accessible.role: Accessible.StaticText
+                                        Accessible.name: playedLabel.text
+
+                                        Kirigami.Icon {
+                                            Layout.preferredWidth: Kirigami.Units.iconSizes.small
+                                            Layout.preferredHeight: Kirigami.Units.iconSizes.small
+                                            source: "emblem-checked"
+                                            Accessible.ignored: true
+                                        }
+
+                                        Controls.Label {
+                                            id: playedLabel
+                                            textFormat: Text.PlainText
+                                            text: i18nc("state of an item", "Played")
+                                        }
+                                    }
+
+                                    RowLayout {
+                                        objectName: "factFavorite"
+                                        height: facts.rowHeight
+                                        visible: page.details.favorite
+                                        spacing: Kirigami.Units.smallSpacing
+                                        Accessible.role: Accessible.StaticText
+                                        Accessible.name: favoriteLabel.text
+
+                                        Kirigami.Icon {
+                                            Layout.preferredWidth: Kirigami.Units.iconSizes.small
+                                            Layout.preferredHeight: Kirigami.Units.iconSizes.small
+                                            source: "emblem-favorite"
+                                            Accessible.ignored: true
+                                        }
+
+                                        Controls.Label {
+                                            id: favoriteLabel
+                                            textFormat: Text.PlainText
+                                            text: i18n("Favorite")
+                                        }
+                                    }
+                                }
+
+                                ActionButton {
+                                    objectName: "detailsPlay"
+                                    visible: !hero.narrow && command.visible
+                                    command: page.playAction
+                                    highlighted: true
                                 }
                             }
                         }
                     }
 
-                    // The one button of the hero, the whole width on a narrow window: the other actions are in the page toolbar
+                    // The one button of the hero on a narrow window, the whole width under the facts: the other actions are in the page toolbar
                     ActionButton {
-                        objectName: "detailsPlay"
-                        Layout.fillWidth: hero.narrow
+                        objectName: "detailsPlayNarrow"
+                        Layout.fillWidth: true
+                        visible: hero.narrow && command.visible
                         command: page.playAction
                         highlighted: true
                     }
@@ -1160,7 +1174,8 @@ Kirigami.ScrollablePage {
 
         footer: Item {
             width: list.width
-            height: footerContent.implicitHeight + page.margin
+            // The warning has an action at its trailing end, where the mini player docks: it lifts the box above the dock
+            height: footerContent.implicitHeight + page.margin + (episodesWarning.visible ? (page.Window.window?.miniPlayerSpace ?? 0) : 0)
 
             ColumnLayout {
                 id: footerContent
@@ -1170,6 +1185,7 @@ Kirigami.ScrollablePage {
                 width: parent.width - page.margin * 2
 
                 MessageBox {
+                    id: episodesWarning
                     visible: page.childModel.episodes.pageError && page.childModel.episodes.status !== SeasonEpisodesModel.Failed
                     type: Kirigami.MessageType.Warning
                     text: i18n("Some episodes could not be loaded")

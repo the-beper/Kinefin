@@ -492,9 +492,6 @@ Item {
     }
     Component.onCompleted: syncTabs()
 
-    // The keys that open another page would take the place of the player and end the playback: they rest while it is in front, with the header hidden
-    readonly property bool navigationKeys: !shell.playbackPageShowing
-
     Kirigami.Action {
         id: homeAction
         objectName: "homeTabAction"
@@ -504,7 +501,7 @@ Item {
         icon.name: "go-home"
         enabled: root.signedIn
         onCheckedChanged: Qt.callLater(root.syncTabs)
-        shortcut: root.navigationKeys ? "Ctrl+1" : ""
+        shortcut: "Ctrl+1"
         onTriggered: shell.goHome()
     }
 
@@ -519,7 +516,7 @@ Item {
         visible: root.connection.movieLibraries.length > 0
         enabled: root.signedIn
         onCheckedChanged: Qt.callLater(root.syncTabs)
-        shortcut: visible && root.navigationKeys ? "Ctrl+2" : ""
+        shortcut: visible ? "Ctrl+2" : ""
         onTriggered: shell.openTab("movies")
     }
     Kirigami.Action {
@@ -532,7 +529,7 @@ Item {
         visible: root.connection.showLibraries.length > 0
         enabled: root.signedIn
         onCheckedChanged: Qt.callLater(root.syncTabs)
-        shortcut: visible && root.navigationKeys ? (moviesAction.visible ? "Ctrl+3" : "Ctrl+2") : ""
+        shortcut: visible ? (moviesAction.visible ? "Ctrl+3" : "Ctrl+2") : ""
         onTriggered: shell.openTab("tvshows")
     }
 
@@ -541,14 +538,14 @@ Item {
         objectName: "previousTabShortcut"
         sequences: ["Ctrl+PgUp", "Ctrl+[", "Ctrl+Shift+Tab"]
         context: Qt.WindowShortcut
-        enabled: root.signedIn && root.navigationKeys
+        enabled: root.signedIn
         onActivated: root.switchRelativeTab(-1)
     }
     Shortcut {
         objectName: "nextTabShortcut"
         sequences: ["Ctrl+PgDown", "Ctrl+]", "Ctrl+Tab"]
         context: Qt.WindowShortcut
-        enabled: root.signedIn && root.navigationKeys
+        enabled: root.signedIn
         onActivated: root.switchRelativeTab(1)
     }
 
@@ -559,7 +556,7 @@ Item {
 
         text: i18nc("@action:inmenu", "Settings")
         icon.name: "configure"
-        shortcut: root.navigationKeys ? "Ctrl+," : ""
+        shortcut: "Ctrl+,"
         onTriggered: shell.openSection("settingsPage", "SettingsPage.qml", { settings: shell.settings, connection: shell.connection })
     }
     Kirigami.Action {

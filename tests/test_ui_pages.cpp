@@ -25,6 +25,7 @@
 #include <QLocale>
 #include <QMutex>
 #include <QMutexLocker>
+#include <QPointer>
 #include <QQmlApplicationEngine>
 #include <QQmlComponent>
 #include <QQmlContext>
@@ -2089,6 +2090,51 @@ QQuickItem *openPlayer(Ui &ui, PlayerStub &stub)
                && page->property("isShowing").toBool() && ui.window->activeFocusItem() == page;
     });
     return ready ? page : nullptr;
+}
+
+// The mini player once it shows, or null
+QQuickItem *shownMiniPlayer(const Ui &ui)
+{
+    QQuickItem *mini = ui.item(QStringLiteral("miniPlayer"));
+    return mini && mini->isVisible() ? mini : nullptr;
+}
+
+// Puts the pointer over the middle of the mini player: two moves, as in restPointerOnVideo
+void hoverMiniPlayer(const Ui &ui, const QQuickItem *mini)
+{
+    const QPoint middle =
+        mini->mapToScene(QPointF(mini->width() / 2, mini->height() / 2)).toPoint();
+    QTest::mouseMove(ui.window, middle + QPoint(1, 1));
+    QTest::mouseMove(ui.window, middle);
+}
+
+// Plays the fixture movie, leaves the player by its Mini Player button and waits for the mini player; it, or null
+QQuickItem *openMiniPlayer(Ui &ui, PlayerStub &stub)
+{
+    QQuickItem *page = openPlayer(ui, stub);
+    QQuickItem *button = page ? Ui::itemIn(page, QStringLiteral("playerMiniButton")) : nullptr;
+    if (!button)
+        return nullptr;
+    ui.clickCenter(button);
+    QQuickItem *mini = nullptr;
+    const bool shown = qWaitForScaled([&] { return (mini = shownMiniPlayer(ui)) != nullptr; });
+    return shown ? mini : nullptr;
+}
+
+// The item with the keyboard focus once it has stopped changing for a few polls
+QQuickItem *focusAtRest(const Ui &ui)
+{
+    QQuickItem *last = nullptr;
+    int quiet = 0;
+    QElapsedTimer timer;
+    timer.start();
+    while (quiet < 5 && timer.elapsed() < scaled(5000)) {
+        QTest::qWait(20);
+        QQuickItem *now = ui.window->activeFocusItem();
+        quiet = now == last ? quiet + 1 : 0;
+        last = now;
+    }
+    return last;
 }
 
 // Puts the pointer at rest in the middle of the window, on the video: two moves, because Qt drops a move to the position it already has for the cursor, and an earlier test may have left it there
@@ -7400,6 +7446,33 @@ class TestUiPages : public QObject {
         QVERIFY(page);
         QTRY_VERIFY(Ui::itemIn(page, QStringLiteral("detailsPlay")) != nullptr);
         QVERIFY(!Ui::itemIn(page, QStringLiteral("detailsActions")));
+        // Wide: Play ends the facts row, on its line and to the right of the facts; narrow: the whole width below
+        QVERIFY(ui.opensWindowOfWidth(1400));
+        QQuickItem *play = Ui::itemIn(page, QStringLiteral("detailsPlay"));
+        QQuickItem *narrowPlay = Ui::itemIn(page, QStringLiteral("detailsPlayNarrow"));
+        QQuickItem *facts = Ui::itemIn(page, QStringLiteral("detailsFacts"));
+        QVERIFY(play && narrowPlay && facts);
+        QTRY_VERIFY(play->isVisible() && !narrowPlay->isVisible());
+        const auto centreY = [](QQuickItem *item) {
+            return item->mapToScene(QPointF(0, item->height() / 2)).y();
+        };
+        QTRY_VERIFY(qAbs(centreY(play) - centreY(facts)) < facts->height() / 2 + 1);
+        QVERIFY(play->mapToScene(QPointF(0, 0)).x()
+                >= facts->mapToScene(QPointF(facts->width(), 0)).x() - 1);
+        // At the end of the hero's text, on its margin
+        QQuickItem *heroText = Ui::itemIn(page, QStringLiteral("detailsHeroText"));
+        QVERIFY(heroText);
+        QVERIFY(qAbs(play->mapToScene(QPointF(play->width(), 0)).x()
+                     - heroText->mapToScene(QPointF(heroText->width(), 0)).x())
+                < 1);
+        QTRY_VERIFY(ui.layoutProblems().isEmpty());
+        // A Tab stop like the button it replaces
+        QVERIFY(play->activeFocusOnTab());
+        QVERIFY(ui.opensWindowOfWidth(500));
+        QTRY_VERIFY(!play->isVisible() && narrowPlay->isVisible());
+        QTRY_VERIFY(narrowPlay->width() > facts->width() / 2);
+        QTRY_VERIFY(ui.layoutProblems().isEmpty());
+        QVERIFY(narrowPlay->activeFocusOnTab());
         QStringList names;
         QStringList texts;
         QQmlListReference actions(page, "actions");
@@ -10250,7 +10323,9 @@ class TestUiPages : public QObject {
             ui.window, Qt::LeftButton, Qt::NoModifier,
             back->mapToScene(QPointF(back->width() / 2, back->height() / 2)).toPoint());
         QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("homePage"));
-        QVERIFY(stub.calls.contains(QStringLiteral("stop")));
+        // Back never stops: the playback goes on in the mini player
+        QVERIFY(!stub.calls.contains(QStringLiteral("stop")));
+        QTRY_VERIFY(shownMiniPlayer(ui));
         QTRY_COMPARE(ui.window->visibility(), QWindow::Windowed);
     }
 
@@ -10388,7 +10463,305 @@ class TestUiPages : public QObject {
                  QStringList({QStringLiteral("togglePause"), QStringLiteral("togglePause")}));
     }
 
-    void shellShortcutsLeaveThePlayerAlone()
+    void playerLeavesToTheMiniPlayerByEveryRoute_data()
+    {
+        QTest::addColumn<QString>("route");
+        for (const char *route :
+             {"osd back", "escape", "alt-left", "mini player button", "tab", "find", "remote home"})
+            QTest::newRow(route) << QString::fromLatin1(route);
+    }
+
+    void playerLeavesToTheMiniPlayerByEveryRoute()
+    {
+        QFETCH(QString, route);
+        PlayerStub stub;
+        RemoteStub remote;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(attach(ui, "remoteInput", &remote));
+        QQuickItem *page = openPlayer(ui, stub);
+        QVERIFY(page);
+        QQuickItem *video = ui.item(QStringLiteral("videoRenderer"));
+        QQuickItem *mini = ui.item(QStringLiteral("miniPlayer"));
+        QVERIFY(video && mini);
+        QVERIFY(page->isAncestorOf(video));
+        QVERIFY(!mini->isVisible());
+        // The video item never leaves its window on the way: not while the page goes, not afterwards
+        QSignalSpy windowChanged(video, &QQuickItem::windowChanged);
+        QVERIFY(windowChanged.isValid());
+        QPointer<QQuickItem> leavingPage(page);
+        if (route == QLatin1String("osd back"))
+            ui.clickCenter(ui.item(QStringLiteral("playerBackButton")));
+        else if (route == QLatin1String("escape"))
+            QTest::keyClick(ui.window, Qt::Key_Escape);
+        else if (route == QLatin1String("alt-left"))
+            QTest::keyClick(ui.window, Qt::Key_Left, Qt::AltModifier);
+        else if (route == QLatin1String("mini player button"))
+            ui.clickCenter(ui.item(QStringLiteral("playerMiniButton")));
+        else if (route == QLatin1String("tab")) {
+            // The header and its tabs are hidden in the full player: a tab opened by the shell (a link, a remote) clears the stack under it, once the Movies tab exists
+            const auto hasMovies = [&ui] {
+                QVariant has;
+                QMetaObject::invokeMethod(ui.window, "hasTypeTab", Q_RETURN_ARG(QVariant, has),
+                                          Q_ARG(QVariant, QStringLiteral("movies")));
+                return has.toBool();
+            };
+            QTRY_VERIFY(hasMovies());
+            QVERIFY(QMetaObject::invokeMethod(ui.window, "openTab",
+                                              Q_ARG(QVariant, QStringLiteral("movies")),
+                                              Q_ARG(QVariant, QVariant())));
+        } else if (route == QLatin1String("find"))
+            QTest::keySequence(ui.window, QKeySequence::Find);
+        else
+            Q_EMIT remote.actionRequested(QStringLiteral("home"));
+        // The mini player shows, holding the very item the page held, and nothing was stopped
+        QTRY_VERIFY(mini->isVisible());
+        QTRY_VERIFY(mini->isAncestorOf(video));
+        QCOMPARE(ui.item(QStringLiteral("videoRenderer")), video);
+        QCOMPARE(ui.window->property("playbackMode").toString(), QStringLiteral("mini"));
+        QTRY_VERIFY(ui.currentDetails()->objectName() != QLatin1String("playerPage"));
+        QVERIFY(!stub.calls.contains(QStringLiteral("stop")));
+        QVERIFY(stub.active);
+        if (route == QLatin1String("tab"))
+            QTRY_COMPARE(ui.rootTab(), QStringLiteral("movies"));
+        else if (route == QLatin1String("find"))
+            QTRY_VERIFY(ui.item(QStringLiteral("searchPage")) != nullptr);
+        // The page is deleted by now or soon: the item stays in the mini player, in the window
+        QTRY_VERIFY(leavingPage.isNull());
+        QCOMPARE(ui.item(QStringLiteral("videoRenderer")), video);
+        QVERIFY(mini->isAncestorOf(video));
+        QCOMPARE(video->window(), ui.window);
+        QCOMPARE(windowChanged.count(), 0);
+        QVERIFY(!stub.calls.contains(QStringLiteral("stop")));
+    }
+
+    void miniPlayerExpandsBackToTheFullPlayer_data()
+    {
+        QTest::addColumn<QString>("way");
+        for (const char *way : {"click", "expand button", "shortcut", "new play"})
+            QTest::newRow(way) << QString::fromLatin1(way);
+    }
+
+    void miniPlayerExpandsBackToTheFullPlayer()
+    {
+        QFETCH(QString, way);
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *mini = openMiniPlayer(ui, stub);
+        QVERIFY(mini);
+        QQuickItem *video = ui.item(QStringLiteral("videoRenderer"));
+        QVERIFY(video && mini->isAncestorOf(video));
+        stub.calls.clear();
+        if (way == QLatin1String("click")) {
+            hoverMiniPlayer(ui, mini);
+            QTest::mouseClick(
+                ui.window, Qt::LeftButton, Qt::NoModifier,
+                mini->mapToScene(QPointF(mini->width() / 2, mini->height() / 2)).toPoint());
+        } else if (way == QLatin1String("expand button")) {
+            hoverMiniPlayer(ui, mini);
+            QQuickItem *expand = ui.item(QStringLiteral("miniPlayerExpandButton"));
+            QVERIFY(expand);
+            ui.clickCenter(expand);
+        } else if (way == QLatin1String("shortcut")) {
+            QTest::keyClick(ui.window, Qt::Key_P, Qt::ControlModifier | Qt::ShiftModifier);
+        } else {
+            QVERIFY(QMetaObject::invokeMethod(ui.engine.rootObjects().constFirst(), "playItem",
+                                              Q_ARG(QVariant, kMovieId), Q_ARG(QVariant, 0)));
+        }
+        // The same item is inside the new page, and the mini player is gone
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("playerPage"));
+        QTRY_VERIFY(!mini->isVisible());
+        QTRY_VERIFY(ui.currentDetails()->isAncestorOf(video));
+        QCOMPARE(ui.item(QStringLiteral("videoRenderer")), video);
+        QCOMPARE(ui.window->property("playbackMode").toString(), QStringLiteral("full"));
+        QVERIFY(!stub.calls.contains(QStringLiteral("stop")));
+        QCOMPARE(stub.calls.contains(QStringLiteral("playItem %1").arg(kMovieId)),
+                 way == QLatin1String("new play"));
+    }
+
+    void miniPlayerCloseStopsAndDestroysTheVideo()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *mini = openMiniPlayer(ui, stub);
+        QVERIFY(mini);
+        QVERIFY(ui.item(QStringLiteral("videoRenderer")));
+        hoverMiniPlayer(ui, mini);
+        QQuickItem *close = ui.item(QStringLiteral("miniPlayerCloseButton"));
+        QVERIFY(close);
+        QCOMPARE(close->property("text").toString(), QStringLiteral("Close Mini Player"));
+        ui.clickCenter(close);
+        QTRY_VERIFY(stub.calls.contains(QStringLiteral("stop")));
+        QTRY_VERIFY(!mini->isVisible());
+        QTRY_VERIFY(ui.item(QStringLiteral("videoRenderer")) == nullptr);
+        QCOMPARE(ui.window->property("playbackMode").toString(), QStringLiteral("none"));
+        // A new play builds a new item inside the full player
+        QQuickItem *page = openPlayer(ui, stub);
+        QVERIFY(page);
+        QQuickItem *video = ui.item(QStringLiteral("videoRenderer"));
+        QVERIFY(video && page->isAncestorOf(video));
+    }
+
+    void miniPlayerGoesWhenPlaybackEnds()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *mini = openMiniPlayer(ui, stub);
+        QVERIFY(mini);
+        stub.active = false;
+        Q_EMIT stub.changed();
+        Q_EMIT stub.finished();
+        QTRY_VERIFY(!mini->isVisible());
+        QTRY_VERIFY(ui.item(QStringLiteral("videoRenderer")) == nullptr);
+        QCOMPARE(ui.window->property("playbackMode").toString(), QStringLiteral("none"));
+        // The end in the full player leaves its page the same way
+        QVERIFY(openPlayer(ui, stub));
+        stub.active = false;
+        Q_EMIT stub.changed();
+        Q_EMIT stub.finished();
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("homePage"));
+        QTRY_VERIFY(ui.item(QStringLiteral("videoRenderer")) == nullptr);
+        QVERIFY(!shownMiniPlayer(ui));
+    }
+
+    void miniPlayerStaysForTheNextEpisode()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *mini = openMiniPlayer(ui, stub);
+        QVERIFY(mini);
+        QQuickItem *video = ui.item(QStringLiteral("videoRenderer"));
+        QQuickItem *title = ui.item(QStringLiteral("miniPlayerTitle"));
+        QVERIFY(video && title);
+        QVERIFY(showsPlainText(title));
+        QCOMPARE(title->property("text").toString(), stub.title);
+        // The player moves on to the next item: it is still active when the end of the last one is announced
+        stub.title = QStringLiteral("The Silent Sea");
+        Q_EMIT stub.changed();
+        Q_EMIT stub.finished();
+        QTRY_COMPARE(title->property("text").toString(), QStringLiteral("The Silent Sea"));
+        QTest::qWait(100);
+        QVERIFY(mini->isVisible());
+        QCOMPARE(ui.item(QStringLiteral("videoRenderer")), video);
+        QVERIFY(mini->isAncestorOf(video));
+    }
+
+    void miniPlayerGoesOnSignOut()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *mini = openMiniPlayer(ui, stub);
+        QVERIFY(mini);
+        ui.controller.signOut();
+        QTRY_VERIFY(ui.item(QStringLiteral("serversPage")) != nullptr);
+        QTRY_VERIFY(!mini->isVisible());
+        QTRY_VERIFY(ui.item(QStringLiteral("videoRenderer")) == nullptr);
+        QCOMPARE(ui.window->property("playbackMode").toString(), QStringLiteral("none"));
+    }
+
+    void miniPlayerKeepsThePageFocus()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *mini = openMiniPlayer(ui, stub);
+        QVERIFY(mini);
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("homePage"));
+        // The page takes the keyboard a turn after it comes to the front
+        QQuickItem *home = ui.currentDetails();
+        QTRY_VERIFY(ui.window->activeFocusItem()
+                    && (ui.window->activeFocusItem() == home
+                        || home->isAncestorOf(ui.window->activeFocusItem())));
+        QQuickItem *before = focusAtRest(ui);
+        QVERIFY(before);
+        // Hovering shows the controls, and a click on one acts without taking the keyboard
+        QQuickItem *scrim = ui.item(QStringLiteral("miniPlayerScrim"));
+        QVERIFY(scrim);
+        hoverMiniPlayer(ui, mini);
+        QTRY_COMPARE(scrim->opacity(), 1.0);
+        QQuickItem *pause = ui.item(QStringLiteral("miniPlayerPauseButton"));
+        QVERIFY(pause);
+        stub.calls.clear();
+        ui.clickCenter(pause);
+        QTRY_COMPARE(stub.calls.count(QStringLiteral("togglePause")), 1);
+        QCOMPARE(focusAtRest(ui), before);
+        // The click acted on the control: it did not expand the player
+        QCOMPARE(ui.window->property("playbackMode").toString(), QStringLiteral("mini"));
+        QCOMPARE(ui.currentDetails(), home);
+    }
+
+    void miniPlayerTouchShowsTheControlsBeforeActing()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *mini = openMiniPlayer(ui, stub);
+        QVERIFY(mini);
+        QQuickItem *scrim = ui.item(QStringLiteral("miniPlayerScrim"));
+        QQuickItem *pause = ui.item(QStringLiteral("miniPlayerPauseButton"));
+        QObject *timer = mini->findChild<QObject *>(QStringLiteral("miniPlayerRevealTimer"));
+        QVERIFY(scrim && pause && timer);
+        // The pointer rests away from the dock, so only the touch can show the controls
+        const QPoint away(ui.window->width() / 4, ui.window->height() / 2);
+        QTest::mouseMove(ui.window, away + QPoint(1, 1));
+        QTest::mouseMove(ui.window, away);
+        QTRY_COMPARE(scrim->opacity(), 0.0);
+        QPointingDevice *touch = QTest::createTouchDevice();
+        const auto tap = [&](const QQuickItem *item) {
+            const QPoint at =
+                item->mapToScene(QPointF(item->width() / 2, item->height() / 2)).toPoint();
+            QTest::touchEvent(ui.window, touch).press(0, at);
+            QTest::touchEvent(ui.window, touch).release(0, at);
+        };
+        const auto mode = [&ui] { return ui.window->property("playbackMode").toString(); };
+        stub.calls.clear();
+        // A tap on the video shows the controls and does nothing else
+        timer->setProperty("interval", 60000);
+        tap(mini);
+        QTRY_COMPARE(scrim->opacity(), 1.0);
+        QCOMPARE(mode(), QStringLiteral("mini"));
+        QVERIFY(stub.calls.isEmpty());
+        // They hide again after a few seconds
+        timer->setProperty("interval", 50);
+        QTRY_COMPARE(scrim->opacity(), 0.0);
+        timer->setProperty("interval", 60000);
+        // A tap on a control that is hidden shows the controls and does not press it
+        tap(pause);
+        QTRY_COMPARE(scrim->opacity(), 1.0);
+        QVERIFY(stub.calls.isEmpty());
+        // Shown, the same tap presses it, and the player stays a mini player
+        tap(pause);
+        QTRY_COMPARE(stub.calls.count(QStringLiteral("togglePause")), 1);
+        QCOMPARE(mode(), QStringLiteral("mini"));
+        // A second tap on the video expands the player
+        tap(mini);
+        QTRY_COMPARE(mode(), QStringLiteral("full"));
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("playerPage"));
+        QVERIFY(!stub.calls.contains(QStringLiteral("stop")));
+    }
+
+    void miniPlayerGivesWayToAPlaybackThatFails()
     {
         PlayerStub stub;
         Ui ui(m_home->path());
@@ -10397,15 +10770,180 @@ class TestUiPages : public QObject {
         QVERIFY(ui.signIn());
         QQuickItem *page = openPlayer(ui, stub);
         QVERIFY(page);
-        for (const QKeySequence &keys :
-             {QKeySequence(QKeySequence::Find), QKeySequence(Qt::CTRL | Qt::Key_1),
-              QKeySequence(Qt::CTRL | Qt::Key_2), QKeySequence(Qt::CTRL | Qt::Key_PageDown),
-              QKeySequence(Qt::CTRL | Qt::Key_Comma)}) {
-            QTest::keySequence(ui.window, keys);
-            QTest::qWait(200);
-            QVERIFY2(ui.currentDetails() == page, qPrintable(keys.toString()));
-        }
+        // The item is still opening when the player is left
+        stub.loading = true;
+        Q_EMIT stub.changed();
+        ui.clickCenter(Ui::itemIn(page, QStringLiteral("playerMiniButton")));
+        QTRY_VERIFY(shownMiniPlayer(ui));
+        QCOMPARE(ui.window->property("playbackMode").toString(), QStringLiteral("mini"));
+        // It fails: the full player comes back with the error and the way to close it
+        stub.loading = false;
+        stub.active = false;
+        stub.errorText = QStringLiteral("The video could not be opened. Try again.");
+        Q_EMIT stub.changed();
+        QTRY_COMPARE(ui.window->property("playbackMode").toString(), QStringLiteral("full"));
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("playerPage"));
+        QTRY_VERIFY(!shownMiniPlayer(ui));
+        QTRY_VERIFY(ui.showsText(stub.errorText));
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Close Player")));
         QVERIFY(!stub.calls.contains(QStringLiteral("stop")));
+    }
+
+    void miniPlayerDocksAboveTheSettingsSaveBar()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        RemotePreferences remote(ui);
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(openPreferences(ui) != nullptr);
+        QQuickItem *bar = nullptr;
+        QTRY_VERIFY((bar = ui.item(QStringLiteral("settingsSaveBar"))) != nullptr
+                    && bar->isVisible());
+        QQuickItem *page = openPlayer(ui, stub);
+        QVERIFY(page);
+        ui.clickCenter(Ui::itemIn(page, QStringLiteral("playerMiniButton")));
+        QQuickItem *mini = nullptr;
+        QTRY_VERIFY((mini = shownMiniPlayer(ui)) != nullptr);
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("settingsPage"));
+        // The dock lies above the bar, not over its Discard and Save buttons
+        QTRY_VERIFY(sceneRect(mini).bottom() <= sceneRect(bar).top() + 1);
+    }
+
+    void miniPlayerDocksInTheTrailingCorner_data()
+    {
+        QTest::addColumn<int>("width");
+        QTest::addColumn<bool>("rightToLeft");
+        QTest::newRow("wide") << 1000 << false;
+        QTest::newRow("compact") << 400 << false;
+        QTest::newRow("right to left") << 1000 << true;
+    }
+
+    void miniPlayerDocksInTheTrailingCorner()
+    {
+        QFETCH(int, width);
+        QFETCH(bool, rightToLeft);
+        const Qt::LayoutDirection direction = QGuiApplication::layoutDirection();
+        QGuiApplication::setLayoutDirection(rightToLeft ? Qt::RightToLeft : Qt::LeftToRight);
+        const auto restoreDirection =
+            qScopeGuard([direction] { QGuiApplication::setLayoutDirection(direction); });
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(width));
+        QVERIFY(ui.signIn());
+        QQuickItem *mini = openMiniPlayer(ui, stub);
+        QVERIFY(mini);
+        const qreal unit = gridUnitOf(ui);
+        const qreal margin = mini->property("margin").toReal();
+        QVERIFY(margin > 0);
+        // 35 % of the window width, between 12 and 20 grid units, 16:9
+        const qreal wanted = std::round(std::min(std::max(width * 0.35, unit * 12), unit * 20));
+        const auto docked = [&] {
+            const QRectF rect = sceneRect(mini);
+            const bool corner = rightToLeft ? qAbs(rect.left() - margin) <= 1
+                                            : qAbs(rect.right() - (width - margin)) <= 1;
+            return corner && qAbs(rect.width() - wanted) <= 1
+                   && qAbs(rect.height() - wanted * 9 / 16) <= 1
+                   && qAbs(rect.bottom() - (ui.window->height() - margin)) <= 1;
+        };
+        QTRY_VERIFY2(docked(), qPrintable(QStringLiteral("%1 %2 %3 %4")
+                                              .arg(sceneRect(mini).x())
+                                              .arg(sceneRect(mini).y())
+                                              .arg(sceneRect(mini).width())
+                                              .arg(sceneRect(mini).height())));
+        // It floats above the page stack and below the startup cover, outside the row the tab motion moves, and under the header
+        const auto *stack =
+            qobject_cast<QQuickItem *>(ui.window->property("pageStack").value<QObject *>());
+        QVERIFY(stack);
+        QVERIFY(!stack->isAncestorOf(mini));
+        QVERIFY(mini->z() > stack->z());
+        QVERIFY(mini->z() < ui.item(QStringLiteral("startupCover"))->z());
+        QVERIFY(sceneRect(mini).top() >= ui.shellHeader()->height());
+    }
+
+    void remotePlayerCommandsWorkInEveryMode()
+    {
+        PlayerStub stub;
+        RemoteStub remote;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(attach(ui, "remoteInput", &remote));
+        QVERIFY(openPlayer(ui, stub));
+        const QStringList sequence =
+            QStringLiteral("playpause pause pause play play next previous fastforward rewind "
+                           "volumedown volumeup togglemute bogus")
+                .split(QLatin1Char(' '));
+        // Pause and play act only on the state they change; the stub starts at full volume
+        const QStringList calls({QStringLiteral("togglePause"), QStringLiteral("resume"),
+                                 QStringLiteral("next"), QStringLiteral("previous"),
+                                 QStringLiteral("seekRelative 10"),
+                                 QStringLiteral("seekRelative -10"), QStringLiteral("setVolume 95"),
+                                 QStringLiteral("setVolume 100"), QStringLiteral("toggleMute")});
+        stub.calls.clear();
+        for (const QString &command : sequence)
+            Q_EMIT remote.actionRequested(command);
+        QCOMPARE(stub.calls, calls);
+
+        // The same commands reach the player under another page
+        ui.clickCenter(Ui::itemIn(ui.currentDetails(), QStringLiteral("playerMiniButton")));
+        QTRY_VERIFY(shownMiniPlayer(ui));
+        stub.calls.clear();
+        for (const QString &command : sequence)
+            Q_EMIT remote.actionRequested(command);
+        QCOMPARE(stub.calls, calls);
+
+        // Full screen needs the full player: the command brings it back
+        Q_EMIT remote.actionRequested(QStringLiteral("togglefullscreen"));
+        QTRY_COMPARE(ui.window->visibility(), QWindow::FullScreen);
+        QCOMPARE(ui.currentDetails()->objectName(), QStringLiteral("playerPage"));
+        Q_EMIT remote.actionRequested(QStringLiteral("togglefullscreen"));
+        QTRY_COMPARE(ui.window->visibility(), QWindow::Windowed);
+
+        // Stop ends the playback from the mini player
+        ui.clickCenter(Ui::itemIn(ui.currentDetails(), QStringLiteral("playerMiniButton")));
+        QTRY_VERIFY(shownMiniPlayer(ui));
+        stub.calls.clear();
+        Q_EMIT remote.actionRequested(QStringLiteral("stop"));
+        QCOMPARE(stub.calls, QStringList({QStringLiteral("stop")}));
+        QTRY_VERIFY(!shownMiniPlayer(ui));
+        QTRY_VERIFY(ui.item(QStringLiteral("videoRenderer")) == nullptr);
+    }
+
+    void playerModeButtonsFitTheNarrowRow()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(1000));
+        QVERIFY(ui.signIn());
+        QVERIFY(openPlayer(ui, stub));
+        QQuickItem *mini = ui.item(QStringLiteral("playerMiniButton"));
+        QQuickItem *fullScreen = ui.item(QStringLiteral("playerFullScreenButton"));
+        QVERIFY(mini && fullScreen);
+        QCOMPARE(mini->property("text").toString(), QStringLiteral("Show Mini Player"));
+        QQuickItem *page = ui.currentDetails();
+        for (const int width : {1000, 440}) {
+            QVERIFY(ui.opensWindowOfWidth(width));
+            // The page lays its row out for the new width a turn after the resize: the checks wait for that layout
+            QTRY_COMPARE(page->property("narrow").toBool(),
+                         width < ui.window->property("wideLimit").toInt());
+            // Icon only at every width (AbstractButton.IconOnly), right before Full Screen, and inside the window
+            QTRY_VERIFY(mini->isVisible() && mini->width() > 0);
+            QCOMPARE(mini->property("display").toInt(), 0);
+            const auto fits = [&] {
+                const QRectF rect = sceneRect(mini);
+                return rect.left() >= 0 && rect.right() <= ui.window->width()
+                       && rect.right() <= sceneRect(fullScreen).left() + 1
+                       && sceneRect(fullScreen).right() <= ui.window->width();
+            };
+            QTRY_VERIFY(fits());
+            QCOMPARE(mini->width(), fullScreen->width());
+        }
     }
 
     void homeLibrariesFollowTheSetting()
@@ -11676,7 +12214,7 @@ class TestUiPages : public QObject {
                            "volumedown togglemute togglefullscreen")
                 .split(QLatin1Char(' '));
 
-        // Without the player page in front nothing reaches the player
+        // Without a playback nothing reaches the player
         for (const QString &command : commands)
             Q_EMIT remote.actionRequested(command);
         QVERIFY(stub.calls.isEmpty());
@@ -11687,11 +12225,11 @@ class TestUiPages : public QObject {
         stub.calls.clear();
         const QStringList sequence =
             QStringLiteral("playpause pause pause play play next previous fastforward rewind "
-                           "volumedown volumeup togglemute bogus home")
+                           "volumedown volumeup togglemute bogus")
                 .split(QLatin1Char(' '));
         for (const QString &command : sequence)
             Q_EMIT remote.actionRequested(command);
-        // Pause and play act only on the state they change; the stub starts at full volume, and the player page keeps the front against Home
+        // Pause and play act only on the state they change; the stub starts at full volume
         QCOMPARE(stub.calls,
                  QStringList({QStringLiteral("togglePause"), QStringLiteral("resume"),
                               QStringLiteral("next"), QStringLiteral("previous"),

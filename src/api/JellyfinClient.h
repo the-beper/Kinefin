@@ -41,6 +41,14 @@ constexpr int MaxFilterValueChars = 128;
 // The longest encoded query of an Items listing: below the 8 KiB request line the server and the usual proxies accept. fetchItems refuses a longer one without a request; the filter UI keeps its selections within it by asking itemsQueryChars()
 constexpr int MaxItemsQueryChars = 7000;
 
+// The longest playlist name (in Unicode code points), the most ids one create, add or remove call may carry, and the largest page fetchPlaylistEntries asks for (a larger `limit` is cut to it)
+constexpr int MaxPlaylistNameChars = 128;
+constexpr int MaxPlaylistWriteIds = 100;
+constexpr int MaxPlaylistPageSize = 100;
+
+// The playlist name `name` stands for: trimmed, 1 to MaxPlaylistNameChars code points, at least one visible (non-space) character, valid UTF-16 with no control, format (bidi and zero-width), line or paragraph separator, surrogate, unassigned or noncharacter code point; empty when it does not qualify
+QString normalizedPlaylistName(const QString &name);
+
 // Random sorting is requested as one page of this many items, never a later one: the order differs on every request
 constexpr int RandomPageSize = 100;
 
@@ -98,6 +106,10 @@ class JellyfinClient final : public QObject {
     Q_OBJECT
 
   public:
+    // The writes of a playlist: the `op` of playlistWriteSucceeded and playlistWriteFailed
+    enum class PlaylistOp { Create, Add, Remove, Move, Rename, Delete };
+    Q_ENUM(PlaylistOp)
+
     // No limit: the same value as the profile's MaxStaticBitrate
     static constexpr qint64 DefaultMaxStreamingBitrate = 1'000'000'000;
 
@@ -170,6 +182,19 @@ class JellyfinClient final : public QObject {
     // writes by canonical GUID; the state changes only after a confirmed reply.
     // The endpoint requires userId on 12.4, not the legacy /Users/... route.
     bool setItemPlayed(const QString &itemId, bool played);
+    // The entries of one playlist (`GET /Playlists/{id}/Items`), paged: each item carries its `PlaylistItemId` (copies of one item share one), `playlistEntriesReady` carries the page and the `TotalRecordCount`. `startIndex` is 0 or more, `limit` 1 or more and is cut to MaxPlaylistPageSize. Same channel rules as fetchItems; failures arrive as listingFailed("PlaylistEntries")
+    bool fetchPlaylistEntries(const QString &playlistId, int startIndex, int limit,
+                              int channel = 0);
+    // The playlist writes: no channel, one write per playlist in flight (a call for a playlist with a write pending returns false, whatever the spelling of its id; so does a second create while one is pending), the outcome comes as playlistWriteSucceeded or playlistWriteFailed. Every call returns false without a request when not authenticated or when its input is refused: an id that is not a Jellyfin id, a name that normalizedPlaylistName() refuses, more than MaxPlaylistWriteIds ids, an empty id list for add and remove, a negative index. A 401 expires the session and still ends with playlistWriteFailed(401). A create succeeds only on a 200 with a valid `Id`, every other write only on a 204: any other status, a 200 included, is a failure carrying that status. A failure with status 0 (transport error, timeout) may still have been applied by the server: a consumer reloads after any failure and never retries a create blindly. Writes in flight are dropped without any signal when the session ends (sessionExpired, credentialsCleared), so a consumer resets its per-write state on those signals, as with favorites. Create makes a private video playlist holding `itemIds` (may be empty): the new id comes back as `createdId`
+    bool createPlaylist(const QString &name, const QStringList &itemIds);
+    bool addToPlaylist(const QString &playlistId, const QStringList &itemIds);
+    // `entryIds` are PlaylistItemIds, not item ids: the server removes every copy of an entry and ignores an unknown one
+    bool removePlaylistEntries(const QString &playlistId, const QStringList &entryIds);
+    // `newIndex` is sent as given: the caller clamps it to the playlist, the server answers 500 past the end
+    bool movePlaylistEntry(const QString &playlistId, const QString &entryId, int newIndex);
+    bool renamePlaylist(const QString &playlistId, const QString &name);
+    // `DELETE /Items/{id}` removes any item for good, so the item is read first (`GET /Items/{id}`) and deleted only when its `Type` is exactly "Playlist": any other type, a failed read or an invalid reply ends as playlistWriteFailed(Delete) with the status of the read, and nothing is deleted. The playlist's write slot is held across both requests
+    bool deletePlaylist(const QString &playlistId);
     // The token-free URL of one item image (`GET /Items/{itemId}/Images/{type}` has no `security` requirement in the 12.4 spec, so the URL carries no credentials and the image fetch may stay unauthenticated). `imageType` is one of the spec's ImageType names; `format` may be empty (the server negotiates) or one of "jpg", "gif", "png", "webp"; `tag` is an opaque alphanumeric cache buster. Invalid input yields an empty URL, never a partially valid one
     QUrl imageUrl(const QString &itemId, const QString &imageType, int maxWidth, const QString &tag,
                   int quality = 90, const QString &format = {}) const;
@@ -269,7 +294,7 @@ class JellyfinClient final : public QObject {
     void quickConnectAwaitingApproval();
     void userViewsReady(const QJsonArray &items, int totalRecordCount);
     void requestFailed(int httpStatus, const QString &reason);
-    // A listing family failed (status 0 for a transport error): `family` is the fixed name of the fetcher ("Items", "Resume", "Latest", "NextUp", "Seasons", "Episodes", "Similar", "Genres", "Filters", "MovieRecommendations", "Suggestions", "Upcoming", "Studios", "Sessions"), the reason a fixed English string; a 401 also expires the session. Listings never emit requestFailed (fetchUserViews, the libraries call, still does), so the Home page error stays about the libraries only. "FiltersLegacy" never emits it: legacyFiltersFailed is its failure
+    // A listing family failed (status 0 for a transport error): `family` is the fixed name of the fetcher ("Items", "Resume", "Latest", "NextUp", "Seasons", "Episodes", "Similar", "Genres", "Filters", "MovieRecommendations", "Suggestions", "Upcoming", "Studios", "PlaylistEntries", "Sessions"), the reason a fixed English string; a 401 also expires the session. Listings never emit requestFailed (fetchUserViews, the libraries call, still does), so the Home page error stays about the libraries only. "FiltersLegacy" never emits it: legacyFiltersFailed is its failure
     void listingFailed(const QString &family, int httpStatus, const QString &reason, int channel);
     // `userId` is the user whose session ended (userId() is already empty by then)
     void sessionExpired(const QString &userId);
@@ -302,6 +327,12 @@ class JellyfinClient final : public QObject {
     void suggestionsReady(const QJsonArray &items, int totalRecordCount, int channel);
     void upcomingReady(const QJsonArray &items, int totalRecordCount, int channel);
     void studiosReady(const QJsonArray &items, int totalRecordCount, int channel);
+    void playlistEntriesReady(const QJsonArray &items, int totalRecordCount, int channel);
+    // `createdId` is the new playlist's id for Create and empty otherwise (`playlistId` is empty for Create); `httpStatus` is 0 for a transport error, the status of the reply otherwise (so 200 for a create reply without a valid id, and for a delete that named no playlist)
+    void playlistWriteSucceeded(Kinefin::JellyfinClient::PlaylistOp op, const QString &playlistId,
+                                const QString &createdId);
+    void playlistWriteFailed(Kinefin::JellyfinClient::PlaylistOp op, const QString &playlistId,
+                             int httpStatus);
     void sessionsReady(const QJsonArray &sessions);
     void sessionPlaystateSucceeded(const QString &sessionId, const QString &command);
     void sessionPlaystateFailed(const QString &sessionId, const QString &command, int httpStatus);
@@ -338,6 +369,12 @@ class JellyfinClient final : public QObject {
     // The shared status handling of the account preference calls: true for a 200 (or a 204 when `allowNoContent`) without a transport error; otherwise false with the status and the fixed reason (`failure`, or "Authentication expired" after a 401 that also expired the session)
     bool acceptAccountReply(QNetworkReply *finished, bool allowNoContent, const QString &failure,
                             int *status, QString *reason);
+    // The shared plumbing of the playlist writes: the one-per-playlist guard, the request and the outcome signals. `body` (JSON) rides only a POST
+    bool sendPlaylistWrite(PlaylistOp op, const QString &playlistId, const QByteArray &method,
+                           const QUrl &url, const QByteArray &body = {});
+    // The request of a write whose slot is already taken
+    void dispatchPlaylistWrite(PlaylistOp op, const QString &playlistId, const QByteArray &method,
+                               const QUrl &url, const QByteArray &body);
     QUrl endpoint(const QString &path) const;
     QNetworkRequest requestFor(const QUrl &url, bool authenticated) const;
     void attach(QNetworkReply *reply, quint64 generation,
@@ -358,6 +395,7 @@ class JellyfinClient final : public QObject {
     QSet<QNetworkReply *> m_pending;
     QSet<QString> m_favoritePending;
     QSet<QString> m_playedPending;
+    QSet<QString> m_playlistPending;
     QUrl m_base;
     QString m_serverId;
     QString m_userId;
@@ -394,7 +432,7 @@ class JellyfinClient final : public QObject {
     // Flipped by the WebSocket component while an authenticated socket exists; `reportCapabilities()` carries it
     bool m_mediaControlAnnounced = false;
     bool m_verifyInFlight = false;
-    // The listing families: `Items`, `Resume`, `Latest`, `NextUp`, `Seasons`, `Episodes`, `Similar`, `Genres`, `Filters`, `FiltersLegacy`, `MovieRecommendations`, `Suggestions`, `Upcoming`, `Studios`, `Sessions` — the serial each accepted request holds and the reply of the one in flight (for supersede aborts)
+    // The listing families: `Items`, `Resume`, `Latest`, `NextUp`, `Seasons`, `Episodes`, `Similar`, `Genres`, `Filters`, `FiltersLegacy`, `MovieRecommendations`, `Suggestions`, `Upcoming`, `Studios`, `PlaylistEntries`, `Sessions` — the serial each accepted request holds and the reply of the one in flight (for supersede aborts)
     QHash<QString, quint64> m_listingSerials;
     QHash<QString, QPointer<QNetworkReply>> m_listingReplies;
 };
