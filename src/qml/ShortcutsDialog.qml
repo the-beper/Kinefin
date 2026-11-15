@@ -42,11 +42,14 @@ Kirigami.Dialog {
         ["-", i18nc("@item:intable shortcut action", "Volume Down")],
         ["F", i18nc("@item:intable shortcut action", "Toggle Full Screen")],
         ["F11", i18nc("@item:intable shortcut action", "Toggle Full Screen")],
-        ["Escape", i18nc("@item:intable shortcut action", "Leave Full Screen or Go Back")],
+        ["Escape", i18nc("@item:intable shortcut action", "Cancel Up Next, Leave Full Screen or Go Back")],
+        ["Return", i18nc("@item:intable shortcut action", "Play the Up Next Item Now")],
         ["Left", i18nc("@item:intable shortcut action", "Skip Back 10 Seconds")],
         ["Right", i18nc("@item:intable shortcut action", "Skip Forward 10 Seconds")],
         ["Down", i18nc("@item:intable shortcut action", "Skip Back 1 Minute")],
-        ["Up", i18nc("@item:intable shortcut action", "Skip Forward 1 Minute")]
+        ["Up", i18nc("@item:intable shortcut action", "Skip Forward 1 Minute")],
+        ["PgDown", i18nc("@item:intable shortcut action", "Previous Chapter")],
+        ["PgUp", i18nc("@item:intable shortcut action", "Next Chapter")]
     ]
 
     // The keys of a combination and the "+" between them; a "+" on its own or at the end ("Ctrl++") is a key

@@ -202,7 +202,13 @@ int main(int argc, char *argv[])
     QObject::connect(&connection, &Kinefin::ConnectionController::homeProjectionChanged, &player,
                      [&connection, &player] {
                          player.setNextEpisodeAutoPlay(connection.nextEpisodeAutoPlay());
+                         player.setRememberSelections(connection.rememberAudioSelections(),
+                                                      connection.rememberSubtitleSelections());
                      });
+    QObject::connect(&connection, &Kinefin::ConnectionController::storedUserForgotten, &player,
+                     &Kinefin::PlayerController::forgetStoredUser);
+    QObject::connect(&connection, &Kinefin::ConnectionController::storedServerForgotten, &player,
+                     &Kinefin::PlayerController::forgetStoredServer);
 
     const auto imageOrigin = std::make_shared<Kinefin::ImageOrigin>();
     connection.setImageOrigin(imageOrigin);

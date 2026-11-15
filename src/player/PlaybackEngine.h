@@ -77,6 +77,8 @@ class PlaybackEngine final : public QObject {
     [[nodiscard]] qreal playbackRate() const { return m_rate; }
     // Whether the file's last time-pos is within a few seconds of its duration: the rule that makes an eof the item's end and not a dropped connection; valid in streamEnded() until the next open()
     [[nodiscard]] bool nearEnd() const;
+    // The file counts as played to its end: the position reads as the duration until mpv says otherwise, so the report of the stop that follows closes it as the natural end would
+    void markEnded();
     // mpv's own picture facts, cached from its property changes (no mpv call): `videoWidth`, `videoHeight` (dwidth, dheight), `droppedFrames` (frame-drop-count), `decoderDroppedFrames` (decoder-frame-drop-count), `hwdec` (hwdec-current); a key is present only while mpv has a value
     [[nodiscard]] QVariantMap videoFacts() const { return m_videoFacts; }
 

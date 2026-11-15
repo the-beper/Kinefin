@@ -215,7 +215,7 @@ class JellyfinClient final : public QObject {
     // Authenticated subtitle files are downloaded via Qt, never opened by mpv
     // over the network (which could forward player headers on redirects).
     bool downloadExternalSubtitle(const QUrl &url);
-    // The item being played (`GET /Users/{id}/Items/{id}`): its title fields and trickplay metadata; a stale reply is dropped and a failed one is silent
+    // The item being played (`GET /Users/{id}/Items/{id}`): its title fields, chapters and trickplay metadata; a stale reply is dropped and a failed one is silent
     bool fetchPlaybackItem(const QString &itemId);
     // Trickplay thumbnails are authenticated on the same origin and bounded in
     // size. Superseded image requests never update the currently playing item.

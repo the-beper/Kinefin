@@ -120,6 +120,9 @@ struct ItemDetails {
 
 ItemDetails parseItemDetails(const QJsonObject &item);
 
+// The `Chapters` array of a `BaseItemDto` in the server's order, for the details page and the player: at most MaxChapters, names cut at MaxShort and made one line (no control, format or line-separator characters), an unreadable start read as 0
+QList<ChapterSummary> parseChapters(const QJsonValue &chapters);
+
 // One `MediaSourceInfo` with the same caps as the details page: also used for the source the player opened
 SourceSummary parseMediaSource(const QJsonObject &source);
 } // namespace Kinefin

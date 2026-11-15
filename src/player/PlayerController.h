@@ -5,12 +5,15 @@
 #include <QImage>
 #include <QTemporaryDir>
 #include <QUrl>
+#include "models/ItemDetails.h"
 #include "player/PlaybackEngine.h"
 #include "player/PlaybackReporter.h"
 #include "player/PlayerSettings.h"
+#include "player/SeriesPreferences.h"
 #include "player/Trickplay.h"
 
 #include <QElapsedTimer>
+#include <QHash>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QObject>
@@ -31,6 +34,31 @@ class ClientSettings;
 
 // `01:24:10` with hours, `05:07` without; a negative count shows as zero
 QString playbackTimeText(qint64 ticks, bool withHours);
+// The chapters the player offers: sorted by start, one per start, none at or past a known duration; fewer than two count as none
+QList<ChapterSummary> playableChapters(QList<ChapterSummary> chapters, qint64 durationTicks);
+// The chapter playing at `ticks` among sorted chapters, -1 before the first
+int chapterIndexAt(const QList<ChapterSummary> &chapters, qint64 ticks);
+// Where a chapter step from `positionTicks` lands, -1 for nowhere: forward the next chapter's start; back the current chapter's start when more than 3 s into it, else the previous chapter's, else the start of the video
+qint64 chapterStepTarget(const QList<ChapterSummary> &chapters, qint64 positionTicks,
+                         int direction);
+
+// The tracks to select once a file's tracks are known: the item's own remembered ids (`audio`, `subtitle`, 0 for off), then the series' choices, each kind only while the user remembers it. 0 leaves mpv's pick
+struct RememberedTracks {
+    int audio = 0;
+    int subtitle = 0;
+    bool subtitleOff = false;
+};
+RememberedTracks rememberedTracks(const QJsonObject &item, const SeriesChoice &series,
+                                  const QList<TrackFact> &audio, const QList<TrackFact> &subtitles,
+                                  bool rememberAudio, bool rememberSubtitles);
+
+// When the Up Next card shows and when the next item starts, in ticks of the item
+struct UpNextWindow {
+    qint64 showAt = 0;
+    qint64 advanceAt = 0;
+};
+// With an Outro segment that ends within 30 s of the end, the card shows at its start and the next item starts 10 s later (at the end at the latest); without one it shows 30 s before the end and the end itself starts the next item. None for an item under 10 minutes or of unknown duration
+std::optional<UpNextWindow> upNextWindow(qint64 durationTicks, const QVariantList &segments);
 
 // Single playback owner. Negotiation and server reporting stay on the authenticated
 // client's event loop; mpv's worker thread is accessed only via MpvAbstractItem.
@@ -67,6 +95,17 @@ class PlayerController final : public QObject {
     Q_PROPERTY(QString skipLabel READ skipLabel NOTIFY changed)
     Q_PROPERTY(int sleepRemainingMinutes READ sleepRemainingMinutes NOTIFY changed)
     Q_PROPERTY(QString aspectMode READ aspectMode NOTIFY changed)
+    // The chapters of the playing item, from the server: `name` (plain text, "Chapter N" when the server gives none), `startTicks` and `time` (as timeText shows it)
+    Q_PROPERTY(QVariantList chapters READ chapters NOTIFY chaptersChanged)
+    // Notified only when the chapter changes, not with every position
+    Q_PROPERTY(int currentChapter READ currentChapter NOTIFY currentChapterChanged)
+    // The Up Next card: up near the end of an item whose end starts another one (never under Repeat One or for a lone item) until Cancel; `upNext` holds that item's `title`, `subtitle` (plain text) and `imageUrl`
+    Q_PROPERTY(bool upNextShown READ upNextShown NOTIFY upNextChanged)
+    Q_PROPERTY(QVariantMap upNext READ upNext NOTIFY upNextChanged)
+    // Whole seconds of media time, at the current rate, until the next item starts
+    Q_PROPERTY(int upNextSeconds READ upNextSeconds NOTIFY upNextChanged)
+    // The episode playing belongs to a series with remembered choices (tracks, speed, aspect)
+    Q_PROPERTY(bool hasSeriesChoices READ hasSeriesChoices NOTIFY seriesChoicesChanged)
   public:
     // What the desktop sees (MPRIS, the screensaver): opening, loading and buffering count as playing, stopping and a failure as stopped
     enum class Status { Stopped, Playing, Paused };
@@ -114,6 +153,16 @@ class PlayerController final : public QObject {
     QString skipLabel() const { return m_skipLabel; }
     // The aspect mode of this playback: the `video.aspect` setting until a choice is made, and again for the next item
     QString aspectMode() const { return m_mpvSettings.aspectMode(); }
+    QVariantList chapters() const { return m_chapterList; }
+    // The chapter playing now, -1 before the first or without chapters
+    int currentChapter() const { return m_currentChapter; }
+    bool upNextShown() const { return m_upNextShown; }
+    QVariantMap upNext() const { return m_upNext; }
+    int upNextSeconds() const { return m_upNextSeconds; }
+    bool hasSeriesChoices() const
+    {
+        return !m_itemSeriesId.isEmpty() && m_seriesPreferences.contains(m_itemSeriesId);
+    }
     int sleepRemainingMinutes() const;
     Status status() const;
     // The token-free URL of the current item's primary image (512 px), empty until the server named its tag
@@ -153,6 +202,17 @@ class PlayerController final : public QObject {
     Q_INVOKABLE void refreshTracks();
     // One of the `video.aspect` values except `custom`: applied at once to this playback only, the setting is not written
     Q_INVOKABLE void setAspectMode(const QString &mode);
+    // The chapter at a position of the timeline, -1 before the first or without chapters
+    Q_INVOKABLE int chapterAt(qint64 ticks) const { return chapterIndexAt(m_chapters, ticks); }
+    Q_INVOKABLE void jumpToChapter(int index);
+    // 1 for the next chapter, -1 for the previous one (see chapterStepTarget)
+    Q_INVOKABLE void stepChapter(int direction);
+    // Play Now on the Up Next card: what it offers starts at once, as Next does
+    Q_INVOKABLE void playUpNext();
+    // Cancel on the Up Next card: the end of this item finishes the playback instead of starting the next one
+    Q_INVOKABLE void cancelUpNext();
+    // The next episodes of this series start from the settings again; this one keeps what it plays with
+    Q_INVOKABLE void forgetSeriesChoices();
     // What the Playback Info overlay shows, from the negotiated source and the facts the engine cached from mpv (no network, no mpv call); a key is present only when its value is known. Never holds the URL or the token
     // - `playMethod`: DirectPlay or Transcode
     // - `streamType`, `protocol`: File, HLS or the container extension; http or https
@@ -167,13 +227,30 @@ class PlayerController final : public QObject {
     // Used before a session changes, never by QML to re-authenticate.
     void onAccountLeaving();
     // The signed-in user's EnableNextEpisodeAutoPlay: whether the end of an episode played alone starts the next one
-    void setNextEpisodeAutoPlay(bool enabled) { m_nextEpisodeAutoPlay = enabled; }
+    void setNextEpisodeAutoPlay(bool enabled)
+    {
+        m_nextEpisodeAutoPlay = enabled;
+        updateUpNext();
+    }
+    // The signed-in user's RememberAudioSelections and RememberSubtitleSelections: whether the item's and the series' track choices are applied
+    void setRememberSelections(bool audio, bool subtitles)
+    {
+        m_rememberAudio = audio;
+        m_rememberSubtitles = subtitles;
+    }
+    // A user's (or every user of a server's) track memory, queue position and series choices go
+    void forgetStoredUser(const QString &serverId, const QString &userId);
+    void forgetStoredServer(const QString &serverId);
 
   Q_SIGNALS:
     void changed();
     // A seek was asked of mpv, to this position
     void seeked(qint64 ticks);
     void tracksChanged();
+    void chaptersChanged();
+    void currentChapterChanged();
+    void upNextChanged();
+    void seriesChoicesChanged();
     void previewChanged();
     void finished();
 
@@ -189,12 +266,40 @@ class PlayerController final : public QObject {
     // Turns the episodes read so far into the series playlist, or leaves the episode alone when they do not hold it
     void finishSeriesPlaylist();
     void updateTrickplayLayout();
+    // Offers the item's chapters that fall within the duration known now
+    void updateChapters();
+    void updateCurrentChapter();
     void cancelSeriesRequest();
     void dropSeriesPlaylist();
     void onEnd(const QString &reason);
     void onState(PlaybackSession::State from, PlaybackSession::State to);
     // `pick` false answers whether a step exists without drawing the random index of shuffle
     int nextIndex(int direction, bool pick = true) const;
+    // Whether the end of this item moves on in the playlist: the saved queue always does, the episodes of a series with the user's autoplay preference or an explicit repeat mode
+    bool advancesAtEnd() const
+    {
+        return !m_playlistEphemeral || m_nextEpisodeAutoPlay || m_repeat != 0;
+    }
+    // The playlist index of the other item the end would start, -1 when it replays this one (Repeat One, a lone item under Repeat All) or stops
+    int pendingAdvance(bool pick) const;
+    // The Up Next card follows the position, the duration, the segments, the rate and the playlist
+    void updateUpNext();
+    void resetUpNext();
+    // The title, subtitle and picture of an item of the playlist, from the saved queue or the series listing
+    QVariantMap upNextInfo(const QString &id) const;
+    // The series store, for the signed-in user
+    SeriesPreferences &seriesStore();
+    // A track choice is the series' only for an episode played directly: a transcode carries the server's one audio track
+    bool keepsSeriesTracks() const
+    {
+        return !m_itemSeriesId.isEmpty() && m_source.method == PlaybackSource::Method::Direct;
+    }
+    // The series' speed and aspect, once the file is loaded and the series known; a restore, never a choice
+    void applySeriesPlayback();
+    // Track memory and queue positions of an owner (`server` or `server/user`) go
+    void pruneMemory(const QString &owner);
+    // The Intro segments around `ticks` are never skipped automatically: the user went there. Before the segments are known the position is kept for when they come
+    void keepIntrosAt(qint64 ticks);
     void refreshSegments();
     void updateSkip();
     QString memoryKey() const;
@@ -233,6 +338,38 @@ class PlayerController final : public QObject {
     QList<ExternalSubtitle> m_subtitleOptions;
     std::optional<TrickplayLayout> m_trickplay;
     QJsonObject m_trickplayInfo;
+    // The chapters as the server sent them, and those the player offers
+    QList<ChapterSummary> m_itemChapters;
+    QList<ChapterSummary> m_chapters;
+    QVariantList m_chapterList;
+    int m_currentChapter = -1;
+    // What the Up Next card offers, drawn once under shuffle: Next and the end start it while the card is up
+    QString m_upNextId;
+    QVariantMap m_upNext;
+    int m_upNextSeconds = 0;
+    bool m_upNextShown = false;
+    // Cancel on the card, or a jump past its early advance: this playback ends without moving on
+    bool m_upNextCancelled = false;
+    // The card's title, subtitle and picture of each episode of the series listing (by lower-case id), and of the pages read so far
+    QHash<QString, QVariantMap> m_seriesInfo;
+    QHash<QString, QVariantMap> m_pendingSeriesInfo;
+    // The starts of the Intro segments skipped, or entered by a seek, in this playback; the seeks made before the segments came; where the playback resumed (no Intro before it is skipped)
+    QList<qint64> m_handledIntros;
+    QList<qint64> m_earlySeeks;
+    qint64 m_resumedFrom = 0;
+    SeriesPreferences m_seriesPreferences;
+    // The series of the episode playing, empty for anything else
+    QString m_itemSeriesId;
+    // The audio and subtitle tracks of the file in mpv's order, with their language and forced flag
+    QList<TrackFact> m_audioFacts;
+    QList<TrackFact> m_subtitleFacts;
+    bool m_rememberAudio = true;
+    bool m_rememberSubtitles = true;
+    // The speed of this playback is decided (a repeat kept it, or the user chose one); a track was chosen since the file loaded; the file is loaded; the series' speed and aspect were applied
+    bool m_rateDecided = false;
+    bool m_trackChosen = false;
+    bool m_fileLoaded = false;
+    bool m_seriesApplied = false;
     std::optional<TrickplayFrame> m_requestedFrame;
     QImage m_lastTile;
     QString m_previewImage;

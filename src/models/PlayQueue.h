@@ -77,6 +77,8 @@ class PlayQueue final : public QAbstractListModel {
 
     // Entries in order
     QStringList itemIds() const;
+    // The picture of a row: the item's own, else (an episode without one) its parent's backdrop; empty when the server named neither
+    QUrl imageUrlFor(const ItemSummary &item) const;
     // When a queue item is playing, Next inserts immediately after that item.
     // An empty id restores the traditional insert-at-front behavior.
     void setCurrentPlaybackItemId(const QString &id);
@@ -148,7 +150,6 @@ class PlayQueue final : public QAbstractListModel {
     void fail();
     void endOperation();
     void insert(std::vector<ItemSummary> items, Placement placement, bool *truncated, int *joined);
-    QUrl imageUrlFor(const ItemSummary &item) const;
 
     Stored readStored(const QString &path, StoredQueue *stored);
     QString queuesDirectory() const;

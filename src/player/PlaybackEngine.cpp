@@ -329,6 +329,12 @@ static const char *videoFactKey(const QString &property)
     return nullptr;
 }
 
+void PlaybackEngine::markEnded()
+{
+    if (m_positionKnown && m_durationTicks > 0)
+        m_positionTicks = m_durationTicks;
+}
+
 bool PlaybackEngine::nearEnd() const
 {
     return m_positionKnown && m_durationTicks > 0

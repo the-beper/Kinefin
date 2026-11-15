@@ -133,6 +133,8 @@ add_library(kinefin_player STATIC
     src/player/PlayerController.h
     src/player/PlayerSettings.cpp
     src/player/PlayerSettings.h
+    src/player/SeriesPreferences.cpp
+    src/player/SeriesPreferences.h
     src/player/Trickplay.cpp
     src/player/Trickplay.h
 )
@@ -292,6 +294,10 @@ if(BUILD_TESTING)
     target_compile_definitions(test_playback_engine PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(test_playback_engine PRIVATE kinefin_player Qt6::Test)
     add_test(NAME playback_engine COMMAND test_playback_engine)
+
+    add_executable(test_series_preferences tests/test_series_preferences.cpp)
+    target_link_libraries(test_series_preferences PRIVATE kinefin_player Qt6::Test)
+    add_test(NAME series_preferences COMMAND test_series_preferences)
 
     add_executable(test_player_controller tests/test_player_controller.cpp)
     target_compile_definitions(test_player_controller PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")

@@ -23,6 +23,19 @@ QString text(const QJsonValue &value, int limit)
     return value.isString() ? value.toString().left(limit) : QString();
 }
 
+// One line of remote text, as FavoritesModel's: control, format (bidirectional overrides among them) and line-separator characters become spaces, then whitespace runs collapse
+QString oneLine(const QString &value)
+{
+    QString clean = value;
+    for (QChar &c : clean) {
+        const QChar::Category category = c.category();
+        if (category == QChar::Other_Control || category == QChar::Other_Format
+            || category == QChar::Separator_Line || category == QChar::Separator_Paragraph)
+            c = QLatin1Char(' ');
+    }
+    return clean.simplified();
+}
+
 // A short server token (codec, profile, colour name) as plain text: empty unless it is printable ASCII, cut at 64 characters; `\z` because `$` also matches before a final newline
 QString token(const QJsonValue &value)
 {
@@ -283,21 +296,7 @@ ItemDetails parseItemDetails(const QJsonObject &item)
         }
     }
 
-    const QJsonValue chapters = item.value(QStringLiteral("Chapters"));
-    if (chapters.isArray()) {
-        for (const QJsonValue &entry : chapters.toArray()) {
-            if (details.chapters.size() == ItemDetails::MaxChapters)
-                break;
-            if (!entry.isObject())
-                continue;
-            const QJsonObject chapter = entry.toObject();
-            ChapterSummary summary;
-            summary.name = text(chapter.value(QStringLiteral("Name")), ItemDetails::MaxShort);
-            summary.startTicks =
-                boundedInt64(chapter.value(QStringLiteral("StartPositionTicks")), 0, kMaxTicks, 0);
-            details.chapters.append(summary);
-        }
-    }
+    details.chapters = parseChapters(item.value(QStringLiteral("Chapters")));
 
     const QJsonValue sources = item.value(QStringLiteral("MediaSources"));
     if (sources.isArray()) {
@@ -309,5 +308,25 @@ ItemDetails parseItemDetails(const QJsonObject &item)
         }
     }
     return details;
+}
+
+QList<ChapterSummary> parseChapters(const QJsonValue &chapters)
+{
+    QList<ChapterSummary> result;
+    if (!chapters.isArray())
+        return result;
+    for (const QJsonValue &entry : chapters.toArray()) {
+        if (result.size() == ItemDetails::MaxChapters)
+            break;
+        if (!entry.isObject())
+            continue;
+        const QJsonObject chapter = entry.toObject();
+        ChapterSummary summary;
+        summary.name = oneLine(text(chapter.value(QStringLiteral("Name")), ItemDetails::MaxShort));
+        summary.startTicks =
+            boundedInt64(chapter.value(QStringLiteral("StartPositionTicks")), 0, kMaxTicks, 0);
+        result.append(summary);
+    }
+    return result;
 }
 } // namespace Kinefin

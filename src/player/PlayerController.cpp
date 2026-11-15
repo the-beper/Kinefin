@@ -62,6 +62,32 @@ QString episodeSubtitle(const ItemSummary &episode)
                ? label
                : i18nc("episode label and episode title", "%1 — %2", label, episode.name);
 }
+
+// What names an item: for an episode the series, with the numbered episode below; else the item's name alone
+std::pair<QString, QString> itemTitles(const ItemSummary &item)
+{
+    const bool episode = item.type == QLatin1String("Episode") && !item.seriesName.isEmpty();
+    return {episode ? item.seriesName : item.name, episode ? episodeSubtitle(item) : QString()};
+}
+
+// A track of the file as a choice to remember: its language, forced flag and place among its kind
+std::optional<TrackChoice> choiceOf(const QList<TrackFact> &tracks, int id)
+{
+    for (int i = 0; i < tracks.size(); ++i) {
+        if (tracks.at(i).id == id)
+            return TrackChoice{tracks.at(i).lang, tracks.at(i).forced, i};
+    }
+    return std::nullopt;
+}
+
+int indexOfItem(const QStringList &ids, const QString &id)
+{
+    for (int i = 0; i < ids.size(); ++i) {
+        if (sameItemId(ids.at(i), id))
+            return i;
+    }
+    return -1;
+}
 } // namespace
 
 QString playbackTimeText(qint64 ticks, bool withHours)
@@ -73,6 +99,93 @@ QString playbackTimeText(qint64 ticks, bool withHours)
     const QString minutes = part(withHours ? seconds / 60 % 60 : seconds / 60);
     const QString text = minutes + QLatin1Char(':') + part(seconds % 60);
     return withHours ? part(seconds / 3600) + QLatin1Char(':') + text : text;
+}
+
+QList<ChapterSummary> playableChapters(QList<ChapterSummary> chapters, qint64 durationTicks)
+{
+    std::stable_sort(chapters.begin(), chapters.end(),
+                     [](const ChapterSummary &a, const ChapterSummary &b) {
+                         return a.startTicks < b.startTicks;
+                     });
+    QList<ChapterSummary> result;
+    for (const ChapterSummary &chapter : std::as_const(chapters)) {
+        if (durationTicks > 0 && chapter.startTicks >= durationTicks)
+            break;
+        if (result.isEmpty() || result.constLast().startTicks != chapter.startTicks)
+            result.append(chapter);
+    }
+    return result.size() < 2 ? QList<ChapterSummary>() : result;
+}
+
+int chapterIndexAt(const QList<ChapterSummary> &chapters, qint64 ticks)
+{
+    const auto after = std::upper_bound(
+        chapters.cbegin(), chapters.cend(), ticks,
+        [](qint64 value, const ChapterSummary &chapter) { return value < chapter.startTicks; });
+    return int(after - chapters.cbegin()) - 1;
+}
+
+qint64 chapterStepTarget(const QList<ChapterSummary> &chapters, qint64 positionTicks, int direction)
+{
+    if (chapters.isEmpty() || direction == 0)
+        return -1;
+    // A seek can land a frame or so before the chapter start it asked for: that start counts as reached
+    const int current = chapterIndexAt(chapters, positionTicks + TicksPerSecond);
+    if (direction > 0)
+        return current + 1 < chapters.size() ? chapters.at(current + 1).startTicks : -1;
+    if (current >= 0 && positionTicks - chapters.at(current).startTicks > 3 * TicksPerSecond)
+        return chapters.at(current).startTicks;
+    return current > 0 ? chapters.at(current - 1).startTicks : 0;
+}
+
+RememberedTracks rememberedTracks(const QJsonObject &item, const SeriesChoice &series,
+                                  const QList<TrackFact> &audio, const QList<TrackFact> &subtitles,
+                                  bool rememberAudio, bool rememberSubtitles)
+{
+    const auto listed = [](const QList<TrackFact> &tracks, int id) {
+        return id > 0 && std::any_of(tracks.cbegin(), tracks.cend(), [id](const TrackFact &track) {
+                   return track.id == id;
+               });
+    };
+    RememberedTracks result;
+    if (rememberAudio) {
+        // The item's own id, when this source has it; else the series' choice
+        const int id = item.value(QStringLiteral("audio")).toInt();
+        if (listed(audio, id))
+            result.audio = id;
+        else if (series.audio)
+            result.audio = pickTrack(audio, *series.audio);
+    }
+    if (rememberSubtitles) {
+        const QJsonValue stored = item.value(QStringLiteral("subtitle"));
+        if (stored.isDouble() && stored.toInt() == 0)
+            result.subtitleOff = true;
+        else if (listed(subtitles, stored.toInt()))
+            result.subtitle = stored.toInt();
+        else if (series.subtitleOff)
+            result.subtitleOff = true;
+        else if (series.subtitle)
+            result.subtitle = pickTrack(subtitles, *series.subtitle);
+    }
+    return result;
+}
+
+std::optional<UpNextWindow> upNextWindow(qint64 durationTicks, const QVariantList &segments)
+{
+    if (durationTicks < 10 * 60 * TicksPerSecond)
+        return std::nullopt;
+    const qint64 lead = 30 * TicksPerSecond;
+    for (const QVariant &value : segments) {
+        const QVariantMap segment = value.toMap();
+        const qint64 start = segment.value(QStringLiteral("start")).toLongLong();
+        const qint64 end = segment.value(QStringLiteral("end")).toLongLong();
+        // An Outro followed by a scene does not end the item, nor does one that starts in its first half or more than 15 minutes before its end
+        if (segment.value(QStringLiteral("type")).toString() == QLatin1String("Outro")
+            && end >= durationTicks - lead && start < durationTicks
+            && start >= std::max(durationTicks / 2, durationTicks - 15 * 60 * TicksPerSecond))
+            return UpNextWindow{start, std::min(start + 10 * TicksPerSecond, durationTicks)};
+    }
+    return UpNextWindow{durationTicks - lead, durationTicks};
 }
 
 PlayerController::PlayerController(JellyfinClient &client, PlayQueue &queue,
@@ -183,7 +296,10 @@ PlayerController::PlayerController(JellyfinClient &client, PlayQueue &queue,
                 m_segments.clear();
                 for (const QJsonValue &segment : segments)
                     m_segments.append(segment.toObject().toVariantMap());
+                for (const qint64 ticks : std::exchange(m_earlySeeks, {}))
+                    keepIntrosAt(ticks);
                 updateSkip();
+                updateUpNext();
             });
     connect(&client, &JellyfinClient::playbackInfoFailed, this,
             [this](const QString &itemId, int, const QString &) {
@@ -197,11 +313,25 @@ PlayerController::PlayerController(JellyfinClient &client, PlayQueue &queue,
     connect(&client, &JellyfinClient::credentialsCleared, this, [this] { onAccountLeaving(); });
     connect(&m_engine, &PlaybackEngine::positionChanged, this, [this] {
         updateSkip();
+        updateCurrentChapter();
+        updateUpNext();
         Q_EMIT changed();
     });
-    connect(&m_engine, &PlaybackEngine::durationChanged, this, &PlayerController::changed);
+    connect(&m_engine, &PlaybackEngine::durationChanged, this, [this] {
+        updateChapters();
+        updateUpNext();
+        Q_EMIT changed();
+    });
     connect(&m_engine, &PlaybackEngine::canSeekChanged, this, &PlayerController::changed);
-    connect(&m_engine, &PlaybackEngine::rateChanged, this, &PlayerController::changed);
+    connect(&m_engine, &PlaybackEngine::rateChanged, this, [this] {
+        updateUpNext();
+        Q_EMIT changed();
+    });
+    m_seriesPreferences.setParent(this);
+    if (const QString data = profileDataDirectory(profileId); !data.isEmpty())
+        m_seriesPreferences.setDirectory(data + QStringLiteral("/series"));
+    connect(&m_seriesPreferences, &SeriesPreferences::changed, this,
+            &PlayerController::seriesChoicesChanged);
     connect(&m_engine, &PlaybackEngine::fileLoaded, this, [this] {
         if (m_resumeTicks > 0) {
             const qint64 ticks = m_resumeTicks;
@@ -213,6 +343,9 @@ PlayerController::PlayerController(JellyfinClient &client, PlayQueue &queue,
         m_trackTimer.start();
         m_playedClock.start();
         m_mpvSettings.applyLoadedAspect();
+        m_fileLoaded = true;
+        m_trackChosen = false;
+        applySeriesPlayback();
         refreshTracks();
     });
     connect(&m_engine, &PlaybackEngine::videoParamsChanged, &m_mpvSettings,
@@ -294,6 +427,14 @@ void PlayerController::onAccountLeaving()
     m_queue.setCurrentPlaybackItemId({});
     m_pendingSubtitle.clear();
     clearPreview();
+    m_itemChapters.clear();
+    updateChapters();
+    resetUpNext();
+    m_seriesPreferences.flush();
+    if (!m_itemSeriesId.isEmpty()) {
+        m_itemSeriesId.clear();
+        Q_EMIT seriesChoicesChanged();
+    }
     Q_EMIT changed();
 }
 
@@ -331,6 +472,14 @@ bool PlayerController::startItem(const QString &id, qint64 resumeTicks)
     m_subtitle.clear();
     m_primaryTag.clear();
     m_resumeTicks = resumeTicks;
+    m_resumedFrom = resumeTicks;
+    m_rateDecided = false;
+    m_fileLoaded = false;
+    m_seriesApplied = false;
+    if (!m_itemSeriesId.isEmpty()) {
+        m_itemSeriesId.clear();
+        Q_EMIT seriesChoicesChanged();
+    }
     m_errorText.clear();
     m_loading = true;
     m_stopping = false;
@@ -348,6 +497,9 @@ bool PlayerController::startItem(const QString &id, qint64 resumeTicks)
     m_pendingSubtitle.clear();
     m_trickplay.reset();
     m_trickplayInfo = {};
+    m_itemChapters.clear();
+    updateChapters();
+    resetUpNext();
     m_requestedFrame.reset();
     m_lastTile = {};
     m_cachedTileIndex = -1;
@@ -355,6 +507,8 @@ bool PlayerController::startItem(const QString &id, qint64 resumeTicks)
     clearPreview();
     m_audioTracks.clear();
     m_subtitleTracks.clear();
+    m_audioFacts.clear();
+    m_subtitleFacts.clear();
     m_selectedAudioIndex.reset();
     m_selectedSubtitleIndex.reset();
     m_selectedAudioId = 0;
@@ -432,6 +586,7 @@ void PlayerController::requestPending()
     if (m_keptRate) {
         m_engine.setRate(*m_keptRate);
         m_keptRate.reset();
+        m_rateDecided = true;
     }
     const QJsonObject profile = buildDeviceProfile(m_settings.deviceProfileOptions());
     if (!m_client.requestPlaybackInfo(m_itemId, m_resumeTicks, profile)) {
@@ -476,9 +631,17 @@ void PlayerController::onPlaybackItem(const QString &id, const QJsonObject &item
     if (summary.valid) {
         const bool episode =
             summary.type == QLatin1String("Episode") && !summary.seriesName.isEmpty();
-        m_title = episode ? summary.seriesName : summary.name;
-        m_subtitle = episode ? episodeSubtitle(summary) : QString();
+        std::tie(m_title, m_subtitle) = itemTitles(summary);
         m_primaryTag = summary.primaryTag;
+        if (summary.type == QLatin1String("Episode") && isValidJellyfinId(summary.seriesId)) {
+            seriesStore();
+            m_itemSeriesId = summary.seriesId;
+            Q_EMIT seriesChoicesChanged();
+            applySeriesPlayback();
+            // Tracks restored before the series was known get its choices now, unless the user chose since
+            if (m_trackRestored && !m_trackChosen)
+                restoreTracks();
+        }
         if (m_seriesPlaylistWanted && episode && !summary.seriesId.isEmpty()) {
             m_seriesId = summary.seriesId;
             m_seriesEpisodes.clear();
@@ -493,6 +656,8 @@ void PlayerController::onPlaybackItem(const QString &id, const QJsonObject &item
     m_trickplayInfo =
         QJsonObject{{QStringLiteral("Trickplay"), item.value(QStringLiteral("Trickplay"))}};
     updateTrickplayLayout();
+    m_itemChapters = parseChapters(item.value(QStringLiteral("Chapters")));
+    updateChapters();
     Q_EMIT changed();
 }
 
@@ -500,6 +665,168 @@ void PlayerController::updateTrickplayLayout()
 {
     if (!m_trickplayInfo.isEmpty() && !m_source.mediaSourceId.isEmpty())
         m_trickplay = parseTrickplayLayout(m_trickplayInfo, m_source.mediaSourceId);
+}
+
+void PlayerController::updateChapters()
+{
+    m_chapters = playableChapters(m_itemChapters, durationTicks());
+    QVariantList list;
+    list.reserve(m_chapters.size());
+    for (int i = 0; i < m_chapters.size(); ++i) {
+        const ChapterSummary &chapter = m_chapters.at(i);
+        const QString name = chapter.name.trimmed();
+        list.append(QVariantMap{
+            {QStringLiteral("name"),
+             name.isEmpty() ? i18nc("@item a chapter the server gives no name", "Chapter %1", i + 1)
+                            : name},
+            {QStringLiteral("startTicks"), chapter.startTicks},
+            {QStringLiteral("time"), timeText(chapter.startTicks)}});
+    }
+    if (list != m_chapterList) {
+        m_chapterList = list;
+        Q_EMIT chaptersChanged();
+    }
+    updateCurrentChapter();
+}
+
+void PlayerController::updateCurrentChapter()
+{
+    const int chapter = chapterIndexAt(m_chapters, positionTicks());
+    if (chapter != m_currentChapter) {
+        m_currentChapter = chapter;
+        Q_EMIT currentChapterChanged();
+    }
+}
+
+void PlayerController::jumpToChapter(int index)
+{
+    if (index >= 0 && index < m_chapters.size())
+        seek(m_chapters.at(index).startTicks);
+}
+
+void PlayerController::stepChapter(int direction)
+{
+    const qint64 target = chapterStepTarget(m_chapters, positionTicks(), direction);
+    if (target >= 0)
+        seek(target);
+}
+
+int PlayerController::pendingAdvance(bool pick) const
+{
+    if (!advancesAtEnd())
+        return -1;
+    const int index = nextIndex(1, pick);
+    return index == m_queueIndex ? -1 : index;
+}
+
+void PlayerController::updateUpNext()
+{
+    const std::optional<qint64> position = m_engine.knownPositionTicks();
+    const qint64 duration = durationTicks();
+    std::optional<UpNextWindow> window;
+    if (!m_itemId.isEmpty() && !m_loading && position && pendingAdvance(false) >= 0)
+        window = upNextWindow(duration, m_segments);
+    bool show = window && !m_upNextCancelled && *position >= window->showAt;
+    if (show && window->advanceAt < duration && *position >= window->advanceAt) {
+        // Played into the early advance with the card up, the next item starts; reached any other way (a resume), the card stays down and the end moves on as usual (a seek past it is a Cancel, in seek())
+        if (m_upNextShown) {
+            playUpNext();
+            return;
+        }
+        show = false;
+    }
+    QString id;
+    if (show) {
+        // Under shuffle the step drawn when the card came up holds while it is still in the playlist
+        const bool keep = m_shuffle && m_upNextShown && indexOfItem(m_playlist, m_upNextId) >= 0
+                          && !sameItemId(m_upNextId, m_itemId);
+        const int index = keep ? -1 : pendingAdvance(true);
+        id = keep ? m_upNextId : index >= 0 ? m_playlist.at(index) : QString();
+        show = !id.isEmpty();
+    }
+    const QVariantMap info = !show                                         ? QVariantMap()
+                             : m_upNextShown && sameItemId(id, m_upNextId) ? m_upNext
+                                                                           : upNextInfo(id);
+    const double rate = std::max(0.01, this->rate());
+    const int seconds = show ? std::max(0, int(std::ceil(double(window->advanceAt - *position)
+                                                         / TicksPerSecond / rate)))
+                             : 0;
+    m_upNextId = id;
+    if (show != m_upNextShown || seconds != m_upNextSeconds || info != m_upNext) {
+        m_upNextShown = show;
+        m_upNextSeconds = seconds;
+        m_upNext = info;
+        Q_EMIT upNextChanged();
+    }
+}
+
+void PlayerController::resetUpNext()
+{
+    m_upNextId.clear();
+    m_upNextCancelled = false;
+    m_handledIntros.clear();
+    m_earlySeeks.clear();
+    if (m_upNextShown || !m_upNext.isEmpty() || m_upNextSeconds != 0) {
+        m_upNextShown = false;
+        m_upNext.clear();
+        m_upNextSeconds = 0;
+        Q_EMIT upNextChanged();
+    }
+}
+
+QVariantMap PlayerController::upNextInfo(const QString &id) const
+{
+    if (m_playlistEphemeral)
+        return m_seriesInfo.value(id.toLower());
+    const int row = indexOfItem(m_queue.itemIds(), id);
+    if (row < 0)
+        return {};
+    const QModelIndex index = m_queue.index(row);
+    ItemSummary item;
+    item.id = id;
+    item.name = index.data(PlayQueue::NameRole).toString();
+    item.type = index.data(PlayQueue::TypeRole).toString();
+    item.seriesName = index.data(PlayQueue::SeriesNameRole).toString();
+    item.seasonNumber = index.data(PlayQueue::SeasonNumberRole).toInt();
+    item.episodeNumber = index.data(PlayQueue::EpisodeNumberRole).toInt();
+    const auto [title, subtitle] = itemTitles(item);
+    return {{QStringLiteral("title"), title},
+            {QStringLiteral("subtitle"), subtitle},
+            {QStringLiteral("imageUrl"), index.data(PlayQueue::ImageUrlRole).toUrl()}};
+}
+
+void PlayerController::playUpNext()
+{
+    // A refused start takes the card down rather than trying again with every position
+    if (m_upNextShown && !next()) {
+        m_upNextCancelled = true;
+        updateUpNext();
+    }
+}
+
+void PlayerController::cancelUpNext()
+{
+    if (!m_upNextShown)
+        return;
+    m_upNextCancelled = true;
+    updateUpNext();
+}
+
+void PlayerController::keepIntrosAt(qint64 ticks)
+{
+    if (m_segments.isEmpty()) {
+        if (m_earlySeeks.size() < 32)
+            m_earlySeeks.append(ticks);
+        return;
+    }
+    for (const QVariant &value : std::as_const(m_segments)) {
+        const QVariantMap segment = value.toMap();
+        const qint64 start = segment.value(QStringLiteral("start")).toLongLong();
+        if (segment.value(QStringLiteral("type")).toString() == QLatin1String("Intro")
+            && ticks >= start && ticks < segment.value(QStringLiteral("end")).toLongLong()
+            && !m_handledIntros.contains(start))
+            m_handledIntros.append(start);
+    }
 }
 
 void PlayerController::onSeriesEpisodes(const QJsonArray &items, int total, int channel)
@@ -514,6 +841,11 @@ void PlayerController::onSeriesEpisodes(const QJsonArray &items, int total, int 
         if (sameItemId(episode.id, m_itemId))
             m_seriesEpisodeIndex = m_seriesEpisodes.size();
         m_seriesEpisodes.append(episode.id);
+        const auto [title, subtitle] = itemTitles(episode);
+        m_pendingSeriesInfo.insert(episode.id.toLower(),
+                                   {{QStringLiteral("title"), title},
+                                    {QStringLiteral("subtitle"), subtitle},
+                                    {QStringLiteral("imageUrl"), m_queue.imageUrlFor(episode)}});
     }
     m_seriesNextStart += items.size();
     const bool more = items.size() == SeriesPageSize && m_seriesNextStart < total
@@ -529,6 +861,7 @@ void PlayerController::finishSeriesPlaylist()
 {
     const QStringList ids = std::exchange(m_seriesEpisodes, {});
     const int index = std::exchange(m_seriesEpisodeIndex, -1);
+    QHash<QString, QVariantMap> info = std::exchange(m_pendingSeriesInfo, {});
     cancelSeriesRequest();
     // An episode the listing does not hold plays alone, as before
     if (index < 0)
@@ -536,6 +869,8 @@ void PlayerController::finishSeriesPlaylist()
     m_playlist = ids;
     m_queueIndex = index;
     m_playlistEphemeral = true;
+    m_seriesInfo = std::move(info);
+    updateUpNext();
     Q_EMIT changed();
 }
 
@@ -543,6 +878,7 @@ void PlayerController::cancelSeriesRequest()
 {
     m_seriesEpisodes.clear();
     m_seriesEpisodeIndex = -1;
+    m_pendingSeriesInfo.clear();
     if (m_seriesListItem.isEmpty())
         return;
     m_seriesListItem.clear();
@@ -558,6 +894,7 @@ void PlayerController::dropSeriesPlaylist()
     m_playlistEphemeral = false;
     m_playlist.clear();
     m_queueIndex = -1;
+    m_seriesInfo.clear();
 }
 
 void PlayerController::onState(PlaybackSession::State, PlaybackSession::State to)
@@ -583,21 +920,22 @@ void PlayerController::onEnd(const QString &reason)
         QTimer::singleShot(0, this, &PlayerController::requestPending);
         return;
     }
-    // The saved queue always advances; the episodes of a series follow the user's autoplay preference, which an explicit repeat mode overrides
-    const bool advance = !m_playlistEphemeral || m_nextEpisodeAutoPlay || m_repeat != 0;
     const bool ended = reason == QLatin1String("eof") && !m_stopping;
+    // Cancel on the Up Next card ends this playback here, without the advance or the replay of a repeat; a repeat mode chosen after it that replays the item wins
+    const bool cancelled = m_upNextCancelled && pendingAdvance(false) >= 0;
     const bool playedLongEnough =
         m_playedClock.isValid() && m_playedClock.elapsed() >= MinimumPlayedMs;
     m_playedClock.invalidate();
-    if (ended && advance && next())
+    if (ended && !cancelled && advancesAtEnd() && next())
         return;
     // An item with nothing to advance to plays again when either repeat mode is on, after a real end: a stream that stops at once or far from its end does not loop
     const QString again = m_itemId;
-    if (ended && m_repeat != 0 && m_engine.nearEnd() && playedLongEnough
+    if (ended && !cancelled && m_repeat != 0 && m_engine.nearEnd() && playedLongEnough
         && (m_playlist.isEmpty() || m_playlistEphemeral) && startItem(again, 0))
         return;
-    if (reason == QLatin1String("eof") && !m_playlist.isEmpty() && !m_playlistEphemeral
-        && !m_client.serverId().isEmpty() && !m_client.userId().isEmpty()) {
+    // The end of the queue forgets where it was; a Cancel keeps it, the queue has more to play
+    if (reason == QLatin1String("eof") && !cancelled && !m_playlist.isEmpty()
+        && !m_playlistEphemeral && !m_client.serverId().isEmpty() && !m_client.userId().isEmpty()) {
         m_queueMemory.remove(m_client.serverId().toLower() + QLatin1Char('/')
                              + m_client.userId().toLower());
         saveMemory();
@@ -625,6 +963,14 @@ void PlayerController::clearCurrent()
     m_source = PlaybackSource{};
     m_keptRate.reset();
     m_mpvSettings.setAspectOverride({});
+    m_itemChapters.clear();
+    updateChapters();
+    resetUpNext();
+    m_fileLoaded = false;
+    if (!m_itemSeriesId.isEmpty()) {
+        m_itemSeriesId.clear();
+        Q_EMIT seriesChoicesChanged();
+    }
 }
 
 void PlayerController::pause()
@@ -681,9 +1027,15 @@ int PlayerController::nextIndex(int direction, bool pick) const
 
 bool PlayerController::next()
 {
-    const int next = nextIndex(1);
+    // While the Up Next card is up, Next starts what it offers (under shuffle, the step it drew)
+    int next = m_upNextId.isEmpty() ? -1 : indexOfItem(m_playlist, m_upNextId);
+    if (next < 0)
+        next = nextIndex(1);
     if (next < 0)
         return false;
+    // Moving on from the card ends this item: reported as played to its end, as the natural end is
+    if (m_upNextShown)
+        m_engine.markEnded();
     m_queueIndex = next;
     const QString id = m_playlist.at(next);
     if (!m_playlistEphemeral)
@@ -742,6 +1094,15 @@ void PlayerController::seek(qint64 ticks)
         return;
     const qint64 target =
         m_engine.durationTicks() > 0 ? std::min(ticks, m_engine.durationTicks()) : ticks;
+    // Back before the Up Next card arms it again; past its early advance counts as its Cancel
+    if (const auto window = upNextWindow(durationTicks(), m_segments);
+        window && pendingAdvance(false) >= 0) {
+        if (target < window->showAt)
+            m_upNextCancelled = false;
+        else if (window->advanceAt < durationTicks() && target > window->advanceAt)
+            m_upNextCancelled = true;
+    }
+    keepIntrosAt(target);
     m_engine.seekTo(target);
     Q_EMIT seeked(target);
     m_seekReport.start();
@@ -752,8 +1113,19 @@ void PlayerController::seekRelative(int seconds)
 }
 void PlayerController::setRate(double value)
 {
-    if (std::isfinite(value) && value >= MinimumRate && value <= MaximumRate)
-        m_engine.setRate(value);
+    if (!std::isfinite(value) || value < MinimumRate || value > MaximumRate)
+        return;
+    m_engine.setRate(value);
+    m_rateDecided = true;
+    // The series keeps an explicit speed; the default speed is no choice
+    if (!m_itemSeriesId.isEmpty()) {
+        const double standard =
+            m_settings.value(QStringLiteral("video"), QStringLiteral("default_playback_speed"))
+                .toDouble();
+        seriesStore().setRate(m_itemSeriesId, qFuzzyCompare(value, standard)
+                                                  ? std::nullopt
+                                                  : std::optional<double>(value));
+    }
 }
 void PlayerController::setVolume(int level)
 {
@@ -776,6 +1148,7 @@ void PlayerController::toggleMute()
 void PlayerController::setShuffle(bool enabled)
 {
     m_shuffle = enabled;
+    updateUpNext();
     Q_EMIT changed();
 }
 void PlayerController::setAspectMode(const QString &mode)
@@ -783,6 +1156,13 @@ void PlayerController::setAspectMode(const QString &mode)
     if (!PlayerSettings::isAspectMode(mode))
         return;
     m_mpvSettings.setAspectOverride(mode);
+    // The series keeps it, unless it is the setting's own value
+    if (!m_itemSeriesId.isEmpty())
+        seriesStore().setAspect(
+            m_itemSeriesId,
+            mode == m_settings.value(QStringLiteral("video"), QStringLiteral("aspect")).toString()
+                ? QString()
+                : mode);
     Q_EMIT changed();
 }
 
@@ -842,6 +1222,7 @@ void PlayerController::setRepeatMode(int mode)
     if (mode < 0 || mode > 2)
         return;
     m_repeat = mode;
+    updateUpNext();
     Q_EMIT changed();
 }
 
@@ -856,6 +1237,8 @@ void PlayerController::refreshTracks()
         return;
     const QVariantList tracks = m_engine.mpvProperty(QStringLiteral("track-list")).toList();
     QVariantList audio, subs;
+    m_audioFacts.clear();
+    m_subtitleFacts.clear();
     m_selectedAudioIndex.reset();
     m_selectedSubtitleIndex.reset();
     // Subtitles turned off leave no selected track: the remembered choice is then none, not the last one
@@ -890,6 +1273,9 @@ void PlayerController::refreshTracks()
         const QVariantMap result{{QStringLiteral("id"), id},
                                  {QStringLiteral("name"), label},
                                  {QStringLiteral("selected"), selected}};
+        (type == QLatin1String("audio") ? m_audioFacts : m_subtitleFacts)
+            .append({id, trackLanguage(map.value(QStringLiteral("lang")).toString()),
+                     map.value(QStringLiteral("forced")).toBool()});
         if (type == QLatin1String("audio"))
             audio.append(result);
         else
@@ -910,7 +1296,10 @@ void PlayerController::selectAudioTrack(int id)
     if (id < 1 || id > 1024 || !active())
         return;
     m_engine.setMpvProperty(QStringLiteral("aid"), id);
+    m_trackChosen = true;
     rememberTracks(id, m_selectedSubtitleId);
+    if (const auto choice = choiceOf(m_audioFacts, id); choice && keepsSeriesTracks())
+        seriesStore().setAudio(m_itemSeriesId, choice);
     QTimer::singleShot(0, this, &PlayerController::refreshTracks);
     m_reporter.reportNow();
 }
@@ -921,7 +1310,13 @@ void PlayerController::selectSubtitleTrack(int id)
     m_engine.setMpvProperty(QStringLiteral("sid"),
                             id == 0 ? QVariant(QStringLiteral("no")) : QVariant(id));
     m_selectedSubtitleId = id;
+    m_trackChosen = true;
     rememberTracks(m_selectedAudioId, id);
+    if (keepsSeriesTracks()) {
+        const auto choice = choiceOf(m_subtitleFacts, id);
+        if (id == 0 || choice)
+            seriesStore().setSubtitle(m_itemSeriesId, id == 0, choice);
+    }
     QTimer::singleShot(0, this, &PlayerController::refreshTracks);
     m_reporter.reportNow();
 }
@@ -998,6 +1393,15 @@ void PlayerController::updateSkip()
         if (positionTicks() < start || positionTicks() >= finish || finish <= start)
             continue;
         const QString type = row.value(QStringLiteral("type")).toString();
+        // Skip Intros Automatically: each Intro once, from a position mpv reported, never one the user seeked into or one before where the playback resumed, never one that runs to the end, and only once a seek can be made
+        if (type == QLatin1String("Intro") && !m_handledIntros.contains(start)
+            && start >= m_resumedFrom && m_engine.knownPositionTicks() && canSeek() && !m_loading
+            && durationTicks() > 0 && finish <= durationTicks() - 5 * TicksPerSecond
+            && m_settings.value(QStringLiteral("video"), QStringLiteral("skip_intros")).toBool()) {
+            m_handledIntros.append(start);
+            seek(finish);
+            return;
+        }
         label = type == QLatin1String("Intro")   ? i18n("Skip intro")
                 : type == QLatin1String("Recap") ? i18n("Skip recap")
                 : type == QLatin1String("Outro") ? i18n("Skip outro")
@@ -1041,10 +1445,9 @@ void PlayerController::saveMemory()
 {
     if (m_memoryFile.isEmpty())
         return;
-    if (m_memory.size() > MaxRememberedItems) {
+    // Past its cap the track memory starts again, on disk too
+    if (m_memory.size() > MaxRememberedItems)
         m_memory = {};
-        return;
-    }
     const QByteArray bytes = QJsonDocument(QJsonObject{{QStringLiteral("version"), 1},
                                                        {QStringLiteral("tracks"), m_memory},
                                                        {QStringLiteral("queue"), m_queueMemory}})
@@ -1063,26 +1466,74 @@ void PlayerController::rememberTracks(int audioId, int subtitleId)
 }
 void PlayerController::restoreTracks()
 {
-    const QJsonObject stored = m_memory.value(memoryKey()).toObject();
-    if (stored.isEmpty())
-        return;
-    // Only restore ids which actually exist on this media source.
-    const int aid = stored.value(QStringLiteral("audio")).toInt();
-    const int sid = stored.value(QStringLiteral("subtitle")).toInt();
-    for (const QVariant &track : m_audioTracks)
-        if (track.toMap().value(QStringLiteral("id")).toInt() == aid) {
-            m_engine.setMpvProperty(QStringLiteral("aid"), aid);
-            break;
-        }
-    if (sid == 0) {
+    const SeriesChoice series =
+        m_itemSeriesId.isEmpty() ? SeriesChoice() : seriesStore().choice(m_itemSeriesId);
+    const RememberedTracks tracks =
+        rememberedTracks(m_memory.value(memoryKey()).toObject(), series, m_audioFacts,
+                         m_subtitleFacts, m_rememberAudio, m_rememberSubtitles);
+    if (tracks.audio > 0)
+        m_engine.setMpvProperty(QStringLiteral("aid"), tracks.audio);
+    if (tracks.subtitleOff)
         m_engine.setMpvProperty(QStringLiteral("sid"), QStringLiteral("no"));
-    } else
-        for (const QVariant &track : m_subtitleTracks) {
-            if (track.toMap().value(QStringLiteral("id")).toInt() == sid) {
-                m_engine.setMpvProperty(QStringLiteral("sid"), sid);
-                break;
-            }
+    else if (tracks.subtitle > 0)
+        m_engine.setMpvProperty(QStringLiteral("sid"), tracks.subtitle);
+}
+
+SeriesPreferences &PlayerController::seriesStore()
+{
+    m_seriesPreferences.setOwner(m_client.serverId(), m_client.userId());
+    return m_seriesPreferences;
+}
+
+void PlayerController::applySeriesPlayback()
+{
+    if (!m_fileLoaded || m_seriesApplied || m_itemSeriesId.isEmpty())
+        return;
+    m_seriesApplied = true;
+    const SeriesChoice choice = seriesStore().choice(m_itemSeriesId);
+    // The speed a repeat kept or the user chose wins over the series', which wins over the default speed applied already
+    if (choice.rate && !m_rateDecided)
+        m_engine.setRate(*choice.rate);
+    // An aspect chosen for this playback wins over the series', which wins over the setting
+    if (!choice.aspect.isEmpty() && !m_mpvSettings.hasAspectOverride()) {
+        m_mpvSettings.setAspectOverride(choice.aspect);
+        Q_EMIT changed();
+    }
+}
+
+void PlayerController::forgetSeriesChoices()
+{
+    if (!m_itemSeriesId.isEmpty())
+        seriesStore().forget(m_itemSeriesId);
+}
+
+void PlayerController::forgetStoredUser(const QString &serverId, const QString &userId)
+{
+    if (!isValidJellyfinId(serverId) || !isValidJellyfinId(userId))
+        return;
+    m_seriesPreferences.forgetUser(serverId, userId);
+    pruneMemory(serverId.toLower() + QLatin1Char('/') + userId.toLower());
+}
+
+void PlayerController::forgetStoredServer(const QString &serverId)
+{
+    if (!isValidJellyfinId(serverId))
+        return;
+    m_seriesPreferences.forgetServer(serverId);
+    pruneMemory(serverId.toLower());
+}
+
+void PlayerController::pruneMemory(const QString &owner)
+{
+    for (QJsonObject *memory : {&m_memory, &m_queueMemory}) {
+        const QStringList keys = memory->keys();
+        for (const QString &key : keys) {
+            if (key == owner || key.startsWith(owner + QLatin1Char('/')))
+                memory->remove(key);
         }
+    }
+    // Written even when nothing was in memory: the file is what has to lose the owner
+    saveMemory();
 }
 
 bool PlayerController::downloadSubtitle(int index)
@@ -1167,6 +1618,7 @@ void PlayerController::updatePlaylist()
         m_playlist = updated;
         m_queueIndex = priorIndex;
     }
+    updateUpNext();
     Q_EMIT changed();
 }
 

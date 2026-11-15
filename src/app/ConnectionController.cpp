@@ -750,12 +750,17 @@ void ConnectionController::removeUser(const QString &userId)
     const bool signedIn = m_state == Authenticated && m_client.userId() == userId;
     if (!signedIn && !savedUser(userId))
         return;
+    const QString serverId = m_client.serverId();
     forgetUserData(userId);
     // Another user's record goes while this session carries on
-    if (m_state == Authenticated && !signedIn)
+    if (m_state == Authenticated && !signedIn) {
+        Q_EMIT storedUserForgotten(serverId, userId);
         return;
+    }
     if (signedIn)
         leaveSession();
+    // Once the session is left: the player keeps its place on leaving, and that has to go too
+    Q_EMIT storedUserForgotten(serverId, userId);
     if (m_sync.restorableUsers().isEmpty()) {
         m_client.disconnectFromServer();
         if (!m_libraries.isEmpty()) {
@@ -869,6 +874,8 @@ void ConnectionController::removeServer(const QString &serverId)
         setError({});
         setState(Idle);
     }
+    // After the playback let go of the session, which keeps the player's place on leaving
+    Q_EMIT storedServerForgotten(serverId);
     refreshServers();
 }
 

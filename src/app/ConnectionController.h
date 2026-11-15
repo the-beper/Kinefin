@@ -126,6 +126,15 @@ class ConnectionController : public QObject {
     {
         return !m_hasPreferences || m_preferences.enableNextEpisodeAutoPlay;
     }
+    // The server's RememberAudioSelections and RememberSubtitleSelections for the signed-in user, true while the configuration is unknown
+    bool rememberAudioSelections() const
+    {
+        return !m_hasPreferences || m_preferences.rememberAudioSelections;
+    }
+    bool rememberSubtitleSelections() const
+    {
+        return !m_hasPreferences || m_preferences.rememberSubtitleSelections;
+    }
     QVariantList movieLibraries() const { return typeLibraries(QStringLiteral("movies")); }
     QVariantList showLibraries() const { return typeLibraries(QStringLiteral("tvshows")); }
     // The `libraries` entries of a tab type ("movies" or "tvshows"); empty for another type
@@ -240,6 +249,9 @@ class ConnectionController : public QObject {
     // `homeLibraries` or `recentLibraries` may have changed (also with every librariesChanged)
     void homeProjectionChanged();
     void aboutToLeaveSession();
+    // What the profile keeps for a user (signed out or removed) or for every user of a removed server is to go: the queue and the browse state go here, the player's memory with these, sent once the session was left
+    void storedUserForgotten(const QString &serverId, const QString &userId);
+    void storedServerForgotten(const QString &serverId);
 
   private:
     void onServerReady();

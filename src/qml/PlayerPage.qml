@@ -66,6 +66,8 @@ Kirigami.Page {
         page.playbackInfoShown = false;
         page.focusPrimary();
     }
+    // The item's chapters, read from the player once per change rather than by each binding that needs them
+    readonly property var chapters: page.player.chapters
     // An open menu or the queue panel keeps the bars up
     readonly property bool menuOpen: queuePanel.opened || audioMenu.opened || subtitlesMenu.opened || moreMenu.opened
     // The lock keeps the bars up until it is opened again
@@ -125,7 +127,7 @@ Kirigami.Page {
         return false;
     }
 
-    // Esc, Alt+Left and the mouse back button close the queue panel and the Playback Info panel first, then leave a full screen the player entered, and only then leave the player
+    // Esc, Alt+Left and the mouse back button close the queue panel and the Playback Info panel first, then cancel the Up Next card, then leave a full screen the player entered, and only then leave the player
     onBackRequested: event => {
         if (volumePopup.opened) {
             volumePopup.close();
@@ -135,6 +137,9 @@ Kirigami.Page {
             event.accepted = true;
         } else if (page.playbackInfoShown) {
             page.closePlaybackInfo();
+            event.accepted = true;
+        } else if (page.player.upNextShown) {
+            page.player.cancelUpNext();
             event.accepted = true;
         } else if (page.Window.window.playerFullscreen) {
             page.Window.window.togglePlayerFullscreen();
@@ -165,6 +170,16 @@ Kirigami.Page {
         // The minute seeks have no command name: only the keyboard has them
         case Qt.Key_Up: page.player.seekRelative(60); break;
         case Qt.Key_Down: page.player.seekRelative(-60); break;
+        // As mpv's own keys: Page Up goes on to the next chapter
+        case Qt.Key_PageUp: page.player.stepChapter(1); break;
+        case Qt.Key_PageDown: page.player.stepChapter(-1); break;
+        // Play Now on the Up Next card, the remote's select included; without the card Return does nothing here
+        case Qt.Key_Return:
+        case Qt.Key_Enter:
+            if (!page.player.upNextShown)
+                return;
+            page.player.playUpNext();
+            break;
         case Qt.Key_Plus:
         case Qt.Key_Equal: page.playerAction("volumeup"); break;
         case Qt.Key_Minus: page.playerAction("volumedown"); break;
@@ -296,10 +311,108 @@ Kirigami.Page {
         anchors.bottom: parent.bottom
         anchors.margins: Kirigami.Units.largeSpacing
         anchors.bottomMargin: bottomBar.height + Kirigami.Units.largeSpacing
-        visible: page.player.skipLabel.length > 0
+        // The Up Next card takes its place over the credits; Cancel brings it back
+        visible: page.player.skipLabel.length > 0 && !page.player.upNextShown
         text: page.player.skipLabel
         icon.name: "media-skip-forward"
         onClicked: { page.player.skipSegment(); page.wakeChrome(); }
+    }
+    // Up Next, outside the bars like Skip: its buttons take the keyboard only through Tab, so Return (Play Now) and Esc (Cancel) stay with the page
+    Rectangle {
+        id: upNextCard
+        objectName: "playerUpNextCard"
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        anchors.margins: Kirigami.Units.largeSpacing
+        anchors.bottomMargin: bottomBar.height + Kirigami.Units.largeSpacing
+        visible: page.player.upNextShown
+        width: Math.min(upNextRow.implicitWidth + Kirigami.Units.largeSpacing * 2, page.width - Kirigami.Units.largeSpacing * 2)
+        height: upNextRow.implicitHeight + Kirigami.Units.largeSpacing * 2
+        radius: Kirigami.Units.cornerRadius
+        Kirigami.Theme.colorSet: Kirigami.Theme.Complementary
+        Kirigami.Theme.inherit: false
+        color: Qt.alpha(Kirigami.Theme.backgroundColor, 0.9)
+        // An outline keeps it apart from a dark picture
+        border.width: 1
+        border.color: Qt.alpha(Kirigami.Theme.textColor, 0.2)
+        Accessible.role: Accessible.Grouping
+        Accessible.name: i18nc("@info accessible name of the card", "Up Next")
+        // A click beside the buttons is not one on the video
+        BarClickGuard {}
+        RowLayout {
+            id: upNextRow
+            anchors.fill: parent
+            anchors.margins: Kirigami.Units.largeSpacing
+            spacing: Kirigami.Units.largeSpacing
+            Image {
+                objectName: "playerUpNextImage"
+                Layout.preferredHeight: Kirigami.Units.gridUnit * 5
+                Layout.preferredWidth: Math.round(Kirigami.Units.gridUnit * 5 * 16 / 9)
+                Layout.alignment: Qt.AlignTop
+                visible: source.toString().length > 0
+                source: page.player.upNext.imageUrl ?? ""
+                sourceSize.height: Kirigami.Units.gridUnit * 5
+                fillMode: Image.PreserveAspectFit
+                asynchronous: true
+            }
+            ColumnLayout {
+                Layout.maximumWidth: Kirigami.Units.gridUnit * 16
+                spacing: Kirigami.Units.smallSpacing
+                // The card's accessible name says it already
+                Kirigami.Heading {
+                    level: 4
+                    text: i18nc("@title the card of the next item", "Up Next")
+                    Accessible.ignored: true
+                }
+                Controls.Label {
+                    objectName: "playerUpNextTitle"
+                    Layout.fillWidth: true
+                    textFormat: Text.PlainText
+                    maximumLineCount: 1
+                    elide: Text.ElideRight
+                    font.bold: true
+                    text: page.player.upNext.title ?? ""
+                }
+                Controls.Label {
+                    objectName: "playerUpNextSubtitle"
+                    Layout.fillWidth: true
+                    visible: text.length > 0
+                    textFormat: Text.PlainText
+                    maximumLineCount: 1
+                    elide: Text.ElideRight
+                    text: page.player.upNext.subtitle ?? ""
+                }
+                Controls.Label {
+                    objectName: "playerUpNextCountdown"
+                    Layout.fillWidth: true
+                    wrapMode: Text.WordWrap
+                    text: i18np("Starts in %1 second", "Starts in %1 seconds", page.player.upNextSeconds)
+                }
+                RowLayout {
+                    spacing: Kirigami.Units.smallSpacing
+                    // Reached with Tab, a button takes Return itself, before the page reads it as Play Now
+                    Controls.Button {
+                        objectName: "playerUpNextPlay"
+                        focusPolicy: Qt.TabFocus
+                        Keys.onReturnPressed: clicked()
+                        Keys.onEnterPressed: clicked()
+                        icon.name: "media-playback-start"
+                        text: i18nc("@action:button starts the next item at once", "Play Now")
+                        Accessible.name: i18nc("@action:button accessible name", "Play the Next Item Now")
+                        onClicked: page.player.playUpNext()
+                    }
+                    Controls.Button {
+                        objectName: "playerUpNextCancel"
+                        focusPolicy: Qt.TabFocus
+                        Keys.onReturnPressed: clicked()
+                        Keys.onEnterPressed: clicked()
+                        text: i18nc("@action:button the next item does not start", "Cancel")
+                        Accessible.name: i18nc("@action:button accessible name", "Cancel Up Next")
+                        onClicked: page.player.cancelUpNext()
+                    }
+                }
+            }
+        }
     }
 
     Timer {
@@ -328,6 +441,22 @@ Kirigami.Page {
                 fillMode: Image.PreserveAspectFit
                 source: page.player.previewImage
                 asynchronous: true
+            }
+            Controls.Label {
+                objectName: "playerPreviewChapter"
+                Layout.alignment: Qt.AlignHCenter
+                Layout.maximumWidth: parent.width
+                // Kept for the whole item, so the picture does not resize while a drag crosses into a chapter
+                visible: page.chapters.length > 0
+                color: "white"
+                textFormat: Text.PlainText
+                maximumLineCount: 1
+                elide: Text.ElideRight
+                text: {
+                    const chapters = page.chapters;
+                    const index = page.player.chapterAt(Math.floor(timeline.dragSeconds * 10000000));
+                    return index >= 0 && index < chapters.length ? chapters[index].name : "";
+                }
             }
             Controls.Label {
                 Layout.alignment: Qt.AlignHCenter
@@ -504,6 +633,31 @@ Kirigami.Page {
                             }
                         }
                         Accessible.name: i18n("Playback position")
+                        // A thin cut in the groove where each chapter but the first starts, at the handle's middle for that time; the one under the handle hides with it, and the bar's own tick marks stay off
+                        Item {
+                            id: chapterMarks
+                            // Read once here: the player notifies its duration with every position
+                            readonly property real duration: page.player.durationTicks
+                            anchors.fill: parent
+                            Kirigami.Theme.colorSet: Kirigami.Theme.Complementary
+                            Kirigami.Theme.inherit: false
+                            Accessible.ignored: true
+                            Repeater {
+                                model: page.chapters
+                                delegate: Rectangle {
+                                    required property var modelData
+                                    readonly property real fraction: chapterMarks.duration > 0 ? Math.min(1, modelData.startTicks / chapterMarks.duration) : 0
+                                    readonly property real middle: timeline.leftPadding + timeline.handle.width / 2 + (timeline.mirrored ? 1 - fraction : fraction) * (timeline.availableWidth - timeline.handle.width)
+                                    objectName: "playerChapterMark"
+                                    visible: fraction > 0 && Math.abs(middle - timeline.handle.x - timeline.handle.width / 2) > timeline.handle.width / 2
+                                    x: Math.round(middle)
+                                    y: Math.round(timeline.topPadding + (timeline.availableHeight - height) / 2)
+                                    width: 1
+                                    height: Kirigami.Units.smallSpacing * 2
+                                    color: Kirigami.Theme.backgroundColor
+                                }
+                            }
+                        }
                     }
                     Controls.ToolButton {
                         id: timeButton
@@ -659,8 +813,8 @@ Kirigami.Page {
         onAboutToHide: page.popupGone()
         Instantiator {
             model: page.player.audioTracks
-            delegate: Controls.MenuItem {
-                text: modelData.name
+            delegate: PlainMenuItem {
+                plainText: modelData.name
                 checkable: true
                 autoExclusive: true
                 checked: modelData.selected
@@ -684,8 +838,8 @@ Kirigami.Page {
         }
         Instantiator {
             model: page.player.subtitleTracks
-            delegate: Controls.MenuItem {
-                text: modelData.name
+            delegate: PlainMenuItem {
+                plainText: modelData.name
                 checkable: true
                 autoExclusive: true
                 checked: modelData.selected
@@ -702,8 +856,8 @@ Kirigami.Page {
         }
         Instantiator {
             model: page.player.externalSubtitles
-            delegate: Controls.MenuItem {
-                text: modelData.name
+            delegate: PlainMenuItem {
+                plainText: modelData.name
                 onTriggered: page.player.downloadSubtitle(modelData.index)
             }
             onObjectAdded: (index, object) => subtitlesMenu.addItem(object)
@@ -787,6 +941,29 @@ Kirigami.Page {
             AspectItem { mode: "force_16_9_if_4_3"; text: i18nc("@item:inmenu aspect ratio", "Widescreen for 4:3 Video") }
             AspectItem { mode: "noscaling"; text: i18nc("@item:inmenu aspect ratio", "Original Size") }
         }
+        // Disabled rather than hidden when the item has none
+        Controls.Menu {
+            id: chaptersMenu
+            objectName: "playerChaptersMenu"
+            title: i18nc("@title:menu", "Chapters")
+            icon.name: "bookmarks"
+            enabled: page.chapters.length > 0
+            Instantiator {
+                model: page.chapters
+                delegate: PlainMenuItem {
+                    required property var modelData
+                    required property int index
+                    objectName: "playerChapter_" + index
+                    plainText: i18nc("@item:inmenu chapter, %1 is its start time and %2 its name", "%1 — %2", modelData.time, modelData.name)
+                    checkable: true
+                    autoExclusive: true
+                    checked: page.player.currentChapter === index
+                    onTriggered: page.player.jumpToChapter(index)
+                }
+                onObjectAdded: (index, object) => chaptersMenu.insertItem(index, object)
+                onObjectRemoved: (index, object) => chaptersMenu.removeItem(object)
+            }
+        }
         Controls.Menu {
             title: i18n("AV Sync")
             icon.name: "settings-configure"
@@ -812,6 +989,14 @@ Kirigami.Page {
                 onObjectAdded: (index, object) => sleepMenu.insertItem(index, object)
                 onObjectRemoved: (index, object) => sleepMenu.removeItem(object)
             }
+        }
+        // The tracks, speed and aspect the next episodes of this series would start with
+        Controls.MenuItem {
+            objectName: "playerForgetSeriesItem"
+            text: i18nc("@action:inmenu", "Forget Series Choices")
+            icon.name: "edit-clear-history"
+            enabled: page.player.hasSeriesChoices
+            onTriggered: page.player.forgetSeriesChoices()
         }
         Controls.MenuSeparator {}
         Controls.MenuItem {
@@ -974,6 +1159,28 @@ Kirigami.Page {
                 const up = wheelArea.travel > 0;
                 wheelArea.travel -= up ? 120 : -120;
                 wheelArea.stepped(up ? 1 : -1);
+            }
+        }
+    }
+    // A menu entry for a name from the server or the file: it never becomes the entry's `text`, which the style's label reads as markup (it is built even when replaced) and searches for a mnemonic. The space before the name is the style's for a check mark, which every menu that uses it has
+    component PlainMenuItem: Controls.MenuItem {
+        id: plainItem
+        property string plainText
+        Accessible.name: plainText
+        contentItem: RowLayout {
+            Item {
+                Layout.preferredWidth: plainItem.indicator ? plainItem.indicator.width : Kirigami.Units.smallSpacing
+            }
+            Controls.Label {
+                Layout.fillWidth: true
+                Layout.maximumWidth: Kirigami.Units.gridUnit * 24
+                Layout.alignment: Qt.AlignVCenter
+                text: plainItem.plainText
+                textFormat: Text.PlainText
+                maximumLineCount: 1
+                font: plainItem.font
+                color: plainItem.pressed ? Kirigami.Theme.highlightedTextColor : Kirigami.Theme.textColor
+                elide: Text.ElideRight
             }
         }
     }

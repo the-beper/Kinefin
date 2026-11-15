@@ -223,6 +223,8 @@ class FakeJellyfin {
     int subtitleDownloadStatus = 200;
     bool redirectSubtitleDownload = false;
     int trickplayMetadataRequests = 0;
+    // The request line's target of the last playback item request
+    QByteArray trickplayMetadataRoute;
     QByteArray trickplayMetadataBody = "{\"Trickplay\":{}}";
     int trickplayMetadataStatus = 200;
     int trickplayTileRequests = 0;
@@ -1324,6 +1326,7 @@ class FakeJellyfin {
         if (method == "GET" && route.contains("/Users/") && route.contains("/Items/")
             && route.contains("fields=Trickplay")) {
             ++trickplayMetadataRequests;
+            trickplayMetadataRoute = route;
             respond(socket, trickplayMetadataStatus,
                     trickplayMetadataStatus == 200 ? trickplayMetadataBody : QByteArray());
             return;

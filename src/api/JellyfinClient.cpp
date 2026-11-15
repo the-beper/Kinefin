@@ -2022,7 +2022,7 @@ bool JellyfinClient::fetchPlaybackItem(const QString &itemId)
     const quint64 serial = ++m_playbackItemSerial;
     QUrl url = endpoint(QStringLiteral("/Users/") + m_userId + QStringLiteral("/Items/") + itemId);
     QUrlQuery query;
-    query.addQueryItem(QStringLiteral("fields"), QStringLiteral("Trickplay"));
+    query.addQueryItem(QStringLiteral("fields"), QStringLiteral("Trickplay,Chapters"));
     url.setQuery(query);
     QNetworkReply *reply = m_network.get(requestFor(url, true));
     attach(reply, m_generation, [this, itemId, serial](QNetworkReply *finished) {

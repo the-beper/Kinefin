@@ -1262,8 +1262,27 @@ class TestConnectionController : public QObject {
         QVERIFY(controller->openType(QStringLiteral("movies"), kMoviesB));
         controller->movies()->setSortKey(Kinefin::LibraryItemsModel::Runtime);
         QVERIFY(!QFileInfo::exists(browseFile())); // the write is still pending
+        // The player's memory of the user goes with the sign-out, and that of every user with the server
+        const QString serverId =
+            controller->servers().constFirst().toMap().value(QStringLiteral("serverId")).toString();
+        const QString userId = controller->currentUserId();
+        QSignalSpy userForgotten(controller.get(),
+                                 &Kinefin::ConnectionController::storedUserForgotten);
+        QSignalSpy serverForgotten(controller.get(),
+                                   &Kinefin::ConnectionController::storedServerForgotten);
+        // The player leaves the session (and keeps its place) before what it kept is forgotten
+        QStringList order;
+        connect(controller.get(), &Kinefin::ConnectionController::aboutToLeaveSession, this,
+                [&order] { order << QStringLiteral("leave"); });
+        connect(controller.get(), &Kinefin::ConnectionController::storedUserForgotten, this,
+                [&order] { order << QStringLiteral("forget"); });
         // The end of a session writes what is pending and keeps it
         controller->signOut();
+        QCOMPARE(userForgotten.size(), 1);
+        QCOMPARE(userForgotten.constFirst().value(0).toString(), serverId);
+        QCOMPARE(userForgotten.constFirst().value(1).toString(), userId);
+        QCOMPARE(order, QStringList({QStringLiteral("leave"), QStringLiteral("forget")}));
+        disconnect(controller.get(), nullptr, this, nullptr);
         QVERIFY(QFileInfo::exists(browseFile()));
         QFile file(browseFile());
         QVERIFY(file.open(QIODevice::ReadOnly));
@@ -1281,6 +1300,8 @@ class TestConnectionController : public QObject {
                                      .value(QStringLiteral("serverId"))
                                      .toString());
         QVERIFY(!QFileInfo::exists(browseFile()));
+        QCOMPARE(serverForgotten.size(), 1);
+        QCOMPARE(serverForgotten.constFirst().value(0).toString(), serverId);
     }
 
     void aCollectionKeepsItsView()

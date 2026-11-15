@@ -1868,6 +1868,12 @@ class PlayerStub : public QObject {
     Q_PROPERTY(QString skipLabel MEMBER skipLabel NOTIFY changed)
     Q_PROPERTY(int sleepRemainingMinutes MEMBER sleepRemainingMinutes NOTIFY changed)
     Q_PROPERTY(QString aspectMode MEMBER aspectMode NOTIFY changed)
+    Q_PROPERTY(QVariantList chapters MEMBER chapters NOTIFY chaptersChanged)
+    Q_PROPERTY(int currentChapter MEMBER currentChapter NOTIFY changed)
+    Q_PROPERTY(bool upNextShown MEMBER upNextShown NOTIFY changed)
+    Q_PROPERTY(QVariantMap upNext MEMBER upNext NOTIFY changed)
+    Q_PROPERTY(int upNextSeconds MEMBER upNextSeconds NOTIFY changed)
+    Q_PROPERTY(bool hasSeriesChoices MEMBER hasSeriesChoices NOTIFY changed)
   public:
     Q_INVOKABLE bool playItem(const QString &id, qint64)
     {
@@ -1924,6 +1930,28 @@ class PlayerStub : public QObject {
         Q_EMIT changed();
     }
     Q_INVOKABLE QVariantMap playbackInfo() const { return info; }
+    Q_INVOKABLE int chapterAt(qint64 ticks) const
+    {
+        int index = -1;
+        for (int i = 0; i < chapters.size(); ++i) {
+            if (chapters.at(i).toMap().value(QStringLiteral("startTicks")).toLongLong() <= ticks)
+                index = i;
+        }
+        return index;
+    }
+    Q_INVOKABLE void jumpToChapter(int index) { record(QStringLiteral("jumpToChapter"), index); }
+    Q_INVOKABLE void playUpNext() { record(QStringLiteral("playUpNext")); }
+    Q_INVOKABLE void forgetSeriesChoices() { record(QStringLiteral("forgetSeriesChoices")); }
+    Q_INVOKABLE void cancelUpNext()
+    {
+        record(QStringLiteral("cancelUpNext"));
+        upNextShown = false;
+        Q_EMIT changed();
+    }
+    Q_INVOKABLE void stepChapter(int direction)
+    {
+        record(QStringLiteral("stepChapter"), direction);
+    }
     Q_INVOKABLE void selectAudioTrack(int id) { record(QStringLiteral("selectAudioTrack"), id); }
     Q_INVOKABLE void selectSubtitleTrack(int id)
     {
@@ -1979,10 +2007,17 @@ class PlayerStub : public QObject {
     int sleepRemainingMinutes = 0;
     QString aspectMode = QStringLiteral("normal");
     QVariantMap info;
+    QVariantList chapters;
+    int currentChapter = -1;
+    bool upNextShown = false;
+    QVariantMap upNext;
+    int upNextSeconds = 0;
+    bool hasSeriesChoices = false;
     QStringList calls;
 
   Q_SIGNALS:
     void changed();
+    void chaptersChanged();
     void finished();
 
   private:
@@ -2090,6 +2125,14 @@ QQuickItem *openPlayer(Ui &ui, PlayerStub &stub)
                && page->property("isShowing").toBool() && ui.window->activeFocusItem() == page;
     });
     return ready ? page : nullptr;
+}
+
+// A chapter as the player lists it
+QVariantMap playerChapter(const QString &name, qint64 seconds, const QString &time)
+{
+    return {{QStringLiteral("name"), name},
+            {QStringLiteral("startTicks"), seconds * 10'000'000},
+            {QStringLiteral("time"), time}};
 }
 
 // The mini player once it shows, or null
@@ -5978,8 +6021,10 @@ class TestUiPages : public QObject {
              {QStringLiteral("Quit Kinefin"), QStringLiteral("Search"), QStringLiteral("Home"),
               QStringLiteral("Settings"), QStringLiteral("Show Keyboard Shortcuts"),
               QStringLiteral("Player"), QStringLiteral("Play or Pause"),
-              QStringLiteral("Mute or Unmute"), QStringLiteral("Leave Full Screen or Go Back"),
-              QStringLiteral("Skip Forward 1 Minute")})
+              QStringLiteral("Mute or Unmute"),
+              QStringLiteral("Cancel Up Next, Leave Full Screen or Go Back"),
+              QStringLiteral("Skip Forward 1 Minute"), QStringLiteral("Previous Chapter"),
+              QStringLiteral("Next Chapter")})
             QTRY_VERIFY2(ui.showsText(action), qPrintable(action));
         for (const QString &key :
              {QStringLiteral("Ctrl"), QStringLiteral("Shift"), QStringLiteral("/")})
@@ -6058,7 +6103,7 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(dialog->property("opened").toBool());
         // The opening animation moves the dialog; a binding loop shows as a warning (the harness fails the test on any)
         QTest::qWait(500);
-        const QString lastRow = QStringLiteral("Skip Forward 1 Minute");
+        const QString lastRow = QStringLiteral("Next Chapter");
         QQuickItem *label = nullptr;
         for (QQuickItem *candidate : ui.itemsWithText(lastRow)) {
             if (candidate->isVisible() && candidate->inherits("QQuickText"))
@@ -11395,6 +11440,287 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(entry(QStringLiteral("force_16_9_if_4_3"))->property("checked").toBool());
         QVERIFY(!entry(QStringLiteral("zoom"))->property("checked").toBool());
         QCOMPARE(stub.calls.count(QStringLiteral("setAspectMode zoom")), 1);
+    }
+
+    void playerChaptersMarkTheTimelineAndFillTheirMenu()
+    {
+        PlayerStub stub;
+        // Of the stub's two hours, chapters at the start, a quarter, a half and three quarters
+        stub.chapters = {playerChapter(QStringLiteral("Opening"), 0, QStringLiteral("00:00:00")),
+                         playerChapter(QStringLiteral("Heist"), 1800, QStringLiteral("00:30:00")),
+                         playerChapter(QStringLiteral("Chase"), 3600, QStringLiteral("01:00:00")),
+                         playerChapter(QStringLiteral("Ending"), 5400, QStringLiteral("01:30:00"))};
+        stub.currentChapter = 0;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *page = openPlayer(ui, stub);
+        QVERIFY(page);
+        // The bars stay up for the whole test
+        page->findChild<QObject *>(QStringLiteral("playerChromeTimer"))
+            ->setProperty("interval", 600000);
+        QQuickItem *timeline = ui.item(QStringLiteral("playbackTimeline"));
+        QVERIFY(timeline);
+        const auto shownMarks = [timeline] {
+            QList<QQuickItem *> shown;
+            for (QQuickItem *mark : allItems(timeline)) {
+                if (mark->objectName() == QLatin1String("playerChapterMark") && mark->isVisible())
+                    shown.append(mark);
+            }
+            std::sort(shown.begin(), shown.end(),
+                      [](const QQuickItem *a, const QQuickItem *b) { return a->x() < b->x(); });
+            return shown;
+        };
+        // No mark for the chapter that starts with the video; the others sit where the handle's middle would be at their start, across the groove, thin and out of the accessibility tree
+        QTRY_COMPARE(shownMarks().size(), 3);
+        const auto *handle = timeline->property("handle").value<QQuickItem *>();
+        QVERIFY(handle && handle->width() > 0);
+        const qreal start = timeline->property("leftPadding").toReal() + handle->width() / 2;
+        const qreal span = timeline->property("availableWidth").toReal() - handle->width();
+        const qreal middle = timeline->property("topPadding").toReal()
+                             + timeline->property("availableHeight").toReal() / 2;
+        for (int i = 0; i < 3; ++i) {
+            const QQuickItem *mark = shownMarks().at(i);
+            QVERIFY2(qAbs(mark->x() - (start + span * (i + 1) / 4)) <= 1,
+                     qPrintable(QString::number(i)));
+            QVERIFY(qAbs(mark->y() + mark->height() / 2 - middle) <= 1);
+            QCOMPARE(mark->width(), 1.0);
+        }
+        QQuickItem *marks = shownMarks().constFirst()->parentItem();
+        QVERIFY(QQmlProperty(marks, QStringLiteral("Accessible.ignored"), qmlContext(marks))
+                    .read()
+                    .toBool());
+        // The mark under the handle hides while the handle covers it
+        stub.positionTicks = 1800 * 10'000'000LL;
+        stub.currentChapter = 1;
+        Q_EMIT stub.changed();
+        QTRY_COMPARE(shownMarks().size(), 2);
+
+        // The preview of a drag names the chapter it is in
+        QQuickItem *previewChapter = ui.item(QStringLiteral("playerPreviewChapter"));
+        QVERIFY(previewChapter);
+        QCOMPARE(previewChapter->property("textFormat").toInt(), int(Qt::PlainText));
+        timeline->setProperty("dragSeconds", 3700);
+        QTRY_COMPARE(previewChapter->property("text").toString(), QStringLiteral("Chase"));
+        timeline->setProperty("dragSeconds", 10);
+        QTRY_COMPARE(previewChapter->property("text").toString(), QStringLiteral("Opening"));
+
+        // Chapters follows Aspect Ratio in More Actions: "time — name" entries, the current one checked
+        QObject *more = ui.popup(QStringLiteral("playerMoreMenu"));
+        QVERIFY(more);
+        ui.clickCenter(ui.item(QStringLiteral("playerMoreButton")));
+        QTRY_VERIFY(more->property("opened").toBool());
+        QObject *menu = more->findChild<QObject *>(QStringLiteral("playerChaptersMenu"));
+        QVERIFY(menu);
+        QCOMPARE(menu->property("title").toString(), QStringLiteral("Chapters"));
+        const auto entryAt = [](QObject *owner, int index) {
+            QQuickItem *item = nullptr;
+            QMetaObject::invokeMethod(owner, "itemAt", Q_RETURN_ARG(QQuickItem *, item),
+                                      Q_ARG(int, index));
+            return item;
+        };
+        const auto submenuEntry = [&](QObject *submenu) {
+            for (int i = 0; i < more->property("count").toInt(); ++i) {
+                QQuickItem *item = entryAt(more, i);
+                if (item && item->property("subMenu").value<QObject *>() == submenu)
+                    return i;
+            }
+            return -1;
+        };
+        const int chaptersRow = submenuEntry(menu);
+        QVERIFY(chaptersRow > 0);
+        QCOMPARE(chaptersRow,
+                 submenuEntry(more->findChild<QObject *>(QStringLiteral("playerAspectMenu"))) + 1);
+        QVERIFY(entryAt(more, chaptersRow)->isEnabled());
+        QTRY_COMPARE(menu->property("count").toInt(), 4);
+        const QStringList texts{
+            QStringLiteral("00:00:00 — Opening"), QStringLiteral("00:30:00 — Heist"),
+            QStringLiteral("01:00:00 — Chase"), QStringLiteral("01:30:00 — Ending")};
+        for (int i = 0; i < 4; ++i) {
+            QQuickItem *entry = entryAt(menu, i);
+            QVERIFY(entry);
+            QCOMPARE(entry->property("plainText").toString(), texts.at(i));
+            QCOMPARE(QQmlProperty(entry, QStringLiteral("Accessible.name"), qmlContext(entry))
+                         .read()
+                         .toString(),
+                     texts.at(i));
+            QVERIFY(entry->property("checkable").toBool());
+            QCOMPARE(entry->property("checked").toBool(), i == 1);
+        }
+        QVERIFY(QMetaObject::invokeMethod(entryAt(menu, 2), "click"));
+        QTRY_VERIFY(stub.calls.contains(QStringLiteral("jumpToChapter 2")));
+        QVERIFY(QMetaObject::invokeMethod(more, "close"));
+        QTRY_VERIFY(!more->property("visible").toBool());
+
+        // Page Up and Page Down step through the chapters, from the page and from the timeline
+        QTRY_COMPARE(ui.window->activeFocusItem(), page);
+        stub.calls.clear();
+        QTest::keyClick(ui.window, Qt::Key_PageUp);
+        QTest::keyClick(ui.window, Qt::Key_PageDown);
+        timeline->forceActiveFocus();
+        QTest::keyClick(ui.window, Qt::Key_PageUp);
+        QCOMPARE(stub.calls,
+                 QStringList({QStringLiteral("stepChapter 1"), QStringLiteral("stepChapter -1"),
+                              QStringLiteral("stepChapter 1")}));
+
+        // Without chapters the entry stays, disabled, and the timeline has no marks
+        stub.chapters.clear();
+        Q_EMIT stub.chaptersChanged();
+        QTRY_COMPARE(shownMarks().size(), 0);
+        QVERIFY(!menu->property("enabled").toBool());
+        QCOMPARE(menu->property("count").toInt(), 0);
+        QVERIFY(!entryAt(more, chaptersRow)->isEnabled());
+    }
+
+    void playerMenusShowNamesFromTheServerAndTheFileAsPlainText()
+    {
+        PlayerStub stub;
+        const QString hostile =
+            QStringLiteral("<b>Dub</b> & <img src=\"http://evil.invalid/x.png\">");
+        stub.audioTracks = {QVariantMap{{QStringLiteral("id"), 1},
+                                        {QStringLiteral("name"), hostile},
+                                        {QStringLiteral("selected"), true}}};
+        stub.subtitleTracks = {QVariantMap{{QStringLiteral("id"), 2},
+                                           {QStringLiteral("name"), hostile},
+                                           {QStringLiteral("selected"), false}}};
+        stub.externalSubtitles = {
+            QVariantMap{{QStringLiteral("index"), 3}, {QStringLiteral("name"), hostile}}};
+        // The drag preview, hidden, names the chapter at the start: the other one carries the markup
+        stub.chapters = {playerChapter(QStringLiteral("One"), 0, QStringLiteral("00:00:00")),
+                         playerChapter(hostile, 600, QStringLiteral("00:10:00"))};
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(openPlayer(ui, stub));
+        // The name is never an entry's own text, which the style's label reads as markup and mnemonics: a label shows it in plain text, and screen readers get it as the entry's accessible name
+        for (const auto &[name, labels] : {std::pair{QStringLiteral("playerAudioMenu"), 1},
+                                           std::pair{QStringLiteral("playerSubtitlesMenu"), 2},
+                                           std::pair{QStringLiteral("playerChaptersMenu"), 1}}) {
+            QObject *menu = ui.popup(name);
+            QVERIFY2(menu, qPrintable(name));
+            // Chapters opens from its entry in More Actions
+            QObject *more = ui.popup(QStringLiteral("playerMoreMenu"));
+            if (name == QLatin1String("playerChaptersMenu")) {
+                QVERIFY(QMetaObject::invokeMethod(more, "open"));
+                QTRY_VERIFY(more->property("opened").toBool());
+                for (int i = 0; i < more->property("count").toInt(); ++i) {
+                    QQuickItem *entry = nullptr;
+                    QMetaObject::invokeMethod(more, "itemAt", Q_RETURN_ARG(QQuickItem *, entry),
+                                              Q_ARG(int, i));
+                    if (entry && entry->property("subMenu").value<QObject *>() == menu)
+                        QVERIFY(QMetaObject::invokeMethod(entry, "click"));
+                }
+            } else {
+                QVERIFY(QMetaObject::invokeMethod(menu, "open"));
+            }
+            QTRY_VERIFY2(menu->property("opened").toBool(), qPrintable(name));
+            int found = 0;
+            const QStringList problems = ui.notPlainText(hostile, &found);
+            QVERIFY2(problems.isEmpty(),
+                     qPrintable(name + QLatin1String(": ") + problems.join(QLatin1String(", "))));
+            QCOMPARE(found, labels);
+            for (QQuickItem *holder : ui.itemsWithText(hostile, false))
+                QVERIFY2(holder->inherits("QQuickText"), holder->metaObject()->className());
+            QVERIFY(QMetaObject::invokeMethod(menu, "close"));
+            QVERIFY(QMetaObject::invokeMethod(more, "close"));
+            QTRY_VERIFY(!menu->property("visible").toBool() && !more->property("visible").toBool());
+        }
+        QTest::qWait(300);
+        QVERIFY(gWarnings.filter(QStringLiteral("evil.invalid")).isEmpty());
+    }
+
+    void playerUpNextCardPlaysOnReturnAndCancelsOnEscape()
+    {
+        PlayerStub stub;
+        const QString hostile =
+            QStringLiteral("<b>Abyss</b> & <img src=\"http://evil.invalid/x.png\">");
+        stub.skipLabel = QStringLiteral("Skip outro");
+        stub.upNext = {{QStringLiteral("title"), hostile},
+                       {QStringLiteral("subtitle"), QString(QStringLiteral("S2:E7 — ") + hostile)},
+                       {QStringLiteral("imageUrl"), QUrl()}};
+        stub.upNextSeconds = 12;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *page = openPlayer(ui, stub);
+        QVERIFY(page);
+        QQuickItem *card = ui.item(QStringLiteral("playerUpNextCard"));
+        QQuickItem *skip = ui.item(QStringLiteral("skipSegmentButton"));
+        QVERIFY(card && skip);
+        QVERIFY(!card->isVisible());
+        QVERIFY(skip->isVisible());
+        // Up: the next item's names in plain text, the seconds left, and Skip Outro out of its way
+        stub.upNextShown = true;
+        Q_EMIT stub.changed();
+        QTRY_VERIFY(card->isVisible());
+        QVERIFY(!skip->isVisible());
+        int found = 0;
+        const QStringList problems = ui.notPlainText(hostile, &found);
+        QVERIFY2(problems.isEmpty(), qPrintable(problems.join(QLatin1String(", "))));
+        QCOMPARE(found, 2);
+        QCOMPARE(ui.item(QStringLiteral("playerUpNextCountdown"))->property("text").toString(),
+                 QStringLiteral("Starts in 12 seconds"));
+        QVERIFY(!ui.item(QStringLiteral("playerUpNextImage"))->isVisible());
+        // The keyboard stays with the page: Return is Play Now
+        QCOMPARE(ui.window->activeFocusItem(), page);
+        stub.calls.clear();
+        QTest::keyClick(ui.window, Qt::Key_Return);
+        QCOMPARE(stub.calls, QStringList({QStringLiteral("playUpNext")}));
+        // A click on Play Now leaves the keyboard with the page too
+        ui.clickCenter(ui.item(QStringLiteral("playerUpNextPlay")));
+        QTRY_COMPARE(stub.calls.count(QStringLiteral("playUpNext")), 2);
+        QCOMPARE(ui.window->activeFocusItem(), page);
+        // Esc cancels the card before anything else it would do; Skip Outro comes back
+        QTest::keyClick(ui.window, Qt::Key_Escape);
+        QTRY_VERIFY(stub.calls.contains(QStringLiteral("cancelUpNext")));
+        QTRY_VERIFY(!card->isVisible());
+        QVERIFY(skip->isVisible());
+        QCOMPARE(ui.currentDetails(), page);
+        // Without the card Return does nothing
+        stub.calls.clear();
+        QTest::keyClick(ui.window, Qt::Key_Return);
+        QTest::qWait(100);
+        QVERIFY(stub.calls.isEmpty());
+        // A button reached with Tab takes Return itself: on Cancel it cancels
+        stub.upNextShown = true;
+        Q_EMIT stub.changed();
+        QTRY_VERIFY(card->isVisible());
+        QQuickItem *cancel = ui.item(QStringLiteral("playerUpNextCancel"));
+        QVERIFY(cancel);
+        cancel->forceActiveFocus(Qt::TabFocusReason);
+        QTRY_VERIFY(cancel->hasActiveFocus());
+        QTest::keyClick(ui.window, Qt::Key_Return);
+        QTRY_COMPARE(stub.calls, QStringList({QStringLiteral("cancelUpNext")}));
+        QTest::qWait(300);
+        QVERIFY(gWarnings.filter(QStringLiteral("evil.invalid")).isEmpty());
+    }
+
+    void playerForgetsSeriesChoicesOnlyWhenThereAreSome()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(openPlayer(ui, stub));
+        QObject *menu = ui.popup(QStringLiteral("playerMoreMenu"));
+        QVERIFY(menu);
+        ui.clickCenter(ui.item(QStringLiteral("playerMoreButton")));
+        QTRY_VERIFY(menu->property("opened").toBool());
+        QObject *forget = menu->findChild<QObject *>(QStringLiteral("playerForgetSeriesItem"));
+        QVERIFY(forget);
+        QCOMPARE(forget->property("text").toString(), QStringLiteral("Forget Series Choices"));
+        // Disabled, not hidden, while the series has nothing remembered
+        QVERIFY(!forget->property("enabled").toBool());
+        QVERIFY(forget->property("visible").toBool());
+        stub.hasSeriesChoices = true;
+        Q_EMIT stub.changed();
+        QTRY_VERIFY(forget->property("enabled").toBool());
+        QVERIFY(QMetaObject::invokeMethod(forget, "click"));
+        QTRY_VERIFY(stub.calls.contains(QStringLiteral("forgetSeriesChoices")));
     }
 
     void playerRepeatIsAlwaysOnAndAllNeedsSomewhereToGo()

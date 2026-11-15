@@ -30,6 +30,7 @@ class PlayerSettings final : public QObject {
     QString aspectMode() const;
     // One of the setting's values except `custom` applies at once and survives every later `apply()`; an empty or invalid one returns to the setting
     void setAspectOverride(const QString &mode);
+    bool hasAspectOverride() const { return !m_aspectOverride.isEmpty(); }
     static bool isAspectMode(const QString &mode);
     // Re-evaluates the aspect once a file is loaded, for the mode that needs the decoded picture; the other modes and `custom` are left as they are
     void applyLoadedAspect();
