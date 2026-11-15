@@ -111,10 +111,15 @@ Item {
             flick.contentY = Math.min(flick.originY + flick.contentHeight - flick.height, top + root.height - flick.height + margin);
     }
 
+    // The focus frame of a card reaches a little past it, and the list clips: the list keeps that room inside it at both ends and reaches out by as much, so the cards stay where they were
+    readonly property real frameRoom: Kirigami.Units.smallSpacing
+
     Loader {
         id: loader
 
         anchors.fill: parent
+        anchors.leftMargin: -root.frameRoom
+        anchors.rightMargin: -root.frameRoom
         asynchronous: true
         active: root.listKept
 
@@ -126,8 +131,8 @@ Item {
             orientation: ListView.Horizontal
             // The gap between two cards, the same as the grids
             spacing: Kirigami.Units.largeSpacing
-            leftMargin: root.edgeMargin
-            rightMargin: root.edgeMargin
+            leftMargin: root.edgeMargin + root.frameRoom
+            rightMargin: root.edgeMargin + root.frameRoom
             clip: true
             boundsBehavior: Flickable.StopAtBounds
             readonly property bool isCardRowList: true
@@ -214,22 +219,71 @@ Item {
         easing.type: Easing.OutCubic
     }
 
-    component RowArrow: Controls.RoundButton {
+    // The pointer over the row shows its arrows: the keyboard and touch scroll it themselves, and a strip shown all the time would cover the card the keys reach at an end
+    HoverHandler {
+        id: rowHover
+        acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+    }
+
+    // An end of the row with more cards that way: the whole strip, as high as the row, is the button, a large arrow over a fade into the window colour
+    component RowArrow: Controls.AbstractButton {
+        id: arrow
+
+        // The start of the row (left) or its end (right): the fade is solid on the row's edge
+        property bool leading: true
+        // More cards that way
+        property bool more: false
+
         z: 3
-        anchors.verticalCenter: parent.verticalCenter
+        opacity: rowHover.hovered && more ? 1 : 0
+        visible: opacity > 0
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        width: Kirigami.Units.gridUnit * 2.5
         // The arrow keys move inside the list, which is the row's one tab stop
         focusPolicy: Qt.NoFocus
+        hoverEnabled: true
         display: Controls.AbstractButton.IconOnly
         Controls.ToolTip.text: text
         Controls.ToolTip.visible: hovered
         Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
+
+        background: Rectangle {
+            gradient: Gradient {
+                orientation: Gradient.Horizontal
+                GradientStop {
+                    position: 0
+                    color: arrow.leading ? Kirigami.Theme.backgroundColor : Qt.alpha(Kirigami.Theme.backgroundColor, 0)
+                }
+                GradientStop {
+                    position: 1
+                    color: arrow.leading ? Qt.alpha(Kirigami.Theme.backgroundColor, 0) : Kirigami.Theme.backgroundColor
+                }
+            }
+        }
+        contentItem: Item {
+            Kirigami.Icon {
+                anchors.centerIn: parent
+                width: Kirigami.Units.iconSizes.medium
+                height: width
+                source: arrow.icon.name
+                opacity: arrow.hovered || arrow.pressed ? 1 : 0.7
+            }
+        }
+
+        Behavior on opacity {
+            NumberAnimation {
+                duration: Kirigami.Units.shortDuration
+            }
+        }
     }
 
     RowArrow {
         objectName: "cardRowPrevious"
-        anchors.left: parent.left
-        anchors.leftMargin: Kirigami.Units.smallSpacing
-        visible: root.list !== null && !root.list.atXBeginning
+        // Over the room the list keeps for the focus frame as well
+        anchors.left: loader.left
+        leading: true
+        more: root.list !== null && !root.list.atXBeginning
         icon.name: "go-previous"
         text: i18nc("@action:button scroll a row of cards", "Previous")
         // A page holds several rows: the row's name tells the arrows apart
@@ -239,9 +293,9 @@ Item {
 
     RowArrow {
         objectName: "cardRowNext"
-        anchors.right: parent.right
-        anchors.rightMargin: Kirigami.Units.smallSpacing
-        visible: root.list !== null && !root.list.atXEnd
+        anchors.right: loader.right
+        leading: false
+        more: root.list !== null && !root.list.atXEnd
         icon.name: "go-next"
         text: i18nc("@action:button scroll a row of cards", "Next")
         Accessible.name: i18nc("@action:button %1 is the name of a row of cards", "Next in %1", root.accessibleName)

@@ -339,11 +339,40 @@ Controls.ItemDelegate {
                 height: width
                 active: card.quickPlayEnabled
                 sourceComponent: Controls.RoundButton {
+                    id: quickPlayButton
                     objectName: "cardQuickPlay"
-                    visible: cardHover.hovered
+                    // Fades in while the pointer is over the card and lights up while it is over the button itself, as streaming players do
+                    opacity: cardHover.hovered ? 1 : 0
+                    visible: opacity > 0
+                    scale: hovered || down ? 1.08 : 1
+                    hoverEnabled: true
                     focusPolicy: Qt.NoFocus
                     display: Controls.AbstractButton.IconOnly
                     icon.name: "media-playback-start"
+                    // Over the poster, like the pills: white on a dark disc, the highlight colour under the pointer
+                    icon.color: "white"
+                    background: Rectangle {
+                        radius: width / 2
+                        color: quickPlayButton.hovered || quickPlayButton.down ? Kirigami.Theme.highlightColor : Qt.rgba(0, 0, 0, 0.6)
+
+                        Behavior on color {
+                            ColorAnimation {
+                                duration: Kirigami.Units.shortDuration
+                            }
+                        }
+                    }
+
+                    Behavior on opacity {
+                        NumberAnimation {
+                            duration: Kirigami.Units.longDuration
+                            easing.type: Easing.InOutQuad
+                        }
+                    }
+                    Behavior on scale {
+                        NumberAnimation {
+                            duration: Kirigami.Units.shortDuration
+                        }
+                    }
                     // One value for both sides: `icon` is a grouped value, so reading it inside its own binding loops
                     readonly property int glyph: Math.round(width / 2)
                     icon.width: glyph

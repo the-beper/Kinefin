@@ -16,6 +16,8 @@ Kirigami.Dialog {
     readonly property var entries: sources.map(source => ({ name: source.name, rows: sourceRows(source) }))
 
     title: i18nc("@title:window", "Media Info")
+    // The content lines up with the title, which the header insets by the same room
+    padding: Kirigami.Units.largeSpacing
     preferredWidth: Kirigami.Units.gridUnit * 30
     maximumWidth: Kirigami.Units.gridUnit * 34
     maximumHeight: absoluteMaximumHeight - Kirigami.Units.gridUnit * 4
@@ -28,9 +30,15 @@ Kirigami.Dialog {
         }
     ]
 
-    // One line per stream: codec, resolution or channels, language, title and flags
+    // One line per stream: the server's own description when it gives one (it already names the language, codec, layout and flags), with the resolution a video's leaves out; otherwise the stream piece by piece
     function streamText(stream, kind) {
         const parts = [];
+        if (stream.title.length > 0) {
+            parts.push(stream.title);
+            if (kind === "video" && stream.width > 0 && stream.height > 0)
+                parts.push(stream.width + "×" + stream.height);
+            return parts.join(" · ");
+        }
         if (stream.codec.length > 0)
             parts.push(stream.codec.toUpperCase());
         if (kind === "video" && stream.width > 0 && stream.height > 0)
@@ -39,8 +47,6 @@ Kirigami.Dialog {
             parts.push(i18np("%1 channel", "%1 channels", stream.channels));
         if (stream.language.length > 0)
             parts.push(stream.language);
-        if (stream.title.length > 0)
-            parts.push(stream.title);
         if (stream.isDefault)
             parts.push(i18n("Default"));
         if (stream.isForced)

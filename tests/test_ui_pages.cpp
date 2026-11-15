@@ -2435,21 +2435,41 @@ class TestUiPages : public QObject {
         QQuickItem *previous = Ui::itemIn(row, QStringLiteral("cardRowPrevious"));
         QQuickItem *next = Ui::itemIn(row, QStringLiteral("cardRowNext"));
         QVERIFY(previous && next);
-        // At the start only the way forward shows
+        // A card's focus frame reaches a little past it: the list clips that much farther out than the row, and the first card still starts at the row's edge
+        QQuickItem *first = nullptr;
+        QTRY_VERIFY(QMetaObject::invokeMethod(list, "itemAtIndex",
+                                              Q_RETURN_ARG(QQuickItem *, first), Q_ARG(int, 0))
+                    && first != nullptr);
+        QVERIFY(list->property("clip").toBool());
+        QVERIFY(list->mapToScene(QPointF(0, 0)).x() <= row->mapToScene(QPointF(0, 0)).x() - 3);
+        QVERIFY(qAbs(first->mapToScene(QPointF(0, 0)).x() - row->mapToScene(QPointF(0, 0)).x())
+                < 0.5);
+        // The arrows show only while the pointer is over the row
+        QVERIFY(!next->isVisible());
+        const QPoint over = row->mapToScene(QPointF(row->width() / 2, row->height() / 2)).toPoint();
+        // Qt drops a move to where the cursor already is, which a test before may have left there
+        QTest::mouseMove(ui.window, over + QPoint(1, 1));
+        QTest::mouseMove(ui.window, over);
+        // At the start only the way forward shows; each arrow is a strip as high as the row
         QTRY_VERIFY(next->isVisible());
+        QCOMPARE(next->height(), row->height());
+        QVERIFY(qAbs(next->width() - 2.5 * gridUnitOf(ui)) < 1);
         QVERIFY(!previous->isVisible());
         const qreal start = list->property("contentX").toReal();
         ui.clickCenter(next);
         QTRY_VERIFY(list->property("contentX").toReal() > start + 100);
         QTRY_VERIFY(previous->isVisible());
         // At the end only the way back shows
-        for (int step = 0; step < 20 && next->isVisible(); ++step) {
+        for (int step = 0; step < 20 && list->property("atXEnd").toBool() == false; ++step) {
             QVERIFY(QMetaObject::invokeMethod(row, "scrollBy", Q_ARG(QVariant, 1)));
             QTest::qWait(50);
         }
+        QTRY_VERIFY(list->property("atXEnd").toBool());
         QTRY_VERIFY(!next->isVisible());
         QVERIFY(previous->isVisible());
-        QVERIFY(list->property("atXEnd").toBool());
+        // The pointer leaving the row takes them away
+        QTest::mouseMove(ui.window, QPoint(2, 2));
+        QTRY_VERIFY(!previous->isVisible());
     }
 
     void aMessageBoxIsBuiltWhenItFirstShowsAndKept()
@@ -2654,9 +2674,11 @@ class TestUiPages : public QObject {
              {QStringLiteral("Arcturus 1080p"), QStringLiteral("Container"), QStringLiteral("mkv"),
               QStringLiteral("Video"), QStringLiteral("Audio"), QStringLiteral("Subtitles")})
             QVERIFY2(texts.contains(expected), qPrintable(expected));
-        QVERIFY(std::any_of(texts.cbegin(), texts.cend(), [](const QString &text) {
-            return text.contains(QStringLiteral("HEVC"));
-        }));
+        // A stream line is the server's own description, a video's with its resolution, and nothing it already says twice
+        QVERIFY2(texts.contains(QStringLiteral("1080p HEVC \u00b7 1920\u00d71080")),
+                 qPrintable(texts.join(QLatin1Char('|'))));
+        QVERIFY(texts.contains(QStringLiteral("English EAC3 5.1")));
+        QVERIFY(texts.contains(QStringLiteral("Italian SRT")));
     }
 
     void copyPutsTheMediaInfoInTheClipboard()
@@ -2677,7 +2699,8 @@ class TestUiPages : public QObject {
             QGuiApplication::clipboard()->text().contains(QStringLiteral("Container: mkv")));
         const QString copied = QGuiApplication::clipboard()->text();
         QVERIFY(copied.startsWith(QStringLiteral("Arcturus 1080p\n")));
-        QVERIFY(copied.contains(QStringLiteral("Video: HEVC")));
+        QVERIFY(copied.contains(QStringLiteral("Video: 1080p HEVC \u00b7 1920\u00d71080")));
+        QVERIFY(copied.contains(QStringLiteral("Audio: English EAC3 5.1")));
     }
 
     void creditsShowOneRowPerKind()
@@ -9626,8 +9649,9 @@ class TestUiPages : public QObject {
         QVERIFY(ui.signIn());
         QQuickItem *card = nullptr;
         QTRY_VERIFY((card = homeRowMovieCard(ui, 0)) != nullptr);
-        QQuickItem *button = Ui::itemIn(card, QStringLiteral("cardQuickPlay"));
-        QVERIFY(button);
+        // The card is in the scene while its row is still being built: the button comes with it
+        QQuickItem *button = nullptr;
+        QTRY_VERIFY((button = Ui::itemIn(card, QStringLiteral("cardQuickPlay"))) != nullptr);
         QVERIFY(!button->isVisible());
         // Keyboard focus on the row does not show it
         QQuickItem *list = ui.item(QStringLiteral("homeRowList_0"));
@@ -9635,19 +9659,38 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(list->hasActiveFocus());
         QVERIFY(!button->isVisible());
         QVERIFY(revealCard(ui, card));
-        QTest::mouseMove(ui.window, cardPoint(card));
+        const auto fades = [](const PropertyRecorder &recorder) {
+            return std::any_of(recorder.values.cbegin(), recorder.values.cend(),
+                               [](qreal value) { return value > 0 && value < 1; });
+        };
+        // The pointer on the card, away from the button in its middle, fades it in
+        PropertyRecorder fadeIn(button, "opacity");
+        QTest::mouseMove(
+            ui.window,
+            card->mapToScene(QPointF(card->width() * 0.15, card->height() * 0.1)).toPoint());
         QTRY_VERIFY(button->isVisible());
-        // The pointer moving onto the button keeps it shown
+        QTRY_COMPARE(button->opacity(), 1.0);
+        QVERIFY(fades(fadeIn));
+        auto *disc = button->property("background").value<QQuickItem *>();
+        QVERIFY(disc);
+        QVERIFY(!button->property("hovered").toBool());
+        const QColor resting = disc->property("color").value<QColor>();
+        // The pointer moving onto the button keeps it shown and lights it up
         QTest::mouseMove(
             ui.window,
             button->mapToScene(QPointF(button->width() / 2, button->height() / 2)).toPoint());
-        QTest::qWait(100);
+        QTRY_VERIFY(button->property("hovered").toBool());
+        QTRY_VERIFY(disc->property("color").value<QColor>() != resting);
+        QTRY_VERIFY(button->scale() > 1.0);
         QVERIFY(button->isVisible());
         // The button stays inside the card
         const QRectF area = button->mapRectToItem(card, QRectF(QPointF(0, 0), button->size()));
         QVERIFY(card->boundingRect().contains(area));
+        // The pointer leaving the card fades it out
+        PropertyRecorder fadeOut(button, "opacity");
         QTest::mouseMove(ui.window, QPoint(ui.window->width() - 2, ui.window->height() - 2));
         QTRY_VERIFY(!button->isVisible());
+        QVERIFY(fades(fadeOut));
     }
 
     void continueWatchingCardPlayButtonResumesTheItem()
@@ -9661,8 +9704,9 @@ class TestUiPages : public QObject {
             "player", QVariant::fromValue<QObject *>(&stub)));
         QQuickItem *card = nullptr;
         QTRY_VERIFY((card = homeRowMovieCard(ui, 0)) != nullptr);
-        QQuickItem *button = Ui::itemIn(card, QStringLiteral("cardQuickPlay"));
-        QVERIFY(button);
+        // The card is in the scene while its row is still being built: the button comes with it
+        QQuickItem *button = nullptr;
+        QTRY_VERIFY((button = Ui::itemIn(card, QStringLiteral("cardQuickPlay"))) != nullptr);
         QVERIFY(revealCard(ui, card));
         QTest::mouseMove(ui.window, cardPoint(card));
         QTRY_VERIFY(button->isVisible());
