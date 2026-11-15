@@ -250,7 +250,7 @@ Kirigami.Page {
             page.wakeChrome();
         }
     }
-    // A click on the video pauses or resumes at once; a double click toggles full screen and puts the pause back as the click before it changed it; a tap on a touch screen only shows the bars
+    // A click on the video pauses or resumes after a short wait, so the usual double click, which toggles full screen, never stops the video; a slower double click puts the pause back as the click before it changed it; a tap on a touch screen only shows the bars
     TapHandler {
         id: videoTap
         // Whether the last click of this run paused or resumed: the double click undoes it
@@ -265,21 +265,34 @@ Kirigami.Page {
             if (eventPoint.device.type === PointerDevice.TouchScreen || page.menuOpen || volumePopup.opened || Date.now() - page.popupClosedAt < Qt.styleHints.mouseDoubleClickInterval)
                 return;
             // Nothing to pause while an item opens or after it failed
-            if (page.player.active && !page.player.loading) {
-                const wasPaused = page.player.paused;
-                page.player.togglePause();
-                videoTap.toggledPause = page.player.paused !== wasPaused;
-            }
+            if (page.player.active && !page.player.loading)
+                clickPauseTimer.restart();
         }
         onDoubleTapped: (eventPoint, button) => {
             if (eventPoint.device.type === PointerDevice.TouchScreen)
                 return;
-            if (videoTap.toggledPause) {
+            // The second click came in time: the first one pauses nothing
+            if (clickPauseTimer.running) {
+                clickPauseTimer.stop();
+            } else if (videoTap.toggledPause) {
                 page.player.togglePause();
                 videoTap.toggledPause = false;
             }
             page.Window.window.togglePlayerFullscreen();
             page.wakeChrome();
+        }
+    }
+    // The wait of a click before it pauses: shorter than the double-click interval of the system (400 ms in Plasma), long enough for a usual double click
+    Timer {
+        id: clickPauseTimer
+        objectName: "playerClickPauseTimer"
+        interval: 250
+        onTriggered: {
+            if (!page.player.active || page.player.loading)
+                return;
+            const wasPaused = page.player.paused;
+            page.player.togglePause();
+            videoTap.toggledPause = page.player.paused !== wasPaused;
         }
     }
 

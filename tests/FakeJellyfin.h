@@ -543,6 +543,31 @@ class FakeJellyfin {
         }
     }
 
+    // The playlist listing (`includeItemTypes=Playlist`) over the store, by name, paged by `limit`
+    QByteArray playlistsListingBody(const QByteArray &route) const
+    {
+        QList<FakePlaylist> sorted = playlists;
+        std::sort(sorted.begin(), sorted.end(), [](const FakePlaylist &a, const FakePlaylist &b) {
+            return a.name.compare(b.name, Qt::CaseInsensitive) < 0;
+        });
+        const QUrlQuery query = capturedListingQuery(route);
+        const int limit = query.hasQueryItem(QStringLiteral("limit"))
+                              ? query.queryItemValue(QStringLiteral("limit")).toInt()
+                              : int(sorted.size());
+        QJsonArray items;
+        for (qsizetype row = 0; row < sorted.size() && row < limit; ++row)
+            items.append(
+                QJsonObject{{QStringLiteral("Id"), sorted.at(row).id},
+                            {QStringLiteral("Name"), sorted.at(row).name},
+                            {QStringLiteral("Type"), QStringLiteral("Playlist")},
+                            {QStringLiteral("MediaType"), QStringLiteral("Video")},
+                            {QStringLiteral("ChildCount"), int(sorted.at(row).entries.size())}});
+        return QJsonDocument(QJsonObject{{QStringLiteral("Items"), items},
+                                         {QStringLiteral("StartIndex"), 0},
+                                         {QStringLiteral("TotalRecordCount"), int(sorted.size())}})
+            .toJson(QJsonDocument::Compact);
+    }
+
     QJsonObject playlistEntryJson(const FakePlaylistEntry &entry) const
     {
         const QByteArray raw = itemsById.value(entry.itemId.toLower());
@@ -1140,6 +1165,10 @@ class FakeJellyfin {
                 respond(socket, listingStatus.value(listingFamily), {});
             } else if (custom.first != 0) {
                 respond(socket, custom.first, custom.second);
+            } else if (listingFamily == QLatin1String("Items")
+                       && route.contains("includeItemTypes=Playlist") && !denyListings
+                       && !redirectListings) {
+                respond(socket, 200, playlistsListingBody(route));
             } else if (listingFamily == QLatin1String("Episodes") && generatedEpisodeTotal >= 0
                        && !denyListings && !redirectListings) {
                 respond(socket, 200, generatedEpisodesBody(route));

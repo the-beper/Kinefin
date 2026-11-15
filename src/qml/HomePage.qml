@@ -77,8 +77,15 @@ Kirigami.ScrollablePage {
                     // From the page's column, not from the Flow: a Flow child sized by the Flow's own width never settles under the software renderer
                     width: Math.min(Kirigami.Units.gridUnit * 16, homeColumn.width)
                     library: tile.modelData
-                    // A movies or TV shows library opens its tab on that library; the other types open above Home
-                    onClicked: tile.library.tab ? page.Window.window.openTab(tile.library.tab, tile.library.id) : page.Window.window.openLibrary(tile.library.id, tile.library.name)
+                    // A movies or TV shows library opens its tab on that library, the server's Playlists view the Playlists page; the other types open above Home
+                    onClicked: {
+                        if (tile.library.tab)
+                            page.Window.window.openTab(tile.library.tab, tile.library.id);
+                        else if (tile.library.collectionType === "playlists")
+                            page.Window.window.openPlaylists();
+                        else
+                            page.Window.window.openLibrary(tile.library.id, tile.library.name);
+                    }
                 }
             }
         }

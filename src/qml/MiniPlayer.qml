@@ -65,9 +65,10 @@ Item {
         onTriggered: mini.touchRevealed = false
     }
 
-    // A button of the controls: pressed while they are not shown it only shows them, whatever the device; otherwise it activates. The state is read at the press, since the pointer hover may change while a button holds the mouse
+    // A button of the controls: pressed while they are not shown it only shows them, whatever the device; otherwise it activates. The state is read at the press, since the pointer hover may change while a button holds the mouse. No tooltip: it would spill over the small player (the text stays the accessible name)
     component MiniButton: OsdButton {
         id: miniButton
+        Controls.ToolTip.visible: false
         property bool touchPress: false
         property bool shownAtPress: false
         signal activated

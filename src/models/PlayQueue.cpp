@@ -10,6 +10,7 @@
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QRandomGenerator>
 #include <QSet>
 
 #include <algorithm>
@@ -49,6 +50,7 @@ PlayQueue::PlayQueue(JellyfinClient *client, QObject *parent)
     connect(m_client, &JellyfinClient::itemsReady, this, &PlayQueue::onItems);
     connect(m_client, &JellyfinClient::nextUpReady, this, &PlayQueue::onNextUp);
     connect(m_client, &JellyfinClient::episodesReady, this, &PlayQueue::onEpisodes);
+    connect(m_client, &JellyfinClient::playlistEntriesReady, this, &PlayQueue::onPlaylistEntries);
     connect(m_client, &JellyfinClient::listingFailed, this, &PlayQueue::onListingFailed);
     connect(m_client, &JellyfinClient::credentialsCleared, this, [this] {
         // What was edited is saved for the next sign-in of the same user; the stored file stays
@@ -89,17 +91,29 @@ QHash<int, QByteArray> PlayQueue::roleNames() const
             {PlayedRole, "played"}};
 }
 
+QUrl listImageUrl(const JellyfinClient *client, const ItemSummary &item, int width)
+{
+    if (!client)
+        return {};
+    if (!item.primaryTag.isEmpty())
+        return client->imageUrl(item.id, QStringLiteral("Primary"), width, item.primaryTag);
+    if (!item.parentBackdropItemId.isEmpty() && !item.parentBackdropTag.isEmpty())
+        return client->imageUrl(item.parentBackdropItemId, QStringLiteral("Backdrop"), width,
+                                item.parentBackdropTag);
+    return {};
+}
+
+int PlayQueue::indexOf(const QString &itemId) const
+{
+    const auto found = std::find_if(m_items.cbegin(), m_items.cend(), [&](const ItemSummary &item) {
+        return idKey(item.id) == idKey(itemId);
+    });
+    return found == m_items.cend() ? -1 : int(std::distance(m_items.cbegin(), found));
+}
+
 QUrl PlayQueue::imageUrlFor(const ItemSummary &item) const
 {
-    if (!m_client)
-        return {};
-    // The item's own picture, else (an episode without one) the backdrop of its parent
-    if (!item.primaryTag.isEmpty())
-        return m_client->imageUrl(item.id, QStringLiteral("Primary"), ImageWidth, item.primaryTag);
-    if (!item.parentBackdropItemId.isEmpty() && !item.parentBackdropTag.isEmpty())
-        return m_client->imageUrl(item.parentBackdropItemId, QStringLiteral("Backdrop"), ImageWidth,
-                                  item.parentBackdropTag);
-    return {};
+    return listImageUrl(m_client, item, ImageWidth);
 }
 
 QVariant PlayQueue::data(const QModelIndex &index, int role) const
@@ -150,6 +164,17 @@ void PlayQueue::setCurrentPlaybackItemId(const QString &id)
 
 bool PlayQueue::add(const QString &itemId, Placement placement)
 {
+    return beginOperation(itemId, placement, false, false);
+}
+
+bool PlayQueue::replace(const QString &itemId, bool shuffled)
+{
+    return beginOperation(itemId, Last, true, shuffled);
+}
+
+bool PlayQueue::beginOperation(const QString &itemId, Placement placement, bool replacing,
+                               bool shuffled)
+{
     if (!m_client || m_op.active || m_restore.active || !isValidJellyfinId(itemId))
         return false;
     // A queue that could not be read back stays untouched until it is: an add would overwrite the file it is still to restore
@@ -163,6 +188,8 @@ bool PlayQueue::add(const QString &itemId, Placement placement)
     m_op = Operation();
     m_op.active = true;
     m_op.placement = placement;
+    m_op.replacing = replacing;
+    m_op.shuffled = shuffled;
     if (!m_client->fetchItems(query, ExpandChannel)) {
         m_op = Operation();
         return false;
@@ -252,6 +279,9 @@ void PlayQueue::onItems(const QJsonArray &items, int total, int channel)
         }
         if (root.type == QLatin1String("BoxSet"))
             return requestChildren();
+        // A playlist in its own order, its entries read through the playlist route
+        if (root.type == QLatin1String("Playlist"))
+            return requestPlaylistEntries();
         endOperation();
         return Q_EMIT nothingToAdd();
     }
@@ -268,6 +298,30 @@ void PlayQueue::onItems(const QJsonArray &items, int total, int channel)
         return finish();
     }
     requestChildren();
+}
+
+void PlayQueue::requestPlaylistEntries()
+{
+    m_op.stage = Stage::PlaylistEntries;
+    if (!m_client->fetchPlaylistEntries(m_op.root.id, m_op.received, PageSize, ExpandChannel))
+        fail();
+}
+
+void PlayQueue::onPlaylistEntries(const QJsonArray &items, int total, int channel)
+{
+    if (channel != ExpandChannel || !m_op.active || m_op.stage != Stage::PlaylistEntries)
+        return;
+    collect(items, true);
+    m_op.received += int(items.size());
+    m_op.total = total;
+    if (items.isEmpty() || m_op.received >= total)
+        return finish();
+    if (m_op.received >= MaxScan || ++m_op.pages >= MaxPages
+        || m_op.collected.size() >= size_t(MaxScan)) {
+        m_op.cut = true;
+        return finish();
+    }
+    requestPlaylistEntries();
 }
 
 void PlayQueue::onNextUp(const QJsonArray &items, int, int channel)
@@ -325,6 +379,8 @@ void PlayQueue::finish()
     const bool series = m_op.root.type == QLatin1String("Series");
     const QString nextUpId = m_op.nextUpId;
     const bool cut = m_op.cut;
+    const bool replacing = m_op.replacing;
+    const bool shuffled = m_op.shuffled;
     endOperation();
     // A season starts at its first unplayed episode, a series at its Next Up episode; with nothing to resume at, from the top
     auto start = items.begin();
@@ -345,8 +401,39 @@ void PlayQueue::finish()
         return Q_EMIT nothingToAdd();
     bool truncated = cut;
     int joined = 0;
+    if (replacing) {
+        if (shuffled)
+            std::shuffle(items.begin(), items.end(), *QRandomGenerator::global());
+        replaceAll(std::move(items), &truncated, &joined);
+        return Q_EMIT replaced(joined, truncated);
+    }
     insert(std::move(items), placement, &truncated, &joined);
     Q_EMIT added(joined, truncated);
+}
+
+void PlayQueue::replaceAll(std::vector<ItemSummary> items, bool *truncated, int *joined)
+{
+    // Each id once, at its first place, and the cap on the whole list
+    QSet<QString> seen;
+    std::vector<ItemSummary> unique;
+    for (ItemSummary &item : items) {
+        if (seen.contains(idKey(item.id)))
+            continue;
+        seen.insert(idKey(item.id));
+        unique.push_back(std::move(item));
+    }
+    if (unique.size() > size_t(MaxEntries)) {
+        *truncated = true;
+        unique.resize(MaxEntries);
+    }
+    *joined = int(unique.size());
+    // One snapshot of the old queue: Undo brings it back whole
+    rememberEdit();
+    beginResetModel();
+    m_items = std::move(unique);
+    endResetModel();
+    Q_EMIT countChanged();
+    Q_EMIT edited();
 }
 
 void PlayQueue::insert(std::vector<ItemSummary> items, Placement placement, bool *truncated,

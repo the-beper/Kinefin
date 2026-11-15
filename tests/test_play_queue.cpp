@@ -1142,6 +1142,120 @@ class TestPlayQueue : public QObject {
         // The rows were the first user's: the second starts with none
         QCOMPARE(f.queue.count(), 0);
     }
+
+    // A playlist of `count` movies named "P<n>", the first `repeated` of them listed twice; their ids in the playlist's order (each once)
+    static QStringList seedMoviePlaylist(Fixture &f, QString *playlistId, int count,
+                                         int repeated = 0)
+    {
+        QStringList ids;
+        for (int i = 0; i < count; ++i) {
+            const QString id = QStringLiteral("c1%1").arg(i + 1, 30, 16, QLatin1Char('0'));
+            f.server.itemsById.insert(
+                id, QJsonDocument(
+                        QJsonObject{{QStringLiteral("Id"), id},
+                                    {QStringLiteral("Name"), QStringLiteral("P%1").arg(i + 1)},
+                                    {QStringLiteral("Type"), QStringLiteral("Movie")}})
+                        .toJson(QJsonDocument::Compact));
+            ids.append(id);
+        }
+        QStringList listed = ids;
+        for (int i = 0; i < repeated; ++i)
+            listed.append(ids.at(i));
+        *playlistId = f.server.seedPlaylist(QStringLiteral("Evening"), listed);
+        f.server.itemsById.insert(
+            *playlistId,
+            QJsonDocument(QJsonObject{{QStringLiteral("Id"), *playlistId},
+                                      {QStringLiteral("Name"), QStringLiteral("Evening")},
+                                      {QStringLiteral("Type"), QStringLiteral("Playlist")}})
+                .toJson(QJsonDocument::Compact));
+        return ids;
+    }
+
+    void aPlaylistJoinsInItsOwnOrder()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        QVERIFY(f.addAndWait(kMovie, PlayQueue::Last));
+        QString playlist;
+        const QStringList ids = seedMoviePlaylist(f, &playlist, 3, 1);
+        // Read through the playlist route, each item once (the first copy keeps its place)
+        QVERIFY(f.addAndWait(playlist, PlayQueue::Last));
+        QCOMPARE(f.queue.itemIds(), QStringList({kMovie, ids.at(0), ids.at(1), ids.at(2)}));
+        QVERIFY(std::any_of(f.server.playlistRequests.cbegin(), f.server.playlistRequests.cend(),
+                            [&](const auto &request) {
+                                return request.route.contains(
+                                    QByteArray("/Playlists/" + playlist.toUtf8() + "/Items"));
+                            }));
+    }
+
+    void replacingTheQueueWithAPlaylistIsOneStepUndoTakesBack()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        QVERIFY(f.addAndWait(kMovie, PlayQueue::Last));
+        const QStringList before = f.queue.itemIds();
+        QString playlist;
+        const QStringList ids = seedMoviePlaylist(f, &playlist, 4, 2);
+        QSignalSpy replaced(&f.queue, &PlayQueue::replaced);
+        QSignalSpy added(&f.queue, &PlayQueue::added);
+        QVERIFY(f.queue.replace(playlist, false));
+        QTRY_COMPARE(replaced.size(), 1);
+        QCOMPARE(added.size(), 0);
+        QCOMPARE(replaced.constFirst().at(0).toInt(), 4);
+        QVERIFY(!replaced.constFirst().at(1).toBool());
+        QCOMPARE(f.queue.itemIds(), ids);
+        QCOMPARE(f.queue.indexOf(ids.at(2).toUpper()), 2);
+        QCOMPARE(f.queue.indexOf(kMovie), -1);
+        // Undo brings the old queue back whole, in one step
+        QVERIFY(f.queue.canUndo());
+        QVERIFY(f.queue.undo());
+        QCOMPARE(f.queue.itemIds(), before);
+        // Shuffled: the same items, in one random order
+        QVERIFY(f.queue.replace(playlist, true));
+        QTRY_COMPARE(replaced.size(), 2);
+        QStringList shuffled = f.queue.itemIds();
+        QStringList sorted = ids;
+        std::sort(shuffled.begin(), shuffled.end());
+        std::sort(sorted.begin(), sorted.end());
+        QCOMPARE(shuffled, sorted);
+    }
+
+    void aLongPlaylistFillsTheQueueToItsCap()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        QString playlist;
+        const QStringList ids = seedMoviePlaylist(f, &playlist, PlayQueue::MaxEntries + 20);
+        QSignalSpy replaced(&f.queue, &PlayQueue::replaced);
+        QVERIFY(f.queue.replace(playlist, false));
+        QTRY_COMPARE(replaced.size(), 1);
+        QCOMPARE(replaced.constFirst().at(0).toInt(), PlayQueue::MaxEntries);
+        QVERIFY(replaced.constFirst().at(1).toBool());
+        QCOMPARE(f.queue.count(), PlayQueue::MaxEntries);
+        QCOMPARE(f.queue.itemIds().constLast(), ids.at(PlayQueue::MaxEntries - 1));
+    }
+
+    void anEmptyOrFailedPlaylistLeavesTheQueueAlone()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        QVERIFY(f.addAndWait(kMovie, PlayQueue::Last));
+        QString playlist;
+        seedMoviePlaylist(f, &playlist, 0);
+        QSignalSpy nothing(&f.queue, &PlayQueue::nothingToAdd);
+        QVERIFY(f.queue.replace(playlist, false));
+        QTRY_COMPARE(nothing.size(), 1);
+        QCOMPARE(f.queue.itemIds(), QStringList({kMovie}));
+        // A playlist the server lists but whose entries cannot be read (it answers 404)
+        QString other;
+        seedMoviePlaylist(f, &other, 2);
+        f.server.playlists.removeLast();
+        QSignalSpy failed(&f.queue, &PlayQueue::addFailed);
+        QVERIFY(f.queue.replace(other, false));
+        QTRY_COMPARE(failed.size(), 1);
+        QCOMPARE(f.queue.itemIds(), QStringList({kMovie}));
+        QVERIFY(!f.queue.busy());
+    }
 };
 
 QTEST_MAIN(TestPlayQueue)

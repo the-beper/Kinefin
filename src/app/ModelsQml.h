@@ -13,6 +13,8 @@
 #include "models/LibraryItemsModel.h"
 #include "models/LibrarySubtabController.h"
 #include "models/PlayQueue.h"
+#include "models/PlaylistEntriesModel.h"
+#include "models/PlaylistsController.h"
 #include "models/RecommendationRowsModel.h"
 #include "models/RemoteSessionsModel.h"
 #include "models/ResumeItemsModel.h"
@@ -140,6 +142,20 @@ struct FavoritesModelForeign {
     Q_GADGET
     QML_FOREIGN(Kinefin::FavoritesModel)
     QML_NAMED_ELEMENT(FavoritesModel)
+    QML_UNCREATABLE("Created by the application")
+};
+
+struct PlaylistsControllerForeign {
+    Q_GADGET
+    QML_FOREIGN(Kinefin::PlaylistsController)
+    QML_NAMED_ELEMENT(PlaylistsController)
+    QML_UNCREATABLE("Created by the application")
+};
+
+struct PlaylistEntriesModelForeign {
+    Q_GADGET
+    QML_FOREIGN(Kinefin::PlaylistEntriesModel)
+    QML_NAMED_ELEMENT(PlaylistEntriesModel)
     QML_UNCREATABLE("Created by the application")
 };
 

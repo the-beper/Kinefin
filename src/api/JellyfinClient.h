@@ -60,6 +60,8 @@ struct ItemQuery {
     QString parentId;
     QString includeItemTypes; // comma-separated BaseItemKind tokens
     QString excludeItemTypes;
+    // comma-separated MediaType tokens: Video, Audio, Photo, Book (a playlist is listed by its own)
+    QString mediaTypes;
     QStringList itemIds;
     QString searchTerm;
     QString sortBy;    // comma-separated sorting keys (shape-checked letters/digits/underscores)

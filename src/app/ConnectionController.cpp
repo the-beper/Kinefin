@@ -996,9 +996,10 @@ bool ConnectionController::openLibrary(const QString &libraryId)
         const QVariantMap library = entry.toMap();
         if (library.value(QStringLiteral("id")).toString() != libraryId)
             continue;
-        if (!library.value(QStringLiteral("browsable")).toBool())
-            return false;
         const QString collectionType = library.value(QStringLiteral("collectionType")).toString();
+        // A tile that opens a page of its own (the playlists) has no library grid
+        if (!LibraryItemsModel::browseQuery(collectionType))
+            return false;
         const QString name = library.value(QStringLiteral("name")).toString();
         // Only the collections are remembered here: the movie and TV libraries belong to their tabs
         const auto stored = collectionType == QLatin1String("boxsets")
@@ -1263,8 +1264,9 @@ void ConnectionController::onUserViews(const QJsonArray &items)
                  ? QString()
                  : m_client.imageUrl(id, QStringLiteral("Primary"), kLibraryImageWidth, tag)
                        .toString(QUrl::FullyEncoded)},
-            {QStringLiteral("browsable"),
-             LibraryItemsModel::browseQuery(collectionType).has_value()}});
+            // The server's Playlists view opens the Playlists page
+            {QStringLiteral("browsable"), LibraryItemsModel::browseQuery(collectionType).has_value()
+                                              || collectionType == QLatin1String("playlists")}});
     }
     keepTypeModelsConsistent();
     Q_EMIT librariesChanged();

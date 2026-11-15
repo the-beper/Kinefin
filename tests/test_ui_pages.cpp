@@ -2135,6 +2135,18 @@ QVariantMap playerChapter(const QString &name, qint64 seconds, const QString &ti
             {QStringLiteral("time"), time}};
 }
 
+// A mouse click whose events carry `timestamp` (ms): QTest moves the time on after every click so that two clicks never make a double one, and a slow double click needs its own times
+void timedClick(QWindow *window, const QPoint &pos, quint64 timestamp)
+{
+    for (const QEvent::Type type : {QEvent::MouseButtonPress, QEvent::MouseButtonRelease}) {
+        QMouseEvent event(type, pos, window->mapToGlobal(pos), Qt::LeftButton,
+                          type == QEvent::MouseButtonPress ? Qt::LeftButton : Qt::NoButton,
+                          Qt::NoModifier);
+        event.setTimestamp(timestamp);
+        QCoreApplication::sendEvent(window, &event);
+    }
+}
+
 // The mini player once it shows, or null
 QQuickItem *shownMiniPlayer(const Ui &ui)
 {
@@ -10655,6 +10667,37 @@ class TestUiPages : public QObject {
         QVERIFY(video && page->isAncestorOf(video));
     }
 
+    void miniPlayerButtonsShowNoTooltip()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *mini = openMiniPlayer(ui, stub);
+        QVERIFY(mini);
+        hoverMiniPlayer(ui, mini);
+        // The pointer rests on each button past the tooltip delay: no popup names it (the button's text stays its accessible name)
+        for (const QString &name :
+             {QStringLiteral("miniPlayerCloseButton"), QStringLiteral("miniPlayerExpandButton"),
+              QStringLiteral("miniPlayerPauseButton")}) {
+            QQuickItem *button = ui.item(name);
+            QVERIFY2(button, qPrintable(name));
+            QTRY_VERIFY(button->isVisible() && mini->property("controlsShown").toBool());
+            const QPoint centre =
+                button->mapToScene(QPointF(button->width() / 2, button->height() / 2)).toPoint();
+            QTest::mouseMove(ui.window, centre + QPoint(1, 1));
+            QTest::mouseMove(ui.window, centre);
+            QTRY_VERIFY(button->property("hovered").toBool());
+            QTest::qWait(1200);
+            const QString text = button->property("text").toString();
+            QVERIFY(!text.isEmpty());
+            for (QQuickItem *label : ui.itemsWithText(text)) {
+                QVERIFY2(!(label->inherits("QQuickText") && label->isVisible()), qPrintable(name));
+            }
+        }
+    }
+
     void miniPlayerGoesWhenPlaybackEnds()
     {
         PlayerStub stub;
@@ -11723,6 +11766,149 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(stub.calls.contains(QStringLiteral("forgetSeriesChoices")));
     }
 
+    void playlistsOpenFromTheirTileAndTheMainMenuAndPlayAsTheQueue()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        const QString playlistsView = QStringLiteral("e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0");
+        ui.serveViews({{kMovies, QStringLiteral("Movies"), QStringLiteral("movies")},
+                       {playlistsView, QStringLiteral("Playlists"), QStringLiteral("playlists")}});
+        QStringList films;
+        for (int i = 1; i <= 2; ++i) {
+            const QString id = QStringLiteral("f1%1").arg(i, 30, 16, QLatin1Char('0'));
+            ui.server.itemsById.insert(
+                id, QJsonDocument(
+                        QJsonObject{{QStringLiteral("Id"), id},
+                                    {QStringLiteral("Name"), QStringLiteral("Film %1").arg(i)},
+                                    {QStringLiteral("Type"), QStringLiteral("Movie")}})
+                        .toJson(QJsonDocument::Compact));
+            films.append(id);
+        }
+        // The first film twice: the queue takes it once
+        const QString evening = ui.server.seedPlaylist(QStringLiteral("Evening"),
+                                                       {films.at(0), films.at(1), films.at(0)});
+        ui.server.itemsById.insert(
+            evening,
+            QJsonDocument(QJsonObject{{QStringLiteral("Id"), evening},
+                                      {QStringLiteral("Name"), QStringLiteral("Evening")},
+                                      {QStringLiteral("Type"), QStringLiteral("Playlist")}})
+                .toJson(QJsonDocument::Compact));
+        const QString empty = ui.server.seedPlaylist(QStringLiteral("Anime"), {});
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QObject *root = ui.engine.rootObjects().constFirst();
+        QVERIFY(root->setProperty("player", QVariant::fromValue<QObject *>(&stub)));
+        // The server's Playlists view is a tile that opens the Playlists page
+        QTRY_VERIFY(ui.item(QStringLiteral("libraryCard_") + playlistsView) != nullptr);
+        QQuickItem *tile = ui.item(QStringLiteral("libraryCard_") + playlistsView);
+        QVERIFY(tile->isEnabled());
+        ui.clickCenter(tile);
+        QTRY_VERIFY(ui.item(QStringLiteral("playlistsPage")) != nullptr);
+        QTRY_VERIFY(ui.item(QStringLiteral("mediaCard_") + evening) != nullptr);
+        QVERIFY(ui.item(QStringLiteral("mediaCard_") + empty) != nullptr);
+        QCOMPARE(root->property("currentSection").toString(), QStringLiteral("playlists"));
+        // So does the main menu, which brings the same page back
+        QVERIFY(QMetaObject::invokeMethod(root, "goHome"));
+        QTRY_VERIFY(ui.item(QStringLiteral("playlistsPage")) == nullptr);
+        QObject *action = ui.shellAction(QStringLiteral("playlistsAction"));
+        QVERIFY(action && action->property("visible").toBool());
+        QVERIFY(QMetaObject::invokeMethod(action, "trigger"));
+        QTRY_VERIFY(ui.item(QStringLiteral("mediaCard_") + evening) != nullptr);
+        // An empty playlist says so
+        ui.clickCenter(ui.item(QStringLiteral("mediaCard_") + empty));
+        QTRY_VERIFY(ui.item(QStringLiteral("playlistEmpty"))
+                    && ui.item(QStringLiteral("playlistEmpty"))->isVisible());
+        QQuickItem *page = ui.currentDetails();
+        QCOMPARE(page->objectName(), QStringLiteral("playlistPage"));
+        QCOMPARE(page->property("title").toString(), QStringLiteral("Anime"));
+        QVERIFY(!page->findChild<QObject *>(QStringLiteral("playPlaylistAction"))
+                     ->property("enabled")
+                     .toBool());
+        // A playlist lists its entries in order, under its name
+        QVERIFY(QMetaObject::invokeMethod(root, "openPlaylists"));
+        QTRY_VERIFY(ui.item(QStringLiteral("mediaCard_") + evening) != nullptr);
+        ui.clickCenter(ui.item(QStringLiteral("mediaCard_") + evening));
+        QTRY_VERIFY(ui.item(QStringLiteral("playlistRow_2")) != nullptr);
+        page = ui.currentDetails();
+        QCOMPARE(page->property("title").toString(), QStringLiteral("Evening"));
+        QCOMPARE(ui.item(QStringLiteral("playlistRow_0"))->property("name").toString(),
+                 QStringLiteral("Film 1"));
+        QCOMPARE(ui.item(QStringLiteral("playlistRow_1"))->property("name").toString(),
+                 QStringLiteral("Film 2"));
+        QCOMPARE(root->property("currentSection").toString(), QStringLiteral("playlists"));
+        // Play From Here makes the playlist the queue, each item once, and starts at the row's item
+        QVERIFY(QMetaObject::invokeMethod(page, "play", Q_ARG(QVariant, films.at(1)),
+                                          Q_ARG(QVariant, false)));
+        QTRY_VERIFY(stub.calls.contains(QStringLiteral("playQueue 1")));
+        QCOMPARE(ui.controller.queue()->itemIds(), films);
+        // Play starts it at the top, Shuffle in a random order of the same items
+        stub.calls.clear();
+        QObject *play = page->findChild<QObject *>(QStringLiteral("playPlaylistAction"));
+        QVERIFY(play && play->property("enabled").toBool());
+        QVERIFY(QMetaObject::invokeMethod(play, "trigger"));
+        QTRY_VERIFY(stub.calls.contains(QStringLiteral("playQueue 0")));
+        stub.calls.clear();
+        QVERIFY(QMetaObject::invokeMethod(page, "play", Q_ARG(QVariant, QString()),
+                                          Q_ARG(QVariant, true)));
+        QTRY_VERIFY(stub.calls.contains(QStringLiteral("playQueue 0")));
+        QStringList queued = ui.controller.queue()->itemIds();
+        std::sort(queued.begin(), queued.end());
+        QCOMPARE(queued, films);
+        // Undo on the queue takes the last replacement back
+        QVERIFY(ui.controller.queue()->canUndo());
+        // Back on the page from an item, the playlist is read again
+        const auto reads = [&ui] {
+            return std::count_if(ui.server.playlistRequests.cbegin(),
+                                 ui.server.playlistRequests.cend(),
+                                 [](const auto &request) { return request.method == "GET"; });
+        };
+        QVERIFY(QMetaObject::invokeMethod(root, "openPlaylists"));
+        QTRY_VERIFY(ui.item(QStringLiteral("mediaCard_") + evening) != nullptr);
+        QVERIFY(QMetaObject::invokeMethod(
+            root, "openPlaylist", Q_ARG(QVariant, evening),
+            Q_ARG(QVariant, QVariant::fromValue<QObject *>(ui.currentDetails())),
+            Q_ARG(QVariant, QString())));
+        QTRY_VERIFY(ui.currentDetails()->objectName() == QLatin1String("playlistPage"));
+        page = ui.currentDetails();
+        QTRY_COMPARE(page->property("loading").toBool(), false);
+        const qsizetype before = reads();
+        QVERIFY(QMetaObject::invokeMethod(root, "openItem", Q_ARG(QVariant, films.at(0)),
+                                          Q_ARG(QVariant, QVariant::fromValue<QObject *>(page))));
+        QTRY_VERIFY(ui.currentDetails()->objectName() == QLatin1String("itemDetailsPage"));
+        QTest::keyClick(ui.window, Qt::Key_Left, Qt::AltModifier);
+        QTRY_VERIFY(ui.currentDetails() == page);
+        QTRY_VERIFY(reads() > before);
+        // The card menu's Open takes a playlist card to its page, not to the details of the item
+        QVERIFY(QMetaObject::invokeMethod(root, "openPlaylists"));
+        QTRY_VERIFY(ui.item(QStringLiteral("mediaCard_") + evening) != nullptr);
+        QQuickItem *card = ui.item(QStringLiteral("mediaCard_") + evening);
+        QVERIFY(QMetaObject::invokeMethod(
+            root, "openCardMenu", Q_ARG(QVariant, QVariant::fromValue<QObject *>(card)),
+            Q_ARG(QVariant, evening), Q_ARG(QVariant, QStringLiteral("Playlist")),
+            Q_ARG(QVariant, QString()), Q_ARG(QVariant, 0), Q_ARG(QVariant, 0), Q_ARG(QVariant, -1),
+            Q_ARG(QVariant, false)));
+        QObject *open = ui.popup(QStringLiteral("cardMenuOpen"));
+        QTRY_VERIFY(open && open->property("visible").toBool());
+        QVERIFY(QMetaObject::invokeMethod(open, "click"));
+        QTRY_VERIFY(ui.currentDetails()->objectName() == QLatin1String("playlistPage"));
+        QCOMPARE(ui.currentDetails()->property("playlistId").toString(), evening);
+    }
+
+    void playlistsSayWhenThereAreNone()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QObject *root = ui.engine.rootObjects().constFirst();
+        QVERIFY(QMetaObject::invokeMethod(root, "openPlaylists"));
+        QTRY_VERIFY(ui.item(QStringLiteral("playlistsEmpty"))
+                    && ui.item(QStringLiteral("playlistsEmpty"))->isVisible());
+        QCOMPARE(ui.item(QStringLiteral("playlistsEmpty"))->property("text").toString(),
+                 QStringLiteral("No playlists"));
+    }
+
     void playerRepeatIsAlwaysOnAndAllNeedsSomewhereToGo()
     {
         PlayerStub stub;
@@ -12115,7 +12301,7 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(!osd->isVisible());
     }
 
-    void playerClickPausesAtOnceAndDoubleClickTogglesFullScreenAndKeepsThePause()
+    void playerClickPausesSoonAndDoubleClickTogglesFullScreenWithoutAPause()
     {
         PlayerStub stub;
         Ui ui(m_home->path());
@@ -12124,27 +12310,48 @@ class TestUiPages : public QObject {
         QVERIFY(ui.signIn());
         QQuickItem *page = openPlayer(ui, stub);
         QVERIFY(page);
+        QObject *wait = page->findChild<QObject *>(QStringLiteral("playerClickPauseTimer"));
+        QVERIFY(wait);
+        QVERIFY(wait->property("interval").toInt()
+                < QGuiApplication::styleHints()->mouseDoubleClickInterval());
+        // Each run of clicks lands somewhere else, so it never joins the run before it
         const QPoint onVideo(ui.window->width() / 2, ui.window->height() / 2);
-        // One click pauses at once, with no wait for a second click, and only once
+        const QPoint elsewhere = onVideo + QPoint(80, 0);
+        const QPoint thirdPlace = onVideo - QPoint(80, 0);
+        // One click pauses after the short wait, and only once
         restPointerOnVideo(ui);
         QTest::mouseClick(ui.window, Qt::LeftButton, Qt::NoModifier, onVideo);
-        QCOMPARE(stub.calls.count(QStringLiteral("togglePause")), 1);
+        QCOMPARE(stub.calls.count(QStringLiteral("togglePause")), 0);
+        QTRY_COMPARE(stub.calls.count(QStringLiteral("togglePause")), 1);
         QVERIFY(stub.paused);
-        // A double click toggles full screen and puts the pause back, so the playback ends as it was
+        // A double click toggles full screen and never touches the pause
         stub.calls.clear();
-        QTest::mouseDClick(ui.window, Qt::LeftButton, Qt::NoModifier, onVideo);
+        QTest::mouseDClick(ui.window, Qt::LeftButton, Qt::NoModifier, elsewhere);
         QTRY_COMPARE(ui.window->visibility(), QWindow::FullScreen);
+        QTest::qWait(400);
+        QCOMPARE(stub.calls.count(QStringLiteral("togglePause")), 0);
+        QVERIFY(stub.paused);
+        // A slower double click, its first click paused already: the pause is put back with the full screen
+        const int interval = QGuiApplication::styleHints()->mouseDoubleClickInterval();
+        timedClick(ui.window, thirdPlace, 1'000'000);
+        QTRY_COMPARE(stub.calls.count(QStringLiteral("togglePause")), 1);
+        QVERIFY(!stub.paused);
+        timedClick(ui.window, thirdPlace, 1'000'000 + interval - 50);
+        QTRY_COMPARE(ui.window->visibility(), QWindow::Windowed);
         QCOMPARE(stub.calls.count(QStringLiteral("togglePause")), 2);
         QVERIFY(stub.paused);
         stub.calls.clear();
-        // A click on a bar beside its controls is not a click on the video
+        // A click on a bar beside its controls is not a click on the video, once the bars are laid out for the window again
         QQuickItem *bottomBar = ui.item(QStringLiteral("playerBottomBar"));
         QVERIFY(bottomBar);
+        QTRY_VERIFY(bottomBar->mapToScene(QPointF(0, bottomBar->height())).y()
+                    <= ui.window->height());
         const QPoint onBar = bottomBar->mapToScene(QPointF(bottomBar->width() / 2, 4)).toPoint();
         QTest::mouseClick(ui.window, Qt::LeftButton, Qt::NoModifier, onBar);
         QTest::mouseDClick(ui.window, Qt::LeftButton, Qt::NoModifier, onBar);
+        QTest::qWait(400);
         QVERIFY(!stub.calls.contains(QStringLiteral("togglePause")));
-        QCOMPARE(ui.window->visibility(), QWindow::FullScreen);
+        QCOMPARE(ui.window->visibility(), QWindow::Windowed);
         // A click that closes a menu is spent on the menu
         QObject *menu = ui.popup(QStringLiteral("playerMoreMenu"));
         QVERIFY(menu);
@@ -12152,11 +12359,13 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(menu->property("opened").toBool());
         QTest::mouseClick(ui.window, Qt::LeftButton, Qt::NoModifier, onVideo);
         QTRY_VERIFY(!menu->property("visible").toBool());
+        QTest::qWait(400);
         QVERIFY(!stub.calls.contains(QStringLiteral("togglePause")));
         // Nothing to pause while the item opens
         stub.loading = true;
         Q_EMIT stub.changed();
         QTest::mouseClick(ui.window, Qt::LeftButton, Qt::NoModifier, onVideo + QPoint(20, 0));
+        QTest::qWait(400);
         QVERIFY(!stub.calls.contains(QStringLiteral("togglePause")));
         stub.loading = false;
         Q_EMIT stub.changed();
@@ -12188,8 +12397,11 @@ class TestUiPages : public QObject {
         QVERIFY(openPlayer(ui, stub));
         const QPoint onVideo(ui.window->width() / 2, ui.window->height() / 2);
         restPointerOnVideo(ui);
-        // The click asked for a pause that did not happen: the double click has nothing to put back
-        QTest::mouseDClick(ui.window, Qt::LeftButton, Qt::NoModifier, onVideo);
+        // A slow double click whose first click asked for a pause that did not happen: nothing to put back
+        const int interval = QGuiApplication::styleHints()->mouseDoubleClickInterval();
+        timedClick(ui.window, onVideo, 1'000'000);
+        QTRY_COMPARE(stub.calls.count(QStringLiteral("togglePause")), 1);
+        timedClick(ui.window, onVideo, 1'000'000 + interval - 50);
         QTRY_COMPARE(ui.window->visibility(), QWindow::FullScreen);
         QCOMPARE(stub.calls.count(QStringLiteral("togglePause")), 1);
         QVERIFY(!stub.paused);

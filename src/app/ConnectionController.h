@@ -27,6 +27,8 @@
 #include "models/LibraryItemsModel.h"
 #include "models/LibrarySubtabController.h"
 #include "models/PlayQueue.h"
+#include "models/PlaylistEntriesModel.h"
+#include "models/PlaylistsController.h"
 #include "models/RemoteSessionsModel.h"
 #include "models/ResumeItemsModel.h"
 #include "models/SearchModel.h"
@@ -87,6 +89,9 @@ class ConnectionController : public QObject {
     Q_PROPERTY(QVariantList recentLibraries READ recentLibraries NOTIFY homeProjectionChanged)
     // The favorites of the signed-in user across `libraries` (the Favorites page), and the same snapshot split into groups; both follow the session and the library list
     Q_PROPERTY(Kinefin::FavoritesModel *favorites READ favorites CONSTANT)
+    // The user's video playlists, and the entries of the one the Playlist page shows
+    Q_PROPERTY(Kinefin::PlaylistsController *playlists READ playlists CONSTANT)
+    Q_PROPERTY(Kinefin::PlaylistEntriesModel *playlistEntries READ playlistEntries CONSTANT)
     Q_PROPERTY(Kinefin::FavoritesGroupsModel *favoriteGroups READ favoriteGroups CONSTANT)
 
   public:
@@ -154,6 +159,8 @@ class ConnectionController : public QObject {
     QVariantList homeLibraries() const;
     QVariantList recentLibraries() const;
     FavoritesModel *favorites() { return &m_favorites; }
+    PlaylistsController *playlists() { return &m_playlists; }
+    PlaylistEntriesModel *playlistEntries() { return &m_playlistEntries; }
     FavoritesGroupsModel *favoriteGroups() { return &m_favoriteGroups; }
 
     // The place images may be fetched from: the server URL while Authenticated, ChoosingUser or NeedsLogin (the avatars), nothing in every other state. Shared with the image fetcher, which runs on QML's network thread
@@ -339,6 +346,8 @@ class ConnectionController : public QObject {
     PlayQueue m_queue{&m_client};
     UserConfigurationModel m_userConfiguration{&m_client};
     FavoritesModel m_favorites{&m_client};
+    PlaylistsController m_playlists{&m_client};
+    PlaylistEntriesModel m_playlistEntries{&m_client};
     FavoritesGroupsModel m_favoriteGroups{&m_favorites};
     BrowseStateStore m_browse;
     int m_nextDetailsChannel = ItemDetailsModel::FirstChannel;

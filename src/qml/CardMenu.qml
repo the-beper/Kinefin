@@ -22,7 +22,7 @@ Controls.Menu {
     readonly property bool playable: ["Movie", "Episode", "Video"].indexOf(itemType) >= 0
 
     // The kinds the play queue takes, as on the details page: keep the two lists in step
-    readonly property bool queueable: ["Movie", "Episode", "Video", "Season", "Series", "BoxSet"].indexOf(itemType) >= 0
+    readonly property bool queueable: ["Movie", "Episode", "Video", "Season", "Series", "BoxSet", "Playlist"].indexOf(itemType) >= 0
 
     // The favorite state of the item the menu was opened for
     property bool favorite: false

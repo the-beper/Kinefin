@@ -642,6 +642,17 @@ Item {
     }
 
     Kirigami.Action {
+        id: playlistsAction
+        objectName: "playlistsAction"
+
+        text: i18nc("@action:inmenu", "Playlists")
+        // Not the queue's icon: both can sit in the same menu
+        icon.name: "amarok_playlist"
+        visible: root.signedIn
+        onTriggered: shell.openPlaylists()
+    }
+
+    Kirigami.Action {
         id: remoteSessionsAction
         objectName: "remoteSessionsAction"
 
@@ -724,6 +735,11 @@ Item {
             visible: root.compact || root.signedIn
         }
 
+        QQC2.MenuItem {
+            objectName: "menuPlaylistsItem"
+            visible: root.signedIn
+            action: playlistsAction
+        }
         QQC2.MenuItem {
             objectName: "menuRemoteItem"
             visible: root.signedIn

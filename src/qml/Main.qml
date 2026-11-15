@@ -46,6 +46,15 @@ Kirigami.ApplicationWindow {
     property int resumePages: 0
     // The Favorites pages alive, counted the same way: the scan stops when the last one goes, not by a page that outlives its successor
     property int favoritesPages: 0
+    // The Playlists and Playlist pages alive (one deleted late may outlive the next one): the shared models stop reading with the last
+    property int playlistsPages: 0
+    property int playlistPages: 0
+    // A playlist on its way into the queue, and the item it starts at (its first when empty); the queue answers here whatever page asked
+    property bool playlistWaiting: false
+    property string playlistStartAt: ""
+    property int playlistQueueBefore: 0
+    // Numbers the waits, so the end of one never ends the next
+    property int playlistRequest: 0
 
     property bool fullscreenSetting: settings.value("main", "fullscreen")
     property bool alwaysOnTopSetting: settings.value("main", "alwaysOnTop")
@@ -843,7 +852,8 @@ Kirigami.ApplicationWindow {
 
         connection: window.connection
         playAvailable: !!window.player
-        onOpenRequested: targetId => window.openItem(targetId, window.pageStack.currentItem)
+        // A playlist opens its own page, everything else its details
+        onOpenRequested: targetId => cardMenu.itemType === "Playlist" ? window.openPlaylist(targetId, window.pageStack.currentItem) : window.openItem(targetId, window.pageStack.currentItem)
         onPlayRequested: targetId => window.playItem(targetId)
         onResumeRequested: (targetId, ticks) => window.playItem(targetId, ticks)
         // A refused send means a write for the item already runs: its answer updates the card
@@ -923,9 +933,13 @@ Kirigami.ApplicationWindow {
         case "queuePage":
             return "queue";
         }
-        // The Favorites page and what opens above it (a group, an item) belong to the star: no tab is marked
+        // The Favorites page and what opens above it (a group, an item) belong to the star: no tab is marked; so do the Playlists page and what opens above it to the main menu
         if (favoritesPageIndex() >= 0)
             return "favorites";
+        for (let i = 1; i <= pageStack.currentIndex; ++i) {
+            if (pageStack.get(i)?.objectName === "playlistsPage")
+                return "playlists";
+        }
         return rootTab !== "" ? rootTab : "home";
     }
 
@@ -1134,6 +1148,76 @@ Kirigami.ApplicationWindow {
     function favoritesPageGone() {
         if (--favoritesPages === 0)
             connection.favorites.close();
+    }
+
+    // The main menu's Playlists and the Home tile of the server's Playlists view: the page opens above the first page, and one already in the stack is brought back
+    function openPlaylists() {
+        if (!signedIn)
+            return;
+        openSection("playlistsPage", "PlaylistsPage.qml", { connection: connection, shell: window });
+    }
+
+    // A playlist opens above the page asking (the pages above it give way); `name`, when the caller knows it, titles the page
+    function openPlaylist(playlistId, fromPage, name) {
+        if (connection.state !== ConnectionController.Authenticated)
+            return;
+        if (fromPage)
+            popTo(fromPage);
+        pageStack.push(Qt.resolvedUrl("PlaylistPage.qml"), { connection: connection, shell: window, playlistId: playlistId, name: name ?? "" });
+    }
+
+    function playlistsPageGone() {
+        if (--playlistsPages === 0)
+            connection.playlists.close();
+    }
+    function playlistPageGone() {
+        if (--playlistPages === 0)
+            connection.playlistEntries.close();
+    }
+
+    // Play and Shuffle of a playlist: the saved queue becomes it (one step its Undo takes back) and plays from `startAt`, its first item when empty
+    function playPlaylist(playlistId, startAt, shuffled) {
+        if (!signedIn || !window.player || playlistWaiting)
+            return false;
+        playlistWaiting = true;
+        playlistRequest++;
+        playlistStartAt = startAt;
+        playlistQueueBefore = connection.queue.count;
+        if (!connection.queue.replace(playlistId, shuffled)) {
+            playlistWaiting = false;
+            return false;
+        }
+        return true;
+    }
+
+    Connections {
+        target: window.connection.queue
+        enabled: window.playlistWaiting
+        function onReplaced(count, truncated) {
+            window.playlistWaiting = false;
+            const index = window.playlistStartAt.length > 0 ? window.connection.queue.indexOf(window.playlistStartAt) : 0;
+            // The entry asked for did not fit in the queue (its cap, or it is not a video): nothing starts in its place
+            if (index < 0) {
+                window.showPassiveNotification(i18np("The queue holds the first %1 item of the playlist: this entry is not among them", "The queue holds the first %1 items of the playlist: this entry is not among them", count));
+                return;
+            }
+            window.playQueue(index);
+            const message = truncated ? i18np("Only the first %1 item went into the queue", "Only the first %1 items went into the queue", count) : i18n("The queue now holds the playlist");
+            if (window.playlistQueueBefore > 0)
+                window.showPassiveNotification(message, "long", i18nc("@action:button takes the queue back", "Undo"), () => window.connection.queue.undo());
+            else if (truncated)
+                window.showPassiveNotification(message);
+        }
+        // The queue's own messages tell a failure or an empty playlist; an operation the queue dropped (a sign-out, a clear) sends nothing, so the wait ends with it
+        function onBusyChanged() {
+            if (window.connection.queue.busy)
+                return;
+            const request = window.playlistRequest;
+            Qt.callLater(() => {
+                if (window.playlistRequest === request)
+                    window.playlistWaiting = false;
+            });
+        }
     }
 
     // The star of the header: the Favorites page opens above the first page, and one already in the stack is brought back as it is (the page starts the scan when it is created)

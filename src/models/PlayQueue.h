@@ -15,7 +15,11 @@
 #include <vector>
 
 namespace Kinefin {
-// The list of what plays next: video items in order, each at most once, at most `MaxEntries`. `add()` takes only an item id and asks the server what it is: a movie, episode or video joins as it is, a season from its first unplayed episode (all of it when every episode is played), a series from its Next Up episode on, a collection with its playable children; anything else is refused. One expansion runs at a time on `ExpandChannel` and the rows go in together at its end, so a failure adds nothing. Adding an id that is queued already moves it to the new place. The list empties itself when the client loses its credentials. Names are server text: render them as plain text
+// The picture of a list row: the item's own, else (an episode without one) its parent's backdrop; empty when the server named neither
+QUrl listImageUrl(const JellyfinClient *client, const ItemSummary &item, int width);
+
+// The list of what plays next: video items in order, each at most once, at most `MaxEntries`. `add()` takes only an item id and asks the server what it is: a movie, episode or video joins as it is, a season from its first unplayed episode (all of it when every episode is played), a series from its Next Up episode on, a collection with its playable children, a playlist with its playable entries in its order; anything else is refused. `replace()` makes the whole list what an item stands for. One expansion runs at a time on `ExpandChannel` and the rows go in together at its end, so a failure adds nothing. Adding an id that is queued already moves it to the new place. The list empties itself when the client loses its credentials. Names are server text: render them as plain text
+
 class PlayQueue final : public QAbstractListModel {
     Q_OBJECT
     Q_PROPERTY(int count READ count NOTIFY countChanged)
@@ -64,6 +68,8 @@ class PlayQueue final : public QAbstractListModel {
 
     // Queues the item (and what it stands for) at the end or at the top; false, with nothing sent, when the id is not valid, an expansion is running or the client is not signed in. The outcome comes as `added` or `addFailed`
     Q_INVOKABLE bool add(const QString &itemId, Kinefin::PlayQueue::Placement placement);
+    // The whole queue becomes what the item stands for (a playlist in its order), as one step Undo takes back; `shuffled` puts the rows in a random order once (the player's Shuffle stays as it is). Same refusals as add; the outcome comes as `replaced`, `addFailed` or `nothingToAdd`
+    Q_INVOKABLE bool replace(const QString &itemId, bool shuffled);
     Q_INVOKABLE bool move(int from, int to);
     Q_INVOKABLE bool remove(int row);
     Q_INVOKABLE void clear();
@@ -77,6 +83,8 @@ class PlayQueue final : public QAbstractListModel {
 
     // Entries in order
     QStringList itemIds() const;
+    // The row of an item, -1 when it is not queued
+    Q_INVOKABLE int indexOf(const QString &itemId) const;
     // The picture of a row: the item's own, else (an episode without one) its parent's backdrop; empty when the server named neither
     QUrl imageUrlFor(const ItemSummary &item) const;
     // When a queue item is playing, Next inserts immediately after that item.
@@ -99,6 +107,8 @@ class PlayQueue final : public QAbstractListModel {
     void busyChanged();
     // `count` rows joined; `truncated` when the cap cut the expansion short
     void added(int count, bool truncated);
+    // The queue was replaced by `count` rows; `truncated` when the cap cut them
+    void replaced(int count, bool truncated);
     void addFailed();
     // The item is not something the queue takes, or has nothing to play
     void nothingToAdd();
@@ -110,10 +120,13 @@ class PlayQueue final : public QAbstractListModel {
     void saveFailed();
 
   private:
-    enum class Stage { Item, NextUp, Episodes, Children };
+    enum class Stage { Item, NextUp, Episodes, Children, PlaylistEntries };
     struct Operation {
         bool active = false;
         Placement placement = Last;
+        // replace() rather than add(), and its random order
+        bool replacing = false;
+        bool shuffled = false;
         Stage stage = Stage::Item;
         ItemSummary root;
         QString nextUpId;
@@ -142,6 +155,9 @@ class PlayQueue final : public QAbstractListModel {
     void onItems(const QJsonArray &items, int total, int channel);
     void onNextUp(const QJsonArray &items, int total, int channel);
     void onEpisodes(const QJsonArray &items, int total, int channel);
+    void onPlaylistEntries(const QJsonArray &items, int total, int channel);
+    bool beginOperation(const QString &itemId, Placement placement, bool replacing, bool shuffled);
+    void requestPlaylistEntries();
     void onListingFailed(const QString &family, int status, const QString &reason, int channel);
     void requestEpisodes(const QString &seriesId, const QString &seasonId);
     void requestChildren();
@@ -150,6 +166,7 @@ class PlayQueue final : public QAbstractListModel {
     void fail();
     void endOperation();
     void insert(std::vector<ItemSummary> items, Placement placement, bool *truncated, int *joined);
+    void replaceAll(std::vector<ItemSummary> items, bool *truncated, int *joined);
 
     Stored readStored(const QString &path, StoredQueue *stored);
     QString queuesDirectory() const;

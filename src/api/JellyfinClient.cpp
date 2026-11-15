@@ -11,6 +11,8 @@
 #include <QNetworkRequest>
 #include <QUrlQuery>
 
+#include <algorithm>
+
 namespace Kinefin {
 namespace {
 constexpr int MaxResponseBytes = 1'048'576;
@@ -776,6 +778,8 @@ QUrlQuery listingQuery(const ItemQuery &query, const QString &userId)
             wire.addQueryItem(QStringLiteral("includeItemTypes"), query.includeItemTypes);
         if (!query.excludeItemTypes.isEmpty())
             wire.addQueryItem(QStringLiteral("excludeItemTypes"), query.excludeItemTypes);
+        if (!query.mediaTypes.isEmpty())
+            wire.addQueryItem(QStringLiteral("mediaTypes"), query.mediaTypes);
         if (!query.genreIds.isEmpty())
             wire.addQueryItem(QStringLiteral("genreIds"), query.genreIds.join(QLatin1Char('|')));
         addLibraryFilterParameters(wire, query);
@@ -888,6 +892,14 @@ bool validListingQuery(const ItemQuery &query)
         return false;
     for (const QString &value : {query.includeItemTypes, query.excludeItemTypes}) {
         if (!value.isEmpty() && !validKindList(value))
+            return false;
+    }
+    static const QStringList mediaTypes{QStringLiteral("Video"), QStringLiteral("Audio"),
+                                        QStringLiteral("Photo"), QStringLiteral("Book")};
+    if (!query.mediaTypes.isEmpty()) {
+        const QStringList wanted = query.mediaTypes.split(QLatin1Char(','));
+        if (!std::all_of(wanted.cbegin(), wanted.cend(),
+                         [](const QString &type) { return mediaTypes.contains(type); }))
             return false;
     }
     for (const QString &id : query.itemIds) {

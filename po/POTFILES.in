@@ -31,6 +31,9 @@ src/qml/UserPickerPage.qml
 src/qml/Main.qml
 src/qml/PlayerPage.qml
 src/qml/MiniPlayer.qml
+src/qml/MediaListRow.qml
+src/qml/PlaylistsPage.qml
+src/qml/PlaylistPage.qml
 src/qml/PlaybackInfoOverlay.qml
 src/qml/ShellHeader.qml
 src/qml/AboutDialog.qml

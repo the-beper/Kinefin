@@ -17,7 +17,7 @@ Kirigami.ScrollablePage {
     // A reload keeps the old data on screen: the content stays up while it has a name, except for an item the server no longer has
     readonly property bool hasData: details.name.length > 0
     // The kinds the play queue takes: what plays, and what stands for a run of it
-    readonly property bool queueable: ["Movie", "Episode", "Video", "Season", "Series", "BoxSet"].indexOf(details.type) >= 0
+    readonly property bool queueable: ["Movie", "Episode", "Video", "Season", "Series", "BoxSet", "Playlist"].indexOf(details.type) >= 0
     readonly property bool showContent: details.status === ItemDetailsModel.Ready || (hasData && details.status !== ItemDetailsModel.NotFound)
     readonly property bool showLoading: !showContent && (details.status === ItemDetailsModel.Loading || details.status === ItemDetailsModel.Idle)
     // The images are dropped while the page is out of view, which frees their textures

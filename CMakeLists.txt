@@ -58,6 +58,10 @@ add_library(kinefin_core STATIC
     src/models/GenreRailsModel.h
     src/models/PlayQueue.cpp
     src/models/PlayQueue.h
+    src/models/PlaylistEntriesModel.cpp
+    src/models/PlaylistEntriesModel.h
+    src/models/PlaylistsController.cpp
+    src/models/PlaylistsController.h
     src/models/CardRoles.cpp
     src/models/CardRoles.h
     src/models/HomeRowsModel.cpp
@@ -160,7 +164,7 @@ target_compile_definitions(kinefin_integration PRIVATE TRANSLATION_DOMAIN="kinef
 target_link_libraries(kinefin_integration PUBLIC kinefin_player Qt6::DBus Qt6::Gui Qt6::Network KF6::I18n)
 
 # The QML module lives in a static library of its own so that the UI tests can import it like the application does
-foreach(page Main PlayerPage OsdButton MiniPlayer PlaybackInfoOverlay ShellHeader AboutDialog ShortcutsDialog RemoteSessionsDialog MediaInfoDialog HomePage LibraryTile LibraryPage ResumeItemsPage MediaCard CardMenu CardRow EpisodeRow ItemDetailsPage SearchPage QueuePage FilterDialog GenreRailsView GenreRailsPage LibraryContent ItemListRow ItemRowGrid LoginPage UserPickerPage MessageBox ServersPage SettingsPage SettingRow UserPreferencesForm UserPreferencesSaveBar FavoritesPage FavoritesGroupPage TopFade)
+foreach(page Main PlayerPage OsdButton MiniPlayer PlaybackInfoOverlay ShellHeader AboutDialog ShortcutsDialog RemoteSessionsDialog MediaInfoDialog HomePage LibraryTile LibraryPage ResumeItemsPage MediaCard CardMenu CardRow EpisodeRow ItemDetailsPage SearchPage QueuePage FilterDialog GenreRailsView GenreRailsPage LibraryContent ItemListRow ItemRowGrid LoginPage UserPickerPage MessageBox ServersPage SettingsPage SettingRow UserPreferencesForm UserPreferencesSaveBar FavoritesPage FavoritesGroupPage TopFade MediaListRow PlaylistsPage PlaylistPage)
     set_source_files_properties(src/qml/${page}.qml PROPERTIES QT_RESOURCE_ALIAS ${page}.qml)
 endforeach()
 qt_add_library(kinefin_ui STATIC)
@@ -172,6 +176,9 @@ qt_add_qml_module(kinefin_ui
         src/qml/PlayerPage.qml
         src/qml/OsdButton.qml
         src/qml/MiniPlayer.qml
+        src/qml/MediaListRow.qml
+        src/qml/PlaylistsPage.qml
+        src/qml/PlaylistPage.qml
         src/qml/PlaybackInfoOverlay.qml
         src/qml/ShellHeader.qml
         src/qml/ShortcutsDialog.qml
@@ -400,6 +407,11 @@ if(BUILD_TESTING)
     target_compile_definitions(test_filter_options_model PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(test_filter_options_model PRIVATE kinefin_core Qt6::Test Qt6::Network)
     add_test(NAME filter_options_model COMMAND test_filter_options_model)
+
+    add_executable(test_playlists tests/test_playlists.cpp)
+    target_compile_definitions(test_playlists PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    target_link_libraries(test_playlists PRIVATE kinefin_core Qt6::Test Qt6::Network)
+    add_test(NAME playlists COMMAND test_playlists)
 
     add_executable(test_play_queue tests/test_play_queue.cpp)
     target_compile_definitions(test_play_queue PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
