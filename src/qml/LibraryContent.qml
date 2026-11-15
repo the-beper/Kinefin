@@ -75,19 +75,36 @@ Item {
         focusBefore = Window.activeFocusItem;
     }
 
-    // Asked before the view exists: the view takes the keys when it comes, unless the focus moved meanwhile
+    // Asked before the view exists: the view takes the keys when it comes, unless the user took the focus out of the page meanwhile (Kirigami moves it inside the page by itself)
     property bool focusPending: false
     property var focusBefore: null
+
+    function focusLeftPage() {
+        const focused = Window.activeFocusItem;
+        if (!focused || focused === focusBefore)
+            return false;
+        for (let item = focused; item; item = item.parent) {
+            if (item === ownerPage)
+                return false;
+        }
+        return true;
+    }
 
     onViewChanged: {
         if (!view)
             return;
         applyPendingPosition();
-        if (focusPending && Window.activeFocusItem === focusBefore)
+        if (focusPending && !focusLeftPage())
             view.forceActiveFocus(Qt.TabFocusReason);
         focusPending = false;
         focusBefore = null;
     }
+
+    // Nothing more is coming to show at once: the view is there, or the first page is still out (the spinner shows)
+    readonly property bool settled: view !== null || !firstPageIn
+
+    // Whether the view shows its first row: Return to Top has nothing to do there
+    readonly property bool atStart: !view || view.atYBeginning
 
     // A new order, filter or view starts from the first result
     function scrollToStart() {
@@ -96,6 +113,8 @@ Item {
             return;
         view.currentIndex = 0;
         view.positionViewAtBeginning();
+        // The first row at the top edge leaves the top margin hidden: the start is above it
+        view.contentY = view.originY - view.topMargin;
     }
 
     Connections {

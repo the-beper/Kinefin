@@ -298,13 +298,6 @@ ColumnLayout {
     }
 
     PageMessage {
-        objectName: "prefsNote"
-        visible: page.prefs.loaded
-        type: Kirigami.MessageType.Information
-        text: i18n("These preferences are stored on your Jellyfin server. They do not change the language of Kinefin, and the player will apply the language and subtitle choices in a later version")
-    }
-
-    PageMessage {
         objectName: "prefsError"
         visible: page.prefs.state === UserConfigurationModel.Failed
         type: page.prefs.failure === UserConfigurationModel.NotVerified ? Kirigami.MessageType.Warning : Kirigami.MessageType.Error

@@ -37,6 +37,9 @@ Kirigami.Page {
     Accessible.role: Accessible.Pane
     Accessible.name: title
 
+    // Whether the page shows all it has at once: the toolbar lays its buttons out only once every one is built, the list comes a few frames after its first page (a list still loading shows its spinner); the shell fades a new tab in once this holds
+    readonly property bool contentReady: (!toolbar.visible || toolbar.implicitHeight > 0) && (listModel === null || (listContent.item?.settled ?? false))
+
     // The scroll position and the current tile, for the tab to come back as it was left
     function viewPosition() {
         return listContent.item ? listContent.item.viewPosition() : { currentIndex: 0, contentY: 0 };
@@ -382,6 +385,24 @@ Kirigami.Page {
             display: page.wideShell ? Controls.AbstractButton.TextBesideIcon : Controls.AbstractButton.IconOnly
 
             actions: [
+                // First, so a narrowing window never pushes it into the overflow menu; disabled while the list shows its first row
+                Kirigami.Action {
+                    objectName: "returnToTopAction"
+                    text: i18n("Return to Top")
+                    tooltip: text
+                    icon.name: "go-top"
+                    visible: page.listModel !== null
+                    enabled: !(listContent.item?.atStart ?? true)
+                    // The button turns itself off at the top: the grid takes the keys instead of losing them with it
+                    onTriggered: {
+                        listContent.item.scrollToStart();
+                        listContent.item.focusView();
+                    }
+                },
+                Kirigami.Action {
+                    separator: true
+                    visible: page.listModel !== null
+                },
                 SubtabAction {
                     subtabId: "suggestions"
                     icon.name: "starred-symbolic"

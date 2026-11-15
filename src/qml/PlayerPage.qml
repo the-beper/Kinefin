@@ -37,6 +37,15 @@ Kirigami.Page {
             return page.showRemaining ? remaining : elapsed;
         return i18nc("@action:button elapsed playback time, then the total or the remaining time", "%1 / %2", elapsed, page.showRemaining ? remaining : page.player.timeText(page.player.durationTicks));
     }
+    // The widest the time button gets for this item, whatever it shows: the total stands for every time (none is longer), the remaining one adds its minus sign, and with tabular digits every digit is as wide as 0
+    readonly property string widestTimeLabel: {
+        if (page.player.durationTicks <= 0)
+            return page.timeLabel.replace(/[0-9]/g, "0");
+        const total = page.player.timeText(page.player.durationTicks);
+        const remaining = i18nc("@action:button remaining playback time, with a minus sign", "−%1", total);
+        const widest = page.narrow ? remaining : i18nc("@action:button elapsed playback time, then the total or the remaining time", "%1 / %2", total, remaining);
+        return widest.replace(/[0-9]/g, "0");
+    }
     // An open menu or the queue panel keeps the bars up
     readonly property bool menuOpen: queuePanel.opened || audioMenu.opened || subtitlesMenu.opened || moreMenu.opened
     // The lock keeps the bars up until it is opened again
@@ -403,8 +412,9 @@ Kirigami.Page {
                     enabled: page.player.canSeek && page.player.durationTicks > 0
                     from: 0
                     to: Math.max(1, page.player.durationTicks / 10000000)
-                    // The arrow keys move the timeline by ten seconds once Tab reached it
+                    // The arrow keys move the timeline by ten seconds once Tab reached it; the style would draw a tick mark at every step
                     stepSize: 10
+                    Kirigami.StyleHints.tickMarkStepSize: -1
                     property real dragSeconds: 0
                     value: pressed ? dragSeconds : page.player.positionTicks / 10000000
                     onMoved: {
@@ -476,14 +486,23 @@ Kirigami.Page {
                         }
                     }
                     Controls.ToolButton {
+                        id: timeButton
                         objectName: "playerTimeButton"
+                        // As wide as its widest text, so neither the button's frame nor the controls beside it move while the numbers change
+                        Layout.preferredWidth: Math.ceil(timeMetrics.advanceWidth) + leftPadding + rightPadding
                         focusPolicy: Qt.TabFocus
+                        font.features: { "tnum": 1 }
                         text: page.timeLabel
                         Accessible.description: Controls.ToolTip.text
                         Controls.ToolTip.text: !page.showRemaining ? i18nc("@info:tooltip", "Show remaining time") : page.narrow ? i18nc("@info:tooltip", "Show elapsed time") : i18nc("@info:tooltip", "Show total time")
                         Controls.ToolTip.visible: hovered || visualFocus
                         Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
                         onClicked: { page.showRemaining = !page.showRemaining; page.wakeChrome(); }
+                        TextMetrics {
+                            id: timeMetrics
+                            font: timeButton.font
+                            text: page.widestTimeLabel
+                        }
                     }
                     Item { Layout.fillWidth: true }
                     OsdButton {
@@ -726,9 +745,19 @@ Kirigami.Page {
                 id: volumeColumn
                 anchors.fill: parent
                 spacing: Kirigami.Units.smallSpacing
+                // As wide as the widest level, so the popup keeps its width while the level changes
                 Controls.Label {
+                    id: volumeLevel
                     Layout.alignment: Qt.AlignHCenter
+                    Layout.preferredWidth: Math.ceil(volumeMetrics.advanceWidth)
+                    horizontalAlignment: Text.AlignHCenter
+                    font.features: { "tnum": 1 }
                     text: i18nc("@label volume level", "%1%", page.player.volume)
+                    TextMetrics {
+                        id: volumeMetrics
+                        font: volumeLevel.font
+                        text: i18nc("@label volume level", "%1%", 100)
+                    }
                 }
                 Controls.Slider {
                     id: volumeSlider
@@ -739,7 +768,9 @@ Kirigami.Page {
                     focusPolicy: Qt.NoFocus
                     from: 0
                     to: 100
+                    // The level moves by five; the style would draw a tick mark at every step
                     stepSize: 5
+                    Kirigami.StyleHints.tickMarkStepSize: -1
                     value: page.player.volume
                     onMoved: { page.player.setVolume(Math.round(value)); page.wakeChrome(); }
                     onPressedChanged: if (!pressed) volumeCloser.restart()

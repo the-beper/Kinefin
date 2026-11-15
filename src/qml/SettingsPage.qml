@@ -89,9 +89,7 @@ Kirigami.Page {
                 settingsView.forceActiveFocus(Qt.TabFocusReason);
             return;
         }
-        const index = entries.findIndex(entry => entry.section === activeSection);
-        const row = index < deviceEntries.length ? deviceRepeater.itemAt(index) : accountRepeater.itemAt(index - deviceEntries.length);
-        row?.forceActiveFocus(Qt.TabFocusReason);
+        entryRepeater.itemAt(entries.findIndex(entry => entry.section === activeSection))?.forceActiveFocus(Qt.TabFocusReason);
     }
 
     // Tab through a long form scrolls the view to the row that takes the keyboard
@@ -201,25 +199,9 @@ Kirigami.Page {
                     width: Math.max(0, parent.width)
                     spacing: 0
 
-                    Kirigami.ListSectionHeader {
-                        objectName: "settingsDeviceCaption"
-                        Layout.fillWidth: true
-                        text: i18nc("@title:group", "This system")
-                    }
                     Repeater {
-                        id: deviceRepeater
-                        model: page.deviceEntries
-                        delegate: entryDelegate
-                    }
-                    Kirigami.ListSectionHeader {
-                        objectName: "settingsAccountCaption"
-                        Layout.fillWidth: true
-                        visible: page.accountEntries.length > 0
-                        text: i18nc("@title:group", "Jellyfin account")
-                    }
-                    Repeater {
-                        id: accountRepeater
-                        model: page.accountEntries
+                        id: entryRepeater
+                        model: page.entries
                         delegate: entryDelegate
                     }
                 }

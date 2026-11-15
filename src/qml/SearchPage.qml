@@ -31,13 +31,8 @@ Kirigami.ScrollablePage {
             const row = resultRows.itemAt(i);
             if (!row?.visible || !row.hasCards)
                 continue;
-            const cards = row.cards.children;
-            for (let j = 0; j < cards.length; ++j) {
-                if (cards[j].objectName === "searchRow_" + i) {
-                    cards[j].forceActiveFocus(Qt.TabFocusReason);
-                    return;
-                }
-            }
+            row.cards.focusList(Qt.TabFocusReason);
+            return;
         }
     }
 

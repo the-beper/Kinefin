@@ -178,11 +178,11 @@ Item {
     // The box holds the keyboard while the term is being typed: the shell does not move the focus while a keystroke of its own opens the search page
     readonly property bool searchFieldHasFocus: searchField.activeFocus
 
-    // First in the file: siblings take the Tab order by declaration, so the menu button precedes the tab and the right cluster
+    // First in the file: siblings take the Tab order by declaration, so the menu button precedes the tab and the right cluster. Only a narrow Settings page with an entry open has it: there the entry hides the list, and this is the pointer's way back to it (a wide one leaves through the tabs)
     QQC2.ToolButton {
         id: headerBackButton
         objectName: "headerBackButton"
-        visible: shell.pageStack.currentItem?.objectName === "settingsPage"
+        visible: shell.pageStack.currentItem?.objectName === "settingsPage" && shell.pageStack.currentItem.narrow && shell.pageStack.currentItem.entryOpen
         z: 2
         anchors.left: parent.left
         anchors.leftMargin: Kirigami.Units.smallSpacing

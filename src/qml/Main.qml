@@ -258,6 +258,9 @@ Kirigami.ApplicationWindow {
     Connections {
         target: window.pageStack
         function onCurrentItemChanged() {
+            // A page opened above a tab still waiting to fade in shows at once
+            if (window.tabMotionQueued && window.pageStack.currentIndex > 0)
+                window.finishTabMotion();
             // A page a Back left hidden above the current one is taken once the stack settles
             window.popLeftoverPages();
             // The search page leaving the stack takes its term with it: the header box empties with the page.
@@ -805,7 +808,7 @@ Kirigami.ApplicationWindow {
             tabState[leavingTab] = leaving.viewPosition();
         // Queued before the stack changes, so an error on the way cannot leave the row invisible
         if (leavingTab !== "" && prepareTabMotion())
-            Qt.callLater(startTabMotion, leavingTab, name);
+            Qt.callLater(startTabMotionWhenReady, leavingTab, name);
         pageStack.clear();
         // Leaving the type pages gives the sub-tab's data and channels back
         if (name === "home")
@@ -843,10 +846,41 @@ Kirigami.ApplicationWindow {
     }
     function finishTabMotion() {
         tabMotionQueued = false;
+        tabReadyWait.stop();
         // stop, not complete: a group with an animator may still count as running after complete, and the next start would then do nothing
         tabMotion.stop();
         pageStack.opacity = 1;
         tabShift.x = 0;
+    }
+    // The new page fades in whole: a library tab lays its toolbar out and builds its grid over a few frames, and the motion waits for both (`contentReady`), never longer than the wait's cap
+    function startTabMotionWhenReady(fromTab, toTab) {
+        if (!tabMotionQueued)
+            return;
+        if (pageStack.get(0)?.contentReady ?? true) {
+            startTabMotion(fromTab, toTab);
+            return;
+        }
+        tabReadyWait.fromTab = fromTab;
+        tabReadyWait.toTab = toTab;
+        tabReadyWait.since = Date.now();
+        tabReadyWait.restart();
+    }
+    Timer {
+        id: tabReadyWait
+        objectName: "tabReadyWait"
+        property string fromTab
+        property string toTab
+        property double since: 0
+        // The longest the new page stays hidden, in milliseconds
+        property int limit: 500
+        interval: 16
+        repeat: true
+        onTriggered: {
+            if ((window.pageStack.get(0)?.contentReady ?? true) || Date.now() - since >= limit) {
+                stop();
+                window.startTabMotion(fromTab, toTab);
+            }
+        }
     }
     function startTabMotion(fromTab, toTab) {
         if (!tabMotionQueued)
