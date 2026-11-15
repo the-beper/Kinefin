@@ -12,10 +12,14 @@ Kirigami.ApplicationWindow {
     required property ClientSettings settings
     // Provided by the executable; optional for shell tests that have no mpv renderer.
     property var player: null
+    // The remote-control socket, provided by the executable; null in shell tests
+    property var remoteInput: null
     // "fullscreen" or "windowed" when a command line flag decides this run; empty to follow the setting. Changing the setting from the Settings page ends the override
     property string startupWindowMode: ""
     // "settings" or "about": the Settings page or the About dialog to open right after the shell loads (the smoke test uses it to render what needs no server)
     property string startupPage: ""
+    // What About names this build: a development build's time, else empty for the version
+    property string displayVersion: ""
     // An item link from the command line: opened once Home shows, then cleared
     property string requestedItemId: ""
     // Invalidates deferred link navigation when an account changes or a newer link arrives
@@ -192,11 +196,46 @@ Kirigami.ApplicationWindow {
     }
 
     // Esc goes back like Alt+Left except on the first page; an open dialog takes the key first
+    readonly property bool canEscapeBack: pageStack.currentIndex > 0 && pageStack.layers.depth <= 1
+    function escapeBack() {
+        if (canEscapeBack)
+            pageStack.goBack();
+    }
     Shortcut {
         sequences: ["Escape"]
-        enabled: window.pageStack.currentIndex > 0 && window.pageStack.layers.depth <= 1
-        onActivated: window.pageStack.goBack()
+        enabled: window.canEscapeBack
+        onActivated: window.escapeBack()
     }
+
+    // What a remote control asks for besides the keys it sends: the player commands reach the player page only while it is in front
+    function popupOpen() {
+        for (const item of window.overlay?.children ?? []) {
+            if (item.visible && String(item).startsWith("QQuickPopupItem"))
+                return true;
+        }
+        return false;
+    }
+    function remoteAction(name) {
+        switch (name) {
+        case "back":
+            // A popup closes on a real Escape through a shortcut, which a synthesised key never reaches: an open popup keeps the page under it as it is
+            if (!popupOpen())
+                escapeBack();
+            break;
+        case "home":
+            if (!playbackPageShowing)
+                goHome();
+            break;
+        default:
+            if (playbackPageShowing)
+                pageStack.currentItem.playerAction(name);
+        }
+    }
+    Connections {
+        target: window.remoteInput
+        function onActionRequested(action) { window.remoteAction(action); }
+    }
+
     // The search would take the place of the player and end the playback
     Shortcut {
         sequences: [StandardKey.Find]

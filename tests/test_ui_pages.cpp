@@ -1875,6 +1875,18 @@ class PlayerStub : public QObject {
     }
     Q_INVOKABLE bool playQueue(int index) { return record(QStringLiteral("playQueue"), index); }
     Q_INVOKABLE void togglePause() { record(QStringLiteral("togglePause")); }
+    Q_INVOKABLE void pause()
+    {
+        record(QStringLiteral("pause"));
+        paused = true;
+        Q_EMIT changed();
+    }
+    Q_INVOKABLE void resume()
+    {
+        record(QStringLiteral("resume"));
+        paused = false;
+        Q_EMIT changed();
+    }
     Q_INVOKABLE void toggleMute() { record(QStringLiteral("toggleMute")); }
     Q_INVOKABLE void stop()
     {
@@ -1958,6 +1970,13 @@ class PlayerStub : public QObject {
         calls.append(argument.isValid() ? name + QLatin1Char(' ') + argument.toString() : name);
         return true;
     }
+};
+
+// The remote-control object the executable gives the shell
+class RemoteStub : public QObject {
+    Q_OBJECT
+  Q_SIGNALS:
+    void actionRequested(const QString &action);
 };
 
 // Every value a QML property takes, taken from its notify signal: a poll misses a motion that a stalled thread finishes in one tick, and the animators of the render thread write only their end value back
@@ -2117,6 +2136,14 @@ QString endsAtText(QQuickItem *page, const QDateTime &now)
                               Q_ARG(QVariant, clock));
     return text.toString();
 }
+
+// Hands the shell its remote-control object (the window's `remoteInput`); the object must outlive the window
+bool attach(Ui &ui, const char *property, QObject *object)
+{
+    return ui.engine.rootObjects().constFirst()->setProperty(
+        property, QVariant::fromValue<QObject *>(object));
+}
+
 } // namespace
 
 class TestUiPages : public QObject {
@@ -4580,11 +4607,19 @@ class TestUiPages : public QObject {
         QTRY_COMPARE(subtabs->networkId(), studioId);
         QTRY_VERIFY(shownItem(ui, QStringLiteral("networkBackButton")) != nullptr);
         QTRY_COMPARE(lastItemsQuery(ui).queryItemValue(QStringLiteral("studioIds")), studioId);
-        // Series of every library, and the label says so with the name as plain text
-        QQuickItem *cross = nullptr;
-        QTRY_VERIFY((cross = shownItem(ui, QStringLiteral("crossLibraryLabel"))) != nullptr);
-        QCOMPARE(cross->property("textFormat").toInt(), int(Qt::PlainText));
-        QVERIFY(cross->property("text").toString().contains(hostile));
+        // The toolbar stays the top row: the way back sits in it, and no caption row comes above
+        QQuickItem *back = shownItem(ui, QStringLiteral("networkBackButton"));
+        QQuickItem *toolbar = shownItem(ui, QStringLiteral("libraryToolbar"));
+        QVERIFY(toolbar);
+        QVERIFY(qAbs(back->mapToScene(QPointF(0, back->height() / 2)).y()
+                     - toolbar->mapToScene(QPointF(0, toolbar->height() / 2)).y())
+                < 1);
+        QVERIFY(!shownItem(ui, QStringLiteral("crossLibraryLabel")));
+        // The network open is named beside the way back, as plain text
+        QQuickItem *networkName = shownItem(ui, QStringLiteral("networkNameLabel"));
+        QVERIFY(networkName);
+        QCOMPARE(networkName->property("textFormat").toInt(), int(Qt::PlainText));
+        QVERIFY(networkName->property("text").toString().contains(hostile));
         QTRY_VERIFY(ui.item(QStringLiteral("libraryGrid")) != nullptr);
         QTRY_VERIFY(!ui.item(QStringLiteral("networksGrid"))
                     || !ui.item(QStringLiteral("networksGrid"))->isVisible());
@@ -5282,24 +5317,25 @@ class TestUiPages : public QObject {
         QVERIFY(QMetaObject::invokeMethod(menu, "open"));
         QTRY_VERIFY(menu->property("opened").toBool());
 
-        // Wide enough for the bar: the button shows and the menu has no second Refresh
-        QVERIFY(ui.opensWindowOfWidth(2400));
-        QTRY_VERIFY(ui.shellHeader()->property("refreshInBar").toBool());
-        QTRY_VERIFY(ui.item(QStringLiteral("headerRefreshButton"))->isVisible());
-        QTRY_VERIFY(!entry->property("visible").toBool());
-
-        // Narrower: the button goes and the menu entry takes over
-        QVERIFY(ui.opensWindowOfWidth(600));
-        QTRY_VERIFY(!ui.shellHeader()->property("refreshInBar").toBool());
-        QTRY_VERIFY(!ui.item(QStringLiteral("headerRefreshButton"))->isVisible());
-        QTRY_VERIFY(entry->property("visible").toBool());
+        // The menu entry is the one Refresh at every width: the bar has no button of its own
+        for (const int width : {2400, 600}) {
+            QVERIFY(ui.opensWindowOfWidth(width));
+            QTRY_VERIFY(entry->property("visible").toBool());
+            QVERIFY(!ui.item(QStringLiteral("headerRefreshButton")));
+        }
         QCOMPARE(entry->property("action").value<QObject *>(),
                  ui.shellAction(QStringLiteral("refreshAction")));
         QVERIFY(entry->property("enabled").toBool());
 
         // Triggering it reloads the libraries: the views route is asked again
-        const int before = ui.server.viewRequests;
+        int before = ui.server.viewRequests;
         QVERIFY(QMetaObject::invokeMethod(entry, "click"));
+        QTRY_VERIFY(ui.server.viewRequests > before);
+        QTRY_VERIFY(!menu->property("visible").toBool());
+
+        // F5 is the entry's key, with no page action left to make it ambiguous
+        before = ui.server.viewRequests;
+        QTest::keyClick(ui.window, Qt::Key_F5);
         QTRY_VERIFY(ui.server.viewRequests > before);
     }
 
@@ -5391,6 +5427,11 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(ui.server.itemsRoutes.size() > scans);
         QTRY_COMPARE(ui.controller.favorites()->status(), Kinefin::FavoritesModel::Complete);
         QCOMPARE(ui.server.viewRequests, views);
+        // And so does F5, the entry's key
+        const int menuScans = ui.server.itemsRoutes.size();
+        QTest::keyClick(ui.window, Qt::Key_F5);
+        QTRY_VERIFY(ui.server.itemsRoutes.size() > menuScans);
+        QTRY_COMPARE(ui.controller.favorites()->status(), Kinefin::FavoritesModel::Complete);
     }
 
     void theMainMenuRefreshReloadsTheLibraryAndIsOffWhereThereIsNothingToRefresh()
@@ -5455,6 +5496,10 @@ class TestUiPages : public QObject {
         QVERIFY(
             QMetaObject::invokeMethod(ui.shellAction(QStringLiteral("refreshAction")), "trigger"));
         QTRY_VERIFY(detailRequests() > before + 1);
+        // F5 is the main menu's: the page has no Refresh of its own to make it ambiguous
+        const auto afterMenu = detailRequests();
+        QTest::keyClick(ui.window, Qt::Key_F5);
+        QTRY_VERIFY(detailRequests() > afterMenu);
     }
 
     void theAccountButtonShowsItsKeyboardFocusAndMatchesTheHeaderButtons()
@@ -6122,9 +6167,6 @@ class TestUiPages : public QObject {
         }
         QTest::keyClick(ui.window, Qt::Key_Tab);
         QTRY_VERIFY(ui.item(QStringLiteral("headerSearchField"))->hasActiveFocus());
-        // The Home refresh action now lives in the main header beside search.
-        QTest::keyClick(ui.window, Qt::Key_Tab);
-        QTRY_VERIFY(ui.item(QStringLiteral("headerRefreshButton"))->hasActiveFocus());
         QTest::keyClick(ui.window, Qt::Key_Tab);
         QTRY_VERIFY(ui.item(QStringLiteral("favoritesButton"))->hasActiveFocus());
         QTest::keyClick(ui.window, Qt::Key_Tab);
@@ -6192,6 +6234,10 @@ class TestUiPages : public QObject {
         QVERIFY(page);
         QTRY_VERIFY(!page->property("narrow").toBool());
         QTRY_VERIFY(ui.item(QStringLiteral("settingsContentView"))->isVisible());
+        // The list names itself, as System Settings does
+        QQuickItem *listHeader = ui.item(QStringLiteral("settingsListHeader"));
+        QVERIFY(listHeader && listHeader->isVisible());
+        QCOMPARE(listHeader->property("text").toString(), QStringLiteral("Settings"));
         auto *audio = ui.item(QStringLiteral("settingsCategory_audio"));
         QVERIFY(audio);
         ui.clickCenter(audio);
@@ -6939,6 +6985,14 @@ class TestUiPages : public QObject {
             QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("queuePage"));
             QTRY_COMPARE(ui.stackDepth(), 2);
         }
+        // No title bar, as on Home: the actions are a toolbar on top of the list
+        QCOMPARE(ui.currentDetails()->property("globalToolBarStyle"),
+                 ui.item(QStringLiteral("homePage"))->property("globalToolBarStyle"));
+        QTRY_VERIFY(ui.item(QStringLiteral("queueToolbar"))->isVisible());
+        QVERIFY(!ui.item(QStringLiteral("queueHeading"))->isVisible());
+        QQuickItem *fade = ui.item(QStringLiteral("queueTopFade"));
+        QVERIFY(fade);
+        QCOMPARE(fade->parentItem(), ui.item(QStringLiteral("queueList")));
         QTRY_VERIFY(button->property("down").toBool());
         QTRY_VERIFY(ui.layoutProblems().isEmpty());
     }
@@ -7308,7 +7362,7 @@ class TestUiPages : public QObject {
         QVERIFY(!card(kMovieId)->property("favorite").toBool());
     }
 
-    void detailsFavoriteButtonShowsItsLabelOnlyWhenWide()
+    void theDetailsHeroKeepsPlayAndTheToolbarTheRest()
     {
         Ui ui(m_home->path());
         ui.serveMovie();
@@ -7316,16 +7370,20 @@ class TestUiPages : public QObject {
         QVERIFY(ui.signIn());
         QQuickItem *page = openDetails(ui, kMovieId);
         QVERIFY(page);
-        QQuickItem *button = nullptr;
-        QTRY_VERIFY((button = Ui::itemIn(page, QStringLiteral("detailsFavoriteButton")))
-                    != nullptr);
-        // AbstractButton::display: IconOnly is 0, TextBesideIcon is 2
-        QVERIFY(ui.opensWindowOfWidth(1400));
-        QTRY_COMPARE(button->property("display").toInt(), 2);
-        QVERIFY(ui.opensWindowOfWidth(500));
-        QTRY_COMPARE(button->property("display").toInt(), 0);
-        // The text stays for assistive technology and the tooltip
-        QCOMPARE(button->property("text").toString(), QStringLiteral("Add to Favorites"));
+        QTRY_VERIFY(Ui::itemIn(page, QStringLiteral("detailsPlay")) != nullptr);
+        QVERIFY(!Ui::itemIn(page, QStringLiteral("detailsActions")));
+        QStringList names;
+        QStringList texts;
+        QQmlListReference actions(page, "actions");
+        for (qsizetype i = 0; i < actions.count(); ++i) {
+            names << actions.at(i)->objectName();
+            texts << actions.at(i)->property("text").toString();
+        }
+        QCOMPARE(names.mid(0, 3),
+                 (QStringList{QStringLiteral("playNextAction"), QStringLiteral("addToQueueAction"),
+                              QStringLiteral("toggleFavoriteAction")}));
+        // Refresh is the main menu's, for every page
+        QVERIFY(!texts.contains(QStringLiteral("Refresh")));
     }
 
     void aFailedRestoreOffersRetryOnTheQueuePage()
@@ -7965,6 +8023,12 @@ class TestUiPages : public QObject {
         QVERIFY(buildState(ui, QStringLiteral("moviesTwoLibraries")));
         QQuickItem *selector = ui.item(QStringLiteral("librarySelector"));
         QVERIFY(selector);
+        // The selector sits in the toolbar's row: the filter bar stays the page's top row
+        QQuickItem *toolbar = ui.item(QStringLiteral("libraryToolbar"));
+        QVERIFY(toolbar);
+        QTRY_VERIFY(qAbs(selector->mapToScene(QPointF(0, selector->height() / 2)).y()
+                         - toolbar->mapToScene(QPointF(0, toolbar->height() / 2)).y())
+                    < 1);
         // All libraries and the two names; the tile of the first library chose it
         QCOMPARE(selector->property("count").toInt(), 3);
         QCOMPARE(selector->property("currentIndex").toInt(), 1);
@@ -9386,6 +9450,17 @@ class TestUiPages : public QObject {
         QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("favoritesPage"));
         QTRY_COMPARE(ui.controller.favorites()->status(), Kinefin::FavoritesModel::Complete);
         QCOMPARE(ui.stackDepth(), 2);
+        // No title bar, as on Home: the actions are a toolbar on top of the rows, with no Reload of their own
+        QCOMPARE(ui.currentDetails()->property("globalToolBarStyle"),
+                 ui.item(QStringLiteral("homePage"))->property("globalToolBarStyle"));
+        QTRY_VERIFY(ui.item(QStringLiteral("favoritesToolbar"))->isVisible());
+        QVERIFY(!ui.item(QStringLiteral("favoritesHeading"))->isVisible());
+        QVERIFY(!ui.currentDetails()->findChild<QObject *>(QStringLiteral("favoritesReload")));
+        // The fade belongs to the view, not to its scrolling content
+        QQuickItem *fade = ui.item(QStringLiteral("favoritesTopFade"));
+        QVERIFY(fade);
+        QCOMPARE(fade->parentItem(), ui.item(QStringLiteral("favoritesGroups")));
+        QCOMPARE(fade->y(), 0.0);
         // The star marks itself and no tab does
         QTRY_VERIFY(star->property("down").toBool());
         QCOMPARE(ui.window->property("currentSection").toString(), QStringLiteral("favorites"));
@@ -9433,6 +9508,14 @@ class TestUiPages : public QObject {
         QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("favoritesPage"));
         QTRY_COMPARE(ui.controller.favorites()->status(), Kinefin::FavoritesModel::Complete);
         QCOMPARE(ui.window->property("currentSection").toString(), QStringLiteral("favorites"));
+        // With the star hidden the page names itself beside its toolbar
+        QTRY_VERIFY(ui.item(QStringLiteral("favoritesHeading"))->isVisible());
+        QTRY_VERIFY(ui.layoutProblems().isEmpty());
+        // So does the queue, whose button is hidden too
+        QObject *queue = ui.shellAction(QStringLiteral("compactQueueAction"));
+        QVERIFY(queue && QMetaObject::invokeMethod(queue, "trigger"));
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("queuePage"));
+        QTRY_VERIFY(ui.item(QStringLiteral("queueHeading"))->isVisible());
         QTRY_VERIFY(ui.layoutProblems().isEmpty());
     }
 
@@ -9927,6 +10010,17 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(disc->property("color").value<QColor>() != resting);
         QTRY_VERIFY(button->scale() > 1.0);
         QVERIFY(button->isVisible());
+        // Over the button the pointer is a hand
+        QTRY_COMPARE(ui.window->cursor().shape(), Qt::PointingHandCursor);
+        // The glyph is centred vertically and a little right of the middle, where the triangle looks centred
+        auto *content = button->property("contentItem").value<QQuickItem *>();
+        QVERIFY(content && !content->childItems().isEmpty());
+        QQuickItem *glyph = content->childItems().constFirst();
+        const QPointF glyphCenter =
+            glyph->mapToItem(button, QPointF(glyph->width() / 2, glyph->height() / 2));
+        QVERIFY(qAbs(glyphCenter.y() - button->height() / 2) < 1);
+        QVERIFY(glyphCenter.x() > button->width() / 2);
+        QVERIFY(glyphCenter.x() < button->width() / 2 + glyph->width() * 0.1);
         // The button stays inside the card
         const QRectF area = button->mapRectToItem(card, QRectF(QPointF(0, 0), button->size()));
         QVERIFY(card->boundingRect().contains(area));
@@ -10984,6 +11078,100 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(osd->isVisible());
         QTest::qWait(interval + 200);
         QVERIFY(!stub.calls.contains(QStringLiteral("togglePause")));
+    }
+
+    void remoteHomeAndBack()
+    {
+        RemoteStub remote;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(attach(ui, "remoteInput", &remote));
+        QTRY_VERIFY(ui.item(QStringLiteral("homePage")) != nullptr);
+
+        // Back on the first page has nowhere to go
+        Q_EMIT remote.actionRequested(QStringLiteral("back"));
+        QCOMPARE(ui.currentDetails()->objectName(), QStringLiteral("homePage"));
+        QCOMPARE(ui.stackDepth(), 1);
+
+        // Back leaves the details page like Esc does
+        QVERIFY(openDetails(ui, kMovieId));
+        QTRY_COMPARE(ui.stackDepth(), 2);
+        Q_EMIT remote.actionRequested(QStringLiteral("back"));
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("homePage"));
+        QTRY_COMPARE(ui.stackDepth(), 1);
+
+        // With a popup open Back never moves the page under it
+        QVERIFY(openDetails(ui, kMovieId));
+        QTRY_COMPARE(ui.stackDepth(), 2);
+        QObject *menu = ui.popup(QStringLiteral("mainMenu"));
+        QVERIFY(menu && QMetaObject::invokeMethod(menu, "open"));
+        QTRY_VERIFY(menu->property("opened").toBool());
+        Q_EMIT remote.actionRequested(QStringLiteral("back"));
+        QCOMPARE(ui.stackDepth(), 2);
+        QVERIFY(QMetaObject::invokeMethod(menu, "close"));
+        QTRY_VERIFY(!menu->property("visible").toBool());
+
+        // Home drops the pages above the Home tab
+        Q_EMIT remote.actionRequested(QStringLiteral("home"));
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("homePage"));
+        QTRY_COMPARE(ui.stackDepth(), 1);
+
+        // A name nobody knows does nothing
+        Q_EMIT remote.actionRequested(QStringLiteral("bogus"));
+        QCOMPARE(ui.currentDetails()->objectName(), QStringLiteral("homePage"));
+    }
+
+    void remotePlayerActionsNeedPlayerPage()
+    {
+        PlayerStub stub;
+        RemoteStub remote;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(attach(ui, "remoteInput", &remote));
+        QVERIFY(attach(ui, "player", &stub));
+        const QStringList commands =
+            QStringLiteral("playpause play pause stop next previous fastforward rewind volumeup "
+                           "volumedown togglemute togglefullscreen")
+                .split(QLatin1Char(' '));
+
+        // Without the player page in front nothing reaches the player
+        for (const QString &command : commands)
+            Q_EMIT remote.actionRequested(command);
+        QVERIFY(stub.calls.isEmpty());
+        QCOMPARE(ui.window->visibility(), QWindow::Windowed);
+
+        QQuickItem *page = openPlayer(ui, stub);
+        QVERIFY(page);
+        stub.calls.clear();
+        const QStringList sequence =
+            QStringLiteral("playpause pause pause play play next previous fastforward rewind "
+                           "volumedown volumeup togglemute bogus home")
+                .split(QLatin1Char(' '));
+        for (const QString &command : sequence)
+            Q_EMIT remote.actionRequested(command);
+        // Pause and play act only on the state they change; the stub starts at full volume, and the player page keeps the front against Home
+        QCOMPARE(stub.calls,
+                 QStringList({QStringLiteral("togglePause"), QStringLiteral("pause"),
+                              QStringLiteral("resume"), QStringLiteral("next"),
+                              QStringLiteral("previous"), QStringLiteral("seekRelative 10"),
+                              QStringLiteral("seekRelative -10"), QStringLiteral("setVolume 95"),
+                              QStringLiteral("setVolume 100"), QStringLiteral("toggleMute")}));
+        QCOMPARE(ui.currentDetails(), page);
+
+        Q_EMIT remote.actionRequested(QStringLiteral("togglefullscreen"));
+        QTRY_COMPARE(ui.window->visibility(), QWindow::FullScreen);
+        Q_EMIT remote.actionRequested(QStringLiteral("togglefullscreen"));
+        QTRY_COMPARE(ui.window->visibility(), QWindow::Windowed);
+
+        // Stop leaves the player page
+        stub.calls.clear();
+        Q_EMIT remote.actionRequested(QStringLiteral("stop"));
+        QCOMPARE(stub.calls, QStringList({QStringLiteral("stop")}));
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("homePage"));
     }
 
   private:

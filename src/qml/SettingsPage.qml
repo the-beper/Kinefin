@@ -219,6 +219,15 @@ Kirigami.Page {
                     width: Math.max(0, parent.width)
                     spacing: 0
 
+                    // The page has no title bar: the list names itself, as System Settings does
+                    Kirigami.ListSectionHeader {
+                        objectName: "settingsListHeader"
+                        Layout.fillWidth: true
+                        // A heading, never a tab stop
+                        focusPolicy: Qt.NoFocus
+                        text: i18nc("@title:group", "Settings")
+                    }
+
                     Repeater {
                         id: entryRepeater
                         model: page.entries

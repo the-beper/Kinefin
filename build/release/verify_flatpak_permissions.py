@@ -51,7 +51,6 @@ ALLOWED_ARGS = frozenset({
     "--talk-name=org.freedesktop.ScreenSaver",
     "--system-talk-name=org.freedesktop.NetworkManager",
     "--talk-name=org.kde.kwalletd6",
-    "--system-talk-name=org.freedesktop.login1",
     "--talk-name=org.freedesktop.portal.Desktop",
 })
 

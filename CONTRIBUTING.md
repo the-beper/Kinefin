@@ -17,7 +17,7 @@ A scaffold-forward project of one developer. These are the real rules; the layou
 | `src/downloads/` | Not started: download queue, tracked-series auto rules, portal export (feature doc: parity §10) |
 | `src/app/` | `ConnectionController`: the one object the QML pages talk to (servers, sign-in, Quick Connect, session restore); profile commands and logging; `ClientSettingsQml.h`, which exposes the settings object to QML, and `MpvVideoItem`, the mpvqt video renderer item |
 | `src/player/` | Playback session state machine, server reporting (`PlaybackReporter`), the mpv engine (`PlaybackEngine`), `PlayerController` (what `PlayerPage.qml` talks to: queue and series stepping, tracks, segments, sleep timer, screenshots), `PlayerSettings` and trickplay |
-| `src/integration/` | Validated `jellyfin://item/<id>` routing and registered desktop protocol, and the update check; MPRIS, screensaver/power, Wayland/libkscreen display switching and SDL3/optional CEC are not built yet |
+| `src/integration/` | Validated `jellyfin://item/<id>` routing and registered desktop protocol, the update check, MPRIS (with artwork), the screensaver inhibit and the remote-control socket; SDL3 gamepads and optional CEC come after the first release |
 | `src/settings/` | Profile index and identity, server credentials, KConfig client settings (`SettingDefinitions`, `ClientSettings`, `SettingsSectionModel`) |
 | `src/models/` | API-backed listing, details, search, genre and Remote sessions models; `PlayQueue` persists the video up-next list per owner in `queues/<serverId>_<userId>.json` and supports one-level undo |
 | `src/imagecache/` | Image origin lock and the restricted network access (allowed image URLs only, disk cache with a cap); the subtitle cache is not started |
@@ -68,7 +68,7 @@ build/flatpak/build-flatpak.sh                 # dist/Kinefin-x86_64.flatpak
 KINEFIN_EXPECT_VERSION=X.Y.Z build/flatpak/test-flatpak.sh dist/Kinefin-x86_64.flatpak
 ```
 
-The build script installs the org.kde runtime at commits recorded in `build/flatpak/runtime-pins.conf` and refuses to run outside rootless podman. `test-flatpak.sh` installs the bundle into a throwaway container `HOME`, checks the version, installed sandbox permissions and raster icons, D-Bus single-instance behaviour, private profile storage and QML start-up. A real Plasma/Wayland host is still needed for playback, KWallet, portals and GUI acceptance.
+The build script installs the org.kde runtime at commits recorded in `build/flatpak/runtime-pins.conf` and refuses to run outside rootless podman. Until the first release, the About dialog of a local bundle shows its build time (`YYYY.MM.DD.HHMM`, the host's local time, or `KINEFIN_BUILD_ID` when set) in place of the version; a build with `CI` set (every workflow) keeps the version, and `--version`, the update check and the server always get the version of `CMakeLists.txt`. `test-flatpak.sh` installs the bundle into a throwaway container `HOME`, checks the version, installed sandbox permissions and raster icons, D-Bus single-instance behaviour, the MPRIS name, the remote-control socket (private, with its welcome, taken back after a killed instance), private profile storage and QML start-up. A real Plasma/Wayland host is still needed for playback, KWallet, portals and GUI acceptance.
 
 ## Translations
 

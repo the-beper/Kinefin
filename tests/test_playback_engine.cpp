@@ -6,20 +6,26 @@
 #include "api/JellyfinClient.h"
 #include "player/PlaybackEngine.h"
 #include "player/PlaybackSession.h"
+#include "player/PlayerSettings.h"
+#include "settings/ClientSettings.h"
 
 #include <MpvController>
 
 #include <QDataStream>
 #include <QFile>
+#include <QScreen>
 #include <QSignalSpy>
 #include <QTemporaryDir>
+#include <QWindow>
 #include <QtTest/QtTest>
 #include <cmath>
 
+using Kinefin::ClientSettings;
 using Kinefin::JellyfinClient;
 using Kinefin::PlaybackEngine;
 using Kinefin::PlaybackSession;
 using Kinefin::PlaybackSource;
+using Kinefin::PlayerSettings;
 
 namespace {
 // The fixture is one fixed WAV: PCM data for a sine is what the demuxer reports as the duration, position and seekability; the container's mpv build has no lavfi stream protocol (verified offline 2026-11), so generated media stands in for the synthetic clip cases
@@ -318,6 +324,34 @@ class TestPlaybackEngine : public QObject {
         QTRY_VERIFY(chain.engine.positionTicks() > 50'000'000); // five seconds
         QTest::qWait(200);
         QVERIFY(chain.engine.positionTicks() > 50'000'000);
+    }
+
+    void theDisplayRateIsTheVideoWindowsScreens()
+    {
+        JellyfinClient client;
+        PlaybackSession session;
+        PlaybackEngine engine(client, session);
+        QVERIFY(engine.init({QStringLiteral("vo=null"), QStringLiteral("ao=null")}));
+        ClientSettings settings(dir.filePath(QStringLiteral("display-rate.conf")));
+        PlayerSettings mpv(settings, engine);
+        QWindow window;
+        QVERIFY(window.screen());
+        mpv.setWindow(&window);
+        const qreal rate = window.screen()->refreshRate();
+        QCOMPARE(mpv.displayRate(), rate);
+        mpv.apply();
+        if (rate > 20.0 && rate < 500.0)
+            QCOMPARE(engine.mpvProperty(QStringLiteral("display-fps-override")).toDouble(), rate);
+        // A rate change sets only what the rate decides: the speed the user chose while playing stays
+        engine.setMpvProperty(QStringLiteral("speed"), 1.5);
+        engine.setMpvProperty(QStringLiteral("display-fps-override"), 1.0);
+        Q_EMIT window.screen()->refreshRateChanged(rate);
+        QCOMPARE(engine.mpvProperty(QStringLiteral("speed")).toDouble(), 1.5);
+        QCOMPARE(engine.mpvProperty(QStringLiteral("display-fps-override")).toDouble(),
+                 rate > 20.0 && rate < 500.0 ? rate : 0.0);
+        // A window that goes away leaves the primary screen
+        mpv.setWindow(nullptr);
+        QCOMPARE(mpv.displayRate(), QGuiApplication::primaryScreen()->refreshRate());
     }
 
   private:

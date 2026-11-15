@@ -10,11 +10,17 @@ image=localhost/kinefin-flatpak:fedora45
 # reporting success and skipping the artifact/smoke-test gates.
 [ -f "$root/CMakeLists.txt" ] || { echo "missing required CMakeLists.txt" >&2; exit 1; }
 
+# TODO (first release): drop the build id. Until then About names a local build after its build time, taken once on the host (the container runs in UTC); CI and release builds (CI set) keep the version, and an id passed in, even empty, is kept
+if [ -z "${KINEFIN_BUILD_ID+set}" ]; then
+    if [ -n "${CI:-}" ]; then KINEFIN_BUILD_ID=; else KINEFIN_BUILD_ID=$(date +%Y.%m.%d.%H%M); fi
+fi
+export KINEFIN_BUILD_ID
+
 if [ ! -e /run/.containerenv ]; then
     # Rootless podman only: root in the container is then the calling user on the host. No --privileged: bubblewrap, the sandbox of flatpak-builder (and of its icon validation), needs /proc unmasked to mount its own (unmask=ALL) and SYS_ADMIN and NET_ADMIN to create namespaces as container root. Without NET_ADMIN, "loopback: Failed RTM_NEWADDR". The capabilities hold inside the container's user namespace only.
     [ "$(podman info --format '{{.Host.Security.Rootless}}')" = true ] || { echo "build-flatpak.sh needs rootless podman" >&2; exit 1; }
     podman image exists "$image" || podman build -t "$image" -f "$root/build/flatpak/Containerfile" "$root/build/flatpak"
-    exec podman run --rm --security-opt unmask=ALL --cap-add SYS_ADMIN --cap-add NET_ADMIN --security-opt label=disable --network=host -e KINEFIN_FLATPAK_REPO \
+    exec podman run --rm --security-opt unmask=ALL --cap-add SYS_ADMIN --cap-add NET_ADMIN --security-opt label=disable --network=host -e KINEFIN_FLATPAK_REPO -e KINEFIN_BUILD_ID \
         -v kinefin-flatpak:/var/lib/flatpak -v "$root:$root" -w "$root" \
         "$image" "$root/build/flatpak/build-flatpak.sh" "$@"
 fi
@@ -46,6 +52,10 @@ pin "$platform" "$platform_commit"
 mkdir -p dist/tmp
 
 cd build/flatpak
+# Read by the root CMakeLists.txt from the copied checkout; removed again so that no other build sees it, and a file a killed build left is never reused
+trap 'rm -f "$root/build/flatpak/build-id"' EXIT
+rm -f build-id
+if [ -n "$KINEFIN_BUILD_ID" ]; then printf '%s\n' "$KINEFIN_BUILD_ID" > build-id; fi
 flatpak-builder --force-clean --disable-rofiles-fuse --default-branch=stable \
     --state-dir="$builder/state" --repo="$repo" "$@" \
     "$builder/build" "$id.yml"

@@ -143,20 +143,22 @@ if(mpvqt_BINARY_DIR)
     target_include_directories(kinefin_player PRIVATE ${mpvqt_BINARY_DIR}/src)
 endif()
 
-# The desktop's view of the player: MPRIS and the screensaver inhibition, on the session bus
+# The desktop around the app: MPRIS and the screensaver inhibition on the session bus, the remote-control socket
 add_library(kinefin_integration STATIC
     src/integration/Mpris.cpp
     src/integration/Mpris.h
     src/integration/MprisArtwork.cpp
     src/integration/MprisArtwork.h
+    src/integration/RemoteInputServer.cpp
+    src/integration/RemoteInputServer.h
     src/integration/ScreenSaverInhibitor.cpp
     src/integration/ScreenSaverInhibitor.h
 )
 target_compile_definitions(kinefin_integration PRIVATE TRANSLATION_DOMAIN="kinefin")
-target_link_libraries(kinefin_integration PUBLIC kinefin_player Qt6::DBus KF6::I18n)
+target_link_libraries(kinefin_integration PUBLIC kinefin_player Qt6::DBus Qt6::Gui Qt6::Network KF6::I18n)
 
 # The QML module lives in a static library of its own so that the UI tests can import it like the application does
-foreach(page Main PlayerPage ShellHeader AboutDialog ShortcutsDialog RemoteSessionsDialog MediaInfoDialog HomePage LibraryTile LibraryPage ResumeItemsPage MediaCard CardMenu CardRow EpisodeRow ItemDetailsPage SearchPage QueuePage FilterDialog GenreRailsView GenreRailsPage LibraryContent ItemListRow ItemRowGrid LoginPage UserPickerPage MessageBox ServersPage SettingsPage SettingRow UserPreferencesForm UserPreferencesSaveBar FavoritesPage FavoritesGroupPage)
+foreach(page Main PlayerPage ShellHeader AboutDialog ShortcutsDialog RemoteSessionsDialog MediaInfoDialog HomePage LibraryTile LibraryPage ResumeItemsPage MediaCard CardMenu CardRow EpisodeRow ItemDetailsPage SearchPage QueuePage FilterDialog GenreRailsView GenreRailsPage LibraryContent ItemListRow ItemRowGrid LoginPage UserPickerPage MessageBox ServersPage SettingsPage SettingRow UserPreferencesForm UserPreferencesSaveBar FavoritesPage FavoritesGroupPage TopFade)
     set_source_files_properties(src/qml/${page}.qml PROPERTIES QT_RESOURCE_ALIAS ${page}.qml)
 endforeach()
 qt_add_library(kinefin_ui STATIC)
@@ -186,6 +188,7 @@ qt_add_qml_module(kinefin_ui
         src/qml/GenreRailsView.qml
         src/qml/GenreRailsPage.qml
         src/qml/LibraryContent.qml
+        src/qml/TopFade.qml
         src/qml/ItemListRow.qml
         src/qml/ItemRowGrid.qml
         src/qml/LoginPage.qml
@@ -226,7 +229,15 @@ target_link_libraries(kinefin PRIVATE
     KF6::CoreAddons KF6::I18n KF6::I18nQml KF6::DBusAddons
 )
 target_include_directories(kinefin PRIVATE src/app)
-target_compile_definitions(kinefin PRIVATE KINEFIN_VERSION="${PROJECT_VERSION}" TRANSLATION_DOMAIN="kinefin")
+# A development Flatpak names itself after its build time in About (build/flatpak/build-flatpak.sh writes the file for the length of the build); the version the update check and the server see stays PROJECT_VERSION
+set(KINEFIN_DISPLAY_VERSION "${PROJECT_VERSION}")
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/build/flatpak/build-id")
+    file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/build/flatpak/build-id" KINEFIN_DISPLAY_VERSION LIMIT_COUNT 1 REGEX "^[0-9.]+$")
+    if(NOT KINEFIN_DISPLAY_VERSION)
+        set(KINEFIN_DISPLAY_VERSION "${PROJECT_VERSION}")
+    endif()
+endif()
+target_compile_definitions(kinefin PRIVATE KINEFIN_VERSION="${PROJECT_VERSION}" KINEFIN_DISPLAY_VERSION="${KINEFIN_DISPLAY_VERSION}" TRANSLATION_DOMAIN="kinefin")
 ki18n_install(po)
 
 install(TARGETS kinefin ${KDE_INSTALL_TARGETS_DEFAULT_ARGS})
@@ -294,6 +305,11 @@ if(BUILD_TESTING)
     target_compile_definitions(test_screensaver_inhibitor PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(test_screensaver_inhibitor PRIVATE kinefin_integration kinefin_core Qt6::Test Qt6::Network Qt6::DBus)
     add_test(NAME screensaver_inhibitor COMMAND dbus-run-session -- $<TARGET_FILE:test_screensaver_inhibitor>)
+
+    add_executable(test_remote_input tests/test_remote_input.cpp)
+    target_link_libraries(test_remote_input PRIVATE kinefin_integration kinefin_core Qt6::Test Qt6::Gui Qt6::Network)
+    add_test(NAME remote_input COMMAND test_remote_input)
+    set_tests_properties(remote_input PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
     add_executable(test_jellyfin_socket tests/test_jellyfin_socket.cpp)
     target_compile_definitions(test_jellyfin_socket PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")

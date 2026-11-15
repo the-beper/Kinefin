@@ -114,10 +114,6 @@ Item {
         }
     }
 
-    // The Home page on a wide window shows Refresh in the bar, anywhere else it is a menu entry
-    readonly property bool refreshFitsBar: signedIn && shell.width >= Kirigami.Units.gridUnit * 48
-    readonly property bool refreshInBar: refreshFitsBar && shell.pageStack.currentItem?.objectName === "homePage"
-
     implicitHeight: bar.implicitHeight
 
     // Ctrl+F focuses the box and selects what is in it
@@ -226,9 +222,7 @@ Item {
         anchors.fill: parent
         leftPadding: menuButton.width + (headerBackButton.visible ? headerBackButton.width : 0)
                      + Kirigami.Units.smallSpacing * 3
-        // The room of the Refresh button stays reserved on the other pages of a wide window: the tabs keep their width while it comes and goes
-        rightPadding: rightCluster.width + (root.refreshFitsBar && !root.refreshInBar ? refreshButton.implicitWidth + rightCluster.spacing : 0)
-                      + Kirigami.Units.smallSpacing * 2
+        rightPadding: rightCluster.width + Kirigami.Units.smallSpacing * 2
 
         actions: [homeAction, moviesAction, tvShowsAction]
 
@@ -340,20 +334,6 @@ Item {
             }
             Keys.onDownPressed: root.shell.searchResultsDown()
             Component.onCompleted: text = root.currentTerm()
-        }
-
-        QQC2.ToolButton {
-            id: refreshButton
-            objectName: "headerRefreshButton"
-            Layout.alignment: Qt.AlignVCenter
-            visible: root.refreshInBar
-            text: refreshAction.text
-            icon.name: refreshAction.icon.name
-            display: QQC2.AbstractButton.IconOnly
-            QQC2.ToolTip.text: text
-            QQC2.ToolTip.visible: hovered || visualFocus
-            QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
-            onClicked: refreshAction.trigger()
         }
 
         QQC2.ToolButton {
@@ -535,7 +515,7 @@ Item {
 
         text: i18nc("@title:tab", "Movies")
         tooltip: root.wide ? "" : text
-        icon.name: "video-x-generic"
+        icon.name: "video-symbolic"
         visible: root.connection.movieLibraries.length > 0
         enabled: root.signedIn
         onCheckedChanged: Qt.callLater(root.syncTabs)
@@ -599,13 +579,14 @@ Item {
         icon.name: "help-about"
         onTriggered: aboutDialog.open()
     }
-    // No shortcut: F5 belongs to the page actions, and a second one makes both ambiguous
+    // The one Refresh of the app: no page binds F5 itself, or the two shortcuts would be ambiguous. One key, not StandardKey.Refresh: the style's MenuItem binds a single sequence and warns on a standard key that has several
     Kirigami.Action {
         id: refreshAction
         objectName: "refreshAction"
 
         text: i18nc("@action:inmenu", "Refresh")
         icon.name: "view-refresh"
+        shortcut: "F5"
         visible: root.signedIn
         // Only a page that has something to refresh takes it: Home reloads the libraries, the others do it themselves
         enabled: typeof shell.pageStack.currentItem?.refreshPage === "function" || shell.pageStack.currentItem?.objectName === "homePage"
@@ -722,7 +703,7 @@ Item {
 
         QQC2.MenuItem {
             objectName: "menuRefreshItem"
-            visible: root.signedIn && !root.refreshInBar
+            visible: root.signedIn
             action: refreshAction
         }
 
@@ -743,7 +724,7 @@ Item {
             action: compactQueueAction
         }
         QQC2.MenuSeparator {
-            visible: root.compact || (root.signedIn && !root.refreshInBar)
+            visible: root.compact || root.signedIn
         }
 
         QQC2.MenuItem {
@@ -869,6 +850,7 @@ Item {
 
         updateChecksEnabled: root.updateChecksEnabled
         checking: updateChecker.checking
+        displayVersion: root.shell.displayVersion ?? ""
         onCheckForUpdatesRequested: {
             root.manualUpdateCheck = true;
             updateStatus = "checking";

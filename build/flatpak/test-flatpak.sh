@@ -1,5 +1,5 @@
 #!/bin/sh
-# Smoke test of the Flatpak bundle in a throw-away container (no desktop: offscreen Qt, a private session bus): install with non-default XDG folders, check the version, start the app offscreen, check it owns its D-Bus name, check a second launch hands over and exits, and check that the profile data lands under ~/.var/app. Playback, portal dialogs and theming need a real Plasma session and are untested here.
+# Smoke test of the Flatpak bundle in a throw-away container (no desktop: offscreen Qt, a private session bus): install with non-default XDG folders, check the version, start the app offscreen, check it owns its D-Bus name and its MPRIS name, check the private remote-control socket and its welcome, check a second launch hands over and exits, check a restart takes back the socket a killed instance left, and check that the profile data lands under ~/.var/app. Playback, portal dialogs and theming need a real Plasma session and are untested here.
 # Usage: [KINEFIN_EXPECT_VERSION=X.Y.Z] build/flatpak/test-flatpak.sh dist/Kinefin-x86_64.flatpak
 # KINEFIN_EXPECT_VERSION (optional): main.cpp uses QCommandLineParser::addVersionOption(); KAboutData provides QCoreApplication::applicationVersion. Upper/lower-case app labels and optional colon are accepted.
 set -eu
@@ -40,6 +40,8 @@ HOME=$(mktemp -d)
 export HOME
 trap 'flatpak kill "$id" 2>/dev/null; kill %1 2>/dev/null; rm -rf "$HOME"' EXIT
 export XDG_DATA_HOME=$HOME/xdg-data XDG_CONFIG_HOME=$HOME/xdg-config
+# Without it Flatpak keeps the app's runtime folder under ~/.cache instead of the /run/user one the socket check reads
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 mkdir -p "$XDG_DATA_HOME" "$XDG_CONFIG_HOME"
 
 # --no-deps: the runtime and its extension are already at the pinned commits; pulling
@@ -95,6 +97,27 @@ for _ in $(seq 20); do mpris_owned && break; sleep 1; done
 mpris_owned || { cat "$HOME/app.log"; fail "the app did not own org.mpris.MediaPlayer2.Kinefin.profile_default"; }
 echo "ok: MPRIS name org.mpris.MediaPlayer2.Kinefin.profile_default"
 
+# The remote-control socket sits in the app's runtime folder, which Flatpak shares with the host: private to the user, and it greets a client with the version
+socket="$XDG_RUNTIME_DIR/app/$id/kinefin-default"
+welcome_of() {
+    python3 -I -c 'import socket, sys
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.settimeout(5)
+s.connect(sys.argv[1])
+data = b""
+while b"\n" not in data:
+    chunk = s.recv(4096)
+    if not chunk:
+        break
+    data += chunk
+print(data.split(b"\n")[0].decode())' "$1"
+}
+for _ in $(seq 20); do [ -S "$socket" ] && break; sleep 1; done
+[ -S "$socket" ] || { cat "$HOME/app.log"; fail "no remote-control socket at $socket"; }
+[ "$(stat -c %a "$socket")" = 600 ] || fail "the remote-control socket is not private: $(stat -c %a "$socket")"
+welcome_of "$socket" | grep -q '"version"' || fail "the remote-control socket sent no welcome"
+echo "ok: remote-control socket, private, with its welcome"
+
 # A Flatpak app uses its own per-app XDG config root (independent of the
 # host's XDG_CONFIG_HOME). The profile index is configuration, not media data.
 profile_index="$HOME/.var/app/$id/config/kinefin/profiles.json"
@@ -108,6 +131,14 @@ echo "ok: no fatal QML errors"
 # A second launch hands over to the running instance and exits within a timeout.
 timeout 30 flatpak run --env=QT_QPA_PLATFORM=offscreen "$id" >/dev/null 2>&1 || fail "the second launch did not hand over"
 echo "ok: second launch hands over"
+flatpak kill "$id"
+
+# A killed instance leaves its socket behind: the next start replaces it. The old one must be gone first, or its own welcome would pass for the new one's
+for _ in $(seq 20); do welcome_of "$socket" >/dev/null 2>&1 || break; sleep 1; done
+flatpak run --env=QT_QPA_PLATFORM=offscreen "$id" >"$HOME/app2.log" 2>&1 &
+for _ in $(seq 20); do welcome_of "$socket" >/dev/null 2>&1 && break; sleep 1; done
+welcome_of "$socket" 2>/dev/null | grep -q '"version"' || { cat "$HOME/app2.log"; fail "a restart did not take the socket back"; }
+echo "ok: a restart takes the socket back"
 flatpak kill "$id"
 assert_pin "$sdk" "$sdk_commit"
 assert_pin "$platform" "$platform_commit"

@@ -44,7 +44,6 @@ org.kde.kconfig.notify=talk
 
 [System Bus Policy]
 org.freedesktop.NetworkManager=talk
-org.freedesktop.login1=talk
 """
 
 

@@ -90,7 +90,7 @@ Kirigami.ScrollablePage {
         return "";
     }
 
-    // The actions the hero shows beside the facts: the page toolbar keeps the others
+    // Play is the hero's button, the others are page actions
     readonly property Kirigami.Action playAction: Kirigami.Action {
         objectName: "playAction"
         text: page.details.canResume ? i18n("Resume") : i18n("Play")
@@ -118,7 +118,7 @@ Kirigami.ScrollablePage {
     readonly property Kirigami.Action favoriteAction: Kirigami.Action {
         objectName: "toggleFavoriteAction"
         text: page.details.favorite ? i18n("Remove from Favorites") : i18n("Add to Favorites")
-        // The icon shows the state too: on a narrow window the inline button is icon-only
+        // The icon shows the state too: a narrow toolbar may show the icon alone
         icon.name: page.details.favorite ? "starred-symbolic" : "non-starred-symbolic"
         visible: page.details.status === ItemDetailsModel.Ready
         enabled: !page.details.favoriteBusy
@@ -171,35 +171,28 @@ Kirigami.ScrollablePage {
         return i18n("Ends at %1", end.toLocaleTimeString(Qt.locale(), Locale.ShortFormat));
     }
 
-    actions: [
-        Kirigami.Action {
-            objectName: "togglePlayedAction"
-            text: page.details.played ? i18n("Mark as Unwatched") : i18n("Mark as Watched")
-            icon.name: page.details.played ? "view-refresh" : "emblem-checked"
-            visible: page.details.status === ItemDetailsModel.Ready && page.details.playable
-            enabled: !page.details.playedBusy
-            onTriggered: page.details.togglePlayed()
-        },
-        Kirigami.Action {
-            objectName: "mediaInfoAction"
-            text: i18n("Media Info")
-            icon.name: "documentinfo"
-            visible: page.details.mediaSources.length > 0
-            onTriggered: {
-                if (page.mediaInfoDialog)
-                    page.mediaInfoDialog.open();
-                else
-                    page.mediaInfoWanted = true;
-            }
-        },
-        Kirigami.Action {
-            text: i18n("Refresh")
-            icon.name: "view-refresh"
-            // Home binds the same key: only the page in front answers it, the button stays usable
-            shortcut: page.isCurrentPage ? StandardKey.Refresh : ""
-            onTriggered: page.details.reload()
+    readonly property Kirigami.Action togglePlayedAction: Kirigami.Action {
+        objectName: "togglePlayedAction"
+        text: page.details.played ? i18n("Mark as Unwatched") : i18n("Mark as Watched")
+        icon.name: page.details.played ? "edit-undo" : "emblem-checked"
+        visible: page.details.status === ItemDetailsModel.Ready && page.details.playable
+        enabled: !page.details.playedBusy
+        onTriggered: page.details.togglePlayed()
+    }
+    readonly property Kirigami.Action mediaInfoAction: Kirigami.Action {
+        objectName: "mediaInfoAction"
+        text: i18n("Media Info")
+        icon.name: "documentinfo"
+        visible: page.details.mediaSources.length > 0
+        onTriggered: {
+            if (page.mediaInfoDialog)
+                page.mediaInfoDialog.open();
+            else
+                page.mediaInfoWanted = true;
         }
-    ]
+    }
+
+    actions: [page.playNextAction, page.addToQueueAction, page.favoriteAction, page.togglePlayedAction, page.mediaInfoAction]
 
     Timer {
         objectName: "endsAtTimer"
@@ -664,46 +657,12 @@ Kirigami.ScrollablePage {
                         }
                     }
 
-                    // A narrow window gives Play the whole width: a layout child, since a Flow child as wide as its Flow grows the Flow on every pass
+                    // The one button of the hero, the whole width on a narrow window: the other actions are in the page toolbar
                     ActionButton {
-                        objectName: "detailsPlayWide"
-                        Layout.fillWidth: true
+                        objectName: "detailsPlay"
+                        Layout.fillWidth: hero.narrow
                         command: page.playAction
                         highlighted: true
-                        visible: hero.narrow && command.visible
-                    }
-
-                    Flow {
-                        id: actionRow
-                        objectName: "detailsActions"
-
-                        Layout.fillWidth: true
-                        spacing: Kirigami.Units.largeSpacing
-
-                        ActionButton {
-                            command: page.playAction
-                            highlighted: true
-                            visible: !hero.narrow && command.visible
-                        }
-
-                        ActionButton {
-                            command: page.playNextAction
-                        }
-
-                        ActionButton {
-                            command: page.addToQueueAction
-                        }
-
-                        ActionButton {
-                            objectName: "detailsFavoriteButton"
-                            command: page.favoriteAction
-                            // The label shows while there is room; a narrow window keeps the icon and the tooltip
-                            display: hero.narrow ? Controls.AbstractButton.IconOnly : Controls.AbstractButton.TextBesideIcon
-                            Controls.ToolTip.text: text
-                            Controls.ToolTip.visible: hero.narrow && (hovered || visualFocus)
-                            Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
-                            Accessible.name: text
-                        }
                     }
 
                     Flow {

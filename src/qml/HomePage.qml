@@ -16,17 +16,6 @@ Kirigami.ScrollablePage {
 
     title: i18n("Home")
 
-    actions: [
-        Kirigami.Action {
-            text: i18n("Refresh")
-            icon.name: "view-refresh"
-            // The details pages bind the same key: only the page in front answers it, the button stays usable
-            shortcut: page.isCurrentPage ? StandardKey.Refresh : ""
-            // The libraries come first: their answer reloads the rows
-            onTriggered: page.connection.reloadLibraries()
-        }
-    ]
-
     // The scroll position, for the tab to come back as it was left
     function viewPosition() {
         return { currentIndex: 0, contentY: page.flickable.contentY };

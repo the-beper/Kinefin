@@ -309,32 +309,9 @@ Item {
         }
     }
 
-    // Under the toolbar: the cards fade into the window colour as they scroll up beneath it, instead of looking cut by its edge
-    Rectangle {
+    TopFade {
         objectName: "libraryTopFade"
-        anchors {
-            left: parent.left
-            right: parent.right
-            top: parent.top
-        }
-        height: Kirigami.Units.gridUnit
-        opacity: content.atStart ? 0 : 1
-        gradient: Gradient {
-            GradientStop {
-                position: 0
-                color: Kirigami.Theme.backgroundColor
-            }
-            GradientStop {
-                position: 1
-                color: Qt.alpha(Kirigami.Theme.backgroundColor, 0)
-            }
-        }
-
-        Behavior on opacity {
-            NumberAnimation {
-                duration: Kirigami.Units.shortDuration
-            }
-        }
+        atStart: content.atStart
     }
 
     Kirigami.LoadingPlaceholder {

@@ -14,6 +14,8 @@ Kirigami.Dialog {
     // The owner of the update checker sets them and runs the check
     property bool updateChecksEnabled: false
     property bool checking: false
+    // A development build's time, shown in place of the version when set
+    property string displayVersion: ""
     // What the last manual check found: "", "checking", "upToDate", "failed" or "available" (with updateVersion)
     property string updateStatus: ""
     property string updateVersion: ""
@@ -135,7 +137,7 @@ Kirigami.Dialog {
                     Layout.fillWidth: true
                     Kirigami.Heading {
                         level: 2
-                        text: i18n("Kinefin %1", dialog.aboutData.version)
+                        text: i18n("Kinefin %1", dialog.displayVersion || dialog.aboutData.version)
                         textFormat: Text.PlainText
                     }
                     Controls.Label {

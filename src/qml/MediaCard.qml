@@ -373,16 +373,28 @@ Controls.ItemDelegate {
                             duration: Kirigami.Units.shortDuration
                         }
                     }
-                    // One value for both sides: `icon` is a grouped value, so reading it inside its own binding loops
-                    readonly property int glyph: Math.round(width / 2)
-                    icon.width: glyph
-                    icon.height: glyph
+                    padding: 0
+                    // The glyph drawn here, not by the style, which offsets it inside its own margins
+                    contentItem: Item {
+                        Kirigami.Icon {
+                            // Whole pixels, or an odd button blurs the glyph. Breeze's triangle fills its box but its weight sits left of the middle: a small shift to the right centres it to the eye
+                            x: Math.round((parent.width - width) / 2 + width * 0.07)
+                            y: Math.round((parent.height - height) / 2)
+                            width: Math.round(quickPlayButton.width / 2)
+                            height: width
+                            source: quickPlayButton.icon.name
+                            isMask: true
+                            color: quickPlayButton.icon.color
+                        }
+                    }
                     text: card.resumeTicks > 0 ? i18n("Resume") : i18n("Play")
-                    // The card name is plain server text
+                    // No tooltip: the disc on the poster says it all and a popup covers the card. The card name is plain server text
                     Accessible.name: card.resumeTicks > 0 ? i18n("Resume %1", card.name) : i18n("Play %1", card.name)
-                    Controls.ToolTip.text: text
-                    Controls.ToolTip.visible: hovered
-                    Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
+
+                    HoverHandler {
+                        cursorShape: Qt.PointingHandCursor
+                    }
+
                     // The press never reaches the card, so the card becomes current here and Back returns to it
                     onClicked: {
                         card.makeCurrent();

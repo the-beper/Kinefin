@@ -52,7 +52,7 @@ Kirigami.Page {
 
     // The tab's search field takes the keyboard
     function focusSearchField() {
-        topRow.item?.focusSearchField();
+        searchRow.item?.focusSearchField();
     }
 
     // The view takes the keys as soon as the page shows
@@ -143,21 +143,6 @@ Kirigami.Page {
     readonly property bool networkBackShown: hasSubtabs && subtab === "networks" && subtabs.networkId !== ""
     readonly property bool episodeCountShown: hasSubtabs && subtab === "episodes" && subtabs.episodeCount >= 0
 
-    // The label of data that ignores the library chosen above
-    readonly property string crossLibraryText: {
-        if (!hasSubtabs || !subtabs.crossLibrary)
-            return "";
-        switch (subtab) {
-        case "collections":
-            return i18n("Collections from all libraries");
-        case "suggestions":
-            return i18n("Suggestions from all libraries");
-        case "networks":
-            return i18nc("%1 is the name of a network", "%1 · series from all libraries", subtabs.networkName);
-        }
-        return "";
-    }
-
     // A checkable action whose check mark always follows `current`: a click toggles the check first, then the binding is restored
     component ChoiceAction: Kirigami.Action {
         id: choice
@@ -240,60 +225,29 @@ Kirigami.Page {
         }
     }
 
-    // Everything in the page body, in the order of the Tab stops: library, toolbar (sub-tabs first), chips, then the list
+    // Everything in the page body, in the order of the Tab stops: the toolbar row (library, sub-tabs first), the Compact search field, chips, then the list
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
 
-        // Built only while it shows: a wide window with one library of the type, the usual case, would pay its creation on every push
-        Loader {
-            id: topRow
+        // The sub-tabs the settings turn on (the main list is none of them), then filters, sort, view and view options; what does not fit goes into the overflow menu, and below the Wide mode the buttons are icons with tooltips. A sub-tab without a list of the model leaves the sub-tab entries alone in the toolbar
+        RowLayout {
+            id: toolbarRow
 
-            Layout.margins: Kirigami.Units.largeSpacing
-            active: page.tabType !== "" && (page.compactShell || page.libraries.length > 1)
-            visible: active
+            Layout.fillWidth: true
+            Layout.leftMargin: Kirigami.Units.largeSpacing
+            Layout.rightMargin: Kirigami.Units.largeSpacing
+            visible: page.listModel !== null || page.hasSubtabs
+            spacing: Kirigami.Units.mediumSpacing
 
-            sourceComponent: RowLayout {
-                function focusSearchField() {
-                    if (!tabSearch.visible)
-                        return;
-                    tabSearch.forceActiveFocus(Qt.TabFocusReason);
-                    tabSearch.selectAll();
-                }
+            // The library of the type, while there is more than one: built only then, as a wide window with one library, the usual case, would pay its creation on every push
+            Loader {
+                active: page.tabType !== "" && page.libraries.length > 1
+                visible: active
+                // A long library name never pushes the toolbar out
+                Layout.maximumWidth: Kirigami.Units.gridUnit * 16
 
-                spacing: Kirigami.Units.largeSpacing
-
-                Kirigami.SearchField {
-                    id: tabSearch
-                    objectName: "librarySearchField"
-
-                    Layout.fillWidth: true
-                    Layout.maximumWidth: Kirigami.Units.gridUnit * 30
-                    visible: page.tabType !== "" && page.compactShell
-                    // The shell owns Ctrl+F: the field's own sequence would make it ambiguous
-                    focusSequences: []
-                    maximumLength: 128
-                    autoAccept: false
-                    placeholderText: page.tabType === "movies" ? i18nc("@info:placeholder", "Search in Movies") : i18nc("@info:placeholder", "Search in Shows")
-
-                    // The field is the source of truth while it holds the focus, and follows the term the header box changes
-                    onTextChanged: {
-                        if (text !== page.model.searchTerm)
-                            page.model.searchTerm = text;
-                    }
-                    Keys.onDownPressed: page.focusPrimary()
-                    Component.onCompleted: text = page.model.searchTerm
-                }
-
-                Connections {
-                    target: page.model
-                    function onSearchTermChanged() {
-                        if (tabSearch.text !== page.model.searchTerm)
-                            tabSearch.text = page.model.searchTerm;
-                    }
-                }
-
-                Controls.ComboBox {
+                sourceComponent: Controls.ComboBox {
                     id: selector
                     objectName: "librarySelector"
 
@@ -304,9 +258,6 @@ Kirigami.Page {
                         return index < 0 ? 0 : index;
                     }
 
-                    // A long library name never pushes the search field out
-                    Layout.maximumWidth: Kirigami.Units.gridUnit * 16
-                    visible: page.tabType !== "" && page.libraries.length > 1
                     model: entries
                     textRole: "name"
                     currentIndex: scopeIndex()
@@ -333,68 +284,34 @@ Kirigami.Page {
                     }
                 }
             }
-        }
 
-        // The way back from a network's series, what the data is (all libraries) and the count of episodes the server reported
-        RowLayout {
-            objectName: "subtabInfo"
-
-            Layout.fillWidth: true
-            Layout.leftMargin: Kirigami.Units.largeSpacing
-            Layout.rightMargin: Kirigami.Units.largeSpacing
-            // From the conditions, never from the `visible` of the children: that one is false while this row is hidden, so the row would never show again
-            visible: page.networkBackShown || page.crossLibraryText.length > 0 || page.episodeCountShown
-            spacing: Kirigami.Units.largeSpacing
-
-            Controls.Button {
-                id: networkBack
+            // The toolbar is the page's top row: the way back from a network's series sits in it, not on a row of its own
+            Controls.ToolButton {
                 objectName: "networkBackButton"
-
                 visible: page.networkBackShown
-                flat: true
                 icon.name: "go-previous"
                 text: i18n("All Networks")
                 onClicked: page.subtabs.closeNetwork()
             }
 
-            // The text carries the name of a network: plain text only
+            // The network open, so the series below are not anonymous: server text, plain only
             Controls.Label {
-                id: crossLabel
-                objectName: "crossLibraryLabel"
-
-                Layout.fillWidth: true
-                visible: text.length > 0
+                objectName: "networkNameLabel"
+                Layout.maximumWidth: Kirigami.Units.gridUnit * 12
+                visible: page.networkBackShown && text.length > 0
                 elide: Text.ElideRight
-                opacity: 0.7
+                font.weight: Font.DemiBold
                 textFormat: Text.PlainText
-                text: page.crossLibraryText
+                text: page.subtabs?.networkName ?? ""
+                // A long name is cut: the whole one shows under the pointer
+                Controls.ToolTip.text: text
+                Controls.ToolTip.visible: truncated && networkNameHover.hovered
+                Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
+
+                HoverHandler {
+                    id: networkNameHover
+                }
             }
-
-            Controls.Label {
-                id: episodeCount
-                objectName: "episodeCountLabel"
-
-                visible: page.episodeCountShown
-                opacity: 0.7
-                textFormat: Text.PlainText
-                text: i18np("%1 episode", "%1 episodes", page.subtabs.episodeCount)
-            }
-
-            Item {
-                Layout.fillWidth: true
-                visible: page.crossLibraryText.length === 0
-            }
-        }
-
-        // The sub-tabs the settings turn on (the main list is none of them), then filters, sort, view and view options; what does not fit goes into the overflow menu, and below the Wide mode the buttons are icons with tooltips. A sub-tab without a list of the model leaves the sub-tab entries alone in the toolbar
-        RowLayout {
-            id: toolbarRow
-
-            Layout.fillWidth: true
-            Layout.leftMargin: Kirigami.Units.largeSpacing
-            Layout.rightMargin: Kirigami.Units.largeSpacing
-            visible: page.listModel !== null || page.hasSubtabs
-            spacing: Kirigami.Units.mediumSpacing
 
             Kirigami.ActionToolBar {
                 id: toolbar
@@ -612,6 +529,14 @@ Kirigami.Page {
                 ]
             }
 
+            Controls.Label {
+                objectName: "episodeCountLabel"
+                visible: page.episodeCountShown
+                opacity: 0.7
+                textFormat: Text.PlainText
+                text: i18np("%1 episode", "%1 episodes", page.subtabs.episodeCount)
+            }
+
             // At the right end, apart from the controls of the view, and never in the toolbar's overflow menu
             Controls.ToolButton {
                 objectName: "returnToTopButton"
@@ -621,6 +546,52 @@ Kirigami.Page {
                 Controls.ToolTip.text: text
                 Controls.ToolTip.visible: (hovered || visualFocus) && display === Controls.AbstractButton.IconOnly
                 Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
+            }
+        }
+
+        // A Compact window has no search box in the header: the tab's own field sits under the toolbar, built only then
+        Loader {
+            id: searchRow
+
+            Layout.fillWidth: true
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 30
+            Layout.leftMargin: Kirigami.Units.largeSpacing
+            Layout.rightMargin: Kirigami.Units.largeSpacing
+            Layout.topMargin: Kirigami.Units.smallSpacing
+            Layout.bottomMargin: Kirigami.Units.smallSpacing
+            active: page.tabType !== "" && page.compactShell
+            visible: active
+
+            sourceComponent: Kirigami.SearchField {
+                id: tabSearch
+                objectName: "librarySearchField"
+
+                function focusSearchField() {
+                    tabSearch.forceActiveFocus(Qt.TabFocusReason);
+                    tabSearch.selectAll();
+                }
+
+                // The shell owns Ctrl+F: the field's own sequence would make it ambiguous
+                focusSequences: []
+                maximumLength: 128
+                autoAccept: false
+                placeholderText: page.tabType === "movies" ? i18nc("@info:placeholder", "Search in Movies") : i18nc("@info:placeholder", "Search in Shows")
+
+                // The field is the source of truth while it holds the focus, and follows the term the header box changes
+                onTextChanged: {
+                    if (text !== page.model.searchTerm)
+                        page.model.searchTerm = text;
+                }
+                Keys.onDownPressed: page.focusPrimary()
+                Component.onCompleted: text = page.model.searchTerm
+
+                Connections {
+                    target: page.model
+                    function onSearchTermChanged() {
+                        if (tabSearch.text !== page.model.searchTerm)
+                            tabSearch.text = page.model.searchTerm;
+                    }
+                }
             }
         }
 

@@ -7,6 +7,7 @@
 #include "integration/LinkRouter.h"
 #include "integration/Mpris.h"
 #include "integration/MprisArtwork.h"
+#include "integration/RemoteInputServer.h"
 #include "integration/ScreenSaverInhibitor.h"
 #include "player/PlayerController.h"
 #include "settings/ClientSettings.h"
@@ -208,6 +209,9 @@ int main(int argc, char *argv[])
     // The factory is not owned by the engine: it is declared first so it outlives it
     Kinefin::ImageNetworkFactory imageFactory(imageOrigin, Kinefin::profileCacheDirectory(profileId)
                                                                + QStringLiteral("/images"));
+    // Held by the QML shell, so declared before the engine
+    Kinefin::RemoteInputServer remoteInput(Kinefin::remoteSocketPath(profileId),
+                                           QStringLiteral(KINEFIN_VERSION));
     QQmlApplicationEngine engine;
     engine.setNetworkAccessManagerFactory(&imageFactory);
     // "fullscreen" or "windowed" when a flag decides this run; empty to follow the setting
@@ -219,8 +223,11 @@ int main(int argc, char *argv[])
         {{QStringLiteral("connection"), QVariant::fromValue(&connection)},
          {QStringLiteral("settings"), QVariant::fromValue(&settings)},
          {QStringLiteral("player"), QVariant::fromValue(&player)},
+         {QStringLiteral("remoteInput"), QVariant::fromValue(&remoteInput)},
          {QStringLiteral("startupWindowMode"), windowMode},
-         {QStringLiteral("startupPage"), qEnvironmentVariable("KINEFIN_START_PAGE")}});
+         {QStringLiteral("startupPage"), qEnvironmentVariable("KINEFIN_START_PAGE")},
+         // About names a development Flatpak after its build time; the version stays KINEFIN_VERSION everywhere else
+         {QStringLiteral("displayVersion"), QStringLiteral(KINEFIN_DISPLAY_VERSION)}});
     // Register the KI18n QML context so Main.qml can translate its strings
     KLocalization::setupLocalizedContext(&engine);
     engine.loadFromModule(QStringLiteral("org.kde.kinefin"), QStringLiteral("Main"));
@@ -253,5 +260,8 @@ int main(int argc, char *argv[])
                                        Kinefin::profileCacheDirectory(profileId)
                                            + QStringLiteral("/mpris"));
     Kinefin::ScreenSaverInhibitor screenSaverInhibitor(player, QDBusConnection::sessionBus());
+    // Navigation keys from a remote reach the window like a keyboard's; no socket is a warning, never a failure
+    remoteInput.setWindow(window);
+    remoteInput.listen();
     return app.exec();
 }

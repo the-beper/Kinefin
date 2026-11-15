@@ -14,6 +14,30 @@ Kirigami.ScrollablePage {
     readonly property PlayQueue queue: connection.queue
 
     title: i18n("Queue")
+    // No title bar, as in the Movies and Shows tabs: the actions sit in a toolbar on top of the list, the header's queue button says which page this is
+    globalToolBarStyle: Kirigami.ApplicationHeaderStyle.None
+
+    header: RowLayout {
+        spacing: Kirigami.Units.mediumSpacing
+
+        // A Compact window hides the header's queue button, which otherwise names the page
+        Kirigami.Heading {
+            id: queueHeading
+            objectName: "queueHeading"
+            Layout.leftMargin: Kirigami.Units.largeSpacing
+            visible: page.Window.window?.compactHeader ?? false
+            level: 3
+            text: page.title
+        }
+
+        Kirigami.ActionToolBar {
+            objectName: "queueToolbar"
+            Layout.fillWidth: true
+            Layout.leftMargin: queueHeading.visible ? 0 : Kirigami.Units.largeSpacing
+            Layout.rightMargin: Kirigami.Units.largeSpacing
+            actions: page.actions
+        }
+    }
 
     // The list takes the keys as soon as the page shows
     function focusPrimary() {
@@ -211,7 +235,7 @@ Kirigami.ScrollablePage {
         Kirigami.Action {
             objectName: "resumeQueueAction"
             text: i18n("Resume Queue")
-            icon.name: "media-playback-start"
+            icon.name: "media-playlist-play"
             enabled: page.queue.count > 0 && !page.queue.busy && !!page.Window.window?.player
             onTriggered: page.Window.window.resumeQueue()
         },
@@ -306,6 +330,14 @@ Kirigami.ScrollablePage {
     ListView {
         id: list
         objectName: "queueList"
+
+        // On the view, not in its content: the fade stays under the toolbar while the rows scroll
+        TopFade {
+            objectName: "queueTopFade"
+            parent: list
+            z: 1
+            atStart: list.atYBeginning
+        }
 
         model: page.queue
         activeFocusOnTab: true

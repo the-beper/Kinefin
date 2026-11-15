@@ -9,6 +9,7 @@
 #include <QRegularExpression>
 #include <QScreen>
 #include <QVariant>
+#include <QWindow>
 #include <QtMath>
 
 #include <algorithm>
@@ -32,6 +33,44 @@ PlayerSettings::PlayerSettings(ClientSettings &settings, PlaybackEngine &engine,
                     || section == QLatin1String("subtitles") || section == QLatin1String("other"))
                     apply();
             });
+}
+
+void PlayerSettings::setWindow(QWindow *window)
+{
+    disconnect(m_windowConnection);
+    m_window = window;
+    if (window)
+        m_windowConnection =
+            connect(window, &QWindow::screenChanged, this, [this](QScreen *screen) {
+                followScreen(screen);
+                followRate();
+            });
+    followScreen(window ? window->screen() : nullptr);
+    followRate();
+}
+
+void PlayerSettings::followScreen(QScreen *screen)
+{
+    disconnect(m_screenConnection);
+    m_screen = screen;
+    if (screen)
+        m_screenConnection =
+            connect(screen, &QScreen::refreshRateChanged, this, [this] { followRate(); });
+}
+
+// Only what the rate decides: a full apply would also reset what the user changed while playing, such as the speed
+void PlayerSettings::followRate()
+{
+    if (!m_engine.isInitialized())
+        return;
+    applyDisplayRate();
+    applyOverrides({QStringLiteral("display-fps-override"), QStringLiteral("audio-delay")});
+}
+
+qreal PlayerSettings::displayRate() const
+{
+    const QScreen *screen = m_screen ? m_screen.data() : QGuiApplication::primaryScreen();
+    return screen ? screen->refreshRate() : 0;
 }
 
 void PlayerSettings::apply()
@@ -115,11 +154,6 @@ void PlayerSettings::applyVideo()
     m_engine.setMpvProperty(QStringLiteral("demuxer-max-bytes"),
                             QString(QString::number(v("cache").toInt()) + QStringLiteral("MiB")));
     m_engine.setMpvProperty(QStringLiteral("speed"), v("default_playback_speed").toDouble());
-    if (auto *screen = QGuiApplication::primaryScreen()) {
-        const qreal fps = screen->refreshRate();
-        if (fps > 20.0 && fps < 500.0)
-            m_engine.setMpvProperty(QStringLiteral("display-fps-override"), fps);
-    }
     // Reset all modifiers before applying a new aspect; custom means do not override mpv.
     const QString aspect = v("aspect").toString();
     if (aspect != QLatin1String("custom")) {
@@ -145,8 +179,15 @@ void PlayerSettings::applyVideo()
         else if (aspect == QLatin1String("noscaling"))
             m_engine.setMpvProperty(QStringLiteral("video-unscaled"), QStringLiteral("yes"));
     }
-    double refresh =
-        QGuiApplication::primaryScreen() ? QGuiApplication::primaryScreen()->refreshRate() : 0;
+    applyDisplayRate();
+}
+
+void PlayerSettings::applyDisplayRate()
+{
+    const double refresh = displayRate();
+    // 0 lets mpv measure the rate itself, and clears the value of a previous screen
+    m_engine.setMpvProperty(QStringLiteral("display-fps-override"),
+                            refresh > 20.0 && refresh < 500.0 ? refresh : 0.0);
     const char *bucket = "normal";
     for (int fps : {24, 25, 50}) {
         if (std::abs(refresh - fps) <= 0.5) {
@@ -155,8 +196,8 @@ void PlayerSettings::applyVideo()
         }
     }
     const QByteArray key = QByteArray("audio_delay.").append(bucket);
-    m_engine.setMpvProperty(QStringLiteral("audio-delay"),
-                            v(key.constData()).toInt() / 1000.0 + m_audioOffset);
+    const int delay = m_settings.value(QStringLiteral("video"), QString::fromLatin1(key)).toInt();
+    m_engine.setMpvProperty(QStringLiteral("audio-delay"), delay / 1000.0 + m_audioOffset);
 }
 
 void PlayerSettings::applySubtitles()
@@ -198,7 +239,7 @@ void PlayerSettings::applySubtitles()
     m_engine.setMpvProperty(QStringLiteral("sub-delay"), m_subtitleOffset);
 }
 
-void PlayerSettings::applyOverrides()
+void PlayerSettings::applyOverrides(const QStringList &only)
 {
     const QString conf =
         m_settings.value(QStringLiteral("other"), QStringLiteral("other_conf")).toString();
@@ -211,6 +252,8 @@ void PlayerSettings::applyOverrides()
         if (pos <= 0)
             continue;
         const QString name = entry.left(pos).trimmed();
+        if (!only.isEmpty() && !only.contains(name))
+            continue;
         if (keyPattern.match(name).hasMatch() && !name.startsWith(QStringLiteral("http-"))
             && name != QLatin1String("scripts") && name != QLatin1String("script")
             && name != QLatin1String("input-conf") && name != QLatin1String("include"))
@@ -221,7 +264,8 @@ void PlayerSettings::applyOverrides()
 void PlayerSettings::setAudioOffset(double seconds)
 {
     m_audioOffset = qBound(-10.0, seconds, 10.0);
-    applyVideo();
+    // The offset the user set while playing wins over mpv.conf, and nothing else is reset
+    applyDisplayRate();
 }
 void PlayerSettings::setSubtitleOffset(double seconds)
 {

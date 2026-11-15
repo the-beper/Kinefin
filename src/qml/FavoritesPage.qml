@@ -24,6 +24,8 @@ Kirigami.ScrollablePage {
     readonly property real cardHeight: Math.round((cardWidth - Kirigami.Units.smallSpacing * 2) * 3 / 2) + Kirigami.Units.gridUnit * 3.5
 
     title: i18n("Favorites")
+    // No title bar, as in the Movies and Shows tabs: the actions sit in a toolbar on top of the content, the header's star says which page this is
+    globalToolBarStyle: Kirigami.ApplicationHeaderStyle.None
 
     Component.onCompleted: {
         shell.favoritesPages++;
@@ -163,20 +165,32 @@ Kirigami.ScrollablePage {
                 current: page.groups.grouping === FavoritesGroupsModel.None
                 onChosen: page.groups.grouping = FavoritesGroupsModel.None
             }
-        },
-        Kirigami.Action {
-            objectName: "favoritesReload"
-            text: i18n("Reload")
-            icon.name: "view-refresh"
-            // The details pages bind the same key: only the page in front answers it, the button stays usable
-            shortcut: page.isCurrentPage ? StandardKey.Refresh : ""
-            enabled: !page.loading
-            onTriggered: page.favorites.reload()
         }
     ]
 
     header: ColumnLayout {
         spacing: 0
+
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.leftMargin: Kirigami.Units.largeSpacing
+            Layout.rightMargin: Kirigami.Units.largeSpacing
+            spacing: Kirigami.Units.mediumSpacing
+
+            // A Compact window hides the header's star, which otherwise names the page
+            Kirigami.Heading {
+                objectName: "favoritesHeading"
+                visible: page.Window.window?.compactHeader ?? false
+                level: 3
+                text: page.title
+            }
+
+            Kirigami.ActionToolBar {
+                objectName: "favoritesToolbar"
+                Layout.fillWidth: true
+                actions: page.actions
+            }
+        }
 
         MessageBox {
             objectName: "favoritesCappedBanner"
@@ -205,6 +219,14 @@ Kirigami.ScrollablePage {
     ListView {
         id: groupsList
         objectName: "favoritesGroups"
+
+        // On the view, not in its content: the fade stays under the toolbar while the rows scroll
+        TopFade {
+            objectName: "favoritesTopFade"
+            parent: groupsList
+            z: 1
+            atStart: groupsList.atYBeginning
+        }
 
         model: page.groups
         spacing: Kirigami.Units.largeSpacing

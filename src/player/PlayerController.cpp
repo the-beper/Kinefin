@@ -20,6 +20,7 @@
 #include <QImageReader>
 #include <QJsonDocument>
 #include <QJsonParseError>
+#include <QQuickWindow>
 #include <QRandomGenerator>
 #include <QSaveFile>
 #include <QStandardPaths>
@@ -237,6 +238,10 @@ bool PlayerController::attachVideo(MpvAbstractItem *item, MpvController *control
     if (!item || m_video || !m_engine.attach(item, controller))
         return false;
     m_video = item;
+    // The display rate is the one of the screen the video is on
+    m_mpvSettings.setWindow(item->window());
+    connect(item, &QQuickItem::windowChanged, this,
+            [this](QQuickWindow *window) { m_mpvSettings.setWindow(window); });
     m_mpvSettings.apply();
     m_volume = qBound(0, m_engine.mpvProperty(QStringLiteral("volume")).toInt(), 100);
     m_muted = m_engine.mpvProperty(QStringLiteral("mute")).toBool();
@@ -257,6 +262,8 @@ void PlayerController::detachVideo(MpvAbstractItem *item)
     persistQueueCursor();
     m_queue.setCurrentPlaybackItemId({});
     m_engine.detach(item);
+    disconnect(item, &QQuickItem::windowChanged, this, nullptr);
+    m_mpvSettings.setWindow(nullptr);
     m_video = nullptr;
     clearCurrent();
     Q_EMIT changed();

@@ -22,8 +22,6 @@ finish-args:
   - --system-talk-name=org.freedesktop.NetworkManager
   # The access tokens live in the user's KWallet (KWalletTokenStore): the daemon is the only way to them from the sandbox, and there is no plaintext fallback.
   - --talk-name=org.kde.kwalletd6
-  # The power actions of the host commands (parity of "Power options").
-  - --system-talk-name=org.freedesktop.login1
   # Portals: the browser links (server web UI, externallinks) and the folder picker of the download export (a per-folder Document-portal grant, never a --filesystem=home).
   # TODO (P10b, docs/cast-research.md): --system-talk-name=org.freedesktop.Avahi lands here only
   # when the Google Cast stage needs mDNS discovery (DLNA stage discovers via SSDP, no grant needed).
@@ -114,8 +112,7 @@ modules:
               stable-only: true
               url-template: https://www.freedesktop.org/software/uchardet/releases/uchardet-$version.tar.xz
 
-  # TODO (P6, docs/plan.md): add the libkscreen module (mode switching, parity §5) and, if the
-  # first release keeps gamepads, an SDL3 module — neither ships in org.kde.Sdk.
+  # TODO (gamepad input, after the first release): add an SDL3 module, which does not ship in org.kde.Sdk.
   # mpvqt is NOT a standalone module: the app's root CMakeLists vendors it via FetchContent
   # and the build sandbox has no network to fetch with, so the kinefin module below carries
   # the exact pinned tarball as a local file source (downloaded by flatpak-builder on the

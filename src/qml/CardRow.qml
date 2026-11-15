@@ -243,10 +243,8 @@ Item {
         // The arrow keys move inside the list, which is the row's one tab stop
         focusPolicy: Qt.NoFocus
         hoverEnabled: true
+        // No tooltip: the chevron says it all, and a popup over the next card hides it
         display: Controls.AbstractButton.IconOnly
-        Controls.ToolTip.text: text
-        Controls.ToolTip.visible: hovered
-        Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
 
         background: Rectangle {
             gradient: Gradient {

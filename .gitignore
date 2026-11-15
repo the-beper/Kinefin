@@ -10,3 +10,4 @@ __pycache__/
 /.cache/
 **/*.patch
 /docs/
+/build/flatpak/build-id

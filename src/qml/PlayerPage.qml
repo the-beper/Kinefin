@@ -83,6 +83,25 @@ Kirigami.Page {
         page.player.setVolume(Math.max(0, Math.min(100, page.player.volume + steps * 5)));
         page.wakeChrome();
     }
+    // The player commands of the keyboard and of the remote socket; a name that is no command does nothing
+    function playerAction(name) {
+        switch (name) {
+        case "playpause": page.player.togglePause(); break;
+        case "play": if (page.player.paused) page.player.resume(); break;
+        case "pause": if (!page.player.paused) page.player.pause(); break;
+        case "stop": page.closePlayer(); return;
+        case "next": page.player.next(); break;
+        case "previous": page.player.previous(); break;
+        case "fastforward": page.player.seekRelative(10); break;
+        case "rewind": page.player.seekRelative(-10); break;
+        case "volumeup": page.stepVolume(1); break;
+        case "volumedown": page.stepVolume(-1); break;
+        case "togglemute": page.player.toggleMute(); break;
+        case "togglefullscreen": page.Window.window.togglePlayerFullscreen(); break;
+        default: return;
+        }
+        page.wakeChrome();
+    }
     // A menu of the bottom bar opens above its button, aligned to the button's far edge
     function openMenu(menu, button) {
         const corner = button.mapToItem(page, page.mirrored ? 0 : button.width, 0);
@@ -125,16 +144,17 @@ Kirigami.Page {
             return;
         }
         switch (event.key) {
-        case Qt.Key_Space: page.player.togglePause(); break;
-        case Qt.Key_M: page.player.toggleMute(); break;
-        case Qt.Key_F: page.Window.window.togglePlayerFullscreen(); break;
-        case Qt.Key_Left: page.player.seekRelative(-10); break;
-        case Qt.Key_Right: page.player.seekRelative(10); break;
+        case Qt.Key_Space: page.playerAction("playpause"); break;
+        case Qt.Key_M: page.playerAction("togglemute"); break;
+        case Qt.Key_F: page.playerAction("togglefullscreen"); break;
+        case Qt.Key_Left: page.playerAction("rewind"); break;
+        case Qt.Key_Right: page.playerAction("fastforward"); break;
+        // The minute seeks have no command name: only the keyboard has them
         case Qt.Key_Up: page.player.seekRelative(60); break;
         case Qt.Key_Down: page.player.seekRelative(-60); break;
         case Qt.Key_Plus:
-        case Qt.Key_Equal: page.stepVolume(1); break;
-        case Qt.Key_Minus: page.stepVolume(-1); break;
+        case Qt.Key_Equal: page.playerAction("volumeup"); break;
+        case Qt.Key_Minus: page.playerAction("volumedown"); break;
         default: return;
         }
         page.wakeChrome();
