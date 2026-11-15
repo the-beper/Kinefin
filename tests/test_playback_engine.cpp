@@ -2,23 +2,24 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Offline engine tests: the mpv mapping runs on a real mpv (offscreen, vo=null/ao=null) over a generated WAV clip (16-bit mono PCM, a sine). No network, no window, no media files in the repo; the only deliberately broken case is a path that does not exist. The live reproduction of INT-02..06 stays in test_jellyfin_live.cpp, on the real Jellyfin-streamed media URLs
 #include "FakeJellyfin.h"
+#include "WavClip.h"
 
 #include "api/JellyfinClient.h"
+#include "models/PlayQueue.h"
 #include "player/PlaybackEngine.h"
 #include "player/PlaybackSession.h"
+#include "player/PlayerController.h"
 #include "player/PlayerSettings.h"
 #include "settings/ClientSettings.h"
 
 #include <MpvController>
 
-#include <QDataStream>
 #include <QFile>
 #include <QScreen>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QWindow>
 #include <QtTest/QtTest>
-#include <cmath>
 
 using Kinefin::ClientSettings;
 using Kinefin::JellyfinClient;
@@ -28,47 +29,6 @@ using Kinefin::PlaybackSource;
 using Kinefin::PlayerSettings;
 
 namespace {
-// The fixture is one fixed WAV: PCM data for a sine is what the demuxer reports as the duration, position and seekability; the container's mpv build has no lavfi stream protocol (verified offline 2026-11), so generated media stands in for the synthetic clip cases
-constexpr int kWavSampleRate = 8000;
-
-QString writeWavClip(const QTemporaryDir &dir, int seconds)
-{
-    QFile file(dir.filePath(QStringLiteral("clip%1.wav").arg(seconds)));
-    if (!file.open(QIODevice::WriteOnly)) {
-        return {};
-    }
-    const int frames = seconds * kWavSampleRate;
-    QByteArray pcm(int(frames * sizeof(qint16)), Qt::Uninitialized);
-    auto *samples = reinterpret_cast<qint16 *>(pcm.data());
-    for (int i = 0; i < frames; ++i) {
-        samples[i] =
-            qint16(std::sin(2 * M_PI * 440.0 * double(i) / double(kWavSampleRate)) * 8000.0);
-    }
-    QByteArray header;
-    QDataStream stream(&header, QIODevice::WriteOnly);
-    stream.setByteOrder(QDataStream::LittleEndian);
-    auto ascii = [&stream](const char *text) { stream.writeRawData(text, 4); };
-    // RIFF size = whole rest of the file = data + 36
-    const quint32 riffSize = quint32(frames * sizeof(qint16)) + 36;
-    ascii("RIFF");
-    stream << riffSize;
-    ascii("WAVE");
-    ascii("fmt ");
-    stream << quint32(16)                              // fmt chunk size
-           << quint16(1)                               // PCM
-           << quint16(1)                               // mono
-           << quint32(kWavSampleRate)                  // rate
-           << quint32(kWavSampleRate * sizeof(qint16)) // byte rate
-           << quint16(sizeof(qint16))                  // block align
-           << quint16(16);                             // bits
-    ascii("data");
-    stream << quint32(frames * sizeof(qint16));
-    if (file.write(header) == header.size() && file.write(pcm) == pcm.size()) {
-        return QUrl::fromLocalFile(file.fileName()).toString(QUrl::FullyEncoded);
-    }
-    return {};
-}
-
 PlaybackSource directSource(const QString &url)
 {
     PlaybackSource source;
@@ -84,7 +44,7 @@ PlaybackSource directSource(const QString &url)
 struct Chain {
     // Offscreen basics always apply; `extraOptions` is for case-specific tweaks
     Chain(const QTemporaryDir &dir, int seconds, const QStringList &extraOptions = {})
-        : server(), client(), session(), source(directSource(writeWavClip(dir, seconds))),
+        : server(), client(), session(), source(directSource(TestWav::writeWavClip(dir, seconds))),
           engine(client, session)
     {
         ok = !source.url.isEmpty() && server.listen() && login(client, server)
@@ -101,6 +61,21 @@ struct Chain {
     PlaybackEngine engine;
     bool ok = false;
 };
+
+// mpv answers a flag as a boolean and a yes/no choice as a string
+bool isYes(const QVariant &value)
+{
+    return value.typeId() == QMetaType::Bool ? value.toBool()
+                                             : value.toString() == QLatin1String("yes");
+}
+
+// `video.aspect` is hidden from the UI, so only the file can hold a value other than the default
+QString settingsFile(const QTemporaryDir &dir, const QString &name, const QByteArray &body)
+{
+    QFile file(dir.filePath(name));
+    return file.open(QIODevice::WriteOnly) && file.write(body) == body.size() ? file.fileName()
+                                                                              : QString();
+}
 
 QVariantList headerEntries(PlaybackEngine &engine)
 {
@@ -352,6 +327,303 @@ class TestPlaybackEngine : public QObject {
         // A window that goes away leaves the primary screen
         mpv.setWindow(nullptr);
         QCOMPARE(mpv.displayRate(), QGuiApplication::primaryScreen()->refreshRate());
+    }
+
+    void aspectChoiceAppliesAtOnceAndSurvivesEveryApply()
+    {
+        JellyfinClient client;
+        PlaybackSession session;
+        PlaybackEngine engine(client, session);
+        QVERIFY(engine.init({QStringLiteral("vo=null"), QStringLiteral("ao=null")}));
+        ClientSettings settings(
+            settingsFile(dir, QStringLiteral("aspect.conf"), "[video]\naspect=zoom\n"));
+        PlayerSettings mpv(settings, engine);
+        QWindow window;
+        mpv.setWindow(&window);
+        mpv.apply();
+        QCOMPARE(mpv.aspectMode(), QStringLiteral("zoom"));
+        QCOMPARE(engine.mpvProperty(QStringLiteral("panscan")).toDouble(), 1.0);
+
+        // A choice replaces the setting at once, with the speed the user set left alone and the setting unwritten
+        engine.setMpvProperty(QStringLiteral("speed"), 1.5);
+        mpv.setAspectOverride(QStringLiteral("stretch"));
+        QCOMPARE(mpv.aspectMode(), QStringLiteral("stretch"));
+        QCOMPARE(engine.mpvProperty(QStringLiteral("panscan")).toDouble(), 0.0);
+        QVERIFY(!isYes(engine.mpvProperty(QStringLiteral("keepaspect"))));
+        QCOMPARE(engine.mpvProperty(QStringLiteral("speed")).toDouble(), 1.5);
+        QCOMPARE(settings.value(QStringLiteral("video"), QStringLiteral("aspect")).toString(),
+                 QStringLiteral("zoom"));
+
+        // A full apply and a screen rate change keep it
+        mpv.apply();
+        QCOMPARE(mpv.aspectMode(), QStringLiteral("stretch"));
+        QVERIFY(!isYes(engine.mpvProperty(QStringLiteral("keepaspect"))));
+        QCOMPARE(engine.mpvProperty(QStringLiteral("panscan")).toDouble(), 0.0);
+        engine.setMpvProperty(QStringLiteral("speed"), 1.5);
+        Q_EMIT window.screen()->refreshRateChanged(window.screen()->refreshRate());
+        QVERIFY(!isYes(engine.mpvProperty(QStringLiteral("keepaspect"))));
+        QCOMPARE(engine.mpvProperty(QStringLiteral("speed")).toDouble(), 1.5);
+
+        // Another choice clears the modifiers of the previous one
+        mpv.setAspectOverride(QStringLiteral("noscaling"));
+        QVERIFY(isYes(engine.mpvProperty(QStringLiteral("keepaspect"))));
+        QVERIFY(isYes(engine.mpvProperty(QStringLiteral("video-unscaled"))));
+        mpv.setAspectOverride({});
+        QCOMPARE(mpv.aspectMode(), QStringLiteral("zoom"));
+
+        // The setting is back, with the speed untouched
+        QCOMPARE(engine.mpvProperty(QStringLiteral("panscan")).toDouble(), 1.0);
+        QVERIFY(!isYes(engine.mpvProperty(QStringLiteral("video-unscaled"))));
+        QCOMPARE(engine.mpvProperty(QStringLiteral("speed")).toDouble(), 1.5);
+    }
+
+    void aspectOfACustomSettingReadsAsCustomAndLeavesMpvAlone()
+    {
+        JellyfinClient client;
+        PlaybackSession session;
+        PlaybackEngine engine(client, session);
+        QVERIFY(engine.init({QStringLiteral("vo=null"), QStringLiteral("ao=null")}));
+        ClientSettings settings(
+            settingsFile(dir, QStringLiteral("aspect-custom.conf"), "[video]\naspect=custom\n"));
+        PlayerSettings mpv(settings, engine);
+        QCOMPARE(mpv.aspectMode(), QStringLiteral("custom"));
+        // Custom does not touch mpv's own aspect properties, not even once a file is loaded
+        engine.setMpvProperty(QStringLiteral("panscan"), 0.5);
+        mpv.apply();
+        mpv.applyLoadedAspect();
+        QCOMPARE(engine.mpvProperty(QStringLiteral("panscan")).toDouble(), 0.5);
+        // A choice made for one playback is undone when it ends
+        mpv.setAspectOverride(QStringLiteral("zoom"));
+        QCOMPARE(engine.mpvProperty(QStringLiteral("panscan")).toDouble(), 1.0);
+        mpv.setAspectOverride({});
+        QCOMPARE(mpv.aspectMode(), QStringLiteral("custom"));
+        QCOMPARE(engine.mpvProperty(QStringLiteral("panscan")).toDouble(), 0.0);
+        // Auto is a choice of its own against a custom setting
+        engine.setMpvProperty(QStringLiteral("panscan"), 0.5);
+        mpv.setAspectOverride(QStringLiteral("normal"));
+        QCOMPARE(mpv.aspectMode(), QStringLiteral("normal"));
+        QCOMPARE(engine.mpvProperty(QStringLiteral("panscan")).toDouble(), 0.0);
+        // A value that is no mode at all is no choice
+        mpv.setAspectOverride({});
+        mpv.setAspectOverride(QStringLiteral("bogus"));
+        QCOMPARE(mpv.aspectMode(), QStringLiteral("custom"));
+    }
+
+    void theLoadedFileReevaluatesOnlyTheModeThatNeedsThePicture()
+    {
+        JellyfinClient client;
+        PlaybackSession session;
+        PlaybackEngine engine(client, session);
+        QVERIFY(engine.init({QStringLiteral("vo=null"), QStringLiteral("ao=null")}));
+        ClientSettings zoom(
+            settingsFile(dir, QStringLiteral("aspect-zoom.conf"), "[video]\naspect=zoom\n"));
+        PlayerSettings zoomed(zoom, engine);
+        zoomed.apply();
+        engine.setMpvProperty(QStringLiteral("panscan"), 0.5);
+        zoomed.applyLoadedAspect();
+        QCOMPARE(engine.mpvProperty(QStringLiteral("panscan")).toDouble(), 0.5);
+
+        ClientSettings wide(settingsFile(dir, QStringLiteral("aspect-wide.conf"),
+                                         "[video]\naspect=force_16_9_if_4_3\n"));
+        PlayerSettings widescreen(wide, engine);
+        widescreen.apply();
+        // This mode is evaluated again: the modifiers go back to their defaults, and there is no picture here to widen
+        engine.setMpvProperty(QStringLiteral("panscan"), 0.5);
+        widescreen.applyLoadedAspect();
+        QCOMPARE(engine.mpvProperty(QStringLiteral("panscan")).toDouble(), 0.0);
+    }
+
+    void controllerReportsThePlayingSourceAndForgetsItAtTheEnd()
+    {
+        FakeJellyfin server;
+        JellyfinClient client;
+        QVERIFY(server.listen() && login(client, server));
+        Kinefin::PlayQueue queue(&client);
+        ClientSettings settings(dir.filePath(QStringLiteral("controller.conf")));
+        Kinefin::PlayerController controller(client, queue, settings, QString());
+        auto *engine = controller.findChild<PlaybackEngine *>();
+        QVERIFY(engine);
+        QVERIFY(controller.playItem(QStringLiteral("c7dd3b1ac7dd3b1a9d42f2ab74f8a1b9"), 0));
+        // No window renders here: the engine stands alone, after the item asked for its source
+        QVERIFY(engine->init({QStringLiteral("vo=null"), QStringLiteral("ao=null")}));
+        QVERIFY(controller.playbackInfo().isEmpty());
+
+        PlaybackSource source = directSource(TestWav::writeWavClip(dir, 8));
+        source.method = PlaybackSource::Method::Transcode;
+        source.media.streamType = QStringLiteral("HLS");
+        source.media.protocol = QStringLiteral("https");
+        source.media.targetVideoCodec = QStringLiteral("hevc");
+        source.media.targetAudioCodec = QStringLiteral("aac");
+        source.media.transcodeReasons = {QStringLiteral("AudioCodecNotSupported")};
+        source.media.source.container = QStringLiteral("mkv");
+        source.media.source.size = 4'000'000'000LL;
+        source.media.source.bitrate = 19'000'000;
+        Kinefin::StreamSummary video;
+        video.type = QStringLiteral("Video");
+        video.codec = QStringLiteral("hevc");
+        video.profile = QStringLiteral("Main 10");
+        video.level = 153;
+        video.bitrate = 18'000'000;
+        video.frameRate = 23.976;
+        video.bitDepth = 10;
+        video.pixelFormat = QStringLiteral("yuv420p10le");
+        video.videoRangeType = QStringLiteral("HDR10");
+        video.videoRange = QStringLiteral("HDR");
+        video.colorSpace = QStringLiteral("bt2020nc");
+        video.colorPrimaries = QStringLiteral("bt2020");
+        video.colorTransfer = QStringLiteral("smpte2084");
+        Kinefin::StreamSummary audio;
+        audio.index = 1;
+        audio.type = QStringLiteral("Audio");
+        audio.codec = QStringLiteral("dts");
+        audio.channels = 6;
+        audio.bitrate = 1'500'000;
+        audio.sampleRate = 48000;
+        audio.isDefault = true;
+        source.media.source.streams = {video, audio};
+        source.itemId = QStringLiteral("c7dd3b1ac7dd3b1a9d42f2ab74f8a1b9");
+        Q_EMIT client.playbackInfoReady(source);
+
+        const QVariantMap info = controller.playbackInfo();
+        QCOMPARE(info.value(QStringLiteral("playMethod")).toString(), QStringLiteral("Transcode"));
+        QCOMPARE(info.value(QStringLiteral("streamType")).toString(), QStringLiteral("HLS"));
+        QCOMPARE(info.value(QStringLiteral("protocol")).toString(), QStringLiteral("https"));
+        QCOMPARE(info.value(QStringLiteral("targetVideoCodec")).toString(), QStringLiteral("hevc"));
+        QCOMPARE(info.value(QStringLiteral("targetAudioCodec")).toString(), QStringLiteral("aac"));
+        QCOMPARE(info.value(QStringLiteral("transcodeReasons")).toStringList(),
+                 (QStringList{QStringLiteral("AudioCodecNotSupported")}));
+        QCOMPARE(info.value(QStringLiteral("container")).toString(), QStringLiteral("mkv"));
+        QCOMPARE(info.value(QStringLiteral("sizeBytes")).toLongLong(), 4'000'000'000LL);
+        QCOMPARE(info.value(QStringLiteral("bitrate")).toLongLong(), 19'000'000LL);
+        QCOMPARE(info.value(QStringLiteral("videoCodec")).toString(), QStringLiteral("hevc"));
+        QCOMPARE(info.value(QStringLiteral("videoProfile")).toString(), QStringLiteral("Main 10"));
+        QCOMPARE(info.value(QStringLiteral("videoLevel")).toDouble(), 153.0);
+        QCOMPARE(info.value(QStringLiteral("videoBitrate")).toLongLong(), 18'000'000LL);
+        QCOMPARE(info.value(QStringLiteral("videoFps")).toDouble(), 23.976);
+        QCOMPARE(info.value(QStringLiteral("videoBitDepth")).toInt(), 10);
+        QCOMPARE(info.value(QStringLiteral("videoPixelFormat")).toString(),
+                 QStringLiteral("yuv420p10le"));
+        QCOMPARE(info.value(QStringLiteral("videoRange")).toString(), QStringLiteral("HDR10"));
+        QCOMPARE(info.value(QStringLiteral("colorSpace")).toString(), QStringLiteral("bt2020nc"));
+        QCOMPARE(info.value(QStringLiteral("colorPrimaries")).toString(), QStringLiteral("bt2020"));
+        QCOMPARE(info.value(QStringLiteral("colorTransfer")).toString(),
+                 QStringLiteral("smpte2084"));
+        QCOMPARE(info.value(QStringLiteral("audioCodec")).toString(), QStringLiteral("dts"));
+        QCOMPARE(info.value(QStringLiteral("audioChannels")).toInt(), 6);
+        QCOMPARE(info.value(QStringLiteral("audioBitrate")).toLongLong(), 1'500'000LL);
+        QCOMPARE(info.value(QStringLiteral("audioSampleRate")).toInt(), 48000);
+        // An audio-only clip has no picture size, no frame counters and no hardware decoder: unknown is absent, never 0
+        for (const char *key :
+             {"videoWidth", "videoHeight", "droppedFrames", "decoderDroppedFrames", "hwdec"})
+            QVERIFY2(!info.contains(QString::fromLatin1(key)), key);
+        // Neither the URL nor the file name is in the snapshot
+        for (auto it = info.cbegin(); it != info.cend(); ++it) {
+            const QString text = it.value().toString() + it.value().toStringList().join(u' ');
+            QVERIFY2(!text.contains(QStringLiteral("clip8")), qPrintable(it.key()));
+            QVERIFY2(!text.contains(QStringLiteral("file:")), qPrintable(it.key()));
+        }
+
+        // The choice of an aspect is this playback's alone
+        QCOMPARE(controller.aspectMode(), QStringLiteral("normal"));
+        controller.setAspectMode(QStringLiteral("zoom"));
+        QCOMPARE(controller.aspectMode(), QStringLiteral("zoom"));
+        QCOMPARE(engine->mpvProperty(QStringLiteral("panscan")).toDouble(), 1.0);
+        controller.setAspectMode(QStringLiteral("custom"));
+        QCOMPARE(controller.aspectMode(), QStringLiteral("zoom"));
+        QVERIFY(settings.value(QStringLiteral("video"), QStringLiteral("aspect")).toString()
+                != QLatin1String("zoom"));
+
+        controller.stop();
+        QTRY_VERIFY(controller.playbackInfo().isEmpty());
+        QCOMPARE(controller.aspectMode(), QStringLiteral("normal"));
+        QCOMPARE(engine->mpvProperty(QStringLiteral("panscan")).toDouble(), 0.0);
+    }
+
+    void aRestartOfTheSameItemKeepsTheAspectChoiceAndTheRate()
+    {
+        FakeJellyfin server;
+        JellyfinClient client;
+        QVERIFY(server.listen() && login(client, server));
+        Kinefin::PlayQueue queue(&client);
+        ClientSettings settings(dir.filePath(QStringLiteral("restart.conf")));
+        Kinefin::PlayerController controller(client, queue, settings, QString());
+        auto *engine = controller.findChild<PlaybackEngine *>();
+        QVERIFY(engine);
+        const QString item = QStringLiteral("c7dd3b1ac7dd3b1a9d42f2ab74f8a1b9");
+        QVERIFY(controller.playItem(item, 0));
+        QVERIFY(engine->init({QStringLiteral("vo=null"), QStringLiteral("ao=null")}));
+        controller.setAspectMode(QStringLiteral("zoom"));
+        engine->setRate(1.5);
+        QTRY_COMPARE(engine->playbackRate(), 1.5);
+        // The same item again keeps both, although the settings are applied again before it opens
+        QVERIFY(controller.playItem(item, 0));
+        QCOMPARE(controller.aspectMode(), QStringLiteral("zoom"));
+        QCOMPARE(engine->mpvProperty(QStringLiteral("panscan")).toDouble(), 1.0);
+        QCOMPARE(engine->mpvProperty(QStringLiteral("speed")).toDouble(), 1.5);
+        // Another item starts from the settings
+        QVERIFY(controller.playItem(QStringLiteral("d5ed5d4e2e5447b58e9f2b6f7bd5c96a"), 0));
+        QCOMPARE(controller.aspectMode(), QStringLiteral("normal"));
+        QCOMPARE(engine->mpvProperty(QStringLiteral("panscan")).toDouble(), 0.0);
+        QCOMPARE(engine->mpvProperty(QStringLiteral("speed")).toDouble(), 1.0);
+    }
+
+    void directPlayShowsTheAudioTrackMpvPlaysAndTheFactsItReports()
+    {
+        FakeJellyfin server;
+        JellyfinClient client;
+        QVERIFY(server.listen() && login(client, server));
+        Kinefin::PlayQueue queue(&client);
+        ClientSettings settings(dir.filePath(QStringLiteral("direct.conf")));
+        Kinefin::PlayerController controller(client, queue, settings, QString());
+        auto *engine = controller.findChild<PlaybackEngine *>();
+        QVERIFY(engine);
+        QVERIFY(controller.playItem(QStringLiteral("c7dd3b1ac7dd3b1a9d42f2ab74f8a1b9"), 0));
+        QVERIFY(engine->init({QStringLiteral("vo=null"), QStringLiteral("ao=null")}));
+
+        PlaybackSource source = directSource(TestWav::writeWavClip(dir, 8));
+        Kinefin::StreamSummary defaultTrack;
+        defaultTrack.index = 1;
+        defaultTrack.type = QStringLiteral("Audio");
+        defaultTrack.codec = QStringLiteral("dts");
+        defaultTrack.isDefault = true;
+        // The clip's only track is the stream with index 0
+        Kinefin::StreamSummary playing;
+        playing.index = 0;
+        playing.type = QStringLiteral("Audio");
+        playing.codec = QStringLiteral("pcm_s16le");
+        source.media.source.streams = {defaultTrack, playing};
+        Q_EMIT client.playbackInfoReady(source);
+
+        QCOMPARE(controller.playbackInfo().value(QStringLiteral("playMethod")).toString(),
+                 QStringLiteral("DirectPlay"));
+        // The track mpv plays replaces the default one as soon as mpv names it
+        QTRY_COMPARE(controller.playbackInfo().value(QStringLiteral("audioCodec")).toString(),
+                     QStringLiteral("pcm_s16le"));
+
+        // The facts mpv reports come from the engine's cache, and an unavailable property takes its fact away; emitted here since the clip has no picture
+        auto *mpv = engine->controller();
+        QVERIFY(mpv);
+        Q_EMIT mpv->propertyChanged(QStringLiteral("dwidth"), qlonglong(1920));
+        Q_EMIT mpv->propertyChanged(QStringLiteral("dheight"), qlonglong(1080));
+        Q_EMIT mpv->propertyChanged(QStringLiteral("frame-drop-count"), qlonglong(0));
+        Q_EMIT mpv->propertyChanged(QStringLiteral("decoder-frame-drop-count"), qlonglong(3));
+        Q_EMIT mpv->propertyChanged(QStringLiteral("hwdec-current"), QStringLiteral("vaapi"));
+        QVariantMap info = controller.playbackInfo();
+        QCOMPARE(info.value(QStringLiteral("videoWidth")).toInt(), 1920);
+        QCOMPARE(info.value(QStringLiteral("videoHeight")).toInt(), 1080);
+        QVERIFY(info.contains(QStringLiteral("droppedFrames")));
+        QCOMPARE(info.value(QStringLiteral("droppedFrames")).toInt(), 0);
+        QCOMPARE(info.value(QStringLiteral("decoderDroppedFrames")).toInt(), 3);
+        QCOMPARE(info.value(QStringLiteral("hwdec")).toString(), QStringLiteral("vaapi"));
+        Q_EMIT mpv->propertyChanged(QStringLiteral("hwdec-current"), QVariant());
+        Q_EMIT mpv->propertyChanged(QStringLiteral("dwidth"), QVariant());
+        info = controller.playbackInfo();
+        QVERIFY(!info.contains(QStringLiteral("hwdec")));
+        QVERIFY(!info.contains(QStringLiteral("videoWidth")));
+        QCOMPARE(info.value(QStringLiteral("videoHeight")).toInt(), 1080);
+
+        controller.stop();
+        QTRY_VERIFY(controller.playbackInfo().isEmpty());
     }
 
   private:

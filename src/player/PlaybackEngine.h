@@ -8,6 +8,7 @@
 #include <QStringList>
 #include <QTimer>
 #include <QVariant>
+#include <QVariantMap>
 
 #include <optional>
 
@@ -74,6 +75,10 @@ class PlaybackEngine final : public QObject {
     [[nodiscard]] qint64 durationTicks() const { return m_durationTicks; }
     [[nodiscard]] bool canSeek() const { return m_canSeek; }
     [[nodiscard]] qreal playbackRate() const { return m_rate; }
+    // Whether the file's last time-pos is within a few seconds of its duration: the rule that makes an eof the item's end and not a dropped connection; valid in streamEnded() until the next open()
+    [[nodiscard]] bool nearEnd() const;
+    // mpv's own picture facts, cached from its property changes (no mpv call): `videoWidth`, `videoHeight` (dwidth, dheight), `droppedFrames` (frame-drop-count), `decoderDroppedFrames` (decoder-frame-drop-count), `hwdec` (hwdec-current); a key is present only while mpv has a value
+    [[nodiscard]] QVariantMap videoFacts() const { return m_videoFacts; }
 
     // The controller, for the windowed item and the tests only: the engine owns it, and callers should stay in the engine API for everything but attaching renderers
     [[nodiscard]] MpvController *controller() const { return m_controller; }
@@ -86,6 +91,8 @@ class PlaybackEngine final : public QObject {
     // mpv's end-file reason unchanged ("eof", "stop", "error"): a literal of mpv's own vocabulary, never a server-built string, so nothing secret can ride along
     void streamEnded(const QString &reason);
     void fileLoaded();
+    // The decoder's picture parameters (video-dec-params) changed or appeared
+    void videoParamsChanged();
 
   private:
     void applyStreamAuthorization();
@@ -112,5 +119,6 @@ class PlaybackEngine final : public QObject {
     qint64 m_durationTicks = 0;
     bool m_canSeek = false;
     qreal m_rate = 1.0;
+    QVariantMap m_videoFacts;
 };
 } // namespace Kinefin

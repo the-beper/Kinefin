@@ -19,32 +19,50 @@ Kirigami.Page {
         if (isShowing)
             return;
         volumePopup.close();
-        clickTimer.stop();
     }
     property bool showChrome: true
     // Below the window's wide limit the controls row shows icons only, each with its text as tooltip and accessible name
     readonly property bool narrow: width < (page.Window.window?.wideLimit ?? 0)
-    // The time button shows the remaining time instead of the total, for as long as this page lives
+    // The button at the end of the timeline shows the remaining time instead of the total, for as long as this page lives
     property bool showRemaining: false
     readonly property bool fullScreen: page.Window.window?.visibility === Window.FullScreen
-    readonly property string timeLabel: {
-        const elapsed = page.player.timeText(page.player.positionTicks);
-        // An unknown length has neither a total nor a remaining time
+    // An unknown length has neither a total nor a remaining time
+    readonly property string endTimeLabel: {
         if (page.player.durationTicks <= 0)
-            return elapsed;
-        const remaining = i18nc("@action:button remaining playback time, with a minus sign", "−%1", page.player.timeText(Math.max(0, page.player.durationTicks - page.player.positionTicks)));
-        if (page.narrow)
-            return page.showRemaining ? remaining : elapsed;
-        return i18nc("@action:button elapsed playback time, then the total or the remaining time", "%1 / %2", elapsed, page.showRemaining ? remaining : page.player.timeText(page.player.durationTicks));
+            return "";
+        if (!page.showRemaining)
+            return page.player.timeText(page.player.durationTicks);
+        return i18nc("@action:button remaining playback time, with a minus sign", "−%1", page.player.timeText(Math.max(0, page.player.durationTicks - page.player.positionTicks)));
     }
-    // The widest the time button gets for this item, whatever it shows: the total stands for every time (none is longer), the remaining one adds its minus sign, and with tabular digits every digit is as wide as 0
-    readonly property string widestTimeLabel: {
-        if (page.player.durationTicks <= 0)
-            return page.timeLabel.replace(/[0-9]/g, "0");
-        const total = page.player.timeText(page.player.durationTicks);
-        const remaining = i18nc("@action:button remaining playback time, with a minus sign", "−%1", total);
-        const widest = page.narrow ? remaining : i18nc("@action:button elapsed playback time, then the total or the remaining time", "%1 / %2", total, remaining);
-        return widest.replace(/[0-9]/g, "0");
+    // The widest the elapsed time gets for this item: the total stands for every time (none is longer), and with tabular digits every digit is as wide as 0
+    readonly property string widestElapsedLabel: page.player.timeText(Math.max(page.player.durationTicks, page.player.positionTicks)).replace(/[0-9]/g, "0")
+    // The widest the end time button gets, whatever it shows: the remaining time adds its minus sign to the total
+    readonly property string widestEndTimeLabel: i18nc("@action:button remaining playback time, with a minus sign", "−%1", page.player.timeText(page.player.durationTicks)).replace(/[0-9]/g, "0")
+    // Set by tests: the clock time the end of the item is counted from, in place of the real one
+    property var fixedNow: null
+    // Counts the 20 s ticks of the clock, so the end time follows it while nothing else changes, as in a pause
+    property int clockTick: 0
+    function endsAtFor(now, tick) {
+        const left = page.player.durationTicks - page.player.positionTicks;
+        if (page.player.durationTicks <= 0 || left <= 0)
+            return "";
+        // A tick is 100 ns; half a minute is added so that cutting the seconds off rounds to the nearest minute
+        const end = new Date(now.getTime() + left / 10000 / Math.max(0.01, page.player.rate) + 30000);
+        end.setSeconds(0, 0);
+        return i18nc("@info:status", "Ends at %1", end.toLocaleTimeString(Qt.locale(), Locale.ShortFormat));
+    }
+    // The position, the duration and the rate are the inputs: a seek or a new rate moves the end at once
+    readonly property string endsAtText: page.endsAtFor(page.fixedNow ?? new Date(), page.clockTick)
+    // The size of the video item in device pixels
+    readonly property size videoPixelSize: {
+        const ratio = page.Window.window?.devicePixelRatio ?? 1;
+        return Qt.size(Math.round(video.width * ratio), Math.round(video.height * ratio));
+    }
+    // Whether the Playback Info panel is open
+    property bool playbackInfoShown: false
+    function closePlaybackInfo() {
+        page.playbackInfoShown = false;
+        page.focusPrimary();
     }
     // An open menu or the queue panel keeps the bars up
     readonly property bool menuOpen: queuePanel.opened || audioMenu.opened || subtitlesMenu.opened || moreMenu.opened
@@ -62,7 +80,7 @@ Kirigami.Page {
     // The page keeps the keyboard: the controls of the bars take it only through Tab, so the keys work whatever was clicked
     function focusPrimary() { page.forceActiveFocus(Qt.TabFocusReason); }
     function wakeChrome() { showChrome = true; chromeTimer.restart(); }
-    function closePlayer() { clickTimer.stop(); page.player.stop(); page.Window.window.pageStack.pop(); }
+    function closePlayer() { page.player.stop(); page.Window.window.pageStack.pop(); }
     // When a menu or popup last began to close: the click that closes one is not a click on the video
     property double popupClosedAt: 0
     function popupGone() {
@@ -115,13 +133,16 @@ Kirigami.Page {
         return false;
     }
 
-    // Esc, Alt+Left and the mouse back button close the queue panel first, then leave a full screen the player entered, and only then leave the player
+    // Esc, Alt+Left and the mouse back button close the queue panel and the Playback Info panel first, then leave a full screen the player entered, and only then leave the player
     onBackRequested: event => {
         if (volumePopup.opened) {
             volumePopup.close();
             event.accepted = true;
         } else if (queuePanel.opened) {
             queuePanel.close();
+            event.accepted = true;
+        } else if (page.playbackInfoShown) {
+            page.closePlaybackInfo();
             event.accepted = true;
         } else if (page.Window.window.playerFullscreen) {
             page.Window.window.togglePlayerFullscreen();
@@ -185,6 +206,14 @@ Kirigami.Page {
             volumePopup.close();
         }
     }
+    Timer {
+        id: clockTimer
+        objectName: "playerClockTimer"
+        interval: 20000
+        repeat: true
+        running: page.isShowing
+        onTriggered: page.clockTick++
+    }
     // Moving the keyboard through the bars keeps them up
     Connections {
         target: page.Window.window
@@ -222,29 +251,37 @@ Kirigami.Page {
             page.wakeChrome();
         }
     }
-    // A click on the video pauses once the double-click interval has passed without a second click; a double click toggles full screen instead; a tap on a touch screen only shows the bars
+    // A click on the video pauses or resumes at once; a double click toggles full screen and puts the pause back as the click before it changed it; a tap on a touch screen only shows the bars
     TapHandler {
         id: videoTap
+        // Whether the last click of this run paused or resumed: the double click undoes it
+        property bool toggledPause: false
         onTapped: (eventPoint, button) => {
             page.wakeChrome();
-            // Only the first click of a run starts the pause: the second is a double click, a third neither; and a click that closed a menu or popup is spent
-            if (eventPoint.device.type === PointerDevice.TouchScreen || videoTap.tapCount > 1 || page.menuOpen || volumePopup.opened || Date.now() - page.popupClosedAt < Qt.styleHints.mouseDoubleClickInterval)
+            // Only the first click of a run pauses: the second is a double click, a third neither
+            if (videoTap.tapCount > 1)
                 return;
-            clickTimer.restart();
+            videoTap.toggledPause = false;
+            // A click that closed a menu or popup is spent on it
+            if (eventPoint.device.type === PointerDevice.TouchScreen || page.menuOpen || volumePopup.opened || Date.now() - page.popupClosedAt < Qt.styleHints.mouseDoubleClickInterval)
+                return;
+            // Nothing to pause while an item opens or after it failed
+            if (page.player.active && !page.player.loading) {
+                const wasPaused = page.player.paused;
+                page.player.togglePause();
+                videoTap.toggledPause = page.player.paused !== wasPaused;
+            }
         }
         onDoubleTapped: (eventPoint, button) => {
-            clickTimer.stop();
             if (eventPoint.device.type === PointerDevice.TouchScreen)
                 return;
+            if (videoTap.toggledPause) {
+                page.player.togglePause();
+                videoTap.toggledPause = false;
+            }
             page.Window.window.togglePlayerFullscreen();
             page.wakeChrome();
         }
-    }
-    Timer {
-        id: clickTimer
-        interval: Qt.styleHints.mouseDoubleClickInterval
-        // Nothing to pause while an item opens or after it failed
-        onTriggered: if (page.player.active && !page.player.loading) page.player.togglePause()
     }
 
     // The loading and error overlay stays visible when the bars hide
@@ -424,42 +461,89 @@ Kirigami.Page {
                 anchors.bottom: parent.bottom
                 anchors.margins: Kirigami.Units.largeSpacing
                 spacing: Kirigami.Units.smallSpacing
-                Controls.Slider {
-                    id: timeline
-                    objectName: "playbackTimeline"
+                RowLayout {
+                    objectName: "playerTimelineRow"
                     Layout.fillWidth: true
-                    focusPolicy: Qt.TabFocus
-                    enabled: page.player.canSeek && page.player.durationTicks > 0
-                    from: 0
-                    to: Math.max(1, page.player.durationTicks / 10000000)
-                    // No step size: a drag would land on its multiples (and the style would draw a tick mark at each); with the focus here the arrow keys seek as the page's do
-                    Keys.onLeftPressed: { page.player.seekRelative(-10); page.wakeChrome(); }
-                    Keys.onRightPressed: { page.player.seekRelative(10); page.wakeChrome(); }
-                    Keys.onUpPressed: { page.player.seekRelative(60); page.wakeChrome(); }
-                    Keys.onDownPressed: { page.player.seekRelative(-60); page.wakeChrome(); }
-                    property real dragSeconds: 0
-                    value: pressed ? dragSeconds : page.player.positionTicks / 10000000
-                    onMoved: {
-                        page.wakeChrome();
-                        if (!pressed) {
-                            page.player.seek(Math.round(value * 10000000));
-                            return;
-                        }
-                        dragSeconds = value;
-                        previewTimer.restart();
+                    spacing: Kirigami.Units.smallSpacing
+                    Controls.Label {
+                        id: elapsedLabel
+                        objectName: "playerElapsedLabel"
+                        // As wide as its widest text and never otherwise, so the timeline does not move while the numbers change
+                        Layout.minimumWidth: widestElapsed.implicitWidth
+                        Layout.preferredWidth: widestElapsed.implicitWidth
+                        Layout.maximumWidth: widestElapsed.implicitWidth
+                        horizontalAlignment: Text.AlignRight
+                        font.features: { "tnum": 1 }
+                        textFormat: Text.PlainText
+                        text: page.player.timeText(page.player.positionTicks)
                     }
-                    onPressedChanged: {
-                        if (pressed) {
-                            dragSeconds = page.player.positionTicks / 10000000;
-                            page.wakeChrome();
-                        } else {
-                            previewTimer.stop();
-                            page.player.seek(Math.round(dragSeconds * 10000000));
-                            page.player.clearPreview();
-                            page.wakeChrome();
-                        }
+                    // The elapsed time label with its widest text, never shown
+                    Controls.Label {
+                        id: widestElapsed
+                        visible: false
+                        font: elapsedLabel.font
+                        text: page.widestElapsedLabel
                     }
-                    Accessible.name: i18n("Playback position")
+                    Controls.Slider {
+                        id: timeline
+                        objectName: "playbackTimeline"
+                        Layout.fillWidth: true
+                        focusPolicy: Qt.TabFocus
+                        enabled: page.player.canSeek && page.player.durationTicks > 0
+                        from: 0
+                        to: Math.max(1, page.player.durationTicks / 10000000)
+                        // No step size: a drag would land on its multiples (and the style would draw a tick mark at each); with the focus here the arrow keys seek as the page's do
+                        Keys.onLeftPressed: { page.player.seekRelative(-10); page.wakeChrome(); }
+                        Keys.onRightPressed: { page.player.seekRelative(10); page.wakeChrome(); }
+                        Keys.onUpPressed: { page.player.seekRelative(60); page.wakeChrome(); }
+                        Keys.onDownPressed: { page.player.seekRelative(-60); page.wakeChrome(); }
+                        property real dragSeconds: 0
+                        value: pressed ? dragSeconds : page.player.positionTicks / 10000000
+                        onMoved: {
+                            page.wakeChrome();
+                            if (!pressed) {
+                                page.player.seek(Math.round(value * 10000000));
+                                return;
+                            }
+                            dragSeconds = value;
+                            previewTimer.restart();
+                        }
+                        onPressedChanged: {
+                            if (pressed) {
+                                dragSeconds = page.player.positionTicks / 10000000;
+                                page.wakeChrome();
+                            } else {
+                                previewTimer.stop();
+                                page.player.seek(Math.round(dragSeconds * 10000000));
+                                page.player.clearPreview();
+                                page.wakeChrome();
+                            }
+                        }
+                        Accessible.name: i18n("Playback position")
+                    }
+                    Controls.ToolButton {
+                        id: timeButton
+                        objectName: "playerTimeButton"
+                        visible: page.player.durationTicks > 0
+                        // As wide as its widest text, so neither the button's frame nor the timeline beside it move while the numbers change
+                        Layout.preferredWidth: Math.max(implicitWidth, widestTime.implicitWidth)
+                        focusPolicy: Qt.TabFocus
+                        font.features: { "tnum": 1 }
+                        text: page.endTimeLabel
+                        Accessible.name: page.showRemaining ? i18nc("@action:button accessible name", "Remaining time %1", page.player.timeText(Math.max(0, page.player.durationTicks - page.player.positionTicks))) : i18nc("@action:button accessible name", "Total time %1", page.player.timeText(page.player.durationTicks))
+                        Accessible.description: Controls.ToolTip.text
+                        Controls.ToolTip.text: page.showRemaining ? i18nc("@info:tooltip", "Show total time") : i18nc("@info:tooltip", "Show remaining time")
+                        Controls.ToolTip.visible: hovered || visualFocus
+                        Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
+                        onClicked: { page.showRemaining = !page.showRemaining; page.wakeChrome(); }
+                    }
+                    // The time button with its widest text, never shown: the style paints the text inside margins of its own, so only the style can say how wide that is
+                    Controls.ToolButton {
+                        id: widestTime
+                        visible: false
+                        font: timeButton.font
+                        text: page.widestEndTimeLabel
+                    }
                 }
                 RowLayout {
                     objectName: "playerControlRow"
@@ -507,28 +591,15 @@ Kirigami.Page {
                             onStepped: steps => page.stepVolume(steps)
                         }
                     }
-                    Controls.ToolButton {
-                        id: timeButton
-                        objectName: "playerTimeButton"
-                        // As wide as its widest text, so neither the button's frame nor the controls beside it move while the numbers change
-                        Layout.preferredWidth: Math.max(implicitWidth, widestTime.implicitWidth)
-                        focusPolicy: Qt.TabFocus
-                        font.features: { "tnum": 1 }
-                        text: page.timeLabel
-                        Accessible.description: Controls.ToolTip.text
-                        Controls.ToolTip.text: !page.showRemaining ? i18nc("@info:tooltip", "Show remaining time") : page.narrow ? i18nc("@info:tooltip", "Show elapsed time") : i18nc("@info:tooltip", "Show total time")
-                        Controls.ToolTip.visible: hovered || visualFocus
-                        Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
-                        onClicked: { page.showRemaining = !page.showRemaining; page.wakeChrome(); }
-                    }
-                    // The time button with its widest text, never shown: the style paints the text inside margins of its own, so only the style can say how wide that is
-                    Controls.ToolButton {
-                        id: widestTime
-                        visible: false
-                        font: timeButton.font
-                        text: page.widestTimeLabel
-                    }
                     Item { Layout.fillWidth: true }
+                    Controls.Label {
+                        objectName: "playerEndsAtLabel"
+                        // The icon-only row of a narrow window has no room for it
+                        visible: text.length > 0 && !page.narrow
+                        Layout.rightMargin: Kirigami.Units.largeSpacing
+                        textFormat: Text.PlainText
+                        text: page.endsAtText
+                    }
                     OsdButton {
                         id: audioButton
                         objectName: "playerAudioButton"
@@ -573,6 +644,23 @@ Kirigami.Page {
                 Timer { id: screenshotNotice; interval: 6000 }
             }
         }
+    }
+    // Over the bars and the video, and it stays when the bars go; below the top bar while that is up
+    PlaybackInfoOverlay {
+        id: playbackInfo
+        visible: page.playbackInfoShown
+        player: page.player
+        playerSize: page.videoPixelSize
+        anchors.left: parent.left
+        anchors.top: parent.top
+        anchors.leftMargin: Kirigami.Units.largeSpacing
+        anchors.topMargin: osd.wanted ? topRow.y + topRow.implicitHeight + Kirigami.Units.largeSpacing : Kirigami.Units.largeSpacing
+        width: Math.min(Kirigami.Units.gridUnit * 30, page.width - Kirigami.Units.largeSpacing * 2)
+        maximumHeight: page.height - anchors.topMargin - bottomBar.height
+        Behavior on anchors.topMargin {
+            NumberAnimation { duration: Kirigami.Units.longDuration; easing.type: Easing.OutCubic }
+        }
+        onCloseRequested: page.closePlaybackInfo()
     }
     // The menus of the bottom bar belong to the page, not to the bars: they keep the window's colours over the dark bars
     Controls.Menu {
@@ -650,8 +738,6 @@ Kirigami.Page {
             objectName: "playerRepeatMenu"
             title: i18n("Repeat")
             icon.name: "media-playlist-repeat"
-            // An item played alone has nothing to repeat into; a repeat that is on can always be turned off
-            enabled: page.player.queueCount > 0 || page.player.hasNext || page.player.hasPrevious || page.player.repeatMode !== 0
             Controls.MenuItem {
                 objectName: "playerRepeatOff"
                 text: i18nc("@item:inmenu repeat", "Off")
@@ -663,6 +749,8 @@ Kirigami.Page {
             Controls.MenuItem {
                 objectName: "playerRepeatAll"
                 text: i18nc("@item:inmenu repeat", "All")
+                // A lone item repeats as the current item only; a repeat of all that is on can always be turned off
+                enabled: page.player.queueCount > 0 || page.player.hasNext || page.player.hasPrevious || page.player.repeatMode === 1
                 checkable: true
                 autoExclusive: true
                 checked: page.player.repeatMode === 1
@@ -695,6 +783,19 @@ Kirigami.Page {
                 onObjectAdded: (index, object) => speedMenu.insertItem(index, object)
                 onObjectRemoved: (index, object) => speedMenu.removeItem(object)
             }
+        }
+        // This playback only
+        Controls.Menu {
+            objectName: "playerAspectMenu"
+            title: i18nc("@title:menu", "Aspect Ratio")
+            icon.name: "zoom-fit-best"
+            AspectItem { mode: "normal"; text: i18nc("@item:inmenu aspect ratio", "Auto") }
+            AspectItem { mode: "zoom"; text: i18nc("@item:inmenu aspect ratio", "Zoom") }
+            AspectItem { mode: "stretch"; text: i18nc("@item:inmenu aspect ratio", "Stretch") }
+            AspectItem { mode: "force_4_3"; text: i18nc("@item:inmenu aspect ratio", "4:3") }
+            AspectItem { mode: "force_16_9"; text: i18nc("@item:inmenu aspect ratio", "16:9") }
+            AspectItem { mode: "force_16_9_if_4_3"; text: i18nc("@item:inmenu aspect ratio", "Widescreen for 4:3 Video") }
+            AspectItem { mode: "noscaling"; text: i18nc("@item:inmenu aspect ratio", "Original Size") }
         }
         Controls.Menu {
             title: i18n("AV Sync")
@@ -738,6 +839,14 @@ Kirigami.Page {
                 page.wakeChrome();
                 screenshotNotice.restart();
             }
+        }
+        Controls.MenuItem {
+            objectName: "playerPlaybackInfoItem"
+            text: i18nc("@action:inmenu", "Playback Info")
+            icon.name: "dialog-information"
+            checkable: true
+            checked: page.playbackInfoShown
+            onTriggered: page.playbackInfoShown = !page.playbackInfoShown
         }
     }
     Controls.Popup {
@@ -877,6 +986,15 @@ Kirigami.Page {
                 wheelArea.stepped(up ? 1 : -1);
             }
         }
+    }
+    // A checkable entry of the Aspect Ratio menu: it follows the player's mode and sets it
+    component AspectItem: Controls.MenuItem {
+        required property string mode
+        objectName: "playerAspect_" + mode
+        checkable: true
+        autoExclusive: true
+        checked: page.player.aspectMode === mode
+        onTriggered: page.player.setAspectMode(mode)
     }
     // A button of the bars: icon only unless it says otherwise, its text as tooltip and accessible name, and no keyboard focus from a click, so the page keeps the keys
     component OsdButton: Controls.ToolButton {

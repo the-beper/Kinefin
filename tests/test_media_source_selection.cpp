@@ -2,12 +2,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QRegularExpression>
 #include <QUrlQuery>
 #include <QtTest>
 
 #include "api/MediaSourceSelection.h"
 
 using Kinefin::isValidJellyfinId;
+using Kinefin::pickStream;
+using Kinefin::PlaybackMediaInfo;
 using Kinefin::PlaybackSource;
 using Kinefin::selectPlaybackSource;
 using Kinefin::SourceSelection;
@@ -50,6 +53,54 @@ QJsonObject response(const QJsonArray &sources)
 SourceSelection select(const QJsonObject &json, const QUrl &base = kBase)
 {
     return selectPlaybackSource(json, kItem, base, kToken);
+}
+
+QJsonObject videoStream()
+{
+    return {{QStringLiteral("Type"), QStringLiteral("Video")},
+            {QStringLiteral("Index"), 0},
+            {QStringLiteral("Codec"), QStringLiteral("hevc")},
+            {QStringLiteral("Profile"), QStringLiteral("Main 10")},
+            {QStringLiteral("Level"), 153},
+            {QStringLiteral("BitRate"), 18'000'000},
+            {QStringLiteral("RealFrameRate"), 23.976},
+            {QStringLiteral("BitDepth"), 10},
+            {QStringLiteral("PixelFormat"), QStringLiteral("yuv420p10le")},
+            {QStringLiteral("VideoRange"), QStringLiteral("HDR")},
+            {QStringLiteral("VideoRangeType"), QStringLiteral("HDR10")},
+            {QStringLiteral("ColorSpace"), QStringLiteral("bt2020nc")},
+            {QStringLiteral("ColorPrimaries"), QStringLiteral("bt2020")},
+            {QStringLiteral("ColorTransfer"), QStringLiteral("smpte2084")},
+            {QStringLiteral("Width"), 3840},
+            {QStringLiteral("Height"), 2160}};
+}
+
+QJsonObject audioStream(int index, const QString &codec, bool isDefault)
+{
+    return {{QStringLiteral("Type"), QStringLiteral("Audio")},
+            {QStringLiteral("Index"), index},
+            {QStringLiteral("Codec"), codec},
+            {QStringLiteral("Channels"), 6},
+            {QStringLiteral("BitRate"), 640'000},
+            {QStringLiteral("SampleRate"), 48000},
+            {QStringLiteral("IsDefault"), isDefault}};
+}
+
+QJsonObject withStreams(QJsonObject mediaSource, const QJsonArray &streams)
+{
+    mediaSource.insert(QStringLiteral("Container"), QStringLiteral("mkv"));
+    mediaSource.insert(QStringLiteral("Size"), 12'345'678'901LL);
+    mediaSource.insert(QStringLiteral("Bitrate"), 19'000'000);
+    mediaSource.insert(QStringLiteral("MediaStreams"), streams);
+    return mediaSource;
+}
+
+QJsonObject transcodeSource(const QString &query)
+{
+    return withStreams(source(kSourceId, false, true,
+                              QStringLiteral("/videos/x/master.m3u8?%1&ApiKey=%2")
+                                  .arg(query, QString::fromLatin1(kToken))),
+                       QJsonArray{videoStream(), audioStream(1, QStringLiteral("dts"), true)});
 }
 } // namespace
 
@@ -379,6 +430,245 @@ class TestMediaSourceSelection : public QObject {
             const auto selection = select(response({mediaSource}));
             QVERIFY2(selection.source, qPrintable(raw));
             QVERIFY2(selection.source->externalSubtitles.isEmpty(), qPrintable(raw));
+        }
+    }
+
+    void directPlayKeepsTheFactsOfTheSource()
+    {
+        const QJsonObject mediaSource =
+            withStreams(source(kSourceId, true, true),
+                        QJsonArray{videoStream(), audioStream(1, QStringLiteral("aac"), false),
+                                   audioStream(2, QStringLiteral("eac3"), true)});
+        const auto selection = select(response({mediaSource}));
+        QVERIFY(selection.source);
+        const PlaybackMediaInfo &media = selection.source->media;
+        QCOMPARE(media.streamType, QStringLiteral("File"));
+        QCOMPARE(media.protocol, QStringLiteral("https"));
+        QVERIFY(media.transcodeReasons.isEmpty());
+        QVERIFY(media.targetVideoCodec.isEmpty());
+        QCOMPARE(media.source.container, QStringLiteral("mkv"));
+        QCOMPARE(media.source.size, 12'345'678'901LL);
+        QCOMPARE(media.source.bitrate, 19'000'000LL);
+        const auto *video = pickStream(media.source, u"Video");
+        QVERIFY(video);
+        QCOMPARE(video->codec, QStringLiteral("hevc"));
+        QCOMPARE(video->profile, QStringLiteral("Main 10"));
+        QCOMPARE(video->level, 153.0);
+        QCOMPARE(video->bitrate, 18'000'000LL);
+        QCOMPARE(video->frameRate, 23.976);
+        QCOMPARE(video->bitDepth, 10);
+        QCOMPARE(video->pixelFormat, QStringLiteral("yuv420p10le"));
+        QCOMPARE(video->videoRange, QStringLiteral("HDR"));
+        QCOMPARE(video->videoRangeType, QStringLiteral("HDR10"));
+        QCOMPARE(video->colorSpace, QStringLiteral("bt2020nc"));
+        QCOMPARE(video->colorPrimaries, QStringLiteral("bt2020"));
+        QCOMPARE(video->colorTransfer, QStringLiteral("smpte2084"));
+        // The default audio track unless an index names one
+        const auto *audio = pickStream(media.source, u"Audio");
+        QVERIFY(audio);
+        QCOMPARE(audio->codec, QStringLiteral("eac3"));
+        QCOMPARE(audio->channels, 6);
+        QCOMPARE(audio->sampleRate, 48000);
+        QCOMPARE(audio->bitrate, 640'000LL);
+        QCOMPARE(pickStream(media.source, u"Audio", 1)->codec, QStringLiteral("aac"));
+        // An index nothing has falls back to the default track
+        QCOMPARE(pickStream(media.source, u"Audio", 9)->codec, QStringLiteral("eac3"));
+        QVERIFY(!pickStream(media.source, u"Subtitle"));
+    }
+
+    void firstAudioStreamWhenNoneIsDefault()
+    {
+        const auto selection = select(
+            response({withStreams(source(kSourceId, true, true),
+                                  QJsonArray{audioStream(1, QStringLiteral("aac"), false),
+                                             audioStream(2, QStringLiteral("eac3"), false)})}));
+        QVERIFY(selection.source);
+        QCOMPARE(pickStream(selection.source->media.source, u"Audio")->codec,
+                 QStringLiteral("aac"));
+        QVERIFY(!pickStream(selection.source->media.source, u"Video"));
+    }
+
+    void hostileMediaFactsAreCappedAndRangeChecked()
+    {
+        QJsonObject video = videoStream();
+        video.insert(QStringLiteral("Codec"), QString(500, QLatin1Char('h')));
+        video.insert(QStringLiteral("Profile"), QStringLiteral("Main\n<b>10</b>\x01"));
+        video.insert(QStringLiteral("PixelFormat"), QStringLiteral("a\u202eb"));
+        video.insert(QStringLiteral("Level"), 1e12);
+        video.insert(QStringLiteral("RealFrameRate"), -5);
+        video.insert(QStringLiteral("AverageFrameRate"), 25.0);
+        video.insert(QStringLiteral("BitDepth"), -1);
+        video.insert(QStringLiteral("BitRate"), QStringLiteral("fast"));
+        video.insert(QStringLiteral("ColorSpace"), 7);
+        video.insert(QStringLiteral("ColorTransfer"), QStringLiteral("smpte2084\n"));
+        QJsonObject audio = audioStream(1, QStringLiteral("aac"), true);
+        audio.insert(QStringLiteral("Channels"), 1000);
+        audio.insert(QStringLiteral("SampleRate"), 1e12);
+        QJsonObject mediaSource =
+            withStreams(source(kSourceId, true, true), QJsonArray{video, audio});
+        mediaSource.insert(QStringLiteral("Container"), QString(500, QLatin1Char('c')));
+        mediaSource.insert(QStringLiteral("Size"), -1);
+        mediaSource.insert(QStringLiteral("Bitrate"), 1e15);
+        const auto selection = select(response({mediaSource}));
+        QVERIFY(selection.source);
+        const PlaybackMediaInfo &media = selection.source->media;
+        QCOMPARE(media.source.container.size(), 64);
+        QCOMPARE(media.source.size, 0LL);
+        QCOMPARE(media.source.bitrate, 0LL);
+        const auto *parsedVideo = pickStream(media.source, u"Video");
+        QVERIFY(parsedVideo);
+        QCOMPARE(parsedVideo->codec.size(), 64);
+        // A token with a control or bidi character is dropped whole, markup stays plain text
+        QVERIFY(parsedVideo->profile.isEmpty());
+        QVERIFY(parsedVideo->pixelFormat.isEmpty());
+        QCOMPARE(parsedVideo->level, 0.0);
+        QCOMPARE(parsedVideo->frameRate, 25.0);
+        QCOMPARE(parsedVideo->bitDepth, 0);
+        QCOMPARE(parsedVideo->bitrate, 0LL);
+        QVERIFY(parsedVideo->colorSpace.isEmpty());
+        // A final newline is no printable character either
+        QVERIFY(parsedVideo->colorTransfer.isEmpty());
+        const auto *parsedAudio = pickStream(media.source, u"Audio");
+        QVERIFY(parsedAudio);
+        QCOMPARE(parsedAudio->channels, 0);
+        QCOMPARE(parsedAudio->sampleRate, 0);
+    }
+
+    void aHostileStreamListIsCapped()
+    {
+        QJsonArray streams;
+        for (int i = 0; i < 200; ++i)
+            streams.append(audioStream(i, QStringLiteral("aac"), false));
+        const auto selection =
+            select(response({withStreams(source(kSourceId, true, true), streams)}));
+        QVERIFY(selection.source);
+        QCOMPARE(selection.source->media.source.streams.size(),
+                 int(Kinefin::ItemDetails::MaxStreams));
+    }
+
+    void transcodeKeepsReasonsAndTargetCodecs()
+    {
+        const auto selection = select(response({transcodeSource(QStringLiteral(
+            "VideoCodec=h264,hevc&AudioCodec=aac,mp3&TranscodeReasons=VideoCodecNotSupported,"
+            "AudioCodecNotSupported"))}));
+        QVERIFY(selection.source);
+        const PlaybackMediaInfo &media = selection.source->media;
+        QCOMPARE(media.streamType, QStringLiteral("HLS"));
+        QCOMPARE(media.protocol, QStringLiteral("https"));
+        QCOMPARE(media.targetVideoCodec, QStringLiteral("h264"));
+        QCOMPARE(media.targetAudioCodec, QStringLiteral("aac"));
+        QCOMPARE(media.transcodeReasons, (QStringList{QStringLiteral("VideoCodecNotSupported"),
+                                                      QStringLiteral("AudioCodecNotSupported")}));
+    }
+
+    void theTargetVideoCodecIsTheUrlsFirstNeverTheSources()
+    {
+        // Audio-only reasons say nothing about the video: the target is what the URL lists first
+        const auto selection = select(response(
+            {transcodeSource(QStringLiteral("VideoCodec=h264,hevc&AudioCodec=aac&TranscodeReasons="
+                                            "AudioCodecNotSupported,ContainerNotSupported"))}));
+        QVERIFY(selection.source);
+        QCOMPARE(selection.source->media.targetVideoCodec, QStringLiteral("h264"));
+        QCOMPARE(selection.source->media.targetAudioCodec, QStringLiteral("aac"));
+        // No video codec in the URL leaves the target empty, whatever the source's video is
+        const auto none = select(response({transcodeSource(QStringLiteral("AudioCodec=aac"))}));
+        QVERIFY(none.source);
+        QVERIFY(none.source->media.targetVideoCodec.isEmpty());
+    }
+
+    void transcodeReasonsAreFilteredAndCapped()
+    {
+        QStringList names;
+        for (int i = 0; i < 40; ++i)
+            names << QStringLiteral("R") + QChar(u'A' + i % 26) + QChar(u'a' + i / 26);
+        const QString hostile = QStringLiteral("Bad%20Name,%3Cscript%3E,Under_score,Digit1,,")
+                                + QString(65, u'x') + QLatin1Char(',')
+                                + names.join(QLatin1Char(',')) + QStringLiteral(",RAa");
+        const auto selection =
+            select(response({transcodeSource(QStringLiteral("TranscodeReasons=") + hostile)}));
+        QVERIFY(selection.source);
+        QStringList reasons = selection.source->media.transcodeReasons;
+        QCOMPARE(reasons.size(), int(PlaybackMediaInfo::MaxTranscodeReasons));
+        QVERIFY(!reasons.contains(QStringLiteral("Bad Name")));
+        for (const QString &reason : reasons)
+            QVERIFY2(
+                QRegularExpression(QStringLiteral("^[A-Za-z]{1,64}$")).match(reason).hasMatch(),
+                qPrintable(reason));
+        QCOMPARE(reasons.first(), names.first());
+        QCOMPARE(reasons.removeDuplicates(), 0);
+        // A repeated name is listed once
+        const auto repeated =
+            select(response({transcodeSource(QStringLiteral("TranscodeReasons=RAa,RAa,RBa,RAa"))}));
+        QVERIFY(repeated.source);
+        QCOMPARE(repeated.source->media.transcodeReasons,
+                 (QStringList{QStringLiteral("RAa"), QStringLiteral("RBa")}));
+    }
+
+    void transcodeReasonsFallBackToTheSourceField()
+    {
+        QJsonObject mediaSource = transcodeSource(QStringLiteral("VideoCodec=h264"));
+        mediaSource.insert(QStringLiteral("TranscodeReasons"),
+                           QJsonArray{QStringLiteral("DirectPlayError"), 7,
+                                      QStringLiteral("not valid"),
+                                      QStringLiteral("AudioIsExternal")});
+        const auto selection = select(response({mediaSource}));
+        QVERIFY(selection.source);
+        QCOMPARE(
+            selection.source->media.transcodeReasons,
+            (QStringList{QStringLiteral("DirectPlayError"), QStringLiteral("AudioIsExternal")}));
+        // The query wins when it has reasons
+        mediaSource.insert(
+            QStringLiteral("TranscodingUrl"),
+            QStringLiteral("/videos/x/master.m3u8?TranscodeReasons=VideoCodecNotSupported"));
+        const auto both = select(response({mediaSource}));
+        QVERIFY(both.source);
+        QCOMPARE(both.source->media.transcodeReasons,
+                 (QStringList{QStringLiteral("VideoCodecNotSupported")}));
+    }
+
+    void hostileTargetCodecsAreDropped()
+    {
+        const auto selection = select(response({transcodeSource(QStringLiteral(
+            "VideoCodec=h264%3Brm%20-rf&AudioCodec=%3Cb%3E&TranscodeReasons=DirectPlayError"))}));
+        QVERIFY(selection.source);
+        QVERIFY(selection.source->media.targetVideoCodec.isEmpty());
+        QVERIFY(selection.source->media.targetAudioCodec.isEmpty());
+        QCOMPARE(selection.source->media.transcodeReasons,
+                 (QStringList{QStringLiteral("DirectPlayError")}));
+    }
+
+    void streamTypeOfATranscodeFollowsTheUrlExtension()
+    {
+        const auto remux = select(response({withStreams(
+            source(kSourceId, false, true, QStringLiteral("/videos/x/stream.mp4?VideoCodec=h264")),
+            QJsonArray{videoStream()})}));
+        QVERIFY(remux.source);
+        QCOMPARE(remux.source->media.streamType, QStringLiteral("MP4"));
+        const auto bare = select(response(
+            {source(kSourceId, false, true, QStringLiteral("/videos/x/master?VideoCodec=h264"))}));
+        QVERIFY(bare.source);
+        QVERIFY(bare.source->media.streamType.isEmpty());
+    }
+
+    void theMediaInfoNeverHoldsTheUrlOrTheToken()
+    {
+        const auto selection = select(response({transcodeSource(
+            QStringLiteral("VideoCodec=h264&TranscodeReasons=DirectPlayError&MediaSourceId=")
+            + kSourceId)}));
+        QVERIFY(selection.source);
+        const PlaybackMediaInfo &media = selection.source->media;
+        QStringList strings{media.streamType,       media.protocol,    media.targetVideoCodec,
+                            media.targetAudioCodec, media.source.name, media.source.container};
+        strings += media.transcodeReasons;
+        for (const auto &stream : media.source.streams)
+            strings << stream.type << stream.codec << stream.profile << stream.title
+                    << stream.language << stream.pixelFormat << stream.videoRange
+                    << stream.videoRangeType << stream.colorSpace << stream.colorPrimaries
+                    << stream.colorTransfer << stream.channelLayout;
+        for (const QString &text : strings) {
+            QVERIFY2(!text.contains(QString::fromLatin1(kToken)), qPrintable(text));
+            QVERIFY2(!text.contains(QStringLiteral("master.m3u8")), qPrintable(text));
+            QVERIFY2(!text.contains(QStringLiteral("jf.example")), qPrintable(text));
         }
     }
 

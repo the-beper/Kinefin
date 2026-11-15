@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: kinefin 0\n"
 "Report-Msgid-Bugs-To: https://github.com/the-beper/Kinefin/issues\n"
-"POT-Creation-Date: 2026-11-15 15:22+0000\n"
+"POT-Creation-Date: 2026-11-15 16:21+0000\n"
 "PO-Revision-Date: 2026-11-07 00:00+0000\n"
 "Last-Translator: the-beper\n"
 "Language-Team: Italian\n"
@@ -86,13 +86,13 @@ msgstr "Quick Connect non riuscito o scaduto. Avvialo di nuovo"
 msgid "Could not load the libraries. Try again"
 msgstr "Impossibile caricare le librerie. Riprova"
 
-#: src/player/PlayerController.cpp:48 src/qml/EpisodeRow.qml:38
+#: src/player/PlayerController.cpp:50 src/qml/EpisodeRow.qml:38
 #: src/qml/ItemDetailsPage.qml:67
 msgctxt "season and episode range"
 msgid "S%1:E%2–E%3"
 msgstr "S%1:E%2–E%3"
 
-#: src/player/PlayerController.cpp:50 src/qml/HomePage.qml:209
+#: src/player/PlayerController.cpp:52 src/qml/HomePage.qml:209
 #: src/qml/EpisodeRow.qml:38 src/qml/ItemDetailsPage.qml:67
 #: src/qml/ResumeItemsPage.qml:121 src/qml/SearchPage.qml:216
 #: src/qml/QueuePage.qml:117 src/qml/GenreRailsView.qml:214
@@ -103,13 +103,13 @@ msgctxt "season and episode number"
 msgid "S%1:E%2"
 msgstr "S%1:E%2"
 
-#: src/player/PlayerController.cpp:53 src/qml/EpisodeRow.qml:40
+#: src/player/PlayerController.cpp:55 src/qml/EpisodeRow.qml:40
 #: src/qml/ItemDetailsPage.qml:68
 msgctxt "episode number range"
 msgid "E%1–E%2"
 msgstr "E%1–E%2"
 
-#: src/player/PlayerController.cpp:55 src/qml/HomePage.qml:209
+#: src/player/PlayerController.cpp:57 src/qml/HomePage.qml:209
 #: src/qml/EpisodeRow.qml:41 src/qml/ItemDetailsPage.qml:68
 #: src/qml/ResumeItemsPage.qml:121 src/qml/SearchPage.qml:216
 #: src/qml/QueuePage.qml:117 src/qml/GenreRailsView.qml:214
@@ -120,7 +120,7 @@ msgctxt "episode number"
 msgid "E%1"
 msgstr "E%1"
 
-#: src/player/PlayerController.cpp:61 src/qml/HomePage.qml:210
+#: src/player/PlayerController.cpp:63 src/qml/HomePage.qml:210
 #: src/qml/EpisodeRow.qml:48 src/qml/ResumeItemsPage.qml:122
 #: src/qml/SearchPage.qml:217 src/qml/QueuePage.qml:118
 #: src/qml/GenreRailsView.qml:215 src/qml/ItemRowGrid.qml:75
@@ -129,47 +129,47 @@ msgctxt "episode label and episode title"
 msgid "%1 — %2"
 msgstr "%1 — %2"
 
-#: src/player/PlayerController.cpp:132
+#: src/player/PlayerController.cpp:134
 msgid "Could not download the subtitle."
 msgstr "Impossibile scaricare i sottotitoli."
 
-#: src/player/PlayerController.cpp:191
+#: src/player/PlayerController.cpp:193
 msgid "The video could not be opened. Try again."
 msgstr "Impossibile aprire il video. Riprova."
 
-#: src/player/PlayerController.cpp:422
+#: src/player/PlayerController.cpp:439
 msgid "Unable to request playback from the server."
 msgstr "Impossibile richiedere la riproduzione al server."
 
-#: src/player/PlayerController.cpp:441
+#: src/player/PlayerController.cpp:458
 msgid "External subtitle %1"
 msgstr "Sottotitolo esterno %1"
 
-#: src/player/PlayerController.cpp:444
+#: src/player/PlayerController.cpp:461
 msgid "The selected media source could not be opened."
 msgstr "Impossibile aprire la sorgente multimediale selezionata."
 
-#: src/player/PlayerController.cpp:786
+#: src/player/PlayerController.cpp:874
 msgid "Audio track %1"
 msgstr "Traccia audio %1"
 
-#: src/player/PlayerController.cpp:787
+#: src/player/PlayerController.cpp:875
 msgid "Subtitle %1"
 msgstr "Sottotitolo %1"
 
-#: src/player/PlayerController.cpp:883
+#: src/player/PlayerController.cpp:971
 msgid "Could not save the screenshot."
 msgstr "Impossibile salvare lo screenshot."
 
-#: src/player/PlayerController.cpp:913
+#: src/player/PlayerController.cpp:1001
 msgid "Skip intro"
 msgstr "Salta introduzione"
 
-#: src/player/PlayerController.cpp:914
+#: src/player/PlayerController.cpp:1002
 msgid "Skip recap"
 msgstr "Salta riepilogo"
 
-#: src/player/PlayerController.cpp:915
+#: src/player/PlayerController.cpp:1003
 msgid "Skip outro"
 msgstr "Salta conclusione"
 
@@ -693,7 +693,7 @@ msgid "Ended"
 msgstr "Terminata"
 
 #: src/qml/ItemDetailsPage.qml:96 src/qml/MediaCard.qml:390
-#: src/qml/CardMenu.qml:42 src/qml/PlayerPage.qml:478
+#: src/qml/CardMenu.qml:42 src/qml/PlayerPage.qml:562
 msgid "Resume"
 msgstr "Riprendi"
 
@@ -1927,7 +1927,7 @@ msgctxt "@action:button"
 msgid "Add User"
 msgstr "Aggiungi utente"
 
-#: src/qml/UserPickerPage.qml:284 src/qml/PlayerPage.qml:562
+#: src/qml/UserPickerPage.qml:284 src/qml/PlayerPage.qml:633
 msgctxt "@action:button"
 msgid "More Actions"
 msgstr "Altre azioni"
@@ -1982,210 +1982,569 @@ msgstr ""
 "Impossibile aggiungere questo elemento alla coda: controlla la connessione "
 "al server e riprova"
 
-#: src/qml/PlayerPage.qml:13 src/qml/PlayerPage.qml:376
+#: src/qml/PlayerPage.qml:13 src/qml/PlayerPage.qml:413
 msgid "Now Playing"
 msgstr "In riproduzione"
 
-#: src/qml/PlayerPage.qml:35 src/qml/PlayerPage.qml:45
+#: src/qml/PlayerPage.qml:35 src/qml/PlayerPage.qml:40
 msgctxt "@action:button remaining playback time, with a minus sign"
 msgid "−%1"
 msgstr "−%1"
 
-#: src/qml/PlayerPage.qml:38 src/qml/PlayerPage.qml:46
-msgctxt ""
-"@action:button elapsed playback time, then the total or the remaining time"
-msgid "%1 / %2"
-msgstr "%1 / %2"
+#: src/qml/PlayerPage.qml:52
+msgctxt "@info:status"
+msgid "Ends at %1"
+msgstr "Termina alle %1"
 
-#: src/qml/PlayerPage.qml:263
+#: src/qml/PlayerPage.qml:300
 msgid "Opening video…"
 msgstr "Apertura del video…"
 
-#: src/qml/PlayerPage.qml:267
+#: src/qml/PlayerPage.qml:304
 msgid "Close Player"
 msgstr "Chiudi il player"
 
-#: src/qml/PlayerPage.qml:365 src/qml/ShellHeader.qml:186
+#: src/qml/PlayerPage.qml:402 src/qml/ShellHeader.qml:186
 msgctxt "@action:button"
 msgid "Back"
 msgstr "Indietro"
 
-#: src/qml/PlayerPage.qml:396
+#: src/qml/PlayerPage.qml:433
 msgctxt "@action:button"
 msgid "Keep Controls Visible"
 msgstr "Mantieni visibili i controlli"
 
-#: src/qml/PlayerPage.qml:462
+#: src/qml/PlayerPage.qml:522
 msgid "Playback position"
 msgstr "Posizione di riproduzione"
 
-#: src/qml/PlayerPage.qml:472
+#: src/qml/PlayerPage.qml:533
+msgctxt "@action:button accessible name"
+msgid "Remaining time %1"
+msgstr "Tempo rimanente %1"
+
+#: src/qml/PlayerPage.qml:533
+msgctxt "@action:button accessible name"
+msgid "Total time %1"
+msgstr "Durata totale %1"
+
+#: src/qml/PlayerPage.qml:535
+msgctxt "@info:tooltip"
+msgid "Show total time"
+msgstr "Mostra la durata totale"
+
+#: src/qml/PlayerPage.qml:535
+msgctxt "@info:tooltip"
+msgid "Show remaining time"
+msgstr "Mostra il tempo rimanente"
+
+#: src/qml/PlayerPage.qml:556
 msgid "Previous"
 msgstr "Precedente"
 
-#: src/qml/PlayerPage.qml:478
+#: src/qml/PlayerPage.qml:562
 msgid "Pause"
 msgstr "Pausa"
 
-#: src/qml/PlayerPage.qml:487
+#: src/qml/PlayerPage.qml:571
 msgid "Next"
 msgstr "Successivo"
 
-#: src/qml/PlayerPage.qml:495
+#: src/qml/PlayerPage.qml:579
 msgid "Unmute"
 msgstr "Riattiva audio"
 
-#: src/qml/PlayerPage.qml:495
+#: src/qml/PlayerPage.qml:579
 msgid "Mute"
 msgstr "Disattiva audio"
 
-#: src/qml/PlayerPage.qml:496
+#: src/qml/PlayerPage.qml:580
 #, javascript-format
 msgctxt "@info volume level"
 msgid "Volume %1%"
 msgstr "Volume %1%"
 
-#: src/qml/PlayerPage.qml:519
-msgctxt "@info:tooltip"
-msgid "Show remaining time"
-msgstr "Mostra il tempo rimanente"
-
-#: src/qml/PlayerPage.qml:519
-msgctxt "@info:tooltip"
-msgid "Show elapsed time"
-msgstr "Mostra il tempo trascorso"
-
-#: src/qml/PlayerPage.qml:519
-msgctxt "@info:tooltip"
-msgid "Show total time"
-msgstr "Mostra la durata totale"
-
-#: src/qml/PlayerPage.qml:540
+#: src/qml/PlayerPage.qml:611
 msgctxt "@action:button audio tracks"
 msgid "Audio"
 msgstr "Audio"
 
-#: src/qml/PlayerPage.qml:549
+#: src/qml/PlayerPage.qml:620
 msgctxt "@action:button subtitle tracks"
 msgid "Subtitles"
 msgstr "Sottotitoli"
 
-#: src/qml/PlayerPage.qml:555
+#: src/qml/PlayerPage.qml:626
 msgctxt "@action:button"
 msgid "Exit Full Screen Mode"
 msgstr "Esci dalla modalità a schermo intero"
 
-#: src/qml/PlayerPage.qml:555
+#: src/qml/PlayerPage.qml:626
 msgctxt "@action:button"
 msgid "Full Screen Mode"
 msgstr "Modalità a schermo intero"
 
-#: src/qml/PlayerPage.qml:571
+#: src/qml/PlayerPage.qml:642
 msgid "Screenshot saved to %1"
 msgstr "Schermata salvata in %1"
 
-#: src/qml/PlayerPage.qml:601
+#: src/qml/PlayerPage.qml:689
 msgctxt "@item:inmenu no subtitles"
 msgid "Off"
 msgstr "Disattivati"
 
-#: src/qml/PlayerPage.qml:621
+#: src/qml/PlayerPage.qml:709
 msgid "Download external subtitles"
 msgstr "Scarica sottotitoli esterni"
 
-#: src/qml/PlayerPage.qml:641
+#: src/qml/PlayerPage.qml:729
 msgid "Shuffle"
 msgstr "Riproduzione casuale"
 
-#: src/qml/PlayerPage.qml:651
+#: src/qml/PlayerPage.qml:739
 msgid "Repeat"
 msgstr "Ripeti"
 
-#: src/qml/PlayerPage.qml:657
+#: src/qml/PlayerPage.qml:743
 msgctxt "@item:inmenu repeat"
 msgid "Off"
 msgstr "Disattivata"
 
-#: src/qml/PlayerPage.qml:665
+#: src/qml/PlayerPage.qml:751
 msgctxt "@item:inmenu repeat"
 msgid "All"
 msgstr "Tutto"
 
-#: src/qml/PlayerPage.qml:673
+#: src/qml/PlayerPage.qml:761
 msgctxt "@item:inmenu repeat"
 msgid "Current Item"
 msgstr "Elemento corrente"
 
-#: src/qml/PlayerPage.qml:683
+#: src/qml/PlayerPage.qml:771
 msgid "Playback Speed"
 msgstr "Velocità di riproduzione"
 
-#: src/qml/PlayerPage.qml:689
+#: src/qml/PlayerPage.qml:777
 msgctxt "@item:inmenu playback speed, %1 is the factor"
 msgid "%1×"
 msgstr "%1×"
 
-#: src/qml/PlayerPage.qml:700
+#: src/qml/PlayerPage.qml:790
+msgctxt "@title:menu"
+msgid "Aspect Ratio"
+msgstr "Rapporto d'aspetto"
+
+#: src/qml/PlayerPage.qml:792
+msgctxt "@item:inmenu aspect ratio"
+msgid "Auto"
+msgstr "Automatico"
+
+#: src/qml/PlayerPage.qml:793
+msgctxt "@item:inmenu aspect ratio"
+msgid "Zoom"
+msgstr "Zoom"
+
+#: src/qml/PlayerPage.qml:794
+msgctxt "@item:inmenu aspect ratio"
+msgid "Stretch"
+msgstr "Allunga"
+
+#: src/qml/PlayerPage.qml:795
+msgctxt "@item:inmenu aspect ratio"
+msgid "4:3"
+msgstr "4:3"
+
+#: src/qml/PlayerPage.qml:796
+msgctxt "@item:inmenu aspect ratio"
+msgid "16:9"
+msgstr "16:9"
+
+#: src/qml/PlayerPage.qml:797
+msgctxt "@item:inmenu aspect ratio"
+msgid "Widescreen for 4:3 Video"
+msgstr "Widescreen per video 4:3"
+
+#: src/qml/PlayerPage.qml:798
+msgctxt "@item:inmenu aspect ratio"
+msgid "Original Size"
+msgstr "Dimensione originale"
+
+#: src/qml/PlayerPage.qml:801
 msgid "AV Sync"
 msgstr "Sincronizzazione audio/video"
 
-#: src/qml/PlayerPage.qml:702
+#: src/qml/PlayerPage.qml:803
 msgid "Audio delay: %1 s"
 msgstr "Ritardo audio: %1 s"
 
-#: src/qml/PlayerPage.qml:703
+#: src/qml/PlayerPage.qml:804
 msgid "Audio earlier (-0.1 s)"
 msgstr "Anticipa audio (-0,1 s)"
 
-#: src/qml/PlayerPage.qml:704
+#: src/qml/PlayerPage.qml:805
 msgid "Audio later (+0.1 s)"
 msgstr "Ritarda audio (+0,1 s)"
 
-#: src/qml/PlayerPage.qml:706
+#: src/qml/PlayerPage.qml:807
 msgid "Subtitle delay: %1 s"
 msgstr "Ritardo sottotitoli: %1 s"
 
-#: src/qml/PlayerPage.qml:707
+#: src/qml/PlayerPage.qml:808
 msgid "Subtitles earlier (-0.1 s)"
 msgstr "Anticipa sottotitoli (-0,1 s)"
 
-#: src/qml/PlayerPage.qml:708
+#: src/qml/PlayerPage.qml:809
 msgid "Subtitles later (+0.1 s)"
 msgstr "Ritarda sottotitoli (+0,1 s)"
 
-#: src/qml/PlayerPage.qml:712
+#: src/qml/PlayerPage.qml:813
 msgid "Sleep: %1 min"
 msgstr "Arresto fra %1 min"
 
-#: src/qml/PlayerPage.qml:712
+#: src/qml/PlayerPage.qml:813
 msgid "Sleep Timer"
 msgstr "Timer di arresto"
 
-#: src/qml/PlayerPage.qml:718
+#: src/qml/PlayerPage.qml:819
 msgid "Off"
 msgstr "Disattivato"
 
-#: src/qml/PlayerPage.qml:718
+#: src/qml/PlayerPage.qml:819
 msgid "%1 minutes"
 msgstr "%1 minuti"
 
-#: src/qml/PlayerPage.qml:728 src/qml/PlayerPage.qml:836
+#: src/qml/PlayerPage.qml:829 src/qml/PlayerPage.qml:945
 msgid "Now Playing Queue"
 msgstr "Coda di riproduzione"
 
-#: src/qml/PlayerPage.qml:733
+#: src/qml/PlayerPage.qml:834
 msgid "Screenshot"
 msgstr "Schermata"
 
-#: src/qml/PlayerPage.qml:779 src/qml/PlayerPage.qml:786
+#: src/qml/PlayerPage.qml:845
+msgctxt "@action:inmenu"
+msgid "Playback Info"
+msgstr "Informazioni di riproduzione"
+
+#: src/qml/PlayerPage.qml:888 src/qml/PlayerPage.qml:895
 #, javascript-format
 msgctxt "@label volume level"
 msgid "%1%"
 msgstr "%1%"
 
-#: src/qml/PlayerPage.qml:803
+#: src/qml/PlayerPage.qml:912
 msgid "Volume"
 msgstr "Volume"
+
+#: src/qml/PlaybackInfoOverlay.qml:32
+msgctxt "@title:window accessible name of the panel"
+msgid "Playback Info"
+msgstr "Informazioni di riproduzione"
+
+#: src/qml/PlaybackInfoOverlay.qml:69
+msgctxt "@item:intext a value with its detail in brackets"
+msgid "%1 (%2)"
+msgstr "%1 (%2)"
+
+#: src/qml/PlaybackInfoOverlay.qml:72
+msgctxt "@item:intext bitrate"
+msgid "%1 Mbps"
+msgstr "%1 Mbps"
+
+#: src/qml/PlaybackInfoOverlay.qml:77
+msgctxt "@item:intext file size"
+msgid "%1 GiB"
+msgstr "%1 GiB"
+
+#: src/qml/PlaybackInfoOverlay.qml:78
+msgctxt "@item:intext file size"
+msgid "%1 MiB"
+msgstr "%1 MiB"
+
+#: src/qml/PlaybackInfoOverlay.qml:83
+msgctxt "@item:intext how the item plays"
+msgid "Direct Play"
+msgstr "Riproduzione diretta"
+
+#: src/qml/PlaybackInfoOverlay.qml:84
+msgctxt "@item:intext how the item plays"
+msgid "Transcoding"
+msgstr "Transcodifica"
+
+#: src/qml/PlaybackInfoOverlay.qml:91
+msgctxt "@item:intext transcoding reason"
+msgid "The container is not supported"
+msgstr "Il contenitore non è supportato"
+
+#: src/qml/PlaybackInfoOverlay.qml:92
+msgctxt "@item:intext transcoding reason"
+msgid "The video codec is not supported"
+msgstr "Il codec video non è supportato"
+
+#: src/qml/PlaybackInfoOverlay.qml:93
+msgctxt "@item:intext transcoding reason"
+msgid "The audio codec is not supported"
+msgstr "Il codec audio non è supportato"
+
+#: src/qml/PlaybackInfoOverlay.qml:94
+msgctxt "@item:intext transcoding reason"
+msgid "The subtitle codec is not supported"
+msgstr "Il codec dei sottotitoli non è supportato"
+
+#: src/qml/PlaybackInfoOverlay.qml:95
+msgctxt "@item:intext transcoding reason"
+msgid "The audio is in an external file"
+msgstr "L'audio si trova in un file esterno"
+
+#: src/qml/PlaybackInfoOverlay.qml:96
+msgctxt "@item:intext transcoding reason"
+msgid "Secondary audio is not supported"
+msgstr "L'audio secondario non è supportato"
+
+#: src/qml/PlaybackInfoOverlay.qml:97
+msgctxt "@item:intext transcoding reason"
+msgid "The video profile is not supported"
+msgstr "Il profilo video non è supportato"
+
+#: src/qml/PlaybackInfoOverlay.qml:98
+msgctxt "@item:intext transcoding reason"
+msgid "The video level is not supported"
+msgstr "Il livello video non è supportato"
+
+#: src/qml/PlaybackInfoOverlay.qml:99
+msgctxt "@item:intext transcoding reason"
+msgid "The video resolution is not supported"
+msgstr "La risoluzione video non è supportata"
+
+#: src/qml/PlaybackInfoOverlay.qml:100
+msgctxt "@item:intext transcoding reason"
+msgid "The video bit depth is not supported"
+msgstr "La profondità di bit video non è supportata"
+
+#: src/qml/PlaybackInfoOverlay.qml:101
+msgctxt "@item:intext transcoding reason"
+msgid "The video frame rate is not supported"
+msgstr "La frequenza dei fotogrammi video non è supportata"
+
+#: src/qml/PlaybackInfoOverlay.qml:102
+msgctxt "@item:intext transcoding reason"
+msgid "The number of reference frames is not supported"
+msgstr "Il numero di frame di riferimento non è supportato"
+
+#: src/qml/PlaybackInfoOverlay.qml:103
+msgctxt "@item:intext transcoding reason"
+msgid "Anamorphic video is not supported"
+msgstr "Il video anamorfico non è supportato"
+
+#: src/qml/PlaybackInfoOverlay.qml:104
+msgctxt "@item:intext transcoding reason"
+msgid "Interlaced video is not supported"
+msgstr "Il video interlacciato non è supportato"
+
+#: src/qml/PlaybackInfoOverlay.qml:105
+msgctxt "@item:intext transcoding reason"
+msgid "The number of audio channels is not supported"
+msgstr "Il numero di canali audio non è supportato"
+
+#: src/qml/PlaybackInfoOverlay.qml:106
+msgctxt "@item:intext transcoding reason"
+msgid "The audio profile is not supported"
+msgstr "Il profilo audio non è supportato"
+
+#: src/qml/PlaybackInfoOverlay.qml:107
+msgctxt "@item:intext transcoding reason"
+msgid "The audio sample rate is not supported"
+msgstr "La frequenza di campionamento audio non è supportata"
+
+#: src/qml/PlaybackInfoOverlay.qml:108
+msgctxt "@item:intext transcoding reason"
+msgid "The audio bit depth is not supported"
+msgstr "La profondità di bit audio non è supportata"
+
+#: src/qml/PlaybackInfoOverlay.qml:109
+msgctxt "@item:intext transcoding reason"
+msgid "The container bitrate exceeds the limit"
+msgstr "Il bitrate del contenitore supera il limite"
+
+#: src/qml/PlaybackInfoOverlay.qml:110
+msgctxt "@item:intext transcoding reason"
+msgid "The video bitrate is not supported"
+msgstr "Il bitrate video non è supportato"
+
+#: src/qml/PlaybackInfoOverlay.qml:111
+msgctxt "@item:intext transcoding reason"
+msgid "The audio bitrate is not supported"
+msgstr "Il bitrate audio non è supportato"
+
+#: src/qml/PlaybackInfoOverlay.qml:112
+msgctxt "@item:intext transcoding reason"
+msgid "The video stream information is unknown"
+msgstr "Le informazioni sul flusso video sono sconosciute"
+
+#: src/qml/PlaybackInfoOverlay.qml:113
+msgctxt "@item:intext transcoding reason"
+msgid "The audio stream information is unknown"
+msgstr "Le informazioni sul flusso audio sono sconosciute"
+
+#: src/qml/PlaybackInfoOverlay.qml:114
+msgctxt "@item:intext transcoding reason"
+msgid "Direct Play failed"
+msgstr "La riproduzione diretta non è riuscita"
+
+#: src/qml/PlaybackInfoOverlay.qml:115
+msgctxt "@item:intext transcoding reason"
+msgid "The video range type is not supported"
+msgstr "Il tipo di gamma video non è supportato"
+
+#: src/qml/PlaybackInfoOverlay.qml:116
+msgctxt "@item:intext transcoding reason"
+msgid "The video codec tag is not supported"
+msgstr "Il tag del codec video non è supportato"
+
+#: src/qml/PlaybackInfoOverlay.qml:117
+msgctxt "@item:intext transcoding reason"
+msgid "The number of streams exceeds the limit"
+msgstr "Il numero di flussi supera il limite"
+
+#: src/qml/PlaybackInfoOverlay.qml:125
+msgctxt "@item:intext the size of the player, then the size of the video"
+msgid "%1 / %2"
+msgstr "%1 / %2"
+
+#: src/qml/PlaybackInfoOverlay.qml:146
+msgctxt "@title:group"
+msgid "Playback Info"
+msgstr "Informazioni di riproduzione"
+
+#: src/qml/PlaybackInfoOverlay.qml:147
+msgctxt "@label"
+msgid "Player"
+msgstr "Lettore"
+
+#: src/qml/PlaybackInfoOverlay.qml:148
+msgctxt "@label"
+msgid "Stream type"
+msgstr "Tipo di flusso"
+
+#: src/qml/PlaybackInfoOverlay.qml:149
+msgctxt "@label"
+msgid "Player sizes"
+msgstr "Dimensioni del lettore"
+
+#: src/qml/PlaybackInfoOverlay.qml:150
+msgctxt "@label"
+msgid "Hardware decoding"
+msgstr "Decodifica hardware"
+
+#: src/qml/PlaybackInfoOverlay.qml:150
+msgctxt "@item:intext hardware decoding is off"
+msgid "Off"
+msgstr "Disattivata"
+
+#: src/qml/PlaybackInfoOverlay.qml:151
+msgctxt "@label"
+msgid "Frames dropped"
+msgstr "Fotogrammi scartati"
+
+#: src/qml/PlaybackInfoOverlay.qml:152
+msgctxt "@label"
+msgid "Frames dropped by the decoder"
+msgstr "Fotogrammi scartati dal decodificatore"
+
+#: src/qml/PlaybackInfoOverlay.qml:157
+msgctxt "@title:group"
+msgid "Transcoding Info"
+msgstr "Informazioni sulla transcodifica"
+
+#: src/qml/PlaybackInfoOverlay.qml:158
+msgctxt "@label"
+msgid "Target codecs"
+msgstr "Codec di destinazione"
+
+#: src/qml/PlaybackInfoOverlay.qml:159
+msgctxt "@label"
+msgid "Reasons"
+msgstr "Motivi"
+
+#: src/qml/PlaybackInfoOverlay.qml:163
+msgctxt "@title:group"
+msgid "Original Media Info"
+msgstr "Informazioni multimediali originali"
+
+#: src/qml/PlaybackInfoOverlay.qml:164
+msgctxt "@label"
+msgid "Container"
+msgstr "Contenitore"
+
+#: src/qml/PlaybackInfoOverlay.qml:165
+msgctxt "@label"
+msgid "Video codec"
+msgstr "Codec video"
+
+#: src/qml/PlaybackInfoOverlay.qml:166
+msgctxt "@label"
+msgid "Video attributes"
+msgstr "Attributi video"
+
+#: src/qml/PlaybackInfoOverlay.qml:168
+msgctxt "@item:intext video level"
+msgid "Lv %1"
+msgstr "Lv %1"
+
+#: src/qml/PlaybackInfoOverlay.qml:170
+msgctxt "@item:intext frames per second"
+msgid "%1 fps"
+msgstr "%1 fps"
+
+#: src/qml/PlaybackInfoOverlay.qml:172
+msgctxt "@label"
+msgid "Video bit depth"
+msgstr "Profondità di bit video"
+
+#: src/qml/PlaybackInfoOverlay.qml:173
+msgctxt "@item:intext bits per colour channel"
+msgid "%1 bit"
+msgstr "%1 bit"
+
+#: src/qml/PlaybackInfoOverlay.qml:177
+msgctxt "@label"
+msgid "Video colors"
+msgstr "Colori video"
+
+#: src/qml/PlaybackInfoOverlay.qml:178
+msgctxt "@label"
+msgid "Audio codec"
+msgstr "Codec audio"
+
+#: src/qml/PlaybackInfoOverlay.qml:179
+msgctxt "@label"
+msgid "Audio attributes"
+msgstr "Attributi audio"
+
+#: src/qml/PlaybackInfoOverlay.qml:180
+msgctxt "@item:intext number of audio channels"
+msgid "%1 Ch"
+msgstr "%1 Ch"
+
+#: src/qml/PlaybackInfoOverlay.qml:181
+msgctxt "@item:intext audio bitrate"
+msgid "%1 kbps"
+msgstr "%1 kbps"
+
+#: src/qml/PlaybackInfoOverlay.qml:182
+msgctxt "@item:intext audio sample rate"
+msgid "%1 Hz"
+msgstr "%1 Hz"
+
+#: src/qml/PlaybackInfoOverlay.qml:215
+msgctxt "@info:status"
+msgid "Waiting for playback"
+msgstr "In attesa della riproduzione"
+
+#: src/qml/PlaybackInfoOverlay.qml:276
+msgctxt "@action:button"
+msgid "Close Playback Info"
+msgstr "Chiudi informazioni di riproduzione"
 
 #: src/qml/ShellHeader.qml:64 src/qml/AboutDialog.qml:201
 msgid "Kinefin is up to date"
@@ -2324,35 +2683,35 @@ msgctxt "@action:inmenu Goes back to the list of servers"
 msgid "Switch Server"
 msgstr "Cambia server"
 
-#: src/qml/ShellHeader.qml:789
+#: src/qml/ShellHeader.qml:788
 msgctxt "@title:window"
 msgid "Update Available"
 msgstr "Aggiornamento disponibile"
 
-#: src/qml/ShellHeader.qml:793
+#: src/qml/ShellHeader.qml:792
 msgctxt "@action:button"
 msgid "Open Release Page"
 msgstr "Apri pagina della versione"
 
-#: src/qml/ShellHeader.qml:798
+#: src/qml/ShellHeader.qml:797
 msgid "Could not open the release page in the browser"
 msgstr "Impossibile aprire la pagina della versione nel browser"
 
-#: src/qml/ShellHeader.qml:807
+#: src/qml/ShellHeader.qml:806
 msgid "Kinefin %1 is available. Open its release page in your browser?"
 msgstr "È disponibile Kinefin %1. Aprire la pagina della versione nel browser?"
 
-#: src/qml/ShellHeader.qml:822
+#: src/qml/ShellHeader.qml:821
 msgctxt "@title:window"
 msgid "Sign Out"
 msgstr "Esci"
 
-#: src/qml/ShellHeader.qml:828
+#: src/qml/ShellHeader.qml:827
 msgctxt "@action:button"
 msgid "Sign Out"
 msgstr "Esci"
 
-#: src/qml/ShellHeader.qml:843
+#: src/qml/ShellHeader.qml:842
 msgctxt "@info %1 is a user name"
 msgid ""
 "Sign out %1? Saved credentials and the local queue will be removed. The "
@@ -2361,7 +2720,7 @@ msgstr ""
 "Uscire da %1? Le credenziali salvate e la coda locale verranno rimosse. "
 "L'account sul server non viene modificato."
 
-#: src/qml/ShellHeader.qml:844
+#: src/qml/ShellHeader.qml:843
 msgctxt "@info"
 msgid ""
 "Sign out? Saved credentials and the local queue will be removed. The server "

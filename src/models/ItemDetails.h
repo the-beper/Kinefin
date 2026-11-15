@@ -23,6 +23,8 @@ struct ChapterSummary {
 };
 
 struct StreamSummary {
+    // The server's stream index, -1 when it sends none
+    int index = -1;
     QString type; // Video, Audio or Subtitle
     QString codec;
     QString language;
@@ -34,6 +36,18 @@ struct StreamSummary {
     QString videoRangeType;
     QString channelLayout;
     qint64 bitrate = 0;
+    // Video and audio technical facts, empty or zero when the server sends none; `level` is the server's number (41 for H.264 level 4.1)
+    QString profile;
+    QString pixelFormat;
+    // `VideoRange` (SDR, HDR)
+    QString videoRange;
+    QString colorSpace;
+    QString colorPrimaries;
+    QString colorTransfer;
+    qreal level = 0;
+    qreal frameRate = 0;
+    int bitDepth = 0;
+    int sampleRate = 0;
     bool isDefault = false;
     bool isForced = false;
     bool isExternal = false;
@@ -105,4 +119,7 @@ struct ItemDetails {
 };
 
 ItemDetails parseItemDetails(const QJsonObject &item);
+
+// One `MediaSourceInfo` with the same caps as the details page: also used for the source the player opened
+SourceSummary parseMediaSource(const QJsonObject &source);
 } // namespace Kinefin

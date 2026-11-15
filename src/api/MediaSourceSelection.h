@@ -7,9 +7,12 @@
 #include <QList>
 #include <QMetaType>
 #include <QString>
+#include <QStringList>
 #include <QStringView>
 #include <QUrl>
 #include <optional>
+
+#include "models/ItemDetails.h"
 
 namespace Kinefin {
 // What the player needs to open one item: the chosen media source and a media URL under the server's own base URL. The URL never carries the access token: the caller sends it in an `Authorization` header (api-notes.md, Media URLs)
@@ -21,6 +24,23 @@ struct ExternalSubtitle {
     QUrl url;
 };
 
+// The facts of the chosen media source for the Playback Info overlay. Everything comes from the server and is untrusted: strings are capped plain tokens, numbers range-checked, and no URL or query value other than the ones below is kept
+struct PlaybackMediaInfo {
+    static constexpr int MaxTranscodeReasons = 16;
+
+    // Container, size, bitrate and the streams, as the details page reads them
+    SourceSummary source;
+    // `File` for a direct URL, `HLS` for a playlist, else the container extension of the URL
+    QString streamType;
+    // The scheme of the media URL
+    QString protocol;
+    // First codec the TranscodingUrl asks for, empty for a direct play
+    QString targetVideoCodec;
+    QString targetAudioCodec;
+    // `TranscodeReason` enum names (letters only), from the TranscodingUrl or the media source
+    QStringList transcodeReasons;
+};
+
 struct PlaybackSource {
     enum class Method { Direct, Transcode };
 
@@ -30,7 +50,12 @@ struct PlaybackSource {
     Method method = Method::Direct;
     QUrl url;
     QList<ExternalSubtitle> externalSubtitles;
+    PlaybackMediaInfo media;
 };
+
+// The stream of `type` (Video or Audio) with the server index `index` when given, else the default one, else the first
+[[nodiscard]] const StreamSummary *pickStream(const SourceSummary &source, QStringView type,
+                                              int index = -1);
 
 // Either a source or a short, fixed English reason; never a URL, a body or a path from the server. The reasons are internal: a UI that shows one maps it to a translated string
 struct SourceSelection {

@@ -10,6 +10,7 @@
 #include "player/PlayerSettings.h"
 #include "player/Trickplay.h"
 
+#include <QElapsedTimer>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QObject>
@@ -17,6 +18,7 @@
 #include <QStringList>
 #include <QTimer>
 #include <QVariantList>
+#include <QVariantMap>
 #include <optional>
 
 class MpvAbstractItem;
@@ -64,6 +66,7 @@ class PlayerController final : public QObject {
     Q_PROPERTY(QString screenshotPath READ screenshotPath NOTIFY changed)
     Q_PROPERTY(QString skipLabel READ skipLabel NOTIFY changed)
     Q_PROPERTY(int sleepRemainingMinutes READ sleepRemainingMinutes NOTIFY changed)
+    Q_PROPERTY(QString aspectMode READ aspectMode NOTIFY changed)
   public:
     // What the desktop sees (MPRIS, the screensaver): opening, loading and buffering count as playing, stopping and a failure as stopped
     enum class Status { Stopped, Playing, Paused };
@@ -109,6 +112,8 @@ class PlayerController final : public QObject {
     QString previewImage() const { return m_previewImage; }
     QString screenshotPath() const { return m_screenshotPath; }
     QString skipLabel() const { return m_skipLabel; }
+    // The aspect mode of this playback: the `video.aspect` setting until a choice is made, and again for the next item
+    QString aspectMode() const { return m_mpvSettings.aspectMode(); }
     int sleepRemainingMinutes() const;
     Status status() const;
     // The token-free URL of the current item's primary image (512 px), empty until the server named its tag
@@ -146,6 +151,17 @@ class PlayerController final : public QObject {
     Q_INVOKABLE void previewAt(qint64 ticks);
     Q_INVOKABLE void clearPreview();
     Q_INVOKABLE void refreshTracks();
+    // One of the `video.aspect` values except `custom`: applied at once to this playback only, the setting is not written
+    Q_INVOKABLE void setAspectMode(const QString &mode);
+    // What the Playback Info overlay shows, from the negotiated source and the facts the engine cached from mpv (no network, no mpv call); a key is present only when its value is known. Never holds the URL or the token
+    // - `playMethod`: DirectPlay or Transcode
+    // - `streamType`, `protocol`: File, HLS or the container extension; http or https
+    // - `videoWidth`, `videoHeight`, `droppedFrames`, `decoderDroppedFrames`, `hwdec`: mpv's dwidth, dheight, frame-drop-count, decoder-frame-drop-count and hwdec-current
+    // - `targetVideoCodec`, `targetAudioCodec`, `transcodeReasons` (a list of the server's enum names): of a transcode
+    // - `container`, `sizeBytes`, `bitrate` of the media source
+    // - `videoCodec`, `videoProfile`, `videoLevel`, `videoBitrate`, `videoFps`, `videoBitDepth`, `videoPixelFormat`, `videoRange`, `colorSpace`, `colorPrimaries`, `colorTransfer`
+    // - `audioCodec`, `audioChannels`, `audioBitrate`, `audioSampleRate` of the playing audio track
+    Q_INVOKABLE QVariantMap playbackInfo() const;
     // Elapsed or remaining time of the video: hours show when its duration is at least one hour
     Q_INVOKABLE QString timeText(qint64 ticks) const;
     // Used before a session changes, never by QML to re-authenticate.
@@ -206,6 +222,10 @@ class PlayerController final : public QObject {
     // One report after a run of seeks, however many there were
     QTimer m_seekReport;
     QTimer m_trackTimer;
+    // Wall-clock time since the current file loaded
+    QElapsedTimer m_playedClock;
+    // The playback rate a restart of the same item keeps, applied after the settings
+    std::optional<double> m_keptRate;
     QJsonObject m_memory;
     QJsonObject m_queueMemory;
     QTemporaryDir m_subtitleDir;

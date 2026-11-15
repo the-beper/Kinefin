@@ -154,32 +154,88 @@ void PlayerSettings::applyVideo()
     m_engine.setMpvProperty(QStringLiteral("demuxer-max-bytes"),
                             QString(QString::number(v("cache").toInt()) + QStringLiteral("MiB")));
     m_engine.setMpvProperty(QStringLiteral("speed"), v("default_playback_speed").toDouble());
-    // Reset all modifiers before applying a new aspect; custom means do not override mpv.
-    const QString aspect = v("aspect").toString();
-    if (aspect != QLatin1String("custom")) {
-        m_engine.setMpvProperty(QStringLiteral("panscan"), 0.0);
-        m_engine.setMpvProperty(QStringLiteral("video-aspect-override"), QStringLiteral("no"));
-        m_engine.setMpvProperty(QStringLiteral("keepaspect"), QStringLiteral("yes"));
-        m_engine.setMpvProperty(QStringLiteral("video-unscaled"), QStringLiteral("no"));
-        if (aspect == QLatin1String("zoom"))
-            m_engine.setMpvProperty(QStringLiteral("panscan"), 1.0);
-        else if (aspect == QLatin1String("force_4_3"))
-            m_engine.setMpvProperty(QStringLiteral("video-aspect-override"), QStringLiteral("4:3"));
-        else if (aspect == QLatin1String("force_16_9"))
+    applyAspect();
+    applyDisplayRate();
+}
+
+QString PlayerSettings::aspectMode() const
+{
+    if (!m_aspectOverride.isEmpty())
+        return m_aspectOverride;
+    const QString aspect =
+        m_settings.value(QStringLiteral("video"), QStringLiteral("aspect")).toString();
+    return aspect == QLatin1String("custom") || isAspectMode(aspect) ? aspect
+                                                                     : QStringLiteral("normal");
+}
+
+bool PlayerSettings::isAspectMode(const QString &mode)
+{
+    static const QStringList modes{QStringLiteral("normal"),
+                                   QStringLiteral("zoom"),
+                                   QStringLiteral("force_4_3"),
+                                   QStringLiteral("force_16_9"),
+                                   QStringLiteral("force_16_9_if_4_3"),
+                                   QStringLiteral("stretch"),
+                                   QStringLiteral("noscaling")};
+    return modes.contains(mode);
+}
+
+void PlayerSettings::setAspectOverride(const QString &mode)
+{
+    const QString wanted = isAspectMode(mode) ? mode : QString();
+    if (wanted == m_aspectOverride)
+        return;
+    m_aspectOverride = wanted;
+    if (!m_engine.isInitialized())
+        return;
+    reapplyAspect(true);
+}
+
+void PlayerSettings::applyLoadedAspect()
+{
+    // Only this mode depends on the decoded picture, which exists once the file is loaded
+    if (!m_engine.isInitialized() || aspectMode() != QLatin1String("force_16_9_if_4_3"))
+        return;
+    reapplyAspect(false);
+}
+
+void PlayerSettings::reapplyAspect(bool reset)
+{
+    // Only the aspect properties: a full apply would also reset what the user changed while playing, such as the speed
+    applyAspect(reset);
+    applyOverrides({QStringLiteral("panscan"), QStringLiteral("video-aspect-override"),
+                    QStringLiteral("keepaspect"), QStringLiteral("video-unscaled")});
+}
+
+void PlayerSettings::applyAspect(bool reset)
+{
+    const QString aspect = aspectMode();
+    const bool custom = aspect == QLatin1String("custom");
+    // Custom leaves mpv alone, unless a choice made for this playback has to be undone
+    if (custom && !reset)
+        return;
+    m_engine.setMpvProperty(QStringLiteral("panscan"), 0.0);
+    m_engine.setMpvProperty(QStringLiteral("video-aspect-override"), QStringLiteral("no"));
+    m_engine.setMpvProperty(QStringLiteral("keepaspect"), QStringLiteral("yes"));
+    m_engine.setMpvProperty(QStringLiteral("video-unscaled"), QStringLiteral("no"));
+    if (custom)
+        return;
+    if (aspect == QLatin1String("zoom"))
+        m_engine.setMpvProperty(QStringLiteral("panscan"), 1.0);
+    else if (aspect == QLatin1String("force_4_3"))
+        m_engine.setMpvProperty(QStringLiteral("video-aspect-override"), QStringLiteral("4:3"));
+    else if (aspect == QLatin1String("force_16_9"))
+        m_engine.setMpvProperty(QStringLiteral("video-aspect-override"), QStringLiteral("16:9"));
+    else if (aspect == QLatin1String("force_16_9_if_4_3")) {
+        const QVariantMap decoded =
+            m_engine.mpvProperty(QStringLiteral("video-dec-params")).toMap();
+        if (std::abs(decoded.value(QStringLiteral("aspect")).toDouble() - 4.0 / 3) <= 0.1)
             m_engine.setMpvProperty(QStringLiteral("video-aspect-override"),
                                     QStringLiteral("16:9"));
-        else if (aspect == QLatin1String("force_16_9_if_4_3")) {
-            const QVariantMap decoded =
-                m_engine.mpvProperty(QStringLiteral("video-dec-params")).toMap();
-            if (std::abs(decoded.value(QStringLiteral("aspect")).toDouble() - 4.0 / 3) <= 0.1)
-                m_engine.setMpvProperty(QStringLiteral("video-aspect-override"),
-                                        QStringLiteral("16:9"));
-        } else if (aspect == QLatin1String("stretch"))
-            m_engine.setMpvProperty(QStringLiteral("keepaspect"), QStringLiteral("no"));
-        else if (aspect == QLatin1String("noscaling"))
-            m_engine.setMpvProperty(QStringLiteral("video-unscaled"), QStringLiteral("yes"));
-    }
-    applyDisplayRate();
+    } else if (aspect == QLatin1String("stretch"))
+        m_engine.setMpvProperty(QStringLiteral("keepaspect"), QStringLiteral("no"));
+    else if (aspect == QLatin1String("noscaling"))
+        m_engine.setMpvProperty(QStringLiteral("video-unscaled"), QStringLiteral("yes"));
 }
 
 void PlayerSettings::applyDisplayRate()

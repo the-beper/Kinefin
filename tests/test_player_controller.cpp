@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Kinefin contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
-// The player controller without mpv: the engine is never attached, so an item stays loading and nothing is negotiated, but the item's own request, the playlist of a series and the end-of-file decision all run against the fake server
+// The player controller without a renderer: the engine is not attached, so an item stays loading and nothing is negotiated, but the item's own request, the playlist of a series and the end-of-file decision all run against the fake server; the tests of a repeat after a real end start the engine on its own (vo=null, ao=null) to give it the position and the duration of a played file
 #include "FakeJellyfin.h"
 
 #include "models/PlayQueue.h"
@@ -8,6 +8,9 @@
 #include "player/PlayerController.h"
 #include "settings/ClientSettings.h"
 
+#include <MpvController>
+
+#include <QFile>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QSignalSpy>
@@ -55,9 +58,19 @@ QByteArray toBody(const QJsonObject &object)
     return QJsonDocument(object).toJson(QJsonDocument::Compact);
 }
 
+// The settings file of a test, with `conf` as its content: `video.aspect` is hidden from the UI, so only the file can hold a value other than the default
+QString settingsFile(const QTemporaryDir &dir, const QByteArray &conf)
+{
+    const QString path = dir.filePath(QStringLiteral("kinefin.conf"));
+    QFile file(path);
+    if (!conf.isEmpty() && (!file.open(QIODevice::WriteOnly) || file.write(conf) != conf.size()))
+        return {};
+    return path;
+}
+
 struct Chain {
-    Chain()
-        : queue(&client), settings(dir.filePath(QStringLiteral("kinefin.conf"))),
+    explicit Chain(const QByteArray &conf = {})
+        : queue(&client), settings(settingsFile(dir, conf)),
           // An invalid profile id keeps the controller's memory files off the disk
           controller(client, queue, settings, QString())
     {
@@ -75,6 +88,17 @@ struct Chain {
         return server.listingRoutes.value(QStringLiteral("Episodes")).size();
     }
     Kinefin::PlaybackEngine *engine() { return controller.findChild<Kinefin::PlaybackEngine *>(); }
+    // Plays the item to an end the repeat modes accept or not: mpv says where it was (`position` of `duration`, in seconds), the file loaded, `playedMs` of wall-clock time went by, then mpv says eof. The engine must be initialised, which is only done once the item has asked for its source
+    void endsAfter(int playedMs, double position, double duration = 100)
+    {
+        auto *mpv = engine()->controller();
+        Q_EMIT mpv->propertyChanged(QStringLiteral("duration"), duration);
+        Q_EMIT mpv->propertyChanged(QStringLiteral("time-pos"), position);
+        Q_EMIT engine()->fileLoaded();
+        if (playedMs > 0)
+            QTest::qWait(playedMs);
+        Q_EMIT engine()->streamEnded(QStringLiteral("eof"));
+    }
 
     QTemporaryDir dir;
     FakeJellyfin server;
@@ -379,6 +403,124 @@ class TestPlayerController : public QObject {
         Q_EMIT engine->streamEnded(QStringLiteral("eof"));
         QCOMPARE(finished.size(), 0);
         QCOMPARE(chain.controller.itemId(), episodeId(3));
+    }
+
+    void repeatPlaysALoneMovieAgainAfterARealEnd()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        Kinefin::PlaybackEngine *engine = chain.engine();
+        QVERIFY(engine);
+        QSignalSpy finished(&chain.controller, &PlayerController::finished);
+        QVERIFY(chain.controller.playItem(kMovie, 0));
+        // No mpv ran for this item yet: it stands alone from here, and its PlaybackInfo is made to fail
+        QVERIFY(engine->init({QStringLiteral("vo=null"), QStringLiteral("ao=null")}));
+        for (const int mode : {2, 1}) {
+            chain.controller.setRepeatMode(mode);
+            QVERIFY(chain.controller.playItem(kMovie, 0));
+            Q_EMIT chain.client.playbackInfoFailed(kMovie, 500, QString());
+            QVERIFY(!chain.controller.loading());
+            chain.endsAfter(2100, 100);
+            QCOMPARE(finished.size(), 0);
+            QCOMPARE(chain.controller.itemId(), kMovie);
+            // The item is asked for again
+            QVERIFY(chain.controller.loading());
+            QVERIFY(chain.controller.errorText().isEmpty());
+        }
+        // Without repeat the end of a lone movie ends the playback
+        chain.controller.setRepeatMode(0);
+        Q_EMIT chain.client.playbackInfoFailed(kMovie, 500, QString());
+        Q_EMIT engine->streamEnded(QStringLiteral("eof"));
+        QCOMPARE(finished.size(), 1);
+        QVERIFY(chain.controller.itemId().isEmpty());
+    }
+
+    void repeatDoesNotRestartAnEndThatIsNotReal()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        Kinefin::PlaybackEngine *engine = chain.engine();
+        QVERIFY(engine);
+        QSignalSpy finished(&chain.controller, &PlayerController::finished);
+        chain.controller.setRepeatMode(2);
+        QVERIFY(chain.controller.playItem(kMovie, 0));
+        QVERIFY(engine->init({QStringLiteral("vo=null"), QStringLiteral("ao=null")}));
+        // An eof far from the duration is a dropped connection, however long it played
+        Q_EMIT chain.client.playbackInfoFailed(kMovie, 500, QString());
+        chain.endsAfter(2100, 10);
+        QCOMPARE(finished.size(), 1);
+        QVERIFY(chain.controller.itemId().isEmpty());
+        // A stream that ends at once, at its duration, does not loop either
+        QVERIFY(chain.controller.playItem(kMovie, 0));
+        Q_EMIT chain.client.playbackInfoFailed(kMovie, 500, QString());
+        chain.endsAfter(0, 100);
+        QCOMPARE(finished.size(), 2);
+        QVERIFY(chain.controller.itemId().isEmpty());
+    }
+
+    void repeatAllAdvancesThroughTheEpisodesAndWrapsWithoutAutoplay()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        chain.serveEpisodeThree();
+        Kinefin::PlaybackEngine *engine = chain.engine();
+        QVERIFY(engine);
+        QSignalSpy finished(&chain.controller, &PlayerController::finished);
+        chain.controller.setNextEpisodeAutoPlay(false);
+        chain.controller.setRepeatMode(1);
+        QVERIFY(chain.controller.playItem(episodeId(3), 0));
+        QTRY_VERIFY(chain.controller.hasNext());
+        // An explicit repeat means continue: the autoplay preference does not stop it
+        for (const int expected : {4, 5, 1}) {
+            Q_EMIT chain.client.playbackInfoFailed(chain.controller.itemId(), 500, QString());
+            Q_EMIT engine->streamEnded(QStringLiteral("eof"));
+            QCOMPARE(finished.size(), 0);
+            QCOMPARE(chain.controller.itemId(), episodeId(expected));
+        }
+        // Without repeat the same preference ends the playback
+        chain.controller.setRepeatMode(0);
+        Q_EMIT chain.client.playbackInfoFailed(chain.controller.itemId(), 500, QString());
+        Q_EMIT engine->streamEnded(QStringLiteral("eof"));
+        QCOMPARE(finished.size(), 1);
+    }
+
+    void theAspectModeStartsAsTheSettingForEveryItem()
+    {
+        Chain chain("[video]\naspect=stretch\n");
+        QVERIFY(chain.ok);
+        QCOMPARE(chain.controller.aspectMode(), QStringLiteral("stretch"));
+        chain.controller.setAspectMode(QStringLiteral("zoom"));
+        QCOMPARE(chain.controller.aspectMode(), QStringLiteral("zoom"));
+        // `custom` is the setting's own value, never a choice, and an unknown name is none
+        chain.controller.setAspectMode(QStringLiteral("custom"));
+        chain.controller.setAspectMode(QStringLiteral("bogus"));
+        QCOMPARE(chain.controller.aspectMode(), QStringLiteral("zoom"));
+        QCOMPARE(chain.settings.value(QStringLiteral("video"), QStringLiteral("aspect")).toString(),
+                 QStringLiteral("stretch"));
+        QVERIFY(chain.controller.playItem(kMovie, 0));
+        QCOMPARE(chain.controller.aspectMode(), QStringLiteral("stretch"));
+        chain.controller.setAspectMode(QStringLiteral("noscaling"));
+        QCOMPARE(chain.controller.aspectMode(), QStringLiteral("noscaling"));
+        chain.controller.stop();
+        QCOMPARE(chain.controller.aspectMode(), QStringLiteral("stretch"));
+    }
+
+    void aCustomAspectSettingReadsAsCustomAndAutoIsStillAChoice()
+    {
+        Chain chain("[video]\naspect=custom\n");
+        QVERIFY(chain.ok);
+        QCOMPARE(chain.controller.aspectMode(), QStringLiteral("custom"));
+        chain.controller.setAspectMode(QStringLiteral("normal"));
+        QCOMPARE(chain.controller.aspectMode(), QStringLiteral("normal"));
+    }
+
+    void thereIsNoPlaybackInfoWithoutASource()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        QVERIFY(chain.controller.playbackInfo().isEmpty());
+        QVERIFY(chain.controller.playItem(kMovie, 0));
+        QVERIFY(chain.controller.playbackInfo().isEmpty());
     }
 
     void shuffleKeepsTheSeriesInOrder()

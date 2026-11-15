@@ -27,6 +27,7 @@
 #include <QMutexLocker>
 #include <QQmlApplicationEngine>
 #include <QQmlComponent>
+#include <QQmlContext>
 #include <QQmlIncubator>
 #include <QQmlListReference>
 #include <QQmlProperty>
@@ -1865,6 +1866,7 @@ class PlayerStub : public QObject {
     Q_PROPERTY(QString screenshotPath MEMBER screenshotPath NOTIFY changed)
     Q_PROPERTY(QString skipLabel MEMBER skipLabel NOTIFY changed)
     Q_PROPERTY(int sleepRemainingMinutes MEMBER sleepRemainingMinutes NOTIFY changed)
+    Q_PROPERTY(QString aspectMode MEMBER aspectMode NOTIFY changed)
   public:
     Q_INVOKABLE bool playItem(const QString &id, qint64)
     {
@@ -1874,7 +1876,14 @@ class PlayerStub : public QObject {
         return true;
     }
     Q_INVOKABLE bool playQueue(int index) { return record(QStringLiteral("playQueue"), index); }
-    Q_INVOKABLE void togglePause() { record(QStringLiteral("togglePause")); }
+    Q_INVOKABLE void togglePause()
+    {
+        record(QStringLiteral("togglePause"));
+        if (pauseChangesNothing)
+            return;
+        paused = !paused;
+        Q_EMIT changed();
+    }
     Q_INVOKABLE void pause()
     {
         record(QStringLiteral("pause"));
@@ -1907,6 +1916,13 @@ class PlayerStub : public QObject {
     }
     Q_INVOKABLE void setShuffle(bool on) { record(QStringLiteral("setShuffle"), on); }
     Q_INVOKABLE void setRepeatMode(int mode) { record(QStringLiteral("setRepeatMode"), mode); }
+    Q_INVOKABLE void setAspectMode(const QString &mode)
+    {
+        record(QStringLiteral("setAspectMode"), mode);
+        aspectMode = mode;
+        Q_EMIT changed();
+    }
+    Q_INVOKABLE QVariantMap playbackInfo() const { return info; }
     Q_INVOKABLE void selectAudioTrack(int id) { record(QStringLiteral("selectAudioTrack"), id); }
     Q_INVOKABLE void selectSubtitleTrack(int id)
     {
@@ -1934,6 +1950,8 @@ class PlayerStub : public QObject {
     bool active = false;
     bool loading = false;
     bool paused = false;
+    // A toggle the player cannot honour, as before anything plays
+    bool pauseChangesNothing = false;
     QString title = QStringLiteral("Abyss Station");
     QString subtitle = QStringLiteral("S2:E6 — Weightless");
     QString errorText;
@@ -1958,6 +1976,8 @@ class PlayerStub : public QObject {
     QString screenshotPath;
     QString skipLabel;
     int sleepRemainingMinutes = 0;
+    QString aspectMode = QStringLiteral("normal");
+    QVariantMap info;
     QStringList calls;
 
   Q_SIGNALS:
@@ -2135,6 +2155,14 @@ QString endsAtText(QQuickItem *page, const QDateTime &now)
     QMetaObject::invokeMethod(page, "endsAtText", Q_RETURN_ARG(QVariant, text),
                               Q_ARG(QVariant, clock));
     return text.toString();
+}
+
+// The name an item gives assistive technology: `Accessible.name` is an attached property, not one of the item's own
+QString accessibleNameOf(QObject *object)
+{
+    return QQmlProperty(object, QStringLiteral("Accessible.name"), qmlContext(object))
+        .read()
+        .toString();
 }
 
 // Hands the shell its remote-control object (the window's `remoteInput`); the object must outlive the window
@@ -10306,6 +10334,8 @@ class TestUiPages : public QObject {
         QVERIFY(timer);
         QQuickItem *osd = ui.item(QStringLiteral("playerOsd"));
         QVERIFY(osd && osd->isVisible());
+        // The bars stay up while paused: the click below must not pause the stub
+        stub.pauseChangesNothing = true;
         // A click on a control of the bars leaves the keyboard with the page
         QQuickItem *pause = ui.item(QStringLiteral("playerPauseButton"));
         QVERIFY(pause);
@@ -10609,7 +10639,7 @@ class TestUiPages : public QObject {
         QObject *shuffle = menu->findChild<QObject *>(QStringLiteral("playerShuffleItem"));
         QVERIFY(shuffle);
         QVERIFY(!shuffle->property("enabled").toBool());
-        // Repeat too: an item played alone has nothing to repeat into
+        // Repeat stays on for an item played alone: it can repeat itself
         QObject *repeat = menu->findChild<QObject *>(QStringLiteral("playerRepeatMenu"));
         QVERIFY(repeat);
         const auto repeatEntry = [menu, repeat]() -> QQuickItem * {
@@ -10623,11 +10653,11 @@ class TestUiPages : public QObject {
             return nullptr;
         };
         QVERIFY(repeatEntry());
-        QVERIFY(!repeatEntry()->isEnabled());
+        QVERIFY(repeatEntry()->isEnabled());
         stub.queueCount = 3;
         Q_EMIT stub.changed();
         QTRY_VERIFY(shuffle->property("enabled").toBool());
-        QTRY_VERIFY(repeatEntry()->isEnabled());
+        QVERIFY(repeatEntry()->isEnabled());
         QVERIFY(QMetaObject::invokeMethod(shuffle, "click"));
         QTRY_VERIFY(stub.calls.contains(QStringLiteral("setShuffle true")));
         QObject *repeatAll = menu->findChild<QObject *>(QStringLiteral("playerRepeatAll"));
@@ -10643,7 +10673,7 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(!ui.item(QStringLiteral("playerOsd"))->isVisible());
     }
 
-    void playerTimeButtonShowsTheRemainingTime()
+    void playerTimelineRowHoldsTheElapsedTimeTheSliderAndTheTotalOrRemainingTime()
     {
         PlayerStub stub;
         stub.positionTicks = 21500000000;
@@ -10654,31 +10684,236 @@ class TestUiPages : public QObject {
         QVERIFY(ui.opensWindowOfWidth(1000));
         QVERIFY(ui.signIn());
         QVERIFY(openPlayer(ui, stub));
+        QQuickItem *row = ui.item(QStringLiteral("playerTimelineRow"));
+        QQuickItem *elapsed = ui.item(QStringLiteral("playerElapsedLabel"));
+        QQuickItem *timeline = ui.item(QStringLiteral("playbackTimeline"));
         QQuickItem *time = ui.item(QStringLiteral("playerTimeButton"));
-        QVERIFY(time);
+        QVERIFY(row && elapsed && timeline && time);
+        // The elapsed time at the start of the row, then the slider, then the button; the control row has no time button any more
+        QCOMPARE(elapsed->parentItem(), row);
+        QCOMPARE(timeline->parentItem(), row);
+        QCOMPARE(time->parentItem(), row);
+        QTRY_VERIFY(elapsed->x() + elapsed->width() <= timeline->x());
+        QVERIFY(timeline->x() + timeline->width() <= time->x());
+        QVERIFY(!Ui::itemIn(ui.item(QStringLiteral("playerControlRow")),
+                            QStringLiteral("playerTimeButton")));
+        // The left time is a label, not a control; the right one is a button
+        QVERIFY(!elapsed->inherits("QQuickAbstractButton"));
+        QVERIFY(time->inherits("QQuickAbstractButton"));
         // The stub writes the seconds: 2150 elapsed of 7200
-        QCOMPARE(time->property("text").toString(), QStringLiteral("2150 / 7200"));
-        // The text fits inside the frame, and the button keeps its width while the numbers change, here to fewer digits
+        QCOMPARE(elapsed->property("text").toString(), QStringLiteral("2150"));
+        QCOMPARE(time->property("text").toString(), QStringLiteral("7200"));
+        // The button names what it shows, without the minus sign of the remaining time
+        QCOMPARE(accessibleNameOf(time), QStringLiteral("Total time 7200"));
+        // Clicking the elapsed time does nothing; the button switches to the remaining time and back, and neither frame moves while the numbers change, here to fewer digits
+        QVERIFY(elapsed->width() >= elapsed->implicitWidth());
         QVERIFY(time->width() >= time->implicitWidth());
-        const qreal wide = time->width();
+        const qreal elapsedWidth = elapsed->width();
+        const qreal timeWidth = time->width();
+        const qreal sliderX = timeline->x();
+        ui.clickCenter(elapsed);
+        QTest::qWait(100);
+        QCOMPARE(time->property("text").toString(), QStringLiteral("7200"));
         ui.clickCenter(time);
-        QTRY_COMPARE(time->property("text").toString(), QStringLiteral("2150 / \u22125050"));
-        QCOMPARE(time->width(), wide);
+        QTRY_COMPARE(time->property("text").toString(), QStringLiteral("\u22125050"));
+        QCOMPARE(accessibleNameOf(time), QStringLiteral("Remaining time 5050"));
+        QCOMPARE(elapsed->property("text").toString(), QStringLiteral("2150"));
+        QCOMPARE(time->width(), timeWidth);
         QVERIFY(time->width() >= time->implicitWidth());
         stub.positionTicks = 50000000;
         Q_EMIT stub.changed();
-        QTRY_COMPARE(time->property("text").toString(), QStringLiteral("5 / \u22127195"));
-        QCOMPARE(time->width(), wide);
+        QTRY_COMPARE(elapsed->property("text").toString(), QStringLiteral("5"));
+        QTRY_COMPARE(time->property("text").toString(), QStringLiteral("\u22127195"));
+        // The layout pass that holds the width runs before the next frame is drawn, not at the text change
+        QTRY_COMPARE(elapsed->width(), elapsedWidth);
+        QCOMPARE(time->width(), timeWidth);
+        QCOMPARE(timeline->x(), sliderX);
+        ui.clickCenter(time);
+        QTRY_COMPARE(time->property("text").toString(), QStringLiteral("7200"));
+        // A narrow row keeps both: the elapsed time never turns into the remaining one
         stub.positionTicks = 21500000000;
         Q_EMIT stub.changed();
-        // A narrow row keeps one time: the one the button was switched to
         QVERIFY(ui.opensWindowOfWidth(440));
-        QTRY_COMPARE(time->property("text").toString(), QStringLiteral("\u22125050"));
-        const qreal narrow = time->width();
-        QVERIFY(time->width() >= time->implicitWidth());
+        QTRY_COMPARE(elapsed->property("text").toString(), QStringLiteral("2150"));
+        QCOMPARE(time->property("text").toString(), QStringLiteral("7200"));
+        // The row is laid out again for the narrow window before the button is clicked where it now is
+        QTRY_VERIFY(time->mapToScene(QPointF(time->width(), 0)).x() <= ui.window->width());
         ui.clickCenter(time);
-        QTRY_COMPARE(time->property("text").toString(), QStringLiteral("2150"));
-        QCOMPARE(time->width(), narrow);
+        QTRY_COMPARE(time->property("text").toString(), QStringLiteral("\u22125050"));
+        QCOMPARE(elapsed->property("text").toString(), QStringLiteral("2150"));
+        // An unknown length has no total to show
+        stub.durationTicks = 0;
+        Q_EMIT stub.changed();
+        QTRY_VERIFY(!time->isVisible());
+        QVERIFY(elapsed->isVisible());
+    }
+
+    void playerEndsAtFollowsThePositionTheRateAndTheClock()
+    {
+        PlayerStub stub;
+        stub.positionTicks = 0;
+        stub.durationTicks = 72000000000;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(1000));
+        QVERIFY(ui.signIn());
+        QQuickItem *page = openPlayer(ui, stub);
+        QVERIFY(page);
+        QQuickItem *ends = ui.item(QStringLiteral("playerEndsAtLabel"));
+        QQuickItem *audio = ui.item(QStringLiteral("playerAudioButton"));
+        QVERIFY(ends && audio);
+        // The clock is fixed at 20:00:40, a Sunday evening, so the minute of the answer does not depend on when the test runs; the end time rounds to the nearest minute
+        QVERIFY(page->setProperty("fixedNow", QDateTime(QDate(2026, 11, 15), QTime(20, 0, 40))));
+        const auto clockTime = [](int hour, int minute) {
+            return QLocale().toString(QTime(hour, minute), QLocale::ShortFormat);
+        };
+        // Two hours left at normal speed: 22:00:40 shows as 22:01
+        QTRY_COMPARE(ends->property("text").toString(),
+                     QStringLiteral("Ends at %1").arg(clockTime(22, 1)));
+        QVERIFY(ends->isVisible());
+        QVERIFY(showsPlainText(ends));
+        // At the right of the row, before the Audio button, which keeps its place at the end
+        QVERIFY(ends->x() < audio->x());
+        QVERIFY(ends->parentItem() == audio->parentItem());
+        // A seek to the middle and then twice the speed each move it
+        stub.positionTicks = 36000000000;
+        Q_EMIT stub.changed();
+        QTRY_COMPARE(ends->property("text").toString(),
+                     QStringLiteral("Ends at %1").arg(clockTime(21, 1)));
+        stub.rate = 2;
+        Q_EMIT stub.changed();
+        QTRY_COMPARE(ends->property("text").toString(),
+                     QStringLiteral("Ends at %1").arg(clockTime(20, 31)));
+        // Under half a minute past the minute rounds down
+        QVERIFY(page->setProperty("fixedNow", QDateTime(QDate(2026, 11, 15), QTime(20, 0, 10))));
+        QTRY_COMPARE(ends->property("text").toString(),
+                     QStringLiteral("Ends at %1").arg(clockTime(20, 30)));
+        // Nothing left, or no known length: no label
+        stub.positionTicks = stub.durationTicks;
+        Q_EMIT stub.changed();
+        QTRY_VERIFY(!ends->isVisible());
+        QCOMPARE(ends->property("text").toString(), QString());
+        stub.positionTicks = 0;
+        stub.durationTicks = 0;
+        Q_EMIT stub.changed();
+        QTRY_VERIFY(!ends->isVisible());
+        QCOMPARE(ends->property("text").toString(), QString());
+        // The clock moves on at least every minute while nothing else changes, as in a pause
+        QObject *clock = page->findChild<QObject *>(QStringLiteral("playerClockTimer"));
+        QVERIFY(clock);
+        QVERIFY(clock->property("running").toBool());
+        QVERIFY(clock->property("repeat").toBool());
+        QVERIFY(clock->property("interval").toInt() <= 60000);
+    }
+
+    void playerAspectRatioMenuFollowsAndSetsTheMode()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(openPlayer(ui, stub));
+        QObject *menu = ui.popup(QStringLiteral("playerMoreMenu"));
+        QVERIFY(menu);
+        ui.clickCenter(ui.item(QStringLiteral("playerMoreButton")));
+        QTRY_VERIFY(menu->property("opened").toBool());
+        QObject *aspect = menu->findChild<QObject *>(QStringLiteral("playerAspectMenu"));
+        QVERIFY(aspect);
+        QCOMPARE(aspect->property("title").toString(), QStringLiteral("Aspect Ratio"));
+        QCOMPARE(aspect->property("count").toInt(), 7);
+        const QList<std::pair<QString, QString>> entries = {
+            {QStringLiteral("normal"), QStringLiteral("Auto")},
+            {QStringLiteral("zoom"), QStringLiteral("Zoom")},
+            {QStringLiteral("stretch"), QStringLiteral("Stretch")},
+            {QStringLiteral("force_4_3"), QStringLiteral("4:3")},
+            {QStringLiteral("force_16_9"), QStringLiteral("16:9")},
+            {QStringLiteral("force_16_9_if_4_3"), QStringLiteral("Widescreen for 4:3 Video")},
+            {QStringLiteral("noscaling"), QStringLiteral("Original Size")}};
+        const auto entry = [aspect](const QString &mode) {
+            return aspect->findChild<QObject *>(QStringLiteral("playerAspect_") + mode);
+        };
+        // The entries in the order of the menu; the player's mode is the checked one
+        for (int i = 0; i < entries.size(); ++i) {
+            QObject *item = entry(entries.at(i).first);
+            QVERIFY2(item, qPrintable(entries.at(i).first));
+            QCOMPARE(item->property("text").toString(), entries.at(i).second);
+            QVERIFY(item->property("checkable").toBool());
+            QCOMPARE(item->property("checked").toBool(), i == 0);
+            QQuickItem *at = nullptr;
+            QVERIFY(QMetaObject::invokeMethod(aspect, "itemAt", Q_RETURN_ARG(QQuickItem *, at),
+                                              Q_ARG(int, i)));
+            QCOMPARE(static_cast<QObject *>(at), item);
+        }
+        // Choosing one sets the mode on the player and the check follows it
+        QVERIFY(QMetaObject::invokeMethod(entry(QStringLiteral("zoom")), "click"));
+        QTRY_VERIFY(stub.calls.contains(QStringLiteral("setAspectMode zoom")));
+        QTRY_VERIFY(entry(QStringLiteral("zoom"))->property("checked").toBool());
+        QVERIFY(!entry(QStringLiteral("normal"))->property("checked").toBool());
+        // A mode the player changed by itself shows too
+        stub.aspectMode = QStringLiteral("force_16_9_if_4_3");
+        Q_EMIT stub.changed();
+        QTRY_VERIFY(entry(QStringLiteral("force_16_9_if_4_3"))->property("checked").toBool());
+        QVERIFY(!entry(QStringLiteral("zoom"))->property("checked").toBool());
+        QCOMPARE(stub.calls.count(QStringLiteral("setAspectMode zoom")), 1);
+    }
+
+    void playerRepeatIsAlwaysOnAndAllNeedsSomewhereToGo()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(openPlayer(ui, stub));
+        QObject *menu = ui.popup(QStringLiteral("playerMoreMenu"));
+        QVERIFY(menu);
+        ui.clickCenter(ui.item(QStringLiteral("playerMoreButton")));
+        QTRY_VERIFY(menu->property("opened").toBool());
+        QObject *repeat = menu->findChild<QObject *>(QStringLiteral("playerRepeatMenu"));
+        QObject *all = menu->findChild<QObject *>(QStringLiteral("playerRepeatAll"));
+        QObject *one = menu->findChild<QObject *>(QStringLiteral("playerRepeatOne"));
+        QObject *off = menu->findChild<QObject *>(QStringLiteral("playerRepeatOff"));
+        QVERIFY(repeat && all && one && off);
+        QQuickItem *entry = nullptr;
+        for (int i = 0; i < menu->property("count").toInt() && !entry; ++i) {
+            QQuickItem *candidate = nullptr;
+            QMetaObject::invokeMethod(menu, "itemAt", Q_RETURN_ARG(QQuickItem *, candidate),
+                                      Q_ARG(int, i));
+            if (candidate && candidate->property("subMenu").value<QObject *>() == repeat)
+                entry = candidate;
+        }
+        QVERIFY(entry);
+        // A lone item: the menu is on, Current Item is there, All has nothing to advance to
+        QVERIFY(entry->isEnabled());
+        QVERIFY(one->property("enabled").toBool());
+        QVERIFY(off->property("enabled").toBool());
+        QVERIFY(!all->property("enabled").toBool());
+        QVERIFY(QMetaObject::invokeMethod(one, "click"));
+        QTRY_VERIFY(stub.calls.contains(QStringLiteral("setRepeatMode 2")));
+        // Somewhere to go, whichever way, turns All on
+        for (const auto &setUp : {std::function<void()>([&] { stub.queueCount = 2; }),
+                                  std::function<void()>([&] { stub.hasNext = true; }),
+                                  std::function<void()>([&] { stub.hasPrevious = true; })}) {
+            stub.queueCount = 0;
+            stub.hasNext = false;
+            stub.hasPrevious = false;
+            Q_EMIT stub.changed();
+            QTRY_VERIFY(!all->property("enabled").toBool());
+            setUp();
+            Q_EMIT stub.changed();
+            QTRY_VERIFY(all->property("enabled").toBool());
+        }
+        // A repeat of all that is on can be turned off whatever the queue became
+        stub.queueCount = 0;
+        stub.hasNext = false;
+        stub.hasPrevious = false;
+        stub.repeatMode = 1;
+        Q_EMIT stub.changed();
+        QTRY_VERIFY(all->property("checked").toBool());
+        QVERIFY(all->property("enabled").toBool());
+        QVERIFY(entry->isEnabled());
     }
 
     void playerTimelineSeeksWhereADragEndsAndShowsNoTicks()
@@ -11016,7 +11251,7 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(!osd->isVisible());
     }
 
-    void playerClickPausesAndDoubleClickTogglesFullScreen()
+    void playerClickPausesAtOnceAndDoubleClickTogglesFullScreenAndKeepsThePause()
     {
         PlayerStub stub;
         Ui ui(m_home->path());
@@ -11025,27 +11260,25 @@ class TestUiPages : public QObject {
         QVERIFY(ui.signIn());
         QQuickItem *page = openPlayer(ui, stub);
         QVERIFY(page);
-        const int interval = QGuiApplication::styleHints()->mouseDoubleClickInterval();
         const QPoint onVideo(ui.window->width() / 2, ui.window->height() / 2);
-        // One click pauses once the double-click interval has passed
+        // One click pauses at once, with no wait for a second click, and only once
         restPointerOnVideo(ui);
         QTest::mouseClick(ui.window, Qt::LeftButton, Qt::NoModifier, onVideo);
-        QTest::qWait(qMin(50, interval / 4));
-        QVERIFY(!stub.calls.contains(QStringLiteral("togglePause")));
-        QTRY_COMPARE(stub.calls.count(QStringLiteral("togglePause")), 1);
-        // A double click toggles full screen and does not pause
+        QCOMPARE(stub.calls.count(QStringLiteral("togglePause")), 1);
+        QVERIFY(stub.paused);
+        // A double click toggles full screen and puts the pause back, so the playback ends as it was
         stub.calls.clear();
         QTest::mouseDClick(ui.window, Qt::LeftButton, Qt::NoModifier, onVideo);
         QTRY_COMPARE(ui.window->visibility(), QWindow::FullScreen);
-        QTest::qWait(interval + 200);
-        QVERIFY(!stub.calls.contains(QStringLiteral("togglePause")));
+        QCOMPARE(stub.calls.count(QStringLiteral("togglePause")), 2);
+        QVERIFY(stub.paused);
+        stub.calls.clear();
         // A click on a bar beside its controls is not a click on the video
         QQuickItem *bottomBar = ui.item(QStringLiteral("playerBottomBar"));
         QVERIFY(bottomBar);
         const QPoint onBar = bottomBar->mapToScene(QPointF(bottomBar->width() / 2, 4)).toPoint();
         QTest::mouseClick(ui.window, Qt::LeftButton, Qt::NoModifier, onBar);
         QTest::mouseDClick(ui.window, Qt::LeftButton, Qt::NoModifier, onBar);
-        QTest::qWait(interval + 200);
         QVERIFY(!stub.calls.contains(QStringLiteral("togglePause")));
         QCOMPARE(ui.window->visibility(), QWindow::FullScreen);
         // A click that closes a menu is spent on the menu
@@ -11055,15 +11288,16 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(menu->property("opened").toBool());
         QTest::mouseClick(ui.window, Qt::LeftButton, Qt::NoModifier, onVideo);
         QTRY_VERIFY(!menu->property("visible").toBool());
-        QTest::qWait(interval + 200);
         QVERIFY(!stub.calls.contains(QStringLiteral("togglePause")));
         // Nothing to pause while the item opens
         stub.loading = true;
         Q_EMIT stub.changed();
         QTest::mouseClick(ui.window, Qt::LeftButton, Qt::NoModifier, onVideo + QPoint(20, 0));
-        QTest::qWait(interval + 200);
         QVERIFY(!stub.calls.contains(QStringLiteral("togglePause")));
         stub.loading = false;
+        Q_EMIT stub.changed();
+        // The bars stay up while paused: playing again lets them hide
+        stub.paused = false;
         Q_EMIT stub.changed();
         // A tap on a touch screen only shows the bars
         QObject *timer = page->findChild<QObject *>(QStringLiteral("playerChromeTimer"));
@@ -11076,8 +11310,312 @@ class TestUiPages : public QObject {
         QTest::touchEvent(ui.window, touch).press(0, onVideo);
         QTest::touchEvent(ui.window, touch).release(0, onVideo);
         QTRY_VERIFY(osd->isVisible());
-        QTest::qWait(interval + 200);
         QVERIFY(!stub.calls.contains(QStringLiteral("togglePause")));
+    }
+
+    void playerDoubleClickDoesNotTogglePauseWhenTheFirstClickChangedNothing()
+    {
+        PlayerStub stub;
+        stub.pauseChangesNothing = true;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(openPlayer(ui, stub));
+        const QPoint onVideo(ui.window->width() / 2, ui.window->height() / 2);
+        restPointerOnVideo(ui);
+        // The click asked for a pause that did not happen: the double click has nothing to put back
+        QTest::mouseDClick(ui.window, Qt::LeftButton, Qt::NoModifier, onVideo);
+        QTRY_COMPARE(ui.window->visibility(), QWindow::FullScreen);
+        QCOMPARE(stub.calls.count(QStringLiteral("togglePause")), 1);
+        QVERIFY(!stub.paused);
+    }
+
+    void playerPlaybackInfoOverlayOpensFromTheMenuAndShowsTheInfo()
+    {
+        PlayerStub stub;
+        stub.info = {{QStringLiteral("playMethod"), QStringLiteral("Transcode")},
+                     {QStringLiteral("streamType"), QStringLiteral("HLS")},
+                     {QStringLiteral("protocol"), QStringLiteral("https")},
+                     {QStringLiteral("videoWidth"), 1920},
+                     {QStringLiteral("videoHeight"), 1080},
+                     {QStringLiteral("droppedFrames"), 3},
+                     {QStringLiteral("decoderDroppedFrames"), 0},
+                     {QStringLiteral("hwdec"), QStringLiteral("vaapi")},
+                     {QStringLiteral("targetVideoCodec"), QStringLiteral("h264")},
+                     {QStringLiteral("targetAudioCodec"), QStringLiteral("aac")},
+                     {QStringLiteral("transcodeReasons"),
+                      QStringList{QStringLiteral("VideoCodecNotSupported"),
+                                  QStringLiteral("NoSuchReasonYet"),
+                                  QStringLiteral("AudioChannelsNotSupported")}},
+                     // Remote text is shown as it is, never as markup
+                     {QStringLiteral("container"), QStringLiteral("<b>mkv</b> &amp; <img src=x>")},
+                     {QStringLiteral("sizeBytes"), qint64(3) * 1024 * 1024 * 1024},
+                     {QStringLiteral("bitrate"), 8500000},
+                     {QStringLiteral("videoCodec"), QStringLiteral("hevc")},
+                     {QStringLiteral("videoProfile"), QStringLiteral("Main 10")},
+                     {QStringLiteral("videoLevel"), 120},
+                     {QStringLiteral("videoBitrate"), 7000000},
+                     {QStringLiteral("videoFps"), 23.976},
+                     {QStringLiteral("videoBitDepth"), 10},
+                     {QStringLiteral("videoPixelFormat"), QStringLiteral("yuv420p10le")},
+                     {QStringLiteral("videoRange"), QStringLiteral("HDR10")},
+                     {QStringLiteral("colorSpace"), QStringLiteral("bt2020nc")},
+                     {QStringLiteral("colorPrimaries"), QStringLiteral("bt2020")},
+                     {QStringLiteral("colorTransfer"), QStringLiteral("smpte2084")},
+                     {QStringLiteral("audioCodec"), QStringLiteral("eac3")},
+                     {QStringLiteral("audioChannels"), 6},
+                     {QStringLiteral("audioBitrate"), 640000},
+                     {QStringLiteral("audioSampleRate"), 48000}};
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(1000));
+        QVERIFY(ui.signIn());
+        QQuickItem *page = openPlayer(ui, stub);
+        QVERIFY(page);
+        // The bars stay up while the menu is worked, whatever the speed of the machine
+        QObject *timer = page->findChild<QObject *>(QStringLiteral("playerChromeTimer"));
+        QVERIFY(timer);
+        timer->setProperty("interval", 60000);
+        QQuickItem *overlay = ui.item(QStringLiteral("playbackInfoOverlay"));
+        QVERIFY(overlay);
+        QVERIFY(!overlay->isVisible());
+        QObject *menu = ui.popup(QStringLiteral("playerMoreMenu"));
+        QVERIFY(menu);
+        ui.clickCenter(ui.item(QStringLiteral("playerMoreButton")));
+        QTRY_VERIFY(menu->property("opened").toBool());
+        QObject *entry = menu->findChild<QObject *>(QStringLiteral("playerPlaybackInfoItem"));
+        QVERIFY(entry);
+        QCOMPARE(entry->property("text").toString(), QStringLiteral("Playback Info"));
+        QVERIFY(entry->property("checkable").toBool());
+        QVERIFY(!entry->property("checked").toBool());
+        QVERIFY(QMetaObject::invokeMethod(entry, "click"));
+        QTRY_VERIFY(overlay->isVisible());
+        QTRY_VERIFY(entry->property("checked").toBool());
+        QTRY_VERIFY(!menu->property("visible").toBool());
+
+        const auto value = [&ui](const QString &key) -> QString {
+            const QQuickItem *label = ui.item(QStringLiteral("playbackInfoValue_") + key);
+            return label ? label->property("text").toString() : QStringLiteral("<no row>");
+        };
+        // The sections and rows of the stub's answer, each as plain text
+        QTRY_COMPARE(value(QStringLiteral("player")), QStringLiteral("mpv (Transcoding)"));
+        QCOMPARE(value(QStringLiteral("streamType")), QStringLiteral("HLS (https)"));
+        const QQuickItem *video = ui.item(QStringLiteral("videoRenderer"));
+        QVERIFY(video);
+        QCOMPARE(value(QStringLiteral("sizes")),
+                 QStringLiteral("%1\u00d7%2 / 1920\u00d71080")
+                     .arg(qRound(video->width() * ui.window->devicePixelRatio()))
+                     .arg(qRound(video->height() * ui.window->devicePixelRatio())));
+        QCOMPARE(value(QStringLiteral("hwdec")), QStringLiteral("vaapi"));
+        QCOMPARE(value(QStringLiteral("dropped")), QStringLiteral("3"));
+        QCOMPARE(value(QStringLiteral("decoderDropped")), QStringLiteral("0"));
+        QCOMPARE(ui.item(QStringLiteral("playbackInfoValue_decoderDropped"))
+                     ->parentItem()
+                     ->childItems()
+                     .constFirst()
+                     ->property("text")
+                     .toString(),
+                 QStringLiteral("Frames dropped by the decoder"));
+        QVERIFY(ui.item(QStringLiteral("playbackInfoSection_transcoding")));
+        QCOMPARE(ui.item(QStringLiteral("playbackInfoSectionTitle_playback"))
+                     ->property("text")
+                     .toString(),
+                 QStringLiteral("Playback Info"));
+        QCOMPARE(ui.item(QStringLiteral("playbackInfoSectionTitle_transcoding"))
+                     ->property("text")
+                     .toString(),
+                 QStringLiteral("Transcoding Info"));
+        QCOMPARE(
+            ui.item(QStringLiteral("playbackInfoSectionTitle_media"))->property("text").toString(),
+            QStringLiteral("Original Media Info"));
+        QCOMPARE(value(QStringLiteral("targetCodecs")), QStringLiteral("h264, aac"));
+        // A known reason is a sentence, an unknown name is left out
+        QCOMPARE(value(QStringLiteral("reasons")),
+                 QStringLiteral("The video codec is not supported\n"
+                                "The number of audio channels is not supported"));
+        const QString container = value(QStringLiteral("container"));
+        QVERIFY2(container.startsWith(QStringLiteral("<b>mkv</b> &amp; <img src=x>")),
+                 qPrintable(container));
+        QVERIFY2(container.contains(QStringLiteral("GiB")), qPrintable(container));
+        QVERIFY2(container.contains(QStringLiteral("Mbps")), qPrintable(container));
+        QCOMPARE(value(QStringLiteral("videoCodec")), QStringLiteral("hevc"));
+        const QString videoAttributes = value(QStringLiteral("videoAttributes"));
+        QVERIFY2(videoAttributes.startsWith(QStringLiteral("Main 10 \u00b7 Lv 120")),
+                 qPrintable(videoAttributes));
+        QVERIFY2(videoAttributes.contains(QStringLiteral("fps")), qPrintable(videoAttributes));
+        QVERIFY(value(QStringLiteral("videoBitDepth")).contains(QStringLiteral("yuv420p10le")));
+        QVERIFY(value(QStringLiteral("videoBitDepth")).contains(QStringLiteral("HDR10")));
+        QVERIFY(value(QStringLiteral("videoColors")).contains(QStringLiteral("smpte2084")));
+        QCOMPARE(value(QStringLiteral("audioCodec")), QStringLiteral("eac3"));
+        const QString audioAttributes = value(QStringLiteral("audioAttributes"));
+        QVERIFY2(audioAttributes.contains(QStringLiteral("6 Ch"))
+                     && audioAttributes.contains(QStringLiteral("640 kbps"))
+                     && audioAttributes.contains(QStringLiteral("Hz")),
+                 qPrintable(audioAttributes));
+        // Every text of the panel is plain text
+        int labels = 0;
+        const auto inButton = [overlay](const QQuickItem *item) {
+            for (; item && item != overlay; item = item->parentItem()) {
+                if (item->inherits("QQuickAbstractButton"))
+                    return true;
+            }
+            return false;
+        };
+        for (const QQuickItem *item : allItems(overlay)) {
+            if (!item->isVisible() || !item->inherits("QQuickText") || inButton(item))
+                continue;
+            ++labels;
+            QVERIFY2(showsPlainText(item), qPrintable(item->property("text").toString()));
+        }
+        QVERIFY(labels > 10);
+        // The panel sits at the top left, inside the window and clear of the bottom bar
+        const QRectF area = overlay->mapRectToScene(overlay->boundingRect());
+        QVERIFY(area.left() >= 0 && area.right() <= ui.window->width());
+        QVERIFY(area.bottom() <= ui.item(QStringLiteral("playerBottomBar"))
+                                     ->mapRectToScene(QRectF(0, 0, 1, 1))
+                                     .top());
+
+        // It reads the player again every second while it shows
+        stub.info.insert(QStringLiteral("droppedFrames"), 7);
+        QTRY_COMPARE(value(QStringLiteral("dropped")), QStringLiteral("7"));
+        // Without a transcode there is no transcoding section, and the method says so
+        stub.info.insert(QStringLiteral("playMethod"), QStringLiteral("DirectPlay"));
+        QTRY_COMPARE(value(QStringLiteral("player")), QStringLiteral("mpv (Direct Play)"));
+        QTRY_VERIFY(!ui.item(QStringLiteral("playbackInfoSection_transcoding")));
+        // Hardware decoding off and rows without a value are left out, the unknown hardware decoder among them
+        stub.info.insert(QStringLiteral("hwdec"), QStringLiteral("no"));
+        stub.info.remove(QStringLiteral("audioCodec"));
+        QTRY_COMPARE(value(QStringLiteral("hwdec")), QStringLiteral("Off"));
+        QTRY_VERIFY(!ui.item(QStringLiteral("playbackInfoValue_audioCodec")));
+        stub.info.remove(QStringLiteral("hwdec"));
+        QTRY_VERIFY(!ui.item(QStringLiteral("playbackInfoValue_hwdec")));
+
+        // A resize changes the sizes row alone: the rows are not built again
+        const QPointer<QQuickItem> playerRow = ui.item(QStringLiteral("playbackInfoValue_player"));
+        QVERIFY(playerRow);
+        const QString sizes = value(QStringLiteral("sizes"));
+        QVERIFY(ui.opensWindowOfWidth(1100));
+        QTRY_VERIFY(value(QStringLiteral("sizes")) != sizes);
+        QCOMPARE(ui.item(QStringLiteral("playbackInfoValue_player")), playerRow.data());
+        // The panel scrolls with a bar of its own and is a pane with a name
+        bool scrollBar = false;
+        for (const QQuickItem *item : allItems(overlay))
+            scrollBar = scrollBar || item->inherits("QQuickScrollBar");
+        QVERIFY(scrollBar);
+        QCOMPARE(accessibleNameOf(overlay), QStringLiteral("Playback Info"));
+
+        // A click on the panel is not a click on the video
+        stub.calls.clear();
+        QTest::mouseClick(
+            ui.window, Qt::LeftButton, Qt::NoModifier,
+            overlay->mapToScene(QPointF(overlay->width() / 2, overlay->height() - 2)).toPoint());
+        QTest::qWait(100);
+        QVERIFY(!stub.calls.contains(QStringLiteral("togglePause")));
+
+        // It stays when the bars go
+        QQuickItem *osd = ui.item(QStringLiteral("playerOsd"));
+        QVERIFY(osd);
+        restPointerOnVideo(ui);
+        timer->setProperty("interval", 300);
+        QTRY_VERIFY(!osd->isVisible());
+        QTest::qWait(300);
+        QVERIFY(overlay->isVisible());
+
+        // The close button has an accessible name and closes it, and the player stays
+        QQuickItem *close = ui.item(QStringLiteral("playbackInfoCloseButton"));
+        QVERIFY(close && close->isVisible());
+        QCOMPARE(close->property("text").toString(), QStringLiteral("Close Playback Info"));
+        QCOMPARE(close->property("display").toInt(), 0);
+        ui.clickCenter(close);
+        QTRY_VERIFY(!overlay->isVisible());
+        QCOMPARE(ui.currentDetails(), page);
+        QObject *infoTimer = overlay->findChild<QObject *>(QStringLiteral("playbackInfoTimer"));
+        QVERIFY(infoTimer);
+        QVERIFY(!infoTimer->property("running").toBool());
+    }
+
+    void playerPlaybackInfoSaysItWaitsWhileThereIsNothingToShow()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *page = openPlayer(ui, stub);
+        QVERIFY(page);
+        QQuickItem *overlay = ui.item(QStringLiteral("playbackInfoOverlay"));
+        QQuickItem *waiting = ui.item(QStringLiteral("playbackInfoWaiting"));
+        QVERIFY(overlay && waiting);
+        QVERIFY(page->setProperty("playbackInfoShown", true));
+        QTRY_VERIFY(overlay->isVisible());
+        // While the item opens or restarts one line takes the place of the rows
+        QTRY_VERIFY(waiting->isVisible());
+        QCOMPARE(waiting->property("text").toString(), QStringLiteral("Waiting for playback"));
+        QVERIFY(showsPlainText(waiting));
+        QVERIFY(!ui.item(QStringLiteral("playbackInfoSection_playback")));
+        stub.info = {{QStringLiteral("playMethod"), QStringLiteral("DirectPlay")}};
+        QTRY_VERIFY(ui.item(QStringLiteral("playbackInfoSection_playback")));
+        QVERIFY(!waiting->isVisible());
+        stub.info.clear();
+        QTRY_VERIFY(waiting->isVisible());
+        QVERIFY(!ui.item(QStringLiteral("playbackInfoSection_playback")));
+    }
+
+    void playerEscapeClosesThePlaybackInfoBeforeLeavingThePlayer()
+    {
+        PlayerStub stub;
+        stub.info = {{QStringLiteral("playMethod"), QStringLiteral("DirectPlay")}};
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *page = openPlayer(ui, stub);
+        QVERIFY(page);
+        QObject *timer = page->findChild<QObject *>(QStringLiteral("playerChromeTimer"));
+        QVERIFY(timer);
+        timer->setProperty("interval", 60000);
+        QQuickItem *overlay = ui.item(QStringLiteral("playbackInfoOverlay"));
+        QObject *menu = ui.popup(QStringLiteral("playerMoreMenu"));
+        QVERIFY(overlay && menu);
+        // The menu opens through its own method: in a full-screen window the button can lie outside the window the test clicks in
+        const auto open = [&] {
+            QVERIFY(QMetaObject::invokeMethod(menu, "open"));
+            QTRY_VERIFY(menu->property("opened").toBool());
+            QObject *entry = menu->findChild<QObject *>(QStringLiteral("playerPlaybackInfoItem"));
+            QVERIFY(entry);
+            QVERIFY(QMetaObject::invokeMethod(entry, "click"));
+            QTRY_VERIFY(overlay->isVisible());
+            QTRY_VERIFY(!menu->property("visible").toBool());
+        };
+        open();
+        if (QTest::currentTestFailed())
+            return;
+        // Esc closes the panel and stays; a second one leaves the player
+        QTest::keyClick(ui.window, Qt::Key_Escape);
+        QTRY_VERIFY(!overlay->isVisible());
+        QTest::qWait(100);
+        QCOMPARE(ui.currentDetails(), page);
+        QObject *entry = menu->findChild<QObject *>(QStringLiteral("playerPlaybackInfoItem"));
+        QVERIFY(entry && !entry->property("checked").toBool());
+        // The panel comes back from the menu, and it closes before the full screen the player entered
+        QVERIFY(QMetaObject::invokeMethod(ui.engine.rootObjects().constFirst(),
+                                          "togglePlayerFullscreen"));
+        QTRY_COMPARE(ui.window->visibility(), QWindow::FullScreen);
+        open();
+        if (QTest::currentTestFailed())
+            return;
+        QTest::keyClick(ui.window, Qt::Key_Escape);
+        QTRY_VERIFY(!overlay->isVisible());
+        QTest::qWait(100);
+        QCOMPARE(ui.window->visibility(), QWindow::FullScreen);
+        QCOMPARE(ui.currentDetails(), page);
+        QTest::keyClick(ui.window, Qt::Key_Escape);
+        QTRY_COMPARE(ui.window->visibility(), QWindow::Windowed);
+        QCOMPARE(ui.currentDetails(), page);
+        QTest::keyClick(ui.window, Qt::Key_Escape);
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("homePage"));
     }
 
     void remoteHomeAndBack()
@@ -11155,11 +11693,11 @@ class TestUiPages : public QObject {
             Q_EMIT remote.actionRequested(command);
         // Pause and play act only on the state they change; the stub starts at full volume, and the player page keeps the front against Home
         QCOMPARE(stub.calls,
-                 QStringList({QStringLiteral("togglePause"), QStringLiteral("pause"),
-                              QStringLiteral("resume"), QStringLiteral("next"),
-                              QStringLiteral("previous"), QStringLiteral("seekRelative 10"),
-                              QStringLiteral("seekRelative -10"), QStringLiteral("setVolume 95"),
-                              QStringLiteral("setVolume 100"), QStringLiteral("toggleMute")}));
+                 QStringList({QStringLiteral("togglePause"), QStringLiteral("resume"),
+                              QStringLiteral("next"), QStringLiteral("previous"),
+                              QStringLiteral("seekRelative 10"), QStringLiteral("seekRelative -10"),
+                              QStringLiteral("setVolume 95"), QStringLiteral("setVolume 100"),
+                              QStringLiteral("toggleMute")}));
         QCOMPARE(ui.currentDetails(), page);
 
         Q_EMIT remote.actionRequested(QStringLiteral("togglefullscreen"));

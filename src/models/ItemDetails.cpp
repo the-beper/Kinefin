@@ -8,6 +8,7 @@
 
 #include <QJsonArray>
 #include <QJsonValue>
+#include <QRegularExpression>
 
 #include <algorithm>
 
@@ -22,12 +23,28 @@ QString text(const QJsonValue &value, int limit)
     return value.isString() ? value.toString().left(limit) : QString();
 }
 
+// A short server token (codec, profile, colour name) as plain text: empty unless it is printable ASCII, cut at 64 characters; `\z` because `$` also matches before a final newline
+QString token(const QJsonValue &value)
+{
+    static const QRegularExpression printable(QStringLiteral("^[\\x20-\\x7E]{1,64}\\z"));
+    const QString result = text(value, kMaxToken);
+    return printable.match(result).hasMatch() ? result : QString();
+}
+
 int boundedInt(const QJsonValue &value, int minimum, int maximum, int fallback)
 {
     if (!value.isDouble())
         return fallback;
     const double number = value.toDouble();
     return number < minimum || number > maximum ? fallback : static_cast<int>(number);
+}
+
+qreal boundedReal(const QJsonValue &value, double minimum, double maximum)
+{
+    if (!value.isDouble())
+        return 0;
+    const double number = value.toDouble();
+    return !(number >= minimum && number <= maximum) ? 0 : number;
 }
 
 qint64 boundedInt64(const QJsonValue &value, qint64 minimum, qint64 maximum, qint64 fallback)
@@ -95,8 +112,9 @@ QStringList pairNames(const QJsonValue &value, int count)
 StreamSummary parseStream(const QJsonObject &stream)
 {
     StreamSummary summary;
-    summary.type = text(stream.value(QStringLiteral("Type")), kMaxToken);
-    summary.codec = text(stream.value(QStringLiteral("Codec")), kMaxToken);
+    summary.index = boundedInt(stream.value(QStringLiteral("Index")), 0, 4095, -1);
+    summary.type = token(stream.value(QStringLiteral("Type")));
+    summary.codec = token(stream.value(QStringLiteral("Codec")));
     summary.language = text(stream.value(QStringLiteral("Language")), kMaxToken);
     summary.title = text(stream.value(QStringLiteral("DisplayTitle")), ItemDetails::MaxShort);
     if (summary.title.isEmpty())
@@ -104,21 +122,34 @@ StreamSummary parseStream(const QJsonObject &stream)
     summary.width = boundedInt(stream.value(QStringLiteral("Width")), 0, 100000, 0);
     summary.height = boundedInt(stream.value(QStringLiteral("Height")), 0, 100000, 0);
     summary.channels = boundedInt(stream.value(QStringLiteral("Channels")), 0, 64, 0);
-    summary.videoRangeType = text(stream.value(QStringLiteral("VideoRangeType")), kMaxToken);
-    summary.channelLayout = text(stream.value(QStringLiteral("ChannelLayout")), kMaxToken);
+    summary.videoRangeType = token(stream.value(QStringLiteral("VideoRangeType")));
+    summary.channelLayout = token(stream.value(QStringLiteral("ChannelLayout")));
     summary.bitrate = boundedInt64(stream.value(QStringLiteral("BitRate")), 0, 100'000'000'000, 0);
+    summary.profile = token(stream.value(QStringLiteral("Profile")));
+    summary.pixelFormat = token(stream.value(QStringLiteral("PixelFormat")));
+    summary.videoRange = token(stream.value(QStringLiteral("VideoRange")));
+    summary.colorSpace = token(stream.value(QStringLiteral("ColorSpace")));
+    summary.colorPrimaries = token(stream.value(QStringLiteral("ColorPrimaries")));
+    summary.colorTransfer = token(stream.value(QStringLiteral("ColorTransfer")));
+    summary.level = boundedReal(stream.value(QStringLiteral("Level")), 0, 1000);
+    summary.frameRate = boundedReal(stream.value(QStringLiteral("RealFrameRate")), 0, 1000);
+    if (summary.frameRate == 0)
+        summary.frameRate = boundedReal(stream.value(QStringLiteral("AverageFrameRate")), 0, 1000);
+    summary.bitDepth = boundedInt(stream.value(QStringLiteral("BitDepth")), 0, 64, 0);
+    summary.sampleRate = boundedInt(stream.value(QStringLiteral("SampleRate")), 0, 10'000'000, 0);
     summary.isDefault = stream.value(QStringLiteral("IsDefault")).toBool(false);
     summary.isForced = stream.value(QStringLiteral("IsForced")).toBool(false);
     summary.isExternal = stream.value(QStringLiteral("IsExternal")).toBool(false);
     return summary;
 }
+} // namespace
 
-SourceSummary parseSource(const QJsonObject &source)
+SourceSummary parseMediaSource(const QJsonObject &source)
 {
     SourceSummary summary;
     summary.id = text(source.value(QStringLiteral("Id")), kMaxToken);
     summary.name = text(source.value(QStringLiteral("Name")), ItemDetails::MaxShort);
-    summary.container = text(source.value(QStringLiteral("Container")), kMaxToken);
+    summary.container = token(source.value(QStringLiteral("Container")));
     summary.size = boundedInt64(source.value(QStringLiteral("Size")), 0, 1'000'000'000'000'000, 0);
     summary.bitrate = boundedInt64(source.value(QStringLiteral("Bitrate")), 0, 100'000'000'000, 0);
     const QJsonValue streams = source.value(QStringLiteral("MediaStreams"));
@@ -138,7 +169,6 @@ SourceSummary parseSource(const QJsonObject &source)
     // The server's path to the file is never read: it says nothing the page may show
     return summary;
 }
-} // namespace
 
 ItemDetails parseItemDetails(const QJsonObject &item)
 {
@@ -275,7 +305,7 @@ ItemDetails parseItemDetails(const QJsonObject &item)
             if (details.sources.size() == ItemDetails::MaxSources)
                 break;
             if (entry.isObject())
-                details.sources.append(parseSource(entry.toObject()));
+                details.sources.append(parseMediaSource(entry.toObject()));
         }
     }
     return details;

@@ -33,6 +33,8 @@ namespace Kinefin {
 namespace {
 constexpr qint64 TicksPerSecond = 10'000'000;
 constexpr int MaxRememberedItems = 1000;
+// An item that played for less wall-clock time than this since it loaded is not repeated
+constexpr qint64 MinimumPlayedMs = 2000;
 // The most episodes of one series the player lists to step through
 constexpr int MaxSeriesEpisodes = 2000;
 // A page of a series' episodes: a whole long series in one answer would pass the client's reply cap
@@ -209,8 +211,12 @@ PlayerController::PlayerController(JellyfinClient &client, PlayQueue &queue,
         }
         m_trackRestored = false;
         m_trackTimer.start();
+        m_playedClock.start();
+        m_mpvSettings.applyLoadedAspect();
         refreshTracks();
     });
+    connect(&m_engine, &PlaybackEngine::videoParamsChanged, &m_mpvSettings,
+            &PlayerSettings::applyLoadedAspect);
     connect(&m_engine, &PlaybackEngine::streamEnded, this, &PlayerController::onEnd);
     m_sleep.setSingleShot(true);
     connect(&m_sleep, &QTimer::timeout, this, [this] { stop(); });
@@ -311,8 +317,9 @@ bool PlayerController::startItem(const QString &id, qint64 resumeTicks)
 {
     if (!isValidJellyfinId(id) || resumeTicks < 0 || m_client.userId().isEmpty())
         return false;
+    const bool sameItem = id == m_itemId;
     // Preserve the prior item's cursor before the new id replaces it.
-    if (!m_itemId.isEmpty() && m_itemId != id)
+    if (!m_itemId.isEmpty() && !sameItem)
         persistQueueCursor();
     // A different item cannot be opened until the old mpv end-file arrived.
     // The pending id survives that stop and is negotiated exactly once.
@@ -330,6 +337,12 @@ bool PlayerController::startItem(const QString &id, qint64 resumeTicks)
     m_skipLabel.clear();
     m_segments.clear();
     m_source = PlaybackSource{};
+    // The same item again (a repeat) keeps the aspect and the rate the user chose
+    m_keptRate.reset();
+    if (sameItem)
+        m_keptRate = m_engine.playbackRate();
+    else
+        m_mpvSettings.setAspectOverride({});
     m_externalSubtitles.clear();
     m_subtitleOptions.clear();
     m_pendingSubtitle.clear();
@@ -416,6 +429,10 @@ void PlayerController::requestPending()
         || m_session.state() != PlaybackSession::State::Idle)
         return;
     m_mpvSettings.apply();
+    if (m_keptRate) {
+        m_engine.setRate(*m_keptRate);
+        m_keptRate.reset();
+    }
     const QJsonObject profile = buildDeviceProfile(m_settings.deviceProfileOptions());
     if (!m_client.requestPlaybackInfo(m_itemId, m_resumeTicks, profile)) {
         m_loading = false;
@@ -566,9 +583,18 @@ void PlayerController::onEnd(const QString &reason)
         QTimer::singleShot(0, this, &PlayerController::requestPending);
         return;
     }
-    // The saved queue always advances; the episodes of a series follow the user's autoplay preference, which never stops Repeat One
-    const bool advance = !m_playlistEphemeral || m_nextEpisodeAutoPlay || m_repeat == 2;
-    if (reason == QLatin1String("eof") && !m_stopping && advance && next())
+    // The saved queue always advances; the episodes of a series follow the user's autoplay preference, which an explicit repeat mode overrides
+    const bool advance = !m_playlistEphemeral || m_nextEpisodeAutoPlay || m_repeat != 0;
+    const bool ended = reason == QLatin1String("eof") && !m_stopping;
+    const bool playedLongEnough =
+        m_playedClock.isValid() && m_playedClock.elapsed() >= MinimumPlayedMs;
+    m_playedClock.invalidate();
+    if (ended && advance && next())
+        return;
+    // An item with nothing to advance to plays again when either repeat mode is on, after a real end: a stream that stops at once or far from its end does not loop
+    const QString again = m_itemId;
+    if (ended && m_repeat != 0 && m_engine.nearEnd() && playedLongEnough
+        && (m_playlist.isEmpty() || m_playlistEphemeral) && startItem(again, 0))
         return;
     if (reason == QLatin1String("eof") && !m_playlist.isEmpty() && !m_playlistEphemeral
         && !m_client.serverId().isEmpty() && !m_client.userId().isEmpty()) {
@@ -596,6 +622,9 @@ void PlayerController::clearCurrent()
     m_skipLabel.clear();
     m_skipEnd = 0;
     m_segments.clear();
+    m_source = PlaybackSource{};
+    m_keptRate.reset();
+    m_mpvSettings.setAspectOverride({});
 }
 
 void PlayerController::pause()
@@ -749,6 +778,65 @@ void PlayerController::setShuffle(bool enabled)
     m_shuffle = enabled;
     Q_EMIT changed();
 }
+void PlayerController::setAspectMode(const QString &mode)
+{
+    if (!PlayerSettings::isAspectMode(mode))
+        return;
+    m_mpvSettings.setAspectOverride(mode);
+    Q_EMIT changed();
+}
+
+QVariantMap PlayerController::playbackInfo() const
+{
+    QVariantMap info;
+    if (m_source.itemId.isEmpty() || m_source.itemId != m_itemId)
+        return info;
+    const PlaybackMediaInfo &media = m_source.media;
+    const auto put = [&info](const char *key, const QVariant &value) {
+        const bool empty = value.typeId() == QMetaType::QString ? value.toString().isEmpty()
+                           : value.typeId() == QMetaType::QStringList
+                               ? value.toStringList().isEmpty()
+                               : value.toDouble() <= 0;
+        if (!empty)
+            info.insert(QString::fromLatin1(key), value);
+    };
+    const bool direct = m_source.method == PlaybackSource::Method::Direct;
+    info.insert(QStringLiteral("playMethod"),
+                direct ? QStringLiteral("DirectPlay") : QStringLiteral("Transcode"));
+    put("streamType", media.streamType);
+    put("protocol", media.protocol);
+    put("targetVideoCodec", media.targetVideoCodec);
+    put("targetAudioCodec", media.targetAudioCodec);
+    put("transcodeReasons", media.transcodeReasons);
+    put("container", media.source.container);
+    put("sizeBytes", media.source.size);
+    put("bitrate", media.source.bitrate);
+    if (const StreamSummary *video = pickStream(media.source, u"Video")) {
+        put("videoCodec", video->codec);
+        put("videoProfile", video->profile);
+        put("videoLevel", video->level);
+        put("videoBitrate", video->bitrate);
+        put("videoFps", video->frameRate);
+        put("videoBitDepth", video->bitDepth);
+        put("videoPixelFormat", video->pixelFormat);
+        put("videoRange",
+            video->videoRangeType.isEmpty() ? video->videoRange : video->videoRangeType);
+        put("colorSpace", video->colorSpace);
+        put("colorPrimaries", video->colorPrimaries);
+        put("colorTransfer", video->colorTransfer);
+    }
+    // A transcode carries the one track the server chose: mpv's stream index says nothing about the source's
+    const int audioIndex = direct && m_selectedAudioIndex ? *m_selectedAudioIndex : -1;
+    if (const StreamSummary *audio = pickStream(media.source, u"Audio", audioIndex)) {
+        put("audioCodec", audio->codec);
+        put("audioChannels", audio->channels);
+        put("audioBitrate", audio->bitrate);
+        put("audioSampleRate", audio->sampleRate);
+    }
+    info.insert(m_engine.videoFacts());
+    return info;
+}
+
 void PlayerController::setRepeatMode(int mode)
 {
     if (mode < 0 || mode > 2)

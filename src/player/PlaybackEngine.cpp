@@ -146,9 +146,17 @@ void PlaybackEngine::wireController()
         quint64 id = 0;
     };
     static const Observed observed[] = {
-        {"time-pos", MPV_FORMAT_DOUBLE, 1}, {"duration", MPV_FORMAT_DOUBLE, 2},
-        {"seekable", MPV_FORMAT_FLAG, 3},   {"paused-for-cache", MPV_FORMAT_FLAG, 4},
+        {"time-pos", MPV_FORMAT_DOUBLE, 1},
+        {"duration", MPV_FORMAT_DOUBLE, 2},
+        {"seekable", MPV_FORMAT_FLAG, 3},
+        {"paused-for-cache", MPV_FORMAT_FLAG, 4},
         {"speed", MPV_FORMAT_DOUBLE, 5},
+        {"dwidth", MPV_FORMAT_INT64, 6},
+        {"dheight", MPV_FORMAT_INT64, 7},
+        {"frame-drop-count", MPV_FORMAT_INT64, 8},
+        {"decoder-frame-drop-count", MPV_FORMAT_INT64, 9},
+        {"hwdec-current", MPV_FORMAT_STRING, 10},
+        {"video-dec-params", MPV_FORMAT_NODE, 11},
     };
     for (const Observed &entry : observed) {
         if (m_renderer)
@@ -305,6 +313,28 @@ void PlaybackEngine::sendStop()
     }
 }
 
+// The key of `videoFacts()` that an mpv property feeds, null for any other property
+static const char *videoFactKey(const QString &property)
+{
+    if (property == QLatin1String("dwidth"))
+        return "videoWidth";
+    if (property == QLatin1String("dheight"))
+        return "videoHeight";
+    if (property == QLatin1String("frame-drop-count"))
+        return "droppedFrames";
+    if (property == QLatin1String("decoder-frame-drop-count"))
+        return "decoderDroppedFrames";
+    if (property == QLatin1String("hwdec-current"))
+        return "hwdec";
+    return nullptr;
+}
+
+bool PlaybackEngine::nearEnd() const
+{
+    return m_positionKnown && m_durationTicks > 0
+           && m_durationTicks - m_positionTicks <= kEofSnapTicks;
+}
+
 void PlaybackEngine::onFileStarted()
 {
     m_loadStarted = true;
@@ -340,6 +370,19 @@ void PlaybackEngine::onPropertyChanged(const QString &property, const QVariant &
             m_canSeek = value.toBool();
             Q_EMIT canSeekChanged(m_canSeek);
         }
+    } else if (property == QLatin1String("video-dec-params")) {
+        if (value.isValid())
+            Q_EMIT videoParamsChanged();
+    } else if (const char *key = videoFactKey(property)) {
+        const QString name = QString::fromLatin1(key);
+        const bool isText = value.typeId() == QMetaType::QString;
+        // An unavailable property arrives as an invalid value: the fact is unknown again
+        if (!value.isValid() || (isText && value.toString().isEmpty()))
+            m_videoFacts.remove(name);
+        else if (isText)
+            m_videoFacts.insert(name, value.toString().left(64));
+        else
+            m_videoFacts.insert(name, value);
     } else if (property == QLatin1String("paused-for-cache")) {
         // Cache stalls only mean Buffering around an actually Playing session: the state machine refuses every other path silently
         if (isFlag && value.toBool()) {
@@ -353,6 +396,7 @@ void PlaybackEngine::onPropertyChanged(const QString &property, const QVariant &
 void PlaybackEngine::onEndFile(const QString &reason)
 {
     qCDebug(playerLog) << "end file:" << reason;
+    m_videoFacts.clear();
     const bool eofish = reason == QLatin1String("eof");
     switch (m_session.state()) {
     case PlaybackSession::State::Playing:
@@ -363,7 +407,7 @@ void PlaybackEngine::onEndFile(const QString &reason)
             m_session.failed();
             break;
         }
-        if (eofish && m_positionKnown && m_durationTicks - m_positionTicks <= kEofSnapTicks) {
+        if (eofish && nearEnd()) {
             m_positionTicks = m_durationTicks;
             Q_EMIT positionChanged(m_positionTicks);
         }

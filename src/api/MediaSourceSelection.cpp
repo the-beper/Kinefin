@@ -111,6 +111,82 @@ std::optional<QUrl> transcodingUrl(const QUrl &serverBase, const QString &raw,
     return url;
 }
 
+QString queryValue(const QUrlQuery &query, const QString &key)
+{
+    const auto items = query.queryItems(QUrl::FullyDecoded);
+    for (const auto &item : items) {
+        if (item.first.compare(key, Qt::CaseInsensitive) == 0)
+            return item.second;
+    }
+    return {};
+}
+
+// The first entry of a comma list of codecs, when it is a plain name
+QString firstCodec(const QString &list)
+{
+    static const QRegularExpression pattern(QStringLiteral("^[A-Za-z0-9_.-]{1,32}$"));
+    const QString first = list.section(QLatin1Char(','), 0, 0).trimmed();
+    return pattern.match(first).hasMatch() ? first : QString();
+}
+
+// Names of the server's `TranscodeReasons` enum: letters only, a few, each once
+QStringList transcodeReasonNames(const QStringList &candidates)
+{
+    static const QRegularExpression pattern(QStringLiteral("^[A-Za-z]{1,64}$"));
+    QStringList names;
+    for (const QString &candidate : candidates) {
+        const QString name = candidate.trimmed();
+        if (names.size() == PlaybackMediaInfo::MaxTranscodeReasons)
+            break;
+        if (pattern.match(name).hasMatch() && !names.contains(name))
+            names.append(name);
+    }
+    return names;
+}
+
+QStringList reasonsOfSource(const QJsonObject &mediaSource)
+{
+    const QJsonValue value = mediaSource.value(QStringLiteral("TranscodeReasons"));
+    QStringList candidates;
+    if (value.isString()) {
+        candidates = value.toString().left(2048).split(QLatin1Char(','));
+    } else if (value.isArray()) {
+        for (const QJsonValue &entry : value.toArray()) {
+            if (candidates.size() == 4 * PlaybackMediaInfo::MaxTranscodeReasons)
+                break;
+            if (entry.isString())
+                candidates.append(entry.toString().left(64));
+        }
+    }
+    return transcodeReasonNames(candidates);
+}
+
+// `rawTranscodingUrl` is the server's string, read for its codec and reason parameters only
+PlaybackMediaInfo mediaInfo(const QJsonObject &mediaSource, const QUrl &url,
+                            const QString &rawTranscodingUrl)
+{
+    PlaybackMediaInfo info;
+    info.source = parseMediaSource(mediaSource);
+    info.protocol = url.scheme();
+    if (rawTranscodingUrl.isEmpty()) {
+        info.streamType = QStringLiteral("File");
+        return info;
+    }
+    const QString extension = url.path().section(QLatin1Char('.'), -1).toLower();
+    static const QRegularExpression plain(QStringLiteral("^[a-z0-9]{1,8}$"));
+    info.streamType = extension == QLatin1String("m3u8")  ? QStringLiteral("HLS")
+                      : plain.match(extension).hasMatch() ? extension.toUpper()
+                                                          : QString();
+    const QUrlQuery query(rawTranscodingUrl.section(QLatin1Char('?'), 1));
+    info.targetVideoCodec = firstCodec(queryValue(query, QStringLiteral("VideoCodec")));
+    info.targetAudioCodec = firstCodec(queryValue(query, QStringLiteral("AudioCodec")));
+    info.transcodeReasons = transcodeReasonNames(
+        queryValue(query, QStringLiteral("TranscodeReasons")).left(2048).split(QLatin1Char(',')));
+    if (info.transcodeReasons.isEmpty())
+        info.transcodeReasons = reasonsOfSource(mediaSource);
+    return info;
+}
+
 void addExternalSubtitles(PlaybackSource &playback, const QJsonObject &mediaSource,
                           const QUrl &serverBase, QByteArrayView token)
 {
@@ -165,6 +241,23 @@ bool isValidJellyfinId(QStringView id)
     return true;
 }
 
+const StreamSummary *pickStream(const SourceSummary &source, QStringView type, int index)
+{
+    const StreamSummary *fallback = nullptr;
+    const StreamSummary *first = nullptr;
+    for (const StreamSummary &stream : source.streams) {
+        if (stream.type != type)
+            continue;
+        if (index >= 0 && stream.index == index)
+            return &stream;
+        if (!fallback && stream.isDefault)
+            fallback = &stream;
+        if (!first)
+            first = &stream;
+    }
+    return fallback ? fallback : first;
+}
+
 SourceSelection selectPlaybackSource(const QJsonObject &response, const QString &itemId,
                                      const QUrl &serverBase, QByteArrayView accessToken)
 {
@@ -216,6 +309,7 @@ SourceSelection selectPlaybackSource(const QJsonObject &response, const QString 
         PlaybackSource result =
             baseSource(itemId, mediaSourceId, playSessionId, PlaybackSource::Method::Direct);
         result.url = url;
+        result.media = mediaInfo(source, url, {});
         addExternalSubtitles(result, source, serverBase, accessToken);
         return {result, {}};
     }
@@ -233,6 +327,7 @@ SourceSelection selectPlaybackSource(const QJsonObject &response, const QString 
         PlaybackSource result = baseSource(itemId, source.value(QStringLiteral("Id")).toString(),
                                            playSessionId, PlaybackSource::Method::Transcode);
         result.url = *url;
+        result.media = mediaInfo(source, *url, raw.toString());
         addExternalSubtitles(result, source, serverBase, accessToken);
         return {result, {}};
     }
