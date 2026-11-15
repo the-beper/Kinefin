@@ -5,6 +5,9 @@
 #include "app/Logging.h"
 #include "app/ProfileCommands.h"
 #include "integration/LinkRouter.h"
+#include "integration/Mpris.h"
+#include "integration/MprisArtwork.h"
+#include "integration/ScreenSaverInhibitor.h"
 #include "player/PlayerController.h"
 #include "settings/ClientSettings.h"
 #include "settings/KWalletTokenStore.h"
@@ -134,27 +137,30 @@ int main(int argc, char *argv[])
     std::optional<QString> pendingItemId;
     if (!parser.positionalArguments().isEmpty())
         pendingItemId = Kinefin::parseItemLink(parser.positionalArguments().first());
-    auto showItem = [&window, &pendingItemId](const QString &itemId) {
+    // A second launch, a link and MPRIS's Raise all bring the window up the same way
+    auto raiseWindow = [&window] {
+        if (!window)
+            return;
+        window->show();
+        window->raise();
+        window->requestActivate();
+    };
+    auto showItem = [&window, &pendingItemId, raiseWindow](const QString &itemId) {
         if (!window) {
             pendingItemId = itemId;
             return;
         }
         window->setProperty("requestedItemId", QVariant(itemId));
-        window->show();
-        window->raise();
-        window->requestActivate();
+        raiseWindow();
     };
     KDBusService service(KDBusService::Unique);
     QObject::connect(&service, &KDBusService::activateRequested, &app,
-                     [&window, showItem](const QStringList &args, const QString &) {
-                         if (const auto item = Kinefin::itemFromActivationArguments(args)) {
+                     [showItem, raiseWindow](const QStringList &args, const QString &) {
+                         if (const auto item = Kinefin::itemFromActivationArguments(args))
                              showItem(*item);
-                         } else if (window) {
+                         else
                              // Plain second launch: raise without changing pages.
-                             window->show();
-                             window->raise();
-                             window->requestActivate();
-                         }
+                             raiseWindow();
                      });
 
     const auto profileLock = Kinefin::lockProfile(profileId, &profileError);
@@ -238,5 +244,14 @@ int main(int argc, char *argv[])
         pendingItemId.reset();
         showItem(itemId);
     }
+    // The desktop's media controls and the screen kept on during playback; Quit closes the window as Ctrl+Q does, so unsaved preferences are asked about first
+    Kinefin::Mpris mpris(player, profileId, QDBusConnection::sessionBus());
+    QObject::connect(&mpris, &Kinefin::Mpris::raiseRequested, &app, raiseWindow);
+    QObject::connect(&mpris, &Kinefin::Mpris::quitRequested, window, &QWindow::close);
+    mpris.registerOnBus();
+    Kinefin::MprisArtwork mprisArtwork(mpris, player, imageOrigin,
+                                       Kinefin::profileCacheDirectory(profileId)
+                                           + QStringLiteral("/mpris"));
+    Kinefin::ScreenSaverInhibitor screenSaverInhibitor(player, QDBusConnection::sessionBus());
     return app.exec();
 }

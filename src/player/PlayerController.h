@@ -65,6 +65,11 @@ class PlayerController final : public QObject {
     Q_PROPERTY(QString skipLabel READ skipLabel NOTIFY changed)
     Q_PROPERTY(int sleepRemainingMinutes READ sleepRemainingMinutes NOTIFY changed)
   public:
+    // What the desktop sees (MPRIS, the screensaver): opening, loading and buffering count as playing, stopping and a failure as stopped
+    enum class Status { Stopped, Playing, Paused };
+    static constexpr double MinimumRate = 0.5;
+    static constexpr double MaximumRate = 4.0;
+
     PlayerController(JellyfinClient &client, PlayQueue &queue, ClientSettings &settings,
                      const QString &profileId, QObject *parent = nullptr);
     ~PlayerController() override;
@@ -105,6 +110,9 @@ class PlayerController final : public QObject {
     QString screenshotPath() const { return m_screenshotPath; }
     QString skipLabel() const { return m_skipLabel; }
     int sleepRemainingMinutes() const;
+    Status status() const;
+    // The token-free URL of the current item's primary image (512 px), empty until the server named its tag
+    QUrl artworkUrl() const;
 
     // Rendering item owns the libmpv handle. The call is made on its ready signal,
     // and detach precedes destruction (including account switch and window close).
@@ -147,6 +155,8 @@ class PlayerController final : public QObject {
 
   Q_SIGNALS:
     void changed();
+    // A seek was asked of mpv, to this position
+    void seeked(qint64 ticks);
     void tracksChanged();
     void previewChanged();
     void finished();
@@ -193,6 +203,8 @@ class PlayerController final : public QObject {
     QPointer<MpvAbstractItem> m_video;
     QTimer m_sleep;
     QTimer m_clock;
+    // One report after a run of seeks, however many there were
+    QTimer m_seekReport;
     QTimer m_trackTimer;
     QJsonObject m_memory;
     QJsonObject m_queueMemory;
@@ -217,6 +229,7 @@ class PlayerController final : public QObject {
     QString m_itemId;
     QString m_title;
     QString m_subtitle;
+    QString m_primaryTag;
     // The item whose series' episodes are being listed, set while that request is in flight
     QString m_seriesListItem;
     QString m_seriesId;

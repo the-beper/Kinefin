@@ -86,6 +86,15 @@ for _ in $(seq 20); do owned && break; sleep 1; done
 owned || { cat "$HOME/app.log"; fail "the app did not own io.github.the_beper.Kinefin"; }
 echo "ok: single instance owns io.github.the_beper.Kinefin"
 
+# MPRIS takes the default profile's name once the window is up, through the sandbox's wildcard own-name grant
+mpris_owned() {
+    gdbus call --session --dest org.freedesktop.DBus --object-path /org/freedesktop/DBus \
+        --method org.freedesktop.DBus.NameHasOwner org.mpris.MediaPlayer2.Kinefin.profile_default 2>/dev/null | grep -q true
+}
+for _ in $(seq 20); do mpris_owned && break; sleep 1; done
+mpris_owned || { cat "$HOME/app.log"; fail "the app did not own org.mpris.MediaPlayer2.Kinefin.profile_default"; }
+echo "ok: MPRIS name org.mpris.MediaPlayer2.Kinefin.profile_default"
+
 # A Flatpak app uses its own per-app XDG config root (independent of the
 # host's XDG_CONFIG_HOME). The profile index is configuration, not media data.
 profile_index="$HOME/.var/app/$id/config/kinefin/profiles.json"

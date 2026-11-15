@@ -204,6 +204,7 @@ PlayerController::PlayerController(JellyfinClient &client, PlayQueue &queue,
             const qint64 ticks = m_resumeTicks;
             m_resumeTicks = 0;
             m_engine.seekTo(ticks);
+            Q_EMIT seeked(ticks);
         }
         m_trackRestored = false;
         m_trackTimer.start();
@@ -212,6 +213,9 @@ PlayerController::PlayerController(JellyfinClient &client, PlayQueue &queue,
     connect(&m_engine, &PlaybackEngine::streamEnded, this, &PlayerController::onEnd);
     m_sleep.setSingleShot(true);
     connect(&m_sleep, &QTimer::timeout, this, [this] { stop(); });
+    m_seekReport.setSingleShot(true);
+    m_seekReport.setInterval(250);
+    connect(&m_seekReport, &QTimer::timeout, this, [this] { m_reporter.reportNow(); });
     m_clock.setInterval(30'000);
     connect(&m_clock, &QTimer::timeout, this, [this] {
         persistQueueCursor();
@@ -273,6 +277,7 @@ void PlayerController::onAccountLeaving()
     m_queueIndex = -1;
     m_title.clear();
     m_subtitle.clear();
+    m_primaryTag.clear();
     m_queue.setCurrentPlaybackItemId({});
     m_pendingSubtitle.clear();
     clearPreview();
@@ -310,6 +315,7 @@ bool PlayerController::startItem(const QString &id, qint64 resumeTicks)
     m_itemId = id;
     m_title.clear();
     m_subtitle.clear();
+    m_primaryTag.clear();
     m_resumeTicks = resumeTicks;
     m_errorText.clear();
     m_loading = true;
@@ -448,6 +454,7 @@ void PlayerController::onPlaybackItem(const QString &id, const QJsonObject &item
             summary.type == QLatin1String("Episode") && !summary.seriesName.isEmpty();
         m_title = episode ? summary.seriesName : summary.name;
         m_subtitle = episode ? episodeSubtitle(summary) : QString();
+        m_primaryTag = summary.primaryTag;
         if (m_seriesPlaylistWanted && episode && !summary.seriesId.isEmpty()) {
             m_seriesId = summary.seriesId;
             m_seriesEpisodes.clear();
@@ -574,6 +581,7 @@ void PlayerController::clearCurrent()
     m_itemId.clear();
     m_title.clear();
     m_subtitle.clear();
+    m_primaryTag.clear();
     m_errorText.clear();
     m_loading = false;
     m_stopping = false;
@@ -668,13 +676,39 @@ bool PlayerController::previous()
     return started;
 }
 
+PlayerController::Status PlayerController::status() const
+{
+    if (m_loading)
+        return Status::Playing;
+    switch (m_session.state()) {
+    case PlaybackSession::State::Opening:
+    case PlaybackSession::State::Playing:
+    case PlaybackSession::State::Buffering:
+        return Status::Playing;
+    case PlaybackSession::State::Paused:
+        return Status::Paused;
+    default:
+        return Status::Stopped;
+    }
+}
+
+QUrl PlayerController::artworkUrl() const
+{
+    if (m_itemId.isEmpty() || m_primaryTag.isEmpty())
+        return {};
+    return m_client.imageUrl(m_itemId, QStringLiteral("Primary"), 512, m_primaryTag);
+}
+
 void PlayerController::seek(qint64 ticks)
 {
-    if (!m_engine.canSeek() || !active() || ticks < 0)
+    // While the next item loads, the engine still holds the previous one's stream
+    if (!m_engine.canSeek() || !active() || m_loading || ticks < 0)
         return;
-    m_engine.seekTo(m_engine.durationTicks() > 0 ? std::min(ticks, m_engine.durationTicks())
-                                                 : ticks);
-    QTimer::singleShot(250, this, [this] { m_reporter.reportNow(); });
+    const qint64 target =
+        m_engine.durationTicks() > 0 ? std::min(ticks, m_engine.durationTicks()) : ticks;
+    m_engine.seekTo(target);
+    Q_EMIT seeked(target);
+    m_seekReport.start();
 }
 void PlayerController::seekRelative(int seconds)
 {
@@ -682,7 +716,7 @@ void PlayerController::seekRelative(int seconds)
 }
 void PlayerController::setRate(double value)
 {
-    if (std::isfinite(value) && value >= 0.5 && value <= 4.0)
+    if (std::isfinite(value) && value >= MinimumRate && value <= MaximumRate)
         m_engine.setRate(value);
 }
 void PlayerController::setVolume(int level)

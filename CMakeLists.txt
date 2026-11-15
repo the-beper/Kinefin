@@ -143,6 +143,18 @@ if(mpvqt_BINARY_DIR)
     target_include_directories(kinefin_player PRIVATE ${mpvqt_BINARY_DIR}/src)
 endif()
 
+# The desktop's view of the player: MPRIS and the screensaver inhibition, on the session bus
+add_library(kinefin_integration STATIC
+    src/integration/Mpris.cpp
+    src/integration/Mpris.h
+    src/integration/MprisArtwork.cpp
+    src/integration/MprisArtwork.h
+    src/integration/ScreenSaverInhibitor.cpp
+    src/integration/ScreenSaverInhibitor.h
+)
+target_compile_definitions(kinefin_integration PRIVATE TRANSLATION_DOMAIN="kinefin")
+target_link_libraries(kinefin_integration PUBLIC kinefin_player Qt6::DBus KF6::I18n)
+
 # The QML module lives in a static library of its own so that the UI tests can import it like the application does
 foreach(page Main PlayerPage ShellHeader AboutDialog ShortcutsDialog RemoteSessionsDialog MediaInfoDialog HomePage LibraryTile LibraryPage ResumeItemsPage MediaCard CardMenu CardRow EpisodeRow ItemDetailsPage SearchPage QueuePage FilterDialog GenreRailsView GenreRailsPage LibraryContent ItemListRow ItemRowGrid LoginPage UserPickerPage MessageBox ServersPage SettingsPage SettingRow UserPreferencesForm UserPreferencesSaveBar FavoritesPage FavoritesGroupPage)
     set_source_files_properties(src/qml/${page}.qml PROPERTIES QT_RESOURCE_ALIAS ${page}.qml)
@@ -209,7 +221,7 @@ target_link_libraries(kinefin_ui PUBLIC
 
 add_executable(kinefin src/main.cpp)
 target_link_libraries(kinefin PRIVATE
-    kinefin_ui kinefin_uiplugin kinefin_core kinefin_player
+    kinefin_ui kinefin_uiplugin kinefin_core kinefin_player kinefin_integration
     Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Quick Qt6::Qml Qt6::QuickControls2 Qt6::DBus
     KF6::CoreAddons KF6::I18n KF6::I18nQml KF6::DBusAddons
 )
@@ -271,6 +283,17 @@ if(BUILD_TESTING)
     target_compile_definitions(test_player_controller PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(test_player_controller PRIVATE kinefin_player kinefin_core Qt6::Test Qt6::Network)
     add_test(NAME player_controller COMMAND test_player_controller)
+
+    # The MPRIS and screensaver tests need a session bus of their own
+    add_executable(test_mpris tests/test_mpris.cpp)
+    target_compile_definitions(test_mpris PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    target_link_libraries(test_mpris PRIVATE kinefin_integration kinefin_core Qt6::Test Qt6::Network Qt6::DBus)
+    add_test(NAME mpris COMMAND dbus-run-session -- $<TARGET_FILE:test_mpris>)
+
+    add_executable(test_screensaver_inhibitor tests/test_screensaver_inhibitor.cpp)
+    target_compile_definitions(test_screensaver_inhibitor PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    target_link_libraries(test_screensaver_inhibitor PRIVATE kinefin_integration kinefin_core Qt6::Test Qt6::Network Qt6::DBus)
+    add_test(NAME screensaver_inhibitor COMMAND dbus-run-session -- $<TARGET_FILE:test_screensaver_inhibitor>)
 
     add_executable(test_jellyfin_socket tests/test_jellyfin_socket.cpp)
     target_compile_definitions(test_jellyfin_socket PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")

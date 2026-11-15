@@ -4,6 +4,7 @@
 # extracted with xgettext and compared against the committed catalogs.
 src/app/ConnectionController.cpp
 src/player/PlayerController.cpp
+src/integration/ScreenSaverInhibitor.cpp
 src/main.cpp
 src/settings/SettingDefinitions.cpp
 src/qml/HomePage.qml
