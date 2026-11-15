@@ -40,6 +40,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <functional>
 
 using Kinefin::ConnectionController;
@@ -10371,6 +10372,8 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(timeline->property("pressed").toBool());
         QTRY_VERIFY(timeline->property("dragSeconds").toDouble() > 0);
         const double dragged = timeline->property("dragSeconds").toDouble();
+        // A drag lands where the pointer is, not on ten-second steps
+        QVERIFY2(std::fmod(dragged, 10.0) != 0.0, qPrintable(QString::number(dragged)));
         stub.calls.clear();
         QTest::mouseRelease(ui.window, Qt::LeftButton, Qt::NoModifier, to);
         QTRY_VERIFY(!timeline->property("pressed").toBool());
@@ -10384,6 +10387,15 @@ class TestUiPages : public QObject {
                 seeks << call;
         }
         QCOMPARE(seeks.constLast(), wanted);
+        // With the focus on the timeline the arrow keys seek as the page's do, once each
+        timeline->forceActiveFocus(Qt::TabFocusReason);
+        QTRY_VERIFY(timeline->hasActiveFocus());
+        stub.calls.clear();
+        QTest::keyClick(ui.window, Qt::Key_Right);
+        QTest::keyClick(ui.window, Qt::Key_Down);
+        QTRY_COMPARE(stub.calls.count(QStringLiteral("seekRelative 10")), 1);
+        QTRY_COMPARE(stub.calls.count(QStringLiteral("seekRelative -60")), 1);
+        QCOMPARE(stub.calls.count(QStringLiteral("seekRelative -10")), 0);
     }
 
     void playerControlRowTurnsToIconsWhenNarrow()

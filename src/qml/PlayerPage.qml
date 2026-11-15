@@ -412,9 +412,11 @@ Kirigami.Page {
                     enabled: page.player.canSeek && page.player.durationTicks > 0
                     from: 0
                     to: Math.max(1, page.player.durationTicks / 10000000)
-                    // The arrow keys move the timeline by ten seconds once Tab reached it; the style would draw a tick mark at every step
-                    stepSize: 10
-                    Kirigami.StyleHints.tickMarkStepSize: -1
+                    // No step size: a drag would land on its multiples (and the style would draw a tick mark at each); with the focus here the arrow keys seek as the page's do
+                    Keys.onLeftPressed: { page.player.seekRelative(-10); page.wakeChrome(); }
+                    Keys.onRightPressed: { page.player.seekRelative(10); page.wakeChrome(); }
+                    Keys.onUpPressed: { page.player.seekRelative(60); page.wakeChrome(); }
+                    Keys.onDownPressed: { page.player.seekRelative(-60); page.wakeChrome(); }
                     property real dragSeconds: 0
                     value: pressed ? dragSeconds : page.player.positionTicks / 10000000
                     onMoved: {
