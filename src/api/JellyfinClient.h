@@ -21,6 +21,7 @@
 
 #include "api/MediaSourceSelection.h"
 #include "api/PlaybackReport.h"
+#include "api/SyncPlayProtocol.h"
 
 class QNetworkReply;
 
@@ -206,6 +207,13 @@ class JellyfinClient final : public QObject {
     static bool isServerImageUrl(const QUrl &base, const QUrl &url);
     // The users the server lists on its sign-in screen (`GET /Users/Public`, no credentials, so it works in any state after the probe except while probing): publicUsersReady carries at most MaxPublicUsers validated entries (the others are dropped), publicUsersFailed a transport or protocol failure. A new call supersedes a pending one. Returns false, without a request, before the probe succeeded
     bool fetchPublicUsers();
+    // SyncPlay, watching together (the wire format is SyncPlayProtocol.h). The group list (`GET /SyncPlay/List`): syncPlayGroupsReady carries the valid groups, syncPlayGroupsFailed the status (0 for a transport error, an unusable reply keeps its 200). A newer call supersedes a pending one silently. Returns false, without a request, when not authenticated
+    bool fetchSyncPlayGroups();
+    // One group request, `POST /SyncPlay/<route>`, with a body SyncPlay::isValidRequest accepts for the route. The requests go out one at a time in call order (on separate connections a Ready could overtake the Buffering before it), at most MaxQueuedSyncPlayRequests waiting; each ends with syncPlayRequestFinished, `accepted` for a 204 (a 200 for New, which answers with the group). The server answers 204 and refuses on the socket (a group update to this session), so accepted means delivered; a user without SyncPlay access presumably gets a 403 *(not observed)*. A 401 expires the session; the requests waiting or in flight when the session ends are dropped without a signal. Returns false, without a request, when not authenticated, the body does not fit the route or the queue is full
+    static constexpr int MaxQueuedSyncPlayRequests = 32;
+    bool postSyncPlay(Kinefin::SyncPlay::Route route, const QJsonObject &body);
+    // The server's time (`GET /GetUtcTime`) for the SyncPlay clock: utcTimeReady carries the server's reception and transmission times (ms since the epoch), utcTimeFailed the status. A newer call supersedes a pending one silently. Returns false, without a request, when not authenticated
+    bool fetchUtcTime();
 
     // Asks the server how to play `itemId` and emits playbackInfoReady with the chosen source (media URL without the token) or playbackInfoFailed. Everything goes in the JSON body (the query parameters of this route are deprecated in 12.4); `maxStreamingBitrate` must be sent, the server default is 8 Mbps. Exactly one of the two signals follows a request, except that a newer request, cancelPlaybackInfo(), disconnectFromServer() and a session lost elsewhere (a 401 on another call) end it with no signal of its own; a 401 on this very request emits sessionExpired and then playbackInfoFailed. Returns false, without a request, when not authenticated or on invalid input
     bool requestPlaybackInfo(const QString &itemId, qint64 startTimeTicks,
@@ -267,6 +275,8 @@ class JellyfinClient final : public QObject {
     QString userImageTag() const;
     // `Policy.IsAdministrator` of the signed-in user as the server last reported it (login reply, then `/Users/Me`); false when unknown, absent or not a bool, and unless authenticated (a restored session knows it only once verifySession() answers). A convenience for hiding entries: the server enforces the rights
     bool isAdministrator() const;
+    // `Policy.SyncPlayAccess` as the server last reported it (login reply, then `/Users/Me`): "CreateAndJoinGroups", "JoinGroups" or "None"; empty when unknown and unless authenticated
+    QString syncPlayAccess() const;
     QString deviceId() const;
     QString deviceName() const;
     // For the credential store only (ServerCredentialSync): it is the one place allowed to put the token on disk. Empty unless authenticated; never log it
@@ -336,6 +346,11 @@ class JellyfinClient final : public QObject {
     void playlistWriteFailed(Kinefin::JellyfinClient::PlaylistOp op, const QString &playlistId,
                              int httpStatus);
     void sessionsReady(const QJsonArray &sessions);
+    void syncPlayGroupsReady(const QList<Kinefin::SyncPlay::GroupInfo> &groups);
+    void syncPlayGroupsFailed(int httpStatus);
+    void syncPlayRequestFinished(Kinefin::SyncPlay::Route route, bool accepted, int httpStatus);
+    void utcTimeReady(qint64 receptionMs, qint64 transmissionMs);
+    void utcTimeFailed(int httpStatus);
     void sessionPlaystateSucceeded(const QString &sessionId, const QString &command);
     void sessionPlaystateFailed(const QString &sessionId, const QString &command, int httpStatus);
     void itemFavoriteUpdated(const QString &itemId, bool favorite);
@@ -365,6 +380,7 @@ class JellyfinClient final : public QObject {
     QByteArray tokenAuthorization() const;
     void abortPending();
     void sendNextPlaybackReport();
+    void sendNextSyncPlayRequest();
     void finishPlaybackReport(QNetworkReply *reply);
     void clearToken();
     void failProbe(int httpStatus, const QString &reason);
@@ -404,6 +420,7 @@ class JellyfinClient final : public QObject {
     QString m_userName;
     QString m_userImageTag;
     bool m_isAdministrator = false;
+    QString m_syncPlayAccess;
     QByteArray m_token;
     QByteArray m_quickConnectSecret;
     struct QueuedReport {
@@ -422,6 +439,17 @@ class JellyfinClient final : public QObject {
     quint64 m_subtitleSerial = 0;
     quint64 m_playbackItemSerial = 0;
     quint64 m_trickplayTileSerial = 0;
+    quint64 m_syncPlayGroupsSerial = 0;
+    quint64 m_utcTimeSerial = 0;
+    QPointer<QNetworkReply> m_syncPlayGroupsReply;
+    struct QueuedSyncPlayRequest {
+        SyncPlay::Route route;
+        QByteArray body;
+    };
+    // The first one is in flight while m_syncPlayBusy
+    QList<QueuedSyncPlayRequest> m_syncPlayQueue;
+    bool m_syncPlayBusy = false;
+    QPointer<QNetworkReply> m_utcTimeReply;
     QPointer<QNetworkReply> m_subtitleReply;
     QPointer<QNetworkReply> m_trickplayTileReply;
     QString m_deviceName;

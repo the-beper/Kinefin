@@ -7,6 +7,7 @@
 
 #include "FakeSocketConnection.h"
 
+#include <QDateTime>
 #include <QFile>
 #include <QHash>
 #include <QHostAddress>
@@ -97,6 +98,8 @@ class FakeJellyfin {
         QJsonObject policedUser = object.value(QStringLiteral("User")).toObject();
         QJsonObject policy = policedUser.value(QStringLiteral("Policy")).toObject();
         policy.insert(QStringLiteral("IsAdministrator"), administratorValue(account));
+        if (!syncPlayAccess.isEmpty())
+            policy.insert(QStringLiteral("SyncPlayAccess"), syncPlayAccess);
         policedUser.insert(QStringLiteral("Policy"), policy);
         object.insert(QStringLiteral("User"), policedUser);
         if (account) {
@@ -134,6 +137,15 @@ class FakeJellyfin {
         if (administratorRaw)
             return *administratorRaw;
         return user ? user->administrator : administrator;
+    }
+    // `Policy.SyncPlayAccess` of every user (the login reply and /Users/Me); empty leaves the field out
+    QString syncPlayAccess;
+    QJsonObject policyOf(const FakeUser *user) const
+    {
+        QJsonObject policy{{QStringLiteral("IsAdministrator"), administratorValue(user)}};
+        if (!syncPlayAccess.isEmpty())
+            policy.insert(QStringLiteral("SyncPlayAccess"), syncPlayAccess);
+        return policy;
     }
     // Tokens /Users/Me answers 401 to (the per-user deny switch)
     QSet<QByteArray> deniedUsersMeTokens;
@@ -246,6 +258,25 @@ class FakeJellyfin {
     int remoteCommandStatus = 204;
     bool redirectRemoteCommands = false;
     bool holdRemoteCommands = false;
+    // SyncPlay: `GET /SyncPlay/List` answers syncPlayListStatus with syncPlayListBody (the syncplay_group_list fixture when empty), `GET /GetUtcTime` utcTimeStatus with utcTimeBody (the get_utc_time fixture when empty); every `POST /SyncPlay/<route>` is recorded and answers syncPlayStatus, New with the syncplay_group fixture when that is 200
+    int syncPlayListStatus = 200;
+    QByteArray syncPlayListBody;
+    int syncPlayListRequests = 0;
+    int utcTimeStatus = 200;
+    QByteArray utcTimeBody;
+    int utcTimeRequests = 0;
+    // `GET /GetUtcTime` answers with the current time (for tests that time commands)
+    bool utcTimeNow = false;
+    int syncPlayStatus = 204;
+    // SyncPlay posts are answered on releaseHeld() (with reportStatus)
+    bool holdSyncPlay = false;
+    struct SyncPlayRequest {
+        QString route;
+        QJsonObject body;
+        QByteArray authorization;
+        QByteArray contentType;
+    };
+    QList<SyncPlayRequest> syncPlayRequests;
     struct FavoriteWrite {
         QByteArray method;
         QByteArray route;
@@ -1065,12 +1096,10 @@ class FakeJellyfin {
                     respond(socket, 401, {});
                     return;
                 }
-                QJsonObject me{
-                    {QStringLiteral("Id"), user->id},
-                    {QStringLiteral("Name"), user->name},
-                    {QStringLiteral("Policy"),
-                     QJsonObject{{QStringLiteral("IsAdministrator"), administratorValue(user)}}},
-                    {QStringLiteral("Configuration"), QJsonObject()}};
+                QJsonObject me{{QStringLiteral("Id"), user->id},
+                               {QStringLiteral("Name"), user->name},
+                               {QStringLiteral("Policy"), policyOf(user)},
+                               {QStringLiteral("Configuration"), QJsonObject()}};
                 if (!user->tag.isEmpty())
                     me.insert(QStringLiteral("PrimaryImageTag"), user->tag);
                 respond(socket, 200, QJsonDocument(me).toJson(QJsonDocument::Compact));
@@ -1078,8 +1107,7 @@ class FakeJellyfin {
                 const QJsonObject me{
                     {QStringLiteral("Id"), QStringLiteral("d5ed5d4e2e5447b58e9f2b6f7bd5c96a")},
                     {QStringLiteral("Name"), QStringLiteral("bepi")},
-                    {QStringLiteral("Policy"),
-                     QJsonObject{{QStringLiteral("IsAdministrator"), administratorValue(nullptr)}}},
+                    {QStringLiteral("Policy"), policyOf(nullptr)},
                     {QStringLiteral("Configuration"), QJsonObject()}};
                 respond(socket, 200, QJsonDocument(me).toJson(QJsonDocument::Compact));
             }
@@ -1353,6 +1381,41 @@ class FakeJellyfin {
                 respond(socket, 302, {}, "Location: https://unexpected.invalid/remote\r\n");
             else
                 respond(socket, remoteCommandStatus, {});
+            return;
+        }
+        if (method == "GET" && route.endsWith("/SyncPlay/List")) {
+            ++syncPlayListRequests;
+            respond(socket, syncPlayListStatus,
+                    syncPlayListBody.isEmpty() ? fixture(QStringLiteral("syncplay_group_list"))
+                                               : syncPlayListBody);
+            return;
+        }
+        if (method == "GET" && route.endsWith("/GetUtcTime")) {
+            ++utcTimeRequests;
+            if (utcTimeNow && utcTimeStatus == 200) {
+                const QString now = QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
+                respond(
+                    socket, 200,
+                    QJsonDocument(QJsonObject{{QStringLiteral("RequestReceptionTime"), now},
+                                              {QStringLiteral("ResponseTransmissionTime"), now}})
+                        .toJson(QJsonDocument::Compact));
+                return;
+            }
+            respond(socket, utcTimeStatus,
+                    utcTimeBody.isEmpty() ? fixture(QStringLiteral("get_utc_time")) : utcTimeBody);
+            return;
+        }
+        if (method == "POST" && route.contains("/SyncPlay/")) {
+            const QString name = QString::fromUtf8(route.mid(route.lastIndexOf('/') + 1));
+            syncPlayRequests.append(
+                {name, QJsonDocument::fromJson(body).object(), authorization, contentType});
+            if (holdSyncPlay) {
+                m_held.append(socket);
+                return;
+            }
+            const bool groupReply = syncPlayStatus == 200 && name == QLatin1String("New");
+            respond(socket, syncPlayStatus,
+                    groupReply ? fixture(QStringLiteral("syncplay_group")) : QByteArray());
             return;
         }
         if (method == "GET" && route.contains("/MediaSegments/")) {

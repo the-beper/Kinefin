@@ -330,6 +330,19 @@ bool userIsAdministrator(const QJsonObject &user)
     return flag.isBool() && flag.toBool();
 }
 
+// `Policy.SyncPlayAccess` of a UserDto: one of the three values the server knows, else empty
+QString userSyncPlayAccess(const QJsonObject &user)
+{
+    const QString access = user.value(QStringLiteral("Policy"))
+                               .toObject()
+                               .value(QStringLiteral("SyncPlayAccess"))
+                               .toString();
+    return access == QLatin1String("CreateAndJoinGroups") || access == QLatin1String("JoinGroups")
+                   || access == QLatin1String("None")
+               ? access
+               : QString();
+}
+
 // Splits a comma-separated query value into tokens, refusing empty members
 bool splitTokenList(const QString &value, QList<QString> *tokens)
 {
@@ -679,6 +692,7 @@ void JellyfinClient::finishAuthentication(QNetworkReply *finished)
     m_userName = validUserName(user.value(QStringLiteral("Name")));
     m_userImageTag = validUserImageTag(user.value(QStringLiteral("PrimaryImageTag")));
     m_isAdministrator = userIsAdministrator(user);
+    m_syncPlayAccess = userSyncPlayAccess(user);
     m_state = State::Authenticated;
     Q_EMIT loginSucceeded(m_userId);
 }
@@ -1651,6 +1665,100 @@ bool JellyfinClient::sendSessionPlaystate(const QString &sessionId, const QStrin
     return true;
 }
 
+bool JellyfinClient::fetchSyncPlayGroups()
+{
+    if (m_state != State::Authenticated)
+        return false;
+    // The serial moves first: an abort may finish the old reply at once, and it must find itself superseded
+    const quint64 serial = ++m_syncPlayGroupsSerial;
+    if (m_syncPlayGroupsReply)
+        m_syncPlayGroupsReply->abort();
+    QNetworkReply *reply =
+        m_network.get(requestFor(endpoint(QStringLiteral("/SyncPlay/List")), true));
+    m_syncPlayGroupsReply = reply;
+    attach(reply, m_generation, [this, serial](QNetworkReply *finished) {
+        if (serial != m_syncPlayGroupsSerial)
+            return;
+        const int status = finished->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (status == 401)
+            invalidateSession();
+        QJsonArray array;
+        if (status != 200 || finished->error() != QNetworkReply::NoError
+            || !parseArray(finished, &array)) {
+            Q_EMIT syncPlayGroupsFailed(status);
+            return;
+        }
+        Q_EMIT syncPlayGroupsReady(
+            SyncPlay::parseGroupList(array).value_or(QList<SyncPlay::GroupInfo>()));
+    });
+    return true;
+}
+
+bool JellyfinClient::postSyncPlay(SyncPlay::Route route, const QJsonObject &body)
+{
+    if (m_state != State::Authenticated || !SyncPlay::isValidRequest(route, body)
+        || m_syncPlayQueue.size() >= MaxQueuedSyncPlayRequests)
+        return false;
+    m_syncPlayQueue.append({route, QJsonDocument(body).toJson(QJsonDocument::Compact)});
+    if (!m_syncPlayBusy)
+        sendNextSyncPlayRequest();
+    return true;
+}
+
+void JellyfinClient::sendNextSyncPlayRequest()
+{
+    if (m_syncPlayQueue.isEmpty() || m_state != State::Authenticated)
+        return;
+    m_syncPlayBusy = true;
+    const SyncPlay::Route route = m_syncPlayQueue.constFirst().route;
+    QNetworkRequest request =
+        requestFor(endpoint(QStringLiteral("/SyncPlay/") + SyncPlay::routeName(route)), true);
+    request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    QNetworkReply *reply = m_network.post(request, m_syncPlayQueue.constFirst().body);
+    attach(reply, m_generation, [this, route](QNetworkReply *finished) {
+        m_syncPlayQueue.removeFirst();
+        m_syncPlayBusy = false;
+        const int status = finished->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        // The session's end empties the queue: nothing is sent after it
+        if (status == 401)
+            invalidateSession();
+        const bool delivered = status == 204 || (status == 200 && route == SyncPlay::Route::New);
+        Q_EMIT syncPlayRequestFinished(
+            route, delivered && finished->error() == QNetworkReply::NoError, status);
+        if (!m_syncPlayBusy)
+            sendNextSyncPlayRequest();
+    });
+}
+
+bool JellyfinClient::fetchUtcTime()
+{
+    if (m_state != State::Authenticated)
+        return false;
+    // The serial moves first: an abort may finish the old reply at once, and it must find itself superseded
+    const quint64 serial = ++m_utcTimeSerial;
+    if (m_utcTimeReply)
+        m_utcTimeReply->abort();
+    QNetworkReply *reply = m_network.get(requestFor(endpoint(QStringLiteral("/GetUtcTime")), true));
+    m_utcTimeReply = reply;
+    attach(reply, m_generation, [this, serial](QNetworkReply *finished) {
+        if (serial != m_utcTimeSerial)
+            return;
+        const int status = finished->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (status == 401)
+            invalidateSession();
+        QJsonObject object;
+        std::optional<SyncPlay::UtcTime> time;
+        if (status == 200 && finished->error() == QNetworkReply::NoError
+            && parseObject(finished, &object))
+            time = SyncPlay::parseUtcTime(object);
+        if (time)
+            Q_EMIT utcTimeReady(time->receptionMs, time->transmissionMs);
+        else
+            Q_EMIT utcTimeFailed(status);
+    });
+    return true;
+}
+
 bool JellyfinClient::setItemFavorite(const QString &itemId, bool favorite)
 {
     if (!isAuthenticated() || !isValidJellyfinId(itemId))
@@ -2270,6 +2378,7 @@ bool JellyfinClient::verifySession()
             m_userName = name;
         m_userImageTag = validUserImageTag(me.value(QStringLiteral("PrimaryImageTag")));
         m_isAdministrator = userIsAdministrator(me);
+        m_syncPlayAccess = userSyncPlayAccess(me);
         Q_EMIT userProfileRefreshed(m_userId, m_userName, m_userImageTag);
     });
     return true;
@@ -2548,6 +2657,8 @@ void JellyfinClient::abortPending()
     m_reportQueue.clear();
     m_reportBusy = false;
     m_reportRetryTimer.stop();
+    m_syncPlayQueue.clear();
+    m_syncPlayBusy = false;
     m_verifyInFlight = false;
     const auto pending = m_pending;
     m_pending.clear();
@@ -2564,6 +2675,7 @@ void JellyfinClient::clearToken()
     m_userName.clear();
     m_userImageTag.clear();
     m_isAdministrator = false;
+    m_syncPlayAccess.clear();
     if (hadToken)
         Q_EMIT credentialsCleared();
 }
@@ -2661,6 +2773,11 @@ QString JellyfinClient::userImageTag() const
 bool JellyfinClient::isAdministrator() const
 {
     return m_isAdministrator;
+}
+
+QString JellyfinClient::syncPlayAccess() const
+{
+    return m_state == State::Authenticated ? m_syncPlayAccess : QString();
 }
 QString JellyfinClient::deviceId() const
 {

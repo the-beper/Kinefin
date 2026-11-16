@@ -9,7 +9,9 @@
 #include "imagecache/ImageOrigin.h"
 #include "integration/RemoteInputServer.h"
 #include "models/SearchModel.h"
+#include "player/PlayerController.h"
 #include "settings/ClientSettings.h"
+#include "syncplay/SyncPlayController.h"
 
 #include <KLocalizedQmlContext>
 
@@ -188,6 +190,8 @@ struct Ui {
         : settings(root + QStringLiteral("/kinefin.conf")),
           controller(QStringLiteral("default"), QStringLiteral("ui-test-device"),
                      QStringLiteral("0.0.1"), &store),
+          groupPlayer(controller.playbackClient(), *controller.queue(), settings, QString()),
+          syncPlay(controller.playbackClient(), *controller.socket(), groupPlayer),
           origin(std::make_shared<Kinefin::ImageOrigin>()),
           imageFactory(origin, root + QStringLiteral("/images"))
     {
@@ -226,6 +230,7 @@ struct Ui {
         engine.setInitialProperties(
             {{QStringLiteral("connection"), QVariant::fromValue(&controller)},
              {QStringLiteral("settings"), QVariant::fromValue(&settings)},
+             {QStringLiteral("syncPlay"), QVariant::fromValue(&syncPlay)},
              {QStringLiteral("startupWindowMode"), QStringLiteral("windowed")}});
         engine.loadFromModule(QStringLiteral("org.kde.kinefin"), QStringLiteral("Main"));
         if (engine.rootObjects().isEmpty())
@@ -902,6 +907,9 @@ struct Ui {
     MemoryTokenStore store;
     Kinefin::ClientSettings settings;
     ConnectionController controller;
+    // The group's own player, never shown (the shell's `player` is a stub where a test needs one): the controller only needs one to hand items to
+    Kinefin::PlayerController groupPlayer;
+    Kinefin::SyncPlayController syncPlay;
     std::shared_ptr<Kinefin::ImageOrigin> origin;
     Kinefin::ImageNetworkFactory imageFactory;
     QQmlApplicationEngine engine;
@@ -2139,6 +2147,52 @@ QQuickItem *openPlayer(Ui &ui, PlayerStub &stub)
                && page->property("isShowing").toBool() && ui.window->activeFocusItem() == page;
     });
     return ready ? page : nullptr;
+}
+
+const QString kSyncPlayGroup = QStringLiteral("5f1e2d3c4b5a69788796a5b4c3d2e1f0");
+
+// A SyncPlay group update of the fixture group, as the server's socket sends it
+QString syncPlayUpdate(const QString &type, const QJsonValue &payload,
+                       const QString &group = kSyncPlayGroup)
+{
+    return QString::fromUtf8(
+        QJsonDocument(
+            QJsonObject{{QStringLiteral("MessageType"), QStringLiteral("SyncPlayGroupUpdate")},
+                        {QStringLiteral("Data"), QJsonObject{{QStringLiteral("GroupId"), group},
+                                                             {QStringLiteral("Type"), type},
+                                                             {QStringLiteral("Data"), payload}}}})
+            .toJson(QJsonDocument::Compact));
+}
+
+// The shell's session in the fixture group: the request, then the server's GroupJoined on the socket
+bool syncPlayJoined(Ui &ui)
+{
+    if (!qWaitForScaled([&] { return ui.syncPlay.available() && ui.server.lastConnection(); }, 5000)
+        || !ui.syncPlay.joinGroup(kSyncPlayGroup))
+        return false;
+    ui.server.lastConnection()->sendText(
+        QString::fromUtf8(fixture(QStringLiteral("ws_syncplay_group_joined"))));
+    return qWaitForScaled(
+        [&] { return ui.syncPlay.status() == Kinefin::SyncPlayController::Status::Joined; });
+}
+
+// The SyncPlay dialog through its menu entry, once the socket is up; null when it does not open
+QObject *openSyncPlayDialog(Ui &ui)
+{
+    QObject *action = ui.shellAction(QStringLiteral("syncPlayAction"));
+    if (!action || !qWaitForScaled([&] { return action->property("visible").toBool(); }, 5000)
+        || !QMetaObject::invokeMethod(action, "trigger"))
+        return nullptr;
+    QObject *dialog = ui.popup(QStringLiteral("syncPlayDialog"));
+    if (!dialog || !qWaitForScaled([&] { return dialog->property("opened").toBool(); }))
+        return nullptr;
+    return dialog;
+}
+
+int syncPlayRequests(const Ui &ui, const QString &route)
+{
+    return int(std::count_if(ui.server.syncPlayRequests.cbegin(), ui.server.syncPlayRequests.cend(),
+                             [&route](const auto &request) { return request.route == route; }));
 }
 
 // A chapter as the player lists it
@@ -5879,6 +5933,197 @@ class TestUiPages : public QObject {
 
         // The flag of the manual check is spent by its result
         QVERIFY(!ui.shellHeader()->property("manualUpdateCheck").toBool());
+    }
+
+    void theSyncPlayDialogListsTheGroupsAsPlainText()
+    {
+        Ui ui(m_home->path());
+        // Markup in a group's or a member's name must show as typed
+        ui.server.syncPlayListBody = QByteArrayLiteral(
+            "[{\"GroupId\":\"5f1e2d3c4b5a69788796a5b4c3d2e1f0\",\"GroupName\":\"<b>Night</b> "
+            "&amp; day\",\"LastUpdatedAt\":\"2026-11-16T16:37:44.5Z\",\"Participants\":[\"alice\","
+            "\"<i>bob</i>\"],\"State\":\"Playing\"}]");
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("home")));
+        QVERIFY(openSyncPlayDialog(ui));
+        QTRY_COMPARE(ui.itemsStartingWith(QStringLiteral("syncPlayGroupRow")).size(), 1);
+        QQuickItem *name = ui.item(QStringLiteral("syncPlayRowName"));
+        QQuickItem *members = ui.item(QStringLiteral("syncPlayRowMembers"));
+        QVERIFY(name && members);
+        QCOMPARE(name->property("text").toString(), QStringLiteral("<b>Night</b> &amp; day"));
+        QCOMPARE(name->property("textFormat").toInt(), int(Qt::PlainText));
+        QCOMPARE(members->property("text").toString(), QStringLiteral("alice, <i>bob</i>"));
+        QCOMPARE(members->property("textFormat").toInt(), int(Qt::PlainText));
+        // The policy is unknown here, so a new group is offered, with a name already filled in
+        QVERIFY(ui.item(QStringLiteral("syncPlayNewGroup"))->isVisible());
+        QVERIFY(
+            !ui.item(QStringLiteral("syncPlayNameField"))->property("text").toString().isEmpty());
+        QVERIFY(!ui.item(QStringLiteral("syncPlayNoGroups"))->isVisible());
+    }
+
+    void joiningAndLeavingFromTheSyncPlayDialog()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("home")));
+        QVERIFY(openSyncPlayDialog(ui));
+        QTRY_COMPARE(ui.itemsStartingWith(QStringLiteral("syncPlayGroupRow")).size(), 1);
+        QQuickItem *join = ui.item(QStringLiteral("syncPlayJoinButton"));
+        QVERIFY(join);
+        QVERIFY(QMetaObject::invokeMethod(join, "clicked"));
+        QTRY_COMPARE(syncPlayRequests(ui, QStringLiteral("Join")), 1);
+        QCOMPARE(ui.server.syncPlayRequests.last().body.value(QStringLiteral("GroupId")).toString(),
+                 kSyncPlayGroup);
+        QTRY_VERIFY(ui.item(QStringLiteral("syncPlayJoining"))->isVisible());
+        ui.server.lastConnection()->sendText(
+            QString::fromUtf8(fixture(QStringLiteral("ws_syncplay_group_joined"))));
+        QTRY_VERIFY(ui.item(QStringLiteral("syncPlayGroup"))->isVisible());
+        QCOMPARE(ui.item(QStringLiteral("syncPlayGroupName"))->property("text").toString(),
+                 QStringLiteral("Movie night"));
+        QCOMPARE(ui.itemsStartingWith(QStringLiteral("syncPlayMember")).size(), 1);
+        QVERIFY(ui.itemsStartingWith(QStringLiteral("syncPlayGroupRow")).isEmpty());
+        QObject *leave = ui.popup(QStringLiteral("syncPlayLeaveAction"));
+        QVERIFY(leave && leave->property("visible").toBool());
+        QVERIFY(!ui.popup(QStringLiteral("syncPlayRefreshAction"))->property("visible").toBool());
+        QVERIFY(QMetaObject::invokeMethod(leave, "trigger"));
+        QTRY_COMPARE(syncPlayRequests(ui, QStringLiteral("Leave")), 1);
+        QTRY_VERIFY(!ui.item(QStringLiteral("syncPlayGroup"))->isVisible());
+        QTRY_COMPARE(ui.itemsStartingWith(QStringLiteral("syncPlayGroupRow")).size(), 1);
+    }
+
+    void creatingASyncPlayGroupSendsItsNameAndARefusalShows()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("home")));
+        QVERIFY(openSyncPlayDialog(ui));
+        QQuickItem *field = ui.item(QStringLiteral("syncPlayNameField"));
+        QVERIFY(field);
+        field->setProperty("text", QStringLiteral("Movie night"));
+        QVERIFY(
+            QMetaObject::invokeMethod(ui.item(QStringLiteral("syncPlayCreateButton")), "clicked"));
+        QTRY_COMPARE(syncPlayRequests(ui, QStringLiteral("New")), 1);
+        QCOMPARE(ui.server.syncPlayRequests.last().body,
+                 (QJsonObject{{QStringLiteral("GroupName"), QStringLiteral("Movie night")}}));
+        ui.server.lastConnection()->sendText(syncPlayUpdate(
+            QStringLiteral("CreateGroupDenied"), QString(), QString(32, QLatin1Char('0'))));
+        QQuickItem *failure = ui.item(QStringLiteral("syncPlayFailure"));
+        QVERIFY(failure);
+        QTRY_VERIFY(failure->isVisible());
+        QVERIFY(!ui.item(QStringLiteral("syncPlayJoining"))->isVisible());
+    }
+
+    void theSyncPlayEntryFollowsTheUsersPolicy()
+    {
+        Ui ui(m_home->path());
+        ui.server.syncPlayAccess = QStringLiteral("JoinGroups");
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("home")));
+        // Joining only: no new group, and the empty list says whom to ask
+        ui.server.syncPlayListBody = QByteArrayLiteral("[]");
+        QVERIFY(openSyncPlayDialog(ui));
+        QQuickItem *empty = ui.item(QStringLiteral("syncPlayNoGroups"));
+        QVERIFY(empty);
+        QTRY_VERIFY(empty->isVisible());
+        QVERIFY(!ui.item(QStringLiteral("syncPlayNewGroup"))->isVisible());
+        QVERIFY(!ui.syncPlay.canCreate());
+        QVERIFY(QMetaObject::invokeMethod(ui.popup(QStringLiteral("syncPlayDialog")), "close"));
+        // No SyncPlay at all: the entry goes, at the next answer of /Users/Me
+        ui.server.syncPlayAccess = QStringLiteral("None");
+        QVERIFY(ui.controller.playbackClient().verifySession());
+        QObject *action = ui.shellAction(QStringLiteral("syncPlayAction"));
+        QTRY_VERIFY(!action->property("visible").toBool());
+        QVERIFY(!ui.syncPlay.available());
+    }
+
+    void theSyncPlayGroupsThatFailToLoadOfferRetry()
+    {
+        Ui ui(m_home->path());
+        ui.server.syncPlayListStatus = 500;
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("home")));
+        QVERIFY(openSyncPlayDialog(ui));
+        QQuickItem *failed = ui.item(QStringLiteral("syncPlayGroupsFailed"));
+        QVERIFY(failed);
+        QTRY_VERIFY(failed->isVisible());
+        QVERIFY(!ui.item(QStringLiteral("syncPlayGroupsBusy"))->isVisible());
+        ui.server.syncPlayListStatus = 200;
+        const int asked = ui.server.syncPlayListRequests;
+        QVERIFY(QMetaObject::invokeMethod(ui.popup(QStringLiteral("syncPlayRefreshAction")),
+                                          "trigger"));
+        QTRY_VERIFY(ui.server.syncPlayListRequests > asked);
+        QTRY_COMPARE(ui.itemsStartingWith(QStringLiteral("syncPlayGroupRow")).size(), 1);
+        QVERIFY(!failed->isVisible());
+    }
+
+    void thePlayerShowsTheSyncPlayGroup()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("home")));
+        QQuickItem *page = openPlayer(ui, stub);
+        QVERIFY(page);
+        QVERIFY(!page->property("grouped").toBool());
+        QVERIFY(syncPlayJoined(ui));
+        QTRY_VERIFY(page->property("grouped").toBool());
+        QObject *button = ui.item(QStringLiteral("playerSyncPlayButton"));
+        QVERIFY(button);
+        // The group's dialog opens over the player, whose page hides the shell's header
+        QVERIFY(QMetaObject::invokeMethod(button, "clicked"));
+        QObject *dialog = ui.popup(QStringLiteral("syncPlayDialog"));
+        QVERIFY(dialog);
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QTRY_VERIFY(ui.item(QStringLiteral("syncPlayGroup"))->isVisible());
+        QVERIFY(QMetaObject::invokeMethod(dialog, "close"));
+        QTRY_VERIFY(!dialog->property("opened").toBool());
+        QVERIFY(!ui.popup(QStringLiteral("playerSpeedMenu"))->property("enabled").toBool());
+        QVERIFY(!ui.popup(QStringLiteral("playerRepeatMenu"))->property("enabled").toBool());
+        QVERIFY(!ui.popup(QStringLiteral("playerShuffleItem"))->property("enabled").toBool());
+        ui.server.lastConnection()->sendText(
+            syncPlayUpdate(QStringLiteral("StateUpdate"),
+                           QJsonObject{{QStringLiteral("State"), QStringLiteral("Waiting")},
+                                       {QStringLiteral("Reason"), QStringLiteral("Buffer")}}));
+        QTRY_VERIFY(ui.item(QStringLiteral("playerGroupWaiting"))->isVisible());
+        ui.server.lastConnection()->sendText(
+            syncPlayUpdate(QStringLiteral("UserJoined"), QStringLiteral("<b>bob</b>")));
+        QQuickItem *notice = ui.item(QStringLiteral("playerGroupNotice"));
+        QVERIFY(notice);
+        QTRY_VERIFY(notice->isVisible());
+        QVERIFY(notice->property("text").toString().contains(QStringLiteral("<b>bob</b>")));
+        QCOMPARE(notice->property("textFormat").toInt(), int(Qt::PlainText));
+        // Left, the menus are the user's again
+        ui.syncPlay.leaveGroup();
+        QTRY_VERIFY(ui.popup(QStringLiteral("playerSpeedMenu"))->property("enabled").toBool());
+        QVERIFY(!ui.item(QStringLiteral("playerGroupWaiting"))->isVisible());
+    }
+
+    void theSyncPlayGroupsItemOpensThePlayer()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("home")));
+        QVERIFY(ui.engine.rootObjects().constFirst()->setProperty(
+            "player", QVariant::fromValue<QObject *>(&stub)));
+        QVERIFY(syncPlayJoined(ui));
+        const QString now = QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
+        ui.server.lastConnection()->sendText(syncPlayUpdate(
+            QStringLiteral("PlayQueue"),
+            QJsonObject{
+                {QStringLiteral("Reason"), QStringLiteral("NewPlaylist")},
+                {QStringLiteral("LastUpdate"), now},
+                {QStringLiteral("Playlist"),
+                 QJsonArray{QJsonObject{{QStringLiteral("ItemId"), kMovieId},
+                                        {QStringLiteral("PlaylistItemId"),
+                                         QStringLiteral("9a8b7c6d5e4f40312a1b2c3d4e5f6071")}}}},
+                {QStringLiteral("PlayingItemIndex"), 0},
+                {QStringLiteral("StartPositionTicks"), 0},
+                {QStringLiteral("IsPlaying"), false},
+                {QStringLiteral("ShuffleMode"), QStringLiteral("Sorted")},
+                {QStringLiteral("RepeatMode"), QStringLiteral("RepeatNone")}}));
+        QTRY_VERIFY(ui.currentDetails()
+                    && ui.currentDetails()->objectName() == QStringLiteral("playerPage"));
     }
 
     void theRemoteSessionsDialogExplainsAnEmptyListAndOffersOneRefresh()

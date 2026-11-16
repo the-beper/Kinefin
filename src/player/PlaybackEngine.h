@@ -53,8 +53,8 @@ class PlaybackEngine final : public QObject {
     bool mpvCommand(const QStringList &arguments);
     [[nodiscard]] bool isInitialized() const { return m_controller != nullptr; }
 
-    // Opens one negotiated source: the session first (Idle → Opening), then mpv's loadfile; the header lands before the load. A synchronous loadfile refusal is an opening failure: session.failed() and straight back to Idle (no server session was ever built to close). Asynchronous failures surface through `streamEnded("error")` and the session machine. Refuses a busy session
-    bool open(const PlaybackSource &source);
+    // Opens one negotiated source: the session first (Idle → Opening), then mpv's loadfile; the header lands before the load. A synchronous loadfile refusal is an opening failure: session.failed() and straight back to Idle (no server session was ever built to close). Asynchronous failures surface through `streamEnded("error")` and the session machine. Refuses a busy session. `startPaused` loads the file paused and the session goes on to Paused once it opened (a watching-together group starts everyone at once)
+    bool open(const PlaybackSource &source, bool startPaused = false);
 
     // The calls run through the session first: a refusal stays a refusal, nothing is sent to mpv. idle/failed/stopping sessions receive nothing. stop() always leaves the session Stopping: it reaches Idle on mpv's end-file, and open() refuses until then
     void pause();
@@ -75,6 +75,8 @@ class PlaybackEngine final : public QObject {
     [[nodiscard]] qint64 durationTicks() const { return m_durationTicks; }
     [[nodiscard]] bool canSeek() const { return m_canSeek; }
     [[nodiscard]] qreal playbackRate() const { return m_rate; }
+    // A seek was asked of mpv and its playback has not restarted yet (mpv's playback-restart event, or a watchdog when it never comes)
+    [[nodiscard]] bool seeking() const { return m_seekPending; }
     // Whether the file's last time-pos is within a few seconds of its duration: the rule that makes an eof the item's end and not a dropped connection; valid in streamEnded() until the next open()
     [[nodiscard]] bool nearEnd() const;
     // The file counts as played to its end: the position reads as the duration until mpv says otherwise, so the report of the stop that follows closes it as the natural end would
@@ -95,6 +97,7 @@ class PlaybackEngine final : public QObject {
     void fileLoaded();
     // The decoder's picture parameters (video-dec-params) changed or appeared
     void videoParamsChanged();
+    void seekingChanged(bool seeking);
 
   private:
     void applyStreamAuthorization();
@@ -107,6 +110,8 @@ class PlaybackEngine final : public QObject {
     void onFileStarted();
     void onPropertyChanged(const QString &property, const QVariant &value);
     void onEndFile(const QString &reason);
+    void settleSeek();
+    void onPlaybackRestart();
 
     JellyfinClient &m_client;
     PlaybackSession &m_session;
@@ -118,6 +123,10 @@ class PlaybackEngine final : public QObject {
     bool m_loadStarted = false;
     bool m_stopPending = false;
     QTimer m_stopWatchdog;
+    bool m_startPaused = false;
+    bool m_seekPending = false;
+    qint64 m_seekTargetTicks = 0;
+    QTimer m_seekWatchdog;
     qint64 m_durationTicks = 0;
     bool m_canSeek = false;
     qreal m_rate = 1.0;

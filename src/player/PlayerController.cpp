@@ -213,8 +213,9 @@ PlayerController::PlayerController(JellyfinClient &client, PlayQueue &queue,
               // valid even after a user reordered the saved queue in another view.
               state.playlistItemId =
                   m_queueIndex >= 0 && !m_playlistEphemeral ? m_itemId : QString();
-              state.repeatMode = m_repeat;
-              state.shuffle = m_shuffle;
+              // A group's item ignores the local repeat and shuffle
+              state.repeatMode = m_groupItem ? 0 : m_repeat;
+              state.shuffle = !m_groupItem && m_shuffle;
               return state;
           },
           std::chrono::seconds(10), this),
@@ -323,6 +324,7 @@ PlayerController::PlayerController(JellyfinClient &client, PlayQueue &queue,
         Q_EMIT changed();
     });
     connect(&m_engine, &PlaybackEngine::canSeekChanged, this, &PlayerController::changed);
+    connect(&m_engine, &PlaybackEngine::seekingChanged, this, &PlayerController::changed);
     connect(&m_engine, &PlaybackEngine::rateChanged, this, [this] {
         updateUpNext();
         Q_EMIT changed();
@@ -347,6 +349,11 @@ PlayerController::PlayerController(JellyfinClient &client, PlayQueue &queue,
         m_trackChosen = false;
         applySeriesPlayback();
         refreshTracks();
+        // Opened paused, the Start went out as playing: a paused Progress follows once the position is known
+        if (m_groupItem)
+            m_seekReport.start();
+        // A paused file may have told its only position before this: a group's Ready must not wait for another
+        Q_EMIT changed();
     });
     connect(&m_engine, &PlaybackEngine::videoParamsChanged, &m_mpvSettings,
             &PlayerSettings::applyLoadedAspect);
@@ -442,6 +449,9 @@ bool PlayerController::playItem(const QString &id, qint64 resumeTicks)
 {
     if (!isValidJellyfinId(id) || resumeTicks < 0 || m_client.userId().isEmpty())
         return false;
+    if (grouped())
+        return resumeTicks <= 24LL * 3600 * TicksPerSecond
+               && m_group->requestQueue({id}, 0, resumeTicks);
     persistQueueCursor();
     m_playlist.clear();
     m_queueIndex = -1;
@@ -454,7 +464,21 @@ bool PlayerController::playItem(const QString &id, qint64 resumeTicks)
     return true;
 }
 
-bool PlayerController::startItem(const QString &id, qint64 resumeTicks)
+bool PlayerController::openGroupItem(const QString &id, qint64 startTicks)
+{
+    if (!isValidJellyfinId(id) || m_client.userId().isEmpty() || startTicks < 0
+        || startTicks > 24LL * 3600 * TicksPerSecond)
+        return false;
+    // The saved queue keeps where it was: the group's queue lives in the group
+    persistQueueCursor();
+    dropSeriesPlaylist();
+    m_playlist.clear();
+    m_queueIndex = -1;
+    m_queue.setCurrentPlaybackItemId({});
+    return startItem(id, startTicks, true);
+}
+
+bool PlayerController::startItem(const QString &id, qint64 resumeTicks, bool grouped)
 {
     if (!isValidJellyfinId(id) || resumeTicks < 0 || m_client.userId().isEmpty())
         return false;
@@ -467,6 +491,8 @@ bool PlayerController::startItem(const QString &id, qint64 resumeTicks)
     m_client.cancelPlaybackInfo();
     cancelSeriesRequest();
     m_seriesPlaylistWanted = false;
+    m_groupItem = grouped;
+    m_mpvSettings.setSpeedHeld(grouped);
     m_itemId = id;
     m_title.clear();
     m_subtitle.clear();
@@ -486,9 +512,9 @@ bool PlayerController::startItem(const QString &id, qint64 resumeTicks)
     m_skipLabel.clear();
     m_segments.clear();
     m_source = PlaybackSource{};
-    // The same item again (a repeat) keeps the aspect and the rate the user chose
+    // The same item again (a repeat) keeps the aspect and the rate the user chose; a group plays at 1.0
     m_keptRate.reset();
-    if (sameItem)
+    if (sameItem && !grouped)
         m_keptRate = m_engine.playbackRate();
     else
         m_mpvSettings.setAspectOverride({});
@@ -529,6 +555,8 @@ bool PlayerController::playQueue(int index, qint64 startTicks)
     if (index < 0 || index >= m_queue.count() || startTicks < 0
         || startTicks > 24LL * 3600 * TicksPerSecond)
         return false;
+    if (grouped())
+        return m_group->requestQueue(m_queue.itemIds(), index, startTicks);
     dropSeriesPlaylist();
     m_playlist = m_queue.itemIds();
     m_queueIndex = index;
@@ -565,6 +593,8 @@ bool PlayerController::resumeQueue()
             }
         }
     }
+    if (grouped())
+        return m_group->requestQueue(ids, index, ticks);
     dropSeriesPlaylist();
     m_playlist = ids;
     m_queueIndex = index;
@@ -584,7 +614,10 @@ void PlayerController::requestPending()
         || m_session.state() != PlaybackSession::State::Idle)
         return;
     m_mpvSettings.apply();
-    if (m_keptRate) {
+    if (m_groupItem) {
+        m_engine.setRate(1.0);
+        m_rateDecided = true;
+    } else if (m_keptRate) {
         m_engine.setRate(*m_keptRate);
         m_keptRate.reset();
         m_rateDecided = true;
@@ -613,7 +646,7 @@ void PlayerController::onSource(const PlaybackSource &source)
             {QStringLiteral("name"),
              entry.label.isEmpty() ? i18n("External subtitle %1").arg(entry.index) : entry.label}});
     Q_EMIT tracksChanged();
-    if (!m_engine.open(source)) {
+    if (!m_engine.open(source, m_groupItem)) {
         m_errorText = i18n("The selected media source could not be opened.");
         Q_EMIT changed();
         return;
@@ -921,6 +954,14 @@ void PlayerController::onEnd(const QString &reason)
         QTimer::singleShot(0, this, &PlayerController::requestPending);
         return;
     }
+    // The group decides what follows its item: nothing moves on or plays again here
+    if (m_groupItem) {
+        m_playedClock.invalidate();
+        clearCurrent();
+        Q_EMIT finished();
+        Q_EMIT changed();
+        return;
+    }
     const bool ended = reason == QLatin1String("eof") && !m_stopping;
     // Cancel on the Up Next card ends this playback here, without the advance or the replay of a repeat; a repeat mode chosen after it that replays the item wins
     const bool cancelled = m_upNextCancelled && pendingAdvance(false) >= 0;
@@ -968,6 +1009,8 @@ void PlayerController::clearCurrent()
     updateChapters();
     resetUpNext();
     m_fileLoaded = false;
+    m_groupItem = false;
+    m_mpvSettings.setSpeedHeld(false);
     if (!m_itemSeriesId.isEmpty()) {
         m_itemSeriesId.clear();
         Q_EMIT seriesChoicesChanged();
@@ -976,11 +1019,50 @@ void PlayerController::clearCurrent()
 
 void PlayerController::pause()
 {
-    m_engine.pause();
+    if (grouped())
+        m_group->requestPause();
+    else
+        m_engine.pause();
 }
 void PlayerController::resume()
 {
+    if (grouped())
+        m_group->requestUnpause();
+    else
+        m_engine.resume();
+}
+void PlayerController::applyPause()
+{
+    m_engine.pause();
+}
+void PlayerController::applyUnpause()
+{
     m_engine.resume();
+}
+void PlayerController::applySeek(qint64 ticks)
+{
+    seekLocally(ticks);
+}
+void PlayerController::applyStop()
+{
+    stopLocally();
+}
+void PlayerController::releaseGroupItem()
+{
+    m_groupItem = false;
+    m_mpvSettings.setSpeedHeld(false);
+}
+bool PlayerController::groupItemLoaded(const QString &id) const
+{
+    return m_groupItem && id == m_itemId && m_fileLoaded && !m_loading
+           && (m_session.state() == PlaybackSession::State::Paused
+               || m_session.state() == PlaybackSession::State::Playing
+               || m_session.state() == PlaybackSession::State::Buffering);
+}
+bool PlayerController::groupItemSettled(const QString &id) const
+{
+    return groupItemLoaded(id) && m_resumeTicks == 0 && m_engine.knownPositionTicks()
+           && !m_engine.seeking();
 }
 void PlayerController::togglePause()
 {
@@ -990,6 +1072,10 @@ void PlayerController::togglePause()
         pause();
 }
 void PlayerController::stop()
+{
+    stopLocally();
+}
+void PlayerController::stopLocally()
 {
     persistQueueCursor();
     m_stopping = true;
@@ -1028,6 +1114,8 @@ int PlayerController::nextIndex(int direction, bool pick) const
 
 bool PlayerController::next()
 {
+    if (grouped())
+        return false;
     // While the Up Next card is up, Next starts what it offers (under shuffle, the step it drew)
     int next = m_upNextId.isEmpty() ? -1 : indexOfItem(m_playlist, m_upNextId);
     if (next < 0)
@@ -1048,6 +1136,8 @@ bool PlayerController::next()
 }
 bool PlayerController::previous()
 {
+    if (grouped())
+        return false;
     if (positionTicks() > 3 * TicksPerSecond) {
         seek(0);
         return true;
@@ -1091,6 +1181,16 @@ QUrl PlayerController::artworkUrl() const
 void PlayerController::seek(qint64 ticks)
 {
     // While the next item loads, the engine still holds the previous one's stream
+    if (!grouped()) {
+        seekLocally(ticks);
+        return;
+    }
+    if (m_engine.canSeek() && active() && !m_loading && ticks >= 0)
+        m_group->requestSeek(
+            m_engine.durationTicks() > 0 ? std::min(ticks, m_engine.durationTicks()) : ticks);
+}
+void PlayerController::seekLocally(qint64 ticks)
+{
     if (!m_engine.canSeek() || !active() || m_loading || ticks < 0)
         return;
     const qint64 target =
@@ -1114,7 +1214,7 @@ void PlayerController::seekRelative(int seconds)
 }
 void PlayerController::setRate(double value)
 {
-    if (!std::isfinite(value) || value < MinimumRate || value > MaximumRate)
+    if (grouped() || !std::isfinite(value) || value < MinimumRate || value > MaximumRate)
         return;
     m_engine.setRate(value);
     m_rateDecided = true;
@@ -1148,6 +1248,8 @@ void PlayerController::toggleMute()
 }
 void PlayerController::setShuffle(bool enabled)
 {
+    if (grouped())
+        return;
     m_shuffle = enabled;
     updateUpNext();
     Q_EMIT changed();
@@ -1220,7 +1322,7 @@ QVariantMap PlayerController::playbackInfo() const
 
 void PlayerController::setRepeatMode(int mode)
 {
-    if (mode < 0 || mode > 2)
+    if (grouped() || mode < 0 || mode > 2)
         return;
     m_repeat = mode;
     updateUpNext();
@@ -1468,7 +1570,8 @@ void PlayerController::updateSkip()
             continue;
         const QString type = row.value(QStringLiteral("type")).toString();
         // Skip Intros Automatically: each Intro once, from a position mpv reported, never one the user seeked into or one before where the playback resumed, never one that runs to the end, and only once a seek can be made
-        if (type == QLatin1String("Intro") && !m_handledIntros.contains(start)
+        // Never in a group: every member would ask for the same seek
+        if (type == QLatin1String("Intro") && !grouped() && !m_handledIntros.contains(start)
             && start >= m_resumedFrom && m_engine.knownPositionTicks() && canSeek() && !m_loading
             && durationTicks() > 0 && finish <= durationTicks() - 5 * TicksPerSecond
             && m_settings.value(QStringLiteral("video"), QStringLiteral("skip_intros")).toBool()) {
@@ -1565,8 +1668,8 @@ void PlayerController::applySeriesPlayback()
         return;
     m_seriesApplied = true;
     const SeriesChoice choice = seriesStore().choice(m_itemSeriesId);
-    // The speed a repeat kept or the user chose wins over the series', which wins over the default speed applied already
-    if (choice.rate && !m_rateDecided)
+    // The speed a repeat kept or the user chose wins over the series', which wins over the default speed applied already; a group's item plays at 1.0
+    if (choice.rate && !m_rateDecided && !m_groupItem)
         m_engine.setRate(*choice.rate);
     // An aspect chosen for this playback wins over the series', which wins over the setting
     if (!choice.aspect.isEmpty() && !m_mpvSettings.hasAspectOverride()) {

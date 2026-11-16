@@ -10,6 +10,9 @@ Kirigami.Page {
     objectName: "playerPage"
     required property var player
     required property ConnectionController connection
+    // Watching together (SyncPlayController), null when the application gives none: in a group the speed, shuffle and repeat are the group's
+    property var syncPlay: null
+    readonly property bool grouped: syncPlay?.status === SyncPlayController.Joined
     // The video item of the shell sits here while this page is in front
     readonly property Item videoSlot: slot
     title: player?.title || i18n("Now Playing")
@@ -296,6 +299,58 @@ Kirigami.Page {
         }
     }
 
+    // The group waits for a member: what this player shows meanwhile, also when the bars hide
+    ColumnLayout {
+        objectName: "playerGroupWaiting"
+        anchors.centerIn: parent
+        visible: page.grouped && page.syncPlay.waiting && !page.player.loading && !page.player.errorText
+        spacing: Kirigami.Units.largeSpacing
+        FadeInOnShow {}
+        Controls.BusyIndicator {
+            Layout.alignment: Qt.AlignHCenter
+            running: visible
+        }
+        Controls.Label {
+            Layout.alignment: Qt.AlignHCenter
+            color: "white"
+            text: i18n("Waiting for the others…")
+        }
+    }
+
+    // A member of the group came or went: named for a while under the top bar
+    Controls.Label {
+        id: groupNotice
+        objectName: "playerGroupNotice"
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.top: parent.top
+        anchors.topMargin: topBar.height
+        visible: noticeTimer.running
+        color: "white"
+        textFormat: Text.PlainText
+        Accessible.role: Accessible.AlertMessage
+        Accessible.name: text
+        background: Rectangle {
+            color: Qt.alpha("black", 0.6)
+            radius: Kirigami.Units.cornerRadius
+        }
+        padding: Kirigami.Units.largeSpacing
+        Timer {
+            id: noticeTimer
+            interval: 4000
+        }
+    }
+    Connections {
+        target: page.grouped ? page.syncPlay : null
+        function onMemberJoined(name) {
+            groupNotice.text = name.length > 0 ? i18nc("@info %1 is a user name", "%1 joined the SyncPlay group", name) : i18n("Someone joined the SyncPlay group");
+            noticeTimer.restart();
+        }
+        function onMemberLeft(name) {
+            groupNotice.text = name.length > 0 ? i18nc("@info %1 is a user name", "%1 left the SyncPlay group", name) : i18n("Someone left the SyncPlay group");
+            noticeTimer.restart();
+        }
+    }
+
     // The loading and error overlay stays visible when the bars hide
     ColumnLayout {
         anchors.centerIn: parent
@@ -576,6 +631,16 @@ Kirigami.Page {
                         text: page.player.subtitle
                         elide: Text.ElideRight
                     }
+                }
+                // In a SyncPlay group: says so, and opens the group's dialog
+                OsdButton {
+                    objectName: "playerSyncPlayButton"
+                    Layout.alignment: Qt.AlignTop
+                    visible: page.grouped
+                    display: page.narrow ? Controls.AbstractButton.IconOnly : Controls.AbstractButton.TextBesideIcon
+                    icon.name: "system-users"
+                    text: i18nc("@action:button", "Show SyncPlay Group")
+                    onClicked: page.Window.window?.openSyncPlay()
                 }
                 // A checkable button with one icon and one label: the pressed look says whether it holds (a deliberate HIG exception, see the architecture notes)
                 OsdButton {
@@ -920,12 +985,13 @@ Kirigami.Page {
             icon.name: "media-playlist-shuffle"
             checkable: true
             checked: page.player.shuffle
-            // A series started from one of its episodes plays in order: only a queue shuffles, and a shuffle that is on can always be turned off
-            enabled: page.player.queueCount > 1 || page.player.shuffle
+            // A series started from one of its episodes plays in order: only a queue shuffles, and a shuffle that is on can always be turned off; a group's playback is the group's
+            enabled: !page.grouped && (page.player.queueCount > 1 || page.player.shuffle)
             onTriggered: page.player.setShuffle(!page.player.shuffle)
         }
         Controls.Menu {
             objectName: "playerRepeatMenu"
+            enabled: !page.grouped
             title: i18n("Repeat")
             icon.name: "media-playlist-repeat"
             Controls.MenuItem {
@@ -958,6 +1024,7 @@ Kirigami.Page {
         Controls.Menu {
             id: speedMenu
             objectName: "playerSpeedMenu"
+            enabled: !page.grouped
             title: i18n("Playback Speed")
             icon.name: "speedometer"
             Instantiator {

@@ -6,6 +6,7 @@
 #include <QTemporaryDir>
 #include <QUrl>
 #include "models/ItemDetails.h"
+#include "player/GroupPlayback.h"
 #include "player/PlaybackEngine.h"
 #include "player/PlaybackReporter.h"
 #include "player/PlayerSettings.h"
@@ -231,6 +232,21 @@ class PlayerController final : public QObject {
     Q_INVOKABLE QString timeText(qint64 ticks) const;
     // Used before a session changes, never by QML to re-authenticate.
     void onAccountLeaving();
+    // A watching-together group that takes the user's pause, resume, seek and play actions while it routes them, with speed, shuffle, repeat, Next and Previous refused meanwhile; null for none. Not owned
+    void setGroupPlayback(GroupPlayback *group) { m_group = group; }
+    // The group's commands, C++ only so that QML, MPRIS and the remote control can only reach the routed actions. openGroupItem opens an item of the group paused at `startTicks` (0 to 24 h), at speed 1.0, without the series' episodes and leaving the saved queue's position as it was; false for an invalid id or position
+    bool openGroupItem(const QString &id, qint64 startTicks);
+    void applyPause();
+    void applyUnpause();
+    void applySeek(qint64 ticks);
+    // Stops whatever plays
+    void applyStop();
+    // The group was left: what plays is the user's own again (its end may repeat, the speed setting applies)
+    void releaseGroupItem();
+    // The group's item `id` is loaded: what the group's pause, unpause and seek act on
+    [[nodiscard]] bool groupItemLoaded(const QString &id) const;
+    // Loaded, its position known and no seek running: the moment a group hears Ready
+    [[nodiscard]] bool groupItemSettled(const QString &id) const;
     // The signed-in user's EnableNextEpisodeAutoPlay: whether the end of an episode played alone starts the next one
     void setNextEpisodeAutoPlay(bool enabled)
     {
@@ -263,7 +279,12 @@ class PlayerController final : public QObject {
     // The listing channel of the series' episodes (see the channel table in the architecture doc)
     static constexpr int EpisodesChannel = 4096;
 
-    bool startItem(const QString &id, qint64 resumeTicks);
+    // `grouped` starts an item of a watching-together group (see openGroupItem)
+    bool startItem(const QString &id, qint64 resumeTicks, bool grouped = false);
+    // Whether the user's playback actions go to a group now
+    bool grouped() const { return m_group && m_group->routesPlayback(); }
+    void seekLocally(qint64 ticks);
+    void stopLocally();
     // Something plays and the server sends the source as it is, so mpv's `ff-index` is the source's stream index
     bool directPlay() const;
     // mpv's track id of the `audio` or `sub` track with this `ff-index`, 0 when there is none or it is not a direct play
@@ -325,6 +346,9 @@ class PlayerController final : public QObject {
 
     JellyfinClient &m_client;
     PlayQueue &m_queue;
+    GroupPlayback *m_group = nullptr;
+    // The item playing (or loading) is the group's: opened paused at speed 1.0, its end never moves on alone
+    bool m_groupItem = false;
     ClientSettings &m_settings;
     QString m_memoryFile;
     PlaybackSession m_session;

@@ -153,7 +153,8 @@ void PlayerSettings::applyVideo()
     m_engine.setMpvProperty(QStringLiteral("video-sync"), v("sync_mode").toString());
     m_engine.setMpvProperty(QStringLiteral("demuxer-max-bytes"),
                             QString(QString::number(v("cache").toInt()) + QStringLiteral("MiB")));
-    m_engine.setMpvProperty(QStringLiteral("speed"), v("default_playback_speed").toDouble());
+    if (!m_speedHeld)
+        m_engine.setMpvProperty(QStringLiteral("speed"), v("default_playback_speed").toDouble());
     applyAspect();
     applyDisplayRate();
 }

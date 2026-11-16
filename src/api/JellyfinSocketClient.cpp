@@ -569,6 +569,24 @@ void JellyfinSocketClient::onTextMessage(quint64 generation, const QString &text
         Q_EMIT sessionsUpdated(sessions);
         return;
     }
+    if (type == QLatin1String("SyncPlayCommand")) {
+        const auto command = SyncPlay::parseCommand(dataValue);
+        if (!command) {
+            drop("syncplay-command");
+            return;
+        }
+        Q_EMIT syncPlayCommand(*command);
+        return;
+    }
+    if (type == QLatin1String("SyncPlayGroupUpdate")) {
+        const auto update = SyncPlay::parseGroupUpdate(dataValue);
+        if (!update) {
+            drop("syncplay-group-update");
+            return;
+        }
+        Q_EMIT syncPlayGroupUpdate(*update);
+        return;
+    }
     if (type == QLatin1String("UserDeleted")) {
         auto *client = m_client.data();
         // Our user was deleted: the session cannot be trusted any more
@@ -578,7 +596,7 @@ void JellyfinSocketClient::onTextMessage(quint64 generation, const QString &text
             drop("user-deleted-identity");
         return;
     }
-    // ServerRestarting, ServerShuttingDown, RestartRequired, UserUpdated, SyncPlay*, *Timer*, RefreshProgress, ScheduledTask*, Package*, ActivityLog* and unknown names: ignored, never closing the connection
+    // ServerRestarting, ServerShuttingDown, RestartRequired, UserUpdated, *Timer*, RefreshProgress, ScheduledTask*, Package*, ActivityLog* and unknown names: ignored, never closing the connection
 }
 
 qint64 JellyfinSocketClient::reconnectDelay(int attempt, qint64 baseMs, qint64 capMs,

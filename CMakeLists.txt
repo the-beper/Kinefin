@@ -44,6 +44,12 @@ add_library(kinefin_core STATIC
     src/api/MediaSourceSelection.h
     src/api/PlaybackReport.cpp
     src/api/PlaybackReport.h
+    src/api/SyncPlayProtocol.cpp
+    src/api/SyncPlayProtocol.h
+    src/syncplay/ServerClock.cpp
+    src/syncplay/ServerClock.h
+    src/syncplay/SyncPlayGroupsModel.cpp
+    src/syncplay/SyncPlayGroupsModel.h
     src/models/CultureOptionsModel.cpp
     src/models/CultureOptionsModel.h
     src/models/FilterOptionsModel.cpp
@@ -133,6 +139,7 @@ target_link_libraries(kinefin_core PUBLIC Qt6::Core Qt6::Network Qt6::WebSockets
 add_library(kinefin_player STATIC
     src/player/PlaybackEngine.cpp
     src/player/PlaybackEngine.h
+    src/player/GroupPlayback.h
     src/player/PlayerController.cpp
     src/player/PlayerController.h
     src/player/PlayerSettings.cpp
@@ -141,6 +148,8 @@ add_library(kinefin_player STATIC
     src/player/SeriesPreferences.h
     src/player/Trickplay.cpp
     src/player/Trickplay.h
+    src/syncplay/SyncPlayController.cpp
+    src/syncplay/SyncPlayController.h
 )
 target_compile_definitions(kinefin_player PRIVATE TRANSLATION_DOMAIN="kinefin")
 target_include_directories(kinefin_player PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
@@ -164,7 +173,7 @@ target_compile_definitions(kinefin_integration PRIVATE TRANSLATION_DOMAIN="kinef
 target_link_libraries(kinefin_integration PUBLIC kinefin_player Qt6::DBus Qt6::Gui Qt6::Network KF6::I18n)
 
 # The QML module lives in a static library of its own so that the UI tests can import it like the application does
-foreach(page Main PlayerPage OsdButton MiniPlayer PlaybackInfoOverlay ShellHeader AboutDialog ShortcutsDialog RemoteSessionsDialog MediaInfoDialog HomePage LibraryTile LibraryPage ResumeItemsPage MediaCard CardMenu CardRow EpisodeRow ItemDetailsPage SearchPage QueuePage FilterDialog GenreRailsView GenreRailsPage LibraryContent ItemListRow ItemRowGrid LoginPage UserPickerPage MessageBox ServersPage SettingsPage SettingRow UserPreferencesForm UserPreferencesSaveBar FavoritesPage FavoritesGroupPage TopFade MediaListRow PlaylistsPage PlaylistPage PlaylistDialogs AddToPlaylistDialog PageToolbar PageBackButton FadeInOnShow PageTitle)
+foreach(page Main PlayerPage OsdButton MiniPlayer PlaybackInfoOverlay ShellHeader AboutDialog ShortcutsDialog RemoteSessionsDialog SyncPlayDialog MediaInfoDialog HomePage LibraryTile LibraryPage ResumeItemsPage MediaCard CardMenu CardRow EpisodeRow ItemDetailsPage SearchPage QueuePage FilterDialog GenreRailsView GenreRailsPage LibraryContent ItemListRow ItemRowGrid LoginPage UserPickerPage MessageBox ServersPage SettingsPage SettingRow UserPreferencesForm UserPreferencesSaveBar FavoritesPage FavoritesGroupPage TopFade MediaListRow PlaylistsPage PlaylistPage PlaylistDialogs AddToPlaylistDialog PageToolbar PageBackButton FadeInOnShow PageTitle)
     set_source_files_properties(src/qml/${page}.qml PROPERTIES QT_RESOURCE_ALIAS ${page}.qml)
 endforeach()
 # The images the pages draw themselves, beside the QML files they belong to
@@ -194,6 +203,7 @@ qt_add_qml_module(kinefin_ui
         src/qml/ShortcutsDialog.qml
         src/qml/AboutDialog.qml
         src/qml/RemoteSessionsDialog.qml
+        src/qml/SyncPlayDialog.qml
         src/qml/MediaInfoDialog.qml
         src/qml/HomePage.qml
         src/qml/LibraryTile.qml
@@ -326,6 +336,11 @@ if(BUILD_TESTING)
     target_link_libraries(test_player_controller PRIVATE kinefin_player kinefin_core Qt6::Test Qt6::Network)
     add_test(NAME player_controller COMMAND test_player_controller)
 
+    add_executable(test_syncplay_controller tests/test_syncplay_controller.cpp)
+    target_compile_definitions(test_syncplay_controller PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    target_link_libraries(test_syncplay_controller PRIVATE kinefin_player kinefin_core Qt6::Test Qt6::Network)
+    add_test(NAME syncplay_controller COMMAND test_syncplay_controller)
+
     # The MPRIS and screensaver tests need a session bus of their own
     add_executable(test_mpris tests/test_mpris.cpp)
     target_compile_definitions(test_mpris PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
@@ -346,6 +361,15 @@ if(BUILD_TESTING)
     target_compile_definitions(test_jellyfin_socket PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(test_jellyfin_socket PRIVATE kinefin_core Qt6::Test Qt6::Network Qt6::WebSockets)
     add_test(NAME jellyfin_socket COMMAND test_jellyfin_socket)
+
+    add_executable(test_syncplay_protocol tests/test_syncplay_protocol.cpp)
+    target_compile_definitions(test_syncplay_protocol PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    target_link_libraries(test_syncplay_protocol PRIVATE kinefin_core Qt6::Test Qt6::Network)
+    add_test(NAME syncplay_protocol COMMAND test_syncplay_protocol)
+
+    add_executable(test_server_clock tests/test_server_clock.cpp)
+    target_link_libraries(test_server_clock PRIVATE kinefin_core Qt6::Test)
+    add_test(NAME server_clock COMMAND test_server_clock)
 
     add_executable(test_jellyfin_live tests/test_jellyfin_live.cpp)
     target_link_libraries(test_jellyfin_live PRIVATE kinefin_player kinefin_core Qt6::Test Qt6::Network Qt6::WebSockets)

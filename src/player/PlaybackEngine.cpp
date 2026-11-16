@@ -3,6 +3,8 @@
 #include "PlaybackEngine.h"
 
 #include <cmath>
+#include <cstdlib>
+#include <utility>
 
 #include <QTimer>
 
@@ -25,6 +27,10 @@ static qint64 secondsToTicks(double seconds)
 constexpr qint64 kEofSnapTicks = 5 * 10'000'000;
 // How long a stop() waits for mpv's end-file before the session settles without it
 constexpr int kStopWatchdogMs = 3000;
+// How long a seek counts as running without mpv's playback-restart
+constexpr int kSeekWatchdogMs = 5000;
+// A playback restart this close to the seek's target is that seek's own: the load's first restart, or an earlier seek's, may still be queued behind it
+constexpr qint64 kSeekLandingTicks = 2 * 10'000'000;
 
 PlaybackEngine::PlaybackEngine(JellyfinClient &client, PlaybackSession &session, QObject *parent)
     : QObject(parent), m_client(client), m_session(session)
@@ -38,6 +44,9 @@ PlaybackEngine::PlaybackEngine(JellyfinClient &client, PlaybackSession &session,
             m_session.stopped();
         }
     });
+    m_seekWatchdog.setSingleShot(true);
+    m_seekWatchdog.setInterval(kSeekWatchdogMs);
+    connect(&m_seekWatchdog, &QTimer::timeout, this, &PlaybackEngine::settleSeek);
 }
 
 PlaybackEngine::~PlaybackEngine() = default;
@@ -88,6 +97,7 @@ void PlaybackEngine::detach(MpvAbstractItem *item)
         m_session.stopped();
     }
     m_stopWatchdog.stop();
+    settleSeek();
     disconnect(m_controller, nullptr, this, nullptr);
     m_controller = nullptr;
     m_renderer = nullptr;
@@ -135,8 +145,13 @@ void PlaybackEngine::wireController()
     connect(m_controller, &MpvController::fileLoaded, this, [this] {
         qCDebug(playerLog) << "file loaded";
         m_session.opened();
+        if (m_startPaused)
+            m_session.pause();
         Q_EMIT fileLoaded();
     });
+    // An event, unlike the `seeking` property, whose quick true-false flips mpv may leave unreported
+    connect(m_controller, &MpvController::playbackRestart, this,
+            &PlaybackEngine::onPlaybackRestart);
     connect(m_controller, &MpvController::endFile, this, &PlaybackEngine::onEndFile);
     connect(m_controller, &MpvController::propertyChanged, this,
             &PlaybackEngine::onPropertyChanged);
@@ -184,7 +199,7 @@ void PlaybackEngine::applyStreamAuthorization()
     // The exact value is never logged (project note: no tokens in URLs, signals or logs)
 }
 
-bool PlaybackEngine::open(const PlaybackSource &source)
+bool PlaybackEngine::open(const PlaybackSource &source, bool startPaused)
 {
     if (m_controller == nullptr || m_session.state() != PlaybackSession::State::Idle) {
         return false;
@@ -207,6 +222,8 @@ bool PlaybackEngine::open(const PlaybackSource &source)
     m_loadStarted = false;
     m_stopPending = false;
     m_stopWatchdog.stop();
+    m_startPaused = startPaused;
+    settleSeek();
     if (m_durationTicks != 0) {
         m_durationTicks = 0;
         Q_EMIT durationChanged(m_durationTicks);
@@ -216,6 +233,8 @@ bool PlaybackEngine::open(const PlaybackSource &source)
         Q_EMIT canSeekChanged(m_canSeek);
     }
     applyStreamAuthorization();
+    // mpv keeps `pause` from one file to the next: every open says what it wants
+    setProperty(QStringLiteral("pause"), startPaused);
     qCDebug(playerLog) << "opening"
                        << (route == PlaybackSession::Route::Transcoded ? "a transcoded stream"
                                                                        : "a direct stream");
@@ -291,7 +310,40 @@ void PlaybackEngine::seekTo(qint64 ticks)
         return;
     }
     const double seconds = static_cast<double>(ticks) / 1e7;
-    command({QStringLiteral("seek"), QString::number(seconds, 'f', 3), QStringLiteral("absolute")});
+    m_seekTargetTicks = ticks;
+    if (!m_seekPending) {
+        m_seekPending = true;
+        Q_EMIT seekingChanged(true);
+    }
+    m_seekWatchdog.start();
+    // A refused seek never restarts the playback: nothing to wait for
+    if (command(
+            {QStringLiteral("seek"), QString::number(seconds, 'f', 3), QStringLiteral("absolute")})
+            .canConvert<ErrorReturn>())
+        settleSeek();
+}
+
+void PlaybackEngine::onPlaybackRestart()
+{
+    if (!m_seekPending)
+        return;
+    // The new time-pos may come after this event: whoever waits for the seek must read where it landed
+    const QVariant position = mpvProperty(QStringLiteral("time-pos"));
+    if (position.metaType() != QMetaType::fromType<double>())
+        return;
+    m_positionTicks = secondsToTicks(position.toDouble());
+    m_positionKnown = true;
+    Q_EMIT positionChanged(m_positionTicks);
+    // Far from the target it is another restart; the seek's own follows (or the watchdog settles it)
+    if (std::llabs(m_positionTicks - m_seekTargetTicks) <= kSeekLandingTicks)
+        settleSeek();
+}
+
+void PlaybackEngine::settleSeek()
+{
+    m_seekWatchdog.stop();
+    if (std::exchange(m_seekPending, false))
+        Q_EMIT seekingChanged(false);
 }
 
 void PlaybackEngine::settleFailure()
@@ -403,6 +455,7 @@ void PlaybackEngine::onEndFile(const QString &reason)
 {
     qCDebug(playerLog) << "end file:" << reason;
     m_videoFacts.clear();
+    settleSeek();
     const bool eofish = reason == QLatin1String("eof");
     switch (m_session.state()) {
     case PlaybackSession::State::Playing:

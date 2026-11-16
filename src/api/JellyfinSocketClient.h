@@ -67,6 +67,9 @@ class JellyfinSocketClient final : public QObject {
     void playRequested(const Kinefin::RemotePlayRequest &request);
     // Only while subscribed; the consumer re-fetches over REST, frames are never a complete delta
     void sessionsUpdated(const QJsonArray &sessions);
+    // The SyncPlay frames, validated by SyncPlayProtocol.h: a frame that breaks a rule is dropped and counted, the socket stays open
+    void syncPlayCommand(const Kinefin::SyncPlay::Command &command);
+    void syncPlayGroupUpdate(const Kinefin::SyncPlay::GroupUpdate &update);
 
   private:
     void start();

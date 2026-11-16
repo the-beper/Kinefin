@@ -8,6 +8,7 @@
 #include "player/PlaybackReporter.h"
 #include "player/PlaybackSession.h"
 
+#include <QDateTime>
 #include <QElapsedTimer>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -19,7 +20,9 @@
 #include <QSignalSpy>
 #include <QTcpServer>
 #include <QTcpSocket>
+#include <QTimer>
 #include <QUrlQuery>
+#include <QUuid>
 #include <QWebSocket>
 #include <QWebSocketProtocol>
 #include <QtTest>
@@ -114,6 +117,9 @@ class TestJellyfinLive : public QObject {
     // Playlist editing (~10 s): a private playlist of three movies, the first entry moved to newIndex 2 and the order read back (what newIndex means), the owner's CanDelete on GET /Items/{id}, then the delete through the client. The playlist is removed even when a check fails
     void playlistEdits();
 
+    // The SyncPlay protocol (~90 s): two sessions of the user, each with its own socket, through New, List, Join (without a socket, then with one but no media control), SetNewQueue, Ping, Ready, Pause, Seek, a Ready off position, Unpause, Buffering, IgnoreWait, NextItem twice, a socket drop and reopen, the error updates and an item the user cannot see; every frame and status printed (the output pairs group ids with the user's name: keep it out of shared logs). Both sessions leave even when a check fails
+    void syncPlayProtocol();
+
   private:
     int deviceSequence = 0;
     static constexpr auto LIVE_FACT = "live-fact:";
@@ -128,7 +134,8 @@ class TestJellyfinLive : public QObject {
     bool socketFirstExchange(QWebSocket *socket);
     QJsonDocument getDocument(Kinefin::JellyfinClient &client, const QString &path);
     QJsonObject getJson(Kinefin::JellyfinClient &client, const QString &path);
-    int postJson(Kinefin::JellyfinClient &client, const QString &path, const QJsonObject &body);
+    int postJson(Kinefin::JellyfinClient &client, const QString &path, const QJsonObject &body,
+                 QByteArray *answer = nullptr);
     int deleteRequest(Kinefin::JellyfinClient &client, const QString &path);
     // Raw GET of any content type with the client's identity (or without it, for the token-free routes and the negative credential probes): the status and the body out, and the Content-Type when asked for
     int probeRaw(Kinefin::JellyfinClient &client, const QString &path, QByteArray *body,
@@ -434,9 +441,9 @@ int TestJellyfinLive::probeRaw(Kinefin::JellyfinClient &client, const QString &p
     return status;
 }
 
-// Aux REST: a POST with the client's identity header; the answer status only
+// Aux REST: a POST with the client's identity header; the answer status, and the body when asked for
 int TestJellyfinLive::postJson(Kinefin::JellyfinClient &client, const QString &path,
-                               const QJsonObject &body)
+                               const QJsonObject &body, QByteArray *answer)
 {
     QNetworkAccessManager network;
     QUrl url = client.serverUrl();
@@ -458,6 +465,8 @@ int TestJellyfinLive::postJson(Kinefin::JellyfinClient &client, const QString &p
     QSignalSpy done(reply, &QNetworkReply::finished);
     done.wait(15000);
     const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    if (answer)
+        *answer = reply->readAll();
     reply->deleteLater();
     return status;
 }
@@ -2034,6 +2043,229 @@ void TestJellyfinLive::playlistEdits()
     qInfo() << LIVE_FACT << "GET /Items/{playlist} after the delete answers" << status;
     QVERIFY2(deleted, "the playlist is still there after the delete");
     client.disconnectFromServer();
+}
+
+void TestJellyfinLive::syncPlayProtocol()
+{
+    if (!m_live)
+        QSKIP("no KINEFIN_LIVE_* environment, skipping the live checks");
+
+    // One session of the user: its client, its raw socket once opened, and what that socket received (keep-alives left out) with how much of it is printed
+    struct Member {
+        QString name;
+        Kinefin::JellyfinClient client;
+        QWebSocket *socket = nullptr;
+        QStringList frames;
+        qsizetype printed = 0;
+    };
+    Member a;
+    a.name = QStringLiteral("A");
+    Member b;
+    b.name = QStringLiteral("B");
+    QVERIFY(authenticate(a.client));
+    QVERIFY(authenticate(b.client));
+    const auto cleanup = qScopeGuard([&] {
+        for (Member *member : {&a, &b}) {
+            postJson(member->client, QStringLiteral("/SyncPlay/Leave"), {});
+            delete member->socket;
+            member->client.disconnectFromServer();
+        }
+    });
+
+    // The server closes a silent socket at 60 s: answer its ForceKeepAlive and beat every 25 s
+    const auto openSocketOf = [](Member &member) {
+        delete member.socket;
+        auto *socket =
+            new QWebSocket(QStringLiteral("Kinefin live check"), QWebSocketProtocol::VersionLatest);
+        member.socket = socket;
+        const QString keepAlive = QStringLiteral("{\"MessageType\":\"KeepAlive\"}");
+        QObject::connect(socket, &QWebSocket::textMessageReceived, socket,
+                         [&member, socket, keepAlive](const QString &frame) {
+                             if (frame.contains(QLatin1String("ForceKeepAlive")))
+                                 socket->sendTextMessage(keepAlive);
+                             else if (!frame.contains(QLatin1String("\"KeepAlive\"")))
+                                 member.frames.append(frame);
+                         });
+        auto *beat = new QTimer(socket);
+        QObject::connect(beat, &QTimer::timeout, socket,
+                         [socket, keepAlive] { socket->sendTextMessage(keepAlive); });
+        beat->start(25000);
+        QSignalSpy connected(socket, &QWebSocket::connected);
+        socket->open(member.client.webSocketRequest());
+        return connected.wait(15000);
+    };
+    // The frames since the previous step, in arrival order (the order is one of the facts)
+    const auto settle = [&](const char *step, int ms = 2500) {
+        QTest::qWait(ms);
+        for (Member *member : {&a, &b}) {
+            for (; member->printed < member->frames.size(); ++member->printed)
+                qInfo().noquote() << LIVE_FACT << step << member->name
+                                  << "frame:" << member->frames.at(member->printed);
+        }
+    };
+    const auto post = [this](Member &member, const QString &route, const QJsonObject &body) {
+        QByteArray answer;
+        const int status =
+            postJson(member.client, QStringLiteral("/SyncPlay/") + route, body, &answer);
+        qInfo().noquote() << LIVE_FACT << member.name << QStringLiteral("POST /SyncPlay/") + route
+                          << QJsonDocument(body).toJson(QJsonDocument::Compact) << "->" << status
+                          << QString::fromUtf8(answer.left(400));
+        return status;
+    };
+    const auto listGroups = [this](Member &member, const char *step) {
+        const QJsonArray groups =
+            getDocument(member.client, QStringLiteral("/SyncPlay/List")).array();
+        qInfo().noquote() << LIVE_FACT << step << member.name << "GET /SyncPlay/List:"
+                          << QJsonDocument(groups).toJson(QJsonDocument::Compact);
+        return groups;
+    };
+    const auto readiness = [](qint64 ticks, bool playing, const QString &entry) {
+        return QJsonObject{
+            {QStringLiteral("When"), QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)},
+            {QStringLiteral("PositionTicks"), ticks},
+            {QStringLiteral("IsPlaying"), playing},
+            {QStringLiteral("PlaylistItemId"), entry}};
+    };
+    // The playing entry of the latest PlayQueue update the member received
+    const auto playingEntry = [](const Member &member) {
+        for (qsizetype i = member.frames.size() - 1; i >= 0; --i) {
+            const QJsonObject update = QJsonDocument::fromJson(member.frames.at(i).toUtf8())
+                                           .object()
+                                           .value(QStringLiteral("Data"))
+                                           .toObject();
+            if (update.value(QStringLiteral("Type")).toString() != QLatin1String("PlayQueue"))
+                continue;
+            const QJsonObject queue = update.value(QStringLiteral("Data")).toObject();
+            const QJsonArray playlist = queue.value(QStringLiteral("Playlist")).toArray();
+            const int index = queue.value(QStringLiteral("PlayingItemIndex")).toInt(-1);
+            if (index < 0 || index >= playlist.size())
+                return QString();
+            return playlist.at(index).toObject().value(QStringLiteral("PlaylistItemId")).toString();
+        }
+        return QString();
+    };
+
+    qInfo() << LIVE_FACT << "/Users/Me Policy.SyncPlayAccess:"
+            << fetchMe(a.client)
+                   .value(QStringLiteral("Policy"))
+                   .toObject()
+                   .value(QStringLiteral("SyncPlayAccess"));
+    QByteArray utc;
+    const int utcStatus = probeRaw(a.client, QStringLiteral("/GetUtcTime"), &utc, true);
+    qInfo().noquote() << LIVE_FACT << "GET /GetUtcTime ->" << utcStatus << QString::fromUtf8(utc);
+    const QString movie = firstItemId(a.client);
+    QVERIFY2(!movie.isEmpty(), "no movie in the library to queue");
+    const QString groupName = QStringLiteral("Kinefin live check %1").arg(deviceSequence);
+    const auto groupIdIn = [&](const QJsonArray &groups) {
+        for (const QJsonValue &group : groups) {
+            if (group.toObject().value(QStringLiteral("GroupName")).toString() == groupName)
+                return group.toObject().value(QStringLiteral("GroupId")).toString();
+        }
+        return QString();
+    };
+
+    // A session with no socket: can it create a group at all
+    post(a, QStringLiteral("New"),
+         {{QStringLiteral("GroupName"), QString(groupName + QStringLiteral(" without socket"))}});
+    listGroups(b, "new-without-socket");
+    post(a, QStringLiteral("Leave"), {});
+    listGroups(b, "new-without-socket-left");
+
+    QVERIFY2(openSocketOf(a), "A's socket did not open");
+    settle("a-socket-open");
+    qInfo() << LIVE_FACT << "A capabilities with media control ->"
+            << postJson(
+                   a.client, QStringLiteral("/Sessions/Capabilities/Full"),
+                   {{QStringLiteral("PlayableMediaTypes"), QJsonArray{QStringLiteral("Video")}},
+                    {QStringLiteral("SupportedCommands"), QJsonArray{}},
+                    {QStringLiteral("SupportsMediaControl"), true},
+                    {QStringLiteral("SupportsPersistentIdentifier"), true}});
+    post(a, QStringLiteral("New"), {{QStringLiteral("GroupName"), groupName}});
+    settle("new");
+    const QString groupId = groupIdIn(listGroups(b, "after-new"));
+    QVERIFY2(!groupId.isEmpty(), "the new group is not in B's list");
+
+    // B joins first with no socket, then with a socket but no media control announced
+    post(b, QStringLiteral("Join"), {{QStringLiteral("GroupId"), groupId}});
+    settle("join-without-socket");
+    listGroups(b, "join-without-socket");
+    post(b, QStringLiteral("Leave"), {});
+    settle("leave-without-socket");
+    QVERIFY2(openSocketOf(b), "B's socket did not open");
+    settle("b-socket-open");
+    post(b, QStringLiteral("Join"), {{QStringLiteral("GroupId"), groupId}});
+    settle("join");
+
+    // B reports a 300 ms round trip before the queue, to see it in the Unpause lead
+    post(b, QStringLiteral("Ping"), {{QStringLiteral("Ping"), 300}});
+    post(a, QStringLiteral("SetNewQueue"),
+         {{QStringLiteral("PlayingQueue"), QJsonArray{movie}},
+          {QStringLiteral("PlayingItemPosition"), 0},
+          {QStringLiteral("StartPositionTicks"), 0}});
+    settle("new-queue");
+    const QString entry = playingEntry(a);
+    qInfo() << LIVE_FACT << "playing entry after SetNewQueue:" << entry << "B sees"
+            << playingEntry(b);
+    post(a, QStringLiteral("Ready"), readiness(0, false, entry));
+    settle("ready-a", 1500);
+    post(b, QStringLiteral("Ready"), readiness(0, false, entry));
+    settle("ready-b");
+    post(a, QStringLiteral("Unpause"), {});
+    settle("unpause");
+    post(b, QStringLiteral("Pause"), {});
+    settle("pause");
+
+    // A seek, then B ready 30 s off the asked position: does the server seek it again
+    constexpr qint64 seekTicks = 60LL * 10'000'000;
+    post(a, QStringLiteral("Seek"), {{QStringLiteral("PositionTicks"), seekTicks}});
+    settle("seek");
+    post(a, QStringLiteral("Ready"), readiness(seekTicks, false, entry));
+    post(b, QStringLiteral("Ready"), readiness(seekTicks / 2, false, entry));
+    settle("ready-off-position");
+    post(a, QStringLiteral("Unpause"), {});
+    settle("unpause-after-seek", 3000);
+
+    post(b, QStringLiteral("Buffering"), readiness(seekTicks + 30'000'000, true, entry));
+    settle("buffering");
+    post(b, QStringLiteral("Ready"), readiness(seekTicks + 30'000'000, true, entry));
+    settle("ready-after-buffering");
+    post(b, QStringLiteral("SetIgnoreWait"), {{QStringLiteral("IgnoreWait"), true}});
+    post(b, QStringLiteral("Buffering"), readiness(seekTicks + 60'000'000, true, entry));
+    settle("buffering-ignoring-wait");
+    post(b, QStringLiteral("SetIgnoreWait"), {{QStringLiteral("IgnoreWait"), false}});
+    settle("ignore-wait-off", 1000);
+
+    // The last entry ended: two NextItem of the same entry, as two members would send them
+    post(a, QStringLiteral("NextItem"), {{QStringLiteral("PlaylistItemId"), entry}});
+    post(b, QStringLiteral("NextItem"), {{QStringLiteral("PlaylistItemId"), entry}});
+    settle("next-item-twice");
+
+    // B's socket drops without a close handshake, then comes back: does the server re-join it
+    b.socket->abort();
+    settle("b-socket-dropped", 4000);
+    listGroups(a, "b-socket-dropped");
+    QVERIFY2(openSocketOf(b), "B's socket did not reopen");
+    settle("b-socket-reopened", 6000);
+    listGroups(a, "b-socket-reopened");
+
+    post(b, QStringLiteral("Leave"), {});
+    settle("leave");
+    post(b, QStringLiteral("Leave"), {});
+    settle("leave-twice");
+    post(b, QStringLiteral("Pause"), {});
+    settle("pause-outside-a-group");
+    post(b, QStringLiteral("Join"),
+         {{QStringLiteral("GroupId"), QUuid::createUuid().toString(QUuid::Id128)}});
+    settle("join-missing-group");
+    post(a, QStringLiteral("SetNewQueue"),
+         {{QStringLiteral("PlayingQueue"), QJsonArray{QUuid::createUuid().toString(QUuid::Id128)}},
+          {QStringLiteral("PlayingItemPosition"), 0},
+          {QStringLiteral("StartPositionTicks"), 0}});
+    settle("queue-of-a-missing-item");
+    post(a, QStringLiteral("Leave"), {});
+    settle("last-member-leaves");
+    QVERIFY2(groupIdIn(listGroups(b, "after-everyone-left")).isEmpty(),
+             "the group outlived its last member");
 }
 
 QTEST_MAIN(TestJellyfinLive)

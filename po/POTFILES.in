@@ -14,6 +14,7 @@ src/qml/LibraryPage.qml
 src/qml/LibraryTile.qml
 src/qml/ResumeItemsPage.qml
 src/qml/RemoteSessionsDialog.qml
+src/qml/SyncPlayDialog.qml
 src/qml/MediaInfoDialog.qml
 src/qml/SearchPage.qml
 src/qml/QueuePage.qml

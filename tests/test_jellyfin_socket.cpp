@@ -226,6 +226,52 @@ class TestJellyfinSocketClient : public QObject {
         QCOMPARE(playstate.count(), 0);
     }
 
+    void routesSyncPlayFrames()
+    {
+        using Kinefin::SyncPlay::Command;
+        using Kinefin::SyncPlay::GroupUpdate;
+        ConnectedSocket flow;
+        QVERIFY(flow.connectAndAuthenticate());
+        FakeSocketConnection *connection = flow.waitConnection();
+        QVERIFY(connection);
+        QSignalSpy commands(&flow.socket, &Kinefin::JellyfinSocketClient::syncPlayCommand);
+        QSignalSpy updates(&flow.socket, &Kinefin::JellyfinSocketClient::syncPlayGroupUpdate);
+        // What a join brings, in the observed order
+        connection->sendText(
+            QString::fromUtf8(fixture(QStringLiteral("ws_syncplay_group_joined"))));
+        connection->sendText(
+            QString::fromUtf8(fixture(QStringLiteral("ws_syncplay_stop_after_join"))));
+        QTRY_COMPARE(commands.count(), 1);
+        QCOMPARE(updates.count(), 1);
+        QCOMPARE(updates.first().first().value<GroupUpdate>().type, GroupUpdate::Type::GroupJoined);
+        QCOMPARE(commands.first().first().value<Command>().kind, Command::Kind::Stop);
+        for (const char *name :
+             {"ws_syncplay_user_joined", "ws_syncplay_state_update", "ws_syncplay_play_queue",
+              "ws_syncplay_group_left", "ws_syncplay_not_in_group"})
+            connection->sendText(QString::fromUtf8(fixture(QString::fromLatin1(name))));
+        QTRY_COMPARE(updates.count(), 6);
+        QCOMPARE(updates.last().first().value<GroupUpdate>().type, GroupUpdate::Type::NotInGroup);
+
+        // A frame that breaks a rule is dropped and the socket stays open
+        QJsonObject command =
+            QJsonDocument::fromJson(fixture(QStringLiteral("ws_syncplay_command")))
+                .object()
+                .value(QStringLiteral("Data"))
+                .toObject();
+        command.insert(QStringLiteral("GroupId"), QStringLiteral("../Items"));
+        connection->sendText(enveloped(QStringLiteral("SyncPlayCommand"), command));
+        const QJsonObject unknown{{QStringLiteral("GroupId"), QString(32, QLatin1Char('0'))},
+                                  {QStringLiteral("Type"), QStringLiteral("GroupExploded")},
+                                  {QStringLiteral("Data"), QString()}};
+        connection->sendText(enveloped(QStringLiteral("SyncPlayGroupUpdate"), unknown));
+        connection->sendText(QString::fromUtf8(fixture(QStringLiteral("ws_syncplay_command"))));
+        QTRY_COMPARE(commands.count(), 2);
+        QCOMPARE(commands.last().first().value<Command>().kind, Command::Kind::Unpause);
+        QCOMPARE(updates.count(), 6);
+        QVERIFY(connection->alive());
+        QCOMPARE(flow.socket.state(), Kinefin::JellyfinSocketClient::State::Authenticated);
+    }
+
     void routesGeneralCommand()
     {
         ConnectedSocket flow;

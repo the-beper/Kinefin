@@ -15,6 +15,7 @@
 #include "settings/ProfileIdentity.h"
 #include "settings/ProfileIndex.h"
 #include "settings/ProfilePaths.h"
+#include "syncplay/SyncPlayController.h"
 
 #include <QApplication>
 #include <QCommandLineParser>
@@ -192,6 +193,9 @@ int main(int argc, char *argv[])
                                      profileId);
     QObject::connect(&connection, &Kinefin::ConnectionController::aboutToLeaveSession, &player,
                      &Kinefin::PlayerController::onAccountLeaving);
+    // Watching together: the player's actions go to a joined group
+    Kinefin::SyncPlayController syncPlay(connection.playbackClient(), *connection.socket(), player);
+    player.setGroupPlayback(&syncPlay);
     QObject::connect(&connection, &Kinefin::ConnectionController::stateChanged, &player,
                      [&connection, &player] {
                          if (connection.state() != Kinefin::ConnectionController::Authenticated)
@@ -229,6 +233,7 @@ int main(int argc, char *argv[])
         {{QStringLiteral("connection"), QVariant::fromValue(&connection)},
          {QStringLiteral("settings"), QVariant::fromValue(&settings)},
          {QStringLiteral("player"), QVariant::fromValue(&player)},
+         {QStringLiteral("syncPlay"), QVariant::fromValue(&syncPlay)},
          {QStringLiteral("remoteInput"), QVariant::fromValue(&remoteInput)},
          {QStringLiteral("startupWindowMode"), windowMode},
          {QStringLiteral("startupPage"), qEnvironmentVariable("KINEFIN_START_PAGE")},

@@ -12,6 +12,9 @@ Kirigami.ApplicationWindow {
     required property ClientSettings settings
     // Provided by the executable; optional for shell tests that have no mpv renderer.
     property var player: null
+    // Watching together (SyncPlayController); null when the application gives none
+    property var syncPlay: null
+    readonly property bool groupJoined: syncPlay?.status === SyncPlayController.Joined
     // The remote-control socket, provided by the executable; null in shell tests
     property var remoteInput: null
     // "fullscreen" or "windowed" when a command line flag decides this run; empty to follow the setting. Changing the setting from the Settings page ends the override
@@ -565,7 +568,7 @@ Kirigami.ApplicationWindow {
         playerPage = null;
         playbackMode = "full";
         const page = pageStack.push(Qt.resolvedUrl("PlayerPage.qml"), {
-            player: window.player, connection: connection
+            player: window.player, connection: connection, syncPlay: window.syncPlay
         });
         if (!page) {
             playbackMode = before;
@@ -670,9 +673,12 @@ Kirigami.ApplicationWindow {
         }
     }
 
+    // In a SyncPlay group a play is the group's request: the player opens when the group's item starts (onItemOpened below)
     function playItem(itemId, resumeTicks) {
         if (!window.signedIn || !window.player || !window.player.playItem(itemId, resumeTicks || 0))
             return false;
+        if (groupJoined)
+            return true;
         if (!showPlayerPage()) { window.player.stop(); return false; }
         return true;
     }
@@ -680,6 +686,8 @@ Kirigami.ApplicationWindow {
     function playQueue(index, startTicks) {
         if (!window.signedIn || !window.player || !window.player.playQueue(index, startTicks || 0))
             return false;
+        if (groupJoined)
+            return true;
         if (!showPlayerPage()) { window.player.stop(); return false; }
         return true;
     }
@@ -687,8 +695,23 @@ Kirigami.ApplicationWindow {
     function resumeQueue() {
         if (!window.signedIn || !window.player || !window.player.resumeQueue())
             return false;
+        if (groupJoined)
+            return true;
         if (!showPlayerPage()) { window.player.stop(); return false; }
         return true;
+    }
+
+    // The group starts its item: the player opens, wherever the user is
+    Connections {
+        target: window.syncPlay
+        function onItemOpened() {
+            if (!window.showPlayerPage())
+                window.player?.stop();
+        }
+    }
+
+    function openSyncPlay() {
+        shellHeader.openSyncPlay();
     }
 
     // The only way to the details of an item: the pages above the one asking give way, and the item already showing is not pushed twice

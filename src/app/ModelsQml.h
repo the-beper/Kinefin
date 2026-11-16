@@ -22,6 +22,8 @@
 #include "models/SearchModel.h"
 #include "models/SeasonEpisodesModel.h"
 #include "models/UserConfigurationModel.h"
+#include "syncplay/SyncPlayController.h"
+#include "syncplay/SyncPlayGroupsModel.h"
 
 #include <QtQml/qqmlregistration.h>
 
@@ -115,6 +117,20 @@ struct RemoteSessionsModelForeign {
     Q_GADGET
     QML_FOREIGN(Kinefin::RemoteSessionsModel)
     QML_NAMED_ELEMENT(RemoteSessionsModel)
+    QML_UNCREATABLE("Created by the application")
+};
+
+struct SyncPlayControllerForeign {
+    Q_GADGET
+    QML_FOREIGN(Kinefin::SyncPlayController)
+    QML_NAMED_ELEMENT(SyncPlayController)
+    QML_UNCREATABLE("Created by the application")
+};
+
+struct SyncPlayGroupsModelForeign {
+    Q_GADGET
+    QML_FOREIGN(Kinefin::SyncPlayGroupsModel)
+    QML_NAMED_ELEMENT(SyncPlayGroupsModel)
     QML_UNCREATABLE("Created by the application")
 };
 

@@ -17,6 +17,8 @@ Item {
     readonly property ConnectionController connection: shell.connection
     readonly property bool signedIn: connection.state === ConnectionController.Authenticated
     readonly property bool serverChosen: connection.state !== ConnectionController.Idle
+    // Watching together; null when the application gives none
+    readonly property var syncPlay: shell.syncPlay ?? null
     // The same thresholds the sidebar used, now for the bar. The shell derives them from the window
     // width it owns: a binding on the attached Window.window here kept its load-time value and never followed a resize
     readonly property bool wide: shell.wideHeader
@@ -678,6 +680,16 @@ Item {
         onTriggered: remoteSessionsDialog.open()
     }
 
+    Kirigami.Action {
+        id: syncPlayAction
+        objectName: "syncPlayAction"
+
+        text: i18nc("@action:inmenu Watching together with other users, the server's feature name", "SyncPlay")
+        icon.name: "system-users"
+        visible: root.signedIn && !!root.syncPlay && (root.syncPlay.available || root.syncPlay.status !== SyncPlayController.Idle)
+        onTriggered: syncPlayDialog.open()
+    }
+
     // The account menu: what a session can lose, and what a chosen server can still be left for
     Kirigami.Action {
         id: switchUserAction
@@ -760,6 +772,11 @@ Item {
             objectName: "menuRemoteItem"
             visible: root.signedIn
             action: remoteSessionsAction
+        }
+        QQC2.MenuItem {
+            objectName: "menuSyncPlayItem"
+            visible: syncPlayAction.visible
+            action: syncPlayAction
         }
         QQC2.MenuItem {
             objectName: "menuAdminItem"
@@ -897,6 +914,37 @@ Item {
 
         connection: root.connection
         maximumWidth: Math.min(Kirigami.Units.gridUnit * 34, root.shell.width - Kirigami.Units.largeSpacing * 2)
+    }
+
+    SyncPlayDialog {
+        id: syncPlayDialog
+        objectName: "syncPlayDialog"
+
+        connection: root.connection
+        syncPlay: root.syncPlay
+        userName: root.currentUser ? root.currentUser.name : ""
+        maximumWidth: Math.min(Kirigami.Units.gridUnit * 34, root.shell.width - Kirigami.Units.largeSpacing * 2)
+    }
+
+    function openSyncPlay() {
+        syncPlayDialog.open();
+    }
+
+    // Outside the dialog a failure is a notification that stays a while; outside the player a member who comes or goes is a short one, without the name (the player's own notice names them)
+    Connections {
+        target: root.syncPlay
+        function onFailed(failure) {
+            if (!syncPlayDialog.opened)
+                root.shell.showPassiveNotification(syncPlayDialog.failureText(failure), "long");
+        }
+        function onMemberJoined() {
+            if (!root.shell.playbackPageShowing)
+                root.shell.showPassiveNotification(i18n("Someone joined the SyncPlay group"));
+        }
+        function onMemberLeft() {
+            if (!root.shell.playbackPageShowing)
+                root.shell.showPassiveNotification(i18n("Someone left the SyncPlay group"));
+        }
     }
 
     // Opening while the startup layout runs leaves a y binding loop in Kirigami.Dialog

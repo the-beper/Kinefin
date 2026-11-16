@@ -34,6 +34,8 @@ class PlayerSettings final : public QObject {
     static bool isAspectMode(const QString &mode);
     // Re-evaluates the aspect once a file is loaded, for the mode that needs the decoded picture; the other modes and `custom` are left as they are
     void applyLoadedAspect();
+    // While held, `apply()` leaves the speed alone: a watching-together group plays at 1.0 whatever the settings say
+    void setSpeedHeld(bool held) { m_speedHeld = held; }
 
   private:
     void applyAudio();
@@ -53,6 +55,7 @@ class PlayerSettings final : public QObject {
     double m_audioOffset = 0;
     double m_subtitleOffset = 0;
     QString m_aspectOverride;
+    bool m_speedHeld = false;
     QPointer<QWindow> m_window;
     QPointer<QScreen> m_screen;
     QMetaObject::Connection m_windowConnection;
