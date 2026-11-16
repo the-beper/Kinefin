@@ -858,6 +858,8 @@ Kirigami.ApplicationWindow {
         onResumeRequested: (targetId, ticks) => window.playItem(targetId, ticks)
         // A refused send means a write for the item already runs: its answer updates the card
         onFavoriteRequested: (targetId, favorite) => window.connection.setFavorite(targetId, favorite)
+        onRenamePlaylistRequested: targetId => window.renamePlaylist(targetId, window.connection.playlists.nameOf(targetId))
+        onDeletePlaylistRequested: targetId => window.askDeletePlaylist(targetId)
     }
 
     // A link opens above the active root tab after sign-in. Incoming links must not bypass the
@@ -1164,6 +1166,37 @@ Kirigami.ApplicationWindow {
         if (fromPage)
             popTo(fromPage);
         pageStack.push(Qt.resolvedUrl("PlaylistPage.qml"), { connection: connection, shell: window, playlistId: playlistId, name: name ?? "" });
+    }
+
+    PlaylistDialogs {
+        id: playlistDialogs
+        connection: window.connection
+        shell: window
+    }
+
+    // Rename… and Delete… of a playlist, from its card menu or its page; `name` fills the field
+    function renamePlaylist(playlistId, name) {
+        if (signedIn)
+            playlistDialogs.rename(playlistId, name);
+    }
+    function askDeletePlaylist(playlistId) {
+        if (signedIn)
+            playlistDialogs.askDelete(playlistId);
+    }
+
+    // The page of a deleted playlist closes, with the pages above it
+    Connections {
+        target: window.connection.playlists
+        function onDeleted(playlistId) {
+            const key = playlistId.replace(/-/g, "").toLowerCase();
+            for (let i = 1; i < window.pageStack.depth; ++i) {
+                const page = window.pageStack.get(i);
+                if (page?.objectName === "playlistPage" && page.playlistId.replace(/-/g, "").toLowerCase() === key) {
+                    window.popTo(window.pageStack.get(i - 1));
+                    return;
+                }
+            }
+        }
     }
 
     function playlistsPageGone() {

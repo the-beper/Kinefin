@@ -36,6 +36,8 @@ Controls.Menu {
     signal playRequested(string targetId)
     signal resumeRequested(string targetId, real ticks)
     signal favoriteRequested(string targetId, bool favorite)
+    signal renamePlaylistRequested(string targetId)
+    signal deletePlaylistRequested(string targetId)
 
     Controls.MenuItem {
         objectName: "cardMenuResume"
@@ -101,5 +103,27 @@ Controls.Menu {
         visible: menu.favoritable
         height: visible ? implicitHeight : 0
         onTriggered: menu.favoriteRequested(menu.itemId, !menu.favorite)
+    }
+    Controls.MenuSeparator {
+        visible: menu.itemType === "Playlist"
+        height: visible ? implicitHeight : 0
+    }
+    Controls.MenuItem {
+        objectName: "cardMenuRenamePlaylist"
+        text: i18nc("@action:inmenu", "Rename…")
+        icon.name: "edit-rename"
+        visible: menu.itemType === "Playlist"
+        height: visible ? implicitHeight : 0
+        enabled: !menu.connection.playlists.writing
+        onTriggered: menu.renamePlaylistRequested(menu.itemId)
+    }
+    Controls.MenuItem {
+        objectName: "cardMenuDeletePlaylist"
+        text: i18nc("@action:inmenu", "Delete…")
+        icon.name: "edit-delete"
+        visible: menu.itemType === "Playlist"
+        height: visible ? implicitHeight : 0
+        enabled: !menu.connection.playlists.writing
+        onTriggered: menu.deletePlaylistRequested(menu.itemId)
     }
 }

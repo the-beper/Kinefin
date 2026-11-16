@@ -1556,6 +1556,8 @@ bool JellyfinClient::deletePlaylist(const QString &playlistId)
     QUrl url = endpoint(QStringLiteral("/Items/") + playlistId);
     QUrlQuery wire;
     wire.addQueryItem(QStringLiteral("userId"), m_userId);
+    // The route answers every field by default (inferred): asked for in case it does not
+    wire.addQueryItem(QStringLiteral("fields"), QStringLiteral("CanDelete"));
     url.setQuery(wire);
     QNetworkReply *reply = m_network.get(requestFor(url, true));
     attach(reply, m_generation, [this, playlistId, key](QNetworkReply *finished) {
@@ -1566,7 +1568,9 @@ bool JellyfinClient::deletePlaylist(const QString &playlistId)
             && parseObject(finished, &item)
             && item.value(QStringLiteral("Type")).toString() == QLatin1String("Playlist")
             && playlistKey(item.value(QStringLiteral("Id")).toString()) == playlistKey(playlistId);
-        if (isPlaylist) {
+        // The server answers a DELETE the user may not make with 401, which would end the session: only a playlist it says the user can delete is deleted
+        const bool deletable = isPlaylist && item.value(QStringLiteral("CanDelete")).toBool(false);
+        if (deletable) {
             dispatchPlaylistWrite(PlaylistOp::Delete, playlistId, QByteArrayLiteral("DELETE"),
                                   endpoint(QStringLiteral("/Items/") + playlistId), {});
             return;
@@ -1574,7 +1578,7 @@ bool JellyfinClient::deletePlaylist(const QString &playlistId)
         m_playlistPending.remove(key);
         if (status == 401)
             invalidateSession();
-        Q_EMIT playlistWriteFailed(PlaylistOp::Delete, playlistId, status);
+        Q_EMIT playlistWriteFailed(PlaylistOp::Delete, playlistId, isPlaylist ? 403 : status);
     });
     return true;
 }

@@ -15,6 +15,7 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QScopeGuard>
 #include <QSignalSpy>
 #include <QTcpServer>
 #include <QTcpSocket>
@@ -109,6 +110,9 @@ class TestJellyfinLive : public QObject {
 
     // Endpoint-matrix round, PlaybackInfo defaults (~30 s): the body without a bitrate ceiling vs an explicit low one vs no DeviceProfile at all — the TranscodingUrl bitrate the server picks is the fact
     void playbackInfoDefaultsProbe();
+
+    // Playlist editing (~10 s): a private playlist of three movies, the first entry moved to newIndex 2 and the order read back (what newIndex means), the owner's CanDelete on GET /Items/{id}, then the delete through the client. The playlist is removed even when a check fails
+    void playlistEdits();
 
   private:
     int deviceSequence = 0;
@@ -1941,6 +1945,94 @@ void TestJellyfinLive::playbackInfoDefaultsProbe()
         postForBody(route, QJsonObject{{QStringLiteral("UserId"), userId}});
     QCOMPARE(bareStatus, 200);
     recordShape(QStringLiteral("no DeviceProfile at all"), bare);
+    client.disconnectFromServer();
+}
+
+void TestJellyfinLive::playlistEdits()
+{
+    if (!m_live)
+        QSKIP("no KINEFIN_LIVE_* environment, skipping the live checks");
+    Kinefin::JellyfinClient client;
+    QVERIFY(authenticate(client));
+    const QJsonArray movies =
+        getJson(client,
+                QStringLiteral("/Items?IncludeItemTypes=Movie&Recursive=true&SortBy=Name&Limit=3"))
+            .value(QStringLiteral("Items"))
+            .toArray();
+    if (movies.size() < 3)
+        QSKIP("fewer than three movies in the user's libraries");
+    QStringList itemIds;
+    for (const QJsonValue &movie : movies)
+        itemIds.append(movie.toObject().value(QStringLiteral("Id")).toString().toLower());
+
+    QSignalSpy written(&client, &Kinefin::JellyfinClient::playlistWriteSucceeded);
+    QSignalSpy failed(&client, &Kinefin::JellyfinClient::playlistWriteFailed);
+    QSignalSpy read(&client, &Kinefin::JellyfinClient::playlistEntriesReady);
+    // The `writes`-th write succeeded and none failed
+    const auto settled = [&](qsizetype writes) {
+        QElapsedTimer timer;
+        timer.start();
+        while (written.size() < writes && failed.isEmpty() && timer.elapsed() < 15000)
+            QTest::qWait(50);
+        return written.size() >= writes && failed.isEmpty();
+    };
+    const auto field = [](const QJsonArray &items, const QString &key) {
+        QStringList values;
+        for (const QJsonValue &item : items)
+            values.append(item.toObject().value(key).toString().toLower());
+        return values;
+    };
+
+    QVERIFY(client.createPlaylist(QStringLiteral("Kinefin live check"), itemIds));
+    QVERIFY2(settled(1), "the playlist was not created");
+    const QString playlist = written.constLast().at(2).toString();
+    QVERIFY(Kinefin::isValidJellyfinId(playlist));
+    bool deleted = false;
+    const auto cleanup = qScopeGuard([&] {
+        if (!deleted)
+            qInfo() << LIVE_FACT << "cleanup DELETE of the live check playlist answered"
+                    << deleteRequest(client, QStringLiteral("/Items/") + playlist);
+    });
+    const auto readEntries = [&](QJsonArray *items) {
+        read.clear();
+        if (!client.fetchPlaylistEntries(playlist, 0, 100) || !read.wait(15000))
+            return false;
+        *items = read.constFirst().at(0).value<QJsonArray>();
+        return true;
+    };
+
+    QJsonArray items;
+    QVERIFY(readEntries(&items));
+    QCOMPARE(field(items, QStringLiteral("Id")), itemIds);
+    const QString firstEntry = field(items, QStringLiteral("PlaylistItemId")).constFirst();
+    QVERIFY(Kinefin::isValidJellyfinId(firstEntry));
+
+    // The model assumes newIndex is the final index of the entry: 0,1,2 then reads back as 1,2,0
+    QVERIFY(client.movePlaylistEntry(playlist, firstEntry, 2));
+    QVERIFY2(settled(2), "the move failed");
+    QVERIFY(readEntries(&items));
+    QList<qsizetype> order;
+    for (const QString &id : field(items, QStringLiteral("Id")))
+        order.append(itemIds.indexOf(id));
+    qInfo() << LIVE_FACT
+            << "the first of three entries moved to newIndex 2 reads back as the original positions"
+            << order << "(1,2,0: newIndex is the final index; 1,0,2: the entry goes before it)";
+    QCOMPARE(order, (QList<qsizetype>{1, 2, 0}));
+
+    const QString itemPath =
+        QStringLiteral("/Items/") + playlist + QStringLiteral("?userId=") + client.userId();
+    const QJsonObject item = getJson(client, itemPath);
+    const QJsonValue canDelete = item.value(QStringLiteral("CanDelete"));
+    qInfo() << LIVE_FACT << "GET /Items/{playlist} for its owner: Type"
+            << item.value(QStringLiteral("Type")).toString() << "CanDelete" << canDelete;
+    QVERIFY2(canDelete.isBool() && canDelete.toBool(), "the owner's CanDelete is not true");
+
+    QVERIFY(client.deletePlaylist(playlist));
+    QVERIFY2(settled(3), "the delete failed");
+    const int status = probeRaw(client, itemPath, nullptr, true);
+    deleted = status != 200;
+    qInfo() << LIVE_FACT << "GET /Items/{playlist} after the delete answers" << status;
+    QVERIFY2(deleted, "the playlist is still there after the delete");
     client.disconnectFromServer();
 }
 

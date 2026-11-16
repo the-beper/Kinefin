@@ -5,7 +5,7 @@ import QtQuick.Controls as Controls
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 
-// One playlist in its order, read again every time the page comes to the front. Play and Shuffle make the playlist the saved queue (Undo on the Queue page brings the old one back) and start it
+// One playlist in its order, read again every time the page comes to the front. Play and Shuffle make the playlist the saved queue (Undo on the Queue page brings the old one back) and start it; the rows move and go at once, their writes follow (see PlaylistEntriesModel)
 Kirigami.ScrollablePage {
     id: page
     objectName: "playlistPage"
@@ -21,11 +21,17 @@ Kirigami.ScrollablePage {
     readonly property PlayQueue queue: connection.queue
     readonly property bool loading: entries.status === PlaylistEntriesModel.Loading
     readonly property bool failed: entries.status === PlaylistEntriesModel.Failed
-    // A queue that could not be read back stays untouched until it is (the Queue page offers Retry)
-    readonly property bool canPlay: entries.count > 0 && !queue.busy && !queue.restoreFailed && !!page.Window.window?.player && !shell.playlistWaiting
+    // A queue that could not be read back stays untouched until it is (the Queue page offers Retry); the queue reads the playlist from the server, so not while edits are on their way
+    readonly property bool canPlay: entries.count > 0 && !entries.writing && !queue.busy && !queue.restoreFailed && !!page.Window.window?.player && !shell.playlistWaiting
+    // One write of a playlist at a time: a rename or a delete waits for the edits of the rows, and the other way round
+    readonly property bool canChangePlaylist: !entries.writing && !connection.playlists.writing
+    // The rows stay as they are while a rename or delete is on its way, and while the queue reads the playlist (an edit then would give it half of each order)
+    readonly property bool canEditRows: !connection.playlists.writing && !shell.playlistWaiting
 
-    // Server text: the toolbar title delegate renders it as plain text. Read again with the list of playlists
-    title: name || (connection.playlists.status, connection.playlists.nameOf(playlistId)) || i18n("Playlist")
+    // Read again with the list of playlists
+    readonly property string knownName: name || (connection.playlists.status, connection.playlists.nameOf(playlistId))
+    // Server text: the toolbar title delegate renders it as plain text
+    title: knownName || i18n("Playlist")
 
     Component.onCompleted: {
         shell.playlistPages++;
@@ -56,6 +62,34 @@ Kirigami.ScrollablePage {
             page.shell.playPlaylist(page.playlistId, itemId, shuffled);
     }
 
+    function isThisPlaylist(id) {
+        return id.replace(/-/g, "").toLowerCase() === playlistId.replace(/-/g, "").toLowerCase();
+    }
+
+    // The row follows the entry it moved
+    function moveRow(from, delta) {
+        const to = from + delta;
+        if (to < 0 || to >= entries.count || !page.canEditRows)
+            return;
+        if (entries.move(from, to))
+            list.currentIndex = to;
+    }
+
+    // The current row stays at the same place, so the next entry takes its spot
+    function removeRow(row) {
+        if (!page.canEditRows || !entries.remove(row))
+            return;
+        list.currentIndex = entries.count > 0 ? Math.min(row, entries.count - 1) : -1;
+    }
+
+    Connections {
+        target: page.connection.playlists
+        function onRenamed(playlistId, name) {
+            if (page.isThisPlaylist(playlistId))
+                page.name = name;
+        }
+    }
+
     actions: [
         Kirigami.Action {
             objectName: "playPlaylistAction"
@@ -70,6 +104,24 @@ Kirigami.ScrollablePage {
             icon.name: "media-playlist-shuffle"
             enabled: page.canPlay
             onTriggered: page.play("", true)
+        },
+        Kirigami.Action {
+            objectName: "renamePlaylistAction"
+            text: i18nc("@action:intoolbar", "Rename…")
+            icon.name: "edit-rename"
+            displayHint: Kirigami.DisplayHint.AlwaysHide
+            // Only while the page is in front: a page left under another keeps its actions
+            shortcut: "F2"
+            enabled: page.canChangePlaylist && page.isCurrentPage
+            onTriggered: page.shell.renamePlaylist(page.playlistId, page.knownName)
+        },
+        Kirigami.Action {
+            objectName: "deletePlaylistAction"
+            text: i18nc("@action:intoolbar", "Delete…")
+            icon.name: "edit-delete"
+            displayHint: Kirigami.DisplayHint.AlwaysHide
+            enabled: page.canChangePlaylist
+            onTriggered: page.shell.askDeletePlaylist(page.playlistId)
         }
     ]
 
@@ -100,6 +152,14 @@ Kirigami.ScrollablePage {
             ]
         }
         MessageBox {
+            objectName: "playlistEditFailed"
+            Layout.fillWidth: true
+            Layout.margins: Kirigami.Units.largeSpacing
+            visible: page.entries.editError !== PlaylistEntriesModel.NoEditError
+            type: Kirigami.MessageType.Warning
+            text: page.entries.editError === PlaylistEntriesModel.EditForbidden ? i18n("Missing permission to change this playlist") : i18n("The change could not be saved and the playlist was read again from the server: try the change again")
+        }
+        MessageBox {
             objectName: "playlistCapped"
             Layout.fillWidth: true
             Layout.margins: Kirigami.Units.largeSpacing
@@ -108,12 +168,26 @@ Kirigami.ScrollablePage {
         }
     }
 
-    // The menu acts on the row it was opened for, and never shows server text
+    // Rows that move or go while the menu is open make it stale: it closes
+    Connections {
+        target: page.entries
+        function onEdited() {
+            menu.close();
+        }
+        function onModelReset() {
+            menu.close();
+        }
+    }
+
+    // The menu acts on the row it was opened for, and never shows server text; what the row allows is read as it opens
     Controls.Menu {
         id: menu
         objectName: "playlistMenu"
 
+        property int row: -1
         property string itemId: ""
+        property bool movable: false
+        property bool removable: false
 
         Controls.MenuItem {
             text: i18n("Play From Here")
@@ -122,6 +196,28 @@ Kirigami.ScrollablePage {
             onTriggered: page.play(menu.itemId, false)
         }
         Controls.MenuItem {
+            objectName: "playlistMenuMoveUp"
+            text: i18n("Move Up")
+            icon.name: "arrow-up"
+            enabled: menu.movable && menu.row > 0
+            onTriggered: page.moveRow(menu.row, -1)
+        }
+        Controls.MenuItem {
+            objectName: "playlistMenuMoveDown"
+            text: i18n("Move Down")
+            icon.name: "arrow-down"
+            enabled: menu.movable && menu.row < page.entries.count - 1
+            onTriggered: page.moveRow(menu.row, 1)
+        }
+        Controls.MenuItem {
+            objectName: "playlistMenuRemove"
+            text: i18n("Remove from Playlist")
+            icon.name: "edit-delete-remove"
+            enabled: menu.removable
+            onTriggered: page.removeRow(menu.row)
+        }
+        Controls.MenuSeparator {}
+        Controls.MenuItem {
             text: i18n("Go to Item")
             icon.name: "go-next"
             onTriggered: page.Window.window.openItem(menu.itemId, page)
@@ -129,7 +225,10 @@ Kirigami.ScrollablePage {
     }
 
     function openMenu(row, x, y) {
+        menu.row = row.index;
         menu.itemId = row.itemId;
+        menu.movable = page.canEditRows && entries.canMove(row.index);
+        menu.removable = page.canEditRows && entries.canRemove(row.index);
         menu.popup(row, x, y);
     }
 
@@ -147,10 +246,17 @@ Kirigami.ScrollablePage {
         Keys.onReturnPressed: if (list.currentItem) page.Window.window.openItem(list.currentItem.itemId, page)
         Keys.onEnterPressed: if (list.currentItem) page.Window.window.openItem(list.currentItem.itemId, page)
         Keys.onSpacePressed: if (list.currentItem) page.Window.window.openItem(list.currentItem.itemId, page)
-        Keys.onMenuPressed: if (list.currentItem) page.openMenu(list.currentItem, 0, list.currentItem.height)
+        Keys.onMenuPressed: if (list.currentItem) page.openMenu(list.currentItem, list.currentItem.sideMargin, list.currentItem.height)
+        Keys.onDeletePressed: page.removeRow(list.currentIndex)
         Keys.onPressed: event => {
-            if (event.modifiers === Qt.ShiftModifier && event.key === Qt.Key_F10 && list.currentItem) {
-                page.openMenu(list.currentItem, 0, list.currentItem.height);
+            if (event.modifiers === Qt.ControlModifier && event.key === Qt.Key_Up) {
+                page.moveRow(list.currentIndex, -1);
+                event.accepted = true;
+            } else if (event.modifiers === Qt.ControlModifier && event.key === Qt.Key_Down) {
+                page.moveRow(list.currentIndex, 1);
+                event.accepted = true;
+            } else if (event.modifiers === Qt.ShiftModifier && event.key === Qt.Key_F10 && list.currentItem) {
+                page.openMenu(list.currentItem, list.currentItem.sideMargin, list.currentItem.height);
                 event.accepted = true;
             }
         }

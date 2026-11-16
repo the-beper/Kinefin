@@ -354,7 +354,7 @@ class FakeJellyfin {
     QHash<QString, QList<QByteArray>> listingRoutes; // family -> every route in arrival order
     QHash<QString, QByteArray> lastListingAuth;      // family -> the Authorization header
 
-    // The playlist routes over an in-memory store, answering as the 12.4 server did (every one answers 401 to an Authorization without the token of the session): create answers 200 `{Id}`; entries carry a `PlaylistItemId` and the copies of one item share it, so removing it removes every copy; a move names the entry, an unknown entry is a silent 204 and an index past the end answers 500; removing an unknown entry is a silent 204; rename and delete answer 204. A write for an unknown playlist answers 404, a create without a name 400. `GET /Items/{id}` answers the item's `Type` (a playlist, or an entry of `typedItems`), 404 otherwise
+    // The playlist routes over an in-memory store, answering as the 12.4 server did (every one answers 401 to an Authorization without the token of the session): create answers 200 `{Id}`; entries carry a `PlaylistItemId` and the copies of one item share it, so removing it removes every copy; a move names the entry, an unknown entry is a silent 204 and an index past the end answers 500; removing an unknown entry is a silent 204; rename and delete answer 204. A write for an unknown playlist answers 404, a create without a name 400. `GET /Items/{id}` answers the item's `Type` (a playlist, with its `CanDelete`, or an entry of `typedItems`), 404 otherwise
     struct FakePlaylistEntry {
         QString entryId;
         QString itemId;
@@ -384,6 +384,8 @@ class FakeJellyfin {
     QHash<QString, QString> typedItems;
     // GET /Items/{id}: a non-zero status, or a non-empty raw body, replaces the answer
     int playlistItemStatus = 0;
+    // The `CanDelete` GET /Items/{id} answers for a playlist (not sent for other items)
+    bool playlistsDeletable = true;
     QByteArray playlistItemRawBody;
     // Writes are applied, then the connection is closed with no answer (a transport error for the client)
     bool dropPlaylistWrites = false;
@@ -650,12 +652,14 @@ class FakeJellyfin {
                 respond(socket, 200, playlistItemRawBody);
             else if (type.isEmpty())
                 respond(socket, 404, {});
-            else
-                respond(socket, 200,
-                        QJsonDocument(QJsonObject{{QStringLiteral("Id"), id},
-                                                  {QStringLiteral("Name"), QStringLiteral("Item")},
-                                                  {QStringLiteral("Type"), type}})
-                            .toJson(QJsonDocument::Compact));
+            else {
+                QJsonObject item{{QStringLiteral("Id"), id},
+                                 {QStringLiteral("Name"), QStringLiteral("Item")},
+                                 {QStringLiteral("Type"), type}};
+                if (playlist)
+                    item.insert(QStringLiteral("CanDelete"), playlistsDeletable);
+                respond(socket, 200, QJsonDocument(item).toJson(QJsonDocument::Compact));
+            }
             return true;
         }
         if (!read && playlistWriteStatus != 0) {

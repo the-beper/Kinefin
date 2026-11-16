@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: kinefin 0\n"
 "Report-Msgid-Bugs-To: https://github.com/the-beper/Kinefin/issues\n"
-"POT-Creation-Date: 2026-11-15 22:41+0000\n"
+"POT-Creation-Date: 2026-11-16 10:41+0000\n"
 "PO-Revision-Date: 2026-11-07 00:00+0000\n"
 "Last-Translator: the-beper\n"
 "Language-Team: Italian\n"
@@ -602,7 +602,7 @@ msgstr "Home"
 #: src/qml/QueuePage.qml:274 src/qml/FilterDialog.qml:416
 #: src/qml/GenreRailsView.qml:85 src/qml/GenreRailsView.qml:178
 #: src/qml/PlaylistsPage.qml:58 src/qml/PlaylistsPage.qml:135
-#: src/qml/PlaylistPage.qml:96 src/qml/PlaylistPage.qml:180
+#: src/qml/PlaylistPage.qml:148 src/qml/PlaylistPage.qml:286
 #: src/qml/FavoritesPage.qml:211 src/qml/FavoritesPage.qml:267
 msgid "Retry"
 msgstr "Riprova"
@@ -705,29 +705,29 @@ msgid "Ended"
 msgstr "Terminata"
 
 #: src/qml/ItemDetailsPage.qml:96 src/qml/MediaCard.qml:390
-#: src/qml/CardMenu.qml:42 src/qml/PlayerPage.qml:713
+#: src/qml/CardMenu.qml:44 src/qml/PlayerPage.qml:713
 #: src/qml/MiniPlayer.qml:198
 msgid "Resume"
 msgstr "Riprendi"
 
 #: src/qml/ItemDetailsPage.qml:96 src/qml/MediaCard.qml:390
-#: src/qml/CardMenu.qml:42
+#: src/qml/CardMenu.qml:44
 msgid "Play"
 msgstr "Riproduci"
 
-#: src/qml/ItemDetailsPage.qml:104 src/qml/CardMenu.qml:77
+#: src/qml/ItemDetailsPage.qml:104 src/qml/CardMenu.qml:79
 msgid "Play Next"
 msgstr "Riproduci dopo"
 
-#: src/qml/ItemDetailsPage.qml:112 src/qml/CardMenu.qml:86
+#: src/qml/ItemDetailsPage.qml:112 src/qml/CardMenu.qml:88
 msgid "Add to Queue"
 msgstr "Aggiungi alla coda"
 
-#: src/qml/ItemDetailsPage.qml:120 src/qml/CardMenu.qml:99
+#: src/qml/ItemDetailsPage.qml:120 src/qml/CardMenu.qml:101
 msgid "Remove from Favorites"
 msgstr "Rimuovi dai preferiti"
 
-#: src/qml/ItemDetailsPage.qml:120 src/qml/CardMenu.qml:99
+#: src/qml/ItemDetailsPage.qml:120 src/qml/CardMenu.qml:101
 msgid "Add to Favorites"
 msgstr "Aggiungi ai preferiti"
 
@@ -784,7 +784,7 @@ msgstr ""
 "Impossibile caricare questo elemento: controlla la connessione al server e "
 "riprova"
 
-#: src/qml/ItemDetailsPage.qml:325 src/qml/Main.qml:1277
+#: src/qml/ItemDetailsPage.qml:325 src/qml/Main.qml:1310
 msgid "Could not update Favorites. Check the connection and try again"
 msgstr "Impossibile aggiornare i preferiti. Controlla la connessione e riprova"
 
@@ -1447,7 +1447,7 @@ msgid "Resume Queue"
 msgstr "Riprendi la coda"
 
 #: src/qml/QueuePage.qml:104 src/qml/QueuePage.qml:160
-#: src/qml/PlaylistPage.qml:119
+#: src/qml/PlaylistPage.qml:193
 msgid "Play From Here"
 msgstr "Riproduci da qui"
 
@@ -1464,11 +1464,11 @@ msgstr "Svuota coda"
 msgid "Remove all items from the queue?"
 msgstr "Rimuovere tutti gli elementi dalla coda?"
 
-#: src/qml/QueuePage.qml:166
+#: src/qml/QueuePage.qml:166 src/qml/PlaylistPage.qml:200
 msgid "Move Up"
 msgstr "Sposta su"
 
-#: src/qml/QueuePage.qml:172
+#: src/qml/QueuePage.qml:172 src/qml/PlaylistPage.qml:207
 msgid "Move Down"
 msgstr "Sposta giù"
 
@@ -1476,7 +1476,7 @@ msgstr "Sposta giù"
 msgid "Remove"
 msgstr "Rimuovi"
 
-#: src/qml/QueuePage.qml:184 src/qml/PlaylistPage.qml:125
+#: src/qml/QueuePage.qml:184 src/qml/PlaylistPage.qml:221
 msgid "Go to Item"
 msgstr "Vai all'elemento"
 
@@ -1783,21 +1783,31 @@ msgstr "Riprendi %1"
 msgid "Play %1"
 msgstr "Riproduci %1"
 
-#: src/qml/CardMenu.qml:52
+#: src/qml/CardMenu.qml:54
 msgid "Open"
 msgstr "Apri"
 
-#: src/qml/CardMenu.qml:58
+#: src/qml/CardMenu.qml:60
 msgid "Go to Series"
 msgstr "Vai alla serie"
 
-#: src/qml/CardMenu.qml:68
+#: src/qml/CardMenu.qml:70
 msgid "Play from Beginning"
 msgstr "Riproduci dall'inizio"
 
-#: src/qml/CardMenu.qml:68
+#: src/qml/CardMenu.qml:70
 msgid "Play Now"
 msgstr "Riproduci ora"
+
+#: src/qml/CardMenu.qml:113
+msgctxt "@action:inmenu"
+msgid "Rename…"
+msgstr "Rinomina…"
+
+#: src/qml/CardMenu.qml:122
+msgctxt "@action:inmenu"
+msgid "Delete…"
+msgstr "Elimina…"
 
 #: src/qml/CardRow.qml:286
 msgctxt "@action:button scroll a row of cards"
@@ -1955,48 +1965,51 @@ msgstr ""
 "della cartella del profilo. Le modifiche restano fino alla chiusura di "
 "Kinefin"
 
-#: src/qml/Main.qml:1201
+#: src/qml/Main.qml:1234
 msgid ""
 "The queue holds the first %1 item of the playlist: this entry is not among "
 "them"
 msgid_plural ""
 "The queue holds the first %1 items of the playlist: this entry is not among "
 "them"
-msgstr[0] "La coda contiene solo %1 elemento della scaletta: questa voce non è compresa"
-msgstr[1] "La coda contiene solo i primi %1 elementi della scaletta: questa voce non è compresa"
+msgstr[0] ""
+"La coda contiene solo %1 elemento della scaletta: questa voce non è compresa"
+msgstr[1] ""
+"La coda contiene solo i primi %1 elementi della scaletta: questa voce non è "
+"compresa"
 
-#: src/qml/Main.qml:1205
+#: src/qml/Main.qml:1238
 msgid "Only the first %1 item went into the queue"
 msgid_plural "Only the first %1 items went into the queue"
 msgstr[0] "Solo %1 elemento è stato aggiunto alla coda"
 msgstr[1] "Solo %1 elementi sono stati aggiunti alla coda"
 
-#: src/qml/Main.qml:1205
+#: src/qml/Main.qml:1238
 msgid "The queue now holds the playlist"
 msgstr "La coda contiene ora la scaletta"
 
-#: src/qml/Main.qml:1207
+#: src/qml/Main.qml:1240
 msgctxt "@action:button takes the queue back"
 msgid "Undo"
 msgstr "Annulla"
 
-#: src/qml/Main.qml:1285
+#: src/qml/Main.qml:1318
 msgid "The queue is full: some items were left out, remove some to add more"
 msgstr ""
 "La coda è piena: alcuni elementi sono stati esclusi, rimuovine alcuni per "
 "aggiungerne altri"
 
-#: src/qml/Main.qml:1285
+#: src/qml/Main.qml:1318
 msgid "%1 item added to the queue"
 msgid_plural "%1 items added to the queue"
 msgstr[0] "%1 elemento aggiunto alla coda"
 msgstr[1] "%1 elementi aggiunti alla coda"
 
-#: src/qml/Main.qml:1288
+#: src/qml/Main.qml:1321
 msgid "There is nothing to play in this item"
 msgstr "Non c'è nulla da riprodurre in questo elemento"
 
-#: src/qml/Main.qml:1291
+#: src/qml/Main.qml:1324
 msgid ""
 "The queue could not be saved: check the free space and the permissions of "
 "the profile folder. It lasts until Kinefin closes"
@@ -2004,7 +2017,7 @@ msgstr ""
 "Impossibile salvare la coda: controlla lo spazio libero e i permessi della "
 "cartella del profilo. Resta fino alla chiusura di Kinefin"
 
-#: src/qml/Main.qml:1294
+#: src/qml/Main.qml:1327
 msgid ""
 "Could not add this to the queue: check the connection to the server and try "
 "again"
@@ -2373,41 +2386,132 @@ msgstr "Impossibile leggere le scalette dal server: riprova"
 msgid "No playlists"
 msgstr "Nessuna scaletta"
 
-#: src/qml/PlaylistPage.qml:28
+#: src/qml/PlaylistPage.qml:34
 msgid "Playlist"
 msgstr "Scaletta"
 
-#: src/qml/PlaylistPage.qml:62
+#: src/qml/PlaylistPage.qml:96
 msgctxt "@action:intoolbar"
 msgid "Play"
 msgstr "Riproduci"
 
-#: src/qml/PlaylistPage.qml:69
+#: src/qml/PlaylistPage.qml:103
 msgctxt "@action:intoolbar"
 msgid "Shuffle"
 msgstr "Riproduzione casuale"
 
-#: src/qml/PlaylistPage.qml:93
+#: src/qml/PlaylistPage.qml:110
+msgctxt "@action:intoolbar"
+msgid "Rename…"
+msgstr "Rinomina…"
+
+#: src/qml/PlaylistPage.qml:120
+msgctxt "@action:intoolbar"
+msgid "Delete…"
+msgstr "Elimina…"
+
+#: src/qml/PlaylistPage.qml:145
 msgid "The playlist could not be read again"
 msgstr "Impossibile rileggere la scaletta"
 
-#: src/qml/PlaylistPage.qml:107
+#: src/qml/PlaylistPage.qml:160 src/qml/PlaylistDialogs.qml:121
+msgid "Missing permission to change this playlist"
+msgstr "Permesso mancante per modificare questa scaletta"
+
+#: src/qml/PlaylistPage.qml:160
+msgid ""
+"The change could not be saved and the playlist was read again from the "
+"server: try the change again"
+msgstr "Impossibile salvare la modifica e la scaletta è stata riletta dal server: riprova la modifica"
+
+#: src/qml/PlaylistPage.qml:167
 msgid "Showing the first %1 entry of %2"
 msgid_plural "Showing the first %1 entries of %2"
 msgstr[0] "Visualizzata %1 voce di %2"
 msgstr[1] "Visualizzate le prime %1 voci di %2"
 
-#: src/qml/PlaylistPage.qml:177
+#: src/qml/PlaylistPage.qml:214
+msgid "Remove from Playlist"
+msgstr "Rimuovi dalla scaletta"
+
+#: src/qml/PlaylistPage.qml:283
 msgid "The playlist could not be loaded"
 msgstr "Impossibile caricare la scaletta"
 
-#: src/qml/PlaylistPage.qml:178
+#: src/qml/PlaylistPage.qml:284
 msgid "Its entries could not be read from the server: try again"
 msgstr "Impossibile leggere gli elementi della scaletta dal server: riprova"
 
-#: src/qml/PlaylistPage.qml:192
+#: src/qml/PlaylistPage.qml:298
 msgid "This playlist is empty"
 msgstr "Questa scaletta è vuota"
+
+#: src/qml/PlaylistDialogs.qml:51
+msgid ""
+"The playlist could not be renamed: wait for the changes on their way and try "
+"again"
+msgstr "Impossibile rinominare la scaletta: attendi che le modifiche in corso siano completate e riprova"
+
+#: src/qml/PlaylistDialogs.qml:54
+msgctxt "@title:window"
+msgid "Rename Playlist"
+msgstr "Rinomina scaletta"
+
+#: src/qml/PlaylistDialogs.qml:58
+msgctxt "@action:button"
+msgid "Rename"
+msgstr "Rinomina"
+
+#: src/qml/PlaylistDialogs.qml:71
+msgctxt "@label:textbox"
+msgid "Name:"
+msgstr "Nome:"
+
+#: src/qml/PlaylistDialogs.qml:79
+msgctxt "@label:textbox"
+msgid "Name"
+msgstr "Nome"
+
+#: src/qml/PlaylistDialogs.qml:89
+msgid "The name needs at least one visible character"
+msgstr "Il nome deve contenere almeno un carattere visibile"
+
+#: src/qml/PlaylistDialogs.qml:102
+msgid ""
+"The playlist could not be deleted: wait for the changes on their way and try "
+"again"
+msgstr "Impossibile eliminare la scaletta: attendi che le modifiche in corso siano completate e riprova"
+
+#: src/qml/PlaylistDialogs.qml:105
+msgctxt "@title:window"
+msgid "Delete Playlist"
+msgstr "Elimina scaletta"
+
+#: src/qml/PlaylistDialogs.qml:106
+msgid ""
+"Delete this playlist from the server? The videos in it stay in the library"
+msgstr "Eliminare questa scaletta dal server? I video al suo interno restano nella libreria"
+
+#: src/qml/PlaylistDialogs.qml:110
+msgctxt "@action:button"
+msgid "Delete"
+msgstr "Elimina"
+
+#: src/qml/PlaylistDialogs.qml:121
+msgid ""
+"The playlist could not be renamed: check the connection to the server and "
+"try again"
+msgstr "Impossibile rinominare la scaletta: controlla la connessione al server e riprova"
+
+#: src/qml/PlaylistDialogs.qml:124
+msgid "Missing permission to delete this playlist"
+msgstr "Permesso mancante per eliminare questa scaletta"
+
+#: src/qml/PlaylistDialogs.qml:124
+msgid ""
+"The playlist could not be deleted: check the connection to the server and "
+"try again"
+msgstr "Impossibile eliminare la scaletta: controlla la connessione al server e riprova"
 
 #: src/qml/PlaybackInfoOverlay.qml:32
 msgctxt "@title:window accessible name of the panel"
@@ -3012,114 +3116,119 @@ msgstr "Annulla ultima modifica della coda"
 
 #: src/qml/ShortcutsDialog.qml:30
 msgctxt "@item:intable shortcut action"
-msgid "Move Queue Item Up"
-msgstr "Sposta elemento della coda su"
+msgid "Move Queue or Playlist Item Up"
+msgstr "Sposta su elemento della coda o della scaletta"
 
 #: src/qml/ShortcutsDialog.qml:31
 msgctxt "@item:intable shortcut action"
-msgid "Move Queue Item Down"
-msgstr "Sposta elemento della coda giù"
+msgid "Move Queue or Playlist Item Down"
+msgstr "Sposta giù elemento della coda o della scaletta"
 
 #: src/qml/ShortcutsDialog.qml:32
 msgctxt "@item:intable shortcut action"
-msgid "Remove Queue Item"
-msgstr "Rimuovi elemento dalla coda"
+msgid "Remove Queue or Playlist Item"
+msgstr "Rimuovi elemento della coda o della scaletta"
 
 #: src/qml/ShortcutsDialog.qml:33
+msgctxt "@item:intable shortcut action"
+msgid "Rename Playlist"
+msgstr "Rinomina scaletta"
+
+#: src/qml/ShortcutsDialog.qml:34
 msgctxt "@item:intable shortcut action"
 msgid "Settings"
 msgstr "Impostazioni"
 
-#: src/qml/ShortcutsDialog.qml:34
+#: src/qml/ShortcutsDialog.qml:35
 msgctxt "@item:intable shortcut action"
 msgid "Expand Player"
 msgstr "Espandi il player"
 
-#: src/qml/ShortcutsDialog.qml:35
+#: src/qml/ShortcutsDialog.qml:36
 msgctxt "@item:intable shortcut action"
 msgid "Show Keyboard Shortcuts"
 msgstr "Mostra le scorciatoie da tastiera"
 
-#: src/qml/ShortcutsDialog.qml:39
+#: src/qml/ShortcutsDialog.qml:40
 msgctxt "@item:intable shortcut action"
 msgid "Play or Pause"
 msgstr "Riproduci o metti in pausa"
 
-#: src/qml/ShortcutsDialog.qml:40
+#: src/qml/ShortcutsDialog.qml:41
 msgctxt "@item:intable shortcut action"
 msgid "Mute or Unmute"
 msgstr "Disattiva o riattiva audio"
 
-#: src/qml/ShortcutsDialog.qml:41
+#: src/qml/ShortcutsDialog.qml:42
 msgctxt "@item:intable shortcut action"
 msgid "Volume Up"
 msgstr "Alza il volume"
 
-#: src/qml/ShortcutsDialog.qml:42
+#: src/qml/ShortcutsDialog.qml:43
 msgctxt "@item:intable shortcut action"
 msgid "Volume Down"
 msgstr "Abbassa il volume"
 
-#: src/qml/ShortcutsDialog.qml:43 src/qml/ShortcutsDialog.qml:44
+#: src/qml/ShortcutsDialog.qml:44 src/qml/ShortcutsDialog.qml:45
 msgctxt "@item:intable shortcut action"
 msgid "Toggle Full Screen"
 msgstr "Attiva o disattiva lo schermo intero"
 
-#: src/qml/ShortcutsDialog.qml:45
+#: src/qml/ShortcutsDialog.qml:46
 msgctxt "@item:intable shortcut action"
 msgid "Cancel Up Next, Leave Full Screen or Go Back"
 msgstr "Annulla “A seguire”, esci dallo schermo intero o torna indietro"
 
-#: src/qml/ShortcutsDialog.qml:46
+#: src/qml/ShortcutsDialog.qml:47
 msgctxt "@item:intable shortcut action"
 msgid "Play the Up Next Item Now"
 msgstr "Riproduci ora l’elemento di “A seguire”"
 
-#: src/qml/ShortcutsDialog.qml:47
+#: src/qml/ShortcutsDialog.qml:48
 msgctxt "@item:intable shortcut action"
 msgid "Skip Back 10 Seconds"
 msgstr "Torna indietro di 10 secondi"
 
-#: src/qml/ShortcutsDialog.qml:48
+#: src/qml/ShortcutsDialog.qml:49
 msgctxt "@item:intable shortcut action"
 msgid "Skip Forward 10 Seconds"
 msgstr "Vai avanti di 10 secondi"
 
-#: src/qml/ShortcutsDialog.qml:49
+#: src/qml/ShortcutsDialog.qml:50
 msgctxt "@item:intable shortcut action"
 msgid "Skip Back 1 Minute"
 msgstr "Torna indietro di 1 minuto"
 
-#: src/qml/ShortcutsDialog.qml:50
+#: src/qml/ShortcutsDialog.qml:51
 msgctxt "@item:intable shortcut action"
 msgid "Skip Forward 1 Minute"
 msgstr "Vai avanti di 1 minuto"
 
-#: src/qml/ShortcutsDialog.qml:51
+#: src/qml/ShortcutsDialog.qml:52
 msgctxt "@item:intable shortcut action"
 msgid "Previous Chapter"
 msgstr "Capitolo precedente"
 
-#: src/qml/ShortcutsDialog.qml:52
+#: src/qml/ShortcutsDialog.qml:53
 msgctxt "@item:intable shortcut action"
 msgid "Next Chapter"
 msgstr "Capitolo successivo"
 
-#: src/qml/ShortcutsDialog.qml:73
+#: src/qml/ShortcutsDialog.qml:74
 msgid "Keyboard Shortcuts"
 msgstr "Scorciatoie da tastiera"
 
-#: src/qml/ShortcutsDialog.qml:105
+#: src/qml/ShortcutsDialog.qml:106
 msgctxt "@action:button"
 msgid "Close"
 msgstr "Chiudi"
 
-#: src/qml/ShortcutsDialog.qml:132
+#: src/qml/ShortcutsDialog.qml:133
 msgctxt "@title:group keyboard shortcuts"
 msgid "General"
 msgstr "Generale"
 
-#: src/qml/ShortcutsDialog.qml:141
+#: src/qml/ShortcutsDialog.qml:142
 msgctxt "@title:group keyboard shortcuts"
 msgid "Player"
 msgstr "Player"

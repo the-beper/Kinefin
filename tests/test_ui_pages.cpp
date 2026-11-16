@@ -11909,6 +11909,155 @@ class TestUiPages : public QObject {
                  QStringLiteral("No playlists"));
     }
 
+    void playlistsAreEditedFromTheKeysTheMenuAndTheirDialogs()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QStringList films;
+        for (int i = 1; i <= 3; ++i) {
+            const QString id = QStringLiteral("f2%1").arg(i, 30, 16, QLatin1Char('0'));
+            ui.server.itemsById.insert(
+                id, QJsonDocument(
+                        QJsonObject{{QStringLiteral("Id"), id},
+                                    {QStringLiteral("Name"), QStringLiteral("Film %1").arg(i)},
+                                    {QStringLiteral("Type"), QStringLiteral("Movie")}})
+                        .toJson(QJsonDocument::Compact));
+            films.append(id);
+        }
+        const QString evening = ui.server.seedPlaylist(QStringLiteral("Evening"), films);
+        const QString other = ui.server.seedPlaylist(QStringLiteral("Other"), {films.at(0)});
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QObject *root = ui.engine.rootObjects().constFirst();
+        QVERIFY(QMetaObject::invokeMethod(root, "openPlaylists"));
+        QTRY_VERIFY(ui.item(QStringLiteral("mediaCard_") + evening) != nullptr);
+        ui.clickCenter(ui.item(QStringLiteral("mediaCard_") + evening));
+        QTRY_VERIFY(ui.item(QStringLiteral("playlistRow_2")) != nullptr);
+        QQuickItem *page = ui.currentDetails();
+        QCOMPARE(page->objectName(), QStringLiteral("playlistPage"));
+        QTRY_COMPARE(page->property("loading").toBool(), false);
+        QQuickItem *list = ui.item(QStringLiteral("playlistEntries"));
+        QVERIFY(list);
+        QVERIFY(QMetaObject::invokeMethod(page, "focusPrimary"));
+        QTRY_VERIFY(list->hasActiveFocus());
+        // Ctrl+Down moves the current entry and the row follows it; the server gets the same order
+        QCOMPARE(list->property("currentIndex").toInt(), 0);
+        QTest::keyClick(ui.window, Qt::Key_Down, Qt::ControlModifier);
+        QCOMPARE(list->property("currentIndex").toInt(), 1);
+        QCOMPARE(ui.item(QStringLiteral("playlistRow_1"))->property("itemId").toString(),
+                 films.at(0));
+        QTRY_COMPARE(ui.server.playlistItemIds(evening),
+                     (QStringList{films.at(1), films.at(0), films.at(2)}));
+        // Delete removes it, and the next entry takes its row
+        QTest::keyClick(ui.window, Qt::Key_Delete);
+        QTRY_COMPARE(ui.server.playlistItemIds(evening), (QStringList{films.at(1), films.at(2)}));
+        QCOMPARE(list->property("currentIndex").toInt(), 1);
+        QTRY_COMPARE(page->property("loading").toBool(), false);
+        // A change the server refuses comes back, and the page says why
+        ui.server.playlistWriteStatus = 403;
+        QTest::keyClick(ui.window, Qt::Key_Up, Qt::ControlModifier);
+        QQuickItem *refused = ui.item(QStringLiteral("playlistEditFailed"));
+        QTRY_VERIFY(refused && refused->isVisible());
+        QCOMPARE(refused->property("text").toString(),
+                 QStringLiteral("Missing permission to change this playlist"));
+        QTRY_COMPARE(page->property("loading").toBool(), false);
+        QTRY_COMPARE(ui.item(QStringLiteral("playlistRow_0"))->property("itemId").toString(),
+                     films.at(1));
+        ui.server.playlistWriteStatus = 0;
+        // The row menu moves and removes too; the next change clears the message
+        QQuickItem *first = ui.item(QStringLiteral("playlistRow_0"));
+        QVERIFY(QMetaObject::invokeMethod(page, "openMenu",
+                                          Q_ARG(QVariant, QVariant::fromValue<QObject *>(first)),
+                                          Q_ARG(QVariant, 0), Q_ARG(QVariant, 0)));
+        QObject *up = ui.popup(QStringLiteral("playlistMenuMoveUp"));
+        QObject *down = ui.popup(QStringLiteral("playlistMenuMoveDown"));
+        QObject *remove = ui.popup(QStringLiteral("playlistMenuRemove"));
+        QVERIFY(up && down && remove);
+        QTRY_VERIFY(down->property("visible").toBool());
+        QVERIFY(!up->property("enabled").toBool());
+        QVERIFY(down->property("enabled").toBool());
+        QVERIFY(remove->property("enabled").toBool());
+        QVERIFY(QMetaObject::invokeMethod(down, "click"));
+        QTRY_COMPARE(ui.server.playlistItemIds(evening), (QStringList{films.at(2), films.at(1)}));
+        QTRY_VERIFY(!refused->isVisible());
+        QTRY_COMPARE(page->property("loading").toBool(), false);
+        // Rename… asks for the new name, filled with the old one, and the page takes it
+        QObject *renameAction = page->findChild<QObject *>(QStringLiteral("renamePlaylistAction"));
+        QVERIFY(renameAction && renameAction->property("enabled").toBool());
+        QVERIFY(QMetaObject::invokeMethod(renameAction, "trigger"));
+        QObject *renameDialog = ui.popup(QStringLiteral("renamePlaylistDialog"));
+        QTRY_VERIFY(renameDialog && renameDialog->property("opened").toBool());
+        QObject *field = ui.popup(QStringLiteral("playlistNameField"));
+        QVERIFY(field);
+        QCOMPARE(field->property("text").toString(), QStringLiteral("Evening"));
+        QVERIFY(!renameDialog->property("acceptable").toBool());
+        QObject *invalid = ui.popup(QStringLiteral("playlistNameInvalid"));
+        QVERIFY(invalid && !invalid->property("visible").toBool());
+        QVERIFY(field->setProperty("text", QStringLiteral("   ")));
+        QVERIFY(!renameDialog->property("acceptable").toBool());
+        QTRY_VERIFY(invalid->property("visible").toBool());
+        QVERIFY(field->setProperty("text", QStringLiteral("  Late Night  ")));
+        QVERIFY(renameDialog->property("acceptable").toBool());
+        QTRY_VERIFY(!invalid->property("visible").toBool());
+        QVERIFY(QMetaObject::invokeMethod(renameDialog, "accept"));
+        QTRY_COMPARE(ui.server.playlistById(evening)->name, QStringLiteral("Late Night"));
+        QTRY_COMPARE(page->property("title").toString(), QStringLiteral("Late Night"));
+        // Delete… asks first; deleting closes the page
+        QTRY_VERIFY(!renameDialog->property("visible").toBool());
+        QObject *deleteAction = page->findChild<QObject *>(QStringLiteral("deletePlaylistAction"));
+        QTRY_VERIFY(deleteAction && deleteAction->property("enabled").toBool());
+        QVERIFY(QMetaObject::invokeMethod(deleteAction, "trigger"));
+        QObject *deleteDialog = ui.popup(QStringLiteral("deletePlaylistDialog"));
+        QTRY_VERIFY(deleteDialog && deleteDialog->property("opened").toBool());
+        QVERIFY(ui.server.playlistById(evening));
+        QVERIFY(QMetaObject::invokeMethod(deleteDialog, "confirm"));
+        QTRY_VERIFY(ui.server.playlistById(evening) == nullptr);
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("playlistsPage"));
+        QTRY_VERIFY(ui.item(QStringLiteral("mediaCard_") + evening) == nullptr);
+        // The card menu of a playlist renames and deletes it; other cards have no such entries
+        QTRY_VERIFY(!deleteDialog->property("visible").toBool());
+        QQuickItem *card = ui.item(QStringLiteral("mediaCard_") + other);
+        QVERIFY(card);
+        const auto openCardMenu = [&](const QString &id, const QString &type) {
+            return QMetaObject::invokeMethod(
+                root, "openCardMenu", Q_ARG(QVariant, QVariant::fromValue<QObject *>(card)),
+                Q_ARG(QVariant, id), Q_ARG(QVariant, type), Q_ARG(QVariant, QString()),
+                Q_ARG(QVariant, 0), Q_ARG(QVariant, 0), Q_ARG(QVariant, -1),
+                Q_ARG(QVariant, false));
+        };
+        QObject *cardMenu = ui.popup(QStringLiteral("cardMenu"));
+        QObject *renameEntry = ui.popup(QStringLiteral("cardMenuRenamePlaylist"));
+        QObject *deleteEntry = ui.popup(QStringLiteral("cardMenuDeletePlaylist"));
+        QVERIFY(cardMenu && renameEntry && deleteEntry);
+        QVERIFY(openCardMenu(films.at(0), QStringLiteral("Movie")));
+        QTRY_VERIFY(cardMenu->property("opened").toBool());
+        QVERIFY(!renameEntry->property("visible").toBool());
+        QVERIFY(!deleteEntry->property("visible").toBool());
+        QVERIFY(QMetaObject::invokeMethod(cardMenu, "close"));
+        QTRY_VERIFY(!cardMenu->property("visible").toBool());
+        QVERIFY(openCardMenu(other, QStringLiteral("Playlist")));
+        QTRY_VERIFY(renameEntry->property("visible").toBool());
+        QVERIFY(QMetaObject::invokeMethod(renameEntry, "click"));
+        QTRY_VERIFY(renameDialog->property("opened").toBool());
+        QCOMPARE(field->property("text").toString(), QStringLiteral("Other"));
+        QVERIFY(QMetaObject::invokeMethod(renameDialog, "close"));
+        QTRY_VERIFY(!renameDialog->property("visible").toBool());
+        // A playlist the server says the user may not delete is never sent a DELETE
+        ui.server.playlistsDeletable = false;
+        QVERIFY(openCardMenu(other, QStringLiteral("Playlist")));
+        QTRY_VERIFY(deleteEntry->property("visible").toBool());
+        QVERIFY(QMetaObject::invokeMethod(deleteEntry, "click"));
+        QTRY_VERIFY(deleteDialog->property("opened").toBool());
+        const qsizetype requests = ui.server.playlistRequests.size();
+        QVERIFY(QMetaObject::invokeMethod(deleteDialog, "confirm"));
+        QTRY_VERIFY(ui.server.playlistRequests.size() > requests);
+        QTRY_VERIFY(!ui.controller.playlists()->writing());
+        QVERIFY(ui.server.playlistById(other));
+        QVERIFY(std::none_of(ui.server.playlistRequests.cbegin() + requests,
+                             ui.server.playlistRequests.cend(),
+                             [](const auto &request) { return request.method == "DELETE"; }));
+    }
+
     void playerRepeatIsAlwaysOnAndAllNeedsSomewhereToGo()
     {
         PlayerStub stub;

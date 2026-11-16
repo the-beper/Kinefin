@@ -4378,6 +4378,51 @@ class TestJellyfinClient : public QObject {
         QCOMPARE(deleteRequests(server), 0);
     }
 
+    void playlistDeleteNeedsCanDeleteTrue()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        const QString playlist = server.seedPlaylist(QStringLiteral("Mine"), {kItemA});
+        const QByteArray head = QByteArrayLiteral("{\"Id\":\"") + playlist.toUtf8()
+                                + QByteArrayLiteral("\",\"Type\":\"Playlist\"");
+        // An empty body is the fake's own answer with `CanDelete` false
+        const QList<QByteArray> bodies{{},
+                                       head + QByteArrayLiteral("}"),
+                                       head + QByteArrayLiteral(",\"CanDelete\":false}"),
+                                       head + QByteArrayLiteral(",\"CanDelete\":\"true\"}"),
+                                       head + QByteArrayLiteral(",\"CanDelete\":1}"),
+                                       head + QByteArrayLiteral(",\"CanDelete\":null}")};
+        QSignalSpy done(&client, &Kinefin::JellyfinClient::playlistWriteSucceeded);
+        QSignalSpy failed(&client, &Kinefin::JellyfinClient::playlistWriteFailed);
+        int expected = 0;
+        for (const QByteArray &body : bodies) {
+            server.playlistsDeletable = !body.isEmpty();
+            server.playlistItemRawBody = body;
+            QVERIFY(client.deletePlaylist(playlist));
+            ++expected;
+            QTRY_COMPARE(failed.size(), expected);
+            QCOMPARE(failed.constLast().at(0).value<PlaylistOp>(), PlaylistOp::Delete);
+            QCOMPARE(failed.constLast().at(1).toString(), playlist);
+            QCOMPARE(failed.constLast().at(2).toInt(), 403);
+        }
+        QCOMPARE(done.size(), 0);
+        QCOMPARE(deleteRequests(server), 0);
+        QVERIFY(client.isAuthenticated());
+        QVERIFY(server.playlistById(playlist));
+        // The slot is free after every refusal, and a playlist the user may delete goes
+        server.playlistsDeletable = true;
+        server.playlistItemRawBody.clear();
+        QVERIFY(client.deletePlaylist(playlist));
+        QTRY_COMPARE(done.size(), 1);
+        QCOMPARE(done.constFirst().at(0).value<PlaylistOp>(), PlaylistOp::Delete);
+        QCOMPARE(done.constFirst().at(1).toString(), playlist);
+        QCOMPARE(deleteRequests(server), 1);
+        QVERIFY(!server.playlistById(playlist));
+        QCOMPARE(failed.size(), expected);
+    }
+
     void playlistDeleteHoldsTheSlotAcrossBothSteps()
     {
         FakeJellyfin server;

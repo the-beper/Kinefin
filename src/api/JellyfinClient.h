@@ -195,7 +195,7 @@ class JellyfinClient final : public QObject {
     // `newIndex` is sent as given: the caller clamps it to the playlist, the server answers 500 past the end
     bool movePlaylistEntry(const QString &playlistId, const QString &entryId, int newIndex);
     bool renamePlaylist(const QString &playlistId, const QString &name);
-    // `DELETE /Items/{id}` removes any item for good, so the item is read first (`GET /Items/{id}`) and deleted only when its `Type` is exactly "Playlist": any other type, a failed read or an invalid reply ends as playlistWriteFailed(Delete) with the status of the read, and nothing is deleted. The playlist's write slot is held across both requests
+    // `DELETE /Items/{id}` removes any item for good, so the item is read first (`GET /Items/{id}`) and deleted only when its `Type` is exactly "Playlist" and its `CanDelete` is true: a playlist without that ends as playlistWriteFailed(Delete, 403) with no DELETE (the server answers 401 to a delete the user may not make, which would end the session); any other type, a failed read or an invalid reply ends as playlistWriteFailed(Delete) with the status of the read, and nothing is deleted. The playlist's write slot is held across both requests
     bool deletePlaylist(const QString &playlistId);
     // The token-free URL of one item image (`GET /Items/{itemId}/Images/{type}` has no `security` requirement in the 12.4 spec, so the URL carries no credentials and the image fetch may stay unauthenticated). `imageType` is one of the spec's ImageType names; `format` may be empty (the server negotiates) or one of "jpg", "gif", "png", "webp"; `tag` is an opaque alphanumeric cache buster. Invalid input yields an empty URL, never a partially valid one
     QUrl imageUrl(const QString &itemId, const QString &imageType, int maxWidth, const QString &tag,
@@ -330,7 +330,7 @@ class JellyfinClient final : public QObject {
     void upcomingReady(const QJsonArray &items, int totalRecordCount, int channel);
     void studiosReady(const QJsonArray &items, int totalRecordCount, int channel);
     void playlistEntriesReady(const QJsonArray &items, int totalRecordCount, int channel);
-    // `createdId` is the new playlist's id for Create and empty otherwise (`playlistId` is empty for Create); `httpStatus` is 0 for a transport error, the status of the reply otherwise (so 200 for a create reply without a valid id, and for a delete that named no playlist)
+    // `createdId` is the new playlist's id for Create and empty otherwise (`playlistId` is empty for Create); `httpStatus` is 0 for a transport error, the status of the reply otherwise (so 200 for a create reply without a valid id, and for a delete that named no playlist), and 403 for a delete of a playlist the user may not delete
     void playlistWriteSucceeded(Kinefin::JellyfinClient::PlaylistOp op, const QString &playlistId,
                                 const QString &createdId);
     void playlistWriteFailed(Kinefin::JellyfinClient::PlaylistOp op, const QString &playlistId,
