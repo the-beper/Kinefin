@@ -3184,6 +3184,68 @@ class TestUiPages : public QObject {
         QTRY_COMPARE(toggle->property("text").toString(), QStringLiteral("Show More"));
         QCOMPARE(label->property("maximumLineCount").toInt(), 4);
         QTRY_VERIFY(label->property("truncated").toBool());
+        // Folded, the last line fades out
+        QVERIFY(Ui::itemIn(page, QStringLiteral("overviewFade"))->isVisible());
+
+        // The page keeps its place when the text opens and folds again (a short window: the page stays longer than it, folded too)
+        ui.window->resize(ui.window->width(), 360);
+        QQuickItem *list = Ui::itemIn(page, QStringLiteral("episodesList"));
+        QVERIFY(list);
+        QVERIFY(QMetaObject::invokeMethod(toggle, "click"));
+        QTRY_COMPARE(toggle->property("text").toString(), QStringLiteral("Show Less"));
+        QTRY_VERIFY(list->property("contentHeight").toDouble() > list->height() + 60);
+        // The place a click keeps is held only for a moment: a scroll after it is the user's
+        QTest::qWait(400);
+        const auto offset = [list] {
+            return list->property("contentY").toDouble() - list->property("originY").toDouble();
+        };
+        QVERIFY(list->setProperty("contentY", list->property("originY").toDouble() + 60));
+        QTRY_COMPARE(offset(), 60.0);
+        QVERIFY(QMetaObject::invokeMethod(toggle, "click"));
+        QTRY_COMPARE(toggle->property("text").toString(), QStringLiteral("Show More"));
+        QTest::qWait(100);
+        QVERIFY(list->property("contentHeight").toDouble() > list->height() + 60);
+        QCOMPARE(offset(), 60.0);
+        QVERIFY(QMetaObject::invokeMethod(toggle, "click"));
+        QTRY_COMPARE(toggle->property("text").toString(), QStringLiteral("Show Less"));
+        QTest::qWait(100);
+        QCOMPARE(offset(), 60.0);
+        QVERIFY(QMetaObject::invokeMethod(toggle, "click"));
+        QTRY_COMPARE(toggle->property("text").toString(), QStringLiteral("Show More"));
+
+        // A text that folding would cut by two lines only shows whole, with no button; three more lines fold
+        const auto withOverview = [&](int lines) {
+            QStringList text;
+            for (int i = 0; i < lines; ++i)
+                text << QStringLiteral("Line %1 of the overview").arg(i + 1);
+            QJsonObject item = fixtureObject(QStringLiteral("movie_item"));
+            item.insert(QStringLiteral("Overview"), text.join(QLatin1Char('\n')));
+            ui.server.itemsById.insert(kMovieId,
+                                       QJsonDocument(item).toJson(QJsonDocument::Compact));
+        };
+        // The same item already in front is not pushed again: Home first
+        QObject *root = ui.engine.rootObjects().constFirst();
+        const auto reopen = [&] {
+            QVERIFY(QMetaObject::invokeMethod(root, "goHome"));
+            QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("homePage"));
+        };
+        withOverview(6);
+        reopen();
+        QQuickItem *six = openDetails(ui, kMovieId);
+        QVERIFY(six);
+        QTRY_VERIFY(Ui::itemIn(six, QStringLiteral("overviewLabel"))->property("lineCount").toInt()
+                    == 6);
+        QVERIFY(!Ui::itemIn(six, QStringLiteral("overviewToggle"))->isVisible());
+        QVERIFY(!Ui::itemIn(six, QStringLiteral("overviewLabel"))->property("truncated").toBool());
+        withOverview(7);
+        reopen();
+        QQuickItem *seven = openDetails(ui, kMovieId);
+        QVERIFY(seven);
+        QTRY_VERIFY(Ui::itemIn(seven, QStringLiteral("overviewToggle"))->isVisible());
+        QCOMPARE(Ui::itemIn(seven, QStringLiteral("overviewLabel"))
+                     ->property("maximumLineCount")
+                     .toInt(),
+                 4);
 
         // Short text fits in four lines: no button
         QQuickItem *series = openDetails(ui, kSeriesId);

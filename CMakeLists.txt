@@ -167,6 +167,10 @@ target_link_libraries(kinefin_integration PUBLIC kinefin_player Qt6::DBus Qt6::G
 foreach(page Main PlayerPage OsdButton MiniPlayer PlaybackInfoOverlay ShellHeader AboutDialog ShortcutsDialog RemoteSessionsDialog MediaInfoDialog HomePage LibraryTile LibraryPage ResumeItemsPage MediaCard CardMenu CardRow EpisodeRow ItemDetailsPage SearchPage QueuePage FilterDialog GenreRailsView GenreRailsPage LibraryContent ItemListRow ItemRowGrid LoginPage UserPickerPage MessageBox ServersPage SettingsPage SettingRow UserPreferencesForm UserPreferencesSaveBar FavoritesPage FavoritesGroupPage TopFade MediaListRow PlaylistsPage PlaylistPage PlaylistDialogs AddToPlaylistDialog PageToolbar PageBackButton FadeInOnShow PageTitle)
     set_source_files_properties(src/qml/${page}.qml PROPERTIES QT_RESOURCE_ALIAS ${page}.qml)
 endforeach()
+# The images the pages draw themselves, beside the QML files they belong to
+foreach(icon critic-fresh critic-rotten)
+    set_source_files_properties(src/qml/icons/${icon}.svg PROPERTIES QT_RESOURCE_ALIAS icons/${icon}.svg)
+endforeach()
 qt_add_library(kinefin_ui STATIC)
 qt_add_qml_module(kinefin_ui
     URI org.kde.kinefin
@@ -219,6 +223,9 @@ qt_add_qml_module(kinefin_ui
         src/qml/UserPreferencesSaveBar.qml
         src/qml/FavoritesPage.qml
         src/qml/FavoritesGroupPage.qml
+    RESOURCES
+        src/qml/icons/critic-fresh.svg
+        src/qml/icons/critic-rotten.svg
     SOURCES
         src/app/ClientSettingsQml.h
         src/app/UpdateCheckerQml.h

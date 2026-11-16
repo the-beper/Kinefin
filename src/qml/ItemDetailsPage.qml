@@ -395,9 +395,12 @@ Kirigami.ScrollablePage {
                         Layout.fillWidth: true
                         Layout.preferredHeight: overlay ? imageHeight : imageHeight + heroText.implicitHeight + (hasBackdrop ? headerContent.spacing : 0)
 
+                        // The backdrop spans the whole page, edge to edge, outside the margins and the reading width the text keeps
                         Rectangle {
+                            objectName: "detailsBackdrop"
                             visible: hero.hasBackdrop
-                            width: hero.width
+                            x: -headerContent.x
+                            width: list.width
                             height: hero.imageHeight
                             color: Kirigami.Theme.alternateBackgroundColor
                             clip: true
@@ -423,7 +426,8 @@ Kirigami.ScrollablePage {
                                     right: parent.right
                                     bottom: parent.bottom
                                 }
-                                height: Math.min(parent.height, hero.overlay ? heroText.implicitHeight + Kirigami.Units.gridUnit * 4 : Kirigami.Units.gridUnit * 4)
+                                // As little of the image as the text needs: an eased rise, opaque only at the image's last line so its edge leaves no seam
+                                height: Math.min(parent.height, hero.overlay ? heroText.implicitHeight + Kirigami.Units.gridUnit * 2 : Kirigami.Units.gridUnit * 2)
                                 gradient: Gradient {
                                     GradientStop {
                                         position: 0
@@ -431,7 +435,15 @@ Kirigami.ScrollablePage {
                                     }
                                     GradientStop {
                                         position: 0.3
-                                        color: Qt.alpha(scrim.fade, 0.9)
+                                        color: Qt.alpha(scrim.fade, 0.12)
+                                    }
+                                    GradientStop {
+                                        position: 0.55
+                                        color: Qt.alpha(scrim.fade, 0.4)
+                                    }
+                                    GradientStop {
+                                        position: 0.8
+                                        color: Qt.alpha(scrim.fade, 0.75)
                                     }
                                     GradientStop {
                                         position: 1
@@ -529,7 +541,7 @@ Kirigami.ScrollablePage {
                                     readonly property real rowHeight: Kirigami.Units.gridUnit + Kirigami.Units.smallSpacing
 
                                     Layout.fillWidth: true
-                                    spacing: Kirigami.Units.largeSpacing
+                                    spacing: Kirigami.Units.largeSpacing * 2
 
                                     Badge {
                                         objectName: "factEpisode"
@@ -588,14 +600,33 @@ Kirigami.ScrollablePage {
                                         }
                                     }
 
-                                    Controls.Label {
+                                    // The critics' score (the Tomatometer the server reads) behind a ripe tomato from 60%, a squashed one under it
+                                    RowLayout {
                                         objectName: "factCritic"
+                                        readonly property bool fresh: page.details.criticRating >= 60
+                                        readonly property alias text: criticLabel.text
                                         height: facts.rowHeight
-                                        verticalAlignment: Text.AlignVCenter
                                         visible: page.details.criticRating >= 0
-                                        textFormat: Text.PlainText
-                                        text: i18nc("critic rating in percent", "%1%", Math.round(page.details.criticRating))
-                                        Accessible.name: i18n("Critic Rating: %1", text)
+                                        spacing: Kirigami.Units.smallSpacing
+                                        Accessible.role: Accessible.StaticText
+                                        Accessible.name: i18n("Critic Rating: %1", criticLabel.text)
+
+                                        Image {
+                                            objectName: "factCriticIcon"
+                                            Layout.preferredWidth: Kirigami.Units.iconSizes.small
+                                            Layout.preferredHeight: Kirigami.Units.iconSizes.small
+                                            sourceSize.width: Kirigami.Units.iconSizes.small * Screen.devicePixelRatio
+                                            sourceSize.height: Kirigami.Units.iconSizes.small * Screen.devicePixelRatio
+                                            // Images of the module itself, never a server address
+                                            source: parent.fresh ? "icons/critic-fresh.svg" : "icons/critic-rotten.svg"
+                                            Accessible.ignored: true
+                                        }
+
+                                        Controls.Label {
+                                            id: criticLabel
+                                            textFormat: Text.PlainText
+                                            text: i18nc("critic rating in percent", "%1%", Math.round(page.details.criticRating))
+                                        }
                                     }
 
                                     Controls.Label {
@@ -736,9 +767,43 @@ Kirigami.ScrollablePage {
                         text: page.details.tagline
                     }
 
+                    // The whole width of the column, with room at its end; four lines when folded, but a text that would hide only a line or two shows whole
                     ColumnLayout {
+                        id: overviewBlock
+
+                        readonly property int foldedLines: 4
+                        readonly property bool foldable: overviewMeasure.lineCount > foldedLines + 2
+                        readonly property bool folded: foldable && !page.overviewExpanded
+                        // Where the view stood below the start of the list when the text opened or folded (-1: nothing to keep)
+                        property real keptOffset: -1
+
+                        function keepPlace() {
+                            const most = Math.max(0, list.contentHeight - list.height);
+                            list.contentY = list.originY + Math.min(keptOffset, most);
+                        }
+                        // The list lays the new header out over a few passes and moves its origin each time, and a list with no rows of its own (a movie: everything is its header) goes back to its start when it lays out: the place is put back after each, for a moment
+                        Connections {
+                            target: list
+                            enabled: overviewBlock.keptOffset >= 0
+                            function onOriginYChanged() {
+                                overviewBlock.keepPlace();
+                            }
+                            function onContentHeightChanged() {
+                                overviewBlock.keepPlace();
+                            }
+                            function onContentYChanged() {
+                                if (overviewBlock.keptOffset > 0 && Math.abs(list.contentY - list.originY) < 0.5)
+                                    overviewBlock.keepPlace();
+                            }
+                        }
+                        Timer {
+                            id: keepPlaceWindow
+                            interval: Kirigami.Units.longDuration
+                            onTriggered: overviewBlock.keptOffset = -1
+                        }
+
                         Layout.fillWidth: true
-                        Layout.maximumWidth: Kirigami.Units.gridUnit * 43
+                        Layout.rightMargin: Kirigami.Units.gridUnit * 2
                         visible: overviewLabel.text.length > 0
                         spacing: 0
 
@@ -748,19 +813,59 @@ Kirigami.ScrollablePage {
 
                             Layout.fillWidth: true
                             wrapMode: Text.Wrap
-                            maximumLineCount: page.overviewExpanded ? 100000 : 4
-                            elide: page.overviewExpanded ? Text.ElideNone : Text.ElideRight
+                            maximumLineCount: overviewBlock.folded ? overviewBlock.foldedLines : 100000
                             textFormat: Text.PlainText
                             text: page.details.overview
+
+                            // The same text unfolded and never seen: how many lines it takes at this width
+                            Controls.Label {
+                                id: overviewMeasure
+                                width: overviewLabel.width
+                                opacity: 0
+                                wrapMode: Text.Wrap
+                                textFormat: Text.PlainText
+                                font: overviewLabel.font
+                                text: overviewLabel.text
+                                Accessible.ignored: true
+                            }
+
+                            // The last folded line fades out: the text goes on
+                            Rectangle {
+                                objectName: "overviewFade"
+                                visible: overviewBlock.folded
+                                anchors {
+                                    left: parent.left
+                                    right: parent.right
+                                    bottom: parent.bottom
+                                }
+                                height: Math.round(parent.height / overviewBlock.foldedLines * 1.25)
+                                gradient: Gradient {
+                                    GradientStop {
+                                        position: 0
+                                        color: Qt.alpha(Kirigami.Theme.backgroundColor, 0)
+                                    }
+                                    GradientStop {
+                                        position: 1
+                                        color: Kirigami.Theme.backgroundColor
+                                    }
+                                }
+                            }
                         }
 
                         Controls.Button {
                             objectName: "overviewToggle"
+                            Layout.alignment: Qt.AlignRight
                             flat: true
-                            // Collapsed text that fits shows no button; an expanded one keeps it to fold again
-                            visible: page.overviewExpanded || overviewLabel.truncated
+                            visible: overviewBlock.foldable
                             text: page.overviewExpanded ? i18n("Show Less") : i18n("Show More")
-                            onClicked: page.overviewExpanded = !page.overviewExpanded
+                            icon.name: page.overviewExpanded ? "go-up" : "go-down"
+                            // The page keeps its place: the text grows or shrinks under the same view
+                            onClicked: {
+                                overviewBlock.keptOffset = list.contentY - list.originY;
+                                page.overviewExpanded = !page.overviewExpanded;
+                                overviewBlock.keepPlace();
+                                keepPlaceWindow.restart();
+                            }
                         }
                     }
 

@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: kinefin 0\n"
 "Report-Msgid-Bugs-To: https://github.com/the-beper/Kinefin/issues\n"
-"POT-Creation-Date: 2026-11-16 13:54+0000\n"
+"POT-Creation-Date: 2026-11-16 15:37+0000\n"
 "PO-Revision-Date: 2026-11-07 00:00+0000\n"
 "Last-Translator: the-beper\n"
 "Language-Team: Italian\n"
@@ -94,11 +94,11 @@ msgstr "S%1:E%2–E%3"
 
 #: src/player/PlayerController.cpp:52 src/qml/HomePage.qml:218
 #: src/qml/EpisodeRow.qml:38 src/qml/ItemDetailsPage.qml:67
-#: src/qml/ResumeItemsPage.qml:134 src/qml/SearchPage.qml:223
-#: src/qml/GenreRailsView.qml:217 src/qml/LibraryContent.qml:274
+#: src/qml/ResumeItemsPage.qml:140 src/qml/SearchPage.qml:223
+#: src/qml/GenreRailsView.qml:223 src/qml/LibraryContent.qml:276
 #: src/qml/ItemListRow.qml:40 src/qml/ItemRowGrid.qml:74
 #: src/qml/MediaListRow.qml:30 src/qml/FavoritesPage.qml:127
-#: src/qml/FavoritesGroupPage.qml:117
+#: src/qml/FavoritesGroupPage.qml:123
 msgctxt "season and episode number"
 msgid "S%1:E%2"
 msgstr "S%1:E%2"
@@ -111,20 +111,20 @@ msgstr "E%1–E%2"
 
 #: src/player/PlayerController.cpp:57 src/qml/HomePage.qml:218
 #: src/qml/EpisodeRow.qml:41 src/qml/ItemDetailsPage.qml:68
-#: src/qml/ResumeItemsPage.qml:134 src/qml/SearchPage.qml:223
-#: src/qml/GenreRailsView.qml:217 src/qml/LibraryContent.qml:274
+#: src/qml/ResumeItemsPage.qml:140 src/qml/SearchPage.qml:223
+#: src/qml/GenreRailsView.qml:223 src/qml/LibraryContent.qml:276
 #: src/qml/ItemListRow.qml:40 src/qml/ItemRowGrid.qml:74
 #: src/qml/MediaListRow.qml:30 src/qml/FavoritesPage.qml:127
-#: src/qml/FavoritesGroupPage.qml:117
+#: src/qml/FavoritesGroupPage.qml:123
 msgctxt "episode number"
 msgid "E%1"
 msgstr "E%1"
 
 #: src/player/PlayerController.cpp:63 src/qml/HomePage.qml:219
-#: src/qml/EpisodeRow.qml:48 src/qml/ResumeItemsPage.qml:135
-#: src/qml/SearchPage.qml:224 src/qml/GenreRailsView.qml:218
+#: src/qml/EpisodeRow.qml:48 src/qml/ResumeItemsPage.qml:141
+#: src/qml/SearchPage.qml:224 src/qml/GenreRailsView.qml:224
 #: src/qml/ItemRowGrid.qml:75 src/qml/MediaListRow.qml:31
-#: src/qml/FavoritesPage.qml:128 src/qml/FavoritesGroupPage.qml:118
+#: src/qml/FavoritesPage.qml:128 src/qml/FavoritesGroupPage.qml:124
 msgctxt "episode label and episode title"
 msgid "%1 — %2"
 msgstr "%1 — %2"
@@ -581,8 +581,8 @@ msgstr "In arrivo"
 msgid "Networks"
 msgstr "Reti"
 
-#: src/settings/SettingDefinitions.cpp:790 src/qml/ItemDetailsPage.qml:275
-#: src/qml/ItemDetailsPage.qml:1149 src/qml/SearchPage.qml:154
+#: src/settings/SettingDefinitions.cpp:790 src/qml/ItemDetailsPage.qml:278
+#: src/qml/ItemDetailsPage.qml:1258 src/qml/SearchPage.qml:154
 msgid "Episodes"
 msgstr "Episodi"
 
@@ -591,24 +591,24 @@ msgid "Home"
 msgstr "Home"
 
 #: src/qml/HomePage.qml:44 src/qml/HomePage.qml:188
-#: src/qml/ItemDetailsPage.qml:333 src/qml/ItemDetailsPage.qml:346
-#: src/qml/ItemDetailsPage.qml:359 src/qml/ItemDetailsPage.qml:890
-#: src/qml/ItemDetailsPage.qml:946 src/qml/ItemDetailsPage.qml:1119
-#: src/qml/ItemDetailsPage.qml:1165 src/qml/ItemDetailsPage.qml:1223
+#: src/qml/ItemDetailsPage.qml:337 src/qml/ItemDetailsPage.qml:350
+#: src/qml/ItemDetailsPage.qml:363 src/qml/ItemDetailsPage.qml:999
+#: src/qml/ItemDetailsPage.qml:1055 src/qml/ItemDetailsPage.qml:1228
+#: src/qml/ItemDetailsPage.qml:1274 src/qml/ItemDetailsPage.qml:1332
 #: src/qml/LibraryPage.qml:699 src/qml/LibraryPage.qml:721
 #: src/qml/LibraryPage.qml:736 src/qml/ResumeItemsPage.qml:48
 #: src/qml/ResumeItemsPage.qml:62 src/qml/RemoteSessionsDialog.qml:145
 #: src/qml/SearchPage.qml:88 src/qml/SearchPage.qml:192
 #: src/qml/QueuePage.qml:265 src/qml/FilterDialog.qml:417
-#: src/qml/GenreRailsView.qml:86 src/qml/GenreRailsView.qml:181
-#: src/qml/PlaylistsPage.qml:81 src/qml/PlaylistsPage.qml:160
-#: src/qml/PlaylistPage.qml:161 src/qml/PlaylistPage.qml:301
+#: src/qml/GenreRailsView.qml:92 src/qml/GenreRailsView.qml:187
+#: src/qml/PlaylistsPage.qml:81 src/qml/PlaylistsPage.qml:166
+#: src/qml/PlaylistPage.qml:161 src/qml/PlaylistPage.qml:307
 #: src/qml/AddToPlaylistDialog.qml:157 src/qml/FavoritesPage.qml:202
-#: src/qml/FavoritesPage.qml:276
+#: src/qml/FavoritesPage.qml:278
 msgid "Retry"
 msgstr "Riprova"
 
-#: src/qml/HomePage.qml:55 src/qml/FavoritesPage.qml:289
+#: src/qml/HomePage.qml:55 src/qml/FavoritesPage.qml:291
 msgid "No libraries to show"
 msgstr "Nessuna libreria da mostrare"
 
@@ -616,7 +616,7 @@ msgstr "Nessuna libreria da mostrare"
 msgid "Continue Watching"
 msgstr "Continua a guardare"
 
-#: src/qml/HomePage.qml:117 src/qml/ItemDetailsPage.qml:846
+#: src/qml/HomePage.qml:117 src/qml/ItemDetailsPage.qml:955
 msgid "Next Up"
 msgstr "Prossimi"
 
@@ -632,15 +632,15 @@ msgstr "Mostra tutto"
 msgid "See All in %1"
 msgstr "Mostra tutto in %1"
 
-#: src/qml/HomePage.qml:174 src/qml/ItemDetailsPage.qml:324
-#: src/qml/ItemDetailsPage.qml:881 src/qml/ItemDetailsPage.qml:937
-#: src/qml/ItemDetailsPage.qml:1110 src/qml/ItemDetailsPage.qml:1156
-#: src/qml/LibraryPage.qml:824 src/qml/ResumeItemsPage.qml:107
+#: src/qml/HomePage.qml:174 src/qml/ItemDetailsPage.qml:328
+#: src/qml/ItemDetailsPage.qml:990 src/qml/ItemDetailsPage.qml:1046
+#: src/qml/ItemDetailsPage.qml:1219 src/qml/ItemDetailsPage.qml:1265
+#: src/qml/LibraryPage.qml:826 src/qml/ResumeItemsPage.qml:113
 #: src/qml/SearchPage.qml:182 src/qml/QueuePage.qml:244
 #: src/qml/QueuePage.qml:253 src/qml/FilterDialog.qml:403
-#: src/qml/FilterDialog.qml:410 src/qml/GenreRailsView.qml:68
-#: src/qml/GenreRailsView.qml:167 src/qml/LibraryContent.qml:333
-#: src/qml/SettingsPage.qml:372 src/qml/UserPreferencesForm.qml:301
+#: src/qml/FilterDialog.qml:410 src/qml/GenreRailsView.qml:74
+#: src/qml/GenreRailsView.qml:173 src/qml/LibraryContent.qml:335
+#: src/qml/SettingsPage.qml:374 src/qml/UserPreferencesForm.qml:301
 #: src/qml/UserPreferencesForm.qml:635
 msgid "Loading…"
 msgstr "Caricamento…"
@@ -661,14 +661,14 @@ msgstr "%1 h %2 min"
 msgid "%1 min"
 msgstr "%1 min"
 
-#: src/qml/EpisodeRow.qml:59 src/qml/ItemDetailsPage.qml:660
+#: src/qml/EpisodeRow.qml:59 src/qml/ItemDetailsPage.qml:695
 #: src/qml/ItemListRow.qml:59 src/qml/MediaCard.qml:84
 #: src/qml/MediaListRow.qml:78
 msgctxt "state of an item"
 msgid "Played"
 msgstr "Visto"
 
-#: src/qml/EpisodeRow.qml:61 src/qml/ItemDetailsPage.qml:682
+#: src/qml/EpisodeRow.qml:61 src/qml/ItemDetailsPage.qml:717
 #: src/qml/ItemListRow.qml:61 src/qml/MediaCard.qml:86
 msgid "Favorite"
 msgstr "Preferito"
@@ -782,172 +782,172 @@ msgstr "Segna come visto"
 msgid "Media Info"
 msgstr "Info media"
 
-#: src/qml/ItemDetailsPage.qml:330
+#: src/qml/ItemDetailsPage.qml:334
 msgid ""
 "Could not load this item: check the connection to the server and try again"
 msgstr ""
 "Impossibile caricare questo elemento: controlla la connessione al server e "
 "riprova"
 
-#: src/qml/ItemDetailsPage.qml:343 src/qml/Main.qml:1467
+#: src/qml/ItemDetailsPage.qml:347 src/qml/Main.qml:1467
 msgid "Could not update Favorites. Check the connection and try again"
 msgstr "Impossibile aggiornare i preferiti. Controlla la connessione e riprova"
 
-#: src/qml/ItemDetailsPage.qml:356
+#: src/qml/ItemDetailsPage.qml:360
 msgid "Could not update watched status. Check the connection and try again"
 msgstr ""
 "Impossibile aggiornare lo stato di visione. Controlla la connessione e "
 "riprova"
 
-#: src/qml/ItemDetailsPage.qml:371
+#: src/qml/ItemDetailsPage.qml:375
 msgid "This item is not available"
 msgstr "Questo elemento non è disponibile"
 
-#: src/qml/ItemDetailsPage.qml:372
+#: src/qml/ItemDetailsPage.qml:376
 msgid "It may have been removed from the server"
 msgstr "Potrebbe essere stato rimosso dal server"
 
-#: src/qml/ItemDetailsPage.qml:502
+#: src/qml/ItemDetailsPage.qml:518
 msgid "Season %1"
 msgstr "Stagione %1"
 
-#: src/qml/ItemDetailsPage.qml:502
+#: src/qml/ItemDetailsPage.qml:518
 msgid "Specials"
 msgstr "Speciali"
 
-#: src/qml/ItemDetailsPage.qml:502
+#: src/qml/ItemDetailsPage.qml:518
 msgid "Season"
 msgstr "Stagione"
 
-#: src/qml/ItemDetailsPage.qml:560
+#: src/qml/ItemDetailsPage.qml:576
 msgid "Rated %1"
 msgstr "Classificazione %1"
 
-#: src/qml/ItemDetailsPage.qml:570 src/qml/LibraryPage.qml:415
+#: src/qml/ItemDetailsPage.qml:586 src/qml/LibraryPage.qml:415
 msgid "Community Rating"
 msgstr "Valutazione della community"
 
-#: src/qml/ItemDetailsPage.qml:593
+#: src/qml/ItemDetailsPage.qml:612
+msgid "Critic Rating: %1"
+msgstr "Valutazione della critica: %1"
+
+#: src/qml/ItemDetailsPage.qml:628
 #, javascript-format
 msgctxt "critic rating in percent"
 msgid "%1%"
 msgstr "%1%"
 
-#: src/qml/ItemDetailsPage.qml:594
-msgid "Critic Rating: %1"
-msgstr "Valutazione della critica: %1"
-
-#: src/qml/ItemDetailsPage.qml:603 src/qml/ItemListRow.qml:35
+#: src/qml/ItemDetailsPage.qml:638 src/qml/ItemListRow.qml:35
 #: src/qml/MediaCard.qml:56
 msgid "%1 season"
 msgid_plural "%1 seasons"
 msgstr[0] "%1 stagione"
 msgstr[1] "%1 stagioni"
 
-#: src/qml/ItemDetailsPage.qml:612 src/qml/LibraryPage.qml:548
+#: src/qml/ItemDetailsPage.qml:647 src/qml/LibraryPage.qml:548
 #: src/qml/ItemListRow.qml:35 src/qml/MediaCard.qml:56
 msgid "%1 episode"
 msgid_plural "%1 episodes"
 msgstr[0] "%1 episodio"
 msgstr[1] "%1 episodi"
 
-#: src/qml/ItemDetailsPage.qml:621
+#: src/qml/ItemDetailsPage.qml:656
 msgid "%1 unplayed"
 msgid_plural "%1 unplayed"
 msgstr[0] "%1 non riprodotto"
 msgstr[1] "%1 non riprodotti"
 
-#: src/qml/ItemDetailsPage.qml:720
+#: src/qml/ItemDetailsPage.qml:755
 msgid "%1 subtitle"
 msgid_plural "%1 subtitles"
 msgstr[0] "%1 sottotitolo"
 msgstr[1] "%1 sottotitoli"
 
-#: src/qml/ItemDetailsPage.qml:758
+#: src/qml/ItemDetailsPage.qml:860
 msgid "Show Less"
 msgstr "Mostra meno"
 
-#: src/qml/ItemDetailsPage.qml:758
+#: src/qml/ItemDetailsPage.qml:860
 msgid "Show More"
 msgstr "Mostra altro"
 
-#: src/qml/ItemDetailsPage.qml:779
+#: src/qml/ItemDetailsPage.qml:888
 msgid "Genre"
 msgid_plural "Genres"
 msgstr[0] "Genere"
 msgstr[1] "Generi"
 
-#: src/qml/ItemDetailsPage.qml:796
+#: src/qml/ItemDetailsPage.qml:905
 msgid "Network"
 msgid_plural "Networks"
 msgstr[0] "Rete"
 msgstr[1] "Reti"
 
-#: src/qml/ItemDetailsPage.qml:796
+#: src/qml/ItemDetailsPage.qml:905
 msgid "Studio"
 msgid_plural "Studios"
 msgstr[0] "Studio"
 msgstr[1] "Studi"
 
-#: src/qml/ItemDetailsPage.qml:813
+#: src/qml/ItemDetailsPage.qml:922
 msgid "Director"
 msgid_plural "Directors"
 msgstr[0] "Regia"
 msgstr[1] "Regia"
 
-#: src/qml/ItemDetailsPage.qml:830
+#: src/qml/ItemDetailsPage.qml:939
 msgid "Writer"
 msgid_plural "Writers"
 msgstr[0] "Sceneggiatura"
 msgstr[1] "Sceneggiatura"
 
-#: src/qml/ItemDetailsPage.qml:872 src/qml/ItemDetailsPage.qml:902
+#: src/qml/ItemDetailsPage.qml:981 src/qml/ItemDetailsPage.qml:1011
 msgid "Seasons"
 msgstr "Stagioni"
 
-#: src/qml/ItemDetailsPage.qml:887
+#: src/qml/ItemDetailsPage.qml:996
 msgid "Could not load the seasons"
 msgstr "Impossibile caricare le stagioni"
 
-#: src/qml/ItemDetailsPage.qml:920 src/qml/ItemDetailsPage.qml:958
+#: src/qml/ItemDetailsPage.qml:1029 src/qml/ItemDetailsPage.qml:1067
 msgid "In This Collection"
 msgstr "In questa raccolta"
 
-#: src/qml/ItemDetailsPage.qml:928
+#: src/qml/ItemDetailsPage.qml:1037
 msgid "%1 of %2 items"
 msgstr "%1 di %2 elementi"
 
-#: src/qml/ItemDetailsPage.qml:943
+#: src/qml/ItemDetailsPage.qml:1052
 msgid "Could not load the items of this collection"
 msgstr "Impossibile caricare gli elementi di questa raccolta"
 
-#: src/qml/ItemDetailsPage.qml:977 src/qml/ItemDetailsPage.qml:984
+#: src/qml/ItemDetailsPage.qml:1086 src/qml/ItemDetailsPage.qml:1093
 msgid "Cast and Crew"
 msgstr "Cast e troupe"
 
-#: src/qml/ItemDetailsPage.qml:1061
+#: src/qml/ItemDetailsPage.qml:1170
 msgid "Chapters"
 msgstr "Capitoli"
 
-#: src/qml/ItemDetailsPage.qml:1101 src/qml/ItemDetailsPage.qml:1130
+#: src/qml/ItemDetailsPage.qml:1210 src/qml/ItemDetailsPage.qml:1239
 msgid "More Like This"
 msgstr "Simili a questo"
 
-#: src/qml/ItemDetailsPage.qml:1116
+#: src/qml/ItemDetailsPage.qml:1225
 msgid "Could not load similar items"
 msgstr "Impossibile caricare gli elementi simili"
 
-#: src/qml/ItemDetailsPage.qml:1162
+#: src/qml/ItemDetailsPage.qml:1271
 msgid ""
 "Could not load the episodes: check the connection to the server and try again"
 msgstr ""
 "Impossibile caricare gli episodi: verifica la connessione al server e riprova"
 
-#: src/qml/ItemDetailsPage.qml:1177
+#: src/qml/ItemDetailsPage.qml:1286
 msgid "This season has no episodes"
 msgstr "Questa stagione non ha episodi"
 
-#: src/qml/ItemDetailsPage.qml:1220
+#: src/qml/ItemDetailsPage.qml:1329
 msgid "Some episodes could not be loaded"
 msgstr "Alcuni episodi non sono stati caricati"
 
@@ -1193,12 +1193,12 @@ msgstr "Rimuovi il filtro %1"
 msgid "Remove this filter"
 msgstr "Rimuovi questo filtro"
 
-#: src/qml/LibraryPage.qml:676 src/qml/LibraryContent.qml:333
+#: src/qml/LibraryPage.qml:676 src/qml/LibraryContent.qml:335
 msgid "Applying the saved filters…"
 msgstr "Applicazione dei filtri salvati…"
 
 #: src/qml/LibraryPage.qml:683 src/qml/LibraryPage.qml:706
-#: src/qml/LibraryContent.qml:362
+#: src/qml/LibraryContent.qml:364
 msgid "Clear Filters"
 msgstr "Cancella filtri"
 
@@ -1228,36 +1228,36 @@ msgstr ""
 "Impossibile caricare questa sezione: controlla la connessione al server e "
 "riprova"
 
-#: src/qml/LibraryPage.qml:834 src/qml/LibraryContent.qml:344
-#: src/qml/LibraryContent.qml:356
+#: src/qml/LibraryPage.qml:836 src/qml/LibraryContent.qml:346
+#: src/qml/LibraryContent.qml:358
 msgid "No items"
 msgstr "Nessun elemento"
 
-#: src/qml/LibraryPage.qml:871
+#: src/qml/LibraryPage.qml:873
 msgid "Because you watched %1"
 msgstr "Perché hai guardato %1"
 
-#: src/qml/LibraryPage.qml:873
+#: src/qml/LibraryPage.qml:875
 msgid "Because you liked %1"
 msgstr "Perché ti è piaciuto %1"
 
-#: src/qml/LibraryPage.qml:875
+#: src/qml/LibraryPage.qml:877
 msgid "Because you watched movies directed by %1"
 msgstr "Perché hai guardato film diretti da %1"
 
-#: src/qml/LibraryPage.qml:877
+#: src/qml/LibraryPage.qml:879
 msgid "Because you watched movies with %1"
 msgstr "Perché hai guardato film con %1"
 
-#: src/qml/LibraryPage.qml:879
+#: src/qml/LibraryPage.qml:881
 msgid "Because you like movies directed by %1"
 msgstr "Perché ti piacciono i film diretti da %1"
 
-#: src/qml/LibraryPage.qml:881
+#: src/qml/LibraryPage.qml:883
 msgid "Because you like movies with %1"
 msgstr "Perché ti piacciono i film con %1"
 
-#: src/qml/LibraryPage.qml:883
+#: src/qml/LibraryPage.qml:885
 msgid "Suggested for you"
 msgstr "Consigliati per te"
 
@@ -1272,11 +1272,11 @@ msgstr ""
 "Impossibile caricare questo elenco: controlla la connessione al server e "
 "riprova"
 
-#: src/qml/ResumeItemsPage.qml:116
+#: src/qml/ResumeItemsPage.qml:122
 msgid "Nothing to continue watching"
 msgstr "Niente da continuare a guardare"
 
-#: src/qml/ResumeItemsPage.qml:117
+#: src/qml/ResumeItemsPage.qml:123
 msgid "Items you have started watching show up here"
 msgstr "Gli elementi che hai iniziato a guardare compaiono qui"
 
@@ -1688,55 +1688,55 @@ msgctxt "@info hint on a filter value that cannot be added"
 msgid "Too many filters selected: remove one to add this"
 msgstr "Troppi filtri selezionati: rimuovine uno per aggiungere questo"
 
-#: src/qml/GenreRailsView.qml:83
+#: src/qml/GenreRailsView.qml:89
 msgid ""
 "Could not load the genres: check the connection to the server and try again"
 msgstr ""
 "Impossibile caricare i generi: verifica la connessione al server e riprova"
 
-#: src/qml/GenreRailsView.qml:100
+#: src/qml/GenreRailsView.qml:106
 msgid "No genres"
 msgstr "Nessun genere"
 
-#: src/qml/GenreRailsView.qml:101
+#: src/qml/GenreRailsView.qml:107
 msgid "This library has no genres"
 msgstr "Questa libreria non ha generi"
 
-#: src/qml/GenreRailsView.qml:151 src/qml/FavoritesPage.qml:389
+#: src/qml/GenreRailsView.qml:157 src/qml/FavoritesPage.qml:391
 msgid "Show All"
 msgstr "Mostra tutto"
 
-#: src/qml/GenreRailsView.qml:153
+#: src/qml/GenreRailsView.qml:159
 msgctxt ""
 "accessible name of the button that opens the grid of one genre, %1 is the "
 "genre"
 msgid "Show All in %1"
 msgstr "Mostra tutto in %1"
 
-#: src/qml/GenreRailsView.qml:178
+#: src/qml/GenreRailsView.qml:184
 msgid ""
 "Could not load this genre: check the connection to the server and try again"
 msgstr ""
 "Impossibile caricare questo genere: verifica la connessione al server e "
 "riprova"
 
-#: src/qml/LibraryContent.qml:275 src/qml/LibraryContent.qml:281
+#: src/qml/LibraryContent.qml:277 src/qml/LibraryContent.qml:283
 #: src/qml/ItemListRow.qml:41 src/qml/ItemListRow.qml:48
 msgctxt "series name and episode label"
 msgid "%1 · %2"
 msgstr "%1 · %2"
 
-#: src/qml/LibraryContent.qml:280 src/qml/ItemListRow.qml:47
+#: src/qml/LibraryContent.qml:282 src/qml/ItemListRow.qml:47
 msgctxt "season and episode number spoken"
 msgid "Season %1, Episode %2"
 msgstr "Stagione %1, episodio %2"
 
-#: src/qml/LibraryContent.qml:280 src/qml/ItemListRow.qml:47
+#: src/qml/LibraryContent.qml:282 src/qml/ItemListRow.qml:47
 msgctxt "episode number spoken"
 msgid "Episode %1"
 msgstr "Episodio %1"
 
-#: src/qml/LibraryContent.qml:357
+#: src/qml/LibraryContent.qml:359
 msgid "No item matches the search or the selected filters"
 msgstr "Nessun elemento corrisponde alla ricerca o ai filtri selezionati"
 
@@ -2394,23 +2394,25 @@ msgid_plural "Showing the first %1 playlists of %2"
 msgstr[0] "Visualizzata %1 di %2 scaletta"
 msgstr[1] "Visualizzate le prime %1 di %2 scalette"
 
-#: src/qml/PlaylistsPage.qml:157 src/qml/AddToPlaylistDialog.qml:155
+#: src/qml/PlaylistsPage.qml:163 src/qml/AddToPlaylistDialog.qml:155
 msgid "Playlists could not be loaded"
 msgstr "Impossibile caricare le scalette"
 
-#: src/qml/PlaylistsPage.qml:158
+#: src/qml/PlaylistsPage.qml:164
 msgid "The playlists could not be read from the server: try again"
 msgstr "Impossibile leggere le scalette dal server: riprova"
 
-#: src/qml/PlaylistsPage.qml:173 src/qml/AddToPlaylistDialog.qml:170
+#: src/qml/PlaylistsPage.qml:179 src/qml/AddToPlaylistDialog.qml:170
 msgid "No playlists"
 msgstr "Nessuna scaletta"
 
-#: src/qml/PlaylistsPage.qml:175
+#: src/qml/PlaylistsPage.qml:181
 msgid ""
 "Create one with New Playlist…, or with Add to Playlist… in the menu of a "
 "video"
-msgstr "Creane una con Nuova scaletta…, oppure con Aggiungi alla scaletta… nel menu di un video"
+msgstr ""
+"Creane una con Nuova scaletta…, oppure con Aggiungi alla scaletta… nel menu "
+"di un video"
 
 #: src/qml/PlaylistPage.qml:34
 msgid "Playlist"
@@ -2463,15 +2465,15 @@ msgstr[1] "Visualizzate le prime %1 voci di %2"
 msgid "Remove from Playlist"
 msgstr "Rimuovi dalla scaletta"
 
-#: src/qml/PlaylistPage.qml:298
+#: src/qml/PlaylistPage.qml:304
 msgid "The playlist could not be loaded"
 msgstr "Impossibile caricare la scaletta"
 
-#: src/qml/PlaylistPage.qml:299
+#: src/qml/PlaylistPage.qml:305
 msgid "Its entries could not be read from the server: try again"
 msgstr "Impossibile leggere gli elementi della scaletta dal server: riprova"
 
-#: src/qml/PlaylistPage.qml:314
+#: src/qml/PlaylistPage.qml:320
 msgid "This playlist is empty"
 msgstr "Questa scaletta è vuota"
 
@@ -3484,12 +3486,12 @@ msgctxt "@title:group"
 msgid "Settings"
 msgstr "Impostazioni"
 
-#: src/qml/SettingsPage.qml:335
+#: src/qml/SettingsPage.qml:337
 msgctxt "@title:group"
 msgid "Jellyfin account"
 msgstr "Account Jellyfin"
 
-#: src/qml/SettingsPage.qml:346
+#: src/qml/SettingsPage.qml:348
 msgid "Stored on your Jellyfin server"
 msgstr "Salvato sul tuo server Jellyfin"
 
@@ -3936,37 +3938,37 @@ msgstr[1] "Visualizzati %1 preferiti: l’elenco potrebbe essere incompleto"
 msgid "Some libraries could not be read"
 msgstr "Impossibile leggere alcune librerie"
 
-#: src/qml/FavoritesPage.qml:260
+#: src/qml/FavoritesPage.qml:262
 msgid "Loading favorites…"
 msgstr "Caricamento preferiti…"
 
-#: src/qml/FavoritesPage.qml:261
+#: src/qml/FavoritesPage.qml:263
 msgid "%1 favorite found, %2 of %3 libraries read"
 msgid_plural "%1 favorites found, %2 of %3 libraries read"
 msgstr[0] "%1 preferito trovato, %2 di %3 librerie consultate"
 msgstr[1] "%1 preferiti trovati, %2 di %3 librerie consultate"
 
-#: src/qml/FavoritesPage.qml:273
+#: src/qml/FavoritesPage.qml:275
 msgid "Favorites could not be loaded"
 msgstr "Impossibile caricare i preferiti"
 
-#: src/qml/FavoritesPage.qml:274
+#: src/qml/FavoritesPage.qml:276
 msgid "The favorites could not be read from the server: try again"
 msgstr "Impossibile leggere i preferiti dal server: riprova"
 
-#: src/qml/FavoritesPage.qml:290
+#: src/qml/FavoritesPage.qml:292
 msgid "Favorites come from your movie, TV show and collection libraries"
 msgstr "I preferiti provengono dalle librerie di film, serie TV e collezioni"
 
-#: src/qml/FavoritesPage.qml:292
+#: src/qml/FavoritesPage.qml:294
 msgid "Go to Home"
 msgstr "Vai alla Home"
 
-#: src/qml/FavoritesPage.qml:306
+#: src/qml/FavoritesPage.qml:308
 msgid "No favorites yet"
 msgstr "Nessun preferito"
 
-#: src/qml/FavoritesPage.qml:307
+#: src/qml/FavoritesPage.qml:309
 msgid ""
 "Movies, shows and collections you mark as favorites on the server show up "
 "here"
@@ -3974,17 +3976,17 @@ msgstr ""
 "Qui compaiono film, serie TV e collezioni contrassegnati come preferiti sul "
 "server"
 
-#: src/qml/FavoritesPage.qml:309
+#: src/qml/FavoritesPage.qml:311
 msgid "Reload"
 msgstr "Ricarica"
 
-#: src/qml/FavoritesPage.qml:384
+#: src/qml/FavoritesPage.qml:386
 msgid "%1 favorite"
 msgid_plural "%1 favorites"
 msgstr[0] "%1 preferito"
 msgstr[1] "%1 preferiti"
 
-#: src/qml/FavoritesPage.qml:391
+#: src/qml/FavoritesPage.qml:393
 msgid "Show All in %1"
 msgstr "Mostra tutti in %1"
 

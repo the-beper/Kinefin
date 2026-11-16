@@ -37,15 +37,52 @@ Item {
             right: parent.right
             top: parent.bottom
         }
+        // A smooth quadratic falloff, (1 - t)², from the row's colour at the edge (no seam) to nothing: no band where it turns, and mostly see-through in its lower half
         height: Kirigami.Units.gridUnit * 2
         gradient: Gradient {
             GradientStop {
-                position: 0
-                color: Kirigami.Theme.backgroundColor
+                position: 0.0
+                color: Qt.alpha(Kirigami.Theme.backgroundColor, 1.00)
             }
             GradientStop {
-                position: 1
-                color: Qt.alpha(Kirigami.Theme.backgroundColor, 0)
+                position: 0.1
+                color: Qt.alpha(Kirigami.Theme.backgroundColor, 0.81)
+            }
+            GradientStop {
+                position: 0.2
+                color: Qt.alpha(Kirigami.Theme.backgroundColor, 0.64)
+            }
+            GradientStop {
+                position: 0.3
+                color: Qt.alpha(Kirigami.Theme.backgroundColor, 0.49)
+            }
+            GradientStop {
+                position: 0.4
+                color: Qt.alpha(Kirigami.Theme.backgroundColor, 0.36)
+            }
+            GradientStop {
+                position: 0.5
+                color: Qt.alpha(Kirigami.Theme.backgroundColor, 0.25)
+            }
+            GradientStop {
+                position: 0.6
+                color: Qt.alpha(Kirigami.Theme.backgroundColor, 0.16)
+            }
+            GradientStop {
+                position: 0.7
+                color: Qt.alpha(Kirigami.Theme.backgroundColor, 0.09)
+            }
+            GradientStop {
+                position: 0.8
+                color: Qt.alpha(Kirigami.Theme.backgroundColor, 0.04)
+            }
+            GradientStop {
+                position: 0.9
+                color: Qt.alpha(Kirigami.Theme.backgroundColor, 0.01)
+            }
+            GradientStop {
+                position: 1.0
+                color: Qt.alpha(Kirigami.Theme.backgroundColor, 0.00)
             }
         }
     }
