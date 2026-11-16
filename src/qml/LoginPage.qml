@@ -168,6 +168,7 @@ Kirigami.ScrollablePage {
                     onClicked: page.connection.login(username.text, password.text)
                 }
                 Controls.BusyIndicator {
+                    FadeInOnShow {}
                     visible: page.signingIn
                     running: page.signingIn
                 }
@@ -214,6 +215,7 @@ Kirigami.ScrollablePage {
             RowLayout {
                 Layout.alignment: Qt.AlignHCenter
                 Controls.BusyIndicator {
+                    FadeInOnShow {}
                     running: page.quick
                 }
                 Controls.Label {

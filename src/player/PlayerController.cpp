@@ -524,14 +524,15 @@ bool PlayerController::startItem(const QString &id, qint64 resumeTicks)
     return true;
 }
 
-bool PlayerController::playQueue(int index)
+bool PlayerController::playQueue(int index, qint64 startTicks)
 {
-    if (index < 0 || index >= m_queue.count())
+    if (index < 0 || index >= m_queue.count() || startTicks < 0
+        || startTicks > 24LL * 3600 * TicksPerSecond)
         return false;
     dropSeriesPlaylist();
     m_playlist = m_queue.itemIds();
     m_queueIndex = index;
-    if (!startItem(m_playlist.at(index), 0)) {
+    if (!startItem(m_playlist.at(index), startTicks)) {
         m_playlist.clear();
         m_queueIndex = -1;
         return false;
@@ -1241,6 +1242,7 @@ void PlayerController::refreshTracks()
     m_subtitleFacts.clear();
     m_selectedAudioIndex.reset();
     m_selectedSubtitleIndex.reset();
+    const bool direct = directPlay();
     // Subtitles turned off leave no selected track: the remembered choice is then none, not the last one
     m_selectedSubtitleId = 0;
     for (const QVariant &entry : tracks) {
@@ -1258,7 +1260,9 @@ void PlayerController::refreshTracks()
                                                    : i18n("Subtitle %1").arg(id);
         const bool selected = map.value(QStringLiteral("selected")).toBool();
         const QVariant indexValue = map.value(QStringLiteral("ff-index"));
-        if (selected && indexValue.isValid() && indexValue.toInt() >= 0) {
+        // The server's stream index is mpv's only for an embedded track of a direct play: a transcode or an external file has its own numbering
+        if (selected && direct && !map.value(QStringLiteral("external")).toBool()
+            && indexValue.isValid() && indexValue.toInt() >= 0) {
             if (type == QLatin1String("audio"))
                 m_selectedAudioIndex = indexValue.toInt();
             else
@@ -1300,6 +1304,8 @@ void PlayerController::selectAudioTrack(int id)
     rememberTracks(id, m_selectedSubtitleId);
     if (const auto choice = choiceOf(m_audioFacts, id); choice && keepsSeriesTracks())
         seriesStore().setAudio(m_itemSeriesId, choice);
+    // The report carries the new stream index (a remote controller shows it at once)
+    m_selectedAudioIndex = streamIndexOfTrack(QStringLiteral("audio"), id);
     QTimer::singleShot(0, this, &PlayerController::refreshTracks);
     m_reporter.reportNow();
 }
@@ -1311,6 +1317,8 @@ void PlayerController::selectSubtitleTrack(int id)
                             id == 0 ? QVariant(QStringLiteral("no")) : QVariant(id));
     m_selectedSubtitleId = id;
     m_trackChosen = true;
+    m_selectedSubtitleIndex =
+        id == 0 ? std::nullopt : streamIndexOfTrack(QStringLiteral("sub"), id);
     rememberTracks(m_selectedAudioId, id);
     if (keepsSeriesTracks()) {
         const auto choice = choiceOf(m_subtitleFacts, id);
@@ -1319,6 +1327,72 @@ void PlayerController::selectSubtitleTrack(int id)
     }
     QTimer::singleShot(0, this, &PlayerController::refreshTracks);
     m_reporter.reportNow();
+}
+bool PlayerController::directPlay() const
+{
+    // A transcode carries the one track the server chose: mpv's stream index says nothing about the source's
+    return active() && m_engine.isInitialized() && !m_source.itemId.isEmpty()
+           && m_source.itemId == m_itemId && m_source.method == PlaybackSource::Method::Direct;
+}
+std::optional<int> PlayerController::streamIndexOfTrack(const QString &type, int id) const
+{
+    if (!directPlay())
+        return std::nullopt;
+    const QVariantList tracks = m_engine.mpvProperty(QStringLiteral("track-list")).toList();
+    for (const QVariant &entry : tracks) {
+        const QVariantMap map = entry.toMap();
+        const QVariant indexValue = map.value(QStringLiteral("ff-index"));
+        if (map.value(QStringLiteral("type")).toString() == type
+            && map.value(QStringLiteral("id")).toInt() == id
+            && !map.value(QStringLiteral("external")).toBool() && indexValue.isValid()
+            && indexValue.toInt() >= 0)
+            return indexValue.toInt();
+    }
+    return std::nullopt;
+}
+int PlayerController::trackOfStreamIndex(const QString &type, int index) const
+{
+    if (!directPlay())
+        return 0;
+    const QVariantList tracks = m_engine.mpvProperty(QStringLiteral("track-list")).toList();
+    for (const QVariant &entry : tracks) {
+        const QVariantMap map = entry.toMap();
+        const QVariant indexValue = map.value(QStringLiteral("ff-index"));
+        const int id = map.value(QStringLiteral("id")).toInt();
+        // An external track's ff-index counts in its own file, not in the server's media source
+        if (map.value(QStringLiteral("type")).toString() == type && id > 0 && id <= 1024
+            && !map.value(QStringLiteral("external")).toBool() && indexValue.isValid()
+            && indexValue.toInt() == index)
+            return id;
+    }
+    return 0;
+}
+bool PlayerController::selectAudioStreamIndex(int index)
+{
+    if (index < 0 || index > 1024)
+        return false;
+    const int id = trackOfStreamIndex(QStringLiteral("audio"), index);
+    if (id == 0)
+        return false;
+    selectAudioTrack(id);
+    return true;
+}
+bool PlayerController::selectSubtitleStreamIndex(int index)
+{
+    if (index < -1 || index > 1024)
+        return false;
+    // Subtitles off needs no track, only the direct play the indexes belong to
+    if (index == -1) {
+        if (!directPlay())
+            return false;
+        selectSubtitleTrack(0);
+        return true;
+    }
+    const int id = trackOfStreamIndex(QStringLiteral("sub"), index);
+    if (id == 0)
+        return false;
+    selectSubtitleTrack(id);
+    return true;
 }
 void PlayerController::adjustAudioDelay(double seconds)
 {

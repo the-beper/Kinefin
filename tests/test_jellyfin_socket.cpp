@@ -312,6 +312,27 @@ class TestJellyfinSocketClient : public QObject {
         connection->sendText(enveloped(QStringLiteral("Play"), badCommand));
         QTest::qWait(100);
         QCOMPARE(plays.count(), 0);
+        // StartIndex names the item to start at; one past the list names none, a non-integer is a drop
+        const QJsonArray two{QJsonValue(kPlayItem), QJsonValue(kPlayItem)};
+        const auto withIndex = [&two](const QJsonValue &index) {
+            return QJsonObject{{QStringLiteral("PlayCommand"), QStringLiteral("PlayNow")},
+                               {QStringLiteral("ItemIds"), two},
+                               {QStringLiteral("StartIndex"), index}};
+        };
+        connection->sendText(enveloped(QStringLiteral("Play"), withIndex(1)));
+        QTRY_COMPARE(plays.count(), 1);
+        QCOMPARE(plays.takeFirst().first().value<Kinefin::RemotePlayRequest>().startIndex, 1);
+        connection->sendText(enveloped(QStringLiteral("Play"), withIndex(2)));
+        QTRY_COMPARE(plays.count(), 1);
+        QCOMPARE(plays.takeFirst().first().value<Kinefin::RemotePlayRequest>().startIndex, -1);
+        connection->sendText(enveloped(QStringLiteral("Play"), unticked));
+        QTRY_COMPARE(plays.count(), 1);
+        QCOMPARE(plays.takeFirst().first().value<Kinefin::RemotePlayRequest>().startIndex, -1);
+        connection->sendText(enveloped(QStringLiteral("Play"), withIndex(-1)));
+        connection->sendText(enveloped(QStringLiteral("Play"), withIndex(QStringLiteral("1"))));
+        connection->sendText(enveloped(QStringLiteral("Play"), withIndex(0.5)));
+        QTest::qWait(100);
+        QCOMPARE(plays.count(), 0);
     }
 
     void routesSessionsOnlyWhenSubscribed()

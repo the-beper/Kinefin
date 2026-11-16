@@ -247,6 +247,67 @@ class TestRemoteSessionsModel : public QObject {
         QCOMPARE(f.row(1, RemoteSessionsModel::SessionIdRole).toString(), newId);
     }
 
+    void thisClientIsNoRemoteSession()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        const auto session = [](const QString &id, const QString &deviceId) {
+            return QJsonObject{{QStringLiteral("Id"), id},
+                               {QStringLiteral("DeviceId"), deviceId},
+                               {QStringLiteral("DeviceName"), QStringLiteral("A device")},
+                               {QStringLiteral("Client"), QStringLiteral("Kinefin")}};
+        };
+        // Our own device id, in another spelling, is left out
+        f.server.listingRawBody.insert(
+            QStringLiteral("Sessions"),
+            QJsonDocument(QJsonArray{session(QStringLiteral("a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1"),
+                                             f.client.deviceId().toUpper()),
+                                     session(QStringLiteral("b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"),
+                                             QStringLiteral("another-device"))})
+                .toJson(QJsonDocument::Compact));
+        QVERIFY(f.model.open());
+        QTRY_COMPARE(f.model.status(), RemoteSessionsModel::Ready);
+        QCOMPARE(f.model.count(), 1);
+        QCOMPARE(f.row(0, RemoteSessionsModel::SessionIdRole).toString(),
+                 QStringLiteral("b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"));
+        QCOMPARE(f.row(0, RemoteSessionsModel::DeviceKindRole).toString(),
+                 QStringLiteral("computer"));
+    }
+
+    void theKindOfDeviceComesFromItsClientAndName_data()
+    {
+        QTest::addColumn<QString>("client");
+        QTest::addColumn<QString>("device");
+        QTest::addColumn<QString>("kind");
+        QTest::newRow("web") << QStringLiteral("Jellyfin Web") << QStringLiteral("Firefox")
+                             << QStringLiteral("browser");
+        QTest::newRow("android phone") << QStringLiteral("Jellyfin Android")
+                                       << QStringLiteral("Pixel 8") << QStringLiteral("phone");
+        QTest::newRow("android tv") << QStringLiteral("Jellyfin Android TV")
+                                    << QStringLiteral("SHIELD") << QStringLiteral("tv");
+        QTest::newRow("webos") << QStringLiteral("Jellyfin for WebOS") << QStringLiteral("LG")
+                               << QStringLiteral("tv");
+        QTest::newRow("kodi") << QStringLiteral("Kodi") << QStringLiteral("Living room")
+                              << QStringLiteral("tv");
+        QTest::newRow("ipad") << QStringLiteral("Swiftfin iOS") << QStringLiteral("iPad")
+                              << QStringLiteral("tablet");
+        QTest::newRow("iphone") << QStringLiteral("Swiftfin iOS") << QStringLiteral("iPhone")
+                                << QStringLiteral("phone");
+        QTest::newRow("desktop") << QStringLiteral("Jellyfin Media Player")
+                                 << QStringLiteral("workstation") << QStringLiteral("computer");
+        QTest::newRow("kinefin") << QStringLiteral("Kinefin") << QStringLiteral("laptop")
+                                 << QStringLiteral("computer");
+        QTest::newRow("unknown") << QStringLiteral("Some Client") << QStringLiteral("Box")
+                                 << QStringLiteral("other");
+    }
+    void theKindOfDeviceComesFromItsClientAndName()
+    {
+        QFETCH(QString, client);
+        QFETCH(QString, device);
+        QFETCH(QString, kind);
+        QCOMPARE(RemoteSessionsModel::deviceKind(client, device), kind);
+    }
+
     void expiredAuthenticationClearsTheSessionList()
     {
         Fixture f;

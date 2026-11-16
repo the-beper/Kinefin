@@ -44,6 +44,12 @@ class RemoteInputServer final : public QObject {
     // False, with one warning, when there is no path, the folder cannot be made private, a live server owns the path, something that is not a socket sits there, or listening fails
     bool listen();
 
+    // Plays a keycode as a frame of this socket does; false for a keycode outside the table
+    bool dispatchKeycode(const QString &keycode);
+    // A keycode from another Jellyfin session, which may be another user: as dispatchKeycode(), except that the navigation keys are dropped while the window's focus is in a text field or inside a popup (a remote must not submit what the user types or confirm a dialog the user has open), and at most MaxNetworkKeysPerSecond pass
+    bool dispatchNetworkKeycode(const QString &keycode);
+    static constexpr int MaxNetworkKeysPerSecond = 20;
+
   Q_SIGNALS:
     // A command for the QML shell: "back", "home", "playpause", "play", "pause", "stop", "next", "previous", "fastforward", "rewind", "volumeup", "volumedown", "togglemute", "togglefullscreen"
     void actionRequested(const QString &action);
@@ -61,15 +67,17 @@ class RemoteInputServer final : public QObject {
     void acceptConnections();
     void readFrom(QLocalSocket *socket);
     bool handleLine(QLocalSocket *socket, QByteArrayView line);
-    // False for a keycode outside the table
-    bool dispatch(const RemoteFrame &frame);
     bool sendKey(Qt::Key key, const QString &text = {});
+    bool networkNavigationAllowed() const;
     void dropClient(QLocalSocket *socket, const char *reason = nullptr);
 
     QString m_path;
     QByteArray m_welcome;
     QLocalServer m_server;
     QPointer<QWindow> m_window;
+    // The current second of network keycodes and how many it let through
+    QElapsedTimer m_networkSecond;
+    int m_networkKeys = 0;
     QHash<QLocalSocket *, Client> m_clients;
     bool m_ownsPath = false;
     // The socket file this instance made: only that one is removed at exit

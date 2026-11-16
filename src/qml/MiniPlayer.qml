@@ -26,7 +26,11 @@ Item {
     // How much of the item is played, 0 to 1
     readonly property real progress: player && player.durationTicks > 0 ? Math.max(0, Math.min(1, player.positionTicks / player.durationTicks)) : 0
 
-    visible: shell.playbackMode === "mini"
+    // Follows the mode at once, only the look fades: the video slot is laid out while the dock fades in, and no input reaches it while it fades out
+    readonly property bool shown: shell.playbackMode === "mini"
+    enabled: shown
+    opacity: shown ? 1 : 0
+    visible: shown || opacity > 0
     width: Math.round(Math.min(Math.max(shell.width * 0.35, Kirigami.Units.gridUnit * 12), Kirigami.Units.gridUnit * 20))
     height: Math.round(width * 9 / 16)
     x: mirrored ? margin : parent.width - width - margin
@@ -35,10 +39,20 @@ Item {
     z: 10
     Accessible.role: Accessible.Grouping
     Accessible.name: i18nc("@info accessible name of the docked player", "Mini Player")
-    onVisibleChanged: {
-        if (!visible) {
+    onShownChanged: {
+        if (!shown) {
             touchRevealed = false;
             revealTimer.stop();
+        }
+    }
+    Behavior on opacity {
+        NumberAnimation { duration: Kirigami.Units.longDuration; easing.type: mini.shown ? Easing.OutCubic : Easing.InCubic }
+    }
+    // The dock rises into place as it fades in and sinks as it fades out
+    transform: Translate {
+        y: mini.shown ? 0 : Kirigami.Units.gridUnit
+        Behavior on y {
+            NumberAnimation { duration: Kirigami.Units.longDuration; easing.type: mini.shown ? Easing.OutCubic : Easing.InCubic }
         }
     }
 

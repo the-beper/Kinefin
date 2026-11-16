@@ -1195,7 +1195,97 @@ class TestPlayerController : public QObject {
         QVERIFY(chain.controller.title().isEmpty());
     }
 
+    void playQueueStartsAtTheGivenPositionAndRefusesOneOutOfRange()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        chain.server.itemsById.insert(kMovie, movieBody(kMovie, QStringLiteral("Arcturus")));
+        QSignalSpy added(&chain.queue, &Kinefin::PlayQueue::added);
+        QVERIFY(chain.queue.add(kMovie, Kinefin::PlayQueue::Last));
+        QTRY_COMPARE(added.size(), 1);
+        QVERIFY(!chain.controller.playQueue(0, -1));
+        QVERIFY(!chain.controller.playQueue(0, 24LL * 3600 * kSecond + 1));
+        QVERIFY(!chain.controller.playQueue(1, 0));
+        QVERIFY(chain.controller.itemId().isEmpty());
+        QVERIFY(chain.engine()->init({QStringLiteral("vo=null"), QStringLiteral("ao=null")}));
+        QVERIFY(chain.controller.playQueue(0, 90 * kSecond));
+        QCOMPARE(chain.controller.itemId(), kMovie);
+        QTRY_VERIFY(chain.server.playbackInfoRequests >= 1);
+        QCOMPARE(QJsonDocument::fromJson(chain.server.lastPlaybackInfoBody)
+                     .object()
+                     .value(QStringLiteral("StartTimeTicks"))
+                     .toVariant()
+                     .toLongLong(),
+                 90 * kSecond);
+        QVERIFY(chain.controller.playQueue(0));
+    }
+
+    void streamIndexesSelectTracksOnlyInADirectPlay()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        // Nothing plays
+        QVERIFY(!chain.controller.selectAudioStreamIndex(0));
+        QVERIFY(!chain.controller.selectSubtitleStreamIndex(0));
+        QVERIFY(!chain.controller.selectSubtitleStreamIndex(-1));
+
+        QVERIFY(playsClip(chain, Kinefin::PlaybackSource::Method::Direct));
+        const int audioIndex = streamIndexOf(chain, QStringLiteral("audio"));
+        QVERIFY(audioIndex >= 0);
+        QVERIFY(chain.controller.selectAudioStreamIndex(audioIndex));
+        QVERIFY(!chain.controller.selectAudioStreamIndex(audioIndex + 1));
+        // The clip has no subtitle track: the audio track's index is not a subtitle's
+        QVERIFY(!chain.controller.selectSubtitleStreamIndex(audioIndex));
+        QVERIFY(chain.controller.selectSubtitleStreamIndex(-1));
+        for (const int index : {-2, -1, 1025, 100000})
+            QVERIFY(!chain.controller.selectAudioStreamIndex(index));
+        for (const int index : {-2, 1025, 100000})
+            QVERIFY(!chain.controller.selectSubtitleStreamIndex(index));
+    }
+
+    void streamIndexesAreRefusedInATranscode()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        QVERIFY(playsClip(chain, Kinefin::PlaybackSource::Method::Transcode));
+        const int audioIndex = streamIndexOf(chain, QStringLiteral("audio"));
+        QVERIFY(audioIndex >= 0);
+        QVERIFY(!chain.controller.selectAudioStreamIndex(audioIndex));
+        QVERIFY(!chain.controller.selectSubtitleStreamIndex(audioIndex));
+        QVERIFY(!chain.controller.selectSubtitleStreamIndex(-1));
+    }
+
   private:
+    // The item plays a generated clip, handed over as the source the server would have chosen with `method`
+    static bool playsClip(Chain &chain, Kinefin::PlaybackSource::Method method)
+    {
+        if (!chain.controller.playItem(kMovie, 0)
+            || !chain.engine()->init({QStringLiteral("vo=null"), QStringLiteral("ao=null")}))
+            return false;
+        Kinefin::PlaybackSource source;
+        source.itemId = kMovie;
+        source.mediaSourceId = QStringLiteral("c1b2a3d4e5f6071829304a5b6c7d8e9f");
+        source.playSessionId = QStringLiteral("s1");
+        source.method = method;
+        source.url = QUrl(TestWav::writeWavClip(chain.dir, 30));
+        if (source.url.isEmpty())
+            return false;
+        Q_EMIT chain.client.playbackInfoReady(source);
+        return QTest::qWaitFor([&chain] { return chain.controller.canSeek(); }, 10000);
+    }
+    // The `ff-index` mpv gives the first track of a type, -1 when there is none
+    static int streamIndexOf(Chain &chain, const QString &type)
+    {
+        const QVariantList tracks =
+            chain.engine()->mpvProperty(QStringLiteral("track-list")).toList();
+        for (const QVariant &entry : tracks) {
+            const QVariantMap map = entry.toMap();
+            if (map.value(QStringLiteral("type")).toString() == type
+                && map.value(QStringLiteral("ff-index")).isValid())
+                return map.value(QStringLiteral("ff-index")).toInt();
+        }
+        return -1;
+    }
     QTemporaryDir m_data;
 };
 

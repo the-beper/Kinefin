@@ -16,27 +16,16 @@ Kirigami.ScrollablePage {
     title: i18n("Queue")
     // No title bar, as in the Movies and Shows tabs: the actions sit in a toolbar on top of the list, the header's queue button says which page this is
     globalToolBarStyle: Kirigami.ApplicationHeaderStyle.None
+    // Without Kirigami's title row the page names itself to a screen reader
+    Accessible.role: Accessible.Pane
+    Accessible.name: title
 
-    header: RowLayout {
-        spacing: Kirigami.Units.mediumSpacing
-
-        // A Compact window hides the header's queue button, which otherwise names the page
-        Kirigami.Heading {
-            id: queueHeading
-            objectName: "queueHeading"
-            Layout.leftMargin: Kirigami.Units.largeSpacing
-            visible: page.Window.window?.compactHeader ?? false
-            level: 3
-            text: page.title
-        }
-
-        Kirigami.ActionToolBar {
-            objectName: "queueToolbar"
-            Layout.fillWidth: true
-            Layout.leftMargin: queueHeading.visible ? 0 : Kirigami.Units.largeSpacing
-            Layout.rightMargin: Kirigami.Units.largeSpacing
-            actions: page.actions
-        }
+    // A Compact window hides the header's queue button, which otherwise names the page
+    header: PageToolbar {
+        actions: page.actions
+        title: (page.Window.window?.compactHeader ?? false) ? page.title : ""
+        toolbarObjectName: "queueToolbar"
+        titleObjectName: "queueHeading"
     }
 
     // The list takes the keys as soon as the page shows
@@ -245,6 +234,7 @@ Kirigami.ScrollablePage {
                 spacing: Kirigami.Units.largeSpacing
 
                 Controls.BusyIndicator {
+                    FadeInOnShow {}
                     running: parent.visible
                     Accessible.ignored: true
                 }
@@ -257,6 +247,7 @@ Kirigami.ScrollablePage {
         }
 
         Kirigami.LoadingPlaceholder {
+            FadeInOnShow {}
             anchors.centerIn: parent
             visible: page.queue.busy && list.count === 0
             text: i18n("Loading…")
@@ -279,6 +270,7 @@ Kirigami.ScrollablePage {
         }
 
         Kirigami.PlaceholderMessage {
+            FadeInOnShow {}
             anchors.centerIn: parent
             width: parent.width - Kirigami.Units.gridUnit * 4
             visible: page.queue.count === 0 && !page.queue.busy && !page.queue.restoreFailed

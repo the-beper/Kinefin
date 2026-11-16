@@ -18,8 +18,13 @@ Kirigami.ScrollablePage {
     // The group is shown as it was loaded: the notice says so when the list may be partial
     readonly property bool partial: connection.favorites.capped || connection.favorites.libraryFailed
 
-    // Server text (a library or a genre name) in the title: the toolbar title delegate renders it as plain text
+    // Server text (a library or a genre name) in the title: the page row renders it as plain text
     title: heading
+    // The row of the page carries the way back and the name, as on the Movies and Shows tabs
+    globalToolBarStyle: Kirigami.ApplicationHeaderStyle.None
+    // Without Kirigami's title row the page names itself to a screen reader
+    Accessible.role: Accessible.Pane
+    Accessible.name: title
 
     // The grid takes the keys as soon as the page shows
     function focusPrimary() {
@@ -31,7 +36,8 @@ Kirigami.ScrollablePage {
         const stack = page.Window.window?.pageStack;
         for (let i = 1; stack && i < stack.depth; ++i) {
             if (stack.get(i) === page) {
-                stack.pop(stack.get(i - 1));
+                // The row slides back to the page below, as Back does
+                page.Window.window.popTo(stack.get(i - 1), true);
                 return;
             }
         }
@@ -47,6 +53,12 @@ Kirigami.ScrollablePage {
     header: ColumnLayout {
         spacing: 0
 
+        PageToolbar {
+            Layout.fillWidth: true
+            backShown: true
+            title: page.title
+        }
+
         MessageBox {
             Layout.margins: Kirigami.Units.largeSpacing
             visible: page.partial
@@ -57,6 +69,12 @@ Kirigami.ScrollablePage {
 
     GridView {
         id: grid
+        // What scrolls under the page row fades into it instead of being cut by its edge
+        TopFade {
+            parent: grid
+            z: 1
+            atStart: grid.atYBeginning
+        }
         objectName: "favoritesGroupGrid"
 
         // Poster tiles of about ten grid units, at least one to a row

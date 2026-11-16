@@ -18,6 +18,11 @@ Kirigami.ScrollablePage {
     readonly property bool compactShell: Window.window ? Window.window.compactHeader : false
 
     title: i18n("Search")
+    // A section of the header, as Favorites and the queue: no title row, the header's box names it
+    globalToolBarStyle: Kirigami.ApplicationHeaderStyle.None
+    // Without Kirigami's title row the page names itself to a screen reader
+    Accessible.role: Accessible.Pane
+    Accessible.name: title
 
     // The drawer action owns the shortcut and calls this after the page shows
     function focusSearchField() {
@@ -93,6 +98,7 @@ Kirigami.ScrollablePage {
             visible: page.searchState === SearchModel.Empty || page.searchState === SearchModel.TooShort || page.searchState === SearchModel.NoResults
 
             Kirigami.PlaceholderMessage {
+                FadeInOnShow {}
                 anchors.centerIn: parent
                 width: parent.width - Kirigami.Units.largeSpacing * 4
                 text: {
@@ -170,6 +176,7 @@ Kirigami.ScrollablePage {
                     visible: row.status === SearchModel.Loading && !row.hasCards
 
                     Controls.BusyIndicator {
+                        FadeInOnShow {}
                         anchors.centerIn: parent
                         running: parent.visible
                         Accessible.name: i18n("Loading…")

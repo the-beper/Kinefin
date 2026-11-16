@@ -12,6 +12,16 @@ Kirigami.ScrollablePage {
     readonly property var rails: connection.genreRails
 
     title: i18n("Genres")
+    // The row of the page carries the way back and the name, as on the Movies and Shows tabs
+    globalToolBarStyle: Kirigami.ApplicationHeaderStyle.None
+    // Without Kirigami's title row the page names itself to a screen reader
+    Accessible.role: Accessible.Pane
+    Accessible.name: title
+
+    header: PageToolbar {
+        backShown: true
+        title: page.title
+    }
 
     // The library page that opened this one: its grid shows the genre chosen with Show All
     function libraryPageBelow() {
@@ -32,7 +42,8 @@ Kirigami.ScrollablePage {
             if (!libraryPage)
                 return;
             libraryPage.showGenre(genreId);
-            page.Window.window.pageStack.pop(libraryPage);
+            // The row slides back to the library, as Back does
+            page.Window.window.popTo(libraryPage, true);
         }
     }
 }

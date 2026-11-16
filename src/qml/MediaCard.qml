@@ -179,12 +179,17 @@ Controls.ItemDelegate {
                 width: Kirigami.Units.iconSizes.huge
                 height: width
                 source: "video-x-generic"
-                visible: poster.status !== Image.Ready
+                visible: poster.opacity < 1
             }
 
             Image {
                 id: poster
                 anchors.fill: parent
+                // The image fades in once loaded, over the fallback icon
+                opacity: status === Image.Ready ? 1 : 0
+                Behavior on opacity {
+                    NumberAnimation { duration: Kirigami.Units.longDuration; easing.type: Easing.OutCubic }
+                }
                 asynchronous: true
                 fillMode: card.fitImage ? Image.PreserveAspectFit : Image.PreserveAspectCrop
                 sourceSize.width: width * Screen.devicePixelRatio

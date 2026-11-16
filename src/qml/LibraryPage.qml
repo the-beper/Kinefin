@@ -32,8 +32,8 @@ Kirigami.Page {
 
     title: tabType === "movies" ? i18n("Movies") : tabType === "tvshows" ? i18n("Shows") : libraryName
     padding: 0
-    // The row toolbar is ToolBar everywhere (Main.qml): the page of a tab has no title row, the tab itself says where the user is, and the title stays for the accessible name
-    globalToolBarStyle: tabType !== "" ? Kirigami.ApplicationHeaderStyle.None : Kirigami.ApplicationHeaderStyle.Auto
+    // No title row: the page of a tab is named by the tab, a library opened from a tile by its own row (the way back and the name), and the title stays for the accessible name
+    globalToolBarStyle: Kirigami.ApplicationHeaderStyle.None
     Accessible.role: Accessible.Pane
     Accessible.name: title
 
@@ -237,8 +237,19 @@ Kirigami.Page {
             Layout.fillWidth: true
             Layout.leftMargin: Kirigami.Units.largeSpacing
             Layout.rightMargin: Kirigami.Units.largeSpacing
-            visible: page.listModel !== null || page.hasSubtabs
+            visible: page.listModel !== null || page.hasSubtabs || page.tabType === ""
             spacing: Kirigami.Units.mediumSpacing
+
+            // A library opened from a Home tile sits above Home: its way back and its name lead the row, as PageToolbar does on the other pages
+            PageBackButton {
+                visible: page.tabType === ""
+            }
+
+            PageTitle {
+                objectName: "libraryNameLabel"
+                visible: page.tabType === "" && text.length > 0
+                text: page.libraryName
+            }
 
             // The library of the type, while there is more than one: built only then, as a wide window with one library, the usual case, would pay its creation on every push
             Loader {
@@ -736,6 +747,26 @@ Kirigami.Page {
             Layout.fillWidth: true
             Layout.fillHeight: true
 
+            // Another sub-tab or a network's series fade in instead of standing there at once
+            // On the GUI thread: a render-thread animator can leave a stale frame when its item is hidden mid-fade
+            NumberAnimation {
+                id: contentFade
+                property: "opacity"
+                target: contentArea
+                from: 0
+                to: 1
+                duration: Kirigami.Units.longDuration
+                easing.type: Easing.OutCubic
+            }
+            // A network opened or left keeps the Networks sub-tab: the controller's own change covers both
+            Connections {
+                target: page.subtabs
+                enabled: page.hasSubtabs
+                function onCurrentChanged() {
+                    contentFade.restart();
+                }
+            }
+
             // The list of the main sub-tab and of the list sub-tabs: the grid or the list of items
             Loader {
                 id: listContent
@@ -788,6 +819,7 @@ Kirigami.Page {
             }
 
             Kirigami.LoadingPlaceholder {
+                FadeInOnShow {}
                 objectName: "subtabLoading"
                 anchors.centerIn: parent
                 visible: page.flatSubtab && page.subtabs.status === LibrarySubtabController.Loading
@@ -795,6 +827,7 @@ Kirigami.Page {
             }
 
             Kirigami.PlaceholderMessage {
+                FadeInOnShow {}
                 objectName: "subtabEmpty"
                 anchors.centerIn: parent
                 width: parent.width - Kirigami.Units.gridUnit * 4

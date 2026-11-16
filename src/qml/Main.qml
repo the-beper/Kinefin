@@ -55,6 +55,14 @@ Kirigami.ApplicationWindow {
     property int playlistQueueBefore: 0
     // Numbers the waits, so the end of one never ends the next
     property int playlistRequest: 0
+    // Another session's PlayNow on its way into the queue: the item it starts at, where, and the queue's size before (an Undo is offered when it held something)
+    property bool remotePlayWaiting: false
+    property string remoteStartAt: ""
+    property real remoteStartTicks: 0
+    property int remoteQueueBefore: 0
+    property int remotePlayRequest: 0
+    // Another session's Play commands not yet run, oldest first (the queue takes one operation at a time): {now, itemIds, next, startIndex, startTicks}
+    property var remotePending: []
 
     property bool fullscreenSetting: settings.value("main", "fullscreen")
     property bool alwaysOnTopSetting: settings.value("main", "alwaysOnTop")
@@ -72,8 +80,7 @@ Kirigami.ApplicationWindow {
     title: "Kinefin"
     flags: alwaysOnTopSetting ? (Qt.Window | Qt.WindowStaysOnTopHint) : Qt.Window
 
-    // Auto resolves to the Breadcrumb header only on mobile in narrow mode, and that one renders titles without plain-text formatting: the pin keeps server-supplied page titles in the toolbar title delegate, which is plain text
-    // The row keeps one toolbar style for every page of its life: a style that follows the stack depth resizes the columns while a page slides out (the toolbar row above them bounces the column height), and Kirigami then reads the resize as a layout pass, stops the exit slide without finishing it, and the page it was removing is never destroyed. So the style stays ToolBar, and the pages that don't put actions in the toolbar turn their own toolbar off (the root tabs, the pre-signin screens, the settings)
+    // Every page turns Kirigami's title row off and puts its own row under the header (PageToolbar, the style of the Movies and Shows tabs); the global style stays pinned to ToolBar so that it never follows the stack depth: Auto would resolve to the Breadcrumb header on mobile in narrow mode, and a style that follows the depth resizes the columns while a page slides out (Kirigami then reads the resize as a layout pass, stops the exit slide without finishing it, and the page it was removing is never destroyed)
     pageStack.globalToolBar.style: Kirigami.ApplicationHeaderStyle.ToolBar
     // One page at a time: the default switches to side-by-side columns from 40 grid units, which pushes the pages beyond the window
     pageStack.columnView.columnResizeMode: Kirigami.ColumnView.SingleColumn
@@ -184,10 +191,10 @@ Kirigami.ApplicationWindow {
             if (event.accepted)
                 return;
         }
-        // The page leaves the stack at once: going back by moving the index leaves it there until a scroll animation ends
+        // The same slide as Esc: only the index moves, the page left above is taken once the stack settles
         const target = pageStack.get(index - 1);
         if (pageStack.get(index) === leaving)
-            popTo(target);
+            popTo(target, true);
     }
 
     // A back that only moves the index (Esc, the header button, the toolbar back button) leaves the
@@ -312,8 +319,8 @@ Kirigami.ApplicationWindow {
     Connections {
         target: window.pageStack
         function onCurrentItemChanged() {
-            // A page opened above a tab still waiting to fade in shows at once
-            if (window.tabMotionQueued && window.pageStack.currentIndex > 0)
+            // A page opened above the page still waiting to fade in shows at once
+            if (window.tabMotionQueued && window.pageStack.currentIndex > window.tabMotionIndex)
                 window.finishTabMotion();
             // A page a Back left hidden above the current one is taken once the stack settles
             window.popLeftoverPages();
@@ -465,7 +472,9 @@ Kirigami.ApplicationWindow {
             Qt.callLater(settleStartup);
             return;
         }
-        finishTabMotion();
+        // The page of the new state fades in, as a tab does but without sliding; queued before the stack changes, so an error on the way cannot leave the row invisible
+        if (prepareTabMotion(0))
+            Qt.callLater(startTabMotionWhenReady, "", "");
         parkVideo();
         pageStack.clear();
         const shown = pageStack.push(Qt.resolvedUrl(page), properties);
@@ -515,13 +524,16 @@ Kirigami.ApplicationWindow {
         placeVideo();
     }
 
-    // Pops to a page of the stack; the video is parked first when the page in front is the player's, and then, as Kirigami's Back does, only the current index moves: the pages left above are taken once the stack settles, which deletes them (a pop of the page in front does not)
-    function popTo(page) {
-        if (page && page !== pageStack.currentItem && playbackPageShowing) {
-            parkVideo();
+    // Pops to a page of the stack. With `animated`, and always when the page in front is the player's (its video parked first), only the current index moves, as Kirigami's Back does: the row slides back and the pages left above are taken once the stack settles, which deletes them (a pop of the page in front does not). Without it the pages go at once, for a push that follows
+    function popTo(page, animated) {
+        if (page && page !== pageStack.currentItem && (playbackPageShowing || animated)) {
+            if (playbackPageShowing)
+                parkVideo();
             for (let i = 0; i < pageStack.depth; ++i) {
                 if (pageStack.get(i) === page) {
-                    pageStack.currentIndex = i;
+                    // Only ever back: a page above the current one is a leftover about to go
+                    if (i < pageStack.currentIndex)
+                        pageStack.currentIndex = i;
                     return;
                 }
             }
@@ -601,6 +613,11 @@ Kirigami.ApplicationWindow {
 
     // The player commands of the keyboard and of the remote socket, in every mode; a name that is no command does nothing
     function playerAction(name) {
+        // A stop also drops another session's Play commands still on their way, also before anything plays
+        if (name === "stop") {
+            remotePending = [];
+            remotePlayWaiting = false;
+        }
         if (playbackMode === "none" || !player)
             return;
         switch (name) {
@@ -660,8 +677,8 @@ Kirigami.ApplicationWindow {
         return true;
     }
 
-    function playQueue(index) {
-        if (!window.signedIn || !window.player || !window.player.playQueue(index))
+    function playQueue(index, startTicks) {
+        if (!window.signedIn || !window.player || !window.player.playQueue(index, startTicks || 0))
             return false;
         if (!showPlayerPage()) { window.player.stop(); return false; }
         return true;
@@ -736,10 +753,10 @@ Kirigami.ApplicationWindow {
     }
 
     // Everything above the first page goes
-    function popToBase() {
+    function popToBase(animated) {
         const base = pageStack.get(0);
         if (base)
-            popTo(base);
+            popTo(base, animated);
     }
 
     // The first keystroke of the header box on a type tab pops the pages above it: the box keeps the keyboard, which the page it pops back to would take
@@ -936,7 +953,7 @@ Kirigami.ApplicationWindow {
         case "queuePage":
             return "queue";
         }
-        // The Favorites page and what opens above it (a group, an item) belong to the star: no tab is marked; so do the Playlists page and what opens above it to the main menu
+        // The Favorites page and what opens above it (a group, an item) belong to the star: no tab is marked; so do the Playlists page and what opens above it to the Playlists button
         if (favoritesPageIndex() >= 0)
             return "favorites";
         for (let i = 1; i <= pageStack.currentIndex; ++i) {
@@ -1007,7 +1024,8 @@ Kirigami.ApplicationWindow {
                 else
                     delete oneOffTabs[name];
             }
-            popToBase();
+            // Back to the tab's own page: the row slides back to it
+            popToBase(true);
             return;
         }
         if (isTypeTab(name) && !hasTypeTab(name))
@@ -1051,15 +1069,18 @@ Kirigami.ApplicationWindow {
 
     // The new tab enters from the side it has in the tab bar; the row stays invisible from before the push until the motion starts, so the new page never shows one frame at rest
     property bool tabMotionQueued: false
+    // The index of the page the queued motion shows (0 for a tab, the page of a header section above it): a page pushed above that one ends the motion
+    property int tabMotionIndex: 0
     readonly property bool tabSwitching: tabMotionQueued || tabMotion.running
     ParallelAnimation {
         id: tabMotion
         OpacityAnimator { target: pageStack; from: 0; to: 1; duration: Kirigami.Units.longDuration; easing.type: Easing.InOutCubic }
         NumberAnimation { target: tabShift; property: "x"; to: 0; duration: Kirigami.Units.longDuration; easing.type: Easing.OutCubic }
     }
-    // A running or waiting motion ends at once, with the row fully visible and in place; true when a new one is queued (no animation speed, no motion)
-    function prepareTabMotion() {
+    // A running or waiting motion ends at once, with the row fully visible and in place; true when a new one is queued (no animation speed, no motion). `index` is the page the new motion is for
+    function prepareTabMotion(index) {
         finishTabMotion();
+        tabMotionIndex = index ?? 0;
         if (Kirigami.Units.longDuration === 0)
             return false;
         pageStack.opacity = 0;
@@ -1078,7 +1099,7 @@ Kirigami.ApplicationWindow {
     function startTabMotionWhenReady(fromTab, toTab) {
         if (!tabMotionQueued)
             return;
-        if (pageStack.get(0)?.contentReady ?? true) {
+        if (pageStack.currentItem?.contentReady ?? true) {
             startTabMotion(fromTab, toTab);
             return;
         }
@@ -1098,7 +1119,7 @@ Kirigami.ApplicationWindow {
         interval: 16
         repeat: true
         onTriggered: {
-            if ((window.pageStack.get(0)?.contentReady ?? true) || Date.now() - since >= limit) {
+            if ((window.pageStack.currentItem?.contentReady ?? true) || Date.now() - since >= limit) {
                 stop();
                 window.startTabMotion(fromTab, toTab);
             }
@@ -1107,8 +1128,9 @@ Kirigami.ApplicationWindow {
     function startTabMotion(fromTab, toTab) {
         if (!tabMotionQueued)
             return;
+        // The same place (a state change, a page brought back) only fades
         const fromRight = (tabOrder(toTab) > tabOrder(fromTab)) !== (Qt.application.layoutDirection === Qt.RightToLeft);
-        tabShift.x = (fromRight ? 1 : -1) * Kirigami.Units.gridUnit * 2;
+        tabShift.x = fromTab === toTab ? 0 : (fromRight ? 1 : -1) * Kirigami.Units.gridUnit * 2;
         tabMotion.restart();
         tabMotionQueued = false;
     }
@@ -1203,7 +1225,7 @@ Kirigami.ApplicationWindow {
             for (let i = 1; i < window.pageStack.depth; ++i) {
                 const page = window.pageStack.get(i);
                 if (page?.objectName === "playlistPage" && page.playlistId.replace(/-/g, "").toLowerCase() === key) {
-                    window.popTo(window.pageStack.get(i - 1));
+                    window.popTo(window.pageStack.get(i - 1), true);
                     return;
                 }
             }
@@ -1221,7 +1243,7 @@ Kirigami.ApplicationWindow {
 
     // Play and Shuffle of a playlist: the saved queue becomes it (one step its Undo takes back) and plays from `startAt`, its first item when empty
     function playPlaylist(playlistId, startAt, shuffled) {
-        if (!signedIn || !window.player || playlistWaiting)
+        if (!signedIn || !window.player || playlistWaiting || remotePlayWaiting)
             return false;
         playlistWaiting = true;
         playlistRequest++;
@@ -1261,6 +1283,130 @@ Kirigami.ApplicationWindow {
                 if (window.playlistRequest === request)
                     window.playlistWaiting = false;
             });
+        }
+    }
+
+    // What another Jellyfin session asks of this one; its keys and player commands take the remote-control socket's path (main.cpp), the rest comes here
+    Connections {
+        target: window.connection.remoteCommands
+        function onSeekRequested(ticks) {
+            if (window.playbackMode === "none" || !window.player)
+                return;
+            window.player.seek(ticks);
+            if (window.playbackMode === "full")
+                window.playerPage?.wakeChrome();
+        }
+        function onVolumeRequested(level) {
+            window.player?.setVolume(level);
+        }
+        function onMuteRequested(muted) {
+            if (window.player && window.player.muted !== muted)
+                window.player.toggleMute();
+        }
+        function onAudioStreamRequested(index) {
+            if (window.playbackMode !== "none")
+                window.player?.selectAudioStreamIndex(index);
+        }
+        function onSubtitleStreamRequested(index) {
+            if (window.playbackMode !== "none")
+                window.player?.selectSubtitleStreamIndex(index);
+        }
+        function onRepeatModeRequested(mode) {
+            window.player?.setRepeatMode(mode);
+        }
+        function onShuffleRequested(shuffled) {
+            window.player?.setShuffle(shuffled);
+        }
+        function onPlayNowRequested(itemIds, startIndex, startTicks) {
+            window.requestRemotePlay({ now: true, itemIds: itemIds, next: false, startIndex: startIndex, startTicks: startTicks });
+        }
+        function onQueueRequested(itemIds, next) {
+            window.requestRemotePlay({ now: false, itemIds: itemIds, next: next, startIndex: 0, startTicks: 0 });
+        }
+    }
+
+    // The waits ending let the next of another session's Play commands run
+    onRemotePlayWaitingChanged: if (!remotePlayWaiting) Qt.callLater(runRemotePlay)
+    onPlaylistWaitingChanged: if (!playlistWaiting) Qt.callLater(runRemotePlay)
+
+    // Another session's Play commands run in the order they came, each once the queue is free; a few wait at most (the newest are kept)
+    function requestRemotePlay(command) {
+        if (!signedIn)
+            return;
+        remotePending = remotePending.concat([command]).slice(-8);
+        runRemotePlay();
+    }
+    function runRemotePlay() {
+        if (remotePending.length === 0 || !signedIn || connection.queue.busy || playlistWaiting || remotePlayWaiting)
+            return;
+        const command = remotePending[0];
+        remotePending = remotePending.slice(1);
+        const started = command.now ? playRemote(command.itemIds, command.startIndex, command.startTicks)
+                                    : connection.queue.addFromRemote(command.itemIds, command.next ? PlayQueue.Next : PlayQueue.Last);
+        // A queue that refuses (it could not be read back) refuses the rest too: its own message says so once
+        if (!started)
+            remotePending = [];
+    }
+    Connections {
+        target: window.connection.queue
+        enabled: window.remotePending.length > 0
+        function onBusyChanged() {
+            if (!window.connection.queue.busy)
+                Qt.callLater(window.runRemotePlay);
+        }
+    }
+
+    // Another session's PlayNow: the items become the queue (one step its Undo takes back) and play from the one it named; a single video plays on its own, as from its details page
+    function playRemote(itemIds, startIndex, startTicks) {
+        if (!signedIn || !window.player || playlistWaiting || remotePlayWaiting)
+            return false;
+        remotePlayWaiting = true;
+        remotePlayRequest++;
+        remoteStartAt = itemIds[Math.min(startIndex, itemIds.length - 1)];
+        remoteStartTicks = startTicks;
+        remoteQueueBefore = connection.queue.count;
+        if (!connection.queue.replaceWith(itemIds)) {
+            remotePlayWaiting = false;
+            return false;
+        }
+        return true;
+    }
+
+    Connections {
+        target: window.connection.queue
+        enabled: window.remotePlayWaiting
+        function onReplaced(count, truncated) {
+            window.remotePlayWaiting = false;
+            // The item named may have been left out (not a video, past the cap): the queue then starts at its top
+            const index = window.connection.queue.indexOf(window.remoteStartAt);
+            window.playQueue(Math.max(0, index), index >= 0 ? window.remoteStartTicks : 0);
+            if (window.remoteQueueBefore > 0)
+                window.showPassiveNotification(i18n("Another device replaced the queue"), "long", i18nc("@action:button takes the queue back", "Undo"), () => window.connection.queue.undo());
+        }
+        function onVideoAlone(itemId) {
+            window.remotePlayWaiting = false;
+            window.playItem(itemId, window.remoteStartTicks);
+        }
+        // A failure or nothing to play ends the wait with the queue's own message
+        function onBusyChanged() {
+            if (window.connection.queue.busy)
+                return;
+            const request = window.remotePlayRequest;
+            Qt.callLater(() => {
+                if (window.remotePlayRequest === request)
+                    window.remotePlayWaiting = false;
+            });
+        }
+    }
+
+    // A session that ends takes what it had asked for
+    Connections {
+        target: window.connection
+        function onStateChanged() {
+            if (window.connection.state !== ConnectionController.Authenticated) {
+                window.remotePending = [];
+                window.remotePlayWaiting = false;
+            }
         }
     }
 
@@ -1346,16 +1492,24 @@ Kirigami.ApplicationWindow {
 
     // A section opens above the first page: one already in the stack is brought back (what is above it goes), so the stack never grows with every click
     function openSection(name, url, properties) {
-        for (let i = 0; i <= pageStack.currentIndex; ++i) {
-            if (pageStack.get(i)?.objectName === name) {
-                popTo(pageStack.get(i));
-                return;
-            }
+        let existing = -1;
+        for (let i = 0; i <= pageStack.currentIndex && existing < 0; ++i) {
+            if (pageStack.get(i)?.objectName === name)
+                existing = i;
         }
-        if (askBeforeLeaving(() => openSection(name, url, properties)))
+        if (existing >= 0 && pageStack.get(existing) === pageStack.currentItem)
             return;
-        popToBase();
-        pageStack.push(Qt.resolvedUrl(url), properties);
+        if (existing < 0 && askBeforeLeaving(() => openSection(name, url, properties)))
+            return;
+        // The section fades in over Kirigami's own slide of the push (only the fade: a second slide would fight it; the slide's duration must stay, a zero one leaves the focus behind)
+        if (prepareTabMotion(existing >= 0 ? existing : 1))
+            Qt.callLater(startTabMotionWhenReady, name, name);
+        if (existing >= 0) {
+            popTo(pageStack.get(existing));
+        } else {
+            popToBase();
+            pageStack.push(Qt.resolvedUrl(url), properties);
+        }
     }
 
     // Pushing before the window's page row is complete leaves the page outside the scene

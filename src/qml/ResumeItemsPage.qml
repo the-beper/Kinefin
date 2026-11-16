@@ -18,6 +18,11 @@ Kirigami.ScrollablePage {
     Component.onDestruction: shell?.resumePageGone?.()
 
     title: i18n("Continue Watching")
+    // The row of the page carries the way back and the name, as on the Movies and Shows tabs
+    globalToolBarStyle: Kirigami.ApplicationHeaderStyle.None
+    // Without Kirigami's title row the page names itself to a screen reader
+    Accessible.role: Accessible.Pane
+    Accessible.name: title
 
     // The grid takes the keys as soon as the page shows
     function focusPrimary() {
@@ -26,6 +31,12 @@ Kirigami.ScrollablePage {
 
     header: ColumnLayout {
         spacing: 0
+
+        PageToolbar {
+            Layout.fillWidth: true
+            backShown: true
+            title: page.title
+        }
 
         MessageBox {
             Layout.margins: Kirigami.Units.largeSpacing
@@ -58,6 +69,12 @@ Kirigami.ScrollablePage {
 
     GridView {
         id: grid
+        // What scrolls under the page row fades into it instead of being cut by its edge
+        TopFade {
+            parent: grid
+            z: 1
+            atStart: grid.atYBeginning
+        }
         objectName: "resumeItemsGrid"
 
         // Wide tiles of about fourteen grid units, like the Home row
@@ -90,12 +107,14 @@ Kirigami.ScrollablePage {
         }
 
         Kirigami.LoadingPlaceholder {
+            FadeInOnShow {}
             anchors.centerIn: parent
             visible: page.model.status === ResumeItemsModel.Loading && grid.count === 0
             text: i18n("Loading…")
         }
 
         Kirigami.PlaceholderMessage {
+            FadeInOnShow {}
             anchors.centerIn: parent
             width: parent.width - Kirigami.Units.gridUnit * 4
             visible: page.model.status === ResumeItemsModel.Ready && page.model.totalCount === 0

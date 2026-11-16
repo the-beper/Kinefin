@@ -37,11 +37,39 @@ void recordWarnings(QtMsgType type, const QMessageLogContext &context, const QSt
         g_previousHandler(type, context, message);
 }
 
+// Stands in for Qt Quick's popup item, which the server recognises by its class name
+class QQuickPopupItem : public QObject {
+    Q_OBJECT
+};
+
+// A focused item: a text field when it takes input methods, and its visual parent as Qt Quick's items expose it
+class FocusItem : public QObject {
+    Q_OBJECT
+    Q_PROPERTY(QObject *parent READ parentItem CONSTANT)
+  public:
+    bool textField = false;
+    QObject *visualParent = nullptr;
+    QObject *parentItem() const { return visualParent; }
+
+  protected:
+    bool event(QEvent *event) override
+    {
+        if (event->type() == QEvent::InputMethodQuery) {
+            static_cast<QInputMethodQueryEvent *>(event)->setValue(Qt::ImEnabled, textField);
+            return true;
+        }
+        return QObject::event(event);
+    }
+};
+
 class KeyWindow : public QWindow {
   public:
     QList<int> presses;
     QList<int> releases;
     bool acceptEscape = true;
+    QObject *focus = nullptr;
+
+    QObject *focusObject() const override { return focus ? focus : QWindow::focusObject(); }
 
   protected:
     void keyPressEvent(QKeyEvent *event) override
@@ -158,6 +186,51 @@ class TestRemoteInput : public QObject {
   private Q_SLOTS:
     void initTestCase() { g_previousHandler = qInstallMessageHandler(recordWarnings); }
     void cleanupTestCase() { qInstallMessageHandler(g_previousHandler); }
+
+    void networkNavigationKeysStayOutOfTextFieldsAndPopups()
+    {
+        KeyWindow window;
+        auto server = startServer(&window);
+        QVERIFY(server);
+        QVERIFY(server->dispatchNetworkKeycode(QStringLiteral("down")));
+        QCOMPARE(window.presses, QList<int>{Qt::Key_Down});
+        // The user types: a remote Select would submit the field
+        FocusItem field;
+        field.textField = true;
+        window.focus = &field;
+        QVERIFY(!server->dispatchNetworkKeycode(QStringLiteral("select")));
+        QVERIFY(!server->dispatchNetworkKeycode(QStringLiteral("up")));
+        QCOMPARE(window.presses, QList<int>{Qt::Key_Down});
+        // A button inside a popup: a remote Select would confirm the dialog
+        QQuickPopupItem popup;
+        FocusItem button;
+        button.visualParent = &popup;
+        window.focus = &button;
+        QVERIFY(!server->dispatchNetworkKeycode(QStringLiteral("select")));
+        QCOMPARE(window.presses, QList<int>{Qt::Key_Down});
+        // Player commands and Back still pass
+        QVERIFY(server->dispatchNetworkKeycode(QStringLiteral("pause")));
+        QCOMPARE(m_actions.constLast(), QStringLiteral("pause"));
+        QVERIFY(server->dispatchNetworkKeycode(QStringLiteral("back")));
+        QCOMPARE(window.presses.constLast(), int(Qt::Key_Escape));
+        // Out of the popup the keys work again
+        window.focus = nullptr;
+        QVERIFY(server->dispatchNetworkKeycode(QStringLiteral("select")));
+        QCOMPARE(window.presses.constLast(), int(Qt::Key_Return));
+    }
+
+    void networkKeycodesAreRateLimited()
+    {
+        KeyWindow window;
+        auto server = startServer(&window);
+        QVERIFY(server);
+        int passed = 0;
+        for (int i = 0; i < RemoteInputServer::MaxNetworkKeysPerSecond + 5; ++i)
+            passed += server->dispatchNetworkKeycode(QStringLiteral("volumeup")) ? 1 : 0;
+        QCOMPARE(passed, RemoteInputServer::MaxNetworkKeysPerSecond);
+        // The local socket's own path has its own limit, per client
+        QVERIFY(server->dispatchKeycode(QStringLiteral("volumeup")));
+    }
 
     // Every test has a runtime directory of its own, so concurrent runs never share a path
     void init()

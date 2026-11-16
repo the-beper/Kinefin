@@ -396,6 +396,7 @@ Kirigami.Dialog {
                     spacing: Kirigami.Units.largeSpacing
 
                     Controls.BusyIndicator {
+                        FadeInOnShow {}
                         Layout.leftMargin: Kirigami.Units.largeSpacing
                         running: visible
                         visible: row.modelData.loading

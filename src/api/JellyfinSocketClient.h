@@ -21,11 +21,12 @@ Q_DECLARE_LOGGING_CATEGORY(socketLog)
 
 namespace Kinefin {
 
-// A remote `Play` command routed over the WebSocket. `command` is the validated `Data.Command` (the mode the coordinator honours), `itemIds` the validated 1..1000 ids, and `startPositionTicks` the optional server integer (-1 when the frame carried none)
+// A remote `Play` command routed over the WebSocket. `command` is the validated `Data.Command` (the mode the coordinator honours), `itemIds` the validated 1..1000 ids, `startPositionTicks` the optional server integer (-1 when the frame carried none) and `startIndex` the optional item to start at (-1 when the frame carried none or named no item of the list)
 struct RemotePlayRequest {
     QString command;
     QStringList itemIds;
     qint64 startPositionTicks = -1;
+    int startIndex = -1;
 };
 
 // One authenticated WebSocket per active identity (socket, event routing and missed-event wake-ups; the contract is websocket-contract.md). It owns no token: every attempt asks `JellyfinClient` for a fresh request, and it stops as soon as the client drops a credential. REST and the socket share the same server session; never parse playback state from frames, remote commands route to the coordinator, not to the reporter

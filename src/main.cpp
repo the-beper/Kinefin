@@ -269,5 +269,8 @@ int main(int argc, char *argv[])
     // Navigation keys from a remote reach the window like a keyboard's; no socket is a warning, never a failure
     remoteInput.setWindow(window);
     remoteInput.listen();
+    // Another Jellyfin session's keys and player commands take the same path
+    QObject::connect(connection.remoteCommands(), &Kinefin::RemoteCommands::keycodeRequested,
+                     &remoteInput, &Kinefin::RemoteInputServer::dispatchNetworkKeycode);
     return app.exec();
 }

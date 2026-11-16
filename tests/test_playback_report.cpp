@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Kinefin contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <QFile>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QtTest>
 
@@ -170,6 +171,20 @@ class TestPlaybackReport : public QObject {
         QCOMPARE(Kinefin::clientCapabilitiesBody(),
                  golden(QStringLiteral("client_capabilities_request")));
         QVERIFY(!Kinefin::clientCapabilitiesBody().contains(QStringLiteral("DeviceProfile")));
+    }
+
+    void capabilitiesListTheRemoteCommandsOnlyWithMediaControl()
+    {
+        QCOMPARE(Kinefin::clientCapabilitiesBody(false).value(QStringLiteral("SupportedCommands")),
+                 QJsonValue(QJsonArray()));
+        const QJsonObject body = Kinefin::clientCapabilitiesBody(true);
+        QCOMPARE(body.value(QStringLiteral("SupportsMediaControl")), QJsonValue(true));
+        const QJsonArray commands = body.value(QStringLiteral("SupportedCommands")).toArray();
+        QCOMPARE(commands, QJsonArray::fromStringList(Kinefin::supportedGeneralCommands()));
+        for (const char *name : {"SetVolume", "SetAudioStreamIndex", "Play", "PlayNext", "Back"})
+            QVERIFY2(commands.contains(QJsonValue(QLatin1String(name))), name);
+        // No remote text on the screen
+        QVERIFY(!commands.contains(QJsonValue(QStringLiteral("DisplayMessage"))));
     }
 };
 QTEST_APPLESS_MAIN(TestPlaybackReport)

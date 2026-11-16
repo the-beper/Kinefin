@@ -174,7 +174,8 @@ class PlayerController final : public QObject {
     void detachVideo(MpvAbstractItem *item);
 
     Q_INVOKABLE bool playItem(const QString &id, qint64 resumeTicks = 0);
-    Q_INVOKABLE bool playQueue(int index);
+    // Plays the queue from a row, at `startTicks` (0 to 24 h; else refused)
+    Q_INVOKABLE bool playQueue(int index, qint64 startTicks = 0);
     Q_INVOKABLE bool resumeQueue();
     Q_INVOKABLE void pause();
     Q_INVOKABLE void resume();
@@ -191,6 +192,10 @@ class PlayerController final : public QObject {
     Q_INVOKABLE void setRepeatMode(int mode); // 0 off, 1 all, 2 one
     Q_INVOKABLE void selectAudioTrack(int id);
     Q_INVOKABLE void selectSubtitleTrack(int id); // 0 = none
+    // Selects the track whose server `MediaStream.Index` (mpv's `ff-index`) is `index`, in a direct play only; false, with nothing changed, when nothing plays, the server transcodes, the index is out of range (0 to 1024) or no track of that type has it
+    Q_INVOKABLE bool selectAudioStreamIndex(int index);
+    // As selectAudioStreamIndex for a subtitle track; -1 selects none
+    Q_INVOKABLE bool selectSubtitleStreamIndex(int index);
     Q_INVOKABLE void adjustAudioDelay(double seconds);
     Q_INVOKABLE void adjustSubtitleDelay(double seconds);
     Q_INVOKABLE void setSleepTimer(int minutes); // 0 disables
@@ -259,6 +264,12 @@ class PlayerController final : public QObject {
     static constexpr int EpisodesChannel = 4096;
 
     bool startItem(const QString &id, qint64 resumeTicks);
+    // Something plays and the server sends the source as it is, so mpv's `ff-index` is the source's stream index
+    bool directPlay() const;
+    // mpv's track id of the `audio` or `sub` track with this `ff-index`, 0 when there is none or it is not a direct play
+    int trackOfStreamIndex(const QString &type, int index) const;
+    // The server's stream index of mpv's track `id` of `type`: direct play and embedded tracks only
+    std::optional<int> streamIndexOfTrack(const QString &type, int id) const;
     void requestPending();
     void onSource(const PlaybackSource &source);
     void onPlaybackItem(const QString &id, const QJsonObject &item);

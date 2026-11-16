@@ -12,6 +12,7 @@
 #include <QJsonObject>
 #include <QLoggingCategory>
 #include <QMetaEnum>
+#include <QNetworkInformation>
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QSet>
@@ -244,6 +245,15 @@ ConnectionController::ConnectionController(const QString &profileId, const QStri
     if (!dataDirectory.isEmpty()) {
         m_queue.setStoragePath(dataDirectory + QStringLiteral("/queue.json"));
         m_browse.setStoragePath(dataDirectory + QStringLiteral("/browse.json"));
+    }
+    m_remoteCommands.attach(&m_socket);
+    // The network coming back reconnects the socket at once instead of after its backoff (best effort: no backend, no wake-up)
+    if (QNetworkInformation::loadBackendByFeatures(QNetworkInformation::Feature::Reachability)) {
+        connect(QNetworkInformation::instance(), &QNetworkInformation::reachabilityChanged, this,
+                [this](QNetworkInformation::Reachability reachability) {
+                    if (reachability == QNetworkInformation::Reachability::Online)
+                        m_socket.reconnectNow();
+                });
     }
     // A session that ends keeps its browse state, written now
     connect(&m_client, &JellyfinClient::credentialsCleared, &m_browse, &BrowseStateStore::flush);

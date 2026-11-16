@@ -200,6 +200,19 @@ Kirigami.ScrollablePage {
     }
 
     actions: [page.playNextAction, page.addToQueueAction, page.addToPlaylistAction, page.favoriteAction, page.togglePlayedAction, page.mediaInfoAction]
+    // The row of the page carries the way back and the actions, as on the Movies and Shows tabs; the hero names the item
+    globalToolBarStyle: Kirigami.ApplicationHeaderStyle.None
+    // Without Kirigami's title row the page names itself to a screen reader
+    Accessible.role: Accessible.Pane
+    Accessible.name: title
+    header: PageToolbar {
+        // Over the content: the hero's backdrop, and what scrolls up, fade into the row instead of meeting it at an edge
+        z: 1
+        fadeBelow: true
+        backShown: true
+        actions: page.actions
+        toolbarObjectName: "detailsToolbar"
+    }
 
     Timer {
         objectName: "endsAtTimer"
@@ -301,13 +314,15 @@ Kirigami.ScrollablePage {
                 id: headerContent
                 objectName: "detailsHeaderContent"
 
-                y: page.margin
+                // A backdrop starts right under the page row and fades into it: no strip between them
+                y: hero.hasBackdrop ? 0 : page.margin
                 // Prose and metadata stay readable on ultrawide monitors: the cap is the shell's reading width
                 width: Math.min(Math.max(0, parent.width - page.margin * 2), page.Window.window?.readingWidth ?? Infinity)
                 x: (parent.width - width) / 2
                 spacing: Kirigami.Units.largeSpacing
 
                 Kirigami.LoadingPlaceholder {
+                    FadeInOnShow {}
                     Layout.fillWidth: true
                     visible: page.showLoading
                     text: i18n("Loading…")
@@ -353,6 +368,7 @@ Kirigami.ScrollablePage {
                 }
 
                 Kirigami.PlaceholderMessage {
+                    FadeInOnShow {}
                     Layout.fillWidth: true
                     visible: page.details.status === ItemDetailsModel.NotFound
                     icon.name: "video-x-generic"
@@ -449,13 +465,18 @@ Kirigami.ScrollablePage {
                                 sourceSize.width: Kirigami.Units.gridUnit * 16 * Screen.devicePixelRatio
                                 source: page.inView ? page.details.logoUrl : ""
                                 Accessible.role: Accessible.Graphic
-                                Accessible.name: page.details.name
+                                // The series' logo over an episode or a season: its name, not the one the heading under it reads
+                                Accessible.name: detailsTitle.underParentLogo ? page.details.seriesName : page.details.name
                             }
 
+                            // An episode or a season shows its series' logo: its own name stays under it, a size smaller
                             Kirigami.Heading {
+                                id: detailsTitle
+                                objectName: "detailsTitle"
+                                readonly property bool underParentLogo: logo.status === Image.Ready && (page.details.type === "Episode" || page.details.type === "Season")
                                 Layout.fillWidth: true
-                                visible: logo.status !== Image.Ready
-                                level: 1
+                                visible: logo.status !== Image.Ready || underParentLogo
+                                level: underParentLogo ? 2 : 1
                                 wrapMode: Text.Wrap
                                 // Item names come from the server: plain text only
                                 textFormat: Text.PlainText
@@ -856,6 +877,7 @@ Kirigami.ScrollablePage {
                     }
 
                     Controls.BusyIndicator {
+                        FadeInOnShow {}
                         Layout.preferredWidth: Kirigami.Units.gridUnit * 2
                         Layout.preferredHeight: Kirigami.Units.gridUnit * 2
                         visible: page.childModel.kind === ItemChildrenModel.Series && page.childModel.seasonsStatus === ItemChildrenModel.Loading && page.childModel.seasons.count === 0
@@ -911,6 +933,7 @@ Kirigami.ScrollablePage {
                     }
 
                     Controls.BusyIndicator {
+                        FadeInOnShow {}
                         Layout.preferredWidth: Kirigami.Units.gridUnit * 2
                         Layout.preferredHeight: Kirigami.Units.gridUnit * 2
                         visible: page.childModel.kind === ItemChildrenModel.BoxSet && page.childModel.itemsStatus === ItemChildrenModel.Loading && page.childModel.items.count === 0
@@ -1083,6 +1106,7 @@ Kirigami.ScrollablePage {
                     }
 
                     Controls.BusyIndicator {
+                        FadeInOnShow {}
                         Layout.preferredWidth: Kirigami.Units.gridUnit * 2
                         Layout.preferredHeight: Kirigami.Units.gridUnit * 2
                         visible: page.details.similarStatus === ItemDetailsModel.Loading
@@ -1130,6 +1154,7 @@ Kirigami.ScrollablePage {
                     }
 
                     Kirigami.LoadingPlaceholder {
+                        FadeInOnShow {}
                         Layout.fillWidth: true
                         visible: page.childModel.kind === ItemChildrenModel.Season && page.childModel.episodes.status === SeasonEpisodesModel.Loading && list.count === 0
                         text: i18n("Loading…")
@@ -1149,6 +1174,7 @@ Kirigami.ScrollablePage {
                     }
 
                     Kirigami.PlaceholderMessage {
+                        FadeInOnShow {}
                         Layout.fillWidth: true
                         visible: page.childModel.kind === ItemChildrenModel.Season && page.childModel.episodes.status === SeasonEpisodesModel.Ready && page.childModel.episodes.totalCount === 0
                         icon.name: "video-x-generic"

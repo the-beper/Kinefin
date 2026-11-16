@@ -296,6 +296,7 @@ ColumnLayout {
         visible: !page.prefs.loaded && page.prefs.state !== UserConfigurationModel.Failed
 
         Kirigami.LoadingPlaceholder {
+            FadeInOnShow {}
             anchors.centerIn: parent
             text: i18n("Loading…")
         }

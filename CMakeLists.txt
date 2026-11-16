@@ -164,7 +164,7 @@ target_compile_definitions(kinefin_integration PRIVATE TRANSLATION_DOMAIN="kinef
 target_link_libraries(kinefin_integration PUBLIC kinefin_player Qt6::DBus Qt6::Gui Qt6::Network KF6::I18n)
 
 # The QML module lives in a static library of its own so that the UI tests can import it like the application does
-foreach(page Main PlayerPage OsdButton MiniPlayer PlaybackInfoOverlay ShellHeader AboutDialog ShortcutsDialog RemoteSessionsDialog MediaInfoDialog HomePage LibraryTile LibraryPage ResumeItemsPage MediaCard CardMenu CardRow EpisodeRow ItemDetailsPage SearchPage QueuePage FilterDialog GenreRailsView GenreRailsPage LibraryContent ItemListRow ItemRowGrid LoginPage UserPickerPage MessageBox ServersPage SettingsPage SettingRow UserPreferencesForm UserPreferencesSaveBar FavoritesPage FavoritesGroupPage TopFade MediaListRow PlaylistsPage PlaylistPage PlaylistDialogs AddToPlaylistDialog)
+foreach(page Main PlayerPage OsdButton MiniPlayer PlaybackInfoOverlay ShellHeader AboutDialog ShortcutsDialog RemoteSessionsDialog MediaInfoDialog HomePage LibraryTile LibraryPage ResumeItemsPage MediaCard CardMenu CardRow EpisodeRow ItemDetailsPage SearchPage QueuePage FilterDialog GenreRailsView GenreRailsPage LibraryContent ItemListRow ItemRowGrid LoginPage UserPickerPage MessageBox ServersPage SettingsPage SettingRow UserPreferencesForm UserPreferencesSaveBar FavoritesPage FavoritesGroupPage TopFade MediaListRow PlaylistsPage PlaylistPage PlaylistDialogs AddToPlaylistDialog PageToolbar PageBackButton FadeInOnShow PageTitle)
     set_source_files_properties(src/qml/${page}.qml PROPERTIES QT_RESOURCE_ALIAS ${page}.qml)
 endforeach()
 qt_add_library(kinefin_ui STATIC)
@@ -181,6 +181,10 @@ qt_add_qml_module(kinefin_ui
         src/qml/PlaylistPage.qml
         src/qml/PlaylistDialogs.qml
         src/qml/AddToPlaylistDialog.qml
+        src/qml/PageToolbar.qml
+        src/qml/PageBackButton.qml
+        src/qml/FadeInOnShow.qml
+        src/qml/PageTitle.qml
         src/qml/PlaybackInfoOverlay.qml
         src/qml/ShellHeader.qml
         src/qml/ShortcutsDialog.qml
@@ -227,6 +231,8 @@ qt_add_qml_module(kinefin_ui
         src/app/MouseNavigation.h
         src/app/MpvVideoItem.cpp
         src/app/MpvVideoItem.h
+        src/app/RemoteCommands.cpp
+        src/app/RemoteCommands.h
 )
 target_include_directories(kinefin_ui PUBLIC src/app)
 target_compile_definitions(kinefin_ui PRIVATE TRANSLATION_DOMAIN="kinefin")
@@ -358,6 +364,9 @@ if(BUILD_TESTING)
     target_compile_definitions(test_connection_controller PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}" TRANSLATION_DOMAIN="kinefin")
     target_link_libraries(test_connection_controller PRIVATE kinefin_ui kinefin_core Qt6::Test Qt6::Gui Qt6::Qml KF6::I18n)
     add_test(NAME connection_controller COMMAND test_connection_controller)
+    add_executable(test_remote_commands tests/test_remote_commands.cpp)
+    target_link_libraries(test_remote_commands PRIVATE kinefin_ui kinefin_core Qt6::Test)
+    add_test(NAME remote_commands COMMAND test_remote_commands)
 
     add_executable(test_home_rows_model tests/test_home_rows_model.cpp)
     target_compile_definitions(test_home_rows_model PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
@@ -366,7 +375,7 @@ if(BUILD_TESTING)
 
     add_executable(test_ui_pages tests/test_ui_pages.cpp)
     target_compile_definitions(test_ui_pages PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}" TRANSLATION_DOMAIN="kinefin")
-    target_link_libraries(test_ui_pages PRIVATE kinefin_ui kinefin_uiplugin kinefin_core Qt6::Test Qt6::Gui Qt6::Widgets Qt6::Quick Qt6::QuickControls2 Qt6::Qml KF6::I18n KF6::I18nQml)
+    target_link_libraries(test_ui_pages PRIVATE kinefin_ui kinefin_uiplugin kinefin_integration kinefin_core Qt6::Test Qt6::Gui Qt6::Widgets Qt6::Quick Qt6::QuickControls2 Qt6::Qml KF6::I18n KF6::I18nQml)
     # The UI tests take minutes in one process: the test functions are dealt out to shards that run side by side under `ctest -j`. Functions with a `_data` sibling are the slow ones and go first so no shard gets two of them
     set(KINEFIN_UI_SHARDS 6)
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS tests/test_ui_pages.cpp)

@@ -255,6 +255,28 @@ Kirigami.Page {
                 Layout.fillHeight: true
                 contentWidth: availableWidth
 
+                // Another section fades in instead of standing there at once
+                // On the GUI thread: a render-thread animator can leave a stale frame when its item is hidden mid-fade
+                NumberAnimation {
+                    id: sectionFade
+                    property: "opacity"
+                    target: settingsView
+                    from: 0
+                    to: 1
+                    duration: Kirigami.Units.longDuration
+                    easing.type: Easing.OutCubic
+                }
+                Connections {
+                    target: page
+                    function onActiveSectionChanged() {
+                        sectionFade.restart();
+                    }
+                    function onEntryOpenChanged() {
+                        if (page.entryOpen)
+                            sectionFade.restart();
+                    }
+                }
+
                 ColumnLayout {
                     // The room of the vertical scroll bar stays free while the bar hides, so the centred content keeps its place when the bar comes and goes (the bar takes the left side in a right-to-left layout)
                     readonly property var scrollBar: settingsView.Controls.ScrollBar.vertical
@@ -344,6 +366,7 @@ Kirigami.Page {
                         }
                     }
                     Kirigami.LoadingPlaceholder {
+                        FadeInOnShow {}
                         objectName: "userPreferencesBuilding"
                         Layout.alignment: Qt.AlignHCenter
                         Layout.topMargin: Kirigami.Units.gridUnit * 2

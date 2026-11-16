@@ -36,6 +36,7 @@ src/qml/PlaylistsPage.qml
 src/qml/PlaylistPage.qml
 src/qml/PlaylistDialogs.qml
 src/qml/AddToPlaylistDialog.qml
+src/qml/PageBackButton.qml
 src/qml/PlaybackInfoOverlay.qml
 src/qml/ShellHeader.qml
 src/qml/AboutDialog.qml

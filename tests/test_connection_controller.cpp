@@ -17,6 +17,7 @@
 
 #include "FakeJellyfin.h"
 #include "MemoryTokenStore.h"
+#include "api/PlaybackReport.h"
 #include "app/ConnectionController.h"
 #include "settings/BrowseStateStore.h"
 #include "settings/ServerCredentials.h"
@@ -306,6 +307,43 @@ class TestConnectionController : public QObject {
         controller->start();
         QCOMPARE(controller->state(), ConnectionController::Idle);
         QVERIFY(controller->servers().isEmpty());
+    }
+
+    void theSocketCarriesRemoteCommandsAndAnnouncesThem()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        auto controller = makeController();
+        QSignalSpy keycodes(controller->remoteCommands(),
+                            &Kinefin::RemoteCommands::keycodeRequested);
+        QSignalSpy seeks(controller->remoteCommands(), &Kinefin::RemoteCommands::seekRequested);
+        QVERIFY(signInFixtureUser(*controller, server));
+        // The sign-in opens the socket, which announces media control and the commands it takes
+        QTRY_COMPARE(controller->socket()->state(),
+                     Kinefin::JellyfinSocketClient::State::Authenticated);
+        QTRY_VERIFY(QJsonDocument::fromJson(server.lastCapabilitiesBody)
+                        .object()
+                        .value(QStringLiteral("SupportsMediaControl"))
+                        .toBool());
+        const QJsonArray commands = QJsonDocument::fromJson(server.lastCapabilitiesBody)
+                                        .object()
+                                        .value(QStringLiteral("SupportedCommands"))
+                                        .toArray();
+        QCOMPARE(commands, QJsonArray::fromStringList(Kinefin::supportedGeneralCommands()));
+        FakeSocketConnection *connection = server.lastConnection();
+        QVERIFY(connection);
+        connection->sendText(
+            QStringLiteral("{\"MessageType\":\"Playstate\",\"Data\":{\"Command\":\"Pause\"}}"));
+        QTRY_COMPARE(keycodes.size(), 1);
+        QCOMPARE(keycodes.constFirst().at(0).toString(), QStringLiteral("pause"));
+        connection->sendText(QStringLiteral("{\"MessageType\":\"Playstate\",\"Data\":{"
+                                            "\"Command\":\"Seek\",\"SeekPositionTicks\":50}}"));
+        QTRY_COMPARE(seeks.size(), 1);
+        QCOMPARE(seeks.constFirst().at(0).toLongLong(), 50);
+        // Signing out closes it: nothing more arrives
+        controller->signOut();
+        QTRY_COMPARE(controller->socket()->state(),
+                     Kinefin::JellyfinSocketClient::State::Disconnected);
     }
 
     void anonymousServerTestsAreOneShotPerVisitAndSendNoCredentials()

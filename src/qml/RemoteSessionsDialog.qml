@@ -118,6 +118,7 @@ Kirigami.Dialog {
             spacing: Kirigami.Units.largeSpacing
 
             QQC2.BusyIndicator {
+                FadeInOnShow {}
                 objectName: "remoteSessionsBusy"
                 Layout.alignment: Qt.AlignHCenter
                 running: !dialog.hasAnswered || dialog.retrying
@@ -125,6 +126,7 @@ Kirigami.Dialog {
             }
 
             Kirigami.PlaceholderMessage {
+                FadeInOnShow {}
                 objectName: "remoteSessionsEmpty"
                 Layout.fillWidth: true
                 visible: dialog.showsEmpty
@@ -179,21 +181,47 @@ Kirigami.Dialog {
                     required property bool playing
                     required property bool paused
                     required property bool canControl
+                    required property string deviceKind
 
                     // The name for the screen reader of the buttons: a tooltip never carries it
                     readonly property string shownName: deviceName.length > 0 ? deviceName : i18n("Unknown device")
                     readonly property Item primary: pauseButton
+                    readonly property string stateText: paused ? i18nc("@info a session that is paused, %1 title", "Paused: %1", nowPlaying) : playing ? i18n("Playing: %1", nowPlaying) : i18n("Nothing playing")
 
                     contentItem: RowLayout {
-                        spacing: Kirigami.Units.smallSpacing
+                        spacing: Kirigami.Units.largeSpacing
+
+                        // The kind of device, guessed from its client and name
+                        Kirigami.Icon {
+                            objectName: "remoteDeviceIcon"
+                            Layout.preferredWidth: Kirigami.Units.iconSizes.medium
+                            Layout.preferredHeight: Kirigami.Units.iconSizes.medium
+                            Layout.alignment: Qt.AlignVCenter
+                            source: {
+                                switch (deviceFrame.deviceKind) {
+                                case "tv":
+                                    return "video-television";
+                                case "tablet":
+                                    return "tablet";
+                                case "phone":
+                                    return "smartphone";
+                                case "browser":
+                                    return "internet-web-browser";
+                                case "computer":
+                                    return "computer";
+                                }
+                                return "network-server";
+                            }
+                            Accessible.ignored: true
+                        }
 
                         ColumnLayout {
                             Layout.fillWidth: true
-                            spacing: Kirigami.Units.smallSpacing
+                            spacing: 0
 
                             Kirigami.Heading {
                                 Layout.fillWidth: true
-                                level: 5
+                                level: 4
                                 elide: Text.ElideRight
                                 textFormat: Text.PlainText
                                 text: deviceFrame.shownName
@@ -203,13 +231,33 @@ Kirigami.Dialog {
                                 elide: Text.ElideRight
                                 textFormat: Text.PlainText
                                 opacity: 0.7
+                                font: Kirigami.Theme.smallFont
                                 text: [deviceFrame.clientName, deviceFrame.userName].filter(value => value.length > 0).join(" · ")
                             }
-                            QQC2.Label {
+                            // What plays, behind its state's icon; a screen reader hears the state in words
+                            RowLayout {
                                 Layout.fillWidth: true
-                                wrapMode: Text.Wrap
-                                textFormat: Text.PlainText
-                                text: deviceFrame.paused ? i18nc("@info a session that is paused, %1 title", "Paused: %1", deviceFrame.nowPlaying) : deviceFrame.playing ? i18n("Playing: %1", deviceFrame.nowPlaying) : i18n("Nothing playing")
+                                Layout.topMargin: Kirigami.Units.smallSpacing
+                                spacing: Kirigami.Units.smallSpacing
+
+                                Kirigami.Icon {
+                                    Layout.preferredWidth: Kirigami.Units.iconSizes.small
+                                    Layout.preferredHeight: Kirigami.Units.iconSizes.small
+                                    visible: deviceFrame.playing
+                                    // The status icons, boxed, not the buttons' action icons beside them
+                                    source: deviceFrame.paused ? "media-playback-paused" : "media-playback-playing"
+                                    Accessible.ignored: true
+                                }
+                                QQC2.Label {
+                                    objectName: "remoteNowPlaying"
+                                    Layout.fillWidth: true
+                                    elide: Text.ElideRight
+                                    maximumLineCount: 1
+                                    textFormat: Text.PlainText
+                                    opacity: deviceFrame.playing ? 1 : 0.7
+                                    text: deviceFrame.playing ? deviceFrame.nowPlaying : i18n("Nothing playing")
+                                    Accessible.name: deviceFrame.stateText
+                                }
                             }
                         }
 
@@ -225,7 +273,7 @@ Kirigami.Dialog {
                                 ? i18nc("@action:button %1 device", "Resume %1", deviceFrame.shownName)
                                 : i18nc("@action:button %1 device", "Pause %1", deviceFrame.shownName)
                             QQC2.ToolTip.text: text
-                            QQC2.ToolTip.visible: hovered
+                            QQC2.ToolTip.visible: hovered || visualFocus
                             QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
                             onClicked: dialog.remote.control(deviceFrame.sessionId, deviceFrame.paused ? "Unpause" : "Pause")
                         }
@@ -237,7 +285,7 @@ Kirigami.Dialog {
                             display: QQC2.AbstractButton.IconOnly
                             Accessible.name: i18nc("@action:button %1 device", "Stop %1", deviceFrame.shownName)
                             QQC2.ToolTip.text: text
-                            QQC2.ToolTip.visible: hovered
+                            QQC2.ToolTip.visible: hovered || visualFocus
                             QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
                             onClicked: dialog.remote.control(deviceFrame.sessionId, "Stop")
                         }

@@ -19,6 +19,11 @@ Kirigami.ScrollablePage {
     readonly property bool failed: playlists.status === PlaylistsController.Failed
 
     title: i18n("Playlists")
+    // The row of the page carries the actions, as on the Movies and Shows tabs
+    globalToolBarStyle: Kirigami.ApplicationHeaderStyle.None
+    // Without Kirigami's title row the page names itself to a screen reader
+    Accessible.role: Accessible.Pane
+    Accessible.name: title
 
     Component.onCompleted: {
         shell.playlistsPages++;
@@ -56,6 +61,14 @@ Kirigami.ScrollablePage {
     header: ColumnLayout {
         spacing: 0
 
+        // A Compact window hides the header's Playlists button, which otherwise names the page
+        PageToolbar {
+            Layout.fillWidth: true
+            actions: page.actions
+            title: (page.Window.window?.compactHeader ?? false) ? page.title : ""
+            toolbarObjectName: "playlistsToolbar"
+        }
+
         MessageBox {
             objectName: "playlistsFailed"
             Layout.fillWidth: true
@@ -82,6 +95,12 @@ Kirigami.ScrollablePage {
 
     GridView {
         id: grid
+        // What scrolls under the page row fades into it instead of being cut by its edge
+        TopFade {
+            parent: grid
+            z: 1
+            atStart: grid.atYBeginning
+        }
         objectName: "playlistsGrid"
 
         // Poster tiles of about ten grid units, at least one to a row
@@ -128,12 +147,14 @@ Kirigami.ScrollablePage {
         }
 
         Controls.BusyIndicator {
+            FadeInOnShow {}
             anchors.centerIn: parent
             running: visible
             visible: page.loading && page.playlists.list.count === 0
         }
 
         Kirigami.PlaceholderMessage {
+            FadeInOnShow {}
             objectName: "playlistsNotLoaded"
             anchors.centerIn: parent
             width: parent.width - Kirigami.Units.gridUnit * 4
@@ -149,18 +170,15 @@ Kirigami.ScrollablePage {
         }
 
         Kirigami.PlaceholderMessage {
+            FadeInOnShow {}
             objectName: "playlistsEmpty"
             anchors.centerIn: parent
             width: parent.width - Kirigami.Units.gridUnit * 4
             visible: page.playlists.status === PlaylistsController.Ready && page.playlists.list.count === 0
             icon.name: "view-media-playlist"
             text: i18n("No playlists")
-            helpfulAction: Kirigami.Action {
-                text: i18nc("@action:button", "New Playlist…")
-                icon.name: "list-add"
-                enabled: !page.playlists.writing
-                onTriggered: page.Window.window.newPlaylist()
-            }
+            // The row above already carries New Playlist…: the placeholder only says where
+            explanation: i18n("Create one with New Playlist…, or with Add to Playlist… in the menu of a video")
         }
     }
 }

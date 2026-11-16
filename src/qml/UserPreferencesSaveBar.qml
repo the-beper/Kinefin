@@ -21,6 +21,7 @@ Controls.ToolBar {
         spacing: Kirigami.Units.largeSpacing
 
         Controls.BusyIndicator {
+            FadeInOnShow {}
             Layout.preferredHeight: Kirigami.Units.iconSizes.smallMedium
             Layout.preferredWidth: Kirigami.Units.iconSizes.smallMedium
             visible: bar.saving

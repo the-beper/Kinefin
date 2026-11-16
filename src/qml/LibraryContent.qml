@@ -202,6 +202,18 @@ Item {
         asynchronous: true
         active: content.viewKept
         sourceComponent: content.listMode ? listComponent : gridComponent
+        // The grid or the list that takes the other's place fades in
+        onLoaded: viewFade.restart()
+    }
+    // On the GUI thread: a render-thread animator can leave a stale frame when its item is hidden mid-fade
+    NumberAnimation {
+        id: viewFade
+        property: "opacity"
+        target: loader
+        from: 0
+        to: 1
+        duration: Kirigami.Units.longDuration
+        easing.type: Easing.OutCubic
     }
 
     Component {
@@ -315,6 +327,7 @@ Item {
     }
 
     Kirigami.LoadingPlaceholder {
+        FadeInOnShow {}
         objectName: "libraryLoading"
         anchors.centerIn: parent
         // Until the view shows the items that are already in
@@ -324,6 +337,7 @@ Item {
 
     // Nothing in the library, and nothing narrows it
     Kirigami.PlaceholderMessage {
+        FadeInOnShow {}
         objectName: "libraryEmpty"
         anchors.centerIn: parent
         width: parent.width - Kirigami.Units.gridUnit * 4
@@ -335,6 +349,7 @@ Item {
 
     // The filters or the search leave no item: the library is not empty
     Kirigami.PlaceholderMessage {
+        FadeInOnShow {}
         objectName: "libraryFilteredEmpty"
         anchors.centerIn: parent
         width: parent.width - Kirigami.Units.gridUnit * 4

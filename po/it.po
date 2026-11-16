@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: kinefin 0\n"
 "Report-Msgid-Bugs-To: https://github.com/the-beper/Kinefin/issues\n"
-"POT-Creation-Date: 2026-11-16 11:16+0000\n"
+"POT-Creation-Date: 2026-11-16 13:54+0000\n"
 "PO-Revision-Date: 2026-11-07 00:00+0000\n"
 "Last-Translator: the-beper\n"
 "Language-Team: Italian\n"
@@ -13,7 +13,7 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-#: src/app/ConnectionController.cpp:319
+#: src/app/ConnectionController.cpp:329
 msgid ""
 "Could not save the session in KWallet. You will have to sign in again next "
 "time"
@@ -21,44 +21,44 @@ msgstr ""
 "Impossibile salvare la sessione in KWallet. Dovrai accedere di nuovo al "
 "prossimo avvio"
 
-#: src/app/ConnectionController.cpp:444
+#: src/app/ConnectionController.cpp:454
 msgid "Server not reachable"
 msgstr "Server non raggiungibile"
 
-#: src/app/ConnectionController.cpp:472
+#: src/app/ConnectionController.cpp:482
 msgid "Jellyfin server reachable"
 msgstr "Server Jellyfin raggiungibile"
 
-#: src/app/ConnectionController.cpp:495 src/app/ConnectionController.cpp:517
-#: src/app/ConnectionController.cpp:553
+#: src/app/ConnectionController.cpp:505 src/app/ConnectionController.cpp:527
+#: src/app/ConnectionController.cpp:563
 msgid "Enter a valid server address"
 msgstr "Inserisci un indirizzo di server valido"
 
-#: src/app/ConnectionController.cpp:498
+#: src/app/ConnectionController.cpp:508
 msgid "Testing connection…"
 msgstr "Connessione in corso…"
 
-#: src/app/ConnectionController.cpp:549
+#: src/app/ConnectionController.cpp:559
 msgid "The device identity of this profile is invalid"
 msgstr "L'identità del dispositivo di questo profilo non è valida"
 
-#: src/app/ConnectionController.cpp:586
+#: src/app/ConnectionController.cpp:596
 msgid "Could not read the saved session. Enter the password"
 msgstr "Impossibile leggere la sessione salvata. Inserisci la password"
 
-#: src/app/ConnectionController.cpp:647
+#: src/app/ConnectionController.cpp:657
 msgid "Enter a username and a password"
 msgstr "Inserisci nome utente e password"
 
-#: src/app/ConnectionController.cpp:659
+#: src/app/ConnectionController.cpp:669
 msgid "Quick Connect is not available"
 msgstr "Quick Connect non è disponibile"
 
-#: src/app/ConnectionController.cpp:915
+#: src/app/ConnectionController.cpp:925
 msgid "Your session has expired. Sign in again"
 msgstr "La sessione è scaduta. Accedi di nuovo"
 
-#: src/app/ConnectionController.cpp:929
+#: src/app/ConnectionController.cpp:939
 msgid ""
 "Could not reach a Jellyfin server. Check the address and your network "
 "connection"
@@ -66,23 +66,23 @@ msgstr ""
 "Impossibile raggiungere un server Jellyfin. Controlla l'indirizzo e la "
 "connessione di rete"
 
-#: src/app/ConnectionController.cpp:933
+#: src/app/ConnectionController.cpp:943
 msgid "Wrong username or password"
 msgstr "Nome utente o password errati"
 
-#: src/app/ConnectionController.cpp:934
+#: src/app/ConnectionController.cpp:944
 msgid "Signing in failed. Try again, or check the server"
 msgstr "Accesso non riuscito. Riprova o controlla il server"
 
-#: src/app/ConnectionController.cpp:939
+#: src/app/ConnectionController.cpp:949
 msgid "Quick Connect is not available on this server"
 msgstr "Quick Connect non è disponibile su questo server"
 
-#: src/app/ConnectionController.cpp:940
+#: src/app/ConnectionController.cpp:950
 msgid "Quick Connect failed or expired. Start it again"
 msgstr "Quick Connect non riuscito o scaduto. Avvialo di nuovo"
 
-#: src/app/ConnectionController.cpp:947
+#: src/app/ConnectionController.cpp:957
 msgid "Could not load the libraries. Try again"
 msgstr "Impossibile caricare le librerie. Riprova"
 
@@ -92,13 +92,13 @@ msgctxt "season and episode range"
 msgid "S%1:E%2–E%3"
 msgstr "S%1:E%2–E%3"
 
-#: src/player/PlayerController.cpp:52 src/qml/HomePage.qml:216
+#: src/player/PlayerController.cpp:52 src/qml/HomePage.qml:218
 #: src/qml/EpisodeRow.qml:38 src/qml/ItemDetailsPage.qml:67
-#: src/qml/ResumeItemsPage.qml:121 src/qml/SearchPage.qml:216
-#: src/qml/GenreRailsView.qml:214 src/qml/LibraryContent.qml:264
+#: src/qml/ResumeItemsPage.qml:134 src/qml/SearchPage.qml:223
+#: src/qml/GenreRailsView.qml:217 src/qml/LibraryContent.qml:274
 #: src/qml/ItemListRow.qml:40 src/qml/ItemRowGrid.qml:74
-#: src/qml/MediaListRow.qml:30 src/qml/FavoritesPage.qml:124
-#: src/qml/FavoritesGroupPage.qml:105
+#: src/qml/MediaListRow.qml:30 src/qml/FavoritesPage.qml:127
+#: src/qml/FavoritesGroupPage.qml:117
 msgctxt "season and episode number"
 msgid "S%1:E%2"
 msgstr "S%1:E%2"
@@ -109,22 +109,22 @@ msgctxt "episode number range"
 msgid "E%1–E%2"
 msgstr "E%1–E%2"
 
-#: src/player/PlayerController.cpp:57 src/qml/HomePage.qml:216
+#: src/player/PlayerController.cpp:57 src/qml/HomePage.qml:218
 #: src/qml/EpisodeRow.qml:41 src/qml/ItemDetailsPage.qml:68
-#: src/qml/ResumeItemsPage.qml:121 src/qml/SearchPage.qml:216
-#: src/qml/GenreRailsView.qml:214 src/qml/LibraryContent.qml:264
+#: src/qml/ResumeItemsPage.qml:134 src/qml/SearchPage.qml:223
+#: src/qml/GenreRailsView.qml:217 src/qml/LibraryContent.qml:274
 #: src/qml/ItemListRow.qml:40 src/qml/ItemRowGrid.qml:74
-#: src/qml/MediaListRow.qml:30 src/qml/FavoritesPage.qml:124
-#: src/qml/FavoritesGroupPage.qml:105
+#: src/qml/MediaListRow.qml:30 src/qml/FavoritesPage.qml:127
+#: src/qml/FavoritesGroupPage.qml:117
 msgctxt "episode number"
 msgid "E%1"
 msgstr "E%1"
 
-#: src/player/PlayerController.cpp:63 src/qml/HomePage.qml:217
-#: src/qml/EpisodeRow.qml:48 src/qml/ResumeItemsPage.qml:122
-#: src/qml/SearchPage.qml:217 src/qml/GenreRailsView.qml:215
+#: src/player/PlayerController.cpp:63 src/qml/HomePage.qml:219
+#: src/qml/EpisodeRow.qml:48 src/qml/ResumeItemsPage.qml:135
+#: src/qml/SearchPage.qml:224 src/qml/GenreRailsView.qml:218
 #: src/qml/ItemRowGrid.qml:75 src/qml/MediaListRow.qml:31
-#: src/qml/FavoritesPage.qml:125 src/qml/FavoritesGroupPage.qml:106
+#: src/qml/FavoritesPage.qml:128 src/qml/FavoritesGroupPage.qml:118
 msgctxt "episode label and episode title"
 msgid "%1 — %2"
 msgstr "%1 — %2"
@@ -137,44 +137,44 @@ msgstr "Impossibile scaricare i sottotitoli."
 msgid "The video could not be opened. Try again."
 msgstr "Impossibile aprire il video. Riprova."
 
-#: src/player/PlayerController.cpp:594
+#: src/player/PlayerController.cpp:595
 msgid "Unable to request playback from the server."
 msgstr "Impossibile richiedere la riproduzione al server."
 
-#: src/player/PlayerController.cpp:613
+#: src/player/PlayerController.cpp:614
 msgid "External subtitle %1"
 msgstr "Sottotitolo esterno %1"
 
-#: src/player/PlayerController.cpp:616
+#: src/player/PlayerController.cpp:617
 msgid "The selected media source could not be opened."
 msgstr "Impossibile aprire la sorgente multimediale selezionata."
 
-#: src/player/PlayerController.cpp:680
+#: src/player/PlayerController.cpp:681
 msgctxt "@item a chapter the server gives no name"
 msgid "Chapter %1"
 msgstr "Capitolo %1"
 
-#: src/player/PlayerController.cpp:1257
+#: src/player/PlayerController.cpp:1259
 msgid "Audio track %1"
 msgstr "Traccia audio %1"
 
-#: src/player/PlayerController.cpp:1258
+#: src/player/PlayerController.cpp:1260
 msgid "Subtitle %1"
 msgstr "Sottotitolo %1"
 
-#: src/player/PlayerController.cpp:1366
+#: src/player/PlayerController.cpp:1440
 msgid "Could not save the screenshot."
 msgstr "Impossibile salvare lo screenshot."
 
-#: src/player/PlayerController.cpp:1405
+#: src/player/PlayerController.cpp:1479
 msgid "Skip intro"
 msgstr "Salta introduzione"
 
-#: src/player/PlayerController.cpp:1406
+#: src/player/PlayerController.cpp:1480
 msgid "Skip recap"
 msgstr "Salta riepilogo"
 
-#: src/player/PlayerController.cpp:1407
+#: src/player/PlayerController.cpp:1481
 msgid "Skip outro"
 msgstr "Salta conclusione"
 
@@ -517,7 +517,7 @@ msgstr "Sovrascrivi lo stile"
 msgid "Manual MPV Configuration"
 msgstr "Configurazione manuale di MPV"
 
-#: src/settings/SettingDefinitions.cpp:646 src/qml/HomePage.qml:63
+#: src/settings/SettingDefinitions.cpp:646 src/qml/HomePage.qml:64
 msgid "Libraries"
 msgstr "Librerie"
 
@@ -528,7 +528,7 @@ msgstr "Mostra nella Home"
 
 #: src/settings/SettingDefinitions.cpp:657
 #: src/settings/SettingDefinitions.cpp:691
-#: src/settings/SettingDefinitions.cpp:735 src/qml/HomePage.qml:118
+#: src/settings/SettingDefinitions.cpp:735 src/qml/HomePage.qml:119
 #: src/qml/FavoritesPage.qml:26
 msgid "Favorites"
 msgstr "Preferiti"
@@ -554,7 +554,7 @@ msgid "Show Tabs in Movies"
 msgstr "Mostra le schede nei film"
 
 #: src/settings/SettingDefinitions.cpp:702
-#: src/settings/SettingDefinitions.cpp:746 src/qml/SearchPage.qml:150
+#: src/settings/SettingDefinitions.cpp:746 src/qml/SearchPage.qml:156
 msgid "Collections"
 msgstr "Raccolte"
 
@@ -581,8 +581,8 @@ msgstr "In arrivo"
 msgid "Networks"
 msgstr "Reti"
 
-#: src/settings/SettingDefinitions.cpp:790 src/qml/ItemDetailsPage.qml:265
-#: src/qml/ItemDetailsPage.qml:1129 src/qml/SearchPage.qml:148
+#: src/settings/SettingDefinitions.cpp:790 src/qml/ItemDetailsPage.qml:275
+#: src/qml/ItemDetailsPage.qml:1149 src/qml/SearchPage.qml:154
 msgid "Episodes"
 msgstr "Episodi"
 
@@ -590,62 +590,62 @@ msgstr "Episodi"
 msgid "Home"
 msgstr "Home"
 
-#: src/qml/HomePage.qml:44 src/qml/HomePage.qml:186
-#: src/qml/ItemDetailsPage.qml:322 src/qml/ItemDetailsPage.qml:335
-#: src/qml/ItemDetailsPage.qml:348 src/qml/ItemDetailsPage.qml:872
-#: src/qml/ItemDetailsPage.qml:927 src/qml/ItemDetailsPage.qml:1099
-#: src/qml/ItemDetailsPage.qml:1144 src/qml/ItemDetailsPage.qml:1201
-#: src/qml/LibraryPage.qml:688 src/qml/LibraryPage.qml:710
-#: src/qml/LibraryPage.qml:725 src/qml/ResumeItemsPage.qml:37
-#: src/qml/ResumeItemsPage.qml:51 src/qml/RemoteSessionsDialog.qml:143
-#: src/qml/SearchPage.qml:83 src/qml/SearchPage.qml:185
-#: src/qml/QueuePage.qml:274 src/qml/FilterDialog.qml:416
-#: src/qml/GenreRailsView.qml:85 src/qml/GenreRailsView.qml:178
-#: src/qml/PlaylistsPage.qml:68 src/qml/PlaylistsPage.qml:145
-#: src/qml/PlaylistPage.qml:148 src/qml/PlaylistPage.qml:286
-#: src/qml/AddToPlaylistDialog.qml:155 src/qml/FavoritesPage.qml:211
-#: src/qml/FavoritesPage.qml:267
+#: src/qml/HomePage.qml:44 src/qml/HomePage.qml:188
+#: src/qml/ItemDetailsPage.qml:333 src/qml/ItemDetailsPage.qml:346
+#: src/qml/ItemDetailsPage.qml:359 src/qml/ItemDetailsPage.qml:890
+#: src/qml/ItemDetailsPage.qml:946 src/qml/ItemDetailsPage.qml:1119
+#: src/qml/ItemDetailsPage.qml:1165 src/qml/ItemDetailsPage.qml:1223
+#: src/qml/LibraryPage.qml:699 src/qml/LibraryPage.qml:721
+#: src/qml/LibraryPage.qml:736 src/qml/ResumeItemsPage.qml:48
+#: src/qml/ResumeItemsPage.qml:62 src/qml/RemoteSessionsDialog.qml:145
+#: src/qml/SearchPage.qml:88 src/qml/SearchPage.qml:192
+#: src/qml/QueuePage.qml:265 src/qml/FilterDialog.qml:417
+#: src/qml/GenreRailsView.qml:86 src/qml/GenreRailsView.qml:181
+#: src/qml/PlaylistsPage.qml:81 src/qml/PlaylistsPage.qml:160
+#: src/qml/PlaylistPage.qml:161 src/qml/PlaylistPage.qml:301
+#: src/qml/AddToPlaylistDialog.qml:157 src/qml/FavoritesPage.qml:202
+#: src/qml/FavoritesPage.qml:276
 msgid "Retry"
 msgstr "Riprova"
 
-#: src/qml/HomePage.qml:54 src/qml/FavoritesPage.qml:279
+#: src/qml/HomePage.qml:55 src/qml/FavoritesPage.qml:289
 msgid "No libraries to show"
 msgstr "Nessuna libreria da mostrare"
 
-#: src/qml/HomePage.qml:114 src/qml/ResumeItemsPage.qml:20
+#: src/qml/HomePage.qml:115 src/qml/ResumeItemsPage.qml:20
 msgid "Continue Watching"
 msgstr "Continua a guardare"
 
-#: src/qml/HomePage.qml:116 src/qml/ItemDetailsPage.qml:829
+#: src/qml/HomePage.qml:117 src/qml/ItemDetailsPage.qml:846
 msgid "Next Up"
 msgstr "Prossimi"
 
-#: src/qml/HomePage.qml:120
+#: src/qml/HomePage.qml:121
 msgid "Recently Added in %1"
 msgstr "Aggiunti di recente in %1"
 
-#: src/qml/HomePage.qml:157
+#: src/qml/HomePage.qml:158
 msgid "See All"
 msgstr "Mostra tutto"
 
-#: src/qml/HomePage.qml:159
+#: src/qml/HomePage.qml:160
 msgid "See All in %1"
 msgstr "Mostra tutto in %1"
 
-#: src/qml/HomePage.qml:172 src/qml/ItemDetailsPage.qml:313
-#: src/qml/ItemDetailsPage.qml:863 src/qml/ItemDetailsPage.qml:918
-#: src/qml/ItemDetailsPage.qml:1090 src/qml/ItemDetailsPage.qml:1135
-#: src/qml/LibraryPage.qml:794 src/qml/ResumeItemsPage.qml:95
-#: src/qml/SearchPage.qml:175 src/qml/QueuePage.qml:254
-#: src/qml/QueuePage.qml:262 src/qml/FilterDialog.qml:402
-#: src/qml/FilterDialog.qml:409 src/qml/GenreRailsView.qml:67
-#: src/qml/GenreRailsView.qml:164 src/qml/LibraryContent.qml:322
-#: src/qml/SettingsPage.qml:351 src/qml/UserPreferencesForm.qml:300
-#: src/qml/UserPreferencesForm.qml:634
+#: src/qml/HomePage.qml:174 src/qml/ItemDetailsPage.qml:324
+#: src/qml/ItemDetailsPage.qml:881 src/qml/ItemDetailsPage.qml:937
+#: src/qml/ItemDetailsPage.qml:1110 src/qml/ItemDetailsPage.qml:1156
+#: src/qml/LibraryPage.qml:824 src/qml/ResumeItemsPage.qml:107
+#: src/qml/SearchPage.qml:182 src/qml/QueuePage.qml:244
+#: src/qml/QueuePage.qml:253 src/qml/FilterDialog.qml:403
+#: src/qml/FilterDialog.qml:410 src/qml/GenreRailsView.qml:68
+#: src/qml/GenreRailsView.qml:167 src/qml/LibraryContent.qml:333
+#: src/qml/SettingsPage.qml:372 src/qml/UserPreferencesForm.qml:301
+#: src/qml/UserPreferencesForm.qml:635
 msgid "Loading…"
 msgstr "Caricamento…"
 
-#: src/qml/HomePage.qml:179
+#: src/qml/HomePage.qml:181
 msgid ""
 "Could not load this row: check the connection to the server and try again"
 msgstr ""
@@ -661,14 +661,14 @@ msgstr "%1 h %2 min"
 msgid "%1 min"
 msgstr "%1 min"
 
-#: src/qml/EpisodeRow.qml:59 src/qml/ItemDetailsPage.qml:643
+#: src/qml/EpisodeRow.qml:59 src/qml/ItemDetailsPage.qml:660
 #: src/qml/ItemListRow.qml:59 src/qml/MediaCard.qml:84
 #: src/qml/MediaListRow.qml:78
 msgctxt "state of an item"
 msgid "Played"
 msgstr "Visto"
 
-#: src/qml/EpisodeRow.qml:61 src/qml/ItemDetailsPage.qml:665
+#: src/qml/EpisodeRow.qml:61 src/qml/ItemDetailsPage.qml:682
 #: src/qml/ItemListRow.qml:61 src/qml/MediaCard.qml:86
 msgid "Favorite"
 msgstr "Preferito"
@@ -705,13 +705,13 @@ msgctxt "status of a series"
 msgid "Ended"
 msgstr "Terminata"
 
-#: src/qml/ItemDetailsPage.qml:96 src/qml/MediaCard.qml:390
-#: src/qml/CardMenu.qml:45 src/qml/PlayerPage.qml:713
-#: src/qml/MiniPlayer.qml:198
+#: src/qml/ItemDetailsPage.qml:96 src/qml/MediaCard.qml:395
+#: src/qml/CardMenu.qml:45 src/qml/PlayerPage.qml:742
+#: src/qml/MiniPlayer.qml:212
 msgid "Resume"
 msgstr "Riprendi"
 
-#: src/qml/ItemDetailsPage.qml:96 src/qml/MediaCard.qml:390
+#: src/qml/ItemDetailsPage.qml:96 src/qml/MediaCard.qml:395
 #: src/qml/CardMenu.qml:45
 msgid "Play"
 msgstr "Riproduci"
@@ -782,176 +782,176 @@ msgstr "Segna come visto"
 msgid "Media Info"
 msgstr "Info media"
 
-#: src/qml/ItemDetailsPage.qml:319
+#: src/qml/ItemDetailsPage.qml:330
 msgid ""
 "Could not load this item: check the connection to the server and try again"
 msgstr ""
 "Impossibile caricare questo elemento: controlla la connessione al server e "
 "riprova"
 
-#: src/qml/ItemDetailsPage.qml:332 src/qml/Main.qml:1321
+#: src/qml/ItemDetailsPage.qml:343 src/qml/Main.qml:1467
 msgid "Could not update Favorites. Check the connection and try again"
 msgstr "Impossibile aggiornare i preferiti. Controlla la connessione e riprova"
 
-#: src/qml/ItemDetailsPage.qml:345
+#: src/qml/ItemDetailsPage.qml:356
 msgid "Could not update watched status. Check the connection and try again"
 msgstr ""
 "Impossibile aggiornare lo stato di visione. Controlla la connessione e "
 "riprova"
 
-#: src/qml/ItemDetailsPage.qml:359
+#: src/qml/ItemDetailsPage.qml:371
 msgid "This item is not available"
 msgstr "Questo elemento non è disponibile"
 
-#: src/qml/ItemDetailsPage.qml:360
+#: src/qml/ItemDetailsPage.qml:372
 msgid "It may have been removed from the server"
 msgstr "Potrebbe essere stato rimosso dal server"
 
-#: src/qml/ItemDetailsPage.qml:485
+#: src/qml/ItemDetailsPage.qml:502
 msgid "Season %1"
 msgstr "Stagione %1"
 
-#: src/qml/ItemDetailsPage.qml:485
+#: src/qml/ItemDetailsPage.qml:502
 msgid "Specials"
 msgstr "Speciali"
 
-#: src/qml/ItemDetailsPage.qml:485
+#: src/qml/ItemDetailsPage.qml:502
 msgid "Season"
 msgstr "Stagione"
 
-#: src/qml/ItemDetailsPage.qml:543
+#: src/qml/ItemDetailsPage.qml:560
 msgid "Rated %1"
 msgstr "Classificazione %1"
 
-#: src/qml/ItemDetailsPage.qml:553 src/qml/LibraryPage.qml:404
+#: src/qml/ItemDetailsPage.qml:570 src/qml/LibraryPage.qml:415
 msgid "Community Rating"
 msgstr "Valutazione della community"
 
-#: src/qml/ItemDetailsPage.qml:576
+#: src/qml/ItemDetailsPage.qml:593
 #, javascript-format
 msgctxt "critic rating in percent"
 msgid "%1%"
 msgstr "%1%"
 
-#: src/qml/ItemDetailsPage.qml:577
+#: src/qml/ItemDetailsPage.qml:594
 msgid "Critic Rating: %1"
 msgstr "Valutazione della critica: %1"
 
-#: src/qml/ItemDetailsPage.qml:586 src/qml/ItemListRow.qml:35
+#: src/qml/ItemDetailsPage.qml:603 src/qml/ItemListRow.qml:35
 #: src/qml/MediaCard.qml:56
 msgid "%1 season"
 msgid_plural "%1 seasons"
 msgstr[0] "%1 stagione"
 msgstr[1] "%1 stagioni"
 
-#: src/qml/ItemDetailsPage.qml:595 src/qml/LibraryPage.qml:537
+#: src/qml/ItemDetailsPage.qml:612 src/qml/LibraryPage.qml:548
 #: src/qml/ItemListRow.qml:35 src/qml/MediaCard.qml:56
 msgid "%1 episode"
 msgid_plural "%1 episodes"
 msgstr[0] "%1 episodio"
 msgstr[1] "%1 episodi"
 
-#: src/qml/ItemDetailsPage.qml:604
+#: src/qml/ItemDetailsPage.qml:621
 msgid "%1 unplayed"
 msgid_plural "%1 unplayed"
 msgstr[0] "%1 non riprodotto"
 msgstr[1] "%1 non riprodotti"
 
-#: src/qml/ItemDetailsPage.qml:703
+#: src/qml/ItemDetailsPage.qml:720
 msgid "%1 subtitle"
 msgid_plural "%1 subtitles"
 msgstr[0] "%1 sottotitolo"
 msgstr[1] "%1 sottotitoli"
 
-#: src/qml/ItemDetailsPage.qml:741
+#: src/qml/ItemDetailsPage.qml:758
 msgid "Show Less"
 msgstr "Mostra meno"
 
-#: src/qml/ItemDetailsPage.qml:741
+#: src/qml/ItemDetailsPage.qml:758
 msgid "Show More"
 msgstr "Mostra altro"
 
-#: src/qml/ItemDetailsPage.qml:762
+#: src/qml/ItemDetailsPage.qml:779
 msgid "Genre"
 msgid_plural "Genres"
 msgstr[0] "Genere"
 msgstr[1] "Generi"
 
-#: src/qml/ItemDetailsPage.qml:779
+#: src/qml/ItemDetailsPage.qml:796
 msgid "Network"
 msgid_plural "Networks"
 msgstr[0] "Rete"
 msgstr[1] "Reti"
 
-#: src/qml/ItemDetailsPage.qml:779
+#: src/qml/ItemDetailsPage.qml:796
 msgid "Studio"
 msgid_plural "Studios"
 msgstr[0] "Studio"
 msgstr[1] "Studi"
 
-#: src/qml/ItemDetailsPage.qml:796
+#: src/qml/ItemDetailsPage.qml:813
 msgid "Director"
 msgid_plural "Directors"
 msgstr[0] "Regia"
 msgstr[1] "Regia"
 
-#: src/qml/ItemDetailsPage.qml:813
+#: src/qml/ItemDetailsPage.qml:830
 msgid "Writer"
 msgid_plural "Writers"
 msgstr[0] "Sceneggiatura"
 msgstr[1] "Sceneggiatura"
 
-#: src/qml/ItemDetailsPage.qml:855 src/qml/ItemDetailsPage.qml:884
+#: src/qml/ItemDetailsPage.qml:872 src/qml/ItemDetailsPage.qml:902
 msgid "Seasons"
 msgstr "Stagioni"
 
-#: src/qml/ItemDetailsPage.qml:869
+#: src/qml/ItemDetailsPage.qml:887
 msgid "Could not load the seasons"
 msgstr "Impossibile caricare le stagioni"
 
-#: src/qml/ItemDetailsPage.qml:902 src/qml/ItemDetailsPage.qml:939
+#: src/qml/ItemDetailsPage.qml:920 src/qml/ItemDetailsPage.qml:958
 msgid "In This Collection"
 msgstr "In questa raccolta"
 
-#: src/qml/ItemDetailsPage.qml:910
+#: src/qml/ItemDetailsPage.qml:928
 msgid "%1 of %2 items"
 msgstr "%1 di %2 elementi"
 
-#: src/qml/ItemDetailsPage.qml:924
+#: src/qml/ItemDetailsPage.qml:943
 msgid "Could not load the items of this collection"
 msgstr "Impossibile caricare gli elementi di questa raccolta"
 
-#: src/qml/ItemDetailsPage.qml:958 src/qml/ItemDetailsPage.qml:965
+#: src/qml/ItemDetailsPage.qml:977 src/qml/ItemDetailsPage.qml:984
 msgid "Cast and Crew"
 msgstr "Cast e troupe"
 
-#: src/qml/ItemDetailsPage.qml:1042
+#: src/qml/ItemDetailsPage.qml:1061
 msgid "Chapters"
 msgstr "Capitoli"
 
-#: src/qml/ItemDetailsPage.qml:1082 src/qml/ItemDetailsPage.qml:1110
+#: src/qml/ItemDetailsPage.qml:1101 src/qml/ItemDetailsPage.qml:1130
 msgid "More Like This"
 msgstr "Simili a questo"
 
-#: src/qml/ItemDetailsPage.qml:1096
+#: src/qml/ItemDetailsPage.qml:1116
 msgid "Could not load similar items"
 msgstr "Impossibile caricare gli elementi simili"
 
-#: src/qml/ItemDetailsPage.qml:1141
+#: src/qml/ItemDetailsPage.qml:1162
 msgid ""
 "Could not load the episodes: check the connection to the server and try again"
 msgstr ""
 "Impossibile caricare gli episodi: verifica la connessione al server e riprova"
 
-#: src/qml/ItemDetailsPage.qml:1155
+#: src/qml/ItemDetailsPage.qml:1177
 msgid "This season has no episodes"
 msgstr "Questa stagione non ha episodi"
 
-#: src/qml/ItemDetailsPage.qml:1198
+#: src/qml/ItemDetailsPage.qml:1220
 msgid "Some episodes could not be loaded"
 msgstr "Alcuni episodi non sono stati caricati"
 
-#: src/qml/LibraryPage.qml:33 src/qml/SearchPage.qml:144
+#: src/qml/LibraryPage.qml:33 src/qml/SearchPage.qml:150
 msgid "Movies"
 msgstr "Film"
 
@@ -1042,167 +1042,167 @@ msgstr "Non ci sono ancora suggerimenti"
 msgid "Return to Top"
 msgstr "Torna in cima"
 
-#: src/qml/LibraryPage.qml:255
+#: src/qml/LibraryPage.qml:266
 msgid "All libraries"
 msgstr "Tutte le librerie"
 
-#: src/qml/LibraryPage.qml:264
+#: src/qml/LibraryPage.qml:275
 msgctxt "@label:listbox"
 msgid "Library"
 msgstr "Libreria"
 
-#: src/qml/LibraryPage.qml:293
+#: src/qml/LibraryPage.qml:304
 msgid "All Networks"
 msgstr "Tutte le reti"
 
-#: src/qml/LibraryPage.qml:358 src/qml/FilterDialog.qml:25
+#: src/qml/LibraryPage.qml:369 src/qml/FilterDialog.qml:25
 #: src/qml/FilterDialog.qml:355
 msgid "Filters"
 msgstr "Filtri"
 
-#: src/qml/LibraryPage.qml:366
+#: src/qml/LibraryPage.qml:377
 msgid "Sort"
 msgstr "Ordina"
 
-#: src/qml/LibraryPage.qml:374
+#: src/qml/LibraryPage.qml:385
 msgid "Name"
 msgstr "Nome"
 
-#: src/qml/LibraryPage.qml:379
+#: src/qml/LibraryPage.qml:390
 msgid "Date Added"
 msgstr "Data di aggiunta"
 
-#: src/qml/LibraryPage.qml:384
+#: src/qml/LibraryPage.qml:395
 msgid "Date Episode Added"
 msgstr "Data di aggiunta episodio"
 
-#: src/qml/LibraryPage.qml:389
+#: src/qml/LibraryPage.qml:400
 msgid "Release Date"
 msgstr "Data di uscita"
 
-#: src/qml/LibraryPage.qml:394
+#: src/qml/LibraryPage.qml:405
 msgid "Year"
 msgstr "Anno"
 
-#: src/qml/LibraryPage.qml:399
+#: src/qml/LibraryPage.qml:410
 msgid "Episode Order"
 msgstr "Ordine degli episodi"
 
-#: src/qml/LibraryPage.qml:409
+#: src/qml/LibraryPage.qml:420
 msgid "Critic Rating"
 msgstr "Valutazione della critica"
 
-#: src/qml/LibraryPage.qml:414
+#: src/qml/LibraryPage.qml:425
 msgid "Runtime"
 msgstr "Durata"
 
-#: src/qml/LibraryPage.qml:419
+#: src/qml/LibraryPage.qml:430
 msgid "Date Played"
 msgstr "Data di riproduzione"
 
-#: src/qml/LibraryPage.qml:424
+#: src/qml/LibraryPage.qml:435
 msgid "Play Count"
 msgstr "Numero riproduzioni"
 
-#: src/qml/LibraryPage.qml:429
+#: src/qml/LibraryPage.qml:440
 msgid "Random"
 msgstr "Casuale"
 
-#: src/qml/LibraryPage.qml:437
+#: src/qml/LibraryPage.qml:448
 msgid "Ascending Order"
 msgstr "Ordine crescente"
 
-#: src/qml/LibraryPage.qml:444
+#: src/qml/LibraryPage.qml:455
 msgid "Descending Order"
 msgstr "Ordine decrescente"
 
-#: src/qml/LibraryPage.qml:452
+#: src/qml/LibraryPage.qml:463
 msgid "Reshuffle"
 msgstr "Rimescola"
 
-#: src/qml/LibraryPage.qml:461
+#: src/qml/LibraryPage.qml:472
 msgid "Grid View"
 msgstr "Vista a griglia"
 
-#: src/qml/LibraryPage.qml:461
+#: src/qml/LibraryPage.qml:472
 msgid "List View"
 msgstr "Vista elenco"
 
-#: src/qml/LibraryPage.qml:469
+#: src/qml/LibraryPage.qml:480
 msgid "View Options"
 msgstr "Opzioni di visualizzazione"
 
-#: src/qml/LibraryPage.qml:477
+#: src/qml/LibraryPage.qml:488
 msgctxt "@item:inmenu type of image shown on the cards"
 msgid "Poster"
 msgstr "Locandina"
 
-#: src/qml/LibraryPage.qml:482
+#: src/qml/LibraryPage.qml:493
 msgctxt "@item:inmenu type of image shown on the cards"
 msgid "Banner"
 msgstr "Banner"
 
-#: src/qml/LibraryPage.qml:487
+#: src/qml/LibraryPage.qml:498
 msgctxt "@item:inmenu type of image shown on the cards"
 msgid "Disc"
 msgstr "Disco"
 
-#: src/qml/LibraryPage.qml:492
+#: src/qml/LibraryPage.qml:503
 msgctxt "@item:inmenu type of image shown on the cards"
 msgid "Logo"
 msgstr "Logo"
 
-#: src/qml/LibraryPage.qml:497
+#: src/qml/LibraryPage.qml:508
 msgctxt "@item:inmenu type of image shown on the cards"
 msgid "Thumbnail"
 msgstr "Miniatura"
 
-#: src/qml/LibraryPage.qml:504
+#: src/qml/LibraryPage.qml:515
 msgid "Show Title"
 msgstr "Mostra titolo"
 
-#: src/qml/LibraryPage.qml:510
+#: src/qml/LibraryPage.qml:521
 msgid "Show Year"
 msgstr "Mostra anno"
 
-#: src/qml/LibraryPage.qml:516
+#: src/qml/LibraryPage.qml:527
 msgid "Card Layout"
 msgstr "Layout dei riquadri"
 
-#: src/qml/LibraryPage.qml:523
+#: src/qml/LibraryPage.qml:534
 msgid "Browse by Genre"
 msgstr "Sfoglia per genere"
 
-#: src/qml/LibraryPage.qml:578 src/qml/ShellHeader.qml:312
+#: src/qml/LibraryPage.qml:589 src/qml/ShellHeader.qml:312
 msgctxt "@info:placeholder"
 msgid "Search in Movies"
 msgstr "Cerca nei film"
 
-#: src/qml/LibraryPage.qml:578 src/qml/ShellHeader.qml:314
+#: src/qml/LibraryPage.qml:589 src/qml/ShellHeader.qml:314
 msgctxt "@info:placeholder"
 msgid "Search in Shows"
 msgstr "Cerca nelle serie TV"
 
-#: src/qml/LibraryPage.qml:651
+#: src/qml/LibraryPage.qml:662
 msgctxt ""
 "accessible name of the button that removes one filter, %1 is the filter"
 msgid "Remove the filter %1"
 msgstr "Rimuovi il filtro %1"
 
-#: src/qml/LibraryPage.qml:652
+#: src/qml/LibraryPage.qml:663
 msgid "Remove this filter"
 msgstr "Rimuovi questo filtro"
 
-#: src/qml/LibraryPage.qml:665 src/qml/LibraryContent.qml:322
+#: src/qml/LibraryPage.qml:676 src/qml/LibraryContent.qml:333
 msgid "Applying the saved filters…"
 msgstr "Applicazione dei filtri salvati…"
 
-#: src/qml/LibraryPage.qml:672 src/qml/LibraryPage.qml:695
-#: src/qml/LibraryContent.qml:349
+#: src/qml/LibraryPage.qml:683 src/qml/LibraryPage.qml:706
+#: src/qml/LibraryContent.qml:362
 msgid "Clear Filters"
 msgstr "Cancella filtri"
 
-#: src/qml/LibraryPage.qml:684
+#: src/qml/LibraryPage.qml:695
 msgid ""
 "The filters and search are too long for the server: clear the filters or "
 "shorten the search"
@@ -1210,54 +1210,54 @@ msgstr ""
 "Filtri e ricerca sono troppo lunghi per il server: cancella i filtri o "
 "accorcia la ricerca"
 
-#: src/qml/LibraryPage.qml:684
+#: src/qml/LibraryPage.qml:695
 msgid ""
 "Could not load this library: check the connection to the server and try again"
 msgstr ""
 "Impossibile caricare questa libreria: verifica la connessione al server e "
 "riprova"
 
-#: src/qml/LibraryPage.qml:707 src/qml/ResumeItemsPage.qml:48
+#: src/qml/LibraryPage.qml:718 src/qml/ResumeItemsPage.qml:59
 msgid "Some items could not be loaded"
 msgstr "Alcuni elementi non sono stati caricati"
 
-#: src/qml/LibraryPage.qml:722
+#: src/qml/LibraryPage.qml:733
 msgid ""
 "Could not load this section: check the connection to the server and try again"
 msgstr ""
 "Impossibile caricare questa sezione: controlla la connessione al server e "
 "riprova"
 
-#: src/qml/LibraryPage.qml:803 src/qml/LibraryContent.qml:332
-#: src/qml/LibraryContent.qml:343
+#: src/qml/LibraryPage.qml:834 src/qml/LibraryContent.qml:344
+#: src/qml/LibraryContent.qml:356
 msgid "No items"
 msgstr "Nessun elemento"
 
-#: src/qml/LibraryPage.qml:840
+#: src/qml/LibraryPage.qml:871
 msgid "Because you watched %1"
 msgstr "Perché hai guardato %1"
 
-#: src/qml/LibraryPage.qml:842
+#: src/qml/LibraryPage.qml:873
 msgid "Because you liked %1"
 msgstr "Perché ti è piaciuto %1"
 
-#: src/qml/LibraryPage.qml:844
+#: src/qml/LibraryPage.qml:875
 msgid "Because you watched movies directed by %1"
 msgstr "Perché hai guardato film diretti da %1"
 
-#: src/qml/LibraryPage.qml:846
+#: src/qml/LibraryPage.qml:877
 msgid "Because you watched movies with %1"
 msgstr "Perché hai guardato film con %1"
 
-#: src/qml/LibraryPage.qml:848
+#: src/qml/LibraryPage.qml:879
 msgid "Because you like movies directed by %1"
 msgstr "Perché ti piacciono i film diretti da %1"
 
-#: src/qml/LibraryPage.qml:850
+#: src/qml/LibraryPage.qml:881
 msgid "Because you like movies with %1"
 msgstr "Perché ti piacciono i film con %1"
 
-#: src/qml/LibraryPage.qml:852
+#: src/qml/LibraryPage.qml:883
 msgid "Suggested for you"
 msgstr "Consigliati per te"
 
@@ -1265,18 +1265,18 @@ msgstr "Consigliati per te"
 msgid "Not supported yet"
 msgstr "Non ancora supportato"
 
-#: src/qml/ResumeItemsPage.qml:34
+#: src/qml/ResumeItemsPage.qml:45
 msgid ""
 "Could not load this list: check the connection to the server and try again"
 msgstr ""
 "Impossibile caricare questo elenco: controlla la connessione al server e "
 "riprova"
 
-#: src/qml/ResumeItemsPage.qml:103
+#: src/qml/ResumeItemsPage.qml:116
 msgid "Nothing to continue watching"
 msgstr "Niente da continuare a guardare"
 
-#: src/qml/ResumeItemsPage.qml:104
+#: src/qml/ResumeItemsPage.qml:117
 msgid "Items you have started watching show up here"
 msgstr "Gli elementi che hai iniziato a guardare compaiono qui"
 
@@ -1290,65 +1290,65 @@ msgctxt "@action:button"
 msgid "Refresh"
 msgstr "Aggiorna"
 
-#: src/qml/RemoteSessionsDialog.qml:132
+#: src/qml/RemoteSessionsDialog.qml:134
 msgid "No connected devices found"
 msgstr "Nessun dispositivo connesso"
 
-#: src/qml/RemoteSessionsDialog.qml:140
+#: src/qml/RemoteSessionsDialog.qml:142
 msgid "Could not load connected devices"
 msgstr "Impossibile caricare i dispositivi connessi"
 
-#: src/qml/RemoteSessionsDialog.qml:157
+#: src/qml/RemoteSessionsDialog.qml:159
 msgid "The remote command failed. Refresh the devices and try again"
 msgstr "Comando remoto non riuscito. Aggiorna i dispositivi e riprova"
 
-#: src/qml/RemoteSessionsDialog.qml:164
+#: src/qml/RemoteSessionsDialog.qml:166
 msgid "Only the first 100 connected devices are shown"
 msgstr "Vengono mostrati soltanto i primi 100 dispositivi connessi"
 
-#: src/qml/RemoteSessionsDialog.qml:184
+#: src/qml/RemoteSessionsDialog.qml:187
 msgid "Unknown device"
 msgstr "Dispositivo sconosciuto"
 
-#: src/qml/RemoteSessionsDialog.qml:212
+#: src/qml/RemoteSessionsDialog.qml:189
 msgctxt "@info a session that is paused, %1 title"
 msgid "Paused: %1"
 msgstr "In pausa: %1"
 
-#: src/qml/RemoteSessionsDialog.qml:212
+#: src/qml/RemoteSessionsDialog.qml:189
 msgid "Playing: %1"
 msgstr "In riproduzione: %1"
 
-#: src/qml/RemoteSessionsDialog.qml:212
+#: src/qml/RemoteSessionsDialog.qml:189 src/qml/RemoteSessionsDialog.qml:258
 msgid "Nothing playing"
 msgstr "Nessuna riproduzione in corso"
 
-#: src/qml/RemoteSessionsDialog.qml:221
+#: src/qml/RemoteSessionsDialog.qml:269
 msgctxt "@action:button"
 msgid "Resume"
 msgstr "Riprendi"
 
-#: src/qml/RemoteSessionsDialog.qml:221
+#: src/qml/RemoteSessionsDialog.qml:269
 msgctxt "@action:button"
 msgid "Pause"
 msgstr "Pausa"
 
-#: src/qml/RemoteSessionsDialog.qml:225
+#: src/qml/RemoteSessionsDialog.qml:273
 msgctxt "@action:button %1 device"
 msgid "Resume %1"
 msgstr "Riprendi %1"
 
-#: src/qml/RemoteSessionsDialog.qml:226
+#: src/qml/RemoteSessionsDialog.qml:274
 msgctxt "@action:button %1 device"
 msgid "Pause %1"
 msgstr "Pausa %1"
 
-#: src/qml/RemoteSessionsDialog.qml:235
+#: src/qml/RemoteSessionsDialog.qml:283
 msgctxt "@action:button"
 msgid "Stop"
 msgstr "Ferma"
 
-#: src/qml/RemoteSessionsDialog.qml:238
+#: src/qml/RemoteSessionsDialog.qml:286
 msgctxt "@action:button %1 device"
 msgid "Stop %1"
 msgstr "Ferma %1"
@@ -1405,7 +1405,7 @@ msgstr "Info media copiate negli appunti"
 msgid "Search"
 msgstr "Cerca"
 
-#: src/qml/SearchPage.qml:80 src/qml/SearchPage.qml:182
+#: src/qml/SearchPage.qml:85 src/qml/SearchPage.qml:189
 msgid ""
 "Could not load these results: check the connection to the server and try "
 "again"
@@ -1413,33 +1413,33 @@ msgstr ""
 "Impossibile caricare questi risultati: verifica la connessione al server e "
 "riprova"
 
-#: src/qml/SearchPage.qml:101
+#: src/qml/SearchPage.qml:107
 msgid "Keep typing"
 msgstr "Continua a digitare"
 
-#: src/qml/SearchPage.qml:103
+#: src/qml/SearchPage.qml:109
 msgid "No results"
 msgstr "Nessun risultato"
 
-#: src/qml/SearchPage.qml:105
+#: src/qml/SearchPage.qml:111
 msgid "Search your libraries"
 msgstr "Cerca nelle tue librerie"
 
-#: src/qml/SearchPage.qml:111
+#: src/qml/SearchPage.qml:117
 msgid "Type at least %1 character"
 msgid_plural "Type at least %1 characters"
 msgstr[0] "Digita almeno %1 carattere"
 msgstr[1] "Digita almeno %1 caratteri"
 
-#: src/qml/SearchPage.qml:113
+#: src/qml/SearchPage.qml:119
 msgid "Nothing in your libraries matches"
 msgstr "Nulla nelle tue librerie corrisponde"
 
-#: src/qml/SearchPage.qml:115
+#: src/qml/SearchPage.qml:121
 msgid "Type the name of a movie, series or episode"
 msgstr "Digita il nome di un film, di una serie o di un episodio"
 
-#: src/qml/SearchPage.qml:146
+#: src/qml/SearchPage.qml:152
 msgid "Series"
 msgstr "Serie"
 
@@ -1447,55 +1447,55 @@ msgstr "Serie"
 msgid "Queue"
 msgstr "Coda"
 
-#: src/qml/QueuePage.qml:97
+#: src/qml/QueuePage.qml:86
 msgid "Resume Queue"
 msgstr "Riprendi la coda"
 
-#: src/qml/QueuePage.qml:104 src/qml/QueuePage.qml:160
-#: src/qml/PlaylistPage.qml:193
+#: src/qml/QueuePage.qml:93 src/qml/QueuePage.qml:149
+#: src/qml/PlaylistPage.qml:206
 msgid "Play From Here"
 msgstr "Riproduci da qui"
 
-#: src/qml/QueuePage.qml:111
+#: src/qml/QueuePage.qml:100
 msgid "Undo"
 msgstr "Annulla"
 
-#: src/qml/QueuePage.qml:117 src/qml/QueuePage.qml:127
-#: src/qml/QueuePage.qml:132
+#: src/qml/QueuePage.qml:106 src/qml/QueuePage.qml:116
+#: src/qml/QueuePage.qml:121
 msgid "Clear Queue"
 msgstr "Svuota coda"
 
-#: src/qml/QueuePage.qml:128
+#: src/qml/QueuePage.qml:117
 msgid "Remove all items from the queue?"
 msgstr "Rimuovere tutti gli elementi dalla coda?"
 
-#: src/qml/QueuePage.qml:166 src/qml/PlaylistPage.qml:200
+#: src/qml/QueuePage.qml:155 src/qml/PlaylistPage.qml:213
 msgid "Move Up"
 msgstr "Sposta su"
 
-#: src/qml/QueuePage.qml:172 src/qml/PlaylistPage.qml:207
+#: src/qml/QueuePage.qml:161 src/qml/PlaylistPage.qml:220
 msgid "Move Down"
 msgstr "Sposta giù"
 
-#: src/qml/QueuePage.qml:178 src/qml/ServersPage.qml:63
+#: src/qml/QueuePage.qml:167 src/qml/ServersPage.qml:63
 msgid "Remove"
 msgstr "Rimuovi"
 
-#: src/qml/QueuePage.qml:184 src/qml/PlaylistPage.qml:221
+#: src/qml/QueuePage.qml:173 src/qml/PlaylistPage.qml:234
 msgid "Go to Item"
 msgstr "Vai all'elemento"
 
-#: src/qml/QueuePage.qml:271
+#: src/qml/QueuePage.qml:262
 msgid ""
 "Could not restore the queue: check the connection to the server and try again"
 msgstr ""
 "Impossibile ripristinare la coda: verifica la connessione al server e riprova"
 
-#: src/qml/QueuePage.qml:286
+#: src/qml/QueuePage.qml:278
 msgid "The queue is empty"
 msgstr "La coda è vuota"
 
-#: src/qml/QueuePage.qml:287
+#: src/qml/QueuePage.qml:279
 msgid "Add a movie, an episode, a season or a series with Add to Queue"
 msgstr ""
 "Aggiungi un film, un episodio, una stagione o una serie con Aggiungi alla "
@@ -1679,64 +1679,64 @@ msgctxt "@title:group section of the filter dialog"
 msgid "Years"
 msgstr "Anni"
 
-#: src/qml/FilterDialog.qml:409
+#: src/qml/FilterDialog.qml:410
 msgid "Could not load these filters"
 msgstr "Impossibile caricare questi filtri"
 
-#: src/qml/FilterDialog.qml:433
+#: src/qml/FilterDialog.qml:434
 msgctxt "@info hint on a filter value that cannot be added"
 msgid "Too many filters selected: remove one to add this"
 msgstr "Troppi filtri selezionati: rimuovine uno per aggiungere questo"
 
-#: src/qml/GenreRailsView.qml:82
+#: src/qml/GenreRailsView.qml:83
 msgid ""
 "Could not load the genres: check the connection to the server and try again"
 msgstr ""
 "Impossibile caricare i generi: verifica la connessione al server e riprova"
 
-#: src/qml/GenreRailsView.qml:98
+#: src/qml/GenreRailsView.qml:100
 msgid "No genres"
 msgstr "Nessun genere"
 
-#: src/qml/GenreRailsView.qml:99
+#: src/qml/GenreRailsView.qml:101
 msgid "This library has no genres"
 msgstr "Questa libreria non ha generi"
 
-#: src/qml/GenreRailsView.qml:149 src/qml/FavoritesPage.qml:378
+#: src/qml/GenreRailsView.qml:151 src/qml/FavoritesPage.qml:389
 msgid "Show All"
 msgstr "Mostra tutto"
 
-#: src/qml/GenreRailsView.qml:151
+#: src/qml/GenreRailsView.qml:153
 msgctxt ""
 "accessible name of the button that opens the grid of one genre, %1 is the "
 "genre"
 msgid "Show All in %1"
 msgstr "Mostra tutto in %1"
 
-#: src/qml/GenreRailsView.qml:175
+#: src/qml/GenreRailsView.qml:178
 msgid ""
 "Could not load this genre: check the connection to the server and try again"
 msgstr ""
 "Impossibile caricare questo genere: verifica la connessione al server e "
 "riprova"
 
-#: src/qml/LibraryContent.qml:265 src/qml/LibraryContent.qml:271
+#: src/qml/LibraryContent.qml:275 src/qml/LibraryContent.qml:281
 #: src/qml/ItemListRow.qml:41 src/qml/ItemListRow.qml:48
 msgctxt "series name and episode label"
 msgid "%1 · %2"
 msgstr "%1 · %2"
 
-#: src/qml/LibraryContent.qml:270 src/qml/ItemListRow.qml:47
+#: src/qml/LibraryContent.qml:280 src/qml/ItemListRow.qml:47
 msgctxt "season and episode number spoken"
 msgid "Season %1, Episode %2"
 msgstr "Stagione %1, episodio %2"
 
-#: src/qml/LibraryContent.qml:270 src/qml/ItemListRow.qml:47
+#: src/qml/LibraryContent.qml:280 src/qml/ItemListRow.qml:47
 msgctxt "episode number spoken"
 msgid "Episode %1"
 msgstr "Episodio %1"
 
-#: src/qml/LibraryContent.qml:344
+#: src/qml/LibraryContent.qml:357
 msgid "No item matches the search or the selected filters"
 msgstr "Nessun elemento corrisponde alla ricerca o ai filtri selezionati"
 
@@ -1755,15 +1755,15 @@ msgid_plural "%1 unplayed items"
 msgstr[0] "%1 elemento non riprodotto"
 msgstr[1] "%1 elementi non riprodotti"
 
-#: src/qml/ItemListRow.qml:205 src/qml/MediaCard.qml:442
+#: src/qml/ItemListRow.qml:210 src/qml/MediaCard.qml:447
 msgid "More Actions"
 msgstr "Altre azioni"
 
-#: src/qml/ItemListRow.qml:207 src/qml/MediaCard.qml:444
+#: src/qml/ItemListRow.qml:212 src/qml/MediaCard.qml:449
 msgid "More Actions for %1"
 msgstr "Altre azioni per %1"
 
-#: src/qml/MediaCard.qml:88 src/qml/MediaCard.qml:263
+#: src/qml/MediaCard.qml:88 src/qml/MediaCard.qml:268
 msgctxt "badge on a recently added item"
 msgid "New"
 msgstr "Nuovo"
@@ -1774,17 +1774,17 @@ msgid_plural "%1 minutes left"
 msgstr[0] "%1 minuto rimanente"
 msgstr[1] "%1 minuti rimanenti"
 
-#: src/qml/MediaCard.qml:245
+#: src/qml/MediaCard.qml:250
 msgid "%1 min left"
 msgid_plural "%1 min left"
 msgstr[0] "%1 min rimanente"
 msgstr[1] "%1 min rimanenti"
 
-#: src/qml/MediaCard.qml:392
+#: src/qml/MediaCard.qml:397
 msgid "Resume %1"
 msgstr "Riprendi %1"
 
-#: src/qml/MediaCard.qml:392
+#: src/qml/MediaCard.qml:397
 msgid "Play %1"
 msgstr "Riproduci %1"
 
@@ -1873,21 +1873,21 @@ msgstr "Password:"
 msgid "Password"
 msgstr "Password"
 
-#: src/qml/LoginPage.qml:176
+#: src/qml/LoginPage.qml:177
 msgid "Use Quick Connect"
 msgstr "Usa Quick Connect"
 
-#: src/qml/LoginPage.qml:182
+#: src/qml/LoginPage.qml:183
 msgctxt "@action:button Opens the list of the saved users of this server"
 msgid "Choose Another User"
 msgstr "Scegli un altro utente"
 
-#: src/qml/LoginPage.qml:189 src/qml/UserPickerPage.qml:26
+#: src/qml/LoginPage.qml:190 src/qml/UserPickerPage.qml:26
 msgctxt "@action:button Goes back to the list of servers"
 msgid "Switch Server"
 msgstr "Cambia server"
 
-#: src/qml/LoginPage.qml:204
+#: src/qml/LoginPage.qml:205
 msgid ""
 "On a device that is already signed in, open Quick Connect in the Jellyfin "
 "settings and enter this code"
@@ -1895,16 +1895,16 @@ msgstr ""
 "Su un dispositivo già connesso, apri Quick Connect nelle impostazioni di "
 "Jellyfin e inserisci questo codice"
 
-#: src/qml/LoginPage.qml:212
+#: src/qml/LoginPage.qml:213
 msgid "Quick Connect code %1"
 msgstr "Codice Quick Connect %1"
 
-#: src/qml/LoginPage.qml:220
+#: src/qml/LoginPage.qml:222
 msgid "Waiting for approval…"
 msgstr "In attesa di approvazione…"
 
-#: src/qml/LoginPage.qml:225 src/qml/ServersPage.qml:93
-#: src/qml/ServersPage.qml:221
+#: src/qml/LoginPage.qml:227 src/qml/ServersPage.qml:93
+#: src/qml/ServersPage.qml:223
 msgid "Cancel"
 msgstr "Annulla"
 
@@ -1952,7 +1952,7 @@ msgctxt "@action:button"
 msgid "Add User"
 msgstr "Aggiungi utente"
 
-#: src/qml/UserPickerPage.qml:284 src/qml/PlayerPage.qml:790
+#: src/qml/UserPickerPage.qml:284 src/qml/PlayerPage.qml:819
 msgctxt "@action:button"
 msgid "More Actions"
 msgstr "Altre azioni"
@@ -1962,11 +1962,11 @@ msgctxt "@label %1 is a user name"
 msgid "More Actions for %1"
 msgstr "Altre azioni per %1"
 
-#: src/qml/Main.qml:164
+#: src/qml/Main.qml:171
 msgid "Preparing Kinefin…"
 msgstr "Preparazione di Kinefin…"
 
-#: src/qml/Main.qml:348
+#: src/qml/Main.qml:355
 msgid ""
 "The settings could not be saved: check the free space and the permissions of "
 "the profile folder. Changes last until Kinefin closes"
@@ -1975,7 +1975,7 @@ msgstr ""
 "della cartella del profilo. Le modifiche restano fino alla chiusura di "
 "Kinefin"
 
-#: src/qml/Main.qml:1245
+#: src/qml/Main.qml:1267
 msgid ""
 "The queue holds the first %1 item of the playlist: this entry is not among "
 "them"
@@ -1988,38 +1988,42 @@ msgstr[1] ""
 "La coda contiene solo i primi %1 elementi della scaletta: questa voce non è "
 "compresa"
 
-#: src/qml/Main.qml:1249
+#: src/qml/Main.qml:1271
 msgid "Only the first %1 item went into the queue"
 msgid_plural "Only the first %1 items went into the queue"
 msgstr[0] "Solo %1 elemento è stato aggiunto alla coda"
 msgstr[1] "Solo %1 elementi sono stati aggiunti alla coda"
 
-#: src/qml/Main.qml:1249
+#: src/qml/Main.qml:1271
 msgid "The queue now holds the playlist"
 msgstr "La coda contiene ora la scaletta"
 
-#: src/qml/Main.qml:1251
+#: src/qml/Main.qml:1273 src/qml/Main.qml:1384
 msgctxt "@action:button takes the queue back"
 msgid "Undo"
 msgstr "Annulla"
 
-#: src/qml/Main.qml:1329
+#: src/qml/Main.qml:1384
+msgid "Another device replaced the queue"
+msgstr "Un altro dispositivo ha sostituito la coda"
+
+#: src/qml/Main.qml:1475
 msgid "The queue is full: some items were left out, remove some to add more"
 msgstr ""
 "La coda è piena: alcuni elementi sono stati esclusi, rimuovine alcuni per "
 "aggiungerne altri"
 
-#: src/qml/Main.qml:1329
+#: src/qml/Main.qml:1475
 msgid "%1 item added to the queue"
 msgid_plural "%1 items added to the queue"
 msgstr[0] "%1 elemento aggiunto alla coda"
 msgstr[1] "%1 elementi aggiunti alla coda"
 
-#: src/qml/Main.qml:1332
+#: src/qml/Main.qml:1478
 msgid "There is nothing to play in this item"
 msgstr "Non c'è nulla da riprodurre in questo elemento"
 
-#: src/qml/Main.qml:1335
+#: src/qml/Main.qml:1481
 msgid ""
 "The queue could not be saved: check the free space and the permissions of "
 "the profile folder. It lasts until Kinefin closes"
@@ -2027,7 +2031,7 @@ msgstr ""
 "Impossibile salvare la coda: controlla lo spazio libero e i permessi della "
 "cartella del profilo. Resta fino alla chiusura di Kinefin"
 
-#: src/qml/Main.qml:1338
+#: src/qml/Main.qml:1484
 msgid ""
 "Could not add this to the queue: check the connection to the server and try "
 "again"
@@ -2035,8 +2039,8 @@ msgstr ""
 "Impossibile aggiungere questo elemento alla coda: controlla la connessione "
 "al server e riprova"
 
-#: src/qml/PlayerPage.qml:15 src/qml/PlayerPage.qml:539
-#: src/qml/MiniPlayer.qml:172
+#: src/qml/PlayerPage.qml:15 src/qml/PlayerPage.qml:568
+#: src/qml/MiniPlayer.qml:186
 msgid "Now Playing"
 msgstr "In riproduzione"
 
@@ -2050,313 +2054,314 @@ msgctxt "@info:status"
 msgid "Ends at %1"
 msgstr "Termina alle %1"
 
-#: src/qml/PlayerPage.qml:312
+#: src/qml/PlayerPage.qml:313
 msgid "Opening video…"
 msgstr "Apertura del video…"
 
-#: src/qml/PlayerPage.qml:316
+#: src/qml/PlayerPage.qml:317
 msgid "Close Player"
 msgstr "Chiudi il player"
 
-#: src/qml/PlayerPage.qml:352
+#: src/qml/PlayerPage.qml:381
 msgctxt "@info accessible name of the card"
 msgid "Up Next"
 msgstr "A seguire"
 
-#: src/qml/PlayerPage.qml:377
+#: src/qml/PlayerPage.qml:406
 msgctxt "@title the card of the next item"
 msgid "Up Next"
 msgstr "A seguire"
 
-#: src/qml/PlayerPage.qml:402
+#: src/qml/PlayerPage.qml:431
 msgid "Starts in %1 second"
 msgid_plural "Starts in %1 seconds"
 msgstr[0] "Inizia tra %1 secondo"
 msgstr[1] "Inizia tra %1 secondi"
 
-#: src/qml/PlayerPage.qml:413
+#: src/qml/PlayerPage.qml:442
 msgctxt "@action:button starts the next item at once"
 msgid "Play Now"
 msgstr "Riproduci ora"
 
-#: src/qml/PlayerPage.qml:414
+#: src/qml/PlayerPage.qml:443
 msgctxt "@action:button accessible name"
 msgid "Play the Next Item Now"
 msgstr "Riproduci ora il prossimo elemento"
 
-#: src/qml/PlayerPage.qml:422
+#: src/qml/PlayerPage.qml:451
 msgctxt "@action:button the next item does not start"
 msgid "Cancel"
 msgstr "Annulla"
 
-#: src/qml/PlayerPage.qml:423
+#: src/qml/PlayerPage.qml:452
 msgctxt "@action:button accessible name"
 msgid "Cancel Up Next"
 msgstr "Annulla “A seguire”"
 
-#: src/qml/PlayerPage.qml:528 src/qml/ShellHeader.qml:186
+#: src/qml/PlayerPage.qml:557 src/qml/PageBackButton.qml:10
+#: src/qml/ShellHeader.qml:186
 msgctxt "@action:button"
 msgid "Back"
 msgstr "Indietro"
 
-#: src/qml/PlayerPage.qml:559
+#: src/qml/PlayerPage.qml:588
 msgctxt "@action:button"
 msgid "Keep Controls Visible"
 msgstr "Mantieni visibili i controlli"
 
-#: src/qml/PlayerPage.qml:648 src/qml/MiniPlayer.qml:222
+#: src/qml/PlayerPage.qml:677 src/qml/MiniPlayer.qml:236
 msgid "Playback position"
 msgstr "Posizione di riproduzione"
 
-#: src/qml/PlayerPage.qml:684
+#: src/qml/PlayerPage.qml:713
 msgctxt "@action:button accessible name"
 msgid "Remaining time %1"
 msgstr "Tempo rimanente %1"
 
-#: src/qml/PlayerPage.qml:684
+#: src/qml/PlayerPage.qml:713
 msgctxt "@action:button accessible name"
 msgid "Total time %1"
 msgstr "Durata totale %1"
 
-#: src/qml/PlayerPage.qml:686
+#: src/qml/PlayerPage.qml:715
 msgctxt "@info:tooltip"
 msgid "Show total time"
 msgstr "Mostra la durata totale"
 
-#: src/qml/PlayerPage.qml:686
+#: src/qml/PlayerPage.qml:715
 msgctxt "@info:tooltip"
 msgid "Show remaining time"
 msgstr "Mostra il tempo rimanente"
 
-#: src/qml/PlayerPage.qml:707
+#: src/qml/PlayerPage.qml:736
 msgid "Previous"
 msgstr "Precedente"
 
-#: src/qml/PlayerPage.qml:713 src/qml/MiniPlayer.qml:198
+#: src/qml/PlayerPage.qml:742 src/qml/MiniPlayer.qml:212
 msgid "Pause"
 msgstr "Pausa"
 
-#: src/qml/PlayerPage.qml:722
+#: src/qml/PlayerPage.qml:751
 msgid "Next"
 msgstr "Successivo"
 
-#: src/qml/PlayerPage.qml:730
+#: src/qml/PlayerPage.qml:759
 msgid "Unmute"
 msgstr "Riattiva audio"
 
-#: src/qml/PlayerPage.qml:730
+#: src/qml/PlayerPage.qml:759
 msgid "Mute"
 msgstr "Disattiva audio"
 
-#: src/qml/PlayerPage.qml:731
+#: src/qml/PlayerPage.qml:760
 #, javascript-format
 msgctxt "@info volume level"
 msgid "Volume %1%"
 msgstr "Volume %1%"
 
-#: src/qml/PlayerPage.qml:762
+#: src/qml/PlayerPage.qml:791
 msgctxt "@action:button audio tracks"
 msgid "Audio"
 msgstr "Audio"
 
-#: src/qml/PlayerPage.qml:771
+#: src/qml/PlayerPage.qml:800
 msgctxt "@action:button subtitle tracks"
 msgid "Subtitles"
 msgstr "Sottotitoli"
 
-#: src/qml/PlayerPage.qml:777
+#: src/qml/PlayerPage.qml:806
 msgctxt "@action:button"
 msgid "Show Mini Player"
 msgstr "Mostra il mini player"
 
-#: src/qml/PlayerPage.qml:783
+#: src/qml/PlayerPage.qml:812
 msgctxt "@action:button"
 msgid "Exit Full Screen Mode"
 msgstr "Esci dalla modalità a schermo intero"
 
-#: src/qml/PlayerPage.qml:783
+#: src/qml/PlayerPage.qml:812
 msgctxt "@action:button"
 msgid "Full Screen Mode"
 msgstr "Modalità a schermo intero"
 
-#: src/qml/PlayerPage.qml:799
+#: src/qml/PlayerPage.qml:828
 msgid "Screenshot saved to %1"
 msgstr "Schermata salvata in %1"
 
-#: src/qml/PlayerPage.qml:846
+#: src/qml/PlayerPage.qml:879
 msgctxt "@item:inmenu no subtitles"
 msgid "Off"
 msgstr "Disattivati"
 
-#: src/qml/PlayerPage.qml:866
+#: src/qml/PlayerPage.qml:899
 msgid "Download external subtitles"
 msgstr "Scarica sottotitoli esterni"
 
-#: src/qml/PlayerPage.qml:886
+#: src/qml/PlayerPage.qml:919
 msgid "Shuffle"
 msgstr "Riproduzione casuale"
 
-#: src/qml/PlayerPage.qml:896
+#: src/qml/PlayerPage.qml:929
 msgid "Repeat"
 msgstr "Ripeti"
 
-#: src/qml/PlayerPage.qml:900
+#: src/qml/PlayerPage.qml:933
 msgctxt "@item:inmenu repeat"
 msgid "Off"
 msgstr "Disattivata"
 
-#: src/qml/PlayerPage.qml:908
+#: src/qml/PlayerPage.qml:941
 msgctxt "@item:inmenu repeat"
 msgid "All"
 msgstr "Tutto"
 
-#: src/qml/PlayerPage.qml:918
+#: src/qml/PlayerPage.qml:951
 msgctxt "@item:inmenu repeat"
 msgid "Current Item"
 msgstr "Elemento corrente"
 
-#: src/qml/PlayerPage.qml:928
+#: src/qml/PlayerPage.qml:961
 msgid "Playback Speed"
 msgstr "Velocità di riproduzione"
 
-#: src/qml/PlayerPage.qml:934
+#: src/qml/PlayerPage.qml:967
 msgctxt "@item:inmenu playback speed, %1 is the factor"
 msgid "%1×"
 msgstr "%1×"
 
-#: src/qml/PlayerPage.qml:947
+#: src/qml/PlayerPage.qml:980
 msgctxt "@title:menu"
 msgid "Aspect Ratio"
 msgstr "Rapporto d'aspetto"
 
-#: src/qml/PlayerPage.qml:949
+#: src/qml/PlayerPage.qml:982
 msgctxt "@item:inmenu aspect ratio"
 msgid "Auto"
 msgstr "Automatico"
 
-#: src/qml/PlayerPage.qml:950
+#: src/qml/PlayerPage.qml:983
 msgctxt "@item:inmenu aspect ratio"
 msgid "Zoom"
 msgstr "Zoom"
 
-#: src/qml/PlayerPage.qml:951
+#: src/qml/PlayerPage.qml:984
 msgctxt "@item:inmenu aspect ratio"
 msgid "Stretch"
 msgstr "Allunga"
 
-#: src/qml/PlayerPage.qml:952
+#: src/qml/PlayerPage.qml:985
 msgctxt "@item:inmenu aspect ratio"
 msgid "4:3"
 msgstr "4:3"
 
-#: src/qml/PlayerPage.qml:953
+#: src/qml/PlayerPage.qml:986
 msgctxt "@item:inmenu aspect ratio"
 msgid "16:9"
 msgstr "16:9"
 
-#: src/qml/PlayerPage.qml:954
+#: src/qml/PlayerPage.qml:987
 msgctxt "@item:inmenu aspect ratio"
 msgid "Widescreen for 4:3 Video"
 msgstr "Widescreen per video 4:3"
 
-#: src/qml/PlayerPage.qml:955
+#: src/qml/PlayerPage.qml:988
 msgctxt "@item:inmenu aspect ratio"
 msgid "Original Size"
 msgstr "Dimensione originale"
 
-#: src/qml/PlayerPage.qml:961
+#: src/qml/PlayerPage.qml:994
 msgctxt "@title:menu"
 msgid "Chapters"
 msgstr "Capitoli"
 
-#: src/qml/PlayerPage.qml:970
+#: src/qml/PlayerPage.qml:1003
 msgctxt "@item:inmenu chapter, %1 is its start time and %2 its name"
 msgid "%1 — %2"
 msgstr "%1 — %2"
 
-#: src/qml/PlayerPage.qml:981
+#: src/qml/PlayerPage.qml:1014
 msgid "AV Sync"
 msgstr "Sincronizzazione audio/video"
 
-#: src/qml/PlayerPage.qml:983
+#: src/qml/PlayerPage.qml:1016
 msgid "Audio delay: %1 s"
 msgstr "Ritardo audio: %1 s"
 
-#: src/qml/PlayerPage.qml:984
+#: src/qml/PlayerPage.qml:1017
 msgid "Audio earlier (-0.1 s)"
 msgstr "Anticipa audio (-0,1 s)"
 
-#: src/qml/PlayerPage.qml:985
+#: src/qml/PlayerPage.qml:1018
 msgid "Audio later (+0.1 s)"
 msgstr "Ritarda audio (+0,1 s)"
 
-#: src/qml/PlayerPage.qml:987
+#: src/qml/PlayerPage.qml:1020
 msgid "Subtitle delay: %1 s"
 msgstr "Ritardo sottotitoli: %1 s"
 
-#: src/qml/PlayerPage.qml:988
+#: src/qml/PlayerPage.qml:1021
 msgid "Subtitles earlier (-0.1 s)"
 msgstr "Anticipa sottotitoli (-0,1 s)"
 
-#: src/qml/PlayerPage.qml:989
+#: src/qml/PlayerPage.qml:1022
 msgid "Subtitles later (+0.1 s)"
 msgstr "Ritarda sottotitoli (+0,1 s)"
 
-#: src/qml/PlayerPage.qml:993
+#: src/qml/PlayerPage.qml:1026
 msgid "Sleep: %1 min"
 msgstr "Arresto fra %1 min"
 
-#: src/qml/PlayerPage.qml:993
+#: src/qml/PlayerPage.qml:1026
 msgid "Sleep Timer"
 msgstr "Timer di arresto"
 
-#: src/qml/PlayerPage.qml:999
+#: src/qml/PlayerPage.qml:1032
 msgid "Off"
 msgstr "Disattivato"
 
-#: src/qml/PlayerPage.qml:999
+#: src/qml/PlayerPage.qml:1032
 msgid "%1 minutes"
 msgstr "%1 minuti"
 
-#: src/qml/PlayerPage.qml:1009
+#: src/qml/PlayerPage.qml:1042
 msgctxt "@action:inmenu"
 msgid "Forget Series Choices"
 msgstr "Cancella scelte della serie"
 
-#: src/qml/PlayerPage.qml:1017 src/qml/PlayerPage.qml:1133
+#: src/qml/PlayerPage.qml:1050 src/qml/PlayerPage.qml:1176
 msgid "Now Playing Queue"
 msgstr "Coda di riproduzione"
 
-#: src/qml/PlayerPage.qml:1022
+#: src/qml/PlayerPage.qml:1055
 msgid "Screenshot"
 msgstr "Schermata"
 
-#: src/qml/PlayerPage.qml:1033
+#: src/qml/PlayerPage.qml:1066
 msgctxt "@action:inmenu"
 msgid "Playback Info"
 msgstr "Informazioni di riproduzione"
 
-#: src/qml/PlayerPage.qml:1076 src/qml/PlayerPage.qml:1083
+#: src/qml/PlayerPage.qml:1114 src/qml/PlayerPage.qml:1121
 #, javascript-format
 msgctxt "@label volume level"
 msgid "%1%"
 msgstr "%1%"
 
-#: src/qml/PlayerPage.qml:1100
+#: src/qml/PlayerPage.qml:1138
 msgid "Volume"
 msgstr "Volume"
 
-#: src/qml/MiniPlayer.qml:37
+#: src/qml/MiniPlayer.qml:41
 msgctxt "@info accessible name of the docked player"
 msgid "Mini Player"
 msgstr "Mini player"
 
-#: src/qml/MiniPlayer.qml:178
+#: src/qml/MiniPlayer.qml:192
 msgctxt "@action:button stops playback and closes the mini player"
 msgid "Close Mini Player"
 msgstr "Chiudi il mini player"
 
-#: src/qml/MiniPlayer.qml:208
+#: src/qml/MiniPlayer.qml:222
 msgctxt "@action:button"
 msgid "Expand Player"
 msgstr "Espandi il player"
@@ -2366,7 +2371,7 @@ msgctxt "series name and episode"
 msgid "%1 — %2"
 msgstr "%1 — %2"
 
-#: src/qml/MediaListRow.qml:77 src/qml/UserPreferencesForm.qml:513
+#: src/qml/MediaListRow.qml:77 src/qml/UserPreferencesForm.qml:514
 msgid "%1, %2 of %3"
 msgstr "%1, %2 di %3"
 
@@ -2374,72 +2379,73 @@ msgstr "%1, %2 di %3"
 msgid "Playlists"
 msgstr "Scalette"
 
-#: src/qml/PlaylistsPage.qml:49
+#: src/qml/PlaylistsPage.qml:54
 msgctxt "@action:intoolbar"
 msgid "New Playlist…"
 msgstr "Nuova scaletta…"
 
-#: src/qml/PlaylistsPage.qml:65
+#: src/qml/PlaylistsPage.qml:78
 msgid "The playlists could not be read again"
 msgstr "Impossibile rileggere le scalette"
 
-#: src/qml/PlaylistsPage.qml:79
+#: src/qml/PlaylistsPage.qml:92
 msgid "Showing the first %1 playlist of %2"
 msgid_plural "Showing the first %1 playlists of %2"
 msgstr[0] "Visualizzata %1 di %2 scaletta"
 msgstr[1] "Visualizzate le prime %1 di %2 scalette"
 
-#: src/qml/PlaylistsPage.qml:142 src/qml/AddToPlaylistDialog.qml:153
+#: src/qml/PlaylistsPage.qml:157 src/qml/AddToPlaylistDialog.qml:155
 msgid "Playlists could not be loaded"
 msgstr "Impossibile caricare le scalette"
 
-#: src/qml/PlaylistsPage.qml:143
+#: src/qml/PlaylistsPage.qml:158
 msgid "The playlists could not be read from the server: try again"
 msgstr "Impossibile leggere le scalette dal server: riprova"
 
-#: src/qml/PlaylistsPage.qml:157 src/qml/AddToPlaylistDialog.qml:167
+#: src/qml/PlaylistsPage.qml:173 src/qml/AddToPlaylistDialog.qml:170
 msgid "No playlists"
 msgstr "Nessuna scaletta"
 
-#: src/qml/PlaylistsPage.qml:159 src/qml/AddToPlaylistDialog.qml:108
-msgctxt "@action:button"
-msgid "New Playlist…"
-msgstr "Nuova scaletta…"
+#: src/qml/PlaylistsPage.qml:175
+msgid ""
+"Create one with New Playlist…, or with Add to Playlist… in the menu of a "
+"video"
+msgstr "Creane una con Nuova scaletta…, oppure con Aggiungi alla scaletta… nel menu di un video"
 
 #: src/qml/PlaylistPage.qml:34
 msgid "Playlist"
 msgstr "Scaletta"
 
-#: src/qml/PlaylistPage.qml:96
+#: src/qml/PlaylistPage.qml:101
 msgctxt "@action:intoolbar"
 msgid "Play"
 msgstr "Riproduci"
 
-#: src/qml/PlaylistPage.qml:103
+#: src/qml/PlaylistPage.qml:108
 msgctxt "@action:intoolbar"
 msgid "Shuffle"
 msgstr "Riproduzione casuale"
 
-#: src/qml/PlaylistPage.qml:110
+#: src/qml/PlaylistPage.qml:115
 msgctxt "@action:intoolbar"
 msgid "Rename…"
 msgstr "Rinomina…"
 
-#: src/qml/PlaylistPage.qml:120
+#: src/qml/PlaylistPage.qml:125
 msgctxt "@action:intoolbar"
 msgid "Delete…"
 msgstr "Elimina…"
 
-#: src/qml/PlaylistPage.qml:145
+#: src/qml/PlaylistPage.qml:158
 msgid "The playlist could not be read again"
 msgstr "Impossibile rileggere la scaletta"
 
-#: src/qml/PlaylistPage.qml:160 src/qml/PlaylistDialogs.qml:155
+#: src/qml/PlaylistPage.qml:173 src/qml/PlaylistDialogs.qml:155
 #: src/qml/PlaylistDialogs.qml:178
 msgid "Missing permission to change this playlist"
 msgstr "Permesso mancante per modificare questa scaletta"
 
-#: src/qml/PlaylistPage.qml:160
+#: src/qml/PlaylistPage.qml:173
 msgid ""
 "The change could not be saved and the playlist was read again from the "
 "server: try the change again"
@@ -2447,25 +2453,25 @@ msgstr ""
 "Impossibile salvare la modifica e la scaletta è stata riletta dal server: "
 "riprova la modifica"
 
-#: src/qml/PlaylistPage.qml:167
+#: src/qml/PlaylistPage.qml:180
 msgid "Showing the first %1 entry of %2"
 msgid_plural "Showing the first %1 entries of %2"
 msgstr[0] "Visualizzata %1 voce di %2"
 msgstr[1] "Visualizzate le prime %1 voci di %2"
 
-#: src/qml/PlaylistPage.qml:214
+#: src/qml/PlaylistPage.qml:227
 msgid "Remove from Playlist"
 msgstr "Rimuovi dalla scaletta"
 
-#: src/qml/PlaylistPage.qml:283
+#: src/qml/PlaylistPage.qml:298
 msgid "The playlist could not be loaded"
 msgstr "Impossibile caricare la scaletta"
 
-#: src/qml/PlaylistPage.qml:284
+#: src/qml/PlaylistPage.qml:299
 msgid "Its entries could not be read from the server: try again"
 msgstr "Impossibile leggere gli elementi della scaletta dal server: riprova"
 
-#: src/qml/PlaylistPage.qml:298
+#: src/qml/PlaylistPage.qml:314
 msgid "This playlist is empty"
 msgstr "Questa scaletta è vuota"
 
@@ -2612,6 +2618,11 @@ msgstr "Aggiungi alla scaletta"
 msgid "The playlists could not be read again: the list may be out of date"
 msgstr ""
 "Impossibile rileggere le scalette: l'elenco potrebbe non essere aggiornato"
+
+#: src/qml/AddToPlaylistDialog.qml:108
+msgctxt "@action:button"
+msgid "New Playlist…"
+msgstr "Nuova scaletta…"
 
 #: src/qml/PlaybackInfoOverlay.qml:32
 msgctxt "@title:window accessible name of the panel"
@@ -3393,35 +3404,35 @@ msgstr ""
 "Se la connessione non riesce, vengono provate automaticamente solo le porte "
 "standard dello stesso protocollo"
 
-#: src/qml/ServersPage.qml:180 src/qml/ServersPage.qml:292
+#: src/qml/ServersPage.qml:180 src/qml/ServersPage.qml:296
 msgid "Test"
 msgstr "Prova"
 
-#: src/qml/ServersPage.qml:189 src/qml/ServersPage.qml:286
+#: src/qml/ServersPage.qml:189 src/qml/ServersPage.qml:290
 msgid "Connect"
 msgstr "Connetti"
 
-#: src/qml/ServersPage.qml:219
+#: src/qml/ServersPage.qml:221
 msgid "Connecting…"
 msgstr "Connessione in corso…"
 
-#: src/qml/ServersPage.qml:236
+#: src/qml/ServersPage.qml:238
 msgid "Saved Servers"
 msgstr "Server salvati"
 
-#: src/qml/ServersPage.qml:240
+#: src/qml/ServersPage.qml:243
 msgid "No servers yet"
 msgstr "Ancora nessun server"
 
-#: src/qml/ServersPage.qml:275
+#: src/qml/ServersPage.qml:279
 msgid "Not tested"
 msgstr "Non verificato"
 
-#: src/qml/ServersPage.qml:298
+#: src/qml/ServersPage.qml:302
 msgid "Delete"
 msgstr "Rimuovi"
 
-#: src/qml/ServersPage.qml:300
+#: src/qml/ServersPage.qml:304
 msgid "Delete server %1"
 msgstr "Rimuovi il server %1"
 
@@ -3473,12 +3484,12 @@ msgctxt "@title:group"
 msgid "Settings"
 msgstr "Impostazioni"
 
-#: src/qml/SettingsPage.qml:315
+#: src/qml/SettingsPage.qml:335
 msgctxt "@title:group"
 msgid "Jellyfin account"
 msgstr "Account Jellyfin"
 
-#: src/qml/SettingsPage.qml:326
+#: src/qml/SettingsPage.qml:346
 msgid "Stored on your Jellyfin server"
 msgstr "Salvato sul tuo server Jellyfin"
 
@@ -3539,11 +3550,11 @@ msgstr ""
 "Elenco lingue non disponibile: puoi scegliere solo Automatica e l’opzione "
 "attuale"
 
-#: src/qml/UserPreferencesForm.qml:311
+#: src/qml/UserPreferencesForm.qml:312
 msgid "The server sent preferences that Kinefin cannot read"
 msgstr "Il server ha inviato preferenze che Kinefin non riesce a leggere"
 
-#: src/qml/UserPreferencesForm.qml:313
+#: src/qml/UserPreferencesForm.qml:314
 msgid ""
 "Could not save the preferences, your changes are kept: check the connection "
 "to the server and try again"
@@ -3551,7 +3562,7 @@ msgstr ""
 "Impossibile salvare le preferenze. Le modifiche sono conservate: controlla "
 "la connessione al server e riprova"
 
-#: src/qml/UserPreferencesForm.qml:315
+#: src/qml/UserPreferencesForm.qml:316
 msgid ""
 "The preferences were sent but could not be confirmed: reload them before "
 "trusting what is shown"
@@ -3559,7 +3570,7 @@ msgstr ""
 "Preferenze inviate ma non confermate: ricaricale prima di considerare "
 "attendibili i valori mostrati"
 
-#: src/qml/UserPreferencesForm.qml:317
+#: src/qml/UserPreferencesForm.qml:318
 msgid ""
 "Could not load the preferences: check the connection to the server and try "
 "again"
@@ -3567,22 +3578,22 @@ msgstr ""
 "Impossibile caricare le preferenze: controlla la connessione al server e "
 "riprova"
 
-#: src/qml/UserPreferencesForm.qml:321
+#: src/qml/UserPreferencesForm.qml:322
 msgctxt "@action:button"
 msgid "Reload"
 msgstr "Ricarica"
 
-#: src/qml/UserPreferencesForm.qml:321
+#: src/qml/UserPreferencesForm.qml:322
 msgctxt "@action:button"
 msgid "Retry"
 msgstr "Riprova"
 
-#: src/qml/UserPreferencesForm.qml:326 src/qml/UserPreferencesForm.qml:341
+#: src/qml/UserPreferencesForm.qml:327 src/qml/UserPreferencesForm.qml:342
 msgctxt "@action:button"
 msgid "Keep Editing"
 msgstr "Continua a modificare"
 
-#: src/qml/UserPreferencesForm.qml:338
+#: src/qml/UserPreferencesForm.qml:339
 msgid ""
 "Some preferences were changed on another system, so nothing was saved: keep "
 "editing to review your changes, or discard them"
@@ -3591,103 +3602,103 @@ msgstr ""
 "è stato salvato nulla: continua a modificare per rivedere le modifiche "
 "oppure scartale"
 
-#: src/qml/UserPreferencesForm.qml:346 src/qml/UserPreferencesForm.qml:680
-#: src/qml/UserPreferencesSaveBar.qml:47
+#: src/qml/UserPreferencesForm.qml:347 src/qml/UserPreferencesForm.qml:681
+#: src/qml/UserPreferencesSaveBar.qml:48
 msgctxt "@action:button"
 msgid "Discard"
 msgstr "Scarta"
 
-#: src/qml/UserPreferencesForm.qml:360
+#: src/qml/UserPreferencesForm.qml:361
 msgctxt "@title:group"
 msgid "Audio"
 msgstr "Audio"
 
-#: src/qml/UserPreferencesForm.qml:367
+#: src/qml/UserPreferencesForm.qml:368
 msgid "Audio language"
 msgstr "Lingua audio"
 
-#: src/qml/UserPreferencesForm.qml:376
+#: src/qml/UserPreferencesForm.qml:377
 msgid "Play the default audio track"
 msgstr "Riproduci la traccia audio predefinita"
 
-#: src/qml/UserPreferencesForm.qml:377
+#: src/qml/UserPreferencesForm.qml:378
 msgid "Use the track the file marks as default, whatever its language"
 msgstr ""
 "Usa la traccia indicata come predefinita nel file, indipendentemente dalla "
 "lingua"
 
-#: src/qml/UserPreferencesForm.qml:385
+#: src/qml/UserPreferencesForm.qml:386
 msgid "Remember the audio track"
 msgstr "Ricorda la traccia audio"
 
-#: src/qml/UserPreferencesForm.qml:386
+#: src/qml/UserPreferencesForm.qml:387
 msgid ""
 "Start an item with the audio track chosen for the previous one when possible"
 msgstr ""
 "Quando possibile, usa la traccia audio scelta per il contenuto precedente"
 
-#: src/qml/UserPreferencesForm.qml:394
+#: src/qml/UserPreferencesForm.qml:395
 msgid "Audio on this system"
 msgstr "Audio su questo sistema"
 
-#: src/qml/UserPreferencesForm.qml:400
+#: src/qml/UserPreferencesForm.qml:401
 msgctxt "@title:group"
 msgid "Subtitles"
 msgstr "Sottotitoli"
 
-#: src/qml/UserPreferencesForm.qml:406
+#: src/qml/UserPreferencesForm.qml:407
 msgid "Subtitle language"
 msgstr "Lingua sottotitoli"
 
-#: src/qml/UserPreferencesForm.qml:415
+#: src/qml/UserPreferencesForm.qml:416
 msgid "Subtitle mode"
 msgstr "Modalità sottotitoli"
 
-#: src/qml/UserPreferencesForm.qml:426
+#: src/qml/UserPreferencesForm.qml:427
 msgid "Remember the subtitle track"
 msgstr "Ricorda la traccia dei sottotitoli"
 
-#: src/qml/UserPreferencesForm.qml:427
+#: src/qml/UserPreferencesForm.qml:428
 msgid ""
 "Start an item with the subtitles chosen for the previous one when possible"
 msgstr "Quando possibile, usa i sottotitoli scelti per il contenuto precedente"
 
-#: src/qml/UserPreferencesForm.qml:435
+#: src/qml/UserPreferencesForm.qml:436
 msgid "Subtitles on this system"
 msgstr "Sottotitoli su questo sistema"
 
-#: src/qml/UserPreferencesForm.qml:441
+#: src/qml/UserPreferencesForm.qml:442
 msgctxt "@title:group"
 msgid "Playback"
 msgstr "Riproduzione"
 
-#: src/qml/UserPreferencesForm.qml:447
+#: src/qml/UserPreferencesForm.qml:448
 msgid "Play the next episode automatically"
 msgstr "Riproduci automaticamente il prossimo episodio"
 
-#: src/qml/UserPreferencesForm.qml:456
+#: src/qml/UserPreferencesForm.qml:457
 msgctxt "@title:group"
 msgid "Libraries and Home"
 msgstr "Librerie e Home"
 
-#: src/qml/UserPreferencesForm.qml:462
+#: src/qml/UserPreferencesForm.qml:463
 msgid "Show missing episodes"
 msgstr "Mostra episodi mancanti"
 
-#: src/qml/UserPreferencesForm.qml:471
+#: src/qml/UserPreferencesForm.qml:472
 msgid "Leave played items out of Recently Added"
 msgstr "Escludi gli elementi già visti da Aggiunti di recente"
 
-#: src/qml/UserPreferencesForm.qml:480
+#: src/qml/UserPreferencesForm.qml:481
 msgid "Library tabs on this system"
 msgstr "Schede delle librerie su questo sistema"
 
-#: src/qml/UserPreferencesForm.qml:486
+#: src/qml/UserPreferencesForm.qml:487
 msgctxt "@title:group"
 msgid "Order of the libraries"
 msgstr "Ordine delle librerie"
 
-#: src/qml/UserPreferencesForm.qml:490
+#: src/qml/UserPreferencesForm.qml:491
 msgid ""
 "The order of the library tiles on Home. Select a library and press Ctrl+Up "
 "or Ctrl+Down to move it"
@@ -3695,46 +3706,46 @@ msgstr ""
 "Ordine dei riquadri delle librerie nella Home. Seleziona una libreria e "
 "premi Ctrl+Su o Ctrl+Giù per spostarla"
 
-#: src/qml/UserPreferencesForm.qml:494
+#: src/qml/UserPreferencesForm.qml:495
 msgid "No libraries are available"
 msgstr "Nessuna libreria disponibile"
 
-#: src/qml/UserPreferencesForm.qml:536
+#: src/qml/UserPreferencesForm.qml:537
 msgctxt "@action:button"
 msgid "Move Up"
 msgstr "Sposta su"
 
-#: src/qml/UserPreferencesForm.qml:539
+#: src/qml/UserPreferencesForm.qml:540
 msgctxt "@action:button %1 is a library name"
 msgid "Move %1 up"
 msgstr "Sposta %1 su"
 
-#: src/qml/UserPreferencesForm.qml:540
+#: src/qml/UserPreferencesForm.qml:541
 msgctxt "@info:tooltip"
 msgid "Move up"
 msgstr "Sposta su"
 
-#: src/qml/UserPreferencesForm.qml:549
+#: src/qml/UserPreferencesForm.qml:550
 msgctxt "@action:button"
 msgid "Move Down"
 msgstr "Sposta giù"
 
-#: src/qml/UserPreferencesForm.qml:552
+#: src/qml/UserPreferencesForm.qml:553
 msgctxt "@action:button %1 is a library name"
 msgid "Move %1 down"
 msgstr "Sposta %1 giù"
 
-#: src/qml/UserPreferencesForm.qml:553
+#: src/qml/UserPreferencesForm.qml:554
 msgctxt "@info:tooltip"
 msgid "Move down"
 msgstr "Sposta giù"
 
-#: src/qml/UserPreferencesForm.qml:565
+#: src/qml/UserPreferencesForm.qml:566
 msgctxt "@title:group"
 msgid "Libraries on Home"
 msgstr "Librerie nella Home"
 
-#: src/qml/UserPreferencesForm.qml:569
+#: src/qml/UserPreferencesForm.qml:570
 msgid ""
 "Checked libraries get no tile on Home. Hiding a library here does not remove "
 "access to it: it stays available in Movies, Shows, Favorites and Search"
@@ -3743,17 +3754,17 @@ msgstr ""
 "una libreria non ne revoca l’accesso: rimane disponibile in Film, Serie TV, "
 "Preferiti e Ricerca"
 
-#: src/qml/UserPreferencesForm.qml:580
+#: src/qml/UserPreferencesForm.qml:581
 msgctxt "@option:check %1 is a library name"
 msgid "Hide %1 from the Home tiles"
 msgstr "Nascondi %1 dai riquadri della Home"
 
-#: src/qml/UserPreferencesForm.qml:589
+#: src/qml/UserPreferencesForm.qml:590
 msgctxt "@title:group"
 msgid "Recently Added rows on Home"
 msgstr "Righe Aggiunti di recente nella Home"
 
-#: src/qml/UserPreferencesForm.qml:593
+#: src/qml/UserPreferencesForm.qml:594
 msgid ""
 "Checked libraries get no Recently Added row on Home. Their tiles, Continue "
 "Watching and Next Up are not affected"
@@ -3761,201 +3772,201 @@ msgstr ""
 "Le librerie selezionate non avranno una riga Aggiunti di recente nella Home. "
 "I riquadri, Continua a guardare e Prossimi episodi non cambiano"
 
-#: src/qml/UserPreferencesForm.qml:604
+#: src/qml/UserPreferencesForm.qml:605
 msgctxt "@option:check %1 is a library name"
 msgid "Leave %1 out of the Recently Added rows"
 msgstr "Escludi %1 dalle righe Aggiunti di recente"
 
-#: src/qml/UserPreferencesForm.qml:613
+#: src/qml/UserPreferencesForm.qml:614
 msgid "The preferences of %1 library that is not available are kept"
 msgid_plural "The preferences of %1 libraries that are not available are kept"
 msgstr[0] "Le preferenze di %1 libreria non disponibile vengono conservate"
 msgstr[1] "Le preferenze di %1 librerie non disponibili vengono conservate"
 
-#: src/qml/UserPreferencesForm.qml:618
+#: src/qml/UserPreferencesForm.qml:619
 msgctxt "@title:group"
 msgid "Home sections set in Jellyfin"
 msgstr "Sezioni Home impostate su Jellyfin"
 
-#: src/qml/UserPreferencesForm.qml:622
+#: src/qml/UserPreferencesForm.qml:623
 msgid "Read only: Kinefin keeps its own Home layout"
 msgstr "Sola lettura: Kinefin mantiene la propria disposizione della Home"
 
-#: src/qml/UserPreferencesForm.qml:630
+#: src/qml/UserPreferencesForm.qml:631
 msgid "The Jellyfin preview is not available"
 msgstr "L’anteprima di Jellyfin non è disponibile"
 
-#: src/qml/UserPreferencesForm.qml:632
+#: src/qml/UserPreferencesForm.qml:633
 msgid "No sections are set"
 msgstr "Nessuna sezione impostata"
 
-#: src/qml/UserPreferencesForm.qml:653
+#: src/qml/UserPreferencesForm.qml:654
 msgctxt "@item:intable Home section"
 msgid "Libraries"
 msgstr "Librerie"
 
-#: src/qml/UserPreferencesForm.qml:655
+#: src/qml/UserPreferencesForm.qml:656
 msgctxt "@item:intable Home section"
 msgid "Continue Watching"
 msgstr "Continua a guardare"
 
-#: src/qml/UserPreferencesForm.qml:657
+#: src/qml/UserPreferencesForm.qml:658
 msgctxt "@item:intable Home section"
 msgid "Next Up"
 msgstr "Prossimi"
 
-#: src/qml/UserPreferencesForm.qml:659
+#: src/qml/UserPreferencesForm.qml:660
 msgctxt "@item:intable Home section"
 msgid "Recently Added"
 msgstr "Aggiunti di recente"
 
-#: src/qml/UserPreferencesForm.qml:661
+#: src/qml/UserPreferencesForm.qml:662
 msgctxt "@item:intable Home section"
 msgid "Section not supported by Kinefin"
 msgstr "Sezione non supportata da Kinefin"
 
-#: src/qml/UserPreferencesForm.qml:675
+#: src/qml/UserPreferencesForm.qml:676
 msgctxt "@title:window"
 msgid "Save Changes?"
 msgstr "Salvare le modifiche?"
 
-#: src/qml/UserPreferencesForm.qml:676
+#: src/qml/UserPreferencesForm.qml:677
 msgid "The changes to your preferences are not saved"
 msgstr "Le modifiche alle preferenze non sono state salvate"
 
-#: src/qml/UserPreferencesForm.qml:691 src/qml/UserPreferencesSaveBar.qml:55
+#: src/qml/UserPreferencesForm.qml:692 src/qml/UserPreferencesSaveBar.qml:56
 msgctxt "@action:button"
 msgid "Save"
 msgstr "Salva"
 
-#: src/qml/UserPreferencesSaveBar.qml:33
+#: src/qml/UserPreferencesSaveBar.qml:34
 msgid "Saving…"
 msgstr "Salvataggio…"
 
-#: src/qml/UserPreferencesSaveBar.qml:39
+#: src/qml/UserPreferencesSaveBar.qml:40
 msgid "Unsaved changes"
 msgstr "Modifiche non salvate"
 
-#: src/qml/FavoritesPage.qml:71
+#: src/qml/FavoritesPage.qml:74
 msgctxt "favorites grouped by type"
 msgid "Movies"
 msgstr "Film"
 
-#: src/qml/FavoritesPage.qml:73
+#: src/qml/FavoritesPage.qml:76
 msgctxt "favorites grouped by type"
 msgid "Shows"
 msgstr "Serie TV"
 
-#: src/qml/FavoritesPage.qml:75
+#: src/qml/FavoritesPage.qml:78
 msgctxt "favorites grouped by type"
 msgid "Seasons"
 msgstr "Stagioni"
 
-#: src/qml/FavoritesPage.qml:77
+#: src/qml/FavoritesPage.qml:80
 msgctxt "favorites grouped by type"
 msgid "Episodes"
 msgstr "Episodi"
 
-#: src/qml/FavoritesPage.qml:79
+#: src/qml/FavoritesPage.qml:82
 msgctxt "favorites grouped by type"
 msgid "Collections"
 msgstr "Raccolte"
 
-#: src/qml/FavoritesPage.qml:81
+#: src/qml/FavoritesPage.qml:84
 msgctxt "favorites grouped by type"
 msgid "Other"
 msgstr "Altro"
 
-#: src/qml/FavoritesPage.qml:83
+#: src/qml/FavoritesPage.qml:86
 msgctxt "favorites listed by several libraries"
 msgid "More Libraries"
 msgstr "Altre librerie"
 
-#: src/qml/FavoritesPage.qml:85
+#: src/qml/FavoritesPage.qml:88
 msgctxt "favorites without a genre"
 msgid "No Genre"
 msgstr "Nessun genere"
 
-#: src/qml/FavoritesPage.qml:87
+#: src/qml/FavoritesPage.qml:90
 msgctxt "favorites without a year"
 msgid "No Year"
 msgstr "Nessun anno"
 
-#: src/qml/FavoritesPage.qml:89
+#: src/qml/FavoritesPage.qml:92
 msgctxt "all favorites in one group"
 msgid "All Favorites"
 msgstr "Tutti i preferiti"
 
-#: src/qml/FavoritesPage.qml:134
+#: src/qml/FavoritesPage.qml:137
 msgid "Group By"
 msgstr "Raggruppa per"
 
-#: src/qml/FavoritesPage.qml:140
+#: src/qml/FavoritesPage.qml:143
 msgctxt "group favorites by"
 msgid "Type"
 msgstr "Tipo"
 
-#: src/qml/FavoritesPage.qml:146
+#: src/qml/FavoritesPage.qml:149
 msgctxt "group favorites by"
 msgid "Library"
 msgstr "Libreria"
 
-#: src/qml/FavoritesPage.qml:152
+#: src/qml/FavoritesPage.qml:155
 msgctxt "group favorites by"
 msgid "Genre"
 msgstr "Genere"
 
-#: src/qml/FavoritesPage.qml:158
+#: src/qml/FavoritesPage.qml:161
 msgctxt "group favorites by"
 msgid "Year"
 msgstr "Anno"
 
-#: src/qml/FavoritesPage.qml:164
+#: src/qml/FavoritesPage.qml:167
 msgctxt "do not group favorites"
 msgid "None"
 msgstr "Nessuno"
 
-#: src/qml/FavoritesPage.qml:200
+#: src/qml/FavoritesPage.qml:191
 msgid "Showing %1 favorite: the list may be incomplete"
 msgid_plural "Showing %1 favorites: the list may be incomplete"
 msgstr[0] "Visualizzato %1 preferito: l’elenco potrebbe essere incompleto"
 msgstr[1] "Visualizzati %1 preferiti: l’elenco potrebbe essere incompleto"
 
-#: src/qml/FavoritesPage.qml:208
+#: src/qml/FavoritesPage.qml:199
 msgid "Some libraries could not be read"
 msgstr "Impossibile leggere alcune librerie"
 
-#: src/qml/FavoritesPage.qml:252
+#: src/qml/FavoritesPage.qml:260
 msgid "Loading favorites…"
 msgstr "Caricamento preferiti…"
 
-#: src/qml/FavoritesPage.qml:253
+#: src/qml/FavoritesPage.qml:261
 msgid "%1 favorite found, %2 of %3 libraries read"
 msgid_plural "%1 favorites found, %2 of %3 libraries read"
 msgstr[0] "%1 preferito trovato, %2 di %3 librerie consultate"
 msgstr[1] "%1 preferiti trovati, %2 di %3 librerie consultate"
 
-#: src/qml/FavoritesPage.qml:264
+#: src/qml/FavoritesPage.qml:273
 msgid "Favorites could not be loaded"
 msgstr "Impossibile caricare i preferiti"
 
-#: src/qml/FavoritesPage.qml:265
+#: src/qml/FavoritesPage.qml:274
 msgid "The favorites could not be read from the server: try again"
 msgstr "Impossibile leggere i preferiti dal server: riprova"
 
-#: src/qml/FavoritesPage.qml:280
+#: src/qml/FavoritesPage.qml:290
 msgid "Favorites come from your movie, TV show and collection libraries"
 msgstr "I preferiti provengono dalle librerie di film, serie TV e collezioni"
 
-#: src/qml/FavoritesPage.qml:282
+#: src/qml/FavoritesPage.qml:292
 msgid "Go to Home"
 msgstr "Vai alla Home"
 
-#: src/qml/FavoritesPage.qml:295
+#: src/qml/FavoritesPage.qml:306
 msgid "No favorites yet"
 msgstr "Nessun preferito"
 
-#: src/qml/FavoritesPage.qml:296
+#: src/qml/FavoritesPage.qml:307
 msgid ""
 "Movies, shows and collections you mark as favorites on the server show up "
 "here"
@@ -3963,21 +3974,21 @@ msgstr ""
 "Qui compaiono film, serie TV e collezioni contrassegnati come preferiti sul "
 "server"
 
-#: src/qml/FavoritesPage.qml:298
+#: src/qml/FavoritesPage.qml:309
 msgid "Reload"
 msgstr "Ricarica"
 
-#: src/qml/FavoritesPage.qml:373
+#: src/qml/FavoritesPage.qml:384
 msgid "%1 favorite"
 msgid_plural "%1 favorites"
 msgstr[0] "%1 preferito"
 msgstr[1] "%1 preferiti"
 
-#: src/qml/FavoritesPage.qml:380
+#: src/qml/FavoritesPage.qml:391
 msgid "Show All in %1"
 msgstr "Mostra tutti in %1"
 
-#: src/qml/FavoritesGroupPage.qml:54
+#: src/qml/FavoritesGroupPage.qml:66
 msgid "These are the favorites loaded so far: the list may be incomplete"
 msgstr ""
 "Questi sono i preferiti caricati finora: l’elenco potrebbe essere incompleto"

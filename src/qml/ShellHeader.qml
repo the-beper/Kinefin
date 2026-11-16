@@ -184,7 +184,7 @@ Item {
         anchors.leftMargin: Kirigami.Units.smallSpacing
         anchors.verticalCenter: parent.verticalCenter
         text: i18nc("@action:button", "Back")
-        icon.name: "go-previous"
+        icon.name: Qt.application.layoutDirection === Qt.RightToLeft ? "go-next" : "go-previous"
         display: QQC2.AbstractButton.IconOnly
         QQC2.ToolTip.text: text
         QQC2.ToolTip.visible: hovered || visualFocus

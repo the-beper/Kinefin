@@ -196,6 +196,7 @@ Kirigami.ScrollablePage {
                         Layout.fillWidth: true
                         visible: page.newServerStatus.message !== undefined
                         Controls.BusyIndicator {
+                            FadeInOnShow {}
                             running: !!page.newServerStatus.testing
                             visible: running
                             Layout.preferredWidth: Kirigami.Units.iconSizes.smallMedium
@@ -215,6 +216,7 @@ Kirigami.ScrollablePage {
                     }
                     RowLayout {
                         visible: page.busy
+                        FadeInOnShow {}
                         Controls.BusyIndicator { running: page.busy }
                         Controls.Label { text: i18n("Connecting…") }
                         Controls.Button {
@@ -235,6 +237,7 @@ Kirigami.ScrollablePage {
                     spacing: Kirigami.Units.largeSpacing
                     Kirigami.Heading { level: 2; text: i18n("Saved Servers") }
                     Kirigami.PlaceholderMessage {
+                        FadeInOnShow {}
                         Layout.fillWidth: true
                         visible: page.connection.servers.length === 0
                         text: i18n("No servers yet")
@@ -259,6 +262,7 @@ Kirigami.ScrollablePage {
                                 Layout.fillWidth: true
                                 spacing: Kirigami.Units.smallSpacing
                                 Controls.BusyIndicator {
+                                    FadeInOnShow {}
                                     visible: !!saved.status.testing
                                     running: visible
                                     Layout.preferredWidth: Kirigami.Units.iconSizes.small

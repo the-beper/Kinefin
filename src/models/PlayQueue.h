@@ -70,6 +70,11 @@ class PlayQueue final : public QAbstractListModel {
     Q_INVOKABLE bool add(const QString &itemId, Kinefin::PlayQueue::Placement placement);
     // The whole queue becomes what the item stands for (a playlist in its order), as one step Undo takes back; `shuffled` puts the rows in a random order once (the player's Shuffle stays as it is). Same refusals as add; the outcome comes as `replaced`, `addFailed` or `nothingToAdd`
     Q_INVOKABLE bool replace(const QString &itemId, bool shuffled);
+    // Another session's PlayNow: the queue becomes the given items, each once, in the given order (only the first `MaxEntries` are read; the playable videos among them join, the rest is skipped). One id is what `replace(id, false)` does, except that a playable video leaves the queue untouched and comes as `videoAlone` for the caller to play on its own. Same refusals as add, and an empty list or an invalid id; the outcome comes as `replaced`, `videoAlone`, `addFailed` or `nothingToAdd`. Like addFromRemote, it keeps the Undo snapshot of the queue the user last shaped: one Undo brings that back after any number of remote edits
+    Q_INVOKABLE bool replaceWith(const QStringList &itemIds);
+    // Another session's PlayNext or PlayLast: the given items join as one batch (one id expands as add() does; several are read as replaceWith reads them, videos only), with replaceWith's refusals and Undo rule; the outcome comes as `added`, `addFailed` or `nothingToAdd`
+    Q_INVOKABLE bool addFromRemote(const QStringList &itemIds,
+                                   Kinefin::PlayQueue::Placement placement);
     Q_INVOKABLE bool move(int from, int to);
     Q_INVOKABLE bool remove(int row);
     Q_INVOKABLE void clear();
@@ -109,6 +114,8 @@ class PlayQueue final : public QAbstractListModel {
     void added(int count, bool truncated);
     // The queue was replaced by `count` rows; `truncated` when the cap cut them
     void replaced(int count, bool truncated);
+    // `replaceWith` got one playable video: the queue is untouched and the caller plays the item on its own
+    void videoAlone(const QString &itemId);
     void addFailed();
     // The item is not something the queue takes, or has nothing to play
     void nothingToAdd();
@@ -120,16 +127,22 @@ class PlayQueue final : public QAbstractListModel {
     void saveFailed();
 
   private:
-    enum class Stage { Item, NextUp, Episodes, Children, PlaylistEntries };
+    enum class Stage { Item, Items, NextUp, Episodes, Children, PlaylistEntries };
     struct Operation {
         bool active = false;
         Placement placement = Last;
         // replace() rather than add(), and its random order
         bool replacing = false;
         bool shuffled = false;
+        // A playable root is reported as `videoAlone` instead of replacing the queue
+        bool playAlone = false;
+        // Another session asked for it: the Undo snapshot of the user's queue stays
+        bool remote = false;
         Stage stage = Stage::Item;
         ItemSummary root;
         QString nextUpId;
+        // The Items stage: the ids asked for, each once, in order; `received` counts those already asked
+        QStringList ids;
         std::vector<ItemSummary> collected;
         int total = 0;
         int received = 0;
@@ -156,7 +169,11 @@ class PlayQueue final : public QAbstractListModel {
     void onNextUp(const QJsonArray &items, int total, int channel);
     void onEpisodes(const QJsonArray &items, int total, int channel);
     void onPlaylistEntries(const QJsonArray &items, int total, int channel);
-    bool beginOperation(const QString &itemId, Placement placement, bool replacing, bool shuffled);
+    bool beginOperation(const QString &itemId, Placement placement, bool replacing, bool shuffled,
+                        bool playAlone = false, bool remote = false);
+    bool beginRemote(const QStringList &itemIds, bool replacing, Placement placement);
+    bool mayBegin();
+    bool requestIdPage();
     void requestPlaylistEntries();
     void onListingFailed(const QString &family, int status, const QString &reason, int channel);
     void requestEpisodes(const QString &seriesId, const QString &seasonId);
@@ -165,8 +182,9 @@ class PlayQueue final : public QAbstractListModel {
     void finish();
     void fail();
     void endOperation();
-    void insert(std::vector<ItemSummary> items, Placement placement, bool *truncated, int *joined);
-    void replaceAll(std::vector<ItemSummary> items, bool *truncated, int *joined);
+    void insert(std::vector<ItemSummary> items, Placement placement, bool *truncated, int *joined,
+                bool remote);
+    void replaceAll(std::vector<ItemSummary> items, bool *truncated, int *joined, bool remote);
 
     Stored readStored(const QString &path, StoredQueue *stored);
     QString queuesDirectory() const;
@@ -178,7 +196,8 @@ class PlayQueue final : public QAbstractListModel {
     void finishRestore();
     void endRestore();
     void dropMemory();
-    void rememberEdit();
+    // `remote`: an edit another session asked for, which keeps a snapshot the user's own edit took
+    void rememberEdit(bool remote = false);
     void forgetUndo();
     void scheduleSave();
     void flush();
@@ -186,6 +205,8 @@ class PlayQueue final : public QAbstractListModel {
     QPointer<JellyfinClient> m_client;
     std::vector<ItemSummary> m_items;
     std::vector<ItemSummary> m_undoItems;
+    // The snapshot is the queue from before a remote edit
+    bool m_undoBeforeRemote = false;
     bool m_canUndo = false;
     Operation m_op;
     Restore m_restore;

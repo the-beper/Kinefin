@@ -22,7 +22,7 @@ Kirigami.ScrollablePage {
     readonly property bool loading: entries.status === PlaylistEntriesModel.Loading
     readonly property bool failed: entries.status === PlaylistEntriesModel.Failed
     // A queue that could not be read back stays untouched until it is (the Queue page offers Retry); the queue reads the playlist from the server, so not while edits are on their way
-    readonly property bool canPlay: entries.count > 0 && !entries.writing && !queue.busy && !queue.restoreFailed && !!page.Window.window?.player && !shell.playlistWaiting
+    readonly property bool canPlay: entries.count > 0 && !entries.writing && !queue.busy && !queue.restoreFailed && !!page.Window.window?.player && !shell.playlistWaiting && !shell.remotePlayWaiting
     // One write of a playlist at a time: a rename or a delete waits for the edits of the rows, and the other way round
     readonly property bool canChangePlaylist: !entries.writing && !connection.playlists.writing
     // The rows stay as they are while a rename or delete is on its way, and while the queue reads the playlist (an edit then would give it half of each order)
@@ -30,8 +30,13 @@ Kirigami.ScrollablePage {
 
     // Read again with the list of playlists
     readonly property string knownName: name || (connection.playlists.status, connection.playlists.nameOf(playlistId))
-    // Server text: the toolbar title delegate renders it as plain text
+    // The page row shows it as plain text
     title: knownName || i18n("Playlist")
+    // The row of the page carries the way back, the name and the actions, as on the Movies and Shows tabs
+    globalToolBarStyle: Kirigami.ApplicationHeaderStyle.None
+    // Without Kirigami's title row the page names itself to a screen reader
+    Accessible.role: Accessible.Pane
+    Accessible.name: title
 
     Component.onCompleted: {
         shell.playlistPages++;
@@ -127,6 +132,14 @@ Kirigami.ScrollablePage {
 
     header: ColumnLayout {
         spacing: 0
+
+        PageToolbar {
+            Layout.fillWidth: true
+            backShown: true
+            title: page.title
+            actions: page.actions
+            toolbarObjectName: "playlistToolbar"
+        }
 
         // The playlist is read for the queue
         Controls.ProgressBar {
@@ -234,6 +247,12 @@ Kirigami.ScrollablePage {
 
     ListView {
         id: list
+        // What scrolls under the page row fades into it instead of being cut by its edge
+        TopFade {
+            parent: list
+            z: 1
+            atStart: list.atYBeginning
+        }
         objectName: "playlistEntries"
 
         model: page.entries
@@ -269,12 +288,14 @@ Kirigami.ScrollablePage {
         }
 
         Controls.BusyIndicator {
+            FadeInOnShow {}
             anchors.centerIn: parent
             running: visible
             visible: page.loading && list.count === 0
         }
 
         Kirigami.PlaceholderMessage {
+            FadeInOnShow {}
             objectName: "playlistNotLoaded"
             anchors.centerIn: parent
             width: parent.width - Kirigami.Units.gridUnit * 4
@@ -290,6 +311,7 @@ Kirigami.ScrollablePage {
         }
 
         Kirigami.PlaceholderMessage {
+            FadeInOnShow {}
             objectName: "playlistEmpty"
             anchors.centerIn: parent
             width: parent.width - Kirigami.Units.gridUnit * 4

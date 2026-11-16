@@ -30,13 +30,17 @@ class RemoteSessionsModel final : public QAbstractListModel {
         NowPlayingRole,
         PlayingRole,
         PausedRole,
-        CanControlRole
+        CanControlRole,
+        DeviceKindRole
     };
     static constexpr int MaxSessions = 100;
     static constexpr int MaxTextChars = 128;
     static constexpr int PollIntervalMs = 5000;
 
     explicit RemoteSessionsModel(JellyfinClient *client, QObject *parent = nullptr);
+
+    // What kind of device a session runs on, guessed from its client and device names (the server says no more): "tv", "tablet", "phone", "browser", "computer", or "other"
+    static QString deviceKind(const QString &client, const QString &device);
 
     Q_INVOKABLE bool open();
     Q_INVOKABLE void reload();
@@ -66,6 +70,7 @@ class RemoteSessionsModel final : public QAbstractListModel {
         QString client;
         QString user;
         QString title;
+        QString kind;
         bool playing = false;
         bool paused = false;
         bool controllable = false;

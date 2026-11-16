@@ -49,6 +49,7 @@ Kirigami.ScrollablePage {
         }
 
         Kirigami.PlaceholderMessage {
+            FadeInOnShow {}
             Layout.fillWidth: true
             visible: page.connection.librariesLoaded && page.connection.libraries.length === 0 && page.connection.errorText.length === 0
             text: i18n("No libraries to show")
@@ -167,6 +168,7 @@ Kirigami.ScrollablePage {
                     visible: row.status === HomeRowsModel.Loading
 
                     Controls.BusyIndicator {
+                        FadeInOnShow {}
                         anchors.centerIn: parent
                         running: parent.visible
                         Accessible.name: i18n("Loading…")

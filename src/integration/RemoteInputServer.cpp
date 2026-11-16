@@ -341,7 +341,7 @@ bool RemoteInputServer::handleLine(QLocalSocket *socket, QByteArrayView line)
     if (!std::exchange(client.logged, true))
         qDebug("Remote control: client '%s', source '%s' connected",
                utf8ForLog(frame->client).constData(), utf8ForLog(frame->source).constData());
-    if (!dispatch(*frame) && m_clients.contains(socket)
+    if (!dispatchKeycode(frame->keycode) && m_clients.contains(socket)
         && !std::exchange(m_clients[socket].warned, true))
         qDebug("Remote control: unknown keycode '%s' ignored, later ones from this client are not "
                "logged",
@@ -349,10 +349,8 @@ bool RemoteInputServer::handleLine(QLocalSocket *socket, QByteArrayView line)
     return m_clients.contains(socket);
 }
 
-bool RemoteInputServer::dispatch(const RemoteFrame &frame)
+bool RemoteInputServer::dispatchKeycode(const QString &code)
 {
-    const QString &code = frame.keycode;
-
     const auto *navigation = std::ranges::find_if(
         kNavigationKeys, [&code](const NavigationKey &entry) { return code == entry.code; });
     if (navigation != std::end(kNavigationKeys)) {
@@ -377,6 +375,38 @@ bool RemoteInputServer::dispatch(const RemoteFrame &frame)
         return true;
     }
     return false;
+}
+
+bool RemoteInputServer::dispatchNetworkKeycode(const QString &code)
+{
+    if (!m_networkSecond.isValid() || m_networkSecond.elapsed() >= 1000) {
+        m_networkSecond.start();
+        m_networkKeys = 0;
+    }
+    if (++m_networkKeys > MaxNetworkKeysPerSecond)
+        return false;
+    const bool navigation = std::ranges::any_of(
+        kNavigationKeys, [&code](const NavigationKey &entry) { return code == entry.code; });
+    if (navigation && !networkNavigationAllowed())
+        return false;
+    return dispatchKeycode(code);
+}
+
+bool RemoteInputServer::networkNavigationAllowed() const
+{
+    QObject *focus = m_window ? m_window->focusObject() : nullptr;
+    if (!focus)
+        return true;
+    QInputMethodQueryEvent query(Qt::ImEnabled);
+    QCoreApplication::sendEvent(focus, &query);
+    if (query.value(Qt::ImEnabled).toBool())
+        return false;
+    // Up the visual parents of a Qt Quick item (its "parent" property): one inside a popup sits under the popup's item and the window's overlay
+    for (QObject *item = focus; item; item = item->property("parent").value<QObject *>()) {
+        if (item->inherits("QQuickPopupItem") || item->inherits("QQuickOverlay"))
+            return false;
+    }
+    return true;
 }
 
 bool RemoteInputServer::sendKey(Qt::Key key, const QString &text)

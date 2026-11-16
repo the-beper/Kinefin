@@ -7,6 +7,7 @@
 #include "app/ConnectionController.h"
 #include "app/ImageNetworkFactory.h"
 #include "imagecache/ImageOrigin.h"
+#include "integration/RemoteInputServer.h"
 #include "models/SearchModel.h"
 #include "settings/ClientSettings.h"
 
@@ -1881,7 +1882,19 @@ class PlayerStub : public QObject {
         Q_EMIT changed();
         return true;
     }
-    Q_INVOKABLE bool playQueue(int index) { return record(QStringLiteral("playQueue"), index); }
+    Q_INVOKABLE bool playQueue(int index, qint64 startTicks = 0)
+    {
+        lastStartTicks = startTicks;
+        return record(QStringLiteral("playQueue"), index);
+    }
+    Q_INVOKABLE bool selectAudioStreamIndex(int index)
+    {
+        return record(QStringLiteral("selectAudioStreamIndex"), index);
+    }
+    Q_INVOKABLE bool selectSubtitleStreamIndex(int index)
+    {
+        return record(QStringLiteral("selectSubtitleStreamIndex"), index);
+    }
     Q_INVOKABLE void togglePause()
     {
         record(QStringLiteral("togglePause"));
@@ -2013,6 +2026,8 @@ class PlayerStub : public QObject {
     int upNextSeconds = 0;
     bool hasSeriesChoices = false;
     QStringList calls;
+    // The start position of the last playQueue
+    qint64 lastStartTicks = 0;
 
   Q_SIGNALS:
     void changed();
@@ -2171,7 +2186,9 @@ QQuickItem *openMiniPlayer(Ui &ui, PlayerStub &stub)
         return nullptr;
     ui.clickCenter(button);
     QQuickItem *mini = nullptr;
-    const bool shown = qWaitForScaled([&] { return (mini = shownMiniPlayer(ui)) != nullptr; });
+    // Shown and at rest: it fades in rising a little, and its buttons are where a click lands only then
+    const bool shown = qWaitForScaled(
+        [&] { return (mini = shownMiniPlayer(ui)) != nullptr && mini->opacity() == 1.0; });
     return shown ? mini : nullptr;
 }
 
@@ -3358,6 +3375,11 @@ class TestUiPages : public QObject {
         // Return on the second season opens it
         row->forceActiveFocus();
         row->setProperty("currentIndex", 1);
+        // A card outside the visible part is built asynchronously: the row adopts it as current a moment later
+        QTRY_VERIFY([&] {
+            const QObject *current = row->property("currentItem").value<QObject *>();
+            return current && current->property("itemId").toString() == kSeasonId;
+        }());
         const int depth = ui.stackDepth();
         QTest::keyClick(ui.window, Qt::Key_Return);
         QTRY_COMPARE(ui.stackDepth(), depth + 1);
@@ -5876,6 +5898,13 @@ class TestUiPages : public QObject {
         QTRY_COMPARE(ui.itemsStartingWith(QStringLiteral("remoteSessionRow")).size(), 2);
         QVERIFY(!failed->isVisible());
         QVERIFY(!busy->isVisible());
+        // Each row shows the kind of its device: a desktop client and a browser
+        QStringList icons;
+        for (QQuickItem *icon : ui.itemsStartingWith(QStringLiteral("remoteDeviceIcon")))
+            icons << icon->property("source").toString();
+        icons.sort();
+        QCOMPARE(icons,
+                 (QStringList{QStringLiteral("computer"), QStringLiteral("internet-web-browser")}));
         QTRY_COMPARE(remote->status(), Kinefin::RemoteSessionsModel::Ready);
 
         // A poll after an answer changes nothing on screen: no spinner, the rows stay
@@ -11702,7 +11731,8 @@ class TestUiPages : public QObject {
         stub.upNextShown = true;
         Q_EMIT stub.changed();
         QTRY_VERIFY(card->isVisible());
-        QVERIFY(!skip->isVisible());
+        // Skip fades out
+        QTRY_VERIFY(!skip->isVisible());
         int found = 0;
         const QStringList problems = ui.notPlainText(hostile, &found);
         QVERIFY2(problems.isEmpty(), qPrintable(problems.join(QLatin1String(", "))));
@@ -12225,6 +12255,281 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(!picker->property("visible").toBool());
         QTest::qWait(100);
         QCOMPARE(root->property("playlistsPages").toInt(), 1);
+    }
+
+    void everyPageUnderTheHeaderUsesTheRowOfTheTabs()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        const QString evening = ui.server.seedPlaylist(QStringLiteral("Evening"), {kMovieId});
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QObject *root = ui.engine.rootObjects().constFirst();
+        QTRY_VERIFY(ui.item(QStringLiteral("homePage")) != nullptr);
+        const QVariant noTitleRow =
+            ui.item(QStringLiteral("homePage"))->property("globalToolBarStyle");
+        const auto backShown = [](QQuickItem *page) {
+            QQuickItem *back = Ui::itemIn(page, QStringLiteral("pageBackButton"));
+            return back && back->isVisible();
+        };
+        // A section of the header: no title row and no way back, its actions in the row
+        QVERIFY(QMetaObject::invokeMethod(root, "openPlaylists"));
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("playlistsPage"));
+        QQuickItem *page = ui.currentDetails();
+        QCOMPARE(page->property("globalToolBarStyle"), noTitleRow);
+        QVERIFY(!backShown(page));
+        QTRY_VERIFY(ui.item(QStringLiteral("playlistsToolbar"))->isVisible());
+        // A page above another: the way back and the name lead the same row
+        QTRY_VERIFY(ui.item(QStringLiteral("mediaCard_") + evening) != nullptr);
+        ui.clickCenter(ui.item(QStringLiteral("mediaCard_") + evening));
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("playlistPage"));
+        page = ui.currentDetails();
+        QCOMPARE(page->property("globalToolBarStyle"), noTitleRow);
+        QTRY_VERIFY(backShown(page));
+        QQuickItem *toolbar = Ui::itemIn(page, QStringLiteral("playlistToolbar"));
+        QVERIFY(toolbar);
+        // The name sits in the row itself, beside the way back
+        QTRY_VERIFY(std::ranges::any_of(
+            ui.itemsWithText(QStringLiteral("Evening"), true), [&](QQuickItem *label) {
+                return label->isVisible() && label->parentItem() == toolbar->parentItem();
+            }));
+        ui.clickCenter(Ui::itemIn(page, QStringLiteral("pageBackButton")));
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("playlistsPage"));
+        // The details of an item: the way back and the actions, the hero names it
+        page = openDetails(ui, kMovieId);
+        QVERIFY(page);
+        QCOMPARE(page->property("globalToolBarStyle"), noTitleRow);
+        QTRY_VERIFY(backShown(page));
+        QTRY_VERIFY(Ui::itemIn(page, QStringLiteral("detailsToolbar"))->isVisible());
+        // The Continue Watching list and the search page
+        QVERIFY(QMetaObject::invokeMethod(root, "goHome"));
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("homePage"));
+        QVERIFY(QMetaObject::invokeMethod(root, "openResumeItems"));
+        QTRY_VERIFY(ui.currentDetails()->objectName() != QLatin1String("homePage"));
+        page = ui.currentDetails();
+        QCOMPARE(page->property("globalToolBarStyle"), noTitleRow);
+        QTRY_VERIFY(backShown(page));
+        QVERIFY(QMetaObject::invokeMethod(root, "openSearch"));
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("searchPage"));
+        QCOMPARE(ui.currentDetails()->property("globalToolBarStyle"), noTitleRow);
+        QVERIFY(!backShown(ui.currentDetails()));
+    }
+
+    void aPlaceholderHiddenWhileFadingInLeavesNothingDrawn()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(1000));
+        QVERIFY(ui.signIn());
+        // The details load while their Loading placeholder still fades in: once hidden, it must not stay drawn over the hero
+        QQuickItem *page = openDetails(ui, kMovieId);
+        QVERIFY(page);
+        QTRY_VERIFY(page->property("showContent").toBool());
+        QQuickItem *hero = Ui::itemIn(page, QStringLiteral("detailsHero"));
+        QTRY_VERIFY(hero && hero->height() > 100);
+        QTest::qWait(600);
+        const QImage shot = ui.window->grabWindow();
+        QVERIFY(!shot.isNull());
+        // The fixture's backdrop is one colour under a vertical fade: every pixel row across the middle of the hero's top is uniform, a leftover text is not
+        const QRect top = hero->mapRectToScene(QRectF(0, 0, hero->width(), 48)).toRect();
+        const int left = top.left() + top.width() / 4;
+        const int right = top.left() + top.width() * 3 / 4;
+        for (int y = std::max(0, top.top()); y < std::min(shot.height(), top.bottom()); ++y) {
+            const QColor first = shot.pixelColor(left, y);
+            for (int x = left; x < right; ++x) {
+                const QColor pixel = shot.pixelColor(x, y);
+                const int deviation = std::max({std::abs(pixel.red() - first.red()),
+                                                std::abs(pixel.green() - first.green()),
+                                                std::abs(pixel.blue() - first.blue())});
+                QVERIFY2(deviation <= 12,
+                         qPrintable(QStringLiteral("something drawn at %1,%2").arg(x).arg(y)));
+            }
+        }
+    }
+
+    void placeholdersFadeInAndEndFullyVisible()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QObject *root = ui.engine.rootObjects().constFirst();
+        // Shown again and again, it always ends fully visible
+        for (int round = 0; round < 3; ++round) {
+            QVERIFY(QMetaObject::invokeMethod(root, "openPlaylists"));
+            QQuickItem *empty = nullptr;
+            QTRY_VERIFY((empty = ui.item(QStringLiteral("playlistsEmpty"))) && empty->isVisible());
+            QTRY_COMPARE(empty->opacity(), 1.0);
+            QVERIFY(QMetaObject::invokeMethod(root, "goHome"));
+            QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("homePage"));
+        }
+    }
+
+    void headerSectionsFadeInAndBackSlides()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QObject *root = ui.engine.rootObjects().constFirst();
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("homePage"));
+        QObject *row = root->property("pageStack").value<QObject *>();
+        QVERIFY(row);
+        // Each section of the header fades in, also from another section
+        for (const char *section : {"openFavorites", "openPlaylists", "openFavorites"}) {
+            QVERIFY(QMetaObject::invokeMethod(root, section));
+            QTRY_VERIFY(root->property("tabSwitching").toBool());
+            QTRY_VERIFY(!root->property("tabSwitching").toBool());
+            QCOMPARE(row->property("opacity").toDouble(), 1.0);
+        }
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("favoritesPage"));
+        QCOMPARE(ui.stackDepth(), 2);
+        // The section in front asked again: nothing moves
+        QVERIFY(QMetaObject::invokeMethod(root, "openFavorites"));
+        QVERIFY(!root->property("tabSwitching").toBool());
+        // A page pushed above a section still fading in shows at once, fully visible
+        QVERIFY(QMetaObject::invokeMethod(root, "openPlaylists"));
+        QVERIFY(root->property("tabSwitching").toBool());
+        QVERIFY(QMetaObject::invokeMethod(root, "openItem", Q_ARG(QVariant, kMovieId),
+                                          Q_ARG(QVariant, QVariant())));
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("itemDetailsPage"));
+        QTRY_VERIFY(!root->property("tabSwitching").toBool());
+        QCOMPARE(row->property("opacity").toDouble(), 1.0);
+        // A section under the page in front comes back with the same fade
+        QVERIFY(QMetaObject::invokeMethod(root, "openPlaylists"));
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("playlistsPage"));
+        QTRY_VERIFY(!root->property("tabSwitching").toBool());
+        QCOMPARE(row->property("opacity").toDouble(), 1.0);
+        QTRY_COMPARE(ui.stackDepth(), 2);
+        // Clicking the tab under a section slides back to it: the section leaves once the stack settles
+        QVERIFY(QMetaObject::invokeMethod(root, "goHome"));
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("homePage"));
+        QTRY_COMPARE(ui.stackDepth(), 1);
+        // Signing out fades the next page in, and the row ends fully visible
+        ui.controller.signOut();
+        QTRY_VERIFY(ui.currentDetails()->objectName() != QLatin1String("homePage"));
+        QTRY_VERIFY(!root->property("tabSwitching").toBool());
+        QCOMPARE(row->property("opacity").toDouble(), 1.0);
+    }
+
+    void anotherSessionsKeysNeverTypeOrConfirmInADialog()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        const QString evening = ui.server.seedPlaylist(QStringLiteral("Evening"), {});
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QObject *root = ui.engine.rootObjects().constFirst();
+        Kinefin::RemoteInputServer keys(QString(), QStringLiteral("1.2.3"));
+        keys.setWindow(ui.window);
+        // A page in front takes the navigation keys
+        QTRY_VERIFY(ui.currentDetails() != nullptr);
+        QVERIFY(keys.dispatchNetworkKeycode(QStringLiteral("down")));
+        // The rename dialog's field has the focus: Select would submit what the user types
+        QVERIFY(QMetaObject::invokeMethod(root, "renamePlaylist", Q_ARG(QVariant, evening),
+                                          Q_ARG(QVariant, QStringLiteral("Evening"))));
+        QObject *nameDialog = ui.popup(QStringLiteral("playlistNameDialog"));
+        QTRY_VERIFY(nameDialog && nameDialog->property("opened").toBool());
+        QTRY_VERIFY(
+            ui.popup(QStringLiteral("playlistNameField"))->property("activeFocus").toBool());
+        QVERIFY(!keys.dispatchNetworkKeycode(QStringLiteral("select")));
+        QVERIFY(!keys.dispatchNetworkKeycode(QStringLiteral("left")));
+        QVERIFY(QMetaObject::invokeMethod(nameDialog, "close"));
+        QTRY_VERIFY(!nameDialog->property("visible").toBool());
+        // The delete question: whatever has the focus in it, Select never confirms
+        QVERIFY(QMetaObject::invokeMethod(root, "askDeletePlaylist", Q_ARG(QVariant, evening)));
+        QObject *deleteDialog = ui.popup(QStringLiteral("deletePlaylistDialog"));
+        QTRY_VERIFY(deleteDialog && deleteDialog->property("opened").toBool());
+        QVERIFY(!keys.dispatchNetworkKeycode(QStringLiteral("select")));
+        QVERIFY(!keys.dispatchNetworkKeycode(QStringLiteral("down")));
+        QTest::qWait(100);
+        QVERIFY(ui.server.playlistById(evening));
+        QVERIFY(QMetaObject::invokeMethod(deleteDialog, "close"));
+        QTRY_VERIFY(!deleteDialog->property("visible").toBool());
+    }
+
+    void anotherSessionDrivesThePlayerAndTheQueue()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QStringList films;
+        for (int i = 1; i <= 3; ++i) {
+            const QString id = QStringLiteral("f4%1").arg(i, 30, 16, QLatin1Char('0'));
+            ui.server.itemsById.insert(
+                id, QJsonDocument(
+                        QJsonObject{{QStringLiteral("Id"), id},
+                                    {QStringLiteral("Name"), QStringLiteral("Film %1").arg(i)},
+                                    {QStringLiteral("Type"), QStringLiteral("Movie")}})
+                        .toJson(QJsonDocument::Compact));
+            films.append(id);
+        }
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        Kinefin::RemoteCommands *remote = ui.controller.remoteCommands();
+        QObject *root = ui.engine.rootObjects().constFirst();
+        QVERIFY(root->setProperty("player", QVariant::fromValue<QObject *>(&stub)));
+        // Nothing plays: a seek goes nowhere
+        remote->handlePlaystate(QStringLiteral("Seek"), 600);
+        QTest::qWait(50);
+        QVERIFY(!stub.calls.contains(QStringLiteral("seek 600")));
+        QVERIFY(openPlayer(ui, stub));
+        stub.calls.clear();
+        // While something plays the player takes the commands that carry arguments
+        remote->handlePlaystate(QStringLiteral("Seek"), 600);
+        remote->handleGeneralCommand(QStringLiteral("SetVolume"),
+                                     {{QStringLiteral("Volume"), QStringLiteral("40")}});
+        remote->handleGeneralCommand(QStringLiteral("Mute"), {});
+        remote->handleGeneralCommand(QStringLiteral("SetAudioStreamIndex"),
+                                     {{QStringLiteral("Index"), QStringLiteral("2")}});
+        remote->handleGeneralCommand(QStringLiteral("SetSubtitleStreamIndex"),
+                                     {{QStringLiteral("Index"), QStringLiteral("-1")}});
+        remote->handleGeneralCommand(QStringLiteral("SetRepeatMode"),
+                                     {{QStringLiteral("RepeatMode"), QStringLiteral("RepeatAll")}});
+        remote->handleGeneralCommand(QStringLiteral("SetShuffleQueue"),
+                                     {{QStringLiteral("ShuffleMode"), QStringLiteral("Shuffle")}});
+        QTRY_VERIFY(stub.calls.contains(QStringLiteral("setShuffle true")));
+        for (const char *call :
+             {"seek 600", "setVolume 40", "toggleMute", "selectAudioStreamIndex 2",
+              "selectSubtitleStreamIndex -1", "setRepeatMode 1"})
+            QVERIFY2(stub.calls.contains(QLatin1String(call)), call);
+        // Unmute while already unmuted changes nothing
+        stub.calls.clear();
+        remote->handleGeneralCommand(QStringLiteral("Unmute"), {});
+        QTest::qWait(50);
+        QVERIFY(!stub.calls.contains(QStringLiteral("toggleMute")));
+        // PlayNow of several videos makes them the queue and starts at the one named, at its position
+        remote->handlePlay({QStringLiteral("PlayNow"), films, 500, 1});
+        QTRY_VERIFY(stub.calls.contains(QStringLiteral("playQueue 1")));
+        QCOMPARE(stub.lastStartTicks, 500);
+        QCOMPARE(ui.controller.queue()->itemIds(), films);
+        // One video plays on its own and leaves the queue alone
+        stub.calls.clear();
+        remote->handlePlay({QStringLiteral("PlayNow"), {kMovieId}, 300, -1});
+        QTRY_VERIFY(stub.calls.contains(QStringLiteral("playItem ") + kMovieId));
+        QCOMPARE(ui.controller.queue()->itemIds(), films);
+        // PlayLast puts the items at the end, PlayNext after the current one in the order sent
+        QTRY_VERIFY(!ui.controller.queue()->busy());
+        remote->handlePlay({QStringLiteral("PlayLast"), {kMovieId}, -1, -1});
+        QTRY_COMPARE(ui.controller.queue()->itemIds().size(), 4);
+        QCOMPARE(ui.controller.queue()->itemIds().constLast(), kMovieId);
+        QTRY_VERIFY(!ui.controller.queue()->busy());
+        ui.controller.queue()->setCurrentPlaybackItemId(films.at(0));
+        remote->handlePlay({QStringLiteral("PlayNext"), {films.at(2), kMovieId}, -1, -1});
+        QTRY_COMPARE(ui.controller.queue()->itemIds(),
+                     (QStringList{films.at(0), films.at(2), kMovieId, films.at(1)}));
+        // Commands that come while the queue is busy run after it, in their order
+        QTRY_VERIFY(!ui.controller.queue()->busy());
+        ui.server.holdListings = true;
+        remote->handlePlay({QStringLiteral("PlayLast"), {films.at(0)}, -1, -1});
+        QTRY_VERIFY(ui.controller.queue()->busy());
+        stub.calls.clear();
+        remote->handlePlay({QStringLiteral("PlayNow"), {films.at(1), films.at(2)}, -1, 0});
+        ui.server.holdListings = false;
+        ui.server.releaseHeld();
+        QTRY_VERIFY(stub.calls.contains(QStringLiteral("playQueue 0")));
+        QCOMPARE(ui.controller.queue()->itemIds(), (QStringList{films.at(1), films.at(2)}));
     }
 
     void playerRepeatIsAlwaysOnAndAllNeedsSomewhereToGo()

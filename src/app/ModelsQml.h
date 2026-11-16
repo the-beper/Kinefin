@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "RemoteCommands.h"
 #include "models/FavoritesGroupsModel.h"
 #include "models/FavoritesModel.h"
 #include "models/FilterOptionsModel.h"
@@ -156,6 +157,13 @@ struct PlaylistEntriesModelForeign {
     Q_GADGET
     QML_FOREIGN(Kinefin::PlaylistEntriesModel)
     QML_NAMED_ELEMENT(PlaylistEntriesModel)
+    QML_UNCREATABLE("Created by the application")
+};
+
+struct RemoteCommandsForeign {
+    Q_GADGET
+    QML_FOREIGN(Kinefin::RemoteCommands)
+    QML_NAMED_ELEMENT(RemoteCommands)
     QML_UNCREATABLE("Created by the application")
 };
 

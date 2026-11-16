@@ -55,10 +55,39 @@ std::optional<QJsonObject> playbackReportBody(const PlaybackReport &report)
     return body;
 }
 
+const QStringList &supportedGeneralCommands()
+{
+    // PlayState, Play and PlayNext name the Playstate and Play messages, which arrive as their own types
+    static const QStringList commands{QStringLiteral("MoveUp"),
+                                      QStringLiteral("MoveDown"),
+                                      QStringLiteral("MoveLeft"),
+                                      QStringLiteral("MoveRight"),
+                                      QStringLiteral("Select"),
+                                      QStringLiteral("Back"),
+                                      QStringLiteral("GoHome"),
+                                      QStringLiteral("VolumeUp"),
+                                      QStringLiteral("VolumeDown"),
+                                      QStringLiteral("Mute"),
+                                      QStringLiteral("Unmute"),
+                                      QStringLiteral("ToggleMute"),
+                                      QStringLiteral("SetVolume"),
+                                      QStringLiteral("SetAudioStreamIndex"),
+                                      QStringLiteral("SetSubtitleStreamIndex"),
+                                      QStringLiteral("ToggleFullscreen"),
+                                      QStringLiteral("SetRepeatMode"),
+                                      QStringLiteral("SetShuffleQueue"),
+                                      QStringLiteral("PlayState"),
+                                      QStringLiteral("Play"),
+                                      QStringLiteral("PlayNext")};
+    return commands;
+}
+
 QJsonObject clientCapabilitiesBody(bool mediaControlSupported)
 {
     return {{QStringLiteral("PlayableMediaTypes"), QJsonArray{QStringLiteral("Video")}},
-            {QStringLiteral("SupportedCommands"), QJsonArray()},
+            {QStringLiteral("SupportedCommands"),
+             mediaControlSupported ? QJsonArray::fromStringList(supportedGeneralCommands())
+                                   : QJsonArray()},
             {QStringLiteral("SupportsMediaControl"), mediaControlSupported},
             {QStringLiteral("SupportsPersistentIdentifier"), true}};
 }

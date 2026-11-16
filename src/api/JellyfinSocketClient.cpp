@@ -538,7 +538,16 @@ void JellyfinSocketClient::onTextMessage(quint64 generation, const QString &text
             drop("play-ticks");
             return;
         }
-        Q_EMIT playRequested(RemotePlayRequest{command, itemIds, ticks});
+        const QJsonValue indexValue = data.value(QStringLiteral("StartIndex"));
+        qint64 startIndex = -1;
+        if (!indexValue.isUndefined() && !indexValue.isNull()
+            && !nonNegativeIntegral(indexValue, &startIndex)) {
+            drop("play-start-index");
+            return;
+        }
+        if (startIndex >= itemIds.size())
+            startIndex = -1;
+        Q_EMIT playRequested(RemotePlayRequest{command, itemIds, ticks, int(startIndex)});
         return;
     }
     if (type == QLatin1String("Sessions")) {

@@ -24,6 +24,33 @@ QString plainLine(const QJsonValue &value)
 }
 } // namespace
 
+QString RemoteSessionsModel::deviceKind(const QString &client, const QString &device)
+{
+    const QString c = client.toLower();
+    const QString d = device.toLower();
+    const auto mentions = [](const QString &text, std::initializer_list<const char *> words) {
+        return std::any_of(words.begin(), words.end(), [&text](const char *word) {
+            return text.contains(QLatin1String(word));
+        });
+    };
+    // The order matters: a TV app names Android too, a tablet's app names iOS
+    if (mentions(c, {"android tv", "androidtv", "tizen", "webos", "roku", "fire tv", "firetv",
+                     "kodi", "apple tv", "tvos", "xbox", "playstation", "chromecast"})
+        || mentions(d, {" tv", "tv ", "shield", "bravia", "chromecast", "roku", "fire tv"})
+        || d == QLatin1String("tv"))
+        return QStringLiteral("tv");
+    if (mentions(c, {"ipad"}) || mentions(d, {"ipad", "tablet"}))
+        return QStringLiteral("tablet");
+    if (mentions(c, {"android", "ios", "iphone", "swiftfin", "findroid", "mobile"})
+        || mentions(d, {"iphone", "phone", "pixel", "galaxy"}))
+        return QStringLiteral("phone");
+    if (mentions(c, {"web"}) || mentions(d, {"firefox", "chrome", "safari", "edge", "opera"}))
+        return QStringLiteral("browser");
+    if (mentions(c, {"media player", "desktop", "kinefin", "mpv", "shim", "delfin", "theater"}))
+        return QStringLiteral("computer");
+    return QStringLiteral("other");
+}
+
 RemoteSessionsModel::RemoteSessionsModel(JellyfinClient *client, QObject *parent)
     : QAbstractListModel(parent), m_client(client)
 {
@@ -135,6 +162,13 @@ void RemoteSessionsModel::onSessionsReady(const QJsonArray &sessions)
         const QString id = item.value(QStringLiteral("Id")).toString();
         if (!isValidJellyfinId(id) || ids.contains(id.toLower()))
             continue;
+        // This very client is no remote session to control
+        if (m_client
+            && item.value(QStringLiteral("DeviceId"))
+                       .toString()
+                       .compare(m_client->deviceId(), Qt::CaseInsensitive)
+                   == 0)
+            continue;
         if (int(rows.size()) >= MaxSessions) {
             truncated = true;
             break;
@@ -147,6 +181,7 @@ void RemoteSessionsModel::onSessionsReady(const QJsonArray &sessions)
         session.device = plainLine(item.value(QStringLiteral("DeviceName")));
         session.client = plainLine(item.value(QStringLiteral("Client")));
         session.user = plainLine(item.value(QStringLiteral("UserName")));
+        session.kind = deviceKind(session.client, session.device);
         session.title = plainLine(now.value(QStringLiteral("Name")));
         session.playing =
             !now.isEmpty() && isValidJellyfinId(now.value(QStringLiteral("Id")).toString());
@@ -192,6 +227,8 @@ void RemoteSessionsModel::applySessions(std::vector<Session> rows)
             roles << ClientNameRole;
         if (kept.user != fresh->user)
             roles << UserNameRole;
+        if (kept.kind != fresh->kind)
+            roles << DeviceKindRole;
         if (kept.title != fresh->title)
             roles << NowPlayingRole;
         if (kept.playing != fresh->playing)
@@ -288,6 +325,8 @@ QVariant RemoteSessionsModel::data(const QModelIndex &index, int role) const
         return row.paused;
     case CanControlRole:
         return row.controllable;
+    case DeviceKindRole:
+        return row.kind;
     }
     return {};
 }
@@ -297,6 +336,7 @@ QHash<int, QByteArray> RemoteSessionsModel::roleNames() const
     return {{SessionIdRole, "sessionId"},   {DeviceNameRole, "deviceName"},
             {ClientNameRole, "clientName"}, {UserNameRole, "userName"},
             {NowPlayingRole, "nowPlaying"}, {PlayingRole, "playing"},
-            {PausedRole, "paused"},         {CanControlRole, "canControl"}};
+            {PausedRole, "paused"},         {CanControlRole, "canControl"},
+            {DeviceKindRole, "deviceKind"}};
 }
 } // namespace Kinefin

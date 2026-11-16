@@ -139,12 +139,14 @@ Kirigami.Dialog {
         }
 
         Controls.BusyIndicator {
+            FadeInOnShow {}
             anchors.centerIn: parent
             running: visible
             visible: dialog.loading && list.count === 0
         }
 
         Kirigami.PlaceholderMessage {
+            FadeInOnShow {}
             objectName: "addToPlaylistNotLoaded"
             anchors.centerIn: parent
             anchors.verticalCenterOffset: list.headerItem ? list.headerItem.height / 2 : 0
@@ -159,6 +161,7 @@ Kirigami.Dialog {
         }
 
         Kirigami.PlaceholderMessage {
+            FadeInOnShow {}
             objectName: "addToPlaylistEmpty"
             anchors.centerIn: parent
             anchors.verticalCenterOffset: list.headerItem ? list.headerItem.height / 2 : 0

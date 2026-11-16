@@ -301,6 +301,7 @@ Kirigami.Page {
         anchors.centerIn: parent
         visible: page.player.loading || !!page.player.errorText
         spacing: Kirigami.Units.largeSpacing
+        FadeInOnShow {}
         Controls.BusyIndicator {
             Layout.alignment: Qt.AlignHCenter
             running: visible
@@ -325,8 +326,20 @@ Kirigami.Page {
         anchors.margins: Kirigami.Units.largeSpacing
         anchors.bottomMargin: bottomBar.height + Kirigami.Units.largeSpacing
         // The Up Next card takes its place over the credits; Cancel brings it back
-        visible: page.player.skipLabel.length > 0 && !page.player.upNextShown
-        text: page.player.skipLabel
+        readonly property bool shown: page.player.skipLabel.length > 0 && !page.player.upNextShown
+        // The last label stays while the button fades out, so it keeps its width
+        property string shownLabel
+        Binding on shownLabel {
+            when: page.player.skipLabel.length > 0
+            value: page.player.skipLabel
+        }
+        enabled: shown
+        opacity: shown ? 1 : 0
+        visible: shown || opacity > 0
+        Behavior on opacity {
+            NumberAnimation { duration: Kirigami.Units.longDuration; easing.type: Easing.OutCubic }
+        }
+        text: shownLabel
         icon.name: "media-skip-forward"
         onClicked: { page.player.skipSegment(); page.wakeChrome(); }
     }
@@ -338,7 +351,23 @@ Kirigami.Page {
         anchors.bottom: parent.bottom
         anchors.margins: Kirigami.Units.largeSpacing
         anchors.bottomMargin: bottomBar.height + Kirigami.Units.largeSpacing
-        visible: page.player.upNextShown
+        enabled: page.player.upNextShown
+        opacity: page.player.upNextShown ? 1 : 0
+        visible: page.player.upNextShown || opacity > 0
+        Behavior on opacity {
+            NumberAnimation { duration: Kirigami.Units.longDuration; easing.type: Easing.OutCubic }
+        }
+        // The player empties the next item as the card goes: it fades out with what it showed
+        property var shownItem: ({})
+        property int shownSeconds: 0
+        Binding on shownItem {
+            when: page.player.upNextShown
+            value: page.player.upNext
+        }
+        Binding on shownSeconds {
+            when: page.player.upNextShown
+            value: page.player.upNextSeconds
+        }
         width: Math.min(upNextRow.implicitWidth + Kirigami.Units.largeSpacing * 2, page.width - Kirigami.Units.largeSpacing * 2)
         height: upNextRow.implicitHeight + Kirigami.Units.largeSpacing * 2
         radius: Kirigami.Units.cornerRadius
@@ -363,7 +392,7 @@ Kirigami.Page {
                 Layout.preferredWidth: Math.round(Kirigami.Units.gridUnit * 5 * 16 / 9)
                 Layout.alignment: Qt.AlignTop
                 visible: source.toString().length > 0
-                source: page.player.upNext.imageUrl ?? ""
+                source: upNextCard.shownItem.imageUrl ?? ""
                 sourceSize.height: Kirigami.Units.gridUnit * 5
                 fillMode: Image.PreserveAspectFit
                 asynchronous: true
@@ -384,7 +413,7 @@ Kirigami.Page {
                     maximumLineCount: 1
                     elide: Text.ElideRight
                     font.bold: true
-                    text: page.player.upNext.title ?? ""
+                    text: upNextCard.shownItem.title ?? ""
                 }
                 Controls.Label {
                     objectName: "playerUpNextSubtitle"
@@ -393,13 +422,13 @@ Kirigami.Page {
                     textFormat: Text.PlainText
                     maximumLineCount: 1
                     elide: Text.ElideRight
-                    text: page.player.upNext.subtitle ?? ""
+                    text: upNextCard.shownItem.subtitle ?? ""
                 }
                 Controls.Label {
                     objectName: "playerUpNextCountdown"
                     Layout.fillWidth: true
                     wrapMode: Text.WordWrap
-                    text: i18np("Starts in %1 second", "Starts in %1 seconds", page.player.upNextSeconds)
+                    text: i18np("Starts in %1 second", "Starts in %1 seconds", upNextCard.shownSeconds)
                 }
                 RowLayout {
                     spacing: Kirigami.Units.smallSpacing
@@ -805,7 +834,11 @@ Kirigami.Page {
     // Over the bars and the video, and it stays when the bars go; below the top bar while that is up
     PlaybackInfoOverlay {
         id: playbackInfo
-        visible: page.playbackInfoShown
+        opacity: page.playbackInfoShown ? 1 : 0
+        visible: page.playbackInfoShown || opacity > 0
+        Behavior on opacity {
+            NumberAnimation { duration: Kirigami.Units.shortDuration; easing.type: Easing.OutCubic }
+        }
         player: page.player
         playerSize: page.videoPixelSize
         anchors.left: parent.left
@@ -1049,6 +1082,11 @@ Kirigami.Page {
         modal: false
         closePolicy: Controls.Popup.CloseOnPressOutsideParent
         padding: Kirigami.Units.smallSpacing
+        // Only the way out fades: an enter transition would hold `opened` back, which the page's Escape and hover rules read; the exit leaves the opacity at 0, so each show puts it back
+        onAboutToShow: opacity = 1
+        exit: Transition {
+            NumberAnimation { property: "opacity"; from: 1; to: 0; duration: Kirigami.Units.shortDuration; easing.type: Easing.InCubic }
+        }
         // The window's colours, like the menus, not the dark bars' its parent has
         Kirigami.Theme.colorSet: Kirigami.Theme.Window
         Kirigami.Theme.inherit: false
@@ -1126,6 +1164,11 @@ Kirigami.Page {
         x: page.width - width
         y: page.height - height
         closePolicy: Controls.Popup.CloseOnEscape | Controls.Popup.CloseOnPressOutside
+        // Only the way out fades: an enter transition would hold `opened` back, which the page's Escape and hover rules read; the exit leaves the opacity at 0, so each show puts it back
+        onAboutToShow: opacity = 1
+        exit: Transition {
+            NumberAnimation { property: "opacity"; from: 1; to: 0; duration: Kirigami.Units.shortDuration; easing.type: Easing.InCubic }
+        }
         // The hide timer gives way while the panel is open: it starts again when the panel goes
         onAboutToHide: page.popupGone()
         ColumnLayout {

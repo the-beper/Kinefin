@@ -8,6 +8,12 @@ import org.kde.kirigami as Kirigami
 // The genre rails of the library open in `connection.genreRails`, as a list that scrolls by itself (its scroll bar comes from the ScrollablePage or ScrollView around it): the page of its own and the Genres sub-tab show the same view. The page that shows it opens the grid of a genre on `showAllRequested`
 ListView {
     id: view
+    // What scrolls under the page row fades into it instead of being cut by its edge
+    TopFade {
+        parent: view
+        z: 1
+        atStart: view.atYBeginning
+    }
     objectName: "genreRailsList"
 
     required property ConnectionController connection
@@ -62,6 +68,7 @@ ListView {
     onContentHeightChanged: Qt.callLater(view.loadMoreWhenAtEnd)
 
     Kirigami.LoadingPlaceholder {
+        FadeInOnShow {}
         anchors.centerIn: parent
         visible: view.rails.status === GenreRailsModel.Loading && view.count === 0
         text: i18n("Loading…")
@@ -91,6 +98,7 @@ ListView {
     }
 
     Kirigami.PlaceholderMessage {
+        FadeInOnShow {}
         anchors.centerIn: parent
         width: view.width - Kirigami.Units.gridUnit * 4
         visible: view.rails.status === GenreRailsModel.Ready && view.count === 0
@@ -159,6 +167,7 @@ ListView {
             visible: row.railStatus === GenreRailsModel.RailIdle || row.railStatus === GenreRailsModel.RailLoading
 
             Controls.BusyIndicator {
+                FadeInOnShow {}
                 anchors.centerIn: parent
                 running: parent.visible
                 Accessible.name: i18n("Loading…")

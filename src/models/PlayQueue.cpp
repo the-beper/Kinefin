@@ -172,16 +172,68 @@ bool PlayQueue::replace(const QString &itemId, bool shuffled)
     return beginOperation(itemId, Last, true, shuffled);
 }
 
-bool PlayQueue::beginOperation(const QString &itemId, Placement placement, bool replacing,
-                               bool shuffled)
+bool PlayQueue::replaceWith(const QStringList &itemIds)
 {
-    if (!m_client || m_op.active || m_restore.active || !isValidJellyfinId(itemId))
+    return beginRemote(itemIds, true, Last);
+}
+
+bool PlayQueue::addFromRemote(const QStringList &itemIds, Placement placement)
+{
+    return beginRemote(itemIds, false, placement);
+}
+
+bool PlayQueue::beginRemote(const QStringList &itemIds, bool replacing, Placement placement)
+{
+    if (itemIds.isEmpty() || !std::all_of(itemIds.cbegin(), itemIds.cend(), [](const QString &id) {
+            return isValidJellyfinId(id);
+        }))
+        return false;
+    // Each id once, at its first place
+    QStringList ids;
+    QSet<QString> seen;
+    for (const QString &id : itemIds) {
+        if (!seen.contains(idKey(id))) {
+            seen.insert(idKey(id));
+            ids.append(id);
+        }
+    }
+    if (ids.size() == 1)
+        return beginOperation(ids.constFirst(), placement, replacing, false, replacing, true);
+    if (!mayBegin())
+        return false;
+    m_op = Operation();
+    m_op.active = true;
+    m_op.replacing = replacing;
+    m_op.placement = placement;
+    m_op.remote = true;
+    m_op.stage = Stage::Items;
+    m_op.cut = ids.size() > MaxEntries;
+    m_op.ids = ids.mid(0, MaxEntries);
+    if (!requestIdPage()) {
+        m_op = Operation();
+        return false;
+    }
+    Q_EMIT busyChanged();
+    return true;
+}
+
+bool PlayQueue::mayBegin()
+{
+    if (!m_client || m_op.active || m_restore.active)
         return false;
     // A queue that could not be read back stays untouched until it is: an add would overwrite the file it is still to restore
     if (m_restore.failed) {
         Q_EMIT addFailed();
         return false;
     }
+    return true;
+}
+
+bool PlayQueue::beginOperation(const QString &itemId, Placement placement, bool replacing,
+                               bool shuffled, bool playAlone, bool remote)
+{
+    if (!isValidJellyfinId(itemId) || !mayBegin())
+        return false;
     ItemQuery query;
     query.itemIds = {itemId};
     query.cardImages = true;
@@ -190,12 +242,22 @@ bool PlayQueue::beginOperation(const QString &itemId, Placement placement, bool 
     m_op.placement = placement;
     m_op.replacing = replacing;
     m_op.shuffled = shuffled;
+    m_op.playAlone = playAlone;
+    m_op.remote = remote;
     if (!m_client->fetchItems(query, ExpandChannel)) {
         m_op = Operation();
         return false;
     }
     Q_EMIT busyChanged();
     return true;
+}
+
+bool PlayQueue::requestIdPage()
+{
+    ItemQuery query;
+    query.itemIds = m_op.ids.mid(m_op.received, PageSize);
+    query.cardImages = true;
+    return m_client->fetchItems(query, ExpandChannel);
 }
 
 void PlayQueue::endOperation()
@@ -258,6 +320,26 @@ void PlayQueue::onItems(const QJsonArray &items, int total, int channel)
     }
     if (channel != ExpandChannel || !m_op.active)
         return;
+    if (m_op.stage == Stage::Items) {
+        collect(items, true);
+        m_op.received += PageSize;
+        if (m_op.received < m_op.ids.size()) {
+            if (!requestIdPage())
+                fail();
+            return;
+        }
+        // The server does not keep the order of the ids it was asked for: the given order is rebuilt
+        QHash<QString, ItemSummary> found;
+        for (const ItemSummary &item : m_op.collected)
+            found.insert(idKey(item.id), item);
+        m_op.collected.clear();
+        for (const QString &id : std::as_const(m_op.ids)) {
+            const auto match = found.constFind(idKey(id));
+            if (match != found.constEnd())
+                m_op.collected.push_back(*match);
+        }
+        return finish();
+    }
     if (m_op.stage == Stage::Item) {
         const ItemSummary root =
             items.isEmpty() ? ItemSummary() : parseItemSummary(items.first().toObject());
@@ -265,6 +347,10 @@ void PlayQueue::onItems(const QJsonArray &items, int total, int channel)
             return fail();
         m_op.root = root;
         if (isPlayableVideo(root.type)) {
+            if (m_op.playAlone && !root.virtualItem) {
+                endOperation();
+                return Q_EMIT videoAlone(root.id);
+            }
             if (!root.virtualItem)
                 m_op.collected.push_back(root);
             return finish();
@@ -381,6 +467,7 @@ void PlayQueue::finish()
     const bool cut = m_op.cut;
     const bool replacing = m_op.replacing;
     const bool shuffled = m_op.shuffled;
+    const bool remote = m_op.remote;
     endOperation();
     // A season starts at its first unplayed episode, a series at its Next Up episode; with nothing to resume at, from the top
     auto start = items.begin();
@@ -404,14 +491,15 @@ void PlayQueue::finish()
     if (replacing) {
         if (shuffled)
             std::shuffle(items.begin(), items.end(), *QRandomGenerator::global());
-        replaceAll(std::move(items), &truncated, &joined);
+        replaceAll(std::move(items), &truncated, &joined, remote);
         return Q_EMIT replaced(joined, truncated);
     }
-    insert(std::move(items), placement, &truncated, &joined);
+    insert(std::move(items), placement, &truncated, &joined, remote);
     Q_EMIT added(joined, truncated);
 }
 
-void PlayQueue::replaceAll(std::vector<ItemSummary> items, bool *truncated, int *joined)
+void PlayQueue::replaceAll(std::vector<ItemSummary> items, bool *truncated, int *joined,
+                           bool remote)
 {
     // Each id once, at its first place, and the cap on the whole list
     QSet<QString> seen;
@@ -428,7 +516,7 @@ void PlayQueue::replaceAll(std::vector<ItemSummary> items, bool *truncated, int 
     }
     *joined = int(unique.size());
     // One snapshot of the old queue: Undo brings it back whole
-    rememberEdit();
+    rememberEdit(remote);
     beginResetModel();
     m_items = std::move(unique);
     endResetModel();
@@ -437,7 +525,7 @@ void PlayQueue::replaceAll(std::vector<ItemSummary> items, bool *truncated, int 
 }
 
 void PlayQueue::insert(std::vector<ItemSummary> items, Placement placement, bool *truncated,
-                       int *joined)
+                       int *joined, bool remote)
 {
     // Each id once in the batch
     QSet<QString> seen;
@@ -465,7 +553,7 @@ void PlayQueue::insert(std::vector<ItemSummary> items, Placement placement, bool
     *joined = int(unique.size());
     if (unique.empty())
         return;
-    rememberEdit();
+    rememberEdit(remote);
     // What is queued and survives the cut leaves its row first and joins at the new place
     QSet<QString> incoming;
     for (const ItemSummary &item : unique)
@@ -538,11 +626,15 @@ void PlayQueue::clear()
     Q_EMIT edited();
 }
 
-void PlayQueue::rememberEdit()
+void PlayQueue::rememberEdit(bool remote)
 {
+    // Edits another session asked for keep the snapshot of the queue the user last shaped, so one Undo brings it back after any number of them
+    if (remote && m_undoBeforeRemote && m_canUndo)
+        return;
     // Keep at most one snapshot (500 bounded ItemSummary objects), not a history
     // of server responses or a second copy of the persisted queue.
     m_undoItems = m_items;
+    m_undoBeforeRemote = remote;
     if (!m_canUndo) {
         m_canUndo = true;
         Q_EMIT canUndoChanged();
@@ -552,6 +644,7 @@ void PlayQueue::rememberEdit()
 void PlayQueue::forgetUndo()
 {
     m_undoItems.clear();
+    m_undoBeforeRemote = false;
     if (m_canUndo) {
         m_canUndo = false;
         Q_EMIT canUndoChanged();

@@ -26,6 +26,9 @@ Kirigami.ScrollablePage {
     title: i18n("Favorites")
     // No title bar, as in the Movies and Shows tabs: the actions sit in a toolbar on top of the content, the header's star says which page this is
     globalToolBarStyle: Kirigami.ApplicationHeaderStyle.None
+    // Without Kirigami's title row the page names itself to a screen reader
+    Accessible.role: Accessible.Pane
+    Accessible.name: title
 
     Component.onCompleted: {
         shell.favoritesPages++;
@@ -171,25 +174,13 @@ Kirigami.ScrollablePage {
     header: ColumnLayout {
         spacing: 0
 
-        RowLayout {
+        // A Compact window hides the header's star, which otherwise names the page
+        PageToolbar {
             Layout.fillWidth: true
-            Layout.leftMargin: Kirigami.Units.largeSpacing
-            Layout.rightMargin: Kirigami.Units.largeSpacing
-            spacing: Kirigami.Units.mediumSpacing
-
-            // A Compact window hides the header's star, which otherwise names the page
-            Kirigami.Heading {
-                objectName: "favoritesHeading"
-                visible: page.Window.window?.compactHeader ?? false
-                level: 3
-                text: page.title
-            }
-
-            Kirigami.ActionToolBar {
-                objectName: "favoritesToolbar"
-                Layout.fillWidth: true
-                actions: page.actions
-            }
+            actions: page.actions
+            title: (page.Window.window?.compactHeader ?? false) ? page.title : ""
+            toolbarObjectName: "favoritesToolbar"
+            titleObjectName: "favoritesHeading"
         }
 
         MessageBox {
@@ -220,6 +211,24 @@ Kirigami.ScrollablePage {
         id: groupsList
         objectName: "favoritesGroups"
 
+        // Another grouping fades in instead of standing there at once
+        // On the GUI thread: a render-thread animator can leave a stale frame when its item is hidden mid-fade
+        NumberAnimation {
+            id: groupingFade
+            property: "opacity"
+            target: groupsList
+            from: 0
+            to: 1
+            duration: Kirigami.Units.longDuration
+            easing.type: Easing.OutCubic
+        }
+        Connections {
+            target: page.groups
+            function onGroupingChanged() {
+                groupingFade.restart();
+            }
+        }
+
         // On the view, not in its content: the fade stays under the toolbar while the rows scroll
         TopFade {
             objectName: "favoritesTopFade"
@@ -245,6 +254,7 @@ Kirigami.ScrollablePage {
         }
 
         Kirigami.LoadingPlaceholder {
+            FadeInOnShow {}
             objectName: "favoritesLoading"
             anchors.centerIn: parent
             width: parent.width - Kirigami.Units.gridUnit * 4
@@ -256,6 +266,7 @@ Kirigami.ScrollablePage {
         }
 
         Kirigami.PlaceholderMessage {
+            FadeInOnShow {}
             objectName: "favoritesNotLoaded"
             anchors.centerIn: parent
             width: parent.width - Kirigami.Units.gridUnit * 4
@@ -271,6 +282,7 @@ Kirigami.ScrollablePage {
         }
 
         Kirigami.PlaceholderMessage {
+            FadeInOnShow {}
             objectName: "favoritesNoLibraries"
             anchors.centerIn: parent
             width: parent.width - Kirigami.Units.gridUnit * 4
@@ -287,6 +299,7 @@ Kirigami.ScrollablePage {
 
         // A failed library is no empty list: its banner shows instead
         Kirigami.PlaceholderMessage {
+            FadeInOnShow {}
             objectName: "favoritesEmpty"
             anchors.centerIn: parent
             width: parent.width - Kirigami.Units.gridUnit * 4

@@ -17,7 +17,9 @@
 #include <memory>
 #include <optional>
 
+#include "RemoteCommands.h"
 #include "api/JellyfinClient.h"
+#include "api/JellyfinSocketClient.h"
 #include "imagecache/ImageOrigin.h"
 #include "models/FavoritesGroupsModel.h"
 #include "models/FavoritesModel.h"
@@ -93,6 +95,8 @@ class ConnectionController : public QObject {
     Q_PROPERTY(Kinefin::PlaylistsController *playlists READ playlists CONSTANT)
     Q_PROPERTY(Kinefin::PlaylistEntriesModel *playlistEntries READ playlistEntries CONSTANT)
     Q_PROPERTY(Kinefin::FavoritesGroupsModel *favoriteGroups READ favoriteGroups CONSTANT)
+    // What other Jellyfin sessions ask of this one over the WebSocket: the shell plays it
+    Q_PROPERTY(Kinefin::RemoteCommands *remoteCommands READ remoteCommands CONSTANT)
 
   public:
     enum State {
@@ -162,6 +166,9 @@ class ConnectionController : public QObject {
     PlaylistsController *playlists() { return &m_playlists; }
     PlaylistEntriesModel *playlistEntries() { return &m_playlistEntries; }
     FavoritesGroupsModel *favoriteGroups() { return &m_favoriteGroups; }
+    RemoteCommands *remoteCommands() { return &m_remoteCommands; }
+    // For tests: the server's push channel this controller owns
+    JellyfinSocketClient *socket() { return &m_socket; }
 
     // The place images may be fetched from: the server URL while Authenticated, ChoosingUser or NeedsLogin (the avatars), nothing in every other state. Shared with the image fetcher, which runs on QML's network thread
     void setImageOrigin(std::shared_ptr<ImageOrigin> origin);
@@ -349,6 +356,9 @@ class ConnectionController : public QObject {
     PlaylistsController m_playlists{&m_client};
     PlaylistEntriesModel m_playlistEntries{&m_client};
     FavoritesGroupsModel m_favoriteGroups{&m_favorites};
+    // The server's push channel: it starts with every sign-in or restored session, stops with the credentials, announces media control and carries the remote commands
+    JellyfinSocketClient m_socket{&m_client};
+    RemoteCommands m_remoteCommands;
     BrowseStateStore m_browse;
     int m_nextDetailsChannel = ItemDetailsModel::FirstChannel;
     std::shared_ptr<ImageOrigin> m_imageOrigin;

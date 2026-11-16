@@ -43,6 +43,9 @@ struct PlaybackReport {
 // The JSON body of the report, or nullopt for an invalid id or a negative position. Fields that this slice cannot fill correctly are omitted on purpose (parity §9): the server owns `Item` and `SessionId`, track indexes wait for the mpv track mapping
 [[nodiscard]] std::optional<QJsonObject> playbackReportBody(const PlaybackReport &report);
 
-// Body of `POST /Sessions/Capabilities/Full`. No `DeviceProfile`: the PlaybackInfo request is its only owner. The WebSocket component flips `SupportsMediaControl` and its caller is responsible for re-posting on every socket entry (`SupportedCommands` stays empty until the player names the commands it honours)
+// The `GeneralCommand` names the app honours from another session (the one list the capabilities announce and the remote command router accepts); `DisplayMessage` is left out on purpose, so no remote text reaches the screen
+[[nodiscard]] const QStringList &supportedGeneralCommands();
+
+// Body of `POST /Sessions/Capabilities/Full`. No `DeviceProfile`: the PlaybackInfo request is its only owner. The WebSocket component flips `SupportsMediaControl` and its caller is responsible for re-posting on every socket entry; `SupportedCommands` lists supportedGeneralCommands() only while media control is announced (the commands arrive over the socket)
 [[nodiscard]] QJsonObject clientCapabilitiesBody(bool mediaControlSupported = false);
 } // namespace Kinefin

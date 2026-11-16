@@ -1256,6 +1256,232 @@ class TestPlayQueue : public QObject {
         QCOMPARE(f.queue.itemIds(), QStringList({kMovie}));
         QVERIFY(!f.queue.busy());
     }
+
+    void replaceWithTakesTheGivenOrderWhateverTheServerAnswers()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        QString playlist;
+        const QStringList ids = seedMoviePlaylist(f, &playlist, 5);
+        f.server.itemsById.insert(
+            episodeId(9),
+            QJsonDocument(QJsonObject{{QStringLiteral("Id"), episodeId(9)},
+                                      {QStringLiteral("Type"), QStringLiteral("Person")},
+                                      {QStringLiteral("Name"), QStringLiteral("Someone")}})
+                .toJson(QJsonDocument::Compact));
+        f.server.reverseIdsAnswer = true;
+        QSignalSpy replaced(&f.queue, &PlayQueue::replaced);
+        QSignalSpy alone(&f.queue, &PlayQueue::videoAlone);
+        // A repeated id (in another spelling), a non-video and an id the server does not know are skipped
+        QVERIFY(f.queue.replaceWith(
+            {ids.at(3), ids.at(0), ids.at(3).toUpper(), episodeId(9), episodeId(8), ids.at(2)}));
+        QVERIFY(f.queue.busy());
+        QTRY_COMPARE(replaced.size(), 1);
+        QCOMPARE(replaced.constFirst().at(0).toInt(), 3);
+        QVERIFY(!replaced.constFirst().at(1).toBool());
+        QCOMPARE(alone.size(), 0);
+        QCOMPARE(f.queue.itemIds(), QStringList({ids.at(3), ids.at(0), ids.at(2)}));
+        QVERIFY(!f.queue.busy());
+    }
+
+    void replaceWithIsOneStepUndoTakesBack()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        QVERIFY(f.addAndWait(kMovie, PlayQueue::Last));
+        QString playlist;
+        const QStringList ids = seedMoviePlaylist(f, &playlist, 3);
+        QSignalSpy replaced(&f.queue, &PlayQueue::replaced);
+        QVERIFY(f.queue.replaceWith({ids.at(1), ids.at(0)}));
+        QTRY_COMPARE(replaced.size(), 1);
+        QCOMPARE(f.queue.itemIds(), QStringList({ids.at(1), ids.at(0)}));
+        QVERIFY(f.queue.undo());
+        QCOMPARE(f.queue.itemIds(), QStringList({kMovie}));
+        QVERIFY(!f.queue.canUndo());
+    }
+
+    void remoteEditsKeepTheUndoOfTheUsersQueue()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        QVERIFY(f.addAndWait(kMovie, PlayQueue::Last));
+        QString playlist;
+        const QStringList ids = seedMoviePlaylist(f, &playlist, 4);
+        QSignalSpy replaced(&f.queue, &PlayQueue::replaced);
+        QSignalSpy added(&f.queue, &PlayQueue::added);
+        // A remote PlayNow, then a remote PlayLast and a second PlayNow: one Undo still brings back the user's queue
+        QVERIFY(f.queue.replaceWith({ids.at(0), ids.at(1)}));
+        QTRY_COMPARE(replaced.size(), 1);
+        QTRY_VERIFY(!f.queue.busy());
+        QVERIFY(f.queue.addFromRemote({ids.at(2)}, PlayQueue::Last));
+        QTRY_COMPARE(added.size(), 1);
+        QCOMPARE(f.queue.itemIds(), QStringList({ids.at(0), ids.at(1), ids.at(2)}));
+        QTRY_VERIFY(!f.queue.busy());
+        QVERIFY(f.queue.replaceWith({ids.at(3), ids.at(2)}));
+        QTRY_COMPARE(replaced.size(), 2);
+        QTRY_VERIFY(!f.queue.busy());
+        QVERIFY(f.queue.undo());
+        QCOMPARE(f.queue.itemIds(), QStringList({kMovie}));
+        // An edit of the user's own takes a new snapshot as before
+        QVERIFY(f.queue.replaceWith({ids.at(0), ids.at(1)}));
+        QTRY_COMPARE(replaced.size(), 3);
+        QTRY_VERIFY(!f.queue.busy());
+        QVERIFY(f.queue.move(0, 1));
+        QVERIFY(f.queue.undo());
+        QCOMPARE(f.queue.itemIds(), QStringList({ids.at(0), ids.at(1)}));
+    }
+
+    void addFromRemoteJoinsSeveralItemsAsOneBatchInTheirOrder()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        QString playlist;
+        const QStringList ids = seedMoviePlaylist(f, &playlist, 4);
+        QVERIFY(f.addAndWait(ids.at(0), PlayQueue::Last));
+        QVERIFY(f.addAndWait(ids.at(1), PlayQueue::Last));
+        f.queue.setCurrentPlaybackItemId(ids.at(0));
+        f.server.reverseIdsAnswer = true;
+        QSignalSpy added(&f.queue, &PlayQueue::added);
+        // After the current item, in the order sent, one batch and one outcome
+        QVERIFY(f.queue.addFromRemote({ids.at(3), ids.at(2)}, PlayQueue::Next));
+        QTRY_COMPARE(added.size(), 1);
+        QCOMPARE(added.constFirst().at(0).toInt(), 2);
+        QCOMPARE(f.queue.itemIds(), QStringList({ids.at(0), ids.at(3), ids.at(2), ids.at(1)}));
+        QTRY_VERIFY(!f.queue.busy());
+        QVERIFY(!f.queue.addFromRemote({}, PlayQueue::Last));
+        QVERIFY(!f.queue.addFromRemote({QStringLiteral("../x")}, PlayQueue::Last));
+    }
+
+    void replaceWithCutsAtTheCapInPagesOfAHundred()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        QString playlist;
+        const QStringList ids = seedMoviePlaylist(f, &playlist, PlayQueue::MaxEntries + 20);
+        f.server.reverseIdsAnswer = true;
+        const int before = f.server.listingRequests;
+        QSignalSpy replaced(&f.queue, &PlayQueue::replaced);
+        QVERIFY(f.queue.replaceWith(ids));
+        QTRY_COMPARE(replaced.size(), 1);
+        QCOMPARE(replaced.constFirst().at(0).toInt(), int(PlayQueue::MaxEntries));
+        QVERIFY(replaced.constFirst().at(1).toBool());
+        QCOMPARE(f.queue.itemIds(), ids.mid(0, PlayQueue::MaxEntries));
+        QCOMPARE(f.server.listingRequests - before, PlayQueue::MaxEntries / PlayQueue::PageSize);
+    }
+
+    void replaceWithOneVideoLeavesTheQueueAndItsFileAlone()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        f.own();
+        QVERIFY(f.addAndWait(kMovie, PlayQueue::Last));
+        QTRY_VERIFY(f.stored().contains(kMovie.toUtf8()));
+        const QByteArray stored = f.stored();
+        QString playlist;
+        const QStringList ids = seedMoviePlaylist(f, &playlist, 2);
+        QSignalSpy alone(&f.queue, &PlayQueue::videoAlone);
+        QSignalSpy replaced(&f.queue, &PlayQueue::replaced);
+        QSignalSpy edited(&f.queue, &PlayQueue::edited);
+        QVERIFY(f.queue.replaceWith({ids.at(1)}));
+        QTRY_COMPARE(alone.size(), 1);
+        QCOMPARE(alone.constFirst().at(0).toString(), ids.at(1));
+        QVERIFY(!f.queue.busy());
+        // The same id twice is one id
+        QVERIFY(f.queue.replaceWith({ids.at(0), ids.at(0).toUpper()}));
+        QTRY_COMPARE(alone.size(), 2);
+        QCOMPARE(alone.constLast().at(0).toString(), ids.at(0));
+        QTest::qWait(100);
+        QCOMPARE(replaced.size(), 0);
+        QCOMPARE(edited.size(), 0);
+        QCOMPARE(f.queue.itemIds(), QStringList({kMovie}));
+        QCOMPARE(f.stored(), stored);
+    }
+
+    void replaceWithOneSeriesExpandsLikeReplace()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        QVERIFY(f.addAndWait(kMovie, PlayQueue::Last));
+        f.server.generatedEpisodeTotal = 5;
+        f.server.listingRawBody.insert(QStringLiteral("NextUp"), envelope({}));
+        QSignalSpy replaced(&f.queue, &PlayQueue::replaced);
+        QSignalSpy alone(&f.queue, &PlayQueue::videoAlone);
+        QVERIFY(f.queue.replaceWith({kSeries}));
+        QTRY_COMPARE(replaced.size(), 1);
+        QCOMPARE(replaced.constFirst().at(0).toInt(), 5);
+        QCOMPARE(alone.size(), 0);
+        QCOMPARE(f.queue.count(), 5);
+        QCOMPARE(f.name(0), QStringLiteral("Episode 1"));
+        QVERIFY(f.queue.undo());
+        QCOMPARE(f.queue.itemIds(), QStringList({kMovie}));
+    }
+
+    void replaceWithNothingPlayableOrAFailedPageLeavesTheQueue()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        QVERIFY(f.addAndWait(kMovie, PlayQueue::Last));
+        QSignalSpy nothing(&f.queue, &PlayQueue::nothingToAdd);
+        QSignalSpy failed(&f.queue, &PlayQueue::addFailed);
+        QSignalSpy replaced(&f.queue, &PlayQueue::replaced);
+        // Ids the server does not know, and a virtual video alone
+        QVERIFY(f.queue.replaceWith({episodeId(7), episodeId(8)}));
+        QTRY_COMPARE(nothing.size(), 1);
+        const QJsonObject virtualMovie{{QStringLiteral("Id"), episodeId(6)},
+                                       {QStringLiteral("Type"), QStringLiteral("Movie")},
+                                       {QStringLiteral("LocationType"), QStringLiteral("Virtual")}};
+        f.server.itemsById.insert(episodeId(6),
+                                  QJsonDocument(virtualMovie).toJson(QJsonDocument::Compact));
+        QVERIFY(f.queue.replaceWith({episodeId(6)}));
+        QTRY_COMPARE(nothing.size(), 2);
+        f.server.listingStatus.insert(QStringLiteral("Items"), 500);
+        QVERIFY(f.queue.replaceWith({kMovie, episodeId(7)}));
+        QTRY_COMPARE(failed.size(), 1);
+        QCOMPARE(replaced.size(), 0);
+        QCOMPARE(f.queue.itemIds(), QStringList({kMovie}));
+        QVERIFY(!f.queue.busy());
+    }
+
+    void replaceWithRefusesWhereAddDoes()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        const int before = f.server.listingRequests;
+        QVERIFY(!f.queue.replaceWith({}));
+        QVERIFY(!f.queue.replaceWith({QStringLiteral("bad id")}));
+        QVERIFY(!f.queue.replaceWith({kMovie, QStringLiteral("bad id")}));
+        QCOMPARE(f.server.listingRequests, before);
+        // Busy: one expansion at a time
+        f.server.holdListings = true;
+        QVERIFY(f.queue.replaceWith({kMovie, kSeason}));
+        QVERIFY(f.queue.busy());
+        QVERIFY(!f.queue.replaceWith({kMovie, kSeason}));
+        QVERIFY(!f.queue.replaceWith({kMovie}));
+        QVERIFY(!f.queue.add(kMovie, PlayQueue::Last));
+        QSignalSpy replaced(&f.queue, &PlayQueue::replaced);
+        f.server.holdListings = false;
+        f.server.releaseHeld();
+        QTRY_COMPARE(replaced.size(), 1);
+        QVERIFY(!f.queue.busy());
+    }
+
+    void replaceWithAfterAFailedRestoreIsRefusedAndTheFileStays()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        const QByteArray bytes = f.fileFor({kMovie}, f.client.serverId(), f.client.userId());
+        f.write(bytes);
+        f.server.listingStatus.insert(QStringLiteral("Items"), 500);
+        f.queue.restoreFor(f.client.serverId(), f.client.userId());
+        QTRY_VERIFY(f.queue.restoreFailed());
+        QSignalSpy failed(&f.queue, &PlayQueue::addFailed);
+        QVERIFY(!f.queue.replaceWith({kMovie}));
+        QCOMPARE(failed.size(), 1);
+        QVERIFY(!f.queue.replaceWith({kMovie, kSeason}));
+        QCOMPARE(failed.size(), 2);
+        QTest::qWait(100);
+        QCOMPARE(f.stored(), bytes);
+    }
 };
 
 QTEST_MAIN(TestPlayQueue)
