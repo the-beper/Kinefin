@@ -2189,6 +2189,16 @@ QObject *openSyncPlayDialog(Ui &ui)
     return dialog;
 }
 
+// The body of the last request of `route` the fake saw (a clock Ping may come after it)
+QJsonObject lastSyncPlayBody(const Ui &ui, const QString &route)
+{
+    for (qsizetype i = ui.server.syncPlayRequests.size() - 1; i >= 0; --i) {
+        if (ui.server.syncPlayRequests.at(i).route == route)
+            return ui.server.syncPlayRequests.at(i).body;
+    }
+    return {};
+}
+
 int syncPlayRequests(const Ui &ui, const QString &route)
 {
     return int(std::count_if(ui.server.syncPlayRequests.cbegin(), ui.server.syncPlayRequests.cend(),
@@ -5972,7 +5982,9 @@ class TestUiPages : public QObject {
         QVERIFY(join);
         QVERIFY(QMetaObject::invokeMethod(join, "clicked"));
         QTRY_COMPARE(syncPlayRequests(ui, QStringLiteral("Join")), 1);
-        QCOMPARE(ui.server.syncPlayRequests.last().body.value(QStringLiteral("GroupId")).toString(),
+        QCOMPARE(lastSyncPlayBody(ui, QStringLiteral("Join"))
+                     .value(QStringLiteral("GroupId"))
+                     .toString(),
                  kSyncPlayGroup);
         QTRY_VERIFY(ui.item(QStringLiteral("syncPlayJoining"))->isVisible());
         ui.server.lastConnection()->sendText(
@@ -6003,7 +6015,7 @@ class TestUiPages : public QObject {
         QVERIFY(
             QMetaObject::invokeMethod(ui.item(QStringLiteral("syncPlayCreateButton")), "clicked"));
         QTRY_COMPARE(syncPlayRequests(ui, QStringLiteral("New")), 1);
-        QCOMPARE(ui.server.syncPlayRequests.last().body,
+        QCOMPARE(lastSyncPlayBody(ui, QStringLiteral("New")),
                  (QJsonObject{{QStringLiteral("GroupName"), QStringLiteral("Movie night")}}));
         ui.server.lastConnection()->sendText(syncPlayUpdate(
             QStringLiteral("CreateGroupDenied"), QString(), QString(32, QLatin1Char('0'))));
@@ -6056,6 +6068,100 @@ class TestUiPages : public QObject {
         QVERIFY(!failed->isVisible());
     }
 
+    void theSyncPlayDialogShowsAndEditsTheGroupQueue()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("home")));
+        QVERIFY(syncPlayJoined(ui));
+        const QString first = QStringLiteral("9a8b7c6d5e4f40312a1b2c3d4e5f6071");
+        const QString second = QStringLiteral("9a8b7c6d5e4f40312a1b2c3d4e5f6072");
+        ui.server.lastConnection()->sendText(syncPlayUpdate(
+            QStringLiteral("PlayQueue"),
+            QJsonObject{{QStringLiteral("Reason"), QStringLiteral("NewPlaylist")},
+                        {QStringLiteral("LastUpdate"),
+                         QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)},
+                        {QStringLiteral("Playlist"),
+                         QJsonArray{QJsonObject{{QStringLiteral("ItemId"), kMovieId},
+                                                {QStringLiteral("PlaylistItemId"), first}},
+                                    QJsonObject{{QStringLiteral("ItemId"), kMovieId},
+                                                {QStringLiteral("PlaylistItemId"), second}}}},
+                        {QStringLiteral("PlayingItemIndex"), 0},
+                        {QStringLiteral("StartPositionTicks"), 0},
+                        {QStringLiteral("IsPlaying"), false},
+                        {QStringLiteral("ShuffleMode"), QStringLiteral("Sorted")},
+                        {QStringLiteral("RepeatMode"), QStringLiteral("RepeatNone")}}));
+        QVERIFY(openSyncPlayDialog(ui));
+        QTRY_COMPARE(ui.itemsStartingWith(QStringLiteral("syncPlayQueueRow")).size(), 2);
+        // The names come from the server, as plain text
+        QTRY_COMPARE(ui.itemsStartingWith(QStringLiteral("syncPlayQueueTitle"))
+                         .first()
+                         ->property("text")
+                         .toString(),
+                     QStringLiteral("Arcturus (2012)"));
+        QCOMPARE(ui.itemsStartingWith(QStringLiteral("syncPlayQueueTitle"))
+                     .first()
+                     ->property("textFormat")
+                     .toInt(),
+                 int(Qt::PlainText));
+        QVERIFY(ui.itemsStartingWith(QStringLiteral("syncPlayQueueRow"))
+                    .first()
+                    ->property("highlighted")
+                    .toBool());
+        // The second entry: up, play, out
+        QVERIFY(QMetaObject::invokeMethod(
+            ui.itemsStartingWith(QStringLiteral("syncPlayQueueUp")).at(1), "clicked"));
+        QTRY_COMPARE(syncPlayRequests(ui, QStringLiteral("MovePlaylistItem")), 1);
+        QCOMPARE(lastSyncPlayBody(ui, QStringLiteral("MovePlaylistItem"))
+                     .value(QStringLiteral("NewIndex"))
+                     .toInt(),
+                 0);
+        QVERIFY(QMetaObject::invokeMethod(
+            ui.itemsStartingWith(QStringLiteral("syncPlayQueuePlay")).at(1), "clicked"));
+        QTRY_COMPARE(syncPlayRequests(ui, QStringLiteral("SetPlaylistItem")), 1);
+        QCOMPARE(lastSyncPlayBody(ui, QStringLiteral("SetPlaylistItem"))
+                     .value(QStringLiteral("PlaylistItemId"))
+                     .toString(),
+                 second);
+        QVERIFY(QMetaObject::invokeMethod(
+            ui.itemsStartingWith(QStringLiteral("syncPlayQueueRemove")).at(1), "clicked"));
+        QTRY_COMPARE(syncPlayRequests(ui, QStringLiteral("RemoveFromPlaylist")), 1);
+        // Not following, then following again
+        QObject *follow = ui.popup(QStringLiteral("syncPlayFollowAction"));
+        QVERIFY(follow && follow->property("visible").toBool());
+        QCOMPARE(follow->property("text").toString(), QStringLiteral("Stop Following"));
+        QVERIFY(QMetaObject::invokeMethod(follow, "trigger"));
+        QTRY_COMPARE(syncPlayRequests(ui, QStringLiteral("SetIgnoreWait")), 1);
+        QTRY_VERIFY(ui.item(QStringLiteral("syncPlayNotFollowing"))->isVisible());
+        QVERIFY(QMetaObject::invokeMethod(follow, "trigger"));
+        QTRY_COMPARE(syncPlayRequests(ui, QStringLiteral("SetIgnoreWait")), 2);
+        QTRY_VERIFY(!ui.item(QStringLiteral("syncPlayNotFollowing"))->isVisible());
+    }
+
+    void playNextGoesToTheSyncPlayGroupWhileItFollows()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("home")));
+        QVERIFY(syncPlayJoined(ui));
+        QObject *root = ui.engine.rootObjects().constFirst();
+        QVERIFY(QMetaObject::invokeMethod(root, "queueItem", Q_ARG(QVariant, kMovieId),
+                                          Q_ARG(QVariant, true)));
+        QTRY_COMPARE(syncPlayRequests(ui, QStringLiteral("Queue")), 1);
+        QCOMPARE(
+            lastSyncPlayBody(ui, QStringLiteral("Queue")).value(QStringLiteral("Mode")).toString(),
+            QStringLiteral("QueueNext"));
+        QCOMPARE(ui.controller.queue()->count(), 0);
+        // Not following, the user's own queue takes it
+        ui.syncPlay.stopFollowing();
+        QVERIFY(QMetaObject::invokeMethod(root, "queueItem", Q_ARG(QVariant, kMovieId),
+                                          Q_ARG(QVariant, false)));
+        QTRY_COMPARE(ui.controller.queue()->count(), 1);
+        QCOMPARE(syncPlayRequests(ui, QStringLiteral("Queue")), 1);
+    }
+
     void thePlayerShowsTheSyncPlayGroup()
     {
         PlayerStub stub;
@@ -6077,8 +6183,9 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(ui.item(QStringLiteral("syncPlayGroup"))->isVisible());
         QVERIFY(QMetaObject::invokeMethod(dialog, "close"));
         QTRY_VERIFY(!dialog->property("opened").toBool());
+        // The group plays at its own pace; its repeat is the group's, and there is no queue to shuffle yet
         QVERIFY(!ui.popup(QStringLiteral("playerSpeedMenu"))->property("enabled").toBool());
-        QVERIFY(!ui.popup(QStringLiteral("playerRepeatMenu"))->property("enabled").toBool());
+        QVERIFY(ui.popup(QStringLiteral("playerRepeatMenu"))->property("enabled").toBool());
         QVERIFY(!ui.popup(QStringLiteral("playerShuffleItem"))->property("enabled").toBool());
         ui.server.lastConnection()->sendText(
             syncPlayUpdate(QStringLiteral("StateUpdate"),

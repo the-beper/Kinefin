@@ -104,16 +104,17 @@ Kirigami.ScrollablePage {
         text: i18n("Play Next")
         icon.name: "media-skip-forward"
         visible: page.queueable
-        enabled: !page.connection.queue.busy
-        onTriggered: page.connection.queue.add(page.details.itemId, PlayQueue.Next)
+        // A SyncPlay group's queue does not wait for the user's own
+        enabled: !!page.Window.window?.groupRouting || !page.connection.queue.busy
+        onTriggered: page.Window.window?.queueItem(page.details.itemId, true)
     }
     readonly property Kirigami.Action addToQueueAction: Kirigami.Action {
         objectName: "addToQueueAction"
         text: i18n("Add to Queue")
         icon.name: "list-add"
         visible: page.queueable
-        enabled: !page.connection.queue.busy
-        onTriggered: page.connection.queue.add(page.details.itemId, PlayQueue.Last)
+        enabled: !!page.Window.window?.groupRouting || !page.connection.queue.busy
+        onTriggered: page.Window.window?.queueItem(page.details.itemId, false)
     }
     readonly property Kirigami.Action addToPlaylistAction: Kirigami.Action {
         objectName: "addToPlaylistAction"

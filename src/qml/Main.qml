@@ -15,6 +15,8 @@ Kirigami.ApplicationWindow {
     // Watching together (SyncPlayController); null when the application gives none
     property var syncPlay: null
     readonly property bool groupJoined: syncPlay?.status === SyncPlayController.Joined
+    // The player's play actions go to the group: joined, following and online
+    readonly property bool groupRouting: groupJoined && syncPlay.following && !syncPlay.offline
     // The remote-control socket, provided by the executable; null in shell tests
     property var remoteInput: null
     // "fullscreen" or "windowed" when a command line flag decides this run; empty to follow the setting. Changing the setting from the Settings page ends the override
@@ -677,7 +679,7 @@ Kirigami.ApplicationWindow {
     function playItem(itemId, resumeTicks) {
         if (!window.signedIn || !window.player || !window.player.playItem(itemId, resumeTicks || 0))
             return false;
-        if (groupJoined)
+        if (groupRouting)
             return true;
         if (!showPlayerPage()) { window.player.stop(); return false; }
         return true;
@@ -686,7 +688,7 @@ Kirigami.ApplicationWindow {
     function playQueue(index, startTicks) {
         if (!window.signedIn || !window.player || !window.player.playQueue(index, startTicks || 0))
             return false;
-        if (groupJoined)
+        if (groupRouting)
             return true;
         if (!showPlayerPage()) { window.player.stop(); return false; }
         return true;
@@ -695,7 +697,7 @@ Kirigami.ApplicationWindow {
     function resumeQueue() {
         if (!window.signedIn || !window.player || !window.player.resumeQueue())
             return false;
-        if (groupJoined)
+        if (groupRouting)
             return true;
         if (!showPlayerPage()) { window.player.stop(); return false; }
         return true;
@@ -712,6 +714,18 @@ Kirigami.ApplicationWindow {
 
     function openSyncPlay() {
         shellHeader.openSyncPlay();
+    }
+
+    // Play Next (`next`) or Add to Queue: to the SyncPlay group's queue while the group takes the play actions, else to the user's
+    function queueItem(itemId, next) {
+        if (groupRouting) {
+            if (syncPlay.queueItems([itemId], next))
+                showPassiveNotification(next ? i18n("Added to play next in the SyncPlay group") : i18n("Added to the SyncPlay group’s queue"));
+            else
+                showPassiveNotification(i18n("Could not add this to the SyncPlay group’s queue. Check the connection and try again"));
+            return;
+        }
+        connection.queue.add(itemId, next ? PlayQueue.Next : PlayQueue.Last);
     }
 
     // The only way to the details of an item: the pages above the one asking give way, and the item already showing is not pushed twice
@@ -899,6 +913,8 @@ Kirigami.ApplicationWindow {
         // A refused send means a write for the item already runs: its answer updates the card
         onFavoriteRequested: (targetId, favorite) => window.connection.setFavorite(targetId, favorite)
         onAddToPlaylistRequested: targetId => window.addToPlaylist(targetId)
+        onQueueRequested: (targetId, next) => window.queueItem(targetId, next)
+        queueAvailable: window.groupRouting || !window.connection.queue.busy
         onRenamePlaylistRequested: targetId => window.renamePlaylist(targetId, window.connection.playlists.nameOf(targetId))
         onDeletePlaylistRequested: targetId => window.askDeletePlaylist(targetId)
     }

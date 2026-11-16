@@ -13,6 +13,8 @@
 #include "settings/ClientSettings.h"
 #include "syncplay/SyncPlayController.h"
 
+#include <MpvController>
+
 #include <QDateTime>
 #include <QElapsedTimer>
 #include <QJsonArray>
@@ -32,6 +34,9 @@ const QString kOtherGroup = QStringLiteral("6f1e2d3c4b5a69788796a5b4c3d2e1f0");
 const QString kEntry = QStringLiteral("9a8b7c6d5e4f40312a1b2c3d4e5f6071");
 const QString kItem = QStringLiteral("c7dd3b1ac7dd3b1a9d42f2ab74f8a1b9");
 const QString kOtherItem = QStringLiteral("d7dd3b1ac7dd3b1a9d42f2ab74f8a1b9");
+const QString kThirdItem = QStringLiteral("e7dd3b1ac7dd3b1a9d42f2ab74f8a1b9");
+const QString kEntry2 = QStringLiteral("9a8b7c6d5e4f40312a1b2c3d4e5f6072");
+const QString kEntry3 = QStringLiteral("9a8b7c6d5e4f40312a1b2c3d4e5f6073");
 constexpr qint64 kSecond = 10'000'000;
 
 QString date(qint64 ms)
@@ -91,6 +96,23 @@ QJsonObject playQueue(const QString &item, qint64 startTicks, qint64 lastUpdateM
             {QStringLiteral("IsPlaying"), false},
             {QStringLiteral("ShuffleMode"), QStringLiteral("Sorted")},
             {QStringLiteral("RepeatMode"), QStringLiteral("RepeatNone")}};
+}
+
+// A group queue of (item, entry) pairs playing `index`
+QJsonObject queueOf(const QList<std::pair<QString, QString>> &entries, int index,
+                    qint64 lastUpdateMs, const QString &repeat = QStringLiteral("RepeatNone"),
+                    const QString &shuffle = QStringLiteral("Sorted"))
+{
+    QJsonArray playlist;
+    for (const auto &[item, entry] : entries)
+        playlist.append(QJsonObject{{QStringLiteral("ItemId"), item},
+                                    {QStringLiteral("PlaylistItemId"), entry}});
+    QJsonObject queue = playQueue(kItem, 0, lastUpdateMs);
+    queue.insert(QStringLiteral("Playlist"), playlist);
+    queue.insert(QStringLiteral("PlayingItemIndex"), index);
+    queue.insert(QStringLiteral("RepeatMode"), repeat);
+    queue.insert(QStringLiteral("ShuffleMode"), shuffle);
+    return queue;
 }
 
 QString settingsFile(const QTemporaryDir &dir, const QByteArray &conf)
@@ -629,6 +651,302 @@ class TestSyncPlayController : public QObject {
         QVERIFY(!syncPlay.joinGroup(QStringLiteral("../Items")));
         QTest::qWait(100);
         QVERIFY(server.syncPlayRequests.isEmpty());
+    }
+
+    void theEndOfAnItemAsksTheGroupForTheNext()
+    {
+        Group group;
+        QVERIFY(group.ok);
+        QVERIFY(group.joined());
+        group.push(update(QStringLiteral("PlayQueue"),
+                          queueOf({{kItem, kEntry}, {kOtherItem, kEntry2}}, 0, now())));
+        QVERIFY(group.sourceGiven(kItem, 2));
+        QTRY_COMPARE_WITH_TIMEOUT(group.sent(QStringLiteral("Ready")).size(), 1, 10000);
+        const qint64 at = now();
+        group.push(command(QStringLiteral("Unpause"), at, at, 0));
+        QTRY_COMPARE_WITH_TIMEOUT(group.sent(QStringLiteral("NextItem")).size(), 1, 8000);
+        QCOMPARE(group.sent(QStringLiteral("NextItem")).first(),
+                 SyncPlay::playlistItemBody(kEntry));
+        // The player waits for the group's next item instead of closing
+        QVERIFY(group.player.active());
+        QVERIFY(group.player.loading());
+        group.push(update(QStringLiteral("PlayQueue"),
+                          queueOf({{kItem, kEntry}, {kOtherItem, kEntry2}}, 1, now() + 1)));
+        QVERIFY(group.sourceGiven(kOtherItem));
+        QTRY_COMPARE_WITH_TIMEOUT(group.sent(QStringLiteral("Ready")).size(), 2, 10000);
+        QCOMPARE(group.sent(QStringLiteral("Ready"))
+                     .last()
+                     .value(QStringLiteral("PlaylistItemId"))
+                     .toString(),
+                 kEntry2);
+    }
+
+    void theEndOfTheQueueClosesThePlayer()
+    {
+        Group group;
+        QVERIFY(group.ok);
+        QVERIFY(group.joined());
+        group.push(update(QStringLiteral("PlayQueue"), playQueue(kItem, 0, now())));
+        QVERIFY(group.sourceGiven(kItem, 2));
+        QTRY_COMPARE_WITH_TIMEOUT(group.sent(QStringLiteral("Ready")).size(), 1, 10000);
+        const qint64 at = now();
+        group.push(command(QStringLiteral("Unpause"), at, at, 0));
+        QTRY_COMPARE_WITH_TIMEOUT(group.sent(QStringLiteral("NextItem")).size(), 1, 8000);
+        QTRY_VERIFY_WITH_TIMEOUT(!group.player.active(), 3000);
+    }
+
+    void nextAndPreviousGoToTheGroup()
+    {
+        Group group;
+        QVERIFY(group.ok);
+        QVERIFY(group.joined());
+        group.push(update(
+            QStringLiteral("PlayQueue"),
+            queueOf({{kItem, kEntry}, {kOtherItem, kEntry2}, {kThirdItem, kEntry3}}, 1, now())));
+        QVERIFY(group.sourceGiven(kOtherItem));
+        QTRY_COMPARE_WITH_TIMEOUT(group.sent(QStringLiteral("Ready")).size(), 1, 10000);
+        QVERIFY(group.player.hasNext());
+        QVERIFY(group.player.hasPrevious());
+        QVERIFY(group.player.next());
+        QTRY_COMPARE(group.sent(QStringLiteral("NextItem")).size(), 1);
+        QCOMPARE(group.sent(QStringLiteral("NextItem")).first(),
+                 SyncPlay::playlistItemBody(kEntry2));
+        QVERIFY(group.player.previous());
+        QTRY_COMPARE(group.sent(QStringLiteral("PreviousItem")).size(), 1);
+        // Past its first three seconds, Previous goes back to the start of the entry
+        const qint64 at = now();
+        group.push(command(QStringLiteral("Unpause"), at - 4000, at, 0, kGroup, kEntry2));
+        QTRY_VERIFY_WITH_TIMEOUT(group.player.positionTicks() > 3 * kSecond, 3000);
+        QVERIFY(group.player.previous());
+        QTRY_COMPARE(group.sent(QStringLiteral("Seek")).size(), 1);
+        QCOMPARE(group.sent(QStringLiteral("Seek")).first(), SyncPlay::seekBody(0));
+    }
+
+    void aCacheStallHoldsTheGroup()
+    {
+        Group group;
+        QVERIFY(group.ok);
+        QVERIFY(group.joined());
+        QVERIFY(group.playing());
+        auto *mpv = group.engine()->controller();
+        Q_EMIT mpv->propertyChanged(QStringLiteral("paused-for-cache"), true);
+        QVERIFY(group.player.buffering());
+        // A short stall is nobody's business
+        QTest::qWait(200);
+        QVERIFY(group.sent(QStringLiteral("Buffering")).isEmpty());
+        QTRY_COMPARE_WITH_TIMEOUT(group.sent(QStringLiteral("Buffering")).size(), 1, 2000);
+        QCOMPARE(group.sent(QStringLiteral("Buffering"))
+                     .first()
+                     .value(QStringLiteral("IsPlaying"))
+                     .toBool(),
+                 true);
+        Q_EMIT mpv->propertyChanged(QStringLiteral("paused-for-cache"), false);
+        QTRY_COMPARE(group.sent(QStringLiteral("Ready")).size(), 2);
+        QCOMPARE(
+            group.sent(QStringLiteral("Ready")).last().value(QStringLiteral("IsPlaying")).toBool(),
+            true);
+    }
+
+    void notFollowingThenFollowingAgain()
+    {
+        Group group;
+        QVERIFY(group.ok);
+        QVERIFY(group.joined());
+        QVERIFY(group.playing());
+        group.syncPlay.stopFollowing();
+        QTRY_COMPARE(group.sent(QStringLiteral("SetIgnoreWait")).size(), 1);
+        QCOMPARE(group.sent(QStringLiteral("SetIgnoreWait")).first(),
+                 SyncPlay::ignoreWaitBody(true));
+        QVERIFY(!group.syncPlay.following());
+        QVERIFY(!group.syncPlay.routesPlayback());
+        // The player is the user's own
+        group.player.pause();
+        QTRY_VERIFY(group.player.paused());
+        QCOMPARE(group.sent(QStringLiteral("Pause")).size(), 0);
+        // The group's commands are kept, not carried out
+        const qint64 at = now();
+        group.push(command(QStringLiteral("Seek"), at, at, 3 * kSecond));
+        group.push(command(QStringLiteral("Unpause"), at + 1, at + 1, 2 * kSecond));
+        QTest::qWait(300);
+        QVERIFY(group.player.paused());
+        QCOMPARE(group.sent(QStringLiteral("Ready")).size(), 1);
+        // Following again opens the entry where the group is by now and catches up
+        group.syncPlay.resumeFollowing();
+        QTRY_COMPARE(group.sent(QStringLiteral("SetIgnoreWait")).size(), 2);
+        QCOMPARE(group.sent(QStringLiteral("SetIgnoreWait")).last(),
+                 SyncPlay::ignoreWaitBody(false));
+        QVERIFY(group.sourceGiven(kItem));
+        QTRY_VERIFY_WITH_TIMEOUT(!group.player.paused() && !group.player.loading(), 5000);
+        QTRY_VERIFY_WITH_TIMEOUT(group.player.positionTicks() >= 2 * kSecond, 3000);
+    }
+
+    void closingThePlayerStopsFollowing()
+    {
+        Group group;
+        QVERIFY(group.ok);
+        QVERIFY(group.joined());
+        QVERIFY(group.playing());
+        group.player.stop();
+        QTRY_COMPARE(group.sent(QStringLiteral("SetIgnoreWait")).size(), 1);
+        QVERIFY(!group.syncPlay.following());
+        QCOMPARE(group.syncPlay.status(), SyncPlayController::Status::Joined);
+        QTRY_VERIFY_WITH_TIMEOUT(!group.player.active(), 5000);
+        // Following again opens the group's entry once more
+        group.syncPlay.resumeFollowing();
+        QVERIFY(group.sourceGiven(kItem));
+        QTRY_VERIFY_WITH_TIMEOUT(!group.player.paused() && !group.player.loading(), 5000);
+    }
+
+    void aLostConnectionJoinsTheGroupAgain()
+    {
+        Group group;
+        QVERIFY(group.ok);
+        QVERIFY(group.joined());
+        QVERIFY(group.playing());
+        group.server.lastConnection()->kick();
+        QTRY_VERIFY_WITH_TIMEOUT(group.syncPlay.offline(), 5000);
+        QVERIFY(!group.syncPlay.routesPlayback());
+        // Back, the session asks to join again: the server never does it by itself
+        QTRY_COMPARE_WITH_TIMEOUT(group.sent(QStringLiteral("Join")).size(), 2, 15000);
+        QVERIFY(!group.syncPlay.offline());
+        group.push(update(QStringLiteral("GroupJoined"), groupInfo()));
+        const qint64 at = now();
+        group.push(command(QStringLiteral("Stop"), at - 1000, at, 0, kGroup,
+                           QString(32, QLatin1Char('0'))));
+        QTest::qWait(300);
+        // The Stop of a join again stops nothing
+        QVERIFY(group.player.active());
+        QVERIFY(group.syncPlay.routesPlayback());
+        // The group waits for this session's Ready on the entry it still plays
+        group.push(update(QStringLiteral("PlayQueue"), playQueue(kItem, 0, now() + 1)));
+        QTRY_COMPARE(group.sent(QStringLiteral("Ready")).size(), 2);
+    }
+
+    void driftIsCorrected()
+    {
+        Group group;
+        QVERIFY(group.ok);
+        group.syncPlay.setTestTimings(0, 0, 0, 200);
+        QVERIFY(group.joined());
+        QVERIFY(group.queueOpened());
+        const qint64 at = now();
+        group.push(command(QStringLiteral("Unpause"), at, at, 0));
+        group.push(update(QStringLiteral("StateUpdate"),
+                          QJsonObject{{QStringLiteral("State"), QStringLiteral("Playing")},
+                                      {QStringLiteral("Reason"), QStringLiteral("Ready")}}));
+        QTRY_VERIFY(!group.player.paused());
+        QTest::qWait(500);
+        // Half a second ahead: a slower speed brings it back
+        group.player.applySeek(group.player.positionTicks() + 5 * kSecond / 10);
+        QTRY_VERIFY_WITH_TIMEOUT(group.player.rate() < 0.95, 3000);
+        // Three seconds ahead: a skip back to where the group is, at speed 1.0
+        group.player.applySeek(group.player.positionTicks() + 3 * kSecond);
+        QTRY_VERIFY_WITH_TIMEOUT(
+            std::abs(group.player.positionTicks() - (now() - at) * 10'000) < kSecond / 2, 4000);
+        QTRY_COMPARE_WITH_TIMEOUT(group.player.rate(), 1.0, 2000);
+    }
+
+    void theGroupQueueIsEdited()
+    {
+        Group group;
+        QVERIFY(group.ok);
+        group.server.itemsById.insert(
+            kItem, QByteArrayLiteral("{\"Id\":\"c7dd3b1ac7dd3b1a9d42f2ab74f8a1b9\",\"Name\":"
+                                     "\"Arrival\",\"Type\":\"Movie\"}"));
+        QVERIFY(group.joined());
+        group.push(update(QStringLiteral("PlayQueue"),
+                          queueOf({{kItem, kEntry}, {kOtherItem, kEntry2}}, 0, now())));
+        QVERIFY(group.sourceGiven(kItem));
+        QTRY_COMPARE_WITH_TIMEOUT(group.sent(QStringLiteral("Ready")).size(), 1, 10000);
+        QVERIFY(group.syncPlay.queueItems({kThirdItem}, true));
+        QTRY_COMPARE(group.sent(QStringLiteral("Queue")).size(), 1);
+        QCOMPARE(group.sent(QStringLiteral("Queue")).first(),
+                 SyncPlay::queueBody({kThirdItem}, true));
+        QVERIFY(group.syncPlay.removeEntry(kEntry2));
+        QTRY_COMPARE(group.sent(QStringLiteral("RemoveFromPlaylist")).size(), 1);
+        QCOMPARE(group.sent(QStringLiteral("RemoveFromPlaylist")).first(),
+                 SyncPlay::removeBody({kEntry2}, false, false));
+        // An index past the end is brought to the last one
+        QVERIFY(group.syncPlay.moveEntry(kEntry2, 7));
+        QTRY_COMPARE(group.sent(QStringLiteral("MovePlaylistItem")).size(), 1);
+        QCOMPARE(group.sent(QStringLiteral("MovePlaylistItem")).first(),
+                 SyncPlay::moveBody(kEntry2, 1));
+        QVERIFY(group.syncPlay.playEntry(kEntry2));
+        QTRY_COMPARE(group.sent(QStringLiteral("SetPlaylistItem")).size(), 1);
+        group.player.setShuffle(true);
+        QTRY_COMPARE(group.sent(QStringLiteral("SetShuffleMode")).size(), 1);
+        QCOMPARE(group.sent(QStringLiteral("SetShuffleMode")).first(), SyncPlay::shuffleBody(true));
+        group.player.setRepeatMode(1);
+        QTRY_COMPARE(group.sent(QStringLiteral("SetRepeatMode")).size(), 1);
+        QCOMPARE(group.sent(QStringLiteral("SetRepeatMode")).first(),
+                 SyncPlay::repeatBody(QStringLiteral("RepeatAll")));
+        QVERIFY(!group.syncPlay.queueItems({QStringLiteral("../Items")}, false));
+        // The group's answer: shuffled and repeating, the playing entry kept and not opened again
+        group.push(update(QStringLiteral("PlayQueue"),
+                          queueOf({{kOtherItem, kEntry2}, {kItem, kEntry}}, 1, now() + 5,
+                                  QStringLiteral("RepeatAll"), QStringLiteral("Shuffle"))));
+        QTRY_VERIFY(group.player.shuffle());
+        QCOMPARE(group.player.repeatMode(), 1);
+        QTest::qWait(200);
+        QCOMPARE(group.sent(QStringLiteral("Ready")).size(), 1);
+        QCOMPARE(group.player.itemId(), kItem);
+        QVERIFY(!group.player.loading());
+        // The dialog's rows: the names read for the group's items, the playing one marked
+        Kinefin::SyncPlayQueueModel *queue = group.syncPlay.queue();
+        QCOMPARE(queue->rowCount(), 2);
+        QCOMPARE(queue->currentIndex(), 1);
+        QTRY_COMPARE(queue->data(queue->index(1), Kinefin::SyncPlayQueueModel::NameRole).toString(),
+                     QStringLiteral("Arrival"));
+        QVERIFY(queue->data(queue->index(1), Kinefin::SyncPlayQueueModel::CurrentRole).toBool());
+        QVERIFY(queue->data(queue->index(0), Kinefin::SyncPlayQueueModel::NameRole)
+                    .toString()
+                    .isEmpty());
+    }
+
+    void leavingWhileWaitingForTheNextClosesThePlayer()
+    {
+        Group group;
+        QVERIFY(group.ok);
+        QVERIFY(group.joined());
+        group.push(update(QStringLiteral("PlayQueue"),
+                          queueOf({{kItem, kEntry}, {kOtherItem, kEntry2}}, 0, now())));
+        QVERIFY(group.sourceGiven(kItem, 2));
+        QTRY_COMPARE_WITH_TIMEOUT(group.sent(QStringLiteral("Ready")).size(), 1, 10000);
+        const qint64 at = now();
+        group.push(command(QStringLiteral("Unpause"), at, at, 0));
+        QTRY_COMPARE_WITH_TIMEOUT(group.sent(QStringLiteral("NextItem")).size(), 1, 8000);
+        QVERIFY(group.player.awaitingGroup());
+        QCOMPARE(group.player.status(), Kinefin::PlayerController::Status::Playing);
+        // Another member's edit is not the answer: the player keeps waiting
+        group.push(update(QStringLiteral("PlayQueue"),
+                          queueOf({{kItem, kEntry}, {kOtherItem, kEntry2}, {kThirdItem, kEntry3}},
+                                  0, now() + 1)));
+        QTest::qWait(200);
+        QVERIFY(group.player.awaitingGroup());
+        QCOMPARE(group.player.itemId(), kItem);
+        group.syncPlay.leaveGroup();
+        QVERIFY(!group.player.active());
+    }
+
+    void aJoinAgainWhileNotFollowingSaysSoAgain()
+    {
+        Group group;
+        QVERIFY(group.ok);
+        QVERIFY(group.joined());
+        QVERIFY(group.playing());
+        group.syncPlay.stopFollowing();
+        QTRY_COMPARE(group.sent(QStringLiteral("SetIgnoreWait")).size(), 1);
+        group.server.lastConnection()->kick();
+        QTRY_VERIFY_WITH_TIMEOUT(group.syncPlay.offline(), 5000);
+        QTRY_COMPARE_WITH_TIMEOUT(group.sent(QStringLiteral("Join")).size(), 2, 15000);
+        // Nothing goes out before the server's answer
+        QVERIFY(!group.syncPlay.routesPlayback());
+        QVERIFY(!group.syncPlay.queueItems({kOtherItem}, false));
+        group.push(update(QStringLiteral("GroupJoined"), groupInfo()));
+        QTRY_COMPARE(group.sent(QStringLiteral("SetIgnoreWait")).size(), 2);
+        QCOMPARE(group.sent(QStringLiteral("SetIgnoreWait")).last(),
+                 SyncPlay::ignoreWaitBody(true));
+        QVERIFY(!group.syncPlay.following());
     }
 };
 

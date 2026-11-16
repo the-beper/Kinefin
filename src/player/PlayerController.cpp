@@ -370,6 +370,19 @@ PlayerController::PlayerController(JellyfinClient &client, PlayQueue &queue,
     });
     m_trackTimer.setInterval(2000);
     connect(&m_trackTimer, &QTimer::timeout, this, &PlayerController::refreshTracks);
+    // The group did not bring its next item: the playback ends as it would alone
+    m_groupAdvance.setSingleShot(true);
+    m_groupAdvance.setInterval(10'000);
+    connect(&m_groupAdvance, &QTimer::timeout, this, [this] {
+        if (!std::exchange(m_awaitingGroup, false))
+            return;
+        // The player closes, so the group no longer waits for this session
+        if (m_group)
+            m_group->stopFollowing();
+        clearCurrent();
+        Q_EMIT finished();
+        Q_EMIT changed();
+    });
     loadMemory();
 }
 
@@ -419,6 +432,8 @@ void PlayerController::onAccountLeaving()
 {
     persistQueueCursor();
     m_stopping = true;
+    m_awaitingGroup = false;
+    m_groupAdvance.stop();
     m_client.cancelPlaybackInfo();
     m_loading = false;
     m_sleep.stop();
@@ -492,6 +507,8 @@ bool PlayerController::startItem(const QString &id, qint64 resumeTicks, bool gro
     cancelSeriesRequest();
     m_seriesPlaylistWanted = false;
     m_groupItem = grouped;
+    m_awaitingGroup = false;
+    m_groupAdvance.stop();
     m_mpvSettings.setSpeedHeld(grouped);
     m_itemId = id;
     m_title.clear();
@@ -954,9 +971,17 @@ void PlayerController::onEnd(const QString &reason)
         QTimer::singleShot(0, this, &PlayerController::requestPending);
         return;
     }
-    // The group decides what follows its item: nothing moves on or plays again here
+    // The group decides what follows its item: nothing moves on or plays again here, and when it moves on the player waits for its next item
     if (m_groupItem) {
         m_playedClock.invalidate();
+        const bool movesOn = reason == QLatin1String("eof") && !m_stopping && m_group
+                             && m_group->itemEnded(m_itemId);
+        if (movesOn) {
+            m_awaitingGroup = true;
+            m_groupAdvance.start();
+            Q_EMIT changed();
+            return;
+        }
         clearCurrent();
         Q_EMIT finished();
         Q_EMIT changed();
@@ -1010,6 +1035,8 @@ void PlayerController::clearCurrent()
     resetUpNext();
     m_fileLoaded = false;
     m_groupItem = false;
+    m_awaitingGroup = false;
+    m_groupAdvance.stop();
     m_mpvSettings.setSpeedHeld(false);
     if (!m_itemSeriesId.isEmpty()) {
         m_itemSeriesId.clear();
@@ -1047,10 +1074,22 @@ void PlayerController::applyStop()
 {
     stopLocally();
 }
+void PlayerController::applyRate(double rate)
+{
+    if (m_groupItem && std::isfinite(rate))
+        m_engine.setRate(std::clamp(rate, 0.9, 1.1));
+}
 void PlayerController::releaseGroupItem()
 {
     m_groupItem = false;
     m_mpvSettings.setSpeedHeld(false);
+    // Waiting for the group's next item, there is nothing left to play
+    if (std::exchange(m_awaitingGroup, false)) {
+        m_groupAdvance.stop();
+        clearCurrent();
+        Q_EMIT finished();
+        Q_EMIT changed();
+    }
 }
 bool PlayerController::groupItemLoaded(const QString &id) const
 {
@@ -1073,6 +1112,9 @@ void PlayerController::togglePause()
 }
 void PlayerController::stop()
 {
+    // Closing the player leaves the group playing on without this session
+    if (grouped())
+        m_group->stopFollowing();
     stopLocally();
 }
 void PlayerController::stopLocally()
@@ -1115,7 +1157,7 @@ int PlayerController::nextIndex(int direction, bool pick) const
 bool PlayerController::next()
 {
     if (grouped())
-        return false;
+        return m_group->requestNext();
     // While the Up Next card is up, Next starts what it offers (under shuffle, the step it drew)
     int next = m_upNextId.isEmpty() ? -1 : indexOfItem(m_playlist, m_upNextId);
     if (next < 0)
@@ -1136,8 +1178,13 @@ bool PlayerController::next()
 }
 bool PlayerController::previous()
 {
-    if (grouped())
-        return false;
+    if (grouped()) {
+        if (!loading() && positionTicks() > 3 * TicksPerSecond) {
+            seek(0);
+            return true;
+        }
+        return m_group->requestPrevious();
+    }
     if (positionTicks() > 3 * TicksPerSecond) {
         seek(0);
         return true;
@@ -1157,7 +1204,8 @@ bool PlayerController::previous()
 
 PlayerController::Status PlayerController::status() const
 {
-    if (m_loading)
+    // Loading, and waiting for a group's next item, count as playing for the desktop (the screen stays on)
+    if (m_loading || m_awaitingGroup)
         return Status::Playing;
     switch (m_session.state()) {
     case PlaybackSession::State::Opening:
@@ -1185,7 +1233,7 @@ void PlayerController::seek(qint64 ticks)
         seekLocally(ticks);
         return;
     }
-    if (m_engine.canSeek() && active() && !m_loading && ticks >= 0)
+    if (m_engine.canSeek() && active() && !loading() && ticks >= 0)
         m_group->requestSeek(
             m_engine.durationTicks() > 0 ? std::min(ticks, m_engine.durationTicks()) : ticks);
 }
@@ -1248,8 +1296,10 @@ void PlayerController::toggleMute()
 }
 void PlayerController::setShuffle(bool enabled)
 {
-    if (grouped())
+    if (grouped()) {
+        m_group->requestShuffle(enabled);
         return;
+    }
     m_shuffle = enabled;
     updateUpNext();
     Q_EMIT changed();
@@ -1322,8 +1372,12 @@ QVariantMap PlayerController::playbackInfo() const
 
 void PlayerController::setRepeatMode(int mode)
 {
-    if (grouped() || mode < 0 || mode > 2)
+    if (mode < 0 || mode > 2)
         return;
+    if (grouped()) {
+        m_group->requestRepeatMode(mode);
+        return;
+    }
     m_repeat = mode;
     updateUpNext();
     Q_EMIT changed();

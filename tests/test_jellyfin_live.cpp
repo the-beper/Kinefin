@@ -120,6 +120,9 @@ class TestJellyfinLive : public QObject {
     // The SyncPlay protocol (~90 s): two sessions of the user, each with its own socket, through New, List, Join (without a socket, then with one but no media control), SetNewQueue, Ping, Ready, Pause, Seek, a Ready off position, Unpause, Buffering, IgnoreWait, NextItem twice, a socket drop and reopen, the error updates and an item the user cannot see; every frame and status printed (the output pairs group ids with the user's name: keep it out of shared logs). Both sessions leave even when a check fails
     void syncPlayProtocol();
 
+    // The SyncPlay group queue (~40 s): two sessions, a queue of three movies, NextItem with an entry after it (twice), PreviousItem, SetPlaylistItem, Queue and QueueNext, MovePlaylistItem, RemoveFromPlaylist (an entry, the playing one, then all), SetRepeatMode and SetShuffleMode, NextItem at the end under RepeatAll; every frame and status printed (ids next to the user's name: keep the output out of shared logs). Both sessions leave even when a check fails
+    void syncPlayQueueProtocol();
+
   private:
     int deviceSequence = 0;
     static constexpr auto LIVE_FACT = "live-fact:";
@@ -2266,6 +2269,210 @@ void TestJellyfinLive::syncPlayProtocol()
     settle("last-member-leaves");
     QVERIFY2(groupIdIn(listGroups(b, "after-everyone-left")).isEmpty(),
              "the group outlived its last member");
+}
+
+void TestJellyfinLive::syncPlayQueueProtocol()
+{
+    if (!m_live)
+        QSKIP("no KINEFIN_LIVE_* environment, skipping the live checks");
+
+    struct Member {
+        QString name;
+        Kinefin::JellyfinClient client;
+        QWebSocket *socket = nullptr;
+        QStringList frames;
+        qsizetype printed = 0;
+    };
+    Member a;
+    a.name = QStringLiteral("A");
+    Member b;
+    b.name = QStringLiteral("B");
+    QVERIFY(authenticate(a.client));
+    QVERIFY(authenticate(b.client));
+    const auto cleanup = qScopeGuard([&] {
+        for (Member *member : {&a, &b}) {
+            postJson(member->client, QStringLiteral("/SyncPlay/Leave"), {});
+            delete member->socket;
+            member->client.disconnectFromServer();
+        }
+    });
+    const auto openSocketOf = [](Member &member) {
+        auto *socket =
+            new QWebSocket(QStringLiteral("Kinefin live check"), QWebSocketProtocol::VersionLatest);
+        member.socket = socket;
+        const QString keepAlive = QStringLiteral("{\"MessageType\":\"KeepAlive\"}");
+        QObject::connect(socket, &QWebSocket::textMessageReceived, socket,
+                         [&member, socket, keepAlive](const QString &frame) {
+                             if (frame.contains(QLatin1String("ForceKeepAlive")))
+                                 socket->sendTextMessage(keepAlive);
+                             else if (!frame.contains(QLatin1String("\"KeepAlive\""))
+                                      && !frame.contains(QLatin1String("LibraryChanged")))
+                                 member.frames.append(frame);
+                         });
+        auto *beat = new QTimer(socket);
+        QObject::connect(beat, &QTimer::timeout, socket,
+                         [socket, keepAlive] { socket->sendTextMessage(keepAlive); });
+        beat->start(25000);
+        QSignalSpy connected(socket, &QWebSocket::connected);
+        socket->open(member.client.webSocketRequest());
+        return connected.wait(15000);
+    };
+    const auto settle = [&](const char *step, int ms = 2000) {
+        QTest::qWait(ms);
+        for (Member *member : {&a, &b}) {
+            for (; member->printed < member->frames.size(); ++member->printed)
+                qInfo().noquote() << LIVE_FACT << step << member->name
+                                  << "frame:" << member->frames.at(member->printed);
+        }
+    };
+    const auto post = [this](Member &member, const QString &route, const QJsonObject &body) {
+        QByteArray answer;
+        const int status =
+            postJson(member.client, QStringLiteral("/SyncPlay/") + route, body, &answer);
+        qInfo().noquote() << LIVE_FACT << member.name << QStringLiteral("POST /SyncPlay/") + route
+                          << QJsonDocument(body).toJson(QJsonDocument::Compact) << "->" << status
+                          << QString::fromUtf8(answer.left(400));
+        return status;
+    };
+    const auto readiness = [](qint64 ticks, bool playing, const QString &entry) {
+        return QJsonObject{
+            {QStringLiteral("When"), QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)},
+            {QStringLiteral("PositionTicks"), ticks},
+            {QStringLiteral("IsPlaying"), playing},
+            {QStringLiteral("PlaylistItemId"), entry}};
+    };
+    // The entries and the playing one of the latest PlayQueue update A received
+    const auto queueOf = [&a](QStringList *entries) {
+        for (qsizetype i = a.frames.size() - 1; i >= 0; --i) {
+            const QJsonObject update = QJsonDocument::fromJson(a.frames.at(i).toUtf8())
+                                           .object()
+                                           .value(QStringLiteral("Data"))
+                                           .toObject();
+            if (update.value(QStringLiteral("Type")).toString() != QLatin1String("PlayQueue"))
+                continue;
+            const QJsonObject queue = update.value(QStringLiteral("Data")).toObject();
+            entries->clear();
+            for (const QJsonValue &entry : queue.value(QStringLiteral("Playlist")).toArray())
+                entries->append(
+                    entry.toObject().value(QStringLiteral("PlaylistItemId")).toString());
+            return queue.value(QStringLiteral("PlayingItemIndex")).toInt(-1);
+        }
+        return -1;
+    };
+
+    const QJsonArray movies =
+        getJson(a.client,
+                QStringLiteral("/Items?IncludeItemTypes=Movie&Recursive=true&SortBy=Name&Limit=3"))
+            .value(QStringLiteral("Items"))
+            .toArray();
+    if (movies.size() < 3)
+        QSKIP("fewer than three movies in the user's libraries");
+    QStringList ids;
+    for (const QJsonValue &movie : movies)
+        ids.append(movie.toObject().value(QStringLiteral("Id")).toString());
+
+    QVERIFY(openSocketOf(a));
+    QVERIFY(openSocketOf(b));
+    post(a, QStringLiteral("New"),
+         {{QStringLiteral("GroupName"),
+           QStringLiteral("Kinefin queue check %1").arg(deviceSequence)}});
+    settle("new");
+    const QJsonArray groups = getDocument(b.client, QStringLiteral("/SyncPlay/List")).array();
+    QString groupId;
+    for (const QJsonValue &group : groups) {
+        if (group.toObject()
+                .value(QStringLiteral("GroupName"))
+                .toString()
+                .startsWith(QStringLiteral("Kinefin queue check")))
+            groupId = group.toObject().value(QStringLiteral("GroupId")).toString();
+    }
+    QVERIFY2(!groupId.isEmpty(), "the new group is not listed");
+    post(b, QStringLiteral("Join"), {{QStringLiteral("GroupId"), groupId}});
+    settle("join");
+
+    post(a, QStringLiteral("SetNewQueue"),
+         {{QStringLiteral("PlayingQueue"), QJsonArray::fromStringList(ids)},
+          {QStringLiteral("PlayingItemPosition"), 0},
+          {QStringLiteral("StartPositionTicks"), 0}});
+    settle("new-queue");
+    QStringList entries;
+    int playing = queueOf(&entries);
+    QVERIFY2(entries.size() == 3 && playing == 0, "the queue of three did not come");
+    post(a, QStringLiteral("Ready"), readiness(0, false, entries.at(0)));
+    post(b, QStringLiteral("Ready"), readiness(0, false, entries.at(0)));
+    settle("ready");
+
+    // The first entry ended on both: NextItem twice, as two members would send it
+    post(a, QStringLiteral("NextItem"), {{QStringLiteral("PlaylistItemId"), entries.at(0)}});
+    post(b, QStringLiteral("NextItem"), {{QStringLiteral("PlaylistItemId"), entries.at(0)}});
+    settle("next-item-twice");
+    playing = queueOf(&entries);
+    qInfo() << LIVE_FACT << "playing index after NextItem:" << playing;
+    if (playing >= 0) {
+        post(a, QStringLiteral("Ready"), readiness(0, false, entries.at(playing)));
+        post(b, QStringLiteral("Ready"), readiness(0, false, entries.at(playing)));
+        settle("ready-after-next");
+        post(a, QStringLiteral("PreviousItem"),
+             {{QStringLiteral("PlaylistItemId"), entries.at(playing)}});
+        settle("previous-item");
+    }
+    playing = queueOf(&entries);
+    post(a, QStringLiteral("SetPlaylistItem"), {{QStringLiteral("PlaylistItemId"), entries.at(2)}});
+    settle("set-playlist-item");
+
+    post(a, QStringLiteral("Queue"),
+         {{QStringLiteral("ItemIds"), QJsonArray{ids.at(0)}},
+          {QStringLiteral("Mode"), QStringLiteral("Queue")}});
+    settle("queue");
+    post(a, QStringLiteral("Queue"),
+         {{QStringLiteral("ItemIds"), QJsonArray{ids.at(1)}},
+          {QStringLiteral("Mode"), QStringLiteral("QueueNext")}});
+    settle("queue-next");
+    playing = queueOf(&entries);
+    post(a, QStringLiteral("MovePlaylistItem"),
+         {{QStringLiteral("PlaylistItemId"), entries.last()}, {QStringLiteral("NewIndex"), 0}});
+    settle("move-last-to-first");
+    playing = queueOf(&entries);
+    const QString notPlaying = entries.at(playing == 0 ? 1 : 0);
+    post(a, QStringLiteral("RemoveFromPlaylist"),
+         {{QStringLiteral("PlaylistItemIds"), QJsonArray{notPlaying}},
+          {QStringLiteral("ClearPlaylist"), false},
+          {QStringLiteral("ClearPlayingItem"), false}});
+    settle("remove-an-entry");
+    playing = queueOf(&entries);
+    if (playing >= 0)
+        post(a, QStringLiteral("RemoveFromPlaylist"),
+             {{QStringLiteral("PlaylistItemIds"), QJsonArray{entries.at(playing)}},
+              {QStringLiteral("ClearPlaylist"), false},
+              {QStringLiteral("ClearPlayingItem"), false}});
+    settle("remove-the-playing-entry");
+
+    post(a, QStringLiteral("SetRepeatMode"),
+         {{QStringLiteral("Mode"), QStringLiteral("RepeatAll")}});
+    settle("repeat-all");
+    post(a, QStringLiteral("SetShuffleMode"),
+         {{QStringLiteral("Mode"), QStringLiteral("Shuffle")}});
+    settle("shuffle");
+    post(a, QStringLiteral("SetShuffleMode"), {{QStringLiteral("Mode"), QStringLiteral("Sorted")}});
+    settle("sorted");
+    playing = queueOf(&entries);
+    if (playing >= 0) {
+        post(a, QStringLiteral("SetPlaylistItem"),
+             {{QStringLiteral("PlaylistItemId"), entries.last()}});
+        settle("last-entry");
+        playing = queueOf(&entries);
+        post(a, QStringLiteral("NextItem"),
+             {{QStringLiteral("PlaylistItemId"), entries.at(playing)}});
+        settle("next-item-at-the-end-under-repeat-all");
+    }
+    post(a, QStringLiteral("RemoveFromPlaylist"),
+         {{QStringLiteral("PlaylistItemIds"), QJsonArray()},
+          {QStringLiteral("ClearPlaylist"), true},
+          {QStringLiteral("ClearPlayingItem"), true}});
+    settle("clear");
+    post(b, QStringLiteral("Leave"), {});
+    post(a, QStringLiteral("Leave"), {});
+    settle("left");
 }
 
 QTEST_MAIN(TestJellyfinLive)

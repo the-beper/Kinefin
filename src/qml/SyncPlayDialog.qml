@@ -17,6 +17,8 @@ Kirigami.Dialog {
     readonly property SyncPlayGroupsModel groups: syncPlay?.groups ?? null
     readonly property bool joined: syncPlay?.status === SyncPlayController.Joined
     readonly property bool joining: syncPlay?.status === SyncPlayController.Joining
+    readonly property bool following: syncPlay?.following ?? false
+    readonly property SyncPlayQueueModel queue: syncPlay?.queue ?? null
     // The last failure since the dialog opened, -1 for none: a box says it until the next try
     property int failure: -1
     readonly property bool listing: !joined && !joining
@@ -33,6 +35,15 @@ Kirigami.Dialog {
             icon.name: "view-refresh"
             visible: dialog.listing
             onTriggered: dialog.groups?.reload()
+        },
+        Kirigami.Action {
+            objectName: "syncPlayFollowAction"
+            // Not following, the group plays on without waiting for this player
+            text: dialog.following ? i18nc("@action:button", "Stop Following") : i18nc("@action:button", "Follow Again")
+            icon.name: dialog.following ? "network-disconnect" : "network-connect"
+            visible: dialog.joined
+            enabled: !(dialog.syncPlay?.offline ?? false)
+            onTriggered: dialog.following ? dialog.syncPlay.stopFollowing() : dialog.syncPlay.resumeFollowing()
         },
         Kirigami.Action {
             objectName: "syncPlayLeaveAction"
@@ -207,9 +218,128 @@ Kirigami.Dialog {
                     objectName: "syncPlayWaiting"
                     Layout.fillWidth: true
                     Layout.topMargin: Kirigami.Units.largeSpacing
-                    visible: dialog.syncPlay?.waiting ?? false
+                    visible: dialog.following && (dialog.syncPlay?.waiting ?? false)
                     wrapMode: Text.Wrap
                     text: i18n("Waiting for the other members to be ready")
+                }
+                MessageBox {
+                    objectName: "syncPlayOffline"
+                    Layout.fillWidth: true
+                    Layout.topMargin: Kirigami.Units.largeSpacing
+                    visible: dialog.syncPlay?.offline ?? false
+                    type: Kirigami.MessageType.Warning
+                    text: i18n("The connection to the server was lost. The group is joined again once it is back")
+                }
+                MessageBox {
+                    objectName: "syncPlayNotFollowing"
+                    Layout.fillWidth: true
+                    Layout.topMargin: Kirigami.Units.largeSpacing
+                    visible: dialog.joined && !dialog.following
+                    type: Kirigami.MessageType.Information
+                    text: i18n("Playback here is independent of the group. Use Follow Again to keep in step with it")
+                }
+
+                Kirigami.Heading {
+                    Layout.fillWidth: true
+                    Layout.topMargin: Kirigami.Units.largeSpacing
+                    level: 4
+                    text: i18nc("@title the SyncPlay group's queue", "Queue")
+                    visible: (dialog.queue?.count ?? 0) > 0
+                }
+                Repeater {
+                    model: dialog.joined ? dialog.queue : null
+                    delegate: QQC2.ItemDelegate {
+                        id: entryRow
+                        objectName: "syncPlayQueueRow"
+                        Layout.fillWidth: true
+                        required property int index
+                        required property string playlistItemId
+                        required property string name
+                        required property string seriesName
+                        required property int seasonNumber
+                        required property int episodeNumber
+                        required property bool current
+
+                        // An episode under its series, else the item's name; the server's text, plain only
+                        readonly property string title: name.length === 0 ? i18n("Unknown item") : seriesName.length > 0 && seasonNumber >= 0 && episodeNumber >= 0 ? i18nc("@info %1 series, %2 season, %3 episode, %4 episode name", "%1 S%2:E%3 — %4", seriesName, seasonNumber, episodeNumber, name) : name
+                        readonly property int lastIndex: (dialog.queue?.count ?? 1) - 1
+
+                        highlighted: current
+                        // The row itself does nothing: its buttons do
+                        hoverEnabled: false
+                        focusPolicy: Qt.NoFocus
+                        down: false
+                        readonly property bool editable: !(dialog.syncPlay?.offline ?? true)
+                        Accessible.name: current ? i18nc("@info %1 the title of what the group plays", "Playing: %1", title) : title
+
+                        contentItem: RowLayout {
+                            spacing: Kirigami.Units.smallSpacing
+                            Kirigami.Icon {
+                                Layout.preferredWidth: Kirigami.Units.iconSizes.small
+                                Layout.preferredHeight: Kirigami.Units.iconSizes.small
+                                source: "media-playback-start"
+                                opacity: entryRow.current ? 1 : 0
+                                Accessible.ignored: true
+                            }
+                            QQC2.Label {
+                                objectName: "syncPlayQueueTitle"
+                                Layout.fillWidth: true
+                                elide: Text.ElideRight
+                                textFormat: Text.PlainText
+                                text: entryRow.title
+                                font.bold: entryRow.current
+                            }
+                            QQC2.ToolButton {
+                                objectName: "syncPlayQueuePlay"
+                                // Disabled rather than hidden, so the buttons of the rows stay aligned
+                                enabled: !entryRow.current && dialog.following && entryRow.editable
+                                icon.name: "media-playback-start"
+                                text: i18nc("@action:button", "Play")
+                                display: QQC2.AbstractButton.IconOnly
+                                Accessible.name: i18nc("@action:button %1 title", "Play %1", entryRow.title)
+                                QQC2.ToolTip.text: text
+                                QQC2.ToolTip.visible: hovered || visualFocus
+                                QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
+                                onClicked: dialog.syncPlay.playEntry(entryRow.playlistItemId)
+                            }
+                            QQC2.ToolButton {
+                                objectName: "syncPlayQueueUp"
+                                enabled: entryRow.index > 0 && entryRow.editable
+                                icon.name: "arrow-up"
+                                text: i18nc("@action:button", "Move Up")
+                                display: QQC2.AbstractButton.IconOnly
+                                Accessible.name: i18nc("@action:button %1 title", "Move %1 up", entryRow.title)
+                                QQC2.ToolTip.text: text
+                                QQC2.ToolTip.visible: hovered || visualFocus
+                                QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
+                                onClicked: dialog.syncPlay.moveEntry(entryRow.playlistItemId, entryRow.index - 1)
+                            }
+                            QQC2.ToolButton {
+                                objectName: "syncPlayQueueDown"
+                                enabled: entryRow.index < entryRow.lastIndex && entryRow.editable
+                                icon.name: "arrow-down"
+                                text: i18nc("@action:button", "Move Down")
+                                display: QQC2.AbstractButton.IconOnly
+                                Accessible.name: i18nc("@action:button %1 title", "Move %1 down", entryRow.title)
+                                QQC2.ToolTip.text: text
+                                QQC2.ToolTip.visible: hovered || visualFocus
+                                QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
+                                onClicked: dialog.syncPlay.moveEntry(entryRow.playlistItemId, entryRow.index + 1)
+                            }
+                            QQC2.ToolButton {
+                                objectName: "syncPlayQueueRemove"
+                                enabled: entryRow.editable
+                                icon.name: "edit-delete-remove"
+                                text: i18nc("@action:button", "Remove")
+                                display: QQC2.AbstractButton.IconOnly
+                                Accessible.name: i18nc("@action:button %1 title", "Remove %1 from the queue", entryRow.title)
+                                QQC2.ToolTip.text: text
+                                QQC2.ToolTip.visible: hovered || visualFocus
+                                QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
+                                onClicked: dialog.syncPlay.removeEntry(entryRow.playlistItemId)
+                            }
+                        }
+                    }
                 }
             }
 

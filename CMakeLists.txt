@@ -50,6 +50,8 @@ add_library(kinefin_core STATIC
     src/syncplay/ServerClock.h
     src/syncplay/SyncPlayGroupsModel.cpp
     src/syncplay/SyncPlayGroupsModel.h
+    src/syncplay/SyncPlayQueueModel.cpp
+    src/syncplay/SyncPlayQueueModel.h
     src/models/CultureOptionsModel.cpp
     src/models/CultureOptionsModel.h
     src/models/FilterOptionsModel.cpp

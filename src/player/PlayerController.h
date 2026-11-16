@@ -117,10 +117,13 @@ class PlayerController final : public QObject {
                      const QString &profileId, QObject *parent = nullptr);
     ~PlayerController() override;
 
-    bool active() const { return m_loading || m_session.state() != PlaybackSession::State::Idle; }
+    bool active() const
+    {
+        return m_loading || m_awaitingGroup || m_session.state() != PlaybackSession::State::Idle;
+    }
     bool loading() const
     {
-        return m_loading || m_session.state() == PlaybackSession::State::Opening;
+        return m_loading || m_awaitingGroup || m_session.state() == PlaybackSession::State::Opening;
     }
     bool paused() const { return m_session.state() == PlaybackSession::State::Paused; }
     bool buffering() const { return m_session.state() == PlaybackSession::State::Buffering; }
@@ -138,14 +141,18 @@ class PlayerController final : public QObject {
     bool muted() const { return m_muted; }
     double audioDelay() const { return m_audioDelay; }
     double subtitleDelay() const { return m_subtitleDelay; }
-    bool shuffle() const { return m_shuffle; }
-    int repeatMode() const { return m_repeat; }
+    // A group's own while one takes the player's actions
+    bool shuffle() const { return grouped() ? m_group->shuffle() : m_shuffle; }
+    int repeatMode() const { return grouped() ? m_group->repeatMode() : m_repeat; }
     // The saved queue only: the episodes of a series played alone are not in it
     int currentIndex() const { return m_playlistEphemeral ? -1 : m_queueIndex; }
     int queueCount() const { return m_playlistEphemeral ? 0 : m_playlist.size(); }
     // Whether Next and Previous have somewhere to go, in the saved queue or the episodes of the series
-    bool hasNext() const { return nextIndex(1, false) >= 0; }
-    bool hasPrevious() const { return nextIndex(-1, false) >= 0; }
+    bool hasNext() const { return grouped() ? m_group->hasNext() : nextIndex(1, false) >= 0; }
+    bool hasPrevious() const
+    {
+        return grouped() ? m_group->hasPrevious() : nextIndex(-1, false) >= 0;
+    }
     QVariantList audioTracks() const { return m_audioTracks; }
     QVariantList subtitleTracks() const { return m_subtitleTracks; }
     QVariantList externalSubtitles() const { return m_externalSubtitles; }
@@ -241,8 +248,16 @@ class PlayerController final : public QObject {
     void applySeek(qint64 ticks);
     // Stops whatever plays
     void applyStop();
+    // A speed that brings the playback back in step with the group, 0.9 to 1.1
+    void applyRate(double rate);
+    // The group's state changed: the properties that read it (Next, Previous, shuffle, repeat) are read again
+    void notifyGroupChanged() { Q_EMIT changed(); }
     // The group was left: what plays is the user's own again (its end may repeat, the speed setting applies)
     void releaseGroupItem();
+    // A seek was asked of mpv and has not landed yet
+    [[nodiscard]] bool seeking() const { return m_engine.seeking(); }
+    // The group's item ended and the player waits for the group's next one
+    [[nodiscard]] bool awaitingGroup() const { return m_awaitingGroup; }
     // The group's item `id` is loaded: what the group's pause, unpause and seek act on
     [[nodiscard]] bool groupItemLoaded(const QString &id) const;
     // Loaded, its position known and no seek running: the moment a group hears Ready
@@ -349,6 +364,9 @@ class PlayerController final : public QObject {
     GroupPlayback *m_group = nullptr;
     // The item playing (or loading) is the group's: opened paused at speed 1.0, its end never moves on alone
     bool m_groupItem = false;
+    // The group's item ended and the group moves on: the player waits for the next one (bounded by m_groupAdvance)
+    bool m_awaitingGroup = false;
+    QTimer m_groupAdvance;
     ClientSettings &m_settings;
     QString m_memoryFile;
     PlaybackSession m_session;

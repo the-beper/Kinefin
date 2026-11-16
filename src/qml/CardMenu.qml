@@ -37,6 +37,10 @@ Controls.Menu {
     signal resumeRequested(string targetId, real ticks)
     signal favoriteRequested(string targetId, bool favorite)
     signal addToPlaylistRequested(string targetId)
+    // Play Next (`next`) or Add to Queue: the shell decides which queue, the user's or a SyncPlay group's
+    signal queueRequested(string targetId, bool next)
+    // Whether Play Next and Add to Queue can be taken now: the user's queue is not busy, or a SyncPlay group takes them
+    property bool queueAvailable: !connection.queue.busy
     signal renamePlaylistRequested(string targetId)
     signal deletePlaylistRequested(string targetId)
 
@@ -81,8 +85,8 @@ Controls.Menu {
         icon.name: "media-skip-forward"
         visible: menu.queueable
         height: visible ? implicitHeight : 0
-        enabled: !menu.connection.queue.busy
-        onTriggered: menu.connection.queue.add(menu.itemId, PlayQueue.Next)
+        enabled: menu.queueAvailable
+        onTriggered: menu.queueRequested(menu.itemId, true)
     }
     Controls.MenuItem {
         objectName: "cardMenuAddToQueue"
@@ -90,8 +94,8 @@ Controls.Menu {
         icon.name: "list-add"
         visible: menu.queueable
         height: visible ? implicitHeight : 0
-        enabled: !menu.connection.queue.busy
-        onTriggered: menu.connection.queue.add(menu.itemId, PlayQueue.Last)
+        enabled: menu.queueAvailable
+        onTriggered: menu.queueRequested(menu.itemId, false)
     }
     Controls.MenuItem {
         objectName: "cardMenuAddToPlaylist"

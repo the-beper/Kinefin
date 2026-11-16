@@ -13,6 +13,8 @@ Kirigami.Page {
     // Watching together (SyncPlayController), null when the application gives none: in a group the speed, shuffle and repeat are the group's
     property var syncPlay: null
     readonly property bool grouped: syncPlay?.status === SyncPlayController.Joined
+    // The group takes the player's actions: joined, following and online
+    readonly property bool groupFollowing: grouped && syncPlay.following && !syncPlay.offline
     // The video item of the shell sits here while this page is in front
     readonly property Item videoSlot: slot
     title: player?.title || i18n("Now Playing")
@@ -303,7 +305,7 @@ Kirigami.Page {
     ColumnLayout {
         objectName: "playerGroupWaiting"
         anchors.centerIn: parent
-        visible: page.grouped && page.syncPlay.waiting && !page.player.loading && !page.player.errorText
+        visible: page.groupFollowing && page.syncPlay.waiting && !page.player.loading && !page.player.errorText
         spacing: Kirigami.Units.largeSpacing
         FadeInOnShow {}
         Controls.BusyIndicator {
@@ -985,13 +987,12 @@ Kirigami.Page {
             icon.name: "media-playlist-shuffle"
             checkable: true
             checked: page.player.shuffle
-            // A series started from one of its episodes plays in order: only a queue shuffles, and a shuffle that is on can always be turned off; a group's playback is the group's
-            enabled: !page.grouped && (page.player.queueCount > 1 || page.player.shuffle)
+            // A series started from one of its episodes plays in order: only a queue shuffles, and a shuffle that is on can always be turned off; in a group it is the group's queue
+            enabled: page.groupFollowing ? page.syncPlay.queue.count > 1 || page.player.shuffle : page.player.queueCount > 1 || page.player.shuffle
             onTriggered: page.player.setShuffle(!page.player.shuffle)
         }
         Controls.Menu {
             objectName: "playerRepeatMenu"
-            enabled: !page.grouped
             title: i18n("Repeat")
             icon.name: "media-playlist-repeat"
             Controls.MenuItem {
@@ -1006,7 +1007,7 @@ Kirigami.Page {
                 objectName: "playerRepeatAll"
                 text: i18nc("@item:inmenu repeat", "All")
                 // A lone item repeats as the current item only; a repeat of all that is on can always be turned off
-                enabled: page.player.queueCount > 0 || page.player.hasNext || page.player.hasPrevious || page.player.repeatMode === 1
+                enabled: page.groupFollowing || page.player.queueCount > 0 || page.player.hasNext || page.player.hasPrevious || page.player.repeatMode === 1
                 checkable: true
                 autoExclusive: true
                 checked: page.player.repeatMode === 1
@@ -1024,7 +1025,8 @@ Kirigami.Page {
         Controls.Menu {
             id: speedMenu
             objectName: "playerSpeedMenu"
-            enabled: !page.grouped
+            // A group plays at its own pace
+            enabled: !page.groupFollowing
             title: i18n("Playback Speed")
             icon.name: "speedometer"
             Instantiator {

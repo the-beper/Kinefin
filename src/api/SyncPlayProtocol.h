@@ -108,7 +108,13 @@ enum class Route {
     SetIgnoreWait,
     SetNewQueue,
     NextItem,
-    PreviousItem
+    PreviousItem,
+    SetPlaylistItem,
+    Queue,
+    RemoveFromPlaylist,
+    MovePlaylistItem,
+    SetRepeatMode,
+    SetShuffleMode
 };
 
 // An ISO 8601 UTC time with `Z` and 0 to 7 fraction digits (the server leaves out trailing zeros), as ms since the epoch; nullopt for anything else
@@ -135,7 +141,18 @@ QJsonObject pingBody(qint64 pingMs);
 QJsonObject ignoreWaitBody(bool ignoreWait);
 QJsonObject newQueueBody(const QStringList &itemIds, int playingPosition,
                          qint64 startPositionTicks);
+// NextItem, PreviousItem and SetPlaylistItem
 QJsonObject playlistItemBody(const QString &playlistItemId);
+// `next` puts the items after the playing entry (QueueNext), else at the end (Queue)
+QJsonObject queueBody(const QStringList &itemIds, bool next);
+// Removes entries; `clearPlaylist` empties the whole queue (the ids may then be none) and `clearPlayingItem` lets the playing entry go too
+QJsonObject removeBody(const QStringList &playlistItemIds, bool clearPlaylist,
+                       bool clearPlayingItem);
+// `newIndex` is the entry's index after the move (observed)
+QJsonObject moveBody(const QString &playlistItemId, int newIndex);
+// "RepeatNone", "RepeatAll" or "RepeatOne"
+QJsonObject repeatBody(const QString &mode);
+QJsonObject shuffleBody(bool shuffle);
 bool isValidRequest(Route route, const QJsonObject &body);
 
 } // namespace Kinefin::SyncPlay

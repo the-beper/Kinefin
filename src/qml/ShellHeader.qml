@@ -945,6 +945,9 @@ Item {
             if (!root.shell.playbackPageShowing)
                 root.shell.showPassiveNotification(i18n("Someone left the SyncPlay group"));
         }
+        function onFellOutOfStep() {
+            root.shell.showPassiveNotification(i18n("Out of step with the SyncPlay group. Playback catches up at the next pause or seek"), "long");
+        }
     }
 
     // Opening while the startup layout runs leaves a y binding loop in Kirigami.Dialog

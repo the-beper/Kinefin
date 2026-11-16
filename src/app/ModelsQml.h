@@ -24,6 +24,7 @@
 #include "models/UserConfigurationModel.h"
 #include "syncplay/SyncPlayController.h"
 #include "syncplay/SyncPlayGroupsModel.h"
+#include "syncplay/SyncPlayQueueModel.h"
 
 #include <QtQml/qqmlregistration.h>
 
@@ -124,6 +125,13 @@ struct SyncPlayControllerForeign {
     Q_GADGET
     QML_FOREIGN(Kinefin::SyncPlayController)
     QML_NAMED_ELEMENT(SyncPlayController)
+    QML_UNCREATABLE("Created by the application")
+};
+
+struct SyncPlayQueueModelForeign {
+    Q_GADGET
+    QML_FOREIGN(Kinefin::SyncPlayQueueModel)
+    QML_NAMED_ELEMENT(SyncPlayQueueModel)
     QML_UNCREATABLE("Created by the application")
 };
 

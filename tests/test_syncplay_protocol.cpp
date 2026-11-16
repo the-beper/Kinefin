@@ -515,6 +515,27 @@ class TestSyncPlayProtocol : public QObject {
         QVERIFY(SyncPlay::isValidRequest(Route::SetIgnoreWait, SyncPlay::ignoreWaitBody(true)));
         QVERIFY(SyncPlay::isValidRequest(Route::NextItem, SyncPlay::playlistItemBody(kEntry)));
         QVERIFY(SyncPlay::isValidRequest(Route::PreviousItem, SyncPlay::playlistItemBody(kEntry)));
+        QVERIFY(
+            SyncPlay::isValidRequest(Route::SetPlaylistItem, SyncPlay::playlistItemBody(kEntry)));
+        QVERIFY(SyncPlay::isValidRequest(Route::Queue, SyncPlay::queueBody({kItem}, true)));
+        QCOMPARE(SyncPlay::queueBody({kItem}, true).value(QStringLiteral("Mode")).toString(),
+                 QStringLiteral("QueueNext"));
+        QCOMPARE(SyncPlay::queueBody({kItem}, false).value(QStringLiteral("Mode")).toString(),
+                 QStringLiteral("Queue"));
+        QVERIFY(SyncPlay::isValidRequest(Route::RemoveFromPlaylist,
+                                         SyncPlay::removeBody({kEntry}, false, false)));
+        // Clearing the queue names no entry
+        QVERIFY(SyncPlay::isValidRequest(Route::RemoveFromPlaylist,
+                                         SyncPlay::removeBody({}, true, true)));
+        QVERIFY(SyncPlay::isValidRequest(Route::MovePlaylistItem, SyncPlay::moveBody(kEntry, 0)));
+        for (const char *mode : {"RepeatNone", "RepeatAll", "RepeatOne"})
+            QVERIFY(SyncPlay::isValidRequest(Route::SetRepeatMode,
+                                             SyncPlay::repeatBody(QString::fromLatin1(mode))));
+        QCOMPARE(SyncPlay::shuffleBody(true),
+                 (QJsonObject{{QStringLiteral("Mode"), QStringLiteral("Shuffle")}}));
+        QCOMPARE(SyncPlay::shuffleBody(false),
+                 (QJsonObject{{QStringLiteral("Mode"), QStringLiteral("Sorted")}}));
+        QVERIFY(SyncPlay::isValidRequest(Route::SetShuffleMode, SyncPlay::shuffleBody(true)));
         QStringList longest;
         for (int i = 0; i < SyncPlay::MaxNewQueueItems; ++i)
             longest.append(kItem);
@@ -560,6 +581,27 @@ class TestSyncPlayProtocol : public QObject {
         QVERIFY(!SyncPlay::isValidRequest(
             Route::Join, withValue(SyncPlay::joinBody(kGroup), QStringLiteral("Extra"), true)));
         QVERIFY(!SyncPlay::isValidRequest(Route::NextItem, {}));
+        QVERIFY(!SyncPlay::isValidRequest(Route::Queue, SyncPlay::queueBody({}, false)));
+        QVERIFY(!SyncPlay::isValidRequest(
+            Route::Queue, withValue(SyncPlay::queueBody({kItem}, false), QStringLiteral("Mode"),
+                                    QStringLiteral("Last"))));
+        QVERIFY(!SyncPlay::isValidRequest(Route::Queue, SyncPlay::queueBody(tooMany, false)));
+        QVERIFY(!SyncPlay::isValidRequest(
+            Route::Queue, SyncPlay::queueBody({QStringLiteral("../Items")}, false)));
+        // An entry to remove must be named unless the queue is cleared
+        QVERIFY(!SyncPlay::isValidRequest(Route::RemoveFromPlaylist,
+                                          SyncPlay::removeBody({}, false, false)));
+        QVERIFY(!SyncPlay::isValidRequest(Route::RemoveFromPlaylist,
+                                          SyncPlay::removeBody({kZero}, false, false)));
+        QVERIFY(!SyncPlay::isValidRequest(Route::MovePlaylistItem, SyncPlay::moveBody(kEntry, -1)));
+        QVERIFY(!SyncPlay::isValidRequest(Route::MovePlaylistItem,
+                                          SyncPlay::moveBody(kEntry, SyncPlay::MaxQueueEntries)));
+        QVERIFY(!SyncPlay::isValidRequest(Route::SetRepeatMode,
+                                          SyncPlay::repeatBody(QStringLiteral("RepeatTwice"))));
+        QVERIFY(!SyncPlay::isValidRequest(Route::SetShuffleMode,
+                                          SyncPlay::repeatBody(QStringLiteral("Random"))));
+        QVERIFY(
+            !SyncPlay::isValidRequest(Route::SetPlaylistItem, SyncPlay::playlistItemBody(kZero)));
     }
 
     void routeNames()
@@ -579,7 +621,13 @@ class TestSyncPlayProtocol : public QObject {
             {Route::SetIgnoreWait, QStringLiteral("SetIgnoreWait")},
             {Route::SetNewQueue, QStringLiteral("SetNewQueue")},
             {Route::NextItem, QStringLiteral("NextItem")},
-            {Route::PreviousItem, QStringLiteral("PreviousItem")}};
+            {Route::PreviousItem, QStringLiteral("PreviousItem")},
+            {Route::SetPlaylistItem, QStringLiteral("SetPlaylistItem")},
+            {Route::Queue, QStringLiteral("Queue")},
+            {Route::RemoveFromPlaylist, QStringLiteral("RemoveFromPlaylist")},
+            {Route::MovePlaylistItem, QStringLiteral("MovePlaylistItem")},
+            {Route::SetRepeatMode, QStringLiteral("SetRepeatMode")},
+            {Route::SetShuffleMode, QStringLiteral("SetShuffleMode")}};
         for (const auto &[route, name] : names)
             QCOMPARE(SyncPlay::routeName(route), name);
     }

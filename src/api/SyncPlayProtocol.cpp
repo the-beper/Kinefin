@@ -199,6 +199,21 @@ std::optional<PlayQueue> playQueue(const QJsonValue &value)
     return queue;
 }
 
+// An array of `minimum` to `maximum` GUIDs, none all-zero
+bool guids(const QJsonValue &value, qsizetype minimum, qsizetype maximum)
+{
+    if (!value.isArray())
+        return false;
+    const QJsonArray items = value.toArray();
+    if (items.size() < minimum || items.size() > maximum)
+        return false;
+    for (const QJsonValue &item : items) {
+        if (!guid(item, false))
+            return false;
+    }
+    return true;
+}
+
 bool hasExactly(const QJsonObject &body, QStringList keys)
 {
     QStringList present = body.keys();
@@ -411,6 +426,18 @@ QString routeName(Route route)
         return QStringLiteral("NextItem");
     case Route::PreviousItem:
         return QStringLiteral("PreviousItem");
+    case Route::SetPlaylistItem:
+        return QStringLiteral("SetPlaylistItem");
+    case Route::Queue:
+        return QStringLiteral("Queue");
+    case Route::RemoveFromPlaylist:
+        return QStringLiteral("RemoveFromPlaylist");
+    case Route::MovePlaylistItem:
+        return QStringLiteral("MovePlaylistItem");
+    case Route::SetRepeatMode:
+        return QStringLiteral("SetRepeatMode");
+    case Route::SetShuffleMode:
+        return QStringLiteral("SetShuffleMode");
     }
     return {};
 }
@@ -461,6 +488,37 @@ QJsonObject playlistItemBody(const QString &playlistItemId)
     return {{QStringLiteral("PlaylistItemId"), playlistItemId}};
 }
 
+QJsonObject queueBody(const QStringList &itemIds, bool next)
+{
+    return {{QStringLiteral("ItemIds"), QJsonArray::fromStringList(itemIds)},
+            {QStringLiteral("Mode"), next ? QStringLiteral("QueueNext") : QStringLiteral("Queue")}};
+}
+
+QJsonObject removeBody(const QStringList &playlistItemIds, bool clearPlaylist,
+                       bool clearPlayingItem)
+{
+    return {{QStringLiteral("PlaylistItemIds"), QJsonArray::fromStringList(playlistItemIds)},
+            {QStringLiteral("ClearPlaylist"), clearPlaylist},
+            {QStringLiteral("ClearPlayingItem"), clearPlayingItem}};
+}
+
+QJsonObject moveBody(const QString &playlistItemId, int newIndex)
+{
+    return {{QStringLiteral("PlaylistItemId"), playlistItemId},
+            {QStringLiteral("NewIndex"), newIndex}};
+}
+
+QJsonObject repeatBody(const QString &mode)
+{
+    return {{QStringLiteral("Mode"), mode}};
+}
+
+QJsonObject shuffleBody(bool shuffle)
+{
+    return {
+        {QStringLiteral("Mode"), shuffle ? QStringLiteral("Shuffle") : QStringLiteral("Sorted")}};
+}
+
 bool isValidRequest(Route route, const QJsonObject &body)
 {
     switch (route) {
@@ -509,8 +567,38 @@ bool isValidRequest(Route route, const QJsonObject &body)
     }
     case Route::NextItem:
     case Route::PreviousItem:
+    case Route::SetPlaylistItem:
         return hasExactly(body, {QStringLiteral("PlaylistItemId")})
                && guid(body.value(QStringLiteral("PlaylistItemId")), false);
+    case Route::Queue: {
+        const QString mode = body.value(QStringLiteral("Mode")).toString();
+        return hasExactly(body, {QStringLiteral("ItemIds"), QStringLiteral("Mode")})
+               && guids(body.value(QStringLiteral("ItemIds")), 1, MaxNewQueueItems)
+               && (mode == QLatin1String("Queue") || mode == QLatin1String("QueueNext"));
+    }
+    case Route::RemoveFromPlaylist: {
+        const QJsonValue clear = body.value(QStringLiteral("ClearPlaylist"));
+        return hasExactly(body, {QStringLiteral("PlaylistItemIds"), QStringLiteral("ClearPlaylist"),
+                                 QStringLiteral("ClearPlayingItem")})
+               && clear.isBool() && body.value(QStringLiteral("ClearPlayingItem")).isBool()
+               && guids(body.value(QStringLiteral("PlaylistItemIds")), clear.toBool() ? 0 : 1,
+                        MaxQueueEntries);
+    }
+    case Route::MovePlaylistItem:
+        return hasExactly(body, {QStringLiteral("PlaylistItemId"), QStringLiteral("NewIndex")})
+               && guid(body.value(QStringLiteral("PlaylistItemId")), false)
+               && integral(body.value(QStringLiteral("NewIndex")), 0, MaxQueueEntries - 1);
+    case Route::SetRepeatMode: {
+        const QString mode = body.value(QStringLiteral("Mode")).toString();
+        return hasExactly(body, {QStringLiteral("Mode")})
+               && (mode == QLatin1String("RepeatNone") || mode == QLatin1String("RepeatAll")
+                   || mode == QLatin1String("RepeatOne"));
+    }
+    case Route::SetShuffleMode: {
+        const QString mode = body.value(QStringLiteral("Mode")).toString();
+        return hasExactly(body, {QStringLiteral("Mode")})
+               && (mode == QLatin1String("Sorted") || mode == QLatin1String("Shuffle"));
+    }
     }
     return false;
 }
