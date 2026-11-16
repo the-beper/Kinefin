@@ -858,6 +858,7 @@ Kirigami.ApplicationWindow {
         onResumeRequested: (targetId, ticks) => window.playItem(targetId, ticks)
         // A refused send means a write for the item already runs: its answer updates the card
         onFavoriteRequested: (targetId, favorite) => window.connection.setFavorite(targetId, favorite)
+        onAddToPlaylistRequested: targetId => window.addToPlaylist(targetId)
         onRenamePlaylistRequested: targetId => window.renamePlaylist(targetId, window.connection.playlists.nameOf(targetId))
         onDeletePlaylistRequested: targetId => window.askDeletePlaylist(targetId)
     }
@@ -1174,6 +1175,16 @@ Kirigami.ApplicationWindow {
         shell: window
     }
 
+    // Add to Playlist… of a video, from its card menu or its details page
+    function addToPlaylist(itemId) {
+        if (signedIn)
+            playlistDialogs.addTo(itemId);
+    }
+    // New Playlist… of the Playlists page: an empty playlist
+    function newPlaylist() {
+        if (signedIn)
+            playlistDialogs.create([]);
+    }
     // Rename… and Delete… of a playlist, from its card menu or its page; `name` fills the field
     function renamePlaylist(playlistId, name) {
         if (signedIn)

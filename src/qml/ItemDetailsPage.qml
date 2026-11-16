@@ -115,6 +115,13 @@ Kirigami.ScrollablePage {
         enabled: !page.connection.queue.busy
         onTriggered: page.connection.queue.add(page.details.itemId, PlayQueue.Last)
     }
+    readonly property Kirigami.Action addToPlaylistAction: Kirigami.Action {
+        objectName: "addToPlaylistAction"
+        text: i18n("Add to Playlist…")
+        icon.name: "media-playlist-append"
+        visible: page.details.status === ItemDetailsModel.Ready && page.details.playable
+        onTriggered: page.Window.window.addToPlaylist(page.details.itemId)
+    }
     readonly property Kirigami.Action favoriteAction: Kirigami.Action {
         objectName: "toggleFavoriteAction"
         text: page.details.favorite ? i18n("Remove from Favorites") : i18n("Add to Favorites")
@@ -192,7 +199,7 @@ Kirigami.ScrollablePage {
         }
     }
 
-    actions: [page.playNextAction, page.addToQueueAction, page.favoriteAction, page.togglePlayedAction, page.mediaInfoAction]
+    actions: [page.playNextAction, page.addToQueueAction, page.addToPlaylistAction, page.favoriteAction, page.togglePlayedAction, page.mediaInfoAction]
 
     Timer {
         objectName: "endsAtTimer"

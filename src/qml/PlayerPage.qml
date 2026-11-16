@@ -1015,7 +1015,7 @@ Kirigami.Page {
         Controls.MenuItem {
             objectName: "playerQueueItem"
             text: i18n("Now Playing Queue")
-            icon.name: "view-media-playlist"
+            icon.name: "media-track-queue-amarok"
             onTriggered: queuePanel.open()
         }
         Controls.MenuItem {

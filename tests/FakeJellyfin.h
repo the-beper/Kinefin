@@ -390,6 +390,21 @@ class FakeJellyfin {
     // Writes are applied, then the connection is closed with no answer (a transport error for the client)
     bool dropPlaylistWrites = false;
     qsizetype heldPlaylistCount() const { return m_heldPlaylistWrites.size(); }
+    // Not 0: every entries read (`GET /Playlists/{id}/Items`) of a known playlist answers with this status
+    int playlistEntriesStatus = 0;
+    // Entries reads are answered on releasePlaylistEntries()
+    bool holdPlaylistEntries = false;
+    qsizetype heldPlaylistEntriesCount() const { return m_heldPlaylistEntries.size(); }
+
+    void releasePlaylistEntries()
+    {
+        const auto held = m_heldPlaylistEntries;
+        m_heldPlaylistEntries.clear();
+        for (const auto &read : held) {
+            if (read.socket)
+                respond(read.socket, read.status, read.body);
+        }
+    }
 
     void releasePlaylistWrites()
     {
@@ -715,18 +730,26 @@ class FakeJellyfin {
         }
         if (rest.size() == 2 && rest.at(1) == "Items") {
             if (read) {
+                if (playlistEntriesStatus != 0) {
+                    respond(socket, playlistEntriesStatus, {});
+                    return true;
+                }
                 const int start = query.queryItemValue(QStringLiteral("startIndex")).toInt();
                 const int limit = query.queryItemValue(QStringLiteral("limit")).toInt();
                 QJsonArray items;
                 for (qsizetype row = start; row < start + limit && row < playlist->entries.size();
                      ++row)
                     items.append(playlistEntryJson(playlist->entries.at(row)));
-                respond(socket, 200,
-                        QJsonDocument(QJsonObject{{QStringLiteral("Items"), items},
-                                                  {QStringLiteral("StartIndex"), start},
-                                                  {QStringLiteral("TotalRecordCount"),
-                                                   int(playlist->entries.size())}})
-                            .toJson(QJsonDocument::Compact));
+                const QByteArray page =
+                    QJsonDocument(QJsonObject{{QStringLiteral("Items"), items},
+                                              {QStringLiteral("StartIndex"), start},
+                                              {QStringLiteral("TotalRecordCount"),
+                                               int(playlist->entries.size())}})
+                        .toJson(QJsonDocument::Compact);
+                if (holdPlaylistEntries)
+                    m_heldPlaylistEntries.append({socket, 200, page});
+                else
+                    respond(socket, 200, page);
                 return true;
             }
             if (method == "POST") {
@@ -1425,6 +1448,7 @@ class FakeJellyfin {
     QList<QPointer<QTcpSocket>> m_held;
     QList<QPair<QPointer<QTcpSocket>, QByteArray>> m_snapshots;
     QList<HeldPlaylistWrite> m_heldPlaylistWrites;
+    QList<HeldPlaylistWrite> m_heldPlaylistEntries;
     quint64 m_nextFakeId = 0;
     QTcpServer m_server;
     QList<FakeSocketConnection *> m_wsConnections;

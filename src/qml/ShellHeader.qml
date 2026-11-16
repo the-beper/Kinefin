@@ -6,7 +6,7 @@ import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 import org.kde.kirigamiaddons.components as Components
 
-// The top bar: the main menu at the left, the Home, Movies and Shows tabs in the middle (a type tab only while the server has a library of it), and search, favorites, queue and the account menu at the right. The width decides the mode: Wide from 36 grid units (labelled tabs, wide search box), Medium from 24 (icon-only tabs, narrow box), Compact below 24 (search, favorites and queue fold into the main menu)
+// The top bar: the main menu at the left, the Home, Movies and Shows tabs in the middle (a type tab only while the server has a library of it), and search, favorites, playlists, queue and the account menu at the right. The width decides the mode: Wide from 36 grid units (labelled tabs, wide search box), Medium from 24 (icon-only tabs, narrow box), Compact below 24 (search, favorites, playlists and queue fold into the main menu)
 Item {
     id: root
     objectName: "shellHeader"
@@ -353,6 +353,22 @@ Item {
         }
 
         QQC2.ToolButton {
+            objectName: "playlistsButton"
+
+            Layout.alignment: Qt.AlignVCenter
+            visible: !root.compact
+            text: i18nc("@action:button", "Playlists")
+            icon.name: "view-media-playlist"
+            display: QQC2.AbstractButton.IconOnly
+            QQC2.ToolTip.text: text
+            QQC2.ToolTip.visible: hovered || visualFocus
+            QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
+            enabled: root.signedIn
+            down: shell.currentSection === "playlists"
+            onClicked: shell.openPlaylists()
+        }
+
+        QQC2.ToolButton {
             id: queueButton
             objectName: "queueButton"
 
@@ -361,7 +377,8 @@ Item {
             Layout.alignment: Qt.AlignVCenter
             visible: !root.compact
             text: i18nc("@action:button", "Queue")
-            icon.name: "view-media-playlist"
+            // Not the playlists' icon, which sits beside it
+            icon.name: "media-track-queue-amarok"
             display: QQC2.AbstractButton.IconOnly
             QQC2.ToolTip.text: queued > 0 ? i18ncp("@info:tooltip the queue button and how many items the queue holds", "Queue, %1 item", "Queue, %1 items", queued) : text
             QQC2.ToolTip.visible: hovered || visualFocus
@@ -631,25 +648,24 @@ Item {
         onTriggered: shell.openFavorites()
     }
     Kirigami.Action {
-        id: compactQueueAction
-        objectName: "compactQueueAction"
-
-        text: i18nc("@action:inmenu", "Queue")
-        icon.name: "view-media-playlist"
-        visible: root.compact
-        enabled: root.signedIn
-        onTriggered: shell.openSection("queuePage", "QueuePage.qml", { connection: shell.connection })
-    }
-
-    Kirigami.Action {
         id: playlistsAction
         objectName: "playlistsAction"
 
         text: i18nc("@action:inmenu", "Playlists")
-        // Not the queue's icon: both can sit in the same menu
-        icon.name: "amarok_playlist"
-        visible: root.signedIn
+        icon.name: "view-media-playlist"
+        visible: root.compact
+        enabled: root.signedIn
         onTriggered: shell.openPlaylists()
+    }
+    Kirigami.Action {
+        id: compactQueueAction
+        objectName: "compactQueueAction"
+
+        text: i18nc("@action:inmenu", "Queue")
+        icon.name: "media-track-queue-amarok"
+        visible: root.compact
+        enabled: root.signedIn
+        onTriggered: shell.openSection("queuePage", "QueuePage.qml", { connection: shell.connection })
     }
 
     Kirigami.Action {
@@ -715,7 +731,7 @@ Item {
             action: refreshAction
         }
 
-        // In Compact mode the right cluster hides and its three actions fold in here, in the order of the bar
+        // In Compact mode the right cluster hides and its four actions fold in here, in the order of the bar
         QQC2.MenuItem {
             objectName: "menuSearchItem"
             visible: root.compact
@@ -727,6 +743,11 @@ Item {
             action: compactFavoritesAction
         }
         QQC2.MenuItem {
+            objectName: "menuPlaylistsItem"
+            visible: root.compact
+            action: playlistsAction
+        }
+        QQC2.MenuItem {
             objectName: "menuQueueItem"
             visible: root.compact
             action: compactQueueAction
@@ -735,11 +756,6 @@ Item {
             visible: root.compact || root.signedIn
         }
 
-        QQC2.MenuItem {
-            objectName: "menuPlaylistsItem"
-            visible: root.signedIn
-            action: playlistsAction
-        }
         QQC2.MenuItem {
             objectName: "menuRemoteItem"
             visible: root.signedIn

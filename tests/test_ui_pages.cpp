@@ -796,9 +796,8 @@ struct Ui {
             const char *name;
             bool visible;
         } cluster[] = {
-            {"headerSearchField", !compact},
-            {"favoritesButton", !compact},
-            {"queueButton", !compact},
+            {"headerSearchField", !compact}, {"favoritesButton", !compact},
+            {"playlistsButton", !compact},   {"queueButton", !compact},
             {"accountButton", true},
         };
         for (const auto &entry : cluster) {
@@ -5135,16 +5134,16 @@ class TestUiPages : public QObject {
             // The desktop style fades a menu out: opening it again before that ends leaves it closed
             QTRY_VERIFY(!menu->property("visible").toBool());
             if (mode.compact) {
-                for (const char *name :
-                     {"compactSearchAction", "compactFavoritesAction", "compactQueueAction",
-                      "settingsAction", "shortcutsAction", "aboutAction", "adminDashboardAction"})
+                for (const char *name : {"compactSearchAction", "compactFavoritesAction",
+                                         "playlistsAction", "compactQueueAction", "settingsAction",
+                                         "shortcutsAction", "aboutAction", "adminDashboardAction"})
                     QVERIFY2(shown.contains(QLatin1String(name)),
                              qPrintable(QStringLiteral("%1 px: %2 missing")
                                             .arg(mode.width)
                                             .arg(QLatin1String(name))));
             } else {
-                for (const char *name :
-                     {"compactSearchAction", "compactFavoritesAction", "compactQueueAction"})
+                for (const char *name : {"compactSearchAction", "compactFavoritesAction",
+                                         "playlistsAction", "compactQueueAction"})
                     QVERIFY2(!shown.contains(QLatin1String(name)),
                              qPrintable(QStringLiteral("%1 px: %2 shown")
                                             .arg(mode.width)
@@ -6301,6 +6300,8 @@ class TestUiPages : public QObject {
         QTest::keyClick(ui.window, Qt::Key_Tab);
         QTRY_VERIFY(ui.item(QStringLiteral("favoritesButton"))->hasActiveFocus());
         QTest::keyClick(ui.window, Qt::Key_Tab);
+        QTRY_VERIFY(ui.item(QStringLiteral("playlistsButton"))->hasActiveFocus());
+        QTest::keyClick(ui.window, Qt::Key_Tab);
         QTRY_VERIFY(ui.item(QStringLiteral("queueButton"))->hasActiveFocus());
         QTest::keyClick(ui.window, Qt::Key_Tab);
         QTRY_VERIFY(ui.item(QStringLiteral("accountButton"))->hasActiveFocus());
@@ -6310,6 +6311,7 @@ class TestUiPages : public QObject {
         QVERIFY(next && !tabs.contains(next) && next != menuButton
                 && next->objectName() != QStringLiteral("headerSearchField")
                 && next->objectName() != QStringLiteral("favoritesButton")
+                && next->objectName() != QStringLiteral("playlistsButton")
                 && next->objectName() != QStringLiteral("queueButton")
                 && next->objectName() != QStringLiteral("accountButton"));
     }
@@ -7537,8 +7539,9 @@ class TestUiPages : public QObject {
             names << actions.at(i)->objectName();
             texts << actions.at(i)->property("text").toString();
         }
-        QCOMPARE(names.mid(0, 3),
+        QCOMPARE(names.mid(0, 4),
                  (QStringList{QStringLiteral("playNextAction"), QStringLiteral("addToQueueAction"),
+                              QStringLiteral("addToPlaylistAction"),
                               QStringLiteral("toggleFavoriteAction")}));
         // Refresh is the main menu's, for every page
         QVERIFY(!texts.contains(QStringLiteral("Refresh")));
@@ -11808,12 +11811,13 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(ui.item(QStringLiteral("mediaCard_") + evening) != nullptr);
         QVERIFY(ui.item(QStringLiteral("mediaCard_") + empty) != nullptr);
         QCOMPARE(root->property("currentSection").toString(), QStringLiteral("playlists"));
-        // So does the main menu, which brings the same page back
+        // So does the header's button, pressed while the page shows; the main menu has no entry outside Compact mode
+        QTRY_VERIFY(ui.item(QStringLiteral("playlistsButton"))->property("down").toBool());
         QVERIFY(QMetaObject::invokeMethod(root, "goHome"));
         QTRY_VERIFY(ui.item(QStringLiteral("playlistsPage")) == nullptr);
-        QObject *action = ui.shellAction(QStringLiteral("playlistsAction"));
-        QVERIFY(action && action->property("visible").toBool());
-        QVERIFY(QMetaObject::invokeMethod(action, "trigger"));
+        QVERIFY(!ui.item(QStringLiteral("playlistsButton"))->property("down").toBool());
+        QVERIFY(!ui.shellAction(QStringLiteral("playlistsAction"))->property("visible").toBool());
+        ui.clickCenter(ui.item(QStringLiteral("playlistsButton")));
         QTRY_VERIFY(ui.item(QStringLiteral("mediaCard_") + evening) != nullptr);
         // An empty playlist says so
         ui.clickCenter(ui.item(QStringLiteral("mediaCard_") + empty));
@@ -11985,7 +11989,7 @@ class TestUiPages : public QObject {
         QObject *renameAction = page->findChild<QObject *>(QStringLiteral("renamePlaylistAction"));
         QVERIFY(renameAction && renameAction->property("enabled").toBool());
         QVERIFY(QMetaObject::invokeMethod(renameAction, "trigger"));
-        QObject *renameDialog = ui.popup(QStringLiteral("renamePlaylistDialog"));
+        QObject *renameDialog = ui.popup(QStringLiteral("playlistNameDialog"));
         QTRY_VERIFY(renameDialog && renameDialog->property("opened").toBool());
         QObject *field = ui.popup(QStringLiteral("playlistNameField"));
         QVERIFY(field);
@@ -12056,6 +12060,171 @@ class TestUiPages : public QObject {
         QVERIFY(std::none_of(ui.server.playlistRequests.cbegin() + requests,
                              ui.server.playlistRequests.cend(),
                              [](const auto &request) { return request.method == "DELETE"; }));
+    }
+
+    void videosGoIntoPlaylistsFromTheirMenuTheirPageAndANewPlaylist()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QStringList films;
+        for (int i = 1; i <= 3; ++i) {
+            const QString id = QStringLiteral("f3%1").arg(i, 30, 16, QLatin1Char('0'));
+            ui.server.itemsById.insert(
+                id, QJsonDocument(
+                        QJsonObject{{QStringLiteral("Id"), id},
+                                    {QStringLiteral("Name"), QStringLiteral("Film %1").arg(i)},
+                                    {QStringLiteral("Type"), QStringLiteral("Movie")}})
+                        .toJson(QJsonDocument::Compact));
+            films.append(id);
+        }
+        const QString evening = ui.server.seedPlaylist(QStringLiteral("Evening"), {films.at(0)});
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QObject *root = ui.engine.rootObjects().constFirst();
+        const auto playlistNamed = [&ui](const QString &name) {
+            for (const auto &playlist : std::as_const(ui.server.playlists)) {
+                if (playlist.name == name)
+                    return playlist.id;
+            }
+            return QString();
+        };
+        // New Playlist… on the Playlists page makes an empty one and stays on the list
+        QVERIFY(QMetaObject::invokeMethod(root, "openPlaylists"));
+        QTRY_VERIFY(ui.item(QStringLiteral("mediaCard_") + evening) != nullptr);
+        QObject *newAction =
+            ui.currentDetails()->findChild<QObject *>(QStringLiteral("newPlaylistAction"));
+        QVERIFY(newAction && newAction->property("enabled").toBool());
+        QVERIFY(QMetaObject::invokeMethod(newAction, "trigger"));
+        QObject *nameDialog = ui.popup(QStringLiteral("playlistNameDialog"));
+        QTRY_VERIFY(nameDialog && nameDialog->property("opened").toBool());
+        QCOMPARE(nameDialog->property("title").toString(), QStringLiteral("New Playlist"));
+        QObject *field = ui.popup(QStringLiteral("playlistNameField"));
+        QVERIFY(field && field->property("text").toString().isEmpty());
+        QVERIFY(!nameDialog->property("acceptable").toBool());
+        QVERIFY(field->setProperty("text", QStringLiteral(" Weekend ")));
+        QVERIFY(nameDialog->property("acceptable").toBool());
+        QVERIFY(QMetaObject::invokeMethod(nameDialog, "accept"));
+        QTRY_VERIFY(!playlistNamed(QStringLiteral("Weekend")).isEmpty());
+        const QString weekend = playlistNamed(QStringLiteral("Weekend"));
+        QVERIFY(ui.server.playlistItemIds(weekend).isEmpty());
+        QTRY_VERIFY(ui.item(QStringLiteral("mediaCard_") + weekend) != nullptr);
+        QCOMPARE(ui.currentDetails()->objectName(), QStringLiteral("playlistsPage"));
+        QTRY_VERIFY(!nameDialog->property("visible").toBool());
+        // A video's card menu offers Add to Playlist…, a series' does not
+        QQuickItem *card = ui.item(QStringLiteral("mediaCard_") + evening);
+        const auto openCardMenu = [&](const QString &id, const QString &type) {
+            return QMetaObject::invokeMethod(
+                root, "openCardMenu", Q_ARG(QVariant, QVariant::fromValue<QObject *>(card)),
+                Q_ARG(QVariant, id), Q_ARG(QVariant, type), Q_ARG(QVariant, QString()),
+                Q_ARG(QVariant, 0), Q_ARG(QVariant, 0), Q_ARG(QVariant, -1),
+                Q_ARG(QVariant, false));
+        };
+        QObject *cardMenu = ui.popup(QStringLiteral("cardMenu"));
+        QObject *addEntry = ui.popup(QStringLiteral("cardMenuAddToPlaylist"));
+        QVERIFY(cardMenu && addEntry);
+        QVERIFY(openCardMenu(films.at(0), QStringLiteral("Series")));
+        QTRY_VERIFY(cardMenu->property("opened").toBool());
+        QVERIFY(!addEntry->property("visible").toBool());
+        QVERIFY(QMetaObject::invokeMethod(cardMenu, "close"));
+        QTRY_VERIFY(!cardMenu->property("visible").toBool());
+        // The picker lists the playlists by name; a pick adds the video at the end
+        QVERIFY(openCardMenu(films.at(1), QStringLiteral("Movie")));
+        QTRY_VERIFY(addEntry->property("visible").toBool());
+        QVERIFY(QMetaObject::invokeMethod(addEntry, "click"));
+        QObject *picker = ui.popup(QStringLiteral("addToPlaylistDialog"));
+        QTRY_VERIFY(picker && picker->property("opened").toBool());
+        QCOMPARE(picker->property("itemId").toString(), films.at(1));
+        QTRY_VERIFY(ui.item(QStringLiteral("addToPlaylistRow_1")) != nullptr);
+        // The rows are delegates, items of the popup's overlay rather than QObject children of the window
+        QQuickItem *first = ui.item(QStringLiteral("addToPlaylistRow_0"));
+        QCOMPARE(first->property("name").toString(), QStringLiteral("Evening"));
+        QCOMPARE(ui.item(QStringLiteral("addToPlaylistRow_1"))->property("name").toString(),
+                 QStringLiteral("Weekend"));
+        QVERIFY(QMetaObject::invokeMethod(first, "click"));
+        QTRY_COMPARE(ui.server.playlistItemIds(evening), (QStringList{films.at(0), films.at(1)}));
+        QTRY_VERIFY(!picker->property("visible").toBool());
+        QTRY_VERIFY(!ui.controller.playlists()->writing());
+        // A video already in the playlist is not added twice
+        const auto posts = [&ui] {
+            return std::count_if(ui.server.playlistRequests.cbegin(),
+                                 ui.server.playlistRequests.cend(),
+                                 [](const auto &request) { return request.method == "POST"; });
+        };
+        const qsizetype postsBefore = posts();
+        QSignalSpy already(ui.controller.playlists(),
+                           &Kinefin::PlaylistsController::alreadyInPlaylist);
+        QVERIFY(QMetaObject::invokeMethod(root, "addToPlaylist", Q_ARG(QVariant, films.at(0))));
+        QTRY_VERIFY(picker->property("opened").toBool());
+        QTRY_VERIFY(ui.item(QStringLiteral("addToPlaylistRow_0")) != nullptr);
+        QVERIFY(QMetaObject::invokeMethod(picker, "pick", Q_ARG(QVariant, evening)));
+        QTRY_COMPARE(already.size(), 1);
+        QCOMPARE(posts(), postsBefore);
+        QCOMPARE(ui.server.playlistItemIds(evening), (QStringList{films.at(0), films.at(1)}));
+        QTRY_VERIFY(!picker->property("visible").toBool());
+        // New Playlist… in the picker asks for a name and makes a playlist holding the video
+        QVERIFY(QMetaObject::invokeMethod(root, "addToPlaylist", Q_ARG(QVariant, films.at(2))));
+        QTRY_VERIFY(picker->property("opened").toBool());
+        QVERIFY(ui.item(QStringLiteral("addToNewPlaylist")) != nullptr);
+        QVERIFY(QMetaObject::invokeMethod(picker, "requestNewPlaylist"));
+        QTRY_VERIFY(nameDialog->property("opened").toBool());
+        QCOMPARE(nameDialog->property("title").toString(), QStringLiteral("New Playlist"));
+        QVERIFY(field->property("text").toString().isEmpty());
+        QVERIFY(field->setProperty("text", QStringLiteral("Late")));
+        QVERIFY(QMetaObject::invokeMethod(nameDialog, "accept"));
+        QTRY_VERIFY(!playlistNamed(QStringLiteral("Late")).isEmpty());
+        QCOMPARE(ui.server.playlistItemIds(playlistNamed(QStringLiteral("Late"))),
+                 QStringList{films.at(2)});
+        QTRY_VERIFY(!nameDialog->property("visible").toBool());
+        QTRY_VERIFY(!ui.controller.playlists()->writing());
+        // The details page of a video has the same entry
+        QQuickItem *details = openDetails(ui, kMovieId);
+        QVERIFY(details);
+        QObject *detailsAction =
+            details->findChild<QObject *>(QStringLiteral("addToPlaylistAction"));
+        QTRY_VERIFY(detailsAction && detailsAction->property("visible").toBool());
+        QVERIFY(QMetaObject::invokeMethod(detailsAction, "trigger"));
+        QTRY_VERIFY(picker->property("opened").toBool());
+        QCOMPARE(picker->property("itemId").toString(), kMovieId);
+        QVERIFY(QMetaObject::invokeMethod(picker, "close"));
+        QTRY_VERIFY(!picker->property("visible").toBool());
+        // The picker reads the list beside the Playlists page: closing it leaves the page's reading alone
+        QVERIFY(QMetaObject::invokeMethod(root, "openPlaylists"));
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("playlistsPage"));
+        QTRY_COMPARE(root->property("playlistsPages").toInt(), 1);
+        QVERIFY(QMetaObject::invokeMethod(root, "addToPlaylist", Q_ARG(QVariant, kMovieId)));
+        QTRY_VERIFY(picker->property("opened").toBool());
+        QCOMPARE(root->property("playlistsPages").toInt(), 2);
+        QTRY_VERIFY(ui.item(QStringLiteral("addToPlaylistRow_0")) != nullptr);
+        // Up from the first playlist reaches New Playlist…, whose Return hands over to the name dialog
+        QQuickItem *pickerList = ui.item(QStringLiteral("addToPlaylistList"));
+        QVERIFY(pickerList);
+        QTRY_VERIFY(pickerList->hasActiveFocus());
+        QTest::keyClick(ui.window, Qt::Key_Down);
+        QCOMPARE(pickerList->property("currentIndex").toInt(), 0);
+        QTest::keyClick(ui.window, Qt::Key_Up);
+        QCOMPARE(pickerList->property("currentIndex").toInt(), -1);
+        QTest::keyClick(ui.window, Qt::Key_Return);
+        QTRY_VERIFY(nameDialog->property("opened").toBool());
+        QTRY_VERIFY(field->property("activeFocus").toBool());
+        QTRY_VERIFY(!picker->property("visible").toBool());
+        QCOMPARE(root->property("playlistsPages").toInt(), 1);
+        QVERIFY(QMetaObject::invokeMethod(nameDialog, "close"));
+        QTRY_VERIFY(!nameDialog->property("visible").toBool());
+        // Down and Return pick the first playlist
+        QVERIFY(QMetaObject::invokeMethod(root, "addToPlaylist", Q_ARG(QVariant, kMovieId)));
+        QTRY_VERIFY(picker->property("opened").toBool());
+        QTRY_VERIFY(pickerList->hasActiveFocus());
+        QTest::keyClick(ui.window, Qt::Key_Down);
+        QTest::keyClick(ui.window, Qt::Key_Return);
+        QTRY_VERIFY(ui.server.playlistItemIds(evening).contains(kMovieId));
+        QTRY_VERIFY(!picker->property("visible").toBool());
+        QTRY_VERIFY(!ui.controller.playlists()->writing());
+        // A picker closed while it still opens leaves the count of readers as it was
+        QVERIFY(QMetaObject::invokeMethod(root, "addToPlaylist", Q_ARG(QVariant, kMovieId)));
+        QVERIFY(QMetaObject::invokeMethod(picker, "close"));
+        QTRY_VERIFY(!picker->property("visible").toBool());
+        QTest::qWait(100);
+        QCOMPARE(root->property("playlistsPages").toInt(), 1);
     }
 
     void playerRepeatIsAlwaysOnAndAllNeedsSomewhereToGo()

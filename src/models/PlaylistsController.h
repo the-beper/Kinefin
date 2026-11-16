@@ -12,7 +12,7 @@
 #include <vector>
 
 namespace Kinefin {
-// The video playlists of the signed-in user, sorted by name: at most ItemRowModel::MaxItems of them (`total` says how many the server holds). Read when the Playlists page asks, on its listing channel; the rows stay until the next read or the end of the session. Renames and deletes go through here, and the list is read again after each answer while a page shows it
+// The video playlists of the signed-in user, sorted by name: at most ItemRowModel::MaxItems of them (`total` says how many the server holds). Read when the Playlists page or the Add to Playlist dialog asks, on its listing channel; the rows stay until the next read or the end of the session. Creates, adds, renames and deletes go through here, and the list is read again after each answer while a page shows it
 class PlaylistsController final : public QObject {
     Q_OBJECT
     Q_PROPERTY(Kinefin::ItemRowModel *list READ list CONSTANT)
@@ -20,7 +20,7 @@ class PlaylistsController final : public QObject {
     Q_PROPERTY(int total READ total NOTIFY statusChanged)
     // More playlists than the list holds
     Q_PROPERTY(bool capped READ capped NOTIFY statusChanged)
-    // A rename or delete on its way
+    // A create, add, rename or delete on its way
     Q_PROPERTY(bool writing READ writing NOTIFY writingChanged)
     // The longest name the server takes, in UTF-16 units for a text field (a code point is at least one)
     Q_PROPERTY(int maxNameLength READ maxNameLength CONSTANT)
@@ -29,6 +29,12 @@ class PlaylistsController final : public QObject {
     enum Status { Idle, Loading, Ready, Failed };
     Q_ENUM(Status)
     static constexpr int Channel = 5120;
+    // The entries an add reads first, to skip an item already there (copies of one item share one entry on the server, which breaks removing and moving them)
+    static constexpr int CheckChannel = 5122;
+    static constexpr int CheckPageSize = 100;
+    static constexpr int MaxCheckedEntries = 1000;
+    // The pages one check asks for at most, the cap's and two more
+    static constexpr int MaxCheckPages = MaxCheckedEntries / CheckPageSize + 2;
 
     explicit PlaylistsController(JellyfinClient *client, QObject *parent = nullptr);
 
@@ -49,11 +55,15 @@ class PlaylistsController final : public QObject {
     // The name `name` stands for as a playlist name (normalizedPlaylistName), empty when it does not qualify
     Q_INVOKABLE QString validName(const QString &name) const;
 
-    bool writing() const { return !m_writes.empty(); }
+    bool writing() const { return !m_writes.empty() || m_check.has_value(); }
     static int maxNameLength() { return MaxPlaylistNameChars; }
     // Sends the rename or the delete; false when refused (an invalid id or name, a write of the playlist already on its way, no session). The outcome comes as renamed or deleted, else as renameFailed or deleteFailed
     Q_INVOKABLE bool rename(const QString &playlistId, const QString &name);
     Q_INVOKABLE bool deletePlaylist(const QString &playlistId);
+    // Makes a private video playlist holding `itemIds` (may be empty); false when refused (an invalid name or id, a create already on its way, no session). The outcome comes as created, else as createFailed
+    Q_INVOKABLE bool create(const QString &name, const QStringList &itemIds);
+    // Adds `itemId` at the end of the playlist unless its first MaxCheckedEntries entries already hold it (a longer playlist gets it without the rest checked); one add at a time, false when refused. The outcome comes as added or alreadyInPlaylist, else as addFailed
+    Q_INVOKABLE bool add(const QString &playlistId, const QString &itemId);
 
   Q_SIGNALS:
     void statusChanged();
@@ -64,16 +74,37 @@ class PlaylistsController final : public QObject {
     // `forbidden`: the server refused the user (403), the playlist is someone else's
     void renameFailed(const QString &playlistId, bool forbidden);
     void deleteFailed(const QString &playlistId, bool forbidden);
+    // `withItems`: the create carried items
+    void created(const QString &playlistId, bool withItems);
+    void createFailed(bool forbidden);
+    void added(const QString &playlistId);
+    void alreadyInPlaylist(const QString &playlistId);
+    void addFailed(const QString &playlistId, bool forbidden);
+    // The client refused the add after the check: another write of the playlist (an edit of its rows) is on its way
+    void addBusy(const QString &playlistId);
 
   private:
     struct Write {
         JellyfinClient::PlaylistOp op;
         QString playlistId;
         QString name;
+        bool withItems = false;
+    };
+    // The entries read of an add: the item to look for and how far the read got
+    struct Check {
+        QString playlistId;
+        QString itemId;
+        int received = 0;
+        int pages = 0;
     };
     void setStatus(Status status);
-    // The write of `op` on `playlistId` this controller sent, taken off the list; empty when it sent none
+    // The write of `op` on `playlistId` (any create for a create) this controller sent, taken off the list; empty when it sent none
     std::optional<Write> takeWrite(JellyfinClient::PlaylistOp op, const QString &playlistId);
+    void onCheckEntries(const QJsonArray &items, int total);
+    bool requestCheckPage();
+    void sendAdd();
+    void failCheck(int httpStatus);
+    void updateWriting();
 
     QPointer<JellyfinClient> m_client;
     ItemRowModel m_list;
@@ -82,6 +113,8 @@ class PlaylistsController final : public QObject {
     Status m_status = Idle;
     int m_total = 0;
     std::vector<Write> m_writes;
+    std::optional<Check> m_check;
+    bool m_wasWriting = false;
     // A page shows the list: between reload() and close()
     bool m_open = false;
 };

@@ -36,6 +36,7 @@ Controls.Menu {
     signal playRequested(string targetId)
     signal resumeRequested(string targetId, real ticks)
     signal favoriteRequested(string targetId, bool favorite)
+    signal addToPlaylistRequested(string targetId)
     signal renamePlaylistRequested(string targetId)
     signal deletePlaylistRequested(string targetId)
 
@@ -91,6 +92,14 @@ Controls.Menu {
         height: visible ? implicitHeight : 0
         enabled: !menu.connection.queue.busy
         onTriggered: menu.connection.queue.add(menu.itemId, PlayQueue.Last)
+    }
+    Controls.MenuItem {
+        objectName: "cardMenuAddToPlaylist"
+        text: i18nc("@action:inmenu", "Add to Playlist…")
+        icon.name: "media-playlist-append"
+        visible: menu.playable
+        height: visible ? implicitHeight : 0
+        onTriggered: menu.addToPlaylistRequested(menu.itemId)
     }
     Controls.MenuSeparator {
         visible: menu.favoritable

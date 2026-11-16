@@ -43,6 +43,16 @@ Kirigami.ScrollablePage {
         grid.forceActiveFocus(Qt.TabFocusReason);
     }
 
+    actions: [
+        Kirigami.Action {
+            objectName: "newPlaylistAction"
+            text: i18nc("@action:intoolbar", "New Playlist…")
+            icon.name: "list-add"
+            enabled: !page.playlists.writing
+            onTriggered: page.Window.window.newPlaylist()
+        }
+    ]
+
     header: ColumnLayout {
         spacing: 0
 
@@ -145,6 +155,12 @@ Kirigami.ScrollablePage {
             visible: page.playlists.status === PlaylistsController.Ready && page.playlists.list.count === 0
             icon.name: "view-media-playlist"
             text: i18n("No playlists")
+            helpfulAction: Kirigami.Action {
+                text: i18nc("@action:button", "New Playlist…")
+                icon.name: "list-add"
+                enabled: !page.playlists.writing
+                onTriggered: page.Window.window.newPlaylist()
+            }
         }
     }
 }

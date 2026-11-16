@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Kinefin contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
-// The list of playlists and the entries of one against the fake server: what is asked, the order, the caps, the channels and the end of a session, then the edits (moves, removals, renames, deletes): what is sent, in which order, and how a failure ends
+// The list of playlists and the entries of one against the fake server: what is asked, the order, the caps, the channels and the end of a session, then the edits (moves, removals, renames, deletes, creates, adds): what is sent, in which order, and how a failure ends
 #include "FakeJellyfin.h"
 
 #include "api/JellyfinClient.h"
@@ -13,6 +13,7 @@
 #include <QtTest/QtTest>
 
 #include <algorithm>
+#include <functional>
 
 using Kinefin::ItemRowModel;
 using Kinefin::PlaylistEntriesModel;
@@ -59,6 +60,25 @@ QList<FakeJellyfin::PlaylistRequest> writeRequests(const FakeJellyfin &server)
             writes.append(request);
     }
     return writes;
+}
+
+// `id` in the dashed 8-4-4-4-12 spelling
+QString dashed(const QString &id)
+{
+    return id.left(8) + QLatin1Char('-') + id.mid(8, 4) + QLatin1Char('-') + id.mid(12, 4)
+           + QLatin1Char('-') + id.mid(16, 4) + QLatin1Char('-') + id.mid(20);
+}
+
+// The startIndex of each entries read, in arrival order
+QStringList readStarts(const FakeJellyfin &server)
+{
+    QStringList starts;
+    for (const auto &request : server.playlistRequests) {
+        if (request.method == "GET")
+            starts.append(FakeJellyfin::capturedListingQuery(request.route)
+                              .queryItemValue(QStringLiteral("startIndex")));
+    }
+    return starts;
 }
 
 struct Fixture {
@@ -996,6 +1016,554 @@ class TestPlaylists : public QObject {
         f.server.releasePlaylistWrites();
         QTest::qWait(100);
         QCOMPARE(renamed.size() + failed.size(), 0);
+        QVERIFY(!playlists.writing());
+    }
+
+    void createMakesThePlaylistWithTheItemsInOrder()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        const QStringList ids = f.movies(4);
+        PlaylistsController playlists(&f.client);
+        QSignalSpy created(&playlists, &PlaylistsController::created);
+        QSignalSpy failed(&playlists, &PlaylistsController::createFailed);
+        QSignalSpy writingChanges(&playlists, &PlaylistsController::writingChanged);
+        const QStringList items = ordered(ids, {2, 0, 3});
+        QVERIFY(!playlists.writing());
+        QVERIFY(playlists.create(QStringLiteral("  Evening  "), items));
+        QVERIFY(playlists.writing());
+        QTRY_COMPARE(created.size(), 1);
+        QCOMPARE(f.server.playlists.size(), 1);
+        const QString madeId = f.server.playlists.constFirst().id;
+        QCOMPARE(created.constFirst().at(0).toString(), madeId);
+        QVERIFY(Kinefin::isValidJellyfinId(madeId));
+        QVERIFY(created.constFirst().at(1).toBool());
+        QCOMPARE(f.server.playlists.constFirst().name, QStringLiteral("Evening"));
+        QCOMPARE(f.server.playlistItemIds(madeId), items);
+        QCOMPARE(failed.size(), 0);
+        QVERIFY(!playlists.writing());
+        QCOMPARE(writingChanges.size(), 2);
+        const auto writes = writeRequests(f.server);
+        QCOMPARE(writes.size(), 1);
+        const QJsonObject body = QJsonDocument::fromJson(writes.constFirst().body).object();
+        QCOMPARE(body.value(QStringLiteral("Name")).toString(), QStringLiteral("Evening"));
+        QCOMPARE(body.value(QStringLiteral("Ids")).toArray().size(), 3);
+    }
+
+    void anEmptyCreateSaysItCarriedNoItems()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        PlaylistsController playlists(&f.client);
+        QSignalSpy created(&playlists, &PlaylistsController::created);
+        QVERIFY(playlists.create(QStringLiteral("Empty"), {}));
+        QTRY_COMPARE(created.size(), 1);
+        QCOMPARE(f.server.playlists.size(), 1);
+        QCOMPARE(created.constFirst().at(0).toString(), f.server.playlists.constFirst().id);
+        QVERIFY(!created.constFirst().at(1).toBool());
+        QVERIFY(f.server.playlists.constFirst().entries.isEmpty());
+        QVERIFY(!playlists.writing());
+    }
+
+    void aCreateReloadsTheListOnlyWhileAPageHoldsIt()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        f.server.seedPlaylist(QStringLiteral("Existing"), {});
+        PlaylistsController playlists(&f.client);
+        QSignalSpy created(&playlists, &PlaylistsController::created);
+        QVERIFY(playlists.create(QStringLiteral("First"), {}));
+        QTRY_COMPARE(created.size(), 1);
+        QTest::qWait(150);
+        QCOMPARE(f.listings(), 0);
+        playlists.reload();
+        QTRY_COMPARE(playlists.status(), PlaylistsController::Ready);
+        const int listed = f.listings();
+        QVERIFY(playlists.create(QStringLiteral("Second"), {}));
+        QTRY_COMPARE(created.size(), 2);
+        QTRY_COMPARE(f.listings(), listed + 1);
+        QTRY_COMPARE(playlists.list()->count(), 3);
+        QTRY_COMPARE(playlists.status(), PlaylistsController::Ready);
+        QCOMPARE(playlists.nameOf(created.at(1).at(0).toString()), QStringLiteral("Second"));
+        playlists.close();
+        QVERIFY(playlists.create(QStringLiteral("Third"), {}));
+        QTRY_COMPARE(created.size(), 3);
+        QTest::qWait(150);
+        QCOMPARE(f.listings(), listed + 1);
+    }
+
+    void aFailedCreateSaysWhetherItWasForbidden()
+    {
+        const QList<std::pair<int, bool>> failures{{403, true}, {500, false}};
+        for (const auto &failure : failures) {
+            Fixture f;
+            QVERIFY(f.ok);
+            PlaylistsController playlists(&f.client);
+            QSignalSpy created(&playlists, &PlaylistsController::created);
+            QSignalSpy failed(&playlists, &PlaylistsController::createFailed);
+            f.server.playlistWriteStatus = failure.first;
+            QVERIFY(playlists.create(QStringLiteral("New"), f.movies(1)));
+            QTRY_COMPARE(failed.size(), 1);
+            QCOMPARE(failed.constFirst().at(0).toBool(), failure.second);
+            QCOMPARE(created.size(), 0);
+            QVERIFY(!playlists.writing());
+            QVERIFY(f.server.playlists.isEmpty());
+        }
+    }
+
+    void aCreateAnsweredWithoutAValidIdFails()
+    {
+        const QList<QByteArray> bodies{
+            QByteArrayLiteral("{\"Name\":\"x\"}"), QByteArrayLiteral("{\"Id\":\"../Users\"}"),
+            QByteArrayLiteral("{\"Id\":7}"), QByteArrayLiteral("not json")};
+        for (const QByteArray &raw : bodies) {
+            Fixture f;
+            QVERIFY(f.ok);
+            PlaylistsController playlists(&f.client);
+            QSignalSpy created(&playlists, &PlaylistsController::created);
+            QSignalSpy failed(&playlists, &PlaylistsController::createFailed);
+            f.server.playlistCreateRawBody = raw;
+            QVERIFY(playlists.create(QStringLiteral("New"), {}));
+            QTRY_COMPARE(failed.size(), 1);
+            QVERIFY2(!failed.constFirst().at(0).toBool(), raw.constData());
+            QCOMPARE(created.size(), 0);
+            QVERIFY(!playlists.writing());
+        }
+    }
+
+    void aCreateWithAnInvalidNameOrIdIsRefusedWithoutARequest()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        PlaylistsController playlists(&f.client);
+        QSignalSpy created(&playlists, &PlaylistsController::created);
+        QSignalSpy failed(&playlists, &PlaylistsController::createFailed);
+        for (const QString &name : {QString(), QStringLiteral("   "), QStringLiteral("\n"),
+                                    QString(Kinefin::MaxPlaylistNameChars + 1, QLatin1Char('n'))})
+            QVERIFY2(!playlists.create(name, {}), qPrintable(name));
+        QVERIFY(!playlists.create(QStringLiteral("New"), {QStringLiteral("../Users")}));
+        QVERIFY(!playlists.create(QStringLiteral("New"), {movieId(1), QString()}));
+        QVERIFY(!playlists.writing());
+        QTest::qWait(100);
+        QVERIFY(f.server.playlistRequests.isEmpty());
+        QCOMPARE(created.size() + failed.size(), 0);
+    }
+
+    void aSecondCreateIsRefusedWhileOneIsOnItsWay()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        PlaylistsController playlists(&f.client);
+        QSignalSpy created(&playlists, &PlaylistsController::created);
+        f.server.holdPlaylistWrites = true;
+        QVERIFY(playlists.create(QStringLiteral("First"), {}));
+        QTRY_COMPARE(f.server.heldPlaylistCount(), 1);
+        QVERIFY(!playlists.create(QStringLiteral("Second"), {}));
+        QVERIFY(playlists.writing());
+        f.server.holdPlaylistWrites = false;
+        f.server.releasePlaylistWrites();
+        QTRY_COMPARE(created.size(), 1);
+        QVERIFY(!playlists.writing());
+        QTest::qWait(100);
+        QCOMPARE(f.server.playlists.size(), 1);
+        QCOMPARE(writesOf(f.server), 1);
+        QVERIFY(playlists.create(QStringLiteral("Third"), {}));
+        QTRY_COMPARE(created.size(), 2);
+        QCOMPARE(f.server.playlists.size(), 2);
+    }
+
+    void withoutASessionNothingIsCreatedOrAdded()
+    {
+        Kinefin::JellyfinClient client;
+        PlaylistsController playlists(&client);
+        QVERIFY(!playlists.create(QStringLiteral("New"), {}));
+        QVERIFY(!playlists.add(movieId(1), movieId(2)));
+        QVERIFY(!playlists.writing());
+    }
+
+    void anAddReadsTheEntriesThenSendsTheItemAtTheEnd()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        const QStringList ids = f.movies(3);
+        const QString playlist =
+            f.server.seedPlaylist(QStringLiteral("Evening"), {ids.at(0), ids.at(1)});
+        PlaylistsController playlists(&f.client);
+        QSignalSpy added(&playlists, &PlaylistsController::added);
+        QSignalSpy already(&playlists, &PlaylistsController::alreadyInPlaylist);
+        QSignalSpy failed(&playlists, &PlaylistsController::addFailed);
+        QSignalSpy writingChanges(&playlists, &PlaylistsController::writingChanged);
+        QVERIFY(!playlists.writing());
+        QVERIFY(playlists.add(playlist, ids.at(2)));
+        QVERIFY(playlists.writing());
+        QTRY_COMPARE(added.size(), 1);
+        QCOMPARE(added.constFirst().at(0).toString(), playlist);
+        QCOMPARE(already.size() + failed.size(), 0);
+        QVERIFY(!playlists.writing());
+        QCOMPARE(writingChanges.size(), 2);
+        QCOMPARE(f.server.playlistItemIds(playlist), ids);
+        QCOMPARE(f.server.playlistRequests.size(), 2);
+        const auto &read = f.server.playlistRequests.at(0);
+        const auto &write = f.server.playlistRequests.at(1);
+        QCOMPARE(read.method, QByteArrayLiteral("GET"));
+        QVERIFY2(read.route.contains(QByteArray("/Playlists/" + playlist.toUtf8() + "/Items?")),
+                 read.route.constData());
+        QCOMPARE(write.method, QByteArrayLiteral("POST"));
+        QVERIFY2(write.route.contains(QByteArray("/Playlists/" + playlist.toUtf8() + "/Items?")),
+                 write.route.constData());
+        QVERIFY2(write.route.contains(QByteArray("ids=" + ids.at(2).toUtf8())),
+                 write.route.constData());
+    }
+
+    void anAddOfAnItemAlreadyThereSendsNothing()
+    {
+        const QList<std::function<QString(const QString &)>> spellings{
+            [](const QString &id) { return id; }, [](const QString &id) { return id.toUpper(); },
+            [](const QString &id) { return dashed(id); },
+            [](const QString &id) { return dashed(id).toUpper(); }};
+        for (const auto &spelling : spellings) {
+            Fixture f;
+            QVERIFY(f.ok);
+            const QStringList ids = f.movies(3);
+            const QString playlist =
+                f.server.seedPlaylist(QStringLiteral("Evening"), {ids.at(0), ids.at(1)});
+            PlaylistsController playlists(&f.client);
+            QSignalSpy added(&playlists, &PlaylistsController::added);
+            QSignalSpy already(&playlists, &PlaylistsController::alreadyInPlaylist);
+            QSignalSpy failed(&playlists, &PlaylistsController::addFailed);
+            QSignalSpy writingChanges(&playlists, &PlaylistsController::writingChanged);
+            const QString item = spelling(ids.at(1));
+            QVERIFY(playlists.add(playlist, item));
+            QTRY_COMPARE(already.size(), 1);
+            QCOMPARE(already.constFirst().at(0).toString(), playlist);
+            QVERIFY(!playlists.writing());
+            QCOMPARE(writingChanges.size(), 2);
+            QTest::qWait(100);
+            QCOMPARE(added.size() + failed.size(), 0);
+            QCOMPARE(readsOf(f.server), 1);
+            QCOMPARE(writesOf(f.server), 0);
+            QCOMPARE(f.server.playlistItemIds(playlist), ordered(ids, {0, 1}));
+        }
+    }
+
+    void anAddReadsTheEntriesPageByPage()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        const QStringList ids = f.movies(251);
+        const QStringList entries = ids.first(250);
+        const QString playlist = f.server.seedPlaylist(QStringLiteral("Long"), entries);
+        PlaylistsController playlists(&f.client);
+        QSignalSpy added(&playlists, &PlaylistsController::added);
+        QSignalSpy already(&playlists, &PlaylistsController::alreadyInPlaylist);
+        // The item is the last entry: found on the third page, nothing is sent
+        QVERIFY(playlists.add(playlist, ids.at(249)));
+        QTRY_COMPARE_WITH_TIMEOUT(already.size(), 1, 15000);
+        QCOMPARE(readsOf(f.server), 3);
+        QCOMPARE(readStarts(f.server),
+                 (QStringList{QStringLiteral("0"), QStringLiteral("100"), QStringLiteral("200")}));
+        QCOMPARE(writesOf(f.server), 0);
+        QVERIFY(!playlists.writing());
+        // An item that is not there: the same three reads, then the add
+        QVERIFY(playlists.add(playlist, ids.at(250)));
+        QTRY_COMPARE_WITH_TIMEOUT(added.size(), 1, 15000);
+        QCOMPARE(readsOf(f.server), 6);
+        QCOMPARE(writesOf(f.server), 1);
+        QCOMPARE(f.server.playlistItemIds(playlist), ids);
+        QVERIFY(!playlists.writing());
+    }
+
+    void aPlaylistOfMoreThanTheCapGetsTheItemAfterTheEntriesChecked()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        const int cap = PlaylistsController::MaxCheckedEntries;
+        const int pages = cap / PlaylistsController::CheckPageSize;
+        const QStringList ids = f.movies(cap + 100);
+        const QString playlist = f.server.seedPlaylist(QStringLiteral("Huge"), ids.first(cap + 50));
+        PlaylistsController playlists(&f.client);
+        QSignalSpy added(&playlists, &PlaylistsController::added);
+        QSignalSpy already(&playlists, &PlaylistsController::alreadyInPlaylist);
+        // The last entry checked is still found
+        QVERIFY(playlists.add(playlist, ids.at(cap - 1)));
+        QTRY_COMPARE_WITH_TIMEOUT(already.size(), 1, 20000);
+        QCOMPARE(readsOf(f.server), pages);
+        QCOMPARE(writesOf(f.server), 0);
+        // One past the cap is in the playlist, but it is not looked at: the item is sent again
+        QVERIFY(playlists.add(playlist, ids.at(cap + 10)));
+        QTRY_COMPARE_WITH_TIMEOUT(added.size(), 1, 20000);
+        QCOMPARE(readsOf(f.server), 2 * pages);
+        QCOMPARE(writesOf(f.server), 1);
+        QCOMPARE(f.server.playlistItemIds(playlist).size(), cap + 51);
+        QCOMPARE(f.server.playlistItemIds(playlist).constLast(), ids.at(cap + 10));
+        QCOMPARE(already.size(), 1);
+        QVERIFY(!playlists.writing());
+    }
+
+    void anAddIsRefusedWhileTheEntriesOfAnotherAreRead()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        const QStringList ids = f.movies(3);
+        const QString first = f.server.seedPlaylist(QStringLiteral("First"), {ids.at(0)});
+        const QString second = f.server.seedPlaylist(QStringLiteral("Second"), {ids.at(0)});
+        PlaylistsController playlists(&f.client);
+        QSignalSpy added(&playlists, &PlaylistsController::added);
+        QSignalSpy writingChanges(&playlists, &PlaylistsController::writingChanged);
+        f.server.holdPlaylistEntries = true;
+        QVERIFY(playlists.add(first, ids.at(1)));
+        QTRY_COMPARE(f.server.heldPlaylistEntriesCount(), 1);
+        QVERIFY(!playlists.add(second, ids.at(2)));
+        QVERIFY(!playlists.add(first, ids.at(2)));
+        QTest::qWait(100);
+        QCOMPARE(writesOf(f.server), 0);
+        QVERIFY(playlists.writing());
+        f.server.holdPlaylistEntries = false;
+        f.server.releasePlaylistEntries();
+        QTRY_COMPARE(added.size(), 1);
+        QVERIFY(!playlists.writing());
+        QCOMPARE(writingChanges.size(), 2);
+        QCOMPARE(readsOf(f.server), 1);
+        QCOMPARE(writesOf(f.server), 1);
+        QCOMPARE(f.server.playlistItemIds(first), ordered(ids, {0, 1}));
+        QCOMPARE(f.server.playlistItemIds(second), (QStringList{ids.at(0)}));
+        QVERIFY(playlists.add(second, ids.at(2)));
+        QTRY_COMPARE(added.size(), 2);
+    }
+
+    void anAddIsRefusedWhileTheWriteOfAnotherIsOnItsWay()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        const QStringList ids = f.movies(3);
+        const QString first = f.server.seedPlaylist(QStringLiteral("First"), {ids.at(0)});
+        const QString second = f.server.seedPlaylist(QStringLiteral("Second"), {ids.at(0)});
+        PlaylistsController playlists(&f.client);
+        QSignalSpy added(&playlists, &PlaylistsController::added);
+        f.server.holdPlaylistWrites = true;
+        QVERIFY(playlists.add(first, ids.at(1)));
+        QTRY_COMPARE(f.server.heldPlaylistCount(), 1);
+        QVERIFY(!playlists.add(second, ids.at(2)));
+        QVERIFY(playlists.writing());
+        f.server.holdPlaylistWrites = false;
+        f.server.releasePlaylistWrites();
+        QTRY_COMPARE(added.size(), 1);
+        QTest::qWait(100);
+        QCOMPARE(writesOf(f.server), 1);
+        QCOMPARE(f.server.playlistItemIds(second), (QStringList{ids.at(0)}));
+        QVERIFY(!playlists.writing());
+    }
+
+    void anAddWithAnInvalidIdIsRefusedWithoutARequest()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        const QStringList ids = f.movies(2);
+        const QString playlist = f.server.seedPlaylist(QStringLiteral("Evening"), {ids.at(0)});
+        PlaylistsController playlists(&f.client);
+        QSignalSpy added(&playlists, &PlaylistsController::added);
+        QSignalSpy already(&playlists, &PlaylistsController::alreadyInPlaylist);
+        QSignalSpy failed(&playlists, &PlaylistsController::addFailed);
+        QVERIFY(!playlists.add(QStringLiteral("../Users"), ids.at(1)));
+        QVERIFY(!playlists.add(QString(), ids.at(1)));
+        QVERIFY(!playlists.add(playlist, QStringLiteral("../Users")));
+        QVERIFY(!playlists.add(playlist, QStringLiteral("a b")));
+        QVERIFY(!playlists.add(playlist, QString()));
+        QVERIFY(!playlists.writing());
+        QTest::qWait(100);
+        QVERIFY(f.server.playlistRequests.isEmpty());
+        QCOMPARE(added.size() + already.size() + failed.size(), 0);
+        QCOMPARE(f.server.playlistItemIds(playlist), (QStringList{ids.at(0)}));
+    }
+
+    void aFailedEntriesReadFailsTheAddAndSendsNothing()
+    {
+        const QList<std::pair<int, bool>> failures{{403, true}, {404, false}, {500, false}};
+        for (const auto &failure : failures) {
+            Fixture f;
+            QVERIFY(f.ok);
+            const QStringList ids = f.movies(2);
+            const QString playlist = f.server.seedPlaylist(QStringLiteral("Evening"), {ids.at(0)});
+            PlaylistsController playlists(&f.client);
+            QSignalSpy added(&playlists, &PlaylistsController::added);
+            QSignalSpy already(&playlists, &PlaylistsController::alreadyInPlaylist);
+            QSignalSpy failed(&playlists, &PlaylistsController::addFailed);
+            QSignalSpy writingChanges(&playlists, &PlaylistsController::writingChanged);
+            f.server.playlistEntriesStatus = failure.first;
+            QVERIFY(playlists.add(playlist, ids.at(1)));
+            QTRY_COMPARE(failed.size(), 1);
+            QCOMPARE(failed.constFirst().at(0).toString(), playlist);
+            QCOMPARE(failed.constFirst().at(1).toBool(), failure.second);
+            QCOMPARE(added.size() + already.size(), 0);
+            QVERIFY(!playlists.writing());
+            QCOMPARE(writingChanges.size(), 2);
+            QTest::qWait(100);
+            QCOMPARE(writesOf(f.server), 0);
+            QCOMPARE(f.server.playlistItemIds(playlist), (QStringList{ids.at(0)}));
+            // The next add goes through once the server answers again
+            f.server.playlistEntriesStatus = 0;
+            QVERIFY(playlists.add(playlist, ids.at(1)));
+            QTRY_COMPARE(added.size(), 1);
+        }
+    }
+
+    void aFailedAddWriteSaysWhetherItWasForbidden()
+    {
+        const QList<std::pair<int, bool>> failures{{403, true}, {500, false}};
+        for (const auto &failure : failures) {
+            Fixture f;
+            QVERIFY(f.ok);
+            const QStringList ids = f.movies(2);
+            const QString playlist = f.server.seedPlaylist(QStringLiteral("Evening"), {ids.at(0)});
+            PlaylistsController playlists(&f.client);
+            playlists.reload();
+            QTRY_COMPARE(playlists.status(), PlaylistsController::Ready);
+            const int listed = f.listings();
+            QSignalSpy added(&playlists, &PlaylistsController::added);
+            QSignalSpy failed(&playlists, &PlaylistsController::addFailed);
+            f.server.playlistWriteStatus = failure.first;
+            QVERIFY(playlists.add(playlist, ids.at(1)));
+            QTRY_COMPARE(failed.size(), 1);
+            QCOMPARE(failed.constFirst().at(0).toString(), playlist);
+            QCOMPARE(failed.constFirst().at(1).toBool(), failure.second);
+            QCOMPARE(added.size(), 0);
+            QVERIFY(!playlists.writing());
+            QCOMPARE(readsOf(f.server), 1);
+            QCOMPARE(writesOf(f.server), 1);
+            QCOMPARE(f.server.playlistItemIds(playlist), (QStringList{ids.at(0)}));
+            QTRY_COMPARE(f.listings(), listed + 1);
+            QTRY_COMPARE(playlists.status(), PlaylistsController::Ready);
+        }
+    }
+
+    void theCheckOfAnEndedSessionNeverAnswersTheNextAdd()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        const QStringList ids = f.movies(2);
+        const QString playlist = f.server.seedPlaylist(QStringLiteral("Evening"), {ids.at(0)});
+        PlaylistsController playlists(&f.client);
+        QSignalSpy added(&playlists, &PlaylistsController::added);
+        QSignalSpy already(&playlists, &PlaylistsController::alreadyInPlaylist);
+        QSignalSpy failed(&playlists, &PlaylistsController::addFailed);
+        f.server.holdPlaylistEntries = true;
+        QVERIFY(playlists.add(playlist, ids.at(0)));
+        QTRY_COMPARE(f.server.heldPlaylistEntriesCount(), 1);
+        f.client.disconnectFromServer();
+        QVERIFY(!playlists.writing());
+        // A new session adds another video while the old read is still held: only its own answer counts
+        QVERIFY(login(f.client, f.server));
+        QVERIFY(playlists.add(playlist, ids.at(1)));
+        QTRY_COMPARE(f.server.heldPlaylistEntriesCount(), 2);
+        f.server.holdPlaylistEntries = false;
+        f.server.releasePlaylistEntries();
+        QTRY_COMPARE(added.size(), 1);
+        QTRY_VERIFY(!playlists.writing());
+        QTest::qWait(100);
+        QCOMPARE(already.size(), 0);
+        QCOMPARE(failed.size(), 0);
+        QCOMPARE(added.size(), 1);
+        QCOMPARE(f.server.playlistItemIds(playlist), ids);
+    }
+
+    void anAddRefusedByTheClientAfterTheCheckSaysItWasBusy()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        const QStringList ids = f.movies(2);
+        const QString playlist = f.server.seedPlaylist(QStringLiteral("Evening"), {ids.at(0)});
+        PlaylistsController playlists(&f.client);
+        QSignalSpy busy(&playlists, &PlaylistsController::addBusy);
+        QSignalSpy failed(&playlists, &PlaylistsController::addFailed);
+        f.server.holdPlaylistEntries = true;
+        QVERIFY(playlists.add(playlist, ids.at(1)));
+        QTRY_COMPARE(f.server.heldPlaylistEntriesCount(), 1);
+        // Another write of the playlist (an edit of its rows) takes the client's slot meanwhile
+        f.server.holdPlaylistWrites = true;
+        QVERIFY(f.client.renamePlaylist(playlist, QStringLiteral("Other")));
+        QTRY_COMPARE(f.server.heldPlaylistCount(), 1);
+        f.server.holdPlaylistEntries = false;
+        f.server.releasePlaylistEntries();
+        QTRY_COMPARE(busy.size(), 1);
+        QCOMPARE(busy.constFirst().at(0).toString(), playlist);
+        QCOMPARE(failed.size(), 0);
+        QVERIFY(!playlists.writing());
+        f.server.holdPlaylistWrites = false;
+        f.server.releasePlaylistWrites();
+        QCOMPARE(f.server.playlistItemIds(playlist), QStringList{ids.at(0)});
+    }
+
+    void theSessionEndClearsAnAddCheckOnItsWay()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        const QStringList ids = f.movies(2);
+        const QString playlist = f.server.seedPlaylist(QStringLiteral("Evening"), {ids.at(0)});
+        PlaylistsController playlists(&f.client);
+        QSignalSpy added(&playlists, &PlaylistsController::added);
+        QSignalSpy already(&playlists, &PlaylistsController::alreadyInPlaylist);
+        QSignalSpy failed(&playlists, &PlaylistsController::addFailed);
+        QSignalSpy writingChanges(&playlists, &PlaylistsController::writingChanged);
+        f.server.holdPlaylistEntries = true;
+        QVERIFY(playlists.add(playlist, ids.at(1)));
+        QTRY_COMPARE(f.server.heldPlaylistEntriesCount(), 1);
+        QVERIFY(playlists.writing());
+        f.client.disconnectFromServer();
+        QVERIFY(!playlists.writing());
+        QCOMPARE(writingChanges.size(), 2);
+        QVERIFY(!playlists.add(playlist, ids.at(1)));
+        f.server.holdPlaylistEntries = false;
+        f.server.releasePlaylistEntries();
+        QTest::qWait(100);
+        QCOMPARE(added.size() + already.size() + failed.size(), 0);
+        QCOMPARE(writesOf(f.server), 0);
+        QVERIFY(!playlists.writing());
+    }
+
+    void theSessionEndClearsAnAddWriteOnItsWay()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        const QStringList ids = f.movies(2);
+        const QString playlist = f.server.seedPlaylist(QStringLiteral("Evening"), {ids.at(0)});
+        PlaylistsController playlists(&f.client);
+        QSignalSpy added(&playlists, &PlaylistsController::added);
+        QSignalSpy already(&playlists, &PlaylistsController::alreadyInPlaylist);
+        QSignalSpy failed(&playlists, &PlaylistsController::addFailed);
+        QSignalSpy writingChanges(&playlists, &PlaylistsController::writingChanged);
+        f.server.holdPlaylistWrites = true;
+        QVERIFY(playlists.add(playlist, ids.at(1)));
+        QTRY_COMPARE(f.server.heldPlaylistCount(), 1);
+        QVERIFY(playlists.writing());
+        f.client.disconnectFromServer();
+        QVERIFY(!playlists.writing());
+        QCOMPARE(writingChanges.size(), 2);
+        f.server.holdPlaylistWrites = false;
+        f.server.releasePlaylistWrites();
+        QTest::qWait(100);
+        QCOMPARE(added.size() + already.size() + failed.size(), 0);
+        QVERIFY(!playlists.writing());
+    }
+
+    void theSessionEndClearsACreateOnItsWay()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        PlaylistsController playlists(&f.client);
+        QSignalSpy created(&playlists, &PlaylistsController::created);
+        QSignalSpy failed(&playlists, &PlaylistsController::createFailed);
+        QSignalSpy writingChanges(&playlists, &PlaylistsController::writingChanged);
+        f.server.holdPlaylistWrites = true;
+        QVERIFY(playlists.create(QStringLiteral("New"), {}));
+        QTRY_COMPARE(f.server.heldPlaylistCount(), 1);
+        QVERIFY(playlists.writing());
+        f.client.disconnectFromServer();
+        QVERIFY(!playlists.writing());
+        QCOMPARE(writingChanges.size(), 2);
+        f.server.holdPlaylistWrites = false;
+        f.server.releasePlaylistWrites();
+        QTest::qWait(100);
+        QCOMPARE(created.size() + failed.size(), 0);
         QVERIFY(!playlists.writing());
     }
 };
