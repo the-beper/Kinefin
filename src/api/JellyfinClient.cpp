@@ -483,8 +483,16 @@ bool JellyfinClient::connectToServer(const QUrl &baseUrl)
 void JellyfinClient::startProbe(const QUrl &url, quint64 generation, int redirects)
 {
     QNetworkReply *reply = m_network.get(requestFor(url, false));
+    // sslErrors fires only for a certificate that failed verification, never for a port that does not speak TLS
+    connect(reply, &QNetworkReply::sslErrors, reply,
+            [reply] { reply->setProperty("certificateRejected", true); });
     attach(reply, generation, [this, generation, redirects](QNetworkReply *finished) {
         const int status = finished->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (finished->error() != QNetworkReply::NoError
+            && finished->property("certificateRejected").toBool()) {
+            failProbe(0, QStringLiteral("Server certificate rejected"), true);
+            return;
+        }
         const QVariant redirect = finished->attribute(QNetworkRequest::RedirectionTargetAttribute);
         if (status >= 300 && status < 400 && redirect.isValid()) {
             const QUrl target = finished->url().resolved(redirect.toUrl());
@@ -2696,7 +2704,7 @@ void JellyfinClient::invalidateSession()
     Q_EMIT sessionExpired(expiredUser);
 }
 
-void JellyfinClient::failProbe(int status, const QString &reason)
+void JellyfinClient::failProbe(int status, const QString &reason, bool certificateRejected)
 {
     abortPending();
     clearToken();
@@ -2704,7 +2712,10 @@ void JellyfinClient::failProbe(int status, const QString &reason)
     m_state = State::Disconnected;
     m_serverId.clear();
     m_base = {};
-    Q_EMIT requestFailed(status, reason);
+    if (certificateRejected)
+        Q_EMIT serverCertificateRejected();
+    else
+        Q_EMIT requestFailed(status, reason);
 }
 
 void JellyfinClient::disconnectFromServer()

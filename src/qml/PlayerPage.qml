@@ -74,7 +74,7 @@ Kirigami.Page {
     // The item's chapters, read from the player once per change rather than by each binding that needs them
     readonly property var chapters: page.player.chapters
     // An open menu or the queue panel keeps the bars up
-    readonly property bool menuOpen: queuePanel.opened || audioMenu.opened || subtitlesMenu.opened || moreMenu.opened
+    readonly property bool menuOpen: queuePanel.opened || audioMenu.opened || subtitlesMenu.opened || moreMenu.opened || contextMenu.opened
     // The lock keeps the bars up until it is opened again
     property bool osdLocked: false
     // What else keeps the bars up whatever the timer says: the lock, a pause, the pointer on a bar, a drag of the timeline
@@ -124,6 +124,23 @@ Kirigami.Page {
         const corner = button.mapToItem(page, page.mirrored ? 0 : button.width, 0);
         menu.popup(page.mirrored ? corner.x : corner.x - menu.implicitWidth, corner.y - menu.implicitHeight);
     }
+    // The commands and labels the bars and the context menu share
+    readonly property bool canTogglePause: page.player.active && !page.player.loading
+    readonly property string pauseText: page.player.paused ? i18n("Resume") : i18n("Pause")
+    readonly property string pauseIcon: page.player.paused ? "media-playback-start" : "media-playback-pause"
+    readonly property string fullScreenText: page.fullScreen ? i18nc("@action:button", "Exit Full Screen Mode") : i18nc("@action:button", "Full Screen Mode")
+    function togglePlayback() { page.player.togglePause(); page.wakeChrome(); }
+    function skipPrevious() { page.player.previous(); page.wakeChrome(); }
+    function skipNext() { page.player.next(); page.wakeChrome(); }
+    function toggleFullScreen() { page.Window.window.togglePlayerFullscreen(); page.wakeChrome(); }
+    // The context menu opens at the pointer or, from the keyboard, at the centre of the video; never over another popup
+    function showContextMenu(x, y) {
+        page.wakeChrome();
+        if (page.menuOpen || volumePopup.opened)
+            return false;
+        contextMenu.popup(x, y);
+        return true;
+    }
     function focusIsInOsd() {
         for (let item = page.Window.window?.activeFocusItem; item; item = item.parent) {
             if (item === osd)
@@ -162,7 +179,7 @@ Kirigami.Page {
         if (!page.isShowing || (event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)))
             return;
         // A held key repeats the seeks only: a toggle would flicker
-        if (event.isAutoRepeat && (event.key === Qt.Key_Space || event.key === Qt.Key_M || event.key === Qt.Key_F)) {
+        if (event.isAutoRepeat && (event.key === Qt.Key_Space || event.key === Qt.Key_M || event.key === Qt.Key_F || event.key === Qt.Key_Menu || (event.key === Qt.Key_F10 && (event.modifiers & Qt.ShiftModifier)))) {
             event.accepted = true;
             return;
         }
@@ -188,6 +205,14 @@ Kirigami.Page {
         case Qt.Key_Plus:
         case Qt.Key_Equal: page.playerAction("volumeup"); break;
         case Qt.Key_Minus: page.playerAction("volumedown"); break;
+        // The Menu key and Shift+F10 open the context menu at the centre of the video
+        case Qt.Key_F10:
+            if (!(event.modifiers & Qt.ShiftModifier))
+                return;
+        // fall through
+        case Qt.Key_Menu:
+            page.showContextMenu(page.width / 2, page.height / 2);
+            break;
         default: return;
         }
         page.wakeChrome();
@@ -285,6 +310,18 @@ Kirigami.Page {
             }
             page.Window.window.togglePlayerFullscreen();
             page.wakeChrome();
+        }
+    }
+    // A right click on the video opens the context menu at the pointer: it neither pauses nor toggles full screen, and the click that closes a menu or popup is spent on it
+    TapHandler {
+        objectName: "playerContextTap"
+        acceptedButtons: Qt.RightButton
+        onTapped: (eventPoint, button) => {
+            if (eventPoint.device.type === PointerDevice.TouchScreen || Date.now() - page.popupClosedAt < Qt.styleHints.mouseDoubleClickInterval) {
+                page.wakeChrome();
+                return;
+            }
+            page.showContextMenu(eventPoint.position.x, eventPoint.position.y);
         }
     }
     // The wait of a click before it pauses: shorter than the double-click interval of the system (400 ms in Plasma), long enough for a usual double click
@@ -801,22 +838,22 @@ Kirigami.Page {
                         visible: page.player.hasPrevious
                         icon.name: "media-skip-backward"
                         text: i18n("Previous")
-                        onClicked: { page.player.previous(); page.wakeChrome(); }
+                        onClicked: page.skipPrevious()
                     }
                     OsdButton {
                         id: playButton
                         objectName: "playerPauseButton"
-                        text: page.player.paused ? i18n("Resume") : i18n("Pause")
-                        icon.name: page.player.paused ? "media-playback-start" : "media-playback-pause"
-                        enabled: page.player.active && !page.player.loading
-                        onClicked: { page.player.togglePause(); page.wakeChrome(); }
+                        text: page.pauseText
+                        icon.name: page.pauseIcon
+                        enabled: page.canTogglePause
+                        onClicked: page.togglePlayback()
                     }
                     OsdButton {
                         objectName: "playerNextButton"
                         visible: page.player.hasNext
                         icon.name: "media-skip-forward"
                         text: i18n("Next")
-                        onClicked: { page.player.next(); page.wakeChrome(); }
+                        onClicked: page.skipNext()
                     }
                     // A click mutes; hover, keyboard focus or a long press show the volume slider; the wheel and, with the focus here, Up and Down change the volume by five
                     OsdButton {
@@ -876,8 +913,8 @@ Kirigami.Page {
                     OsdButton {
                         objectName: "playerFullScreenButton"
                         icon.name: page.fullScreen ? "view-restore" : "view-fullscreen"
-                        text: page.fullScreen ? i18nc("@action:button", "Exit Full Screen Mode") : i18nc("@action:button", "Full Screen Mode")
-                        onClicked: { page.Window.window.togglePlayerFullscreen(); page.wakeChrome(); }
+                        text: page.fullScreenText
+                        onClicked: page.toggleFullScreen()
                     }
                     OsdButton {
                         id: moreButton
@@ -920,223 +957,86 @@ Kirigami.Page {
         onCloseRequested: page.closePlaybackInfo()
     }
     // The menus of the bottom bar belong to the page, not to the bars: they keep the window's colours over the dark bars
-    Controls.Menu {
+    AudioMenu {
         id: audioMenu
         objectName: "playerAudioMenu"
         onAboutToHide: page.popupGone()
-        Instantiator {
-            model: page.player.audioTracks
-            delegate: PlainMenuItem {
-                plainText: modelData.name
-                checkable: true
-                autoExclusive: true
-                checked: modelData.selected
-                onTriggered: page.player.selectAudioTrack(modelData.id)
-            }
-            onObjectAdded: (index, object) => audioMenu.insertItem(index, object)
-            onObjectRemoved: (index, object) => audioMenu.removeItem(object)
-        }
     }
-    Controls.Menu {
+    SubtitlesMenu {
         id: subtitlesMenu
         objectName: "playerSubtitlesMenu"
         onAboutToHide: page.popupGone()
-        Controls.MenuItem {
-            objectName: "playerSubtitlesOff"
-            text: i18nc("@item:inmenu no subtitles", "Off")
-            checkable: true
-            autoExclusive: true
-            checked: !page.player.subtitleTracks.some(track => track.selected)
-            onTriggered: page.player.selectSubtitleTrack(0)
-        }
-        Instantiator {
-            model: page.player.subtitleTracks
-            delegate: PlainMenuItem {
-                plainText: modelData.name
-                checkable: true
-                autoExclusive: true
-                checked: modelData.selected
-                onTriggered: page.player.selectSubtitleTrack(modelData.id)
-            }
-            onObjectAdded: (index, object) => subtitlesMenu.insertItem(index + 1, object)
-            onObjectRemoved: (index, object) => subtitlesMenu.removeItem(object)
-        }
-        Controls.MenuSeparator { visible: page.player.externalSubtitles.length > 0 }
-        Controls.MenuItem {
-            text: i18n("Download external subtitles")
-            enabled: false
-            visible: page.player.externalSubtitles.length > 0
-        }
-        Instantiator {
-            model: page.player.externalSubtitles
-            delegate: PlainMenuItem {
-                plainText: modelData.name
-                onTriggered: page.player.downloadSubtitle(modelData.index)
-            }
-            onObjectAdded: (index, object) => subtitlesMenu.addItem(object)
-            onObjectRemoved: (index, object) => subtitlesMenu.removeItem(object)
-        }
     }
-    Controls.Menu {
+    MoreMenu {
         id: moreMenu
         objectName: "playerMoreMenu"
         onAboutToHide: page.popupGone()
-        Controls.MenuItem {
-            objectName: "playerShuffleItem"
-            text: i18n("Shuffle")
-            icon.name: "media-playlist-shuffle"
-            checkable: true
-            checked: page.player.shuffle
-            // A series started from one of its episodes plays in order: only a queue shuffles, and a shuffle that is on can always be turned off; in a group it is the group's queue
-            enabled: page.groupFollowing ? page.syncPlay.queue.count > 1 || page.player.shuffle : page.player.queueCount > 1 || page.player.shuffle
-            onTriggered: page.player.setShuffle(!page.player.shuffle)
-        }
-        Controls.Menu {
-            objectName: "playerRepeatMenu"
-            title: i18n("Repeat")
-            icon.name: "media-playlist-repeat"
+    }
+    // The right click on the video: the controls of the bars and every entry of More Actions, built from the same components as the menus above so they never drift apart
+    MoreMenu {
+        id: contextMenu
+        objectName: "playerContextMenu"
+        namePrefix: "playerContext"
+        onAboutToHide: page.popupGone()
+        leading: [
             Controls.MenuItem {
-                objectName: "playerRepeatOff"
-                text: i18nc("@item:inmenu repeat", "Off")
-                checkable: true
-                autoExclusive: true
-                checked: page.player.repeatMode === 0
-                onTriggered: page.player.setRepeatMode(0)
-            }
+                objectName: "playerContextPauseItem"
+                text: page.pauseText
+                icon.name: page.pauseIcon
+                enabled: page.canTogglePause
+                onTriggered: page.togglePlayback()
+            },
             Controls.MenuItem {
-                objectName: "playerRepeatAll"
-                text: i18nc("@item:inmenu repeat", "All")
-                // A lone item repeats as the current item only; a repeat of all that is on can always be turned off
-                enabled: page.groupFollowing || page.player.queueCount > 0 || page.player.hasNext || page.player.hasPrevious || page.player.repeatMode === 1
-                checkable: true
-                autoExclusive: true
-                checked: page.player.repeatMode === 1
-                onTriggered: page.player.setRepeatMode(1)
-            }
+                objectName: "playerContextPreviousItem"
+                // A menu keeps its entries in place: an entry with nothing to do is disabled, not hidden
+                enabled: page.player.hasPrevious
+                icon.name: "media-skip-backward"
+                text: i18n("Previous")
+                onTriggered: page.skipPrevious()
+            },
             Controls.MenuItem {
-                objectName: "playerRepeatOne"
-                text: i18nc("@item:inmenu repeat", "Current Item")
-                checkable: true
-                autoExclusive: true
-                checked: page.player.repeatMode === 2
-                onTriggered: page.player.setRepeatMode(2)
-            }
-        }
-        Controls.Menu {
-            id: speedMenu
-            objectName: "playerSpeedMenu"
-            // A group plays at its own pace
-            enabled: !page.groupFollowing
-            title: i18n("Playback Speed")
-            icon.name: "speedometer"
-            Instantiator {
-                model: [0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4]
-                delegate: Controls.MenuItem {
-                    required property real modelData
-                    text: i18nc("@item:inmenu playback speed, %1 is the factor", "%1×", modelData)
-                    checkable: true
-                    autoExclusive: true
-                    checked: page.player.rate === modelData
-                    onTriggered: page.player.setRate(modelData)
-                }
-                onObjectAdded: (index, object) => speedMenu.insertItem(index, object)
-                onObjectRemoved: (index, object) => speedMenu.removeItem(object)
-            }
-        }
-        // This playback only
-        Controls.Menu {
-            objectName: "playerAspectMenu"
-            title: i18nc("@title:menu", "Aspect Ratio")
-            icon.name: "zoom-fit-best"
-            AspectItem { mode: "normal"; text: i18nc("@item:inmenu aspect ratio", "Auto") }
-            AspectItem { mode: "zoom"; text: i18nc("@item:inmenu aspect ratio", "Zoom") }
-            AspectItem { mode: "stretch"; text: i18nc("@item:inmenu aspect ratio", "Stretch") }
-            AspectItem { mode: "force_4_3"; text: i18nc("@item:inmenu aspect ratio", "4:3") }
-            AspectItem { mode: "force_16_9"; text: i18nc("@item:inmenu aspect ratio", "16:9") }
-            AspectItem { mode: "force_16_9_if_4_3"; text: i18nc("@item:inmenu aspect ratio", "Widescreen for 4:3 Video") }
-            AspectItem { mode: "noscaling"; text: i18nc("@item:inmenu aspect ratio", "Original Size") }
-        }
-        // Disabled rather than hidden when the item has none
-        Controls.Menu {
-            id: chaptersMenu
-            objectName: "playerChaptersMenu"
-            title: i18nc("@title:menu", "Chapters")
-            icon.name: "bookmarks"
-            enabled: page.chapters.length > 0
-            Instantiator {
-                model: page.chapters
-                delegate: PlainMenuItem {
-                    required property var modelData
-                    required property int index
-                    objectName: "playerChapter_" + index
-                    plainText: i18nc("@item:inmenu chapter, %1 is its start time and %2 its name", "%1 — %2", modelData.time, modelData.name)
-                    checkable: true
-                    autoExclusive: true
-                    checked: page.player.currentChapter === index
-                    onTriggered: page.player.jumpToChapter(index)
-                }
-                onObjectAdded: (index, object) => chaptersMenu.insertItem(index, object)
-                onObjectRemoved: (index, object) => chaptersMenu.removeItem(object)
-            }
-        }
-        Controls.Menu {
-            title: i18n("AV Sync")
-            icon.name: "settings-configure"
-            Controls.MenuItem { text: i18n("Audio delay: %1 s", page.player.audioDelay.toFixed(1)); enabled: false }
-            Controls.MenuItem { text: i18n("Audio earlier (-0.1 s)"); onTriggered: page.player.adjustAudioDelay(Math.max(-10, page.player.audioDelay - 0.1)) }
-            Controls.MenuItem { text: i18n("Audio later (+0.1 s)"); onTriggered: page.player.adjustAudioDelay(Math.min(10, page.player.audioDelay + 0.1)) }
+                objectName: "playerContextNextItem"
+                enabled: page.player.hasNext
+                icon.name: "media-skip-forward"
+                text: i18n("Next")
+                onTriggered: page.skipNext()
+            },
+            Controls.MenuSeparator {},
+            AudioMenu {
+                objectName: "playerContextAudioMenu"
+                enabled: page.player.audioTracks.length > 0
+                title: i18nc("@action:button audio tracks", "Audio")
+                icon.name: "audio-headphones"
+            },
+            SubtitlesMenu {
+                objectName: "playerContextSubtitlesMenu"
+                namePrefix: "playerContext"
+                title: i18nc("@action:button subtitle tracks", "Subtitles")
+                icon.name: "media-view-subtitles-symbolic"
+            },
+            Controls.MenuSeparator {},
+            Controls.MenuItem {
+                objectName: "playerContextFullScreenItem"
+                icon.name: page.fullScreen ? "view-restore" : "view-fullscreen"
+                text: page.fullScreenText
+                onTriggered: page.toggleFullScreen()
+            },
+            Controls.MenuItem {
+                objectName: "playerContextMiniItem"
+                icon.name: "window-minimize-pip"
+                text: i18nc("@action:button", "Show Mini Player")
+                onTriggered: page.leavePlayer()
+            },
             Controls.MenuSeparator {}
-            Controls.MenuItem { text: i18n("Subtitle delay: %1 s", page.player.subtitleDelay.toFixed(1)); enabled: false }
-            Controls.MenuItem { text: i18n("Subtitles earlier (-0.1 s)"); onTriggered: page.player.adjustSubtitleDelay(Math.max(-10, page.player.subtitleDelay - 0.1)) }
-            Controls.MenuItem { text: i18n("Subtitles later (+0.1 s)"); onTriggered: page.player.adjustSubtitleDelay(Math.min(10, page.player.subtitleDelay + 0.1)) }
-        }
-        Controls.Menu {
-            id: sleepMenu
-            title: page.player.sleepRemainingMinutes > 0 ? i18n("Sleep: %1 min", page.player.sleepRemainingMinutes) : i18n("Sleep Timer")
-            icon.name: "chronometer"
-            Instantiator {
-                model: [0, 15, 30, 45, 60, 90, 120]
-                delegate: Controls.MenuItem {
-                    required property int modelData
-                    text: modelData === 0 ? i18n("Off") : i18n("%1 minutes", modelData)
-                    onTriggered: page.player.setSleepTimer(modelData)
-                }
-                onObjectAdded: (index, object) => sleepMenu.insertItem(index, object)
-                onObjectRemoved: (index, object) => sleepMenu.removeItem(object)
-            }
-        }
-        // The tracks, speed and aspect the next episodes of this series would start with
-        Controls.MenuItem {
-            objectName: "playerForgetSeriesItem"
-            text: i18nc("@action:inmenu", "Forget Series Choices")
-            icon.name: "edit-clear-history"
-            enabled: page.player.hasSeriesChoices
-            onTriggered: page.player.forgetSeriesChoices()
-        }
+        ]
         Controls.MenuSeparator {}
         Controls.MenuItem {
-            objectName: "playerQueueItem"
-            text: i18n("Now Playing Queue")
-            icon.name: "media-track-queue-amarok"
-            onTriggered: queuePanel.open()
-        }
-        Controls.MenuItem {
-            text: i18n("Screenshot")
-            // The full-colour camera-photo of breeze has path data Qt's SVG renderer truncates, with a warning on every draw
-            icon.name: "camera-photo-symbolic"
-            onTriggered: {
-                page.player.screenshot();
-                page.wakeChrome();
-                screenshotNotice.restart();
-            }
-        }
-        Controls.MenuItem {
-            objectName: "playerPlaybackInfoItem"
-            text: i18nc("@action:inmenu", "Playback Info")
-            icon.name: "dialog-information"
+            objectName: "playerContextLockItem"
+            icon.name: "object-locked"
+            text: i18nc("@action:button", "Keep Controls Visible")
             checkable: true
-            checked: page.playbackInfoShown
-            onTriggered: page.playbackInfoShown = !page.playbackInfoShown
+            checked: page.osdLocked
+            onTriggered: page.osdLocked = !page.osdLocked
         }
     }
     Controls.Popup {
@@ -1309,10 +1209,240 @@ Kirigami.Page {
             }
         }
     }
+    // The entries of the Audio menu: the bottom bar's menu and the context menu's submenu are both one of these
+    component AudioMenu: Controls.Menu {
+        id: self
+        Instantiator {
+            model: page.player.audioTracks
+            delegate: PlainMenuItem {
+                plainText: modelData.name
+                checkable: true
+                autoExclusive: true
+                checked: modelData.selected
+                onTriggered: page.player.selectAudioTrack(modelData.id)
+            }
+            onObjectAdded: (index, object) => self.insertItem(index, object)
+            onObjectRemoved: (index, object) => self.removeItem(object)
+        }
+    }
+    // The entries of the Subtitles menu, likewise
+    component SubtitlesMenu: Controls.Menu {
+        id: self
+        property string namePrefix: "player"
+        Controls.MenuItem {
+            objectName: self.namePrefix + "SubtitlesOff"
+            text: i18nc("@item:inmenu no subtitles", "Off")
+            checkable: true
+            autoExclusive: true
+            checked: !page.player.subtitleTracks.some(track => track.selected)
+            onTriggered: page.player.selectSubtitleTrack(0)
+        }
+        Instantiator {
+            model: page.player.subtitleTracks
+            delegate: PlainMenuItem {
+                plainText: modelData.name
+                checkable: true
+                autoExclusive: true
+                checked: modelData.selected
+                onTriggered: page.player.selectSubtitleTrack(modelData.id)
+            }
+            onObjectAdded: (index, object) => self.insertItem(index + 1, object)
+            onObjectRemoved: (index, object) => self.removeItem(object)
+        }
+        Controls.MenuSeparator { visible: page.player.externalSubtitles.length > 0 }
+        Controls.MenuItem {
+            text: i18n("Download external subtitles")
+            enabled: false
+            visible: page.player.externalSubtitles.length > 0
+        }
+        Instantiator {
+            model: page.player.externalSubtitles
+            delegate: PlainMenuItem {
+                plainText: modelData.name
+                onTriggered: page.player.downloadSubtitle(modelData.index)
+            }
+            onObjectAdded: (index, object) => self.addItem(object)
+            onObjectRemoved: (index, object) => self.removeItem(object)
+        }
+    }
+    // The entries of More Actions, likewise; a second instance adds its own `leading` entries in front
+    component MoreMenu: Controls.Menu {
+        id: moreRoot
+        // The prefix of the entries' object names, so a second instance has names of its own
+        property string namePrefix: "player"
+        // Entries that come before the common ones, in order
+        property list<QtObject> leading
+        Component.onCompleted: {
+            for (let i = 0; i < leading.length; ++i) {
+                if (typeof leading[i].addMenu === "function")
+                    insertMenu(i, leading[i]);
+                else
+                    insertItem(i, leading[i]);
+            }
+        }
+        Controls.MenuItem {
+            objectName: moreRoot.namePrefix + "ShuffleItem"
+            text: i18n("Shuffle")
+            icon.name: "media-playlist-shuffle"
+            checkable: true
+            checked: page.player.shuffle
+            // A series started from one of its episodes plays in order: only a queue shuffles, and a shuffle that is on can always be turned off; in a group it is the group's queue
+            enabled: page.groupFollowing ? page.syncPlay.queue.count > 1 || page.player.shuffle : page.player.queueCount > 1 || page.player.shuffle
+            onTriggered: page.player.setShuffle(!page.player.shuffle)
+        }
+        Controls.Menu {
+            objectName: moreRoot.namePrefix + "RepeatMenu"
+            title: i18n("Repeat")
+            icon.name: "media-playlist-repeat"
+            Controls.MenuItem {
+                objectName: moreRoot.namePrefix + "RepeatOff"
+                text: i18nc("@item:inmenu repeat", "Off")
+                checkable: true
+                autoExclusive: true
+                checked: page.player.repeatMode === 0
+                onTriggered: page.player.setRepeatMode(0)
+            }
+            Controls.MenuItem {
+                objectName: moreRoot.namePrefix + "RepeatAll"
+                text: i18nc("@item:inmenu repeat", "All")
+                // A lone item repeats as the current item only; a repeat of all that is on can always be turned off
+                enabled: page.groupFollowing || page.player.queueCount > 0 || page.player.hasNext || page.player.hasPrevious || page.player.repeatMode === 1
+                checkable: true
+                autoExclusive: true
+                checked: page.player.repeatMode === 1
+                onTriggered: page.player.setRepeatMode(1)
+            }
+            Controls.MenuItem {
+                objectName: moreRoot.namePrefix + "RepeatOne"
+                text: i18nc("@item:inmenu repeat", "Current Item")
+                checkable: true
+                autoExclusive: true
+                checked: page.player.repeatMode === 2
+                onTriggered: page.player.setRepeatMode(2)
+            }
+        }
+        Controls.Menu {
+            id: speedMenu
+            objectName: moreRoot.namePrefix + "SpeedMenu"
+            // A group plays at its own pace
+            enabled: !page.groupFollowing
+            title: i18n("Playback Speed")
+            icon.name: "speedometer"
+            Instantiator {
+                model: [0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4]
+                delegate: Controls.MenuItem {
+                    required property real modelData
+                    text: i18nc("@item:inmenu playback speed, %1 is the factor", "%1×", modelData)
+                    checkable: true
+                    autoExclusive: true
+                    checked: page.player.rate === modelData
+                    onTriggered: page.player.setRate(modelData)
+                }
+                onObjectAdded: (index, object) => speedMenu.insertItem(index, object)
+                onObjectRemoved: (index, object) => speedMenu.removeItem(object)
+            }
+        }
+        // This playback only
+        Controls.Menu {
+            objectName: moreRoot.namePrefix + "AspectMenu"
+            title: i18nc("@title:menu", "Aspect Ratio")
+            icon.name: "zoom-fit-best"
+            AspectItem { namePrefix: moreRoot.namePrefix; mode: "normal"; text: i18nc("@item:inmenu aspect ratio", "Auto") }
+            AspectItem { namePrefix: moreRoot.namePrefix; mode: "zoom"; text: i18nc("@item:inmenu aspect ratio", "Zoom") }
+            AspectItem { namePrefix: moreRoot.namePrefix; mode: "stretch"; text: i18nc("@item:inmenu aspect ratio", "Stretch") }
+            AspectItem { namePrefix: moreRoot.namePrefix; mode: "force_4_3"; text: i18nc("@item:inmenu aspect ratio", "4:3") }
+            AspectItem { namePrefix: moreRoot.namePrefix; mode: "force_16_9"; text: i18nc("@item:inmenu aspect ratio", "16:9") }
+            AspectItem { namePrefix: moreRoot.namePrefix; mode: "force_16_9_if_4_3"; text: i18nc("@item:inmenu aspect ratio", "Widescreen for 4:3 Video") }
+            AspectItem { namePrefix: moreRoot.namePrefix; mode: "noscaling"; text: i18nc("@item:inmenu aspect ratio", "Original Size") }
+        }
+        // Disabled rather than hidden when the item has none
+        Controls.Menu {
+            id: chaptersMenu
+            objectName: moreRoot.namePrefix + "ChaptersMenu"
+            title: i18nc("@title:menu", "Chapters")
+            icon.name: "bookmarks"
+            enabled: page.chapters.length > 0
+            Instantiator {
+                model: page.chapters
+                delegate: PlainMenuItem {
+                    required property var modelData
+                    required property int index
+                    objectName: moreRoot.namePrefix + "Chapter_" + index
+                    plainText: i18nc("@item:inmenu chapter, %1 is its start time and %2 its name", "%1 — %2", modelData.time, modelData.name)
+                    checkable: true
+                    autoExclusive: true
+                    checked: page.player.currentChapter === index
+                    onTriggered: page.player.jumpToChapter(index)
+                }
+                onObjectAdded: (index, object) => chaptersMenu.insertItem(index, object)
+                onObjectRemoved: (index, object) => chaptersMenu.removeItem(object)
+            }
+        }
+        Controls.Menu {
+            title: i18n("AV Sync")
+            icon.name: "settings-configure"
+            Controls.MenuItem { text: i18n("Audio delay: %1 s", page.player.audioDelay.toFixed(1)); enabled: false }
+            Controls.MenuItem { text: i18n("Audio earlier (-0.1 s)"); onTriggered: page.player.adjustAudioDelay(Math.max(-10, page.player.audioDelay - 0.1)) }
+            Controls.MenuItem { text: i18n("Audio later (+0.1 s)"); onTriggered: page.player.adjustAudioDelay(Math.min(10, page.player.audioDelay + 0.1)) }
+            Controls.MenuSeparator {}
+            Controls.MenuItem { text: i18n("Subtitle delay: %1 s", page.player.subtitleDelay.toFixed(1)); enabled: false }
+            Controls.MenuItem { text: i18n("Subtitles earlier (-0.1 s)"); onTriggered: page.player.adjustSubtitleDelay(Math.max(-10, page.player.subtitleDelay - 0.1)) }
+            Controls.MenuItem { text: i18n("Subtitles later (+0.1 s)"); onTriggered: page.player.adjustSubtitleDelay(Math.min(10, page.player.subtitleDelay + 0.1)) }
+        }
+        Controls.Menu {
+            id: sleepMenu
+            title: page.player.sleepRemainingMinutes > 0 ? i18n("Sleep: %1 min", page.player.sleepRemainingMinutes) : i18n("Sleep Timer")
+            icon.name: "chronometer"
+            Instantiator {
+                model: [0, 15, 30, 45, 60, 90, 120]
+                delegate: Controls.MenuItem {
+                    required property int modelData
+                    text: modelData === 0 ? i18n("Off") : i18n("%1 minutes", modelData)
+                    onTriggered: page.player.setSleepTimer(modelData)
+                }
+                onObjectAdded: (index, object) => sleepMenu.insertItem(index, object)
+                onObjectRemoved: (index, object) => sleepMenu.removeItem(object)
+            }
+        }
+        // The tracks, speed and aspect the next episodes of this series would start with
+        Controls.MenuItem {
+            objectName: moreRoot.namePrefix + "ForgetSeriesItem"
+            text: i18nc("@action:inmenu", "Forget Series Choices")
+            icon.name: "edit-clear-history"
+            enabled: page.player.hasSeriesChoices
+            onTriggered: page.player.forgetSeriesChoices()
+        }
+        Controls.MenuSeparator {}
+        Controls.MenuItem {
+            objectName: moreRoot.namePrefix + "QueueItem"
+            text: i18n("Now Playing Queue")
+            icon.name: "media-track-queue-amarok"
+            onTriggered: queuePanel.open()
+        }
+        Controls.MenuItem {
+            text: i18n("Screenshot")
+            // The full-colour camera-photo of breeze has path data Qt's SVG renderer truncates, with a warning on every draw
+            icon.name: "camera-photo-symbolic"
+            onTriggered: {
+                page.player.screenshot();
+                page.wakeChrome();
+                screenshotNotice.restart();
+            }
+        }
+        Controls.MenuItem {
+            objectName: moreRoot.namePrefix + "PlaybackInfoItem"
+            text: i18nc("@action:inmenu", "Playback Info")
+            icon.name: "dialog-information"
+            checkable: true
+            checked: page.playbackInfoShown
+            onTriggered: page.playbackInfoShown = !page.playbackInfoShown
+        }
+    }
     // A checkable entry of the Aspect Ratio menu: it follows the player's mode and sets it
     component AspectItem: Controls.MenuItem {
         required property string mode
-        objectName: "playerAspect_" + mode
+        property string namePrefix: "player"
+        objectName: namePrefix + "Aspect_" + mode
         checkable: true
         autoExclusive: true
         checked: page.player.aspectMode === mode

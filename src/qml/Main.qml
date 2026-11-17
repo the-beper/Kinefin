@@ -30,10 +30,13 @@ Kirigami.ApplicationWindow {
     // Invalidates deferred link navigation when an account changes or a newer link arrives
     property int itemRequestGeneration: 0
     readonly property bool signedIn: connection.state === ConnectionController.Authenticated
-    // A server is chosen while its sign-in or a session is in progress: the account menu shows for it
+    // A server is chosen while its sign-in or a session is in progress: the main menu offers Switch Server for it
     readonly property bool serverChosen: connection.state !== ConnectionController.Idle
-    // The header modes in pixels, from grid units: tests derive their window sizes from these (Compact below 24, Wide from 36)
-    readonly property int compactLimit: Kirigami.Units.gridUnit * 24
+    // The header modes in pixels: Compact below the narrowest bar that keeps the box and the queue (about 30 grid units), Wide from 36 grid units; tests derive their window sizes from these
+    readonly property int compactLimit: Math.ceil(shellHeader.minimumBarWidth)
+    // The smallest window: the Compact header with every tab fits, and the pages keep room to show something
+    minimumWidth: Math.max(Kirigami.Units.gridUnit * 20, Math.ceil(shellHeader.compactBarWidth))
+    minimumHeight: Kirigami.Units.gridUnit * 20
     readonly property int wideLimit: Kirigami.Units.gridUnit * 36
     // The widest a block of reading content (item header, queue rows) gets before it is centred: the pages read it from here so they agree
     readonly property real readingWidth: Kirigami.Units.gridUnit * 70
@@ -41,7 +44,7 @@ Kirigami.ApplicationWindow {
     // attached Window.window kept its load-time value and never followed a resize
     readonly property bool compactHeader: width < compactLimit
     readonly property bool wideHeader: width >= wideLimit
-    // The tab the first page of the stack stands for: "home", "movies" or "tvshows"; empty on the sign-in and server pages and for a library opened from a tile. The depth and the current item change with every push and clear, and the first page is read after them
+    // The tab the first page of the stack stands for: "home", "movies", "tvshows", "favorites" or "playlists"; empty on the sign-in and server pages and for a library opened from a tile. The depth and the current item change with every push and clear, and the first page is read after them
     readonly property string rootTab: pageStack.depth > 0 && pageStack.currentItem ? tabOfPage(pageStack.get(0)) : ""
     // The scroll position and the current tile of each tab left behind, so a tab comes back as the user left it; dropped with the session
     readonly property var tabState: ({})
@@ -101,23 +104,6 @@ Kirigami.ApplicationWindow {
         shell: window
     }
 
-    // A visible connection target stays on screen for at least one second after
-    // selection. This does not delay the request or keep a failed connection busy.
-    property bool serverSelectionPending: false
-    Timer {
-        id: serverSelectionTimer
-        interval: 1000
-        repeat: false
-        onTriggered: {
-            window.serverSelectionPending = false;
-            window.showPageForState();
-        }
-    }
-    function beginServerSelection() {
-        serverSelectionPending = true;
-        serverSelectionTimer.restart();
-    }
-
     // The initial shell never flashes an empty page. The delay is short enough
     // to feel responsive, with a finite fallback for offline/unresponsive servers.
     property bool startupVisible: startupPage.length === 0
@@ -131,13 +117,32 @@ Kirigami.ApplicationWindow {
             return;
         startupVisible = false;
     }
+    // The cover hides the Servers page and its Cancel while a Connect is under way: it carries its own, or a silent host would hold the user until the cover's deadline
+    property bool connectCover: false
+    onStartupVisibleChanged: {
+        if (!startupVisible)
+            connectCover = false;
+    }
+    // A Connect from the Servers page shows the cover again, by the same rules as at startup; nothing happens unless the connection is under way
+    function showConnectCover() {
+        if (connection.state !== ConnectionController.Connecting)
+            return;
+        connectCover = true;
+        startupMinimumElapsed = false;
+        startupDeadlineElapsed = false;
+        startupVisible = true;
+        startupMinimumTimer.restart();
+        startupDeadlineTimer.restart();
+    }
     Timer {
+        id: startupMinimumTimer
         interval: 500
         running: window.startupVisible
         repeat: false
         onTriggered: { window.startupMinimumElapsed = true; window.settleStartup(); }
     }
     Timer {
+        id: startupDeadlineTimer
         interval: 8000
         running: window.startupVisible
         repeat: false
@@ -174,6 +179,13 @@ Kirigami.ApplicationWindow {
                 width: Kirigami.Units.gridUnit * 12
                 indeterminate: true
                 Accessible.name: i18n("Preparing Kinefin…")
+            }
+            QQC2.Button {
+                objectName: "startupCoverCancel"
+                anchors.horizontalCenter: parent.horizontalCenter
+                visible: window.connectCover
+                text: i18nc("@action:button", "Cancel")
+                onClicked: window.connection.cancel()
             }
         }
     }
@@ -453,8 +465,6 @@ Kirigami.ApplicationWindow {
 
     // The page follows the connection state: Servers until a server is chosen, the user picker while one of several saved users is to be chosen, sign-in until there is a session, Home after
     function showPageForState() {
-        if (serverSelectionPending && pageGroup !== 0)
-            return;
         let page = "ServersPage.qml";
         let properties = { connection: connection };
         switch (connection.state) {
@@ -470,8 +480,7 @@ Kirigami.ApplicationWindow {
             page = "HomePage.qml";
             break;
         }
-        // A failed connection must not wipe out the form/error while the
-        // minimum selection interval elapses.
+        // A failed connection must not wipe out the form and the error
         if (page === "ServersPage.qml" && pageStack.depth === 1
             && pageStack.currentItem?.objectName === "serversPage") {
             Qt.callLater(settleStartup);
@@ -924,7 +933,7 @@ Kirigami.ApplicationWindow {
     // link delivered later can trigger a fresh prompt.
     function openRequestedItem(home) {
         if (requestedItemId.length === 0 || connection.state !== ConnectionController.Authenticated
-                || (home?.objectName !== "homePage" && home?.objectName !== "libraryPage"))
+                || tabOfPage(home) === "")
             return;
         const itemId = requestedItemId;
         requestedItemId = "";
@@ -933,7 +942,7 @@ Kirigami.ApplicationWindow {
             if (request !== itemRequestGeneration || connection.state !== ConnectionController.Authenticated)
                 return;
             const base = pageStack.get(0);
-            if (base?.objectName === "homePage" || base?.objectName === "libraryPage")
+            if (tabOfPage(base) !== "")
                 openItem(itemId, base);
         };
         if (askBeforeLeaving(navigate))
@@ -975,7 +984,7 @@ Kirigami.ApplicationWindow {
     // A link that arrives while Home is already showing (a second launch) opens at once
     onRequestedItemIdChanged: openRequestedItem(pageStack.get(0))
 
-    // The section the page in front belongs to: the header marks it (a tab, the main menu button, the queue button); a page opened above a type tab belongs to that tab, and one opened from a collections tile to that library; the Settings page and the Favorites page (with what opens above it) belong to no tab, and the header search is global there. Settings needs no session, so it is marked whatever the connection is
+    // The section the page in front belongs to: the header marks it (a tab, the main menu button, the queue button); a page opened above a type tab belongs to that tab, and one opened from a collections tile to that library; the Settings page belongs to no tab, and the header search is global there and on the Favorites and Playlists tabs. Settings needs no session, so it is marked whatever the connection is
     readonly property string currentSection: {
         if (pageStack.currentItem?.objectName === "settingsPage")
             return "settings";
@@ -992,35 +1001,17 @@ Kirigami.ApplicationWindow {
         case "queuePage":
             return "queue";
         }
-        // The Favorites page and what opens above it (a group, an item) belong to the star: no tab is marked; so do the Playlists page and what opens above it to the Playlists button
-        if (favoritesPageIndex() >= 0)
-            return "favorites";
-        for (let i = 1; i <= pageStack.currentIndex; ++i) {
-            if (pageStack.get(i)?.objectName === "playlistsPage")
-                return "playlists";
-        }
         return rootTab !== "" ? rootTab : "home";
     }
 
-    // The stack position of the Favorites page up to the one in front, -1 when it is not there; the current item is read for the dependency: the stack changes with every push and pop
-    function favoritesPageIndex() {
-        if (!pageStack.currentItem)
-            return -1;
-        for (let i = 1; i <= pageStack.currentIndex; ++i) {
-            if (pageStack.get(i)?.objectName === "favoritesPage")
-                return i;
-        }
-        return -1;
-    }
-
-    // True while the Settings page or the Favorites page is in the stack, whatever page lies above it (the search page the header box opens included): the box stays on the global search then, or the page it opens would turn it back to the list of the tab at the root and pop everything
+    // True while the Settings page is in the stack, whatever page lies above it (the search page the header box opens included): the box stays on the global search then, or the page it opens would turn it back to the list of the tab at the root and pop everything
     readonly property bool globalSearchPage: {
         // The current item is read for the dependency: the stack changes with every push and pop
         if (!pageStack.currentItem)
             return false;
         for (let i = 1; i < pageStack.depth; ++i) {
             const name = pageStack.get(i)?.objectName;
-            if (name === "settingsPage" || name === "favoritesPage")
+            if (name === "settingsPage")
                 return true;
         }
         return false;
@@ -1036,6 +1027,10 @@ Kirigami.ApplicationWindow {
             return "home";
         case "libraryPage":
             return page.tabType;
+        case "favoritesPage":
+            return "favorites";
+        case "playlistsPage":
+            return "playlists";
         }
         return "";
     }
@@ -1045,7 +1040,7 @@ Kirigami.ApplicationWindow {
         return name === "movies" ? connection.movieLibraries.length > 0 : connection.showLibraries.length > 0;
     }
 
-    // The tab becomes the first page of the stack: what was there goes, the tab it leaves is remembered, and the one it comes back to is restored. A type tab opens its list (the stored library when `libraryId` is empty, else that library, which a Home tile persists); the tab already in front only drops the pages above it. `recentlyAdded` opens the type tab on the one-off Recently Added view instead of the stored one
+    // The tab becomes the first page of the stack: what was there goes, the tab it leaves is remembered, and the one it comes back to is restored. A type tab opens its list (the stored library when `libraryId` is empty, else that library, which a Home tile persists); the tab already in front only drops the pages above it. Favorites and Playlists are root tabs too and open at the top. `recentlyAdded` opens the type tab on the one-off Recently Added view instead of the stored one
     function openTab(name, libraryId) {
         openTabScope(name, libraryId, false);
     }
@@ -1090,11 +1085,15 @@ Kirigami.ApplicationWindow {
         parkVideo();
         pageStack.clear();
         // Leaving the type pages gives the sub-tab's data and channels back
-        if (name === "home")
+        if (!isTypeTab(name))
             connection.closeSubtabs();
         let page = null;
         if (name === "home")
             page = pageStack.push(Qt.resolvedUrl("HomePage.qml"), { connection: connection });
+        else if (name === "favorites")
+            page = pageStack.push(Qt.resolvedUrl("FavoritesPage.qml"), { connection: connection, shell: window });
+        else if (name === "playlists")
+            page = pageStack.push(Qt.resolvedUrl("PlaylistsPage.qml"), { connection: connection, shell: window });
         else
             page = pageStack.push(Qt.resolvedUrl("LibraryPage.qml"), { model: name === "movies" ? connection.movies : connection.shows, tabType: name, connection: connection });
         if (tabState[name] && page?.restoreViewPosition)
@@ -1103,7 +1102,7 @@ Kirigami.ApplicationWindow {
 
     // The visible order of the tabs, which decides the side the new one slides in from
     function tabOrder(name) {
-        return name === "home" ? 0 : name === "movies" ? 1 : 2;
+        return ["home", "movies", "tvshows", "favorites", "playlists"].indexOf(name);
     }
 
     // The new tab enters from the side it has in the tab bar; the row stays invisible from before the push until the motion starts, so the new page never shows one frame at rest
@@ -1214,11 +1213,11 @@ Kirigami.ApplicationWindow {
             connection.favorites.close();
     }
 
-    // The main menu's Playlists and the Home tile of the server's Playlists view: the page opens above the first page, and one already in the stack is brought back
+    // The Playlists tab and the Home tile of the server's Playlists view: the page becomes the root of the stack
     function openPlaylists() {
         if (!signedIn)
             return;
-        openSection("playlistsPage", "PlaylistsPage.qml", { connection: connection, shell: window });
+        openTab("playlists");
     }
 
     // A playlist opens above the page asking (the pages above it give way); `name`, when the caller knows it, titles the page
@@ -1449,11 +1448,11 @@ Kirigami.ApplicationWindow {
         }
     }
 
-    // The star of the header: the Favorites page opens above the first page, and one already in the stack is brought back as it is (the page starts the scan when it is created)
+    // The Favorites tab and the Favorites row of Home: the page becomes the root of the stack (it starts the scan when it is created)
     function openFavorites() {
         if (!signedIn)
             return;
-        openSection("favoritesPage", "FavoritesPage.qml", { connection: connection, shell: window });
+        openTab("favorites");
     }
 
     // The Home tab; before a session it is the page the state wants

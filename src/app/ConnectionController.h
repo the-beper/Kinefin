@@ -235,16 +235,16 @@ class ConnectionController : public QObject {
     // Asks the server for the libraries again (the Home page's retry)
     Q_INVOKABLE void reloadLibraries();
     // Removes a stored server with all its users, saved queues and browse state; disconnects first when it is the active one
-    // Probe /System/Info/Public once, without a session/token. A manual test can
-    // optionally try only the standard ports of the same scheme and host.
+    // Probe /System/Info/Public once, without a session/token. An address without a scheme (host, host:port, [ipv6]:port) is tried on https then http (see connectionCandidates) when `standardPortFallback` is set, and the reachability entry's resolvedUrl is the one that answered; one with a scheme is tried as given. A certificate error on an https candidate ends the test with its own message and never moves on to http
     Q_INVOKABLE void testServer(const QString &address, bool standardPortFallback = false);
     Q_INVOKABLE void testSavedServers();
-    // Connecting from the new-server form may try the standard same-scheme ports.
-    // Saved-server connections use connectTo() and never silently change their endpoint.
+    // Connecting from the new-server form: the same candidates as testServer(address, true), moving to the next one only when an attempt fails at network level (refused, unreachable, timeout, a port that does not speak TLS). A certificate error stops with its own error text. The endpoint that answered is the one connected and saved; an http one goes through ConfirmInsecure as usual. Saved-server connections use connectTo() and never silently change their endpoint
     Q_INVOKABLE void connectToWithFallback(const QString &address);
     Q_INVOKABLE void removeServer(const QString &serverId);
     // Opens the admin dashboard of the active server's web interface in the host browser (the app's one action for everything server-side). False when there is no server or its address is not an http(s) link
     Q_INVOKABLE bool openAdminDashboard() const;
+    // The endpoints tried for a server address, in order; empty for an invalid one. Without a scheme and with `standardPortFallback`: no port gives https://host, https://host:8920, http://host:8096, http://host; a typed port gives https then http on that port. Without `standardPortFallback` the address gets https and nothing else. With a scheme it is the one endpoint (public for the tests)
+    static QList<QUrl> connectionCandidates(const QString &address, bool standardPortFallback);
 
   Q_SIGNALS:
     void favoriteUpdateFailed(const QString &itemId);
@@ -312,7 +312,6 @@ class ConnectionController : public QObject {
     void clearQuickConnect();
     void clearLibraryError();
     void refreshServers();
-    static QList<QUrl> connectionCandidates(const QString &address, bool standardPortFallback);
     void startProbeCheck(const QString &key, const QList<QUrl> &candidates, int index,
                          quint64 generation);
     void setReachability(const QString &key, bool testing, bool reachable, const QString &message,

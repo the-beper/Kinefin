@@ -10,6 +10,11 @@
 #include <QNetworkInterface>
 #include <QPointer>
 #include <QSignalSpy>
+#include <QSslCertificate>
+#include <QSslConfiguration>
+#include <QSslKey>
+#include <QSslServer>
+#include <QSslSocket>
 #include <QTemporaryDir>
 #include <QtTest>
 
@@ -42,6 +47,58 @@ QString address(const FakeJellyfin &server)
 {
     return server.url(QStringLiteral("/jellyfin")).toString();
 }
+
+// A TLS server whose certificate is self-signed: a client that verifies it rejects the handshake, and `handshakes` counts the connections it got
+class SelfSignedServer {
+  public:
+    // The pair is a local test fixture, not part of the repository: without it the certificate tests skip
+    static bool fixturesPresent()
+    {
+        const QString directory =
+            QString::fromUtf8(KINEFIN_SOURCE_DIR) + QStringLiteral("/tests/fixtures/");
+        return QFile::exists(directory + QStringLiteral("selfsigned_cert.pem"))
+               && QFile::exists(directory + QStringLiteral("selfsigned_key.pem"));
+    }
+
+    bool listen()
+    {
+        const QString directory =
+            QString::fromUtf8(KINEFIN_SOURCE_DIR) + QStringLiteral("/tests/fixtures/");
+        QFile certificateFile(directory + QStringLiteral("selfsigned_cert.pem"));
+        QFile keyFile(directory + QStringLiteral("selfsigned_key.pem"));
+        if (!certificateFile.open(QIODevice::ReadOnly) || !keyFile.open(QIODevice::ReadOnly))
+            return false;
+        const QSslCertificate certificate(&certificateFile, QSsl::Pem);
+        const QSslKey key(&keyFile, QSsl::Ec, QSsl::Pem);
+        if (certificate.isNull() || key.isNull())
+            return false;
+        QSslConfiguration configuration = QSslConfiguration::defaultConfiguration();
+        configuration.setLocalCertificate(certificate);
+        configuration.setPrivateKey(key);
+        m_server.setSslConfiguration(configuration);
+        QObject::connect(&m_server, &QSslServer::startedEncryptionHandshake, &m_server,
+                         [this] { ++handshakes; });
+        return m_server.listen(QHostAddress::LocalHost);
+    }
+
+    QString address() const { return QStringLiteral("127.0.0.1:%1").arg(m_server.serverPort()); }
+
+    int handshakes = 0;
+
+  private:
+    QSslServer m_server;
+};
+
+QStringList urlStrings(const QList<QUrl> &urls)
+{
+    QStringList result;
+    for (const QUrl &url : urls)
+        result.append(url.toString());
+    return result;
+}
+
+const QString kCertificateError = QStringLiteral(
+    "The server's certificate is not valid: check the certificate, or the address and the port");
 
 const QString kMoviesA = QStringLiteral("e2a1aa11a8d94b5c999a25cf59abcd01");
 const QString kMoviesB = QStringLiteral("b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2");
@@ -423,6 +480,257 @@ class TestConnectionController : public QObject {
                      .toMap()
                      .value(QStringLiteral("reachable"))
                      .toBool());
+    }
+
+    void candidatesOfAnAddressWithoutSchemeTryHttpsThenHttp()
+    {
+        const auto candidates = [](const QString &address) {
+            return urlStrings(ConnectionController::connectionCandidates(address, true));
+        };
+        QCOMPARE(candidates(QStringLiteral("jf.example")),
+                 (QStringList{QStringLiteral("https://jf.example"),
+                              QStringLiteral("https://jf.example:8920"),
+                              QStringLiteral("http://jf.example:8096"),
+                              QStringLiteral("http://jf.example")}));
+        QCOMPARE(candidates(QStringLiteral(" jf.example/jellyfin ")),
+                 (QStringList{QStringLiteral("https://jf.example/jellyfin"),
+                              QStringLiteral("https://jf.example:8920/jellyfin"),
+                              QStringLiteral("http://jf.example:8096/jellyfin"),
+                              QStringLiteral("http://jf.example/jellyfin")}));
+        QCOMPARE(candidates(QStringLiteral("jf.example:9000")),
+                 (QStringList{QStringLiteral("https://jf.example:9000"),
+                              QStringLiteral("http://jf.example:9000")}));
+        // A typed standard port is still a typed port: the same port on both schemes, nothing else
+        QCOMPARE(candidates(QStringLiteral("jf.example:8096")),
+                 (QStringList{QStringLiteral("https://jf.example:8096"),
+                              QStringLiteral("http://jf.example:8096")}));
+        QCOMPARE(candidates(QStringLiteral("[fe80::1]:8096")),
+                 (QStringList{QStringLiteral("https://[fe80::1]:8096"),
+                              QStringLiteral("http://[fe80::1]:8096")}));
+        QCOMPARE(candidates(QStringLiteral("[fe80::1]")),
+                 (QStringList{
+                     QStringLiteral("https://[fe80::1]"), QStringLiteral("https://[fe80::1]:8920"),
+                     QStringLiteral("http://[fe80::1]:8096"), QStringLiteral("http://[fe80::1]")}));
+        // Without the fallback the address is what connectTo() would use: https and nothing else
+        QCOMPARE(urlStrings(ConnectionController::connectionCandidates(
+                     QStringLiteral("jf.example:9000"), false)),
+                 (QStringList{QStringLiteral("https://jf.example:9000")}));
+    }
+
+    // A saved server keeps its exact endpoint: no other port, no other scheme
+    void candidatesOfAnAddressWithSchemeAreThatAddressAlone()
+    {
+        for (const QString &address :
+             {QStringLiteral("https://jf.example"), QStringLiteral("https://jf.example:8920"),
+              QStringLiteral("http://jf.example:8096"), QStringLiteral("http://jf.example:9000")}) {
+            for (const bool fallback : {true, false})
+                QCOMPARE(urlStrings(ConnectionController::connectionCandidates(address, fallback)),
+                         QStringList{address});
+        }
+    }
+
+    void invalidAddressesHaveNoCandidates()
+    {
+        for (const QString &invalid :
+             {QString(), QStringLiteral("   "), QStringLiteral("jf.example:0"),
+              QStringLiteral("user:password@jf.example"), QStringLiteral("jf.example/?q=1"),
+              QStringLiteral("jf.example/#fragment"), QStringLiteral("[fe80::1"),
+              QStringLiteral("ftp://jf.example"), QStringLiteral("file:///tmp/server"),
+              QStringLiteral("http://user:password@jf.example"), QStringLiteral("http://"),
+              QString(QStringLiteral("jf.example/") + QString(2100, QLatin1Char('a')))}) {
+            QVERIFY2(ConnectionController::connectionCandidates(invalid, true).isEmpty(),
+                     qPrintable(invalid.left(60)));
+            QVERIFY2(ConnectionController::connectionCandidates(invalid, false).isEmpty(),
+                     qPrintable(invalid.left(60)));
+        }
+    }
+
+    void invalidAddressWithoutSchemeIsRejectedBeforeAnyRequest()
+    {
+        auto controller = makeController();
+        controller->connectToWithFallback(QStringLiteral("jf.example:0"));
+        QCOMPARE(controller->state(), ConnectionController::Idle);
+        QCOMPARE(controller->errorText(), QStringLiteral("Enter a valid server address"));
+        const QString typed = QStringLiteral("user:password@jf.example");
+        controller->testServer(typed, true);
+        const auto result = controller->serverReachability().value(typed).toMap();
+        QVERIFY(!result.value(QStringLiteral("reachable")).toBool());
+        QVERIFY(!result.value(QStringLiteral("testing")).toBool());
+        QCOMPARE(result.value(QStringLiteral("message")).toString(),
+                 QStringLiteral("Enter a valid server address"));
+    }
+
+    // The typed port serves plain HTTP only: the https attempt on it fails as "not TLS" and the http one answers
+    void testWithoutSchemeFallsBackFromHttpsToHttp()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        auto controller = makeController();
+        const QString typed = QStringLiteral("127.0.0.1:%1").arg(server.url().port());
+        controller->testServer(typed, true);
+        QTRY_VERIFY(controller->serverReachability()
+                        .value(typed)
+                        .toMap()
+                        .value(QStringLiteral("reachable"))
+                        .toBool());
+        const auto result = controller->serverReachability().value(typed).toMap();
+        QVERIFY(!result.value(QStringLiteral("testing")).toBool());
+        QCOMPARE(result.value(QStringLiteral("resolvedUrl")).toString(),
+                 QStringLiteral("http://") + typed);
+        QVERIFY(result.value(QStringLiteral("message")).toString().contains(typed));
+        QCOMPARE(server.tlsAttempts, 1);
+        QCOMPARE(server.publicInfoRequests, 1);
+        QVERIFY(server.lastPublicInfoAuth.isEmpty());
+    }
+
+    void testWithoutSchemeAndWithoutFallbackTriesHttpsOnly()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        auto controller = makeController();
+        const QString typed = QStringLiteral("127.0.0.1:%1").arg(server.url().port());
+        controller->testServer(typed, false);
+        QTRY_VERIFY(!controller->serverReachability()
+                         .value(typed)
+                         .toMap()
+                         .value(QStringLiteral("testing"))
+                         .toBool());
+        QVERIFY(!controller->serverReachability()
+                     .value(typed)
+                     .toMap()
+                     .value(QStringLiteral("reachable"))
+                     .toBool());
+        QCOMPARE(server.tlsAttempts, 1);
+        QCOMPARE(server.publicInfoRequests, 0);
+    }
+
+    void connectWithoutSchemeFallsBackFromHttpsToHttp()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        auto controller = makeController();
+        const QString typed = QStringLiteral("127.0.0.1:%1").arg(server.url().port());
+        controller->connectToWithFallback(typed);
+        QCOMPARE(controller->state(), ConnectionController::Connecting);
+        QCOMPARE(controller->serverUrl(), QStringLiteral("https://") + typed);
+        QTRY_VERIFY(controller->state() == ConnectionController::NeedsLogin);
+        // Loopback is exempt from the insecure-HTTP confirmation
+        QCOMPARE(controller->serverUrl(), QStringLiteral("http://") + typed);
+        QCOMPARE(server.tlsAttempts, 1);
+        controller->login(QStringLiteral("fixture-user"), QStringLiteral("fixture-password"));
+        QTRY_VERIFY(controller->state() == ConnectionController::Authenticated);
+        QTRY_COMPARE(controller->servers().size(), 1);
+        QCOMPARE(controller->servers().constFirst().toMap().value(QStringLiteral("url")).toString(),
+                 QStringLiteral("http://") + typed);
+    }
+
+    // The endpoint reached by the fallback is plain HTTP: the warning comes before any credential
+    void connectFallbackToHttpOnAnotherHostAsksConfirmation()
+    {
+        QHostAddress lan;
+        for (const QHostAddress &candidate : QNetworkInterface::allAddresses()) {
+            if (candidate.protocol() == QAbstractSocket::IPv4Protocol && !candidate.isLoopback()) {
+                lan = candidate;
+                break;
+            }
+        }
+        if (lan.isNull())
+            QSKIP("no non-loopback IPv4 address on this machine");
+        FakeJellyfin server;
+        QVERIFY(server.listen(QHostAddress::AnyIPv4));
+        auto controller = makeController();
+        const QString typed = QStringLiteral("%1:%2").arg(lan.toString()).arg(server.url().port());
+        controller->connectToWithFallback(typed);
+        QTRY_VERIFY(controller->state() == ConnectionController::ConfirmInsecure);
+        QCOMPARE(controller->serverUrl(), QStringLiteral("http://") + typed);
+        QCOMPARE(server.tlsAttempts, 1);
+        controller->login(QStringLiteral("fixture-user"), QStringLiteral("fixture-password"));
+        QCOMPARE(controller->state(), ConnectionController::ConfirmInsecure); // refused
+        QCOMPARE(server.successfulLogins, 0);
+        controller->confirmInsecureHttp();
+        QCOMPARE(controller->state(), ConnectionController::NeedsLogin);
+        controller->login(QStringLiteral("fixture-user"), QStringLiteral("fixture-password"));
+        QTRY_VERIFY(controller->state() == ConnectionController::Authenticated);
+        QTRY_COMPARE(controller->servers().size(), 1);
+        QCOMPARE(controller->servers().constFirst().toMap().value(QStringLiteral("url")).toString(),
+                 QStringLiteral("http://") + typed);
+    }
+
+    // Every candidate refused: the sequence ends with the usual network error
+    void connectWithoutSchemeEndsWhenEveryCandidateIsRefused()
+    {
+        quint16 port = 0;
+        {
+            FakeJellyfin gone;
+            QVERIFY(gone.listen());
+            port = quint16(gone.url().port());
+        }
+        auto controller = makeController();
+        controller->connectToWithFallback(QStringLiteral("127.0.0.1:%1").arg(port));
+        QTRY_VERIFY(controller->state() == ConnectionController::Idle);
+        QCOMPARE(controller->errorText(),
+                 QStringLiteral("Could not reach a Jellyfin server. Check the address and your "
+                                "network connection"));
+    }
+
+    // A certificate that does not verify is not a network failure: the attempts stop, and HTTP is never tried
+    void connectStopsOnACertificateErrorWithoutFallingBackToHttp()
+    {
+        if (!QSslSocket::supportsSsl())
+            QSKIP("no TLS backend");
+        if (!SelfSignedServer::fixturesPresent())
+            QSKIP("no self-signed certificate fixture in tests/fixtures");
+        SelfSignedServer tls;
+        QVERIFY(tls.listen());
+        auto controller = makeController();
+        controller->connectToWithFallback(tls.address());
+        QCOMPARE(controller->state(), ConnectionController::Connecting);
+        QTRY_VERIFY(controller->state() == ConnectionController::Idle);
+        QCOMPARE(controller->errorText(), kCertificateError);
+        // A fallback to http on the same port would reach the TLS server a second time
+        QTest::qWait(300);
+        QCOMPARE(tls.handshakes, 1);
+        QCOMPARE(controller->state(), ConnectionController::Idle);
+        QVERIFY(controller->servers().isEmpty());
+    }
+
+    void connectToAnExactAddressReportsACertificateError()
+    {
+        if (!QSslSocket::supportsSsl())
+            QSKIP("no TLS backend");
+        if (!SelfSignedServer::fixturesPresent())
+            QSKIP("no self-signed certificate fixture in tests/fixtures");
+        SelfSignedServer tls;
+        QVERIFY(tls.listen());
+        auto controller = makeController();
+        controller->connectTo(QStringLiteral("https://") + tls.address());
+        QTRY_VERIFY(controller->state() == ConnectionController::Idle);
+        QCOMPARE(controller->errorText(), kCertificateError);
+        QCOMPARE(tls.handshakes, 1);
+    }
+
+    void testStopsOnACertificateErrorWithoutFallingBackToHttp()
+    {
+        if (!QSslSocket::supportsSsl())
+            QSKIP("no TLS backend");
+        if (!SelfSignedServer::fixturesPresent())
+            QSKIP("no self-signed certificate fixture in tests/fixtures");
+        SelfSignedServer tls;
+        QVERIFY(tls.listen());
+        auto controller = makeController();
+        const QString typed = tls.address();
+        controller->testServer(typed, true);
+        QTRY_VERIFY(!controller->serverReachability()
+                         .value(typed)
+                         .toMap()
+                         .value(QStringLiteral("testing"))
+                         .toBool());
+        const auto result = controller->serverReachability().value(typed).toMap();
+        QVERIFY(!result.value(QStringLiteral("reachable")).toBool());
+        QCOMPARE(result.value(QStringLiteral("message")).toString(), kCertificateError);
+        QVERIFY(result.value(QStringLiteral("resolvedUrl")).toString().isEmpty());
+        QTest::qWait(300);
+        QCOMPARE(tls.handshakes, 1);
     }
 
     void connectSignInAndLibraries()

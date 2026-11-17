@@ -80,6 +80,15 @@ QString stateName(JellyfinSocketClient::State state)
     return QStringLiteral("Reconnecting");
 }
 
+// A close frame needs a connected socket: one still connecting (a teardown or a reconnect right after the attempt started) is dropped instead, or Qt warns that it cannot write
+void closeSocket(QWebSocket *socket)
+{
+    if (socket->state() == QAbstractSocket::ConnectedState)
+        socket->close(QWebSocketProtocol::CloseCodeNormal);
+    else
+        socket->abort();
+}
+
 } // namespace
 
 JellyfinSocketClient::JellyfinSocketClient(JellyfinClient *client, QObject *parent)
@@ -161,7 +170,7 @@ void JellyfinSocketClient::teardown()
     if (m_socket) {
         // One QWebSocket per attempt: the bump above already stale-dated every handler, the deleteLater is the teardown
         m_socket->disconnect(this);
-        m_socket->close(QWebSocketProtocol::CloseCodeNormal);
+        closeSocket(m_socket);
         m_socket->deleteLater();
         m_socket = nullptr;
     }
@@ -245,7 +254,7 @@ void JellyfinSocketClient::handleUnexpectedDisconnect(bool connectingPhase)
     ++m_generation;
     if (m_socket) {
         m_socket->disconnect(this);
-        m_socket->close(QWebSocketProtocol::CloseCodeNormal);
+        closeSocket(m_socket);
         m_socket->deleteLater();
         m_socket = nullptr;
     }

@@ -19,15 +19,26 @@ Kirigami.ScrollablePage {
     readonly property bool splitLayout: width >= Kirigami.Units.gridUnit * 40
     // Keep entry controls usable even when the page spans a very wide monitor.
     readonly property real maxContentWidth: Kirigami.Units.gridUnit * 82
-    readonly property string formUrl: {
+    // The host of the form as the address takes it, empty when it is not one (a scheme, a path, credentials, spaces); two colons or more is a literal IPv6 host, which takes brackets, one is a host with its port
+    readonly property string formHost: {
         const host = hostField.text.trim();
         if (!host || /[\s@?#]/.test(host) || host.includes("/") || host.includes("\\") || host.includes("://"))
             return "";
-        // Literal IPv6 hosts use URL brackets, not a host:port ambiguity.
-        const address = host.includes(":") && !host.startsWith("[") ? "[" + host + "]" : host;
-        return scheme.currentValue + "://" + address + ":" + portField.value;
+        return (host.match(/:/g) ?? []).length >= 2 && !host.startsWith("[") ? "[" + host + "]" : host;
     }
-    readonly property var newServerStatus: connection.serverReachability[formUrl] ?? ({})
+    // The port field: empty (automatic) or a number from 1 to 65535
+    readonly property bool formPortValid: {
+        const port = portField.text.trim();
+        return port.length === 0 || (/^\d+$/.test(port) && parseInt(port, 10) >= 1 && parseInt(port, 10) <= 65535);
+    }
+    // host or host:port without a scheme (the core tries HTTPS, then HTTP); empty when the host or the port is not valid
+    readonly property string formAddress: {
+        if (!formHost || !formPortValid)
+            return "";
+        const port = portField.text.trim();
+        return port.length === 0 ? formHost : formHost + ":" + parseInt(port, 10);
+    }
+    readonly property var newServerStatus: connection.serverReachability[formAddress] ?? ({})
 
     title: i18n("Servers")
 
@@ -41,14 +52,18 @@ Kirigami.ScrollablePage {
     // opening another server cannot show a stale successful probe for a new URL.
     Component.onCompleted: connection.testSavedServers()
 
+    // Whether the connection under way came from the form without a scheme: an HTTP server it reached means HTTPS did not answer, which the warning says
+    property bool automaticScheme: false
+
     function connectAddress(url, tryFallback) {
         if (!url || busy || confirming)
             return;
-        page.Window.window?.beginServerSelection();
+        automaticScheme = tryFallback && !url.includes("://");
         if (tryFallback)
             connection.connectToWithFallback(url);
         else
             connection.connectTo(url);
+        page.Window.window?.showConnectCover();
     }
 
     Kirigami.PromptDialog {
@@ -81,9 +96,13 @@ Kirigami.ScrollablePage {
         }
         MessageBox {
             Layout.fillWidth: true
+            Layout.topMargin: Kirigami.Units.largeSpacing
             visible: page.confirming
             type: Kirigami.MessageType.Warning
-            text: i18n("This server does not use HTTPS: your username, password and session would travel unencrypted")
+            // The address is the one the user typed, as it answered: it passed the form's checks and QUrl, so it carries no markup the box could render
+            text: page.automaticScheme
+                  ? i18nc("@info %1 is the HTTP address that answered", "HTTPS did not answer, only %1 did: your username, password and session would travel unencrypted", page.connection.serverUrl)
+                  : i18n("This server does not use HTTPS: your username, password and session would travel unencrypted")
             actions: [
                 Kirigami.Action {
                     text: i18n("Continue Anyway")
@@ -100,157 +119,165 @@ Kirigami.ScrollablePage {
             Layout.fillWidth: true
             Layout.maximumWidth: page.maxContentWidth
             Layout.alignment: Qt.AlignHCenter
-            columns: page.splitLayout ? 2 : 1
+            columns: page.splitLayout ? 3 : 1
             columnSpacing: Kirigami.Units.largeSpacing * 2
             rowSpacing: Kirigami.Units.largeSpacing * 2
 
-            Kirigami.AbstractCard {
-                id: addCard
-                objectName: "addServerCard"
+            // The heading sits above the card, as the saved servers' heading does above theirs
+            ColumnLayout {
+                objectName: "addServerColumn"
                 Layout.fillWidth: true
                 Layout.alignment: Qt.AlignTop
                 Layout.preferredWidth: page.splitLayout ? Math.min(page.width, page.maxContentWidth) * 0.54
                                                        : Math.max(0, Math.min(page.width - Kirigami.Units.largeSpacing * 2, page.maxContentWidth))
-                contentItem: ColumnLayout {
-                    spacing: Kirigami.Units.largeSpacing
-                    Kirigami.Heading { level: 2; text: i18n("Add a Server") }
-                    Controls.Label {
-                        Layout.fillWidth: true
-                        text: i18n("Enter a domain or IP address and select the connection protocol")
-                        wrapMode: Text.Wrap
-                        opacity: 0.8
-                    }
-                    GridLayout {
-                        Layout.fillWidth: true
-                        // On a medium desktop, the add-server card is only ~half the window.
-                        columns: page.splitLayout && page.width >= Kirigami.Units.gridUnit * 44 ? 3 : 1
-                        columnSpacing: Kirigami.Units.smallSpacing
-                        rowSpacing: Kirigami.Units.smallSpacing
-                        enabled: !page.busy && !page.confirming
-                        Controls.ComboBox {
-                            id: scheme
-                            objectName: "serverProtocolSelector"
-                            Layout.preferredWidth: Kirigami.Units.gridUnit * 6
-                            Layout.fillWidth: !page.splitLayout
-                            model: [{ text: "HTTP", value: "http" }, { text: "HTTPS", value: "https" }]
-                            textRole: "text"
-                            valueRole: "value"
-                            onActivated: {
-                                if (currentValue === "https" && portField.value === 8096)
-                                    portField.value = 8920;
-                                else if (currentValue === "http" && portField.value === 8920)
-                                    portField.value = 8096;
+                spacing: Kirigami.Units.largeSpacing
+                Kirigami.Heading { level: 2; text: i18n("Add a Server") }
+                Kirigami.AbstractCard {
+                    id: addCard
+                    objectName: "addServerCard"
+                    Layout.fillWidth: true
+                    contentItem: ColumnLayout {
+                        spacing: Kirigami.Units.largeSpacing
+                        GridLayout {
+                            Layout.fillWidth: true
+                            // A label before each field; on a medium desktop, the add-server card is only ~half the window, so the port goes under the address
+                            columns: page.splitLayout && page.width >= Kirigami.Units.gridUnit * 44 ? 4 : 2
+                            columnSpacing: Kirigami.Units.smallSpacing
+                            rowSpacing: Kirigami.Units.smallSpacing
+                            enabled: !page.busy && !page.confirming
+                            Controls.Label {
+                                text: i18nc("@label:textbox", "Address:")
                             }
-                            Accessible.name: i18n("Protocol")
-                        }
-                        Controls.TextField {
-                            id: hostField
-                            objectName: "serverHostField"
-                            Layout.fillWidth: true
-                            Layout.minimumWidth: Kirigami.Units.gridUnit * 7
-                            placeholderText: i18n("Domain or IP address")
-                            inputMethodHints: Qt.ImhUrlCharactersOnly | Qt.ImhNoPredictiveText
-                            Accessible.name: i18n("Domain or IP address")
-                            onAccepted: page.connectAddress(page.formUrl, true)
-                        }
-                        Controls.SpinBox {
-                            id: portField
-                            objectName: "serverPortField"
-                            Layout.preferredWidth: Kirigami.Units.gridUnit * 6
-                            from: 1
-                            to: 65535
-                            editable: true
-                            value: 8096
-                            Accessible.name: i18n("Port")
-                        }
-                    }
-                    Controls.Label {
-                        Layout.fillWidth: true
-                        text: i18n("Only standard ports on the same protocol are tried automatically if a connection fails")
-                        wrapMode: Text.Wrap
-                        font.pointSize: Kirigami.Theme.smallFont.pointSize
-                        opacity: 0.75
-                    }
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: Kirigami.Units.smallSpacing
-                        Controls.Button {
-                            id: testNewServer
-                            objectName: "testNewServerButton"
-                            text: i18n("Test")
-                            icon.name: "network-server"
-                            enabled: page.formUrl.length > 0 && !page.newServerStatus.testing && !page.busy && !page.confirming
-                            onClicked: page.connection.testServer(page.formUrl, true)
-                        }
-                        Controls.Button {
-                            id: connectNewServer
-                            objectName: "connectNewServerButton"
-                            Layout.fillWidth: true
-                            text: i18n("Connect")
-                            icon.name: "network-connect"
-                            enabled: page.formUrl.length > 0 && !page.busy && !page.confirming
-                            onClicked: page.connectAddress(page.formUrl, true)
-                        }
-                    }
-                    RowLayout {
-                        Layout.fillWidth: true
-                        visible: page.newServerStatus.message !== undefined
-                        Controls.BusyIndicator {
-                            FadeInOnShow {}
-                            running: !!page.newServerStatus.testing
-                            visible: running
-                            Layout.preferredWidth: Kirigami.Units.iconSizes.smallMedium
-                            Layout.preferredHeight: width
-                        }
-                        Kirigami.Icon {
-                            source: page.newServerStatus.reachable ? "emblem-checked" : "dialog-warning"
-                            visible: !page.newServerStatus.testing
-                            Layout.preferredWidth: Kirigami.Units.iconSizes.smallMedium
-                            Layout.preferredHeight: width
+                            Controls.TextField {
+                                id: hostField
+                                objectName: "serverHostField"
+                                Layout.fillWidth: true
+                                Layout.minimumWidth: Kirigami.Units.gridUnit * 7
+                                placeholderText: i18n("Domain or IP address")
+                                inputMethodHints: Qt.ImhUrlCharactersOnly | Qt.ImhNoPredictiveText
+                                Accessible.name: i18n("Domain or IP address")
+                                onAccepted: page.connectAddress(page.formAddress, true)
+                            }
+                            Controls.Label {
+                                text: i18nc("@label:textbox", "Port:")
+                            }
+                            Controls.TextField {
+                                id: portField
+                                objectName: "serverPortField"
+                                Layout.preferredWidth: Kirigami.Units.gridUnit * 6
+                                placeholderText: i18nc("@info:placeholder the port field left empty", "Automatic")
+                                validator: IntValidator { bottom: 1; top: 65535 }
+                                inputMethodHints: Qt.ImhDigitsOnly
+                                Accessible.name: i18n("Port")
+                                onAccepted: page.connectAddress(page.formAddress, true)
+                            }
                         }
                         Controls.Label {
                             Layout.fillWidth: true
-                            text: page.newServerStatus.message ?? ""
+                            text: i18n("HTTPS is tried before HTTP, and an empty port tries 443 and 8920, then 8096 and 80")
                             wrapMode: Text.Wrap
+                            font.pointSize: Kirigami.Theme.smallFont.pointSize
+                            opacity: 0.75
                         }
-                    }
-                    RowLayout {
-                        visible: page.busy
-                        FadeInOnShow {}
-                        Controls.BusyIndicator { running: page.busy }
-                        Controls.Label { text: i18n("Connecting…") }
-                        Controls.Button {
-                            text: i18n("Cancel")
-                            onClicked: page.connection.cancel()
+                        // What is wrong with the typed address, rather than a Connect that only turns grey
+                        MessageBox {
+                            objectName: "serverAddressProblem"
+                            Layout.fillWidth: true
+                            visible: (hostField.text.trim().length > 0 && page.formHost.length === 0) || !page.formPortValid
+                            type: Kirigami.MessageType.Warning
+                            text: page.formPortValid ? i18n("Enter only the domain or IP address, without a scheme or a path")
+                                                     : i18n("Enter a port from 1 to 65535, or leave it empty")
+                        }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: Kirigami.Units.smallSpacing
+                            Controls.Button {
+                                id: testNewServer
+                                objectName: "testNewServerButton"
+                                text: i18n("Test")
+                                icon.name: "network-server"
+                                enabled: page.formAddress.length > 0 && !page.newServerStatus.testing && !page.busy && !page.confirming
+                                onClicked: page.connection.testServer(page.formAddress, true)
+                            }
+                            Controls.Button {
+                                id: connectNewServer
+                                objectName: "connectNewServerButton"
+                                Layout.fillWidth: true
+                                text: i18n("Connect")
+                                icon.name: "network-connect"
+                                enabled: page.formAddress.length > 0 && !page.busy && !page.confirming
+                                onClicked: page.connectAddress(page.formAddress, true)
+                            }
+                        }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            visible: page.newServerStatus.message !== undefined
+                            Controls.BusyIndicator {
+                                FadeInOnShow {}
+                                running: !!page.newServerStatus.testing
+                                visible: running
+                                Layout.preferredWidth: Kirigami.Units.iconSizes.smallMedium
+                                Layout.preferredHeight: width
+                            }
+                            Kirigami.Icon {
+                                source: page.newServerStatus.reachable ? "emblem-checked" : "dialog-warning"
+                                visible: !page.newServerStatus.testing
+                                Layout.preferredWidth: Kirigami.Units.iconSizes.smallMedium
+                                Layout.preferredHeight: width
+                            }
+                            // The message of a reachable server names the address that answered
+                            Controls.Label {
+                                objectName: "newServerStatusMessage"
+                                Layout.fillWidth: true
+                                text: page.newServerStatus.message ?? ""
+                                textFormat: Text.PlainText
+                                wrapMode: Text.Wrap
+                            }
+                        }
+                        RowLayout {
+                            visible: page.busy
+                            FadeInOnShow {}
+                            Controls.BusyIndicator { running: page.busy }
+                            Controls.Label { text: i18n("Connecting…") }
+                            Controls.Button {
+                                text: i18n("Cancel")
+                                onClicked: page.connection.cancel()
+                            }
                         }
                     }
                 }
             }
 
-            Kirigami.AbstractCard {
-                objectName: "savedServerCard"
+            Kirigami.Separator {
+                objectName: "serversColumnSeparator"
+                Layout.fillWidth: !page.splitLayout
+                Layout.fillHeight: page.splitLayout
+            }
+
+            ColumnLayout {
+                objectName: "savedServersColumn"
                 Layout.fillWidth: true
                 Layout.alignment: Qt.AlignTop
                 Layout.preferredWidth: page.splitLayout ? Math.min(page.width, page.maxContentWidth) * 0.42
                                                        : Math.max(0, Math.min(page.width - Kirigami.Units.largeSpacing * 2, page.maxContentWidth))
-                contentItem: ColumnLayout {
-                    spacing: Kirigami.Units.largeSpacing
-                    Kirigami.Heading { level: 2; text: i18n("Saved Servers") }
-                    Kirigami.PlaceholderMessage {
-                        FadeInOnShow {}
+                spacing: Kirigami.Units.largeSpacing
+                Kirigami.Heading { level: 2; text: i18n("Saved Servers") }
+                Kirigami.PlaceholderMessage {
+                    FadeInOnShow {}
+                    Layout.fillWidth: true
+                    visible: page.connection.servers.length === 0
+                    text: i18n("No servers yet")
+                    icon.name: "network-server"
+                }
+                Repeater {
+                    model: page.connection.servers
+                    delegate: Kirigami.AbstractCard {
+                        id: saved
+                        required property var modelData
+                        readonly property var status: page.connection.serverReachability[modelData.url] ?? ({})
+                        objectName: "savedServerEntry"
                         Layout.fillWidth: true
-                        visible: page.connection.servers.length === 0
-                        text: i18n("No servers yet")
-                        icon.name: "network-server"
-                    }
-                    Repeater {
-                        model: page.connection.servers
-                        delegate: ColumnLayout {
-                            id: saved
-                            required property var modelData
-                            readonly property var status: page.connection.serverReachability[modelData.url] ?? ({})
-                            objectName: "savedServerEntry"
-                            Layout.fillWidth: true
+                        contentItem: ColumnLayout {
                             spacing: Kirigami.Units.smallSpacing
                             Controls.Label {
                                 Layout.fillWidth: true
@@ -299,19 +326,16 @@ Kirigami.ScrollablePage {
                                     onClicked: page.connection.testServer(saved.modelData.url)
                                 }
                                 Controls.Button {
-                                    text: i18n("Delete")
+                                    // The word of the confirmation it opens
+                                    text: i18n("Remove")
                                     icon.name: "edit-delete-remove"
-                                    Accessible.name: i18n("Delete server %1", saved.modelData.url)
+                                    Accessible.name: i18n("Remove server %1", saved.modelData.url)
                                     onClicked: {
                                         removeDialog.serverId = saved.modelData.serverId;
                                         removeDialog.host = saved.modelData.url;
                                         removeDialog.open();
                                     }
                                 }
-                            }
-                            Kirigami.Separator {
-                                Layout.fillWidth: true
-                                Layout.topMargin: Kirigami.Units.smallSpacing
                             }
                         }
                     }

@@ -24,7 +24,7 @@ Kirigami.ScrollablePage {
     readonly property real cardHeight: Math.round((cardWidth - Kirigami.Units.smallSpacing * 2) * 3 / 2) + Kirigami.Units.gridUnit * 3.5
 
     title: i18n("Favorites")
-    // No title bar, as in the Movies and Shows tabs: the actions sit in a toolbar on top of the content, the header's star says which page this is
+    // No title bar, as in the Movies and Shows tabs: the actions sit in a toolbar on top of the content, the Favorites tab of the header says which page this is
     globalToolBarStyle: Kirigami.ApplicationHeaderStyle.None
     // Without Kirigami's title row the page names itself to a screen reader
     Accessible.role: Accessible.Pane
@@ -174,11 +174,9 @@ Kirigami.ScrollablePage {
     header: ColumnLayout {
         spacing: 0
 
-        // A Compact window hides the header's star, which otherwise names the page
         PageToolbar {
             Layout.fillWidth: true
             actions: page.actions
-            title: (page.Window.window?.compactHeader ?? false) ? page.title : ""
             toolbarObjectName: "favoritesToolbar"
             titleObjectName: "favoritesHeading"
         }

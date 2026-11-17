@@ -18,7 +18,7 @@ Kirigami.ScrollablePage {
     readonly property bool compactShell: Window.window ? Window.window.compactHeader : false
 
     title: i18n("Search")
-    // A section of the header, as Favorites and the queue: no title row, the header's box names it
+    // A section of the header, as the queue: no title row, the header's box names it
     globalToolBarStyle: Kirigami.ApplicationHeaderStyle.None
     // Without Kirigami's title row the page names itself to a screen reader
     Accessible.role: Accessible.Pane

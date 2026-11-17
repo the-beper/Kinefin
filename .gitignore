@@ -11,3 +11,5 @@ __pycache__/
 **/*.patch
 /docs/
 /build/flatpak/build-id
+/tests/fixtures/selfsigned_cert.pem
+/tests/fixtures/selfsigned_key.pem

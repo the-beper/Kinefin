@@ -61,11 +61,9 @@ Kirigami.ScrollablePage {
     header: ColumnLayout {
         spacing: 0
 
-        // A Compact window hides the header's Playlists button, which otherwise names the page
         PageToolbar {
             Layout.fillWidth: true
             actions: page.actions
-            title: (page.Window.window?.compactHeader ?? false) ? page.title : ""
             toolbarObjectName: "playlistsToolbar"
         }
 

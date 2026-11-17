@@ -306,6 +306,8 @@ class JellyfinClient final : public QObject {
     void quickConnectAwaitingApproval();
     void userViewsReady(const QJsonArray &items, int totalRecordCount);
     void requestFailed(int httpStatus, const QString &reason);
+    // The server probe of connectToServer ended on a TLS certificate that failed verification (self-signed, expired, wrong host, untrusted): emitted instead of requestFailed, so a caller never takes it for a network failure
+    void serverCertificateRejected();
     // A listing family failed (status 0 for a transport error): `family` is the fixed name of the fetcher ("Items", "Resume", "Latest", "NextUp", "Seasons", "Episodes", "Similar", "Genres", "Filters", "MovieRecommendations", "Suggestions", "Upcoming", "Studios", "PlaylistEntries", "Sessions"), the reason a fixed English string; a 401 also expires the session. Listings never emit requestFailed (fetchUserViews, the libraries call, still does), so the Home page error stays about the libraries only. "FiltersLegacy" never emits it: legacyFiltersFailed is its failure
     void listingFailed(const QString &family, int httpStatus, const QString &reason, int channel);
     // `userId` is the user whose session ended (userId() is already empty by then)
@@ -383,7 +385,7 @@ class JellyfinClient final : public QObject {
     void sendNextSyncPlayRequest();
     void finishPlaybackReport(QNetworkReply *reply);
     void clearToken();
-    void failProbe(int httpStatus, const QString &reason);
+    void failProbe(int httpStatus, const QString &reason, bool certificateRejected = false);
     // The shared status handling of the account preference calls: true for a 200 (or a 204 when `allowNoContent`) without a transport error; otherwise false with the status and the fixed reason (`failure`, or "Authentication expired" after a 401 that also expired the session)
     bool acceptAccountReply(QNetworkReply *finished, bool allowNoContent, const QString &failure,
                             int *status, QString *reason);

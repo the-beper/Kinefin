@@ -71,6 +71,13 @@ bool isLoopbackHost(const QUrl &url)
     return address.setAddress(url.host()) && address.isLoopback();
 }
 
+// Fixed text, never the server's: a certificate error stops the attempts instead of falling back to HTTP
+QString certificateErrorText()
+{
+    return i18n("The server's certificate is not valid: check the certificate, or the address and "
+                "the port");
+}
+
 // A name from the server is one line of text: control characters, line separators, zero-width and bidirectional marks become spaces, and whitespace runs one space
 QString singleLine(const QString &name)
 {
@@ -349,6 +356,13 @@ ConnectionController::ConnectionController(const QString &profileId, const QStri
     });
     connect(&m_client, &JellyfinClient::requestFailed, this,
             [this](int status) { onRequestFailed(status); });
+    connect(&m_client, &JellyfinClient::serverCertificateRejected, this, [this] {
+        if (m_state != Connecting)
+            return;
+        m_connectionFallback.clear();
+        setError(certificateErrorText());
+        setState(Idle);
+    });
     connect(&m_client, &JellyfinClient::userViewsReady, this,
             [this](const QJsonArray &items) { onUserViews(items); });
     // The session's configuration is read once after sign-in for Home: a load of the preferences page that ends Ready adopts the server's data too, and a verified save projects at once
@@ -402,33 +416,34 @@ void ConnectionController::start()
 
 // Discovery is deliberately independent of the authenticated JellyfinClient. Never
 // forward passwords, cookies or the Jellyfin access token to a host being tested.
-// Only well-formed HTTP(S) URLs are accepted; fallback never changes the scheme/host/path.
+// Only well-formed HTTP(S) URLs are accepted. An address with a scheme keeps it: the fallback only moves to the other standard port of the same scheme. An address without one (host, host:port, [ipv6]:port) tries https then http
 QList<QUrl> ConnectionController::connectionCandidates(const QString &address,
                                                        bool standardPortFallback)
 {
-    QUrl url(address.trimmed());
+    const QString text = address.trimmed();
+    const bool explicitScheme = text.contains(QLatin1String("://"));
+    QUrl url(explicitScheme ? text : QLatin1String("https://") + text);
     if (!url.isValid() || url.isRelative() || url.host().isEmpty()
         || (url.scheme() != QLatin1String("http") && url.scheme() != QLatin1String("https"))
         || !url.userName().isEmpty() || !url.password().isEmpty() || url.hasQuery()
         || url.hasFragment() || url.port(-1) == 0 || address.size() > 2048)
         return {};
-    QList<QUrl> result{url};
-    const bool tls = url.scheme() == QLatin1String("https");
-    const int primary = tls ? 8920 : 8096;
-    const int standard = tls ? 443 : 80;
-    // Custom ports must remain explicit. A fallback is allowed only from the
-    // standard Jellyfin port (or the scheme's default) selected in the form.
-    const int selected = url.port(standard);
-    if (standardPortFallback && (selected == primary || selected == standard)) {
-        for (const int port : {primary, standard}) {
-            if (port == selected)
-                continue;
-            QUrl alternative(url);
-            alternative.setPort(port);
-            result.append(alternative);
-        }
+    if (!explicitScheme) {
+        if (!standardPortFallback)
+            return {url};
+        QUrl plain(url);
+        plain.setScheme(QStringLiteral("http"));
+        // A typed port is tried as given on both schemes; none means the four usual endpoints, https first
+        if (url.port(-1) != -1)
+            return {url, plain};
+        QUrl secureAlternative(url);
+        secureAlternative.setPort(8920);
+        QUrl plainPrimary(plain);
+        plainPrimary.setPort(8096);
+        return {url, secureAlternative, plainPrimary, plain};
     }
-    return result;
+    // An address with a scheme (a saved server) is exactly that endpoint
+    return {url};
 }
 
 void ConnectionController::setReachability(const QString &key, bool testing, bool reachable,
@@ -465,22 +480,36 @@ void ConnectionController::startProbeCheck(const QString &key, const QList<QUrl>
     request.setTransferTimeout(4000);
     QNetworkReply *reply = m_probeNetwork.get(request);
     m_probeReplies.insert(key, reply);
+    // sslErrors fires only for a certificate that failed verification, never for a port that does not speak TLS
+    connect(reply, &QNetworkReply::sslErrors, reply,
+            [reply] { reply->setProperty("certificateRejected", true); });
     connect(
         reply, &QNetworkReply::finished, this, [this, key, candidates, index, generation, reply] {
             const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
             const bool ok = reply->error() == QNetworkReply::NoError && status == 200
                             && reply->bytesAvailable() <= 32768;
             const QByteArray body = ok ? reply->readAll() : QByteArray();
+            const bool certificateRejected = reply->error() != QNetworkReply::NoError
+                                             && reply->property("certificateRejected").toBool();
             reply->deleteLater();
             if (m_probeGeneration.value(key) != generation)
                 return;
+            if (certificateRejected) {
+                m_probeReplies.remove(key);
+                setReachability(key, false, false, certificateErrorText());
+                return;
+            }
             if (ok) {
                 const QJsonDocument json = QJsonDocument::fromJson(body);
                 if (json.isObject()
                     && !json.object().value(QStringLiteral("Id")).toString().isEmpty()) {
                     m_probeReplies.remove(key);
-                    setReachability(key, false, true, i18n("Jellyfin server reachable"),
-                                    candidates.at(index));
+                    // A key without a scheme was tried on several endpoints: the message says which one answered
+                    QString message = i18n("Jellyfin server reachable");
+                    if (!key.contains(QLatin1String("://")))
+                        message = i18n("Jellyfin server reachable at %1",
+                                       candidates.at(index).toString());
+                    setReachability(key, false, true, message, candidates.at(index));
                     return;
                 }
             }
@@ -930,7 +959,8 @@ void ConnectionController::onRequestFailed(int status)
 {
     switch (m_state) {
     case Connecting:
-        if (status == 0 && !m_connectionFallback.isEmpty()) {
+        // Any failed candidate moves on, as the Test probe does: a web server answering 404 on 443 is no Jellyfin server. A rejected certificate never gets here, it empties the list
+        if (!m_connectionFallback.isEmpty()) {
             tryNextConnection();
             return;
         }

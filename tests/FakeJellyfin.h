@@ -176,6 +176,8 @@ class FakeJellyfin {
     QByteArray lastUserImageAuth;
 
     int publicInfoRequests = 0;
+    // TLS ClientHellos received on the plain port: a real HTTP server closes on them, and so does this one
+    int tlsAttempts = 0;
     QByteArray lastPublicInfoAuth;
     bool invalidIdentity = false;
     bool denyLogin = false;
@@ -935,6 +937,12 @@ class FakeJellyfin {
             return;
         QByteArray &input = m_buffers[socket];
         input.append(socket->readAll());
+        if (input.startsWith('\x16')) {
+            ++tlsAttempts;
+            m_buffers.remove(socket);
+            socket->disconnectFromHost();
+            return;
+        }
         const qsizetype end = input.indexOf("\r\n\r\n");
         if (end < 0)
             return;
