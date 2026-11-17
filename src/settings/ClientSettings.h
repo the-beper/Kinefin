@@ -21,6 +21,11 @@ class SettingsSectionModel;
 // The client settings of one profile (parity §2), stored in a KConfig file whose groups are the parity sections. Only values that differ from the default are written, and nothing is written until the first change. Every read and write goes through `SettingDefinition`: an unknown key, a hidden key, a value of the wrong type or outside a closed list is refused on write and replaced by the default on read
 class ClientSettings final : public QObject {
     Q_OBJECT
+    // The stored `main.ignoreSSLErrors` or the `--ignore-certificate-errors` flag of this run: invalid TLS certificates of the server are accepted
+    Q_PROPERTY(bool certificateErrorsIgnored READ certificateErrorsIgnored NOTIFY
+                   certificateErrorsIgnoredChanged)
+    Q_PROPERTY(bool certificateErrorsIgnoredByCommandLine READ certificateErrorsIgnoredByCommandLine
+                   CONSTANT)
 
   public:
     static constexpr int kFormatVersion = 1;
@@ -51,8 +56,17 @@ class ClientSettings final : public QObject {
 
     [[nodiscard]] DeviceProfileOptions deviceProfileOptions() const;
 
+    [[nodiscard]] bool certificateErrorsIgnored() const;
+    [[nodiscard]] bool certificateErrorsIgnoredByCommandLine() const
+    {
+        return m_certificateErrorsIgnoredByCommandLine;
+    }
+    // Set once at startup, before the UI loads; the flag is never written to the stored setting
+    void setCertificateErrorsIgnoredByCommandLine(bool ignored);
+
   Q_SIGNALS:
     void valueChanged(const QString &section, const QString &key);
+    void certificateErrorsIgnoredChanged();
     // A change is kept in memory but could not be written (read-only file or directory, newer format that could not be moved aside)
     void saveFailed();
 
@@ -68,5 +82,6 @@ class ClientSettings final : public QObject {
     QHash<QString, SettingsSectionModel *> m_models;
     // Keys already reported as invalid, so one bad hand edit logs once
     mutable QSet<QString> m_warned;
+    bool m_certificateErrorsIgnoredByCommandLine = false;
 };
 } // namespace Kinefin

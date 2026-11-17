@@ -74,8 +74,8 @@ bool isLoopbackHost(const QUrl &url)
 // Fixed text, never the server's: a certificate error stops the attempts instead of falling back to HTTP
 QString certificateErrorText()
 {
-    return i18n("The server's certificate is not valid: check the certificate, or the address and "
-                "the port");
+    return i18n("The server's certificate is not valid: check the certificate, the address and the "
+                "port, or turn on Ignore Certificate Errors in Settings");
 }
 
 // A name from the server is one line of text: control characters, line separators, zero-width and bidirectional marks become spaces, and whitespace runs one space
@@ -254,6 +254,13 @@ ConnectionController::ConnectionController(const QString &profileId, const QStri
         m_browse.setStoragePath(dataDirectory + QStringLiteral("/browse.json"));
     }
     m_remoteCommands.attach(&m_socket);
+    // The error is accepted only while the setting is on; otherwise it is remembered, so a probe that ends in an error afterwards is told from a plain failure
+    connect(&m_probeNetwork, &QNetworkAccessManager::sslErrors, this, [this](QNetworkReply *reply) {
+        if (m_ignoreCertificateErrors)
+            reply->ignoreSslErrors();
+        else
+            reply->setProperty("certificateRejected", true);
+    });
     // The network coming back reconnects the socket at once instead of after its backoff (best effort: no backend, no wake-up)
     if (QNetworkInformation::loadBackendByFeatures(QNetworkInformation::Feature::Reachability)) {
         connect(QNetworkInformation::instance(), &QNetworkInformation::reachabilityChanged, this,
@@ -480,9 +487,6 @@ void ConnectionController::startProbeCheck(const QString &key, const QList<QUrl>
     request.setTransferTimeout(4000);
     QNetworkReply *reply = m_probeNetwork.get(request);
     m_probeReplies.insert(key, reply);
-    // sslErrors fires only for a certificate that failed verification, never for a port that does not speak TLS
-    connect(reply, &QNetworkReply::sslErrors, reply,
-            [reply] { reply->setProperty("certificateRejected", true); });
     connect(
         reply, &QNetworkReply::finished, this, [this, key, candidates, index, generation, reply] {
             const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
@@ -1439,7 +1443,20 @@ void ConnectionController::setState(State state)
 void ConnectionController::setImageOrigin(std::shared_ptr<ImageOrigin> origin)
 {
     m_imageOrigin = std::move(origin);
+    if (m_imageOrigin)
+        m_imageOrigin->setIgnoreCertificateErrors(m_ignoreCertificateErrors);
     updateImageOrigin();
+}
+
+void ConnectionController::setIgnoreCertificateErrors(bool ignore)
+{
+    // As in the client: no probe connection accepted with an invalid certificate outlives the option
+    if (m_ignoreCertificateErrors && !ignore)
+        m_probeNetwork.clearConnectionCache();
+    m_ignoreCertificateErrors = ignore;
+    m_client.setIgnoreCertificateErrors(ignore);
+    if (m_imageOrigin)
+        m_imageOrigin->setIgnoreCertificateErrors(ignore);
 }
 
 bool ConnectionController::imagesAllowed() const

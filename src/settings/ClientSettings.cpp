@@ -20,6 +20,8 @@ namespace Kinefin {
 namespace {
 const QString kGeneral = QStringLiteral("General");
 const QString kVersion = QStringLiteral("version");
+const QString kMain = QStringLiteral("main");
+const QString kIgnoreCertificateErrors = QStringLiteral("ignoreSSLErrors");
 
 QString memoryKey(const QString &section, const QString &key)
 {
@@ -165,6 +167,10 @@ bool ClientSettings::store(const SettingDefinition &definition, const QVariant &
     else
         m_memory.insert(id, checked);
     Q_EMIT valueChanged(section, key);
+    // With the command-line flag on, the effective value stays true whatever is stored
+    if (section == kMain && key == kIgnoreCertificateErrors
+        && !m_certificateErrorsIgnoredByCommandLine)
+        Q_EMIT certificateErrorsIgnoredChanged();
     if (!saved) {
         if (reportFailure)
             Q_EMIT saveFailed();
@@ -236,6 +242,22 @@ QStringList ClientSettings::sectionGroups(const QString &section) const
             groups.append(heading);
     }
     return groups;
+}
+
+bool ClientSettings::certificateErrorsIgnored() const
+{
+    return m_certificateErrorsIgnoredByCommandLine
+           || value(kMain, kIgnoreCertificateErrors).toBool();
+}
+
+void ClientSettings::setCertificateErrorsIgnoredByCommandLine(bool ignored)
+{
+    if (ignored == m_certificateErrorsIgnoredByCommandLine)
+        return;
+    const bool before = certificateErrorsIgnored();
+    m_certificateErrorsIgnoredByCommandLine = ignored;
+    if (certificateErrorsIgnored() != before)
+        Q_EMIT certificateErrorsIgnoredChanged();
 }
 
 DeviceProfileOptions ClientSettings::deviceProfileOptions() const

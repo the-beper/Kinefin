@@ -19,6 +19,9 @@ Loader {
     required property real maximum
     // The heading of the group the row sits under: a short label ("Color" under Border) is read with it
     property string groupTitle: ""
+    // --ignore-certificate-errors forces ignoreSSLErrors on for the run: its switch shows on and cannot be turned off
+    property bool certificateErrorsForced: false
+    readonly property bool forced: key === "ignoreSSLErrors" && certificateErrorsForced
     readonly property string accessibleLabel: groupTitle.length > 0 ? i18nc("@info:accessible a settings group heading and a setting under it", "%1: %2", groupTitle, label) : label
 
     Layout.fillWidth: true
@@ -42,8 +45,18 @@ Loader {
         FormCard.FormSwitchDelegate {
             Accessible.name: row.accessibleLabel
             text: row.label
-            description: row.key === "newBadge" ? i18n("Items added within the last 7 days are marked New until they are played") : ""
-            checked: row.value
+            description: {
+                switch (row.key) {
+                case "newBadge":
+                    return i18n("Items added within the last 7 days are marked New until they are played");
+                case "ignoreSSLErrors":
+                    return row.forced ? i18n("On for this run: Kinefin was started with --ignore-certificate-errors")
+                                      : i18n("Accepts invalid server certificates. Unsafe on networks you do not trust");
+                }
+                return "";
+            }
+            checked: row.forced || row.value
+            enabled: !row.forced
             onToggled: row.model.value = checked
         }
     }

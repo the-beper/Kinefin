@@ -304,6 +304,16 @@ Kirigami.Page {
                         spacing: 0
                         visible: page.activeSection !== "user"
 
+                        MessageBox {
+                            objectName: "certificateErrorsWarning"
+                            Layout.fillWidth: true
+                            Layout.topMargin: Kirigami.Units.largeSpacing
+                            Layout.bottomMargin: Kirigami.Units.largeSpacing
+                            visible: page.activeSection === "main" && (page.settings.certificateErrorsIgnored ?? false)
+                            type: Kirigami.MessageType.Warning
+                            text: (page.settings.certificateErrorsIgnoredByCommandLine ?? false) ? i18n("Certificate errors are ignored for this run (--ignore-certificate-errors): anyone on the network could read the password and the session") : i18n("Certificate errors are ignored: anyone on the network could read the password and the session")
+                        }
+
                         Repeater {
                             model: page.settings.sectionGroups(page.activeSection)
                             delegate: ColumnLayout {
@@ -327,6 +337,7 @@ Kirigami.Page {
                                         model: page.settings.sectionModel(page.activeSection, group.modelData)
                                         delegate: SettingRow {
                                             groupTitle: group.modelData
+                                            certificateErrorsForced: page.settings.certificateErrorsIgnoredByCommandLine
                                         }
                                     }
                                 }

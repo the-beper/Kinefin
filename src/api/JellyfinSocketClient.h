@@ -92,6 +92,8 @@ class JellyfinSocketClient final : public QObject {
     quint64 m_generation = 0;
     State m_state = State::Disconnected;
     bool m_sessionsSubscribed = false;
+    // Whether the socket of this attempt was accepted with an invalid certificate: only such a socket is reopened when the option goes off
+    bool m_acceptedInvalidCertificate = false;
     // One count for every frame a validation rule rejected; never their contents
     int m_droppedFrames = 0;
     int m_oversizeFrames = 0;

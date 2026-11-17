@@ -7279,6 +7279,63 @@ class TestUiPages : public QObject {
         }
     }
 
+    void theGeneralSettingsWarnWhileCertificateErrorsAreIgnored()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(
+            ui.settings.setValue(QStringLiteral("main"), QStringLiteral("ignoreSSLErrors"), false));
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("settings")));
+        auto *page = ui.item(QStringLiteral("settingsPage"));
+        QVERIFY(page);
+        QCOMPARE(page->property("activeSection").toString(), QStringLiteral("main"));
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Ignore Certificate Errors")));
+        QQuickItem *warning = ui.item(QStringLiteral("certificateErrorsWarning"));
+        QVERIFY(warning);
+        QVERIFY(!warning->isVisible());
+
+        QVERIFY(
+            ui.settings.setValue(QStringLiteral("main"), QStringLiteral("ignoreSSLErrors"), true));
+        QTRY_VERIFY(warning->isVisible());
+        QCOMPARE(warning->property("text").toString(),
+                 QStringLiteral("Certificate errors are ignored: anyone on the network could read "
+                                "the password and the session"));
+
+        QVERIFY(
+            ui.settings.setValue(QStringLiteral("main"), QStringLiteral("ignoreSSLErrors"), false));
+        QTRY_VERIFY(!warning->isVisible());
+    }
+
+    // Forced by --ignore-certificate-errors: the box says so even with the switch off, which cannot undo it
+    void theGeneralSettingsSayWhenTheCommandLineIgnoresCertificateErrors()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(
+            ui.settings.setValue(QStringLiteral("main"), QStringLiteral("ignoreSSLErrors"), false));
+        ui.settings.setCertificateErrorsIgnoredByCommandLine(true);
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("settings")));
+        QQuickItem *warning = ui.item(QStringLiteral("certificateErrorsWarning"));
+        QVERIFY(warning);
+        QTRY_VERIFY(warning->isVisible());
+        QVERIFY(warning->property("text").toString().contains(
+            QStringLiteral("for this run (--ignore-certificate-errors)")));
+        // The switch says it too: on, and out of reach for the run
+        QQuickItem *toggle = nullptr;
+        for (QQuickItem *candidate : allItems(ui.item(QStringLiteral("settingsPage")))) {
+            if (QString::fromLatin1(candidate->metaObject()->className())
+                    .contains(QLatin1String("FormSwitchDelegate"))
+                && candidate->property("text").toString()
+                       == QStringLiteral("Ignore Certificate Errors"))
+                toggle = candidate;
+        }
+        QVERIFY(toggle);
+        QVERIFY(toggle->property("checked").toBool());
+        QVERIFY(!toggle->isEnabled());
+        QVERIFY(
+            !ui.settings.value(QStringLiteral("main"), QStringLiteral("ignoreSSLErrors")).toBool());
+    }
+
     void theRedesignedSettingsAreResponsive()
     {
         Ui ui(m_home->path());

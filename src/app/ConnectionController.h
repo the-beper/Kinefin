@@ -172,6 +172,8 @@ class ConnectionController : public QObject {
 
     // The place images may be fetched from: the server URL while Authenticated, ChoosingUser or NeedsLogin (the avatars), nothing in every other state. Shared with the image fetcher, which runs on QML's network thread
     void setImageOrigin(std::shared_ptr<ImageOrigin> origin);
+    // Accept the server's invalid TLS certificates on every connection this controller owns (the API client, the reachability probes, the WebSocket and, through the image origin, the image fetchers); follows `ClientSettings::certificateErrorsIgnored`. New requests and connections follow at once; an open WebSocket is reopened when the value turns off
+    void setIgnoreCertificateErrors(bool ignore);
 
     // For tests; the default is 5 s
     void setQuickConnectPollInterval(std::chrono::milliseconds interval);
@@ -369,6 +371,7 @@ class ConnectionController : public QObject {
     QVariantList m_servers;
     QVariantMap m_serverReachability;
     QNetworkAccessManager m_probeNetwork;
+    bool m_ignoreCertificateErrors = false;
     QHash<QString, QPointer<QNetworkReply>> m_probeReplies;
     QHash<QString, quint64> m_probeGeneration;
     QList<QUrl> m_connectionFallback;

@@ -7,6 +7,7 @@
 #include <QJsonParseError>
 #include <QRandomGenerator>
 #include <QSet>
+#include <QSslError>
 #include <QWebSocket>
 #include <QWebSocketProtocol>
 
@@ -119,6 +120,12 @@ JellyfinSocketClient::JellyfinSocketClient(JellyfinClient *client, QObject *pare
         connect(m_client, &JellyfinClient::credentialsCleared, this,
                 [this] { stopForCredentialsLoss(); });
         connect(m_client, &QObject::destroyed, this, [this] { stopForCredentialsLoss(); });
+        // A connection accepted with an invalid certificate must not outlive the setting: reopen it, verified
+        connect(m_client, &JellyfinClient::ignoreCertificateErrorsChanged, this,
+                [this](bool ignore) {
+                    if (!ignore && m_acceptedInvalidCertificate && m_state != State::Disconnected)
+                        start();
+                });
     }
 }
 
@@ -186,6 +193,7 @@ void JellyfinSocketClient::beginAttempt()
     m_oversizeFrames = 0;
     const quint64 generation = ++m_generation;
     m_socket = new QWebSocket(QString(), QWebSocketProtocol::VersionLatest, this);
+    m_acceptedInvalidCertificate = false;
     connect(m_socket, &QWebSocket::connected, this,
             [this, generation] { onConnected(generation); });
     connect(m_socket, &QWebSocket::disconnected, this,
@@ -196,6 +204,15 @@ void JellyfinSocketClient::beginAttempt()
                     return;
                 // The enum only, never errorString(): a localized message may carry paths or headers
                 qCWarning(socketLog) << "socket error" << int(error);
+            });
+    // Accepted only while the setting is on, and only for this attempt's socket
+    connect(m_socket, &QWebSocket::sslErrors, this,
+            [this, generation](const QList<QSslError> &errors) {
+                if (generation == m_generation && m_socket && m_client
+                    && m_client->ignoresCertificateErrors()) {
+                    m_socket->ignoreSslErrors(errors);
+                    m_acceptedInvalidCertificate = true;
+                }
             });
     connect(m_socket, &QWebSocket::textMessageReceived, this,
             [this, generation](const QString &text) { onTextMessage(generation, text); });

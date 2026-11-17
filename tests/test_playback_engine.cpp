@@ -329,6 +329,74 @@ class TestPlaybackEngine : public QObject {
         QCOMPARE(mpv.displayRate(), QGuiApplication::primaryScreen()->refreshRate());
     }
 
+    void theCertificateBundleIsTheFirstReadableCandidate()
+    {
+        QTemporaryDir bundles;
+        QVERIFY(bundles.isValid());
+        const QString second = bundles.filePath(QStringLiteral("second.crt"));
+        const QString third = bundles.filePath(QStringLiteral("third.crt"));
+        for (const QString &path : {second, third}) {
+            QFile file(path);
+            QVERIFY(file.open(QIODevice::WriteOnly));
+        }
+        const QString missing = bundles.filePath(QStringLiteral("missing.crt"));
+        // A directory is not a bundle
+        QCOMPARE(PlayerSettings::detectCertBundle({bundles.path(), missing, second, third}),
+                 second);
+        QCOMPARE(PlayerSettings::detectCertBundle({missing, third}), third);
+        QVERIFY(PlayerSettings::detectCertBundle({missing}).isEmpty());
+        QVERIFY(PlayerSettings::detectCertBundle({}).isEmpty());
+        QVERIFY(PlayerSettings::certBundleCandidates().contains(
+            QStringLiteral("/etc/ssl/certs/ca-certificates.crt")));
+    }
+
+    void tlsFollowsTheCertificateSettingsAndMpvConfWinsLast()
+    {
+        JellyfinClient client;
+        PlaybackSession session;
+        PlaybackEngine engine(client, session);
+        QVERIFY(engine.init({QStringLiteral("vo=null"), QStringLiteral("ao=null")}));
+        ClientSettings settings(dir.filePath(QStringLiteral("tls.conf")));
+        PlayerSettings mpv(settings, engine);
+        const QString detected =
+            PlayerSettings::detectCertBundle(PlayerSettings::certBundleCandidates());
+        const auto verify = [&engine] {
+            return engine.mpvProperty(QStringLiteral("tls-verify")).toBool();
+        };
+        const auto bundle = [&engine] {
+            return engine.mpvProperty(QStringLiteral("tls-ca-file")).toString();
+        };
+        // At start: verified, with the detected bundle (the host may have none)
+        mpv.apply();
+        QVERIFY(verify());
+        QCOMPARE(bundle(), detected);
+        // The effective value follows at once, from the setting and from the command line alike
+        QVERIFY(settings.setValue(QStringLiteral("main"), QStringLiteral("ignoreSSLErrors"), true));
+        QVERIFY(!verify());
+        QVERIFY(
+            settings.setValue(QStringLiteral("main"), QStringLiteral("ignoreSSLErrors"), false));
+        QVERIFY(verify());
+        settings.setCertificateErrorsIgnoredByCommandLine(true);
+        QVERIFY(!verify());
+        // Turned off during a session the bundle stays until the next start: an empty string would be a path to mpv, not "unset"
+        if (!detected.isEmpty()) {
+            QVERIFY(settings.setValue(QStringLiteral("main"),
+                                      QStringLiteral("autodetectCertBundle"), false));
+            QCOMPARE(bundle(), detected);
+            QVERIFY(settings.setValue(QStringLiteral("main"),
+                                      QStringLiteral("autodetectCertBundle"), true));
+            QCOMPARE(bundle(), detected);
+        }
+        // The user's mpv.conf is applied after both
+        ClientSettings custom(
+            settingsFile(dir, QStringLiteral("tls-custom.conf"),
+                         "[other]\nother_conf=tls-verify=no\\ntls-ca-file=/x.pem\n"));
+        PlayerSettings customMpv(custom, engine);
+        customMpv.apply();
+        QVERIFY(!verify());
+        QCOMPARE(bundle(), QStringLiteral("/x.pem"));
+    }
+
     void aspectChoiceAppliesAtOnceAndSurvivesEveryApply()
     {
         JellyfinClient client;

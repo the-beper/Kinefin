@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: kinefin 0\n"
 "Report-Msgid-Bugs-To: https://github.com/the-beper/Kinefin/issues\n"
-"POT-Creation-Date: 2026-11-17 17:55+0000\n"
+"POT-Creation-Date: 2026-11-17 22:43+0000\n"
 "PO-Revision-Date: 2026-11-07 00:00+0000\n"
 "Last-Translator: the-beper\n"
 "Language-Team: Italian\n"
@@ -15,11 +15,14 @@ msgstr ""
 
 #: src/app/ConnectionController.cpp:77
 msgid ""
-"The server's certificate is not valid: check the certificate, or the address "
-"and the port"
-msgstr "Il certificato del server non è valido: controlla il certificato o l'indirizzo e la porta"
+"The server's certificate is not valid: check the certificate, the address "
+"and the port, or turn on Ignore Certificate Errors in Settings"
+msgstr ""
+"Il certificato del server non è valido: controlla il certificato, "
+"l'indirizzo e la porta, oppure attiva Ignora errori del certificato in "
+"Impostazioni"
 
-#: src/app/ConnectionController.cpp:336
+#: src/app/ConnectionController.cpp:343
 msgid ""
 "Could not save the session in KWallet. You will have to sign in again next "
 "time"
@@ -27,48 +30,48 @@ msgstr ""
 "Impossibile salvare la sessione in KWallet. Dovrai accedere di nuovo al "
 "prossimo avvio"
 
-#: src/app/ConnectionController.cpp:469
+#: src/app/ConnectionController.cpp:476
 msgid "Server not reachable"
 msgstr "Server non raggiungibile"
 
-#: src/app/ConnectionController.cpp:508
+#: src/app/ConnectionController.cpp:512
 msgid "Jellyfin server reachable"
 msgstr "Server Jellyfin raggiungibile"
 
-#: src/app/ConnectionController.cpp:510
+#: src/app/ConnectionController.cpp:514
 msgid "Jellyfin server reachable at %1"
 msgstr "Server Jellyfin raggiungibile su %1"
 
-#: src/app/ConnectionController.cpp:534 src/app/ConnectionController.cpp:556
-#: src/app/ConnectionController.cpp:592
+#: src/app/ConnectionController.cpp:538 src/app/ConnectionController.cpp:560
+#: src/app/ConnectionController.cpp:596
 msgid "Enter a valid server address"
 msgstr "Inserisci un indirizzo di server valido"
 
-#: src/app/ConnectionController.cpp:537
+#: src/app/ConnectionController.cpp:541
 msgid "Testing connection…"
 msgstr "Connessione in corso…"
 
-#: src/app/ConnectionController.cpp:588
+#: src/app/ConnectionController.cpp:592
 msgid "The device identity of this profile is invalid"
 msgstr "L'identità del dispositivo di questo profilo non è valida"
 
-#: src/app/ConnectionController.cpp:625
+#: src/app/ConnectionController.cpp:629
 msgid "Could not read the saved session. Enter the password"
 msgstr "Impossibile leggere la sessione salvata. Inserisci la password"
 
-#: src/app/ConnectionController.cpp:686
+#: src/app/ConnectionController.cpp:690
 msgid "Enter a username and a password"
 msgstr "Inserisci nome utente e password"
 
-#: src/app/ConnectionController.cpp:698
+#: src/app/ConnectionController.cpp:702
 msgid "Quick Connect is not available"
 msgstr "Quick Connect non è disponibile"
 
-#: src/app/ConnectionController.cpp:954
+#: src/app/ConnectionController.cpp:958
 msgid "Your session has expired. Sign in again"
 msgstr "La sessione è scaduta. Accedi di nuovo"
 
-#: src/app/ConnectionController.cpp:969
+#: src/app/ConnectionController.cpp:973
 msgid ""
 "Could not reach a Jellyfin server. Check the address and your network "
 "connection"
@@ -76,23 +79,23 @@ msgstr ""
 "Impossibile raggiungere un server Jellyfin. Controlla l'indirizzo e la "
 "connessione di rete"
 
-#: src/app/ConnectionController.cpp:973
+#: src/app/ConnectionController.cpp:977
 msgid "Wrong username or password"
 msgstr "Nome utente o password errati"
 
-#: src/app/ConnectionController.cpp:974
+#: src/app/ConnectionController.cpp:978
 msgid "Signing in failed. Try again, or check the server"
 msgstr "Accesso non riuscito. Riprova o controlla il server"
 
-#: src/app/ConnectionController.cpp:979
+#: src/app/ConnectionController.cpp:983
 msgid "Quick Connect is not available on this server"
 msgstr "Quick Connect non è disponibile su questo server"
 
-#: src/app/ConnectionController.cpp:980
+#: src/app/ConnectionController.cpp:984
 msgid "Quick Connect failed or expired. Start it again"
 msgstr "Quick Connect non riuscito o scaduto. Avvialo di nuovo"
 
-#: src/app/ConnectionController.cpp:987
+#: src/app/ConnectionController.cpp:991
 msgid "Could not load the libraries. Try again"
 msgstr "Impossibile caricare le librerie. Riprova"
 
@@ -197,7 +200,7 @@ msgstr "Riproduzione video"
 msgid "A native Jellyfin client for KDE Plasma"
 msgstr "Un client Jellyfin nativo per KDE Plasma"
 
-#: src/main.cpp:252
+#: src/main.cpp:262
 msgid "The Kinefin interface could not be loaded"
 msgstr "Impossibile caricare l'interfaccia di Kinefin"
 
@@ -225,6 +228,7 @@ msgstr "Controlla aggiornamenti"
 
 #: src/settings/SettingDefinitions.cpp:98
 #: src/settings/SettingDefinitions.cpp:120
+#: src/settings/SettingDefinitions.cpp:131
 #: src/settings/SettingDefinitions.cpp:142
 msgid "Application"
 msgstr "Applicazione"
@@ -232,6 +236,10 @@ msgstr "Applicazione"
 #: src/settings/SettingDefinitions.cpp:119
 msgid "Enable Input Repeat"
 msgstr "Attiva la ripetizione dell'input"
+
+#: src/settings/SettingDefinitions.cpp:130
+msgid "Ignore Certificate Errors"
+msgstr "Ignora errori del certificato"
 
 #: src/settings/SettingDefinitions.cpp:141
 msgid "Auto-Detect Certificate Bundle"
@@ -650,7 +658,7 @@ msgstr "Mostra tutto in %1"
 #: src/qml/QueuePage.qml:253 src/qml/FilterDialog.qml:403
 #: src/qml/FilterDialog.qml:410 src/qml/GenreRailsView.qml:74
 #: src/qml/GenreRailsView.qml:173 src/qml/LibraryContent.qml:335
-#: src/qml/SettingsPage.qml:374 src/qml/UserPreferencesForm.qml:301
+#: src/qml/SettingsPage.qml:385 src/qml/UserPreferencesForm.qml:301
 #: src/qml/UserPreferencesForm.qml:635
 msgid "Loading…"
 msgstr "Caricamento…"
@@ -3648,7 +3656,9 @@ msgctxt "@info %1 is the HTTP address that answered"
 msgid ""
 "HTTPS did not answer, only %1 did: your username, password and session would "
 "travel unencrypted"
-msgstr "HTTPS non ha risposto, solo %1: nome utente, password e sessione viaggerebbero non cifrati"
+msgstr ""
+"HTTPS non ha risposto, solo %1: nome utente, password e sessione "
+"viaggerebbero non cifrati"
 
 #: src/qml/ServersPage.qml:105
 msgid ""
@@ -3693,11 +3703,14 @@ msgstr "Porta"
 msgid ""
 "HTTPS is tried before HTTP, and an empty port tries 443 and 8920, then 8096 "
 "and 80"
-msgstr "HTTPS viene provato prima di HTTP, e una porta vuota prova 443 e 8920, poi 8096 e 80"
+msgstr ""
+"HTTPS viene provato prima di HTTP, e una porta vuota prova 443 e 8920, poi "
+"8096 e 80"
 
 #: src/qml/ServersPage.qml:188
 msgid "Enter only the domain or IP address, without a scheme or a path"
-msgstr "Inserisci solo il dominio o l'indirizzo IP, senza protocollo né percorso"
+msgstr ""
+"Inserisci solo il dominio o l'indirizzo IP, senza protocollo né percorso"
 
 #: src/qml/ServersPage.qml:189
 msgid "Enter a port from 1 to 65535, or leave it empty"
@@ -3731,16 +3744,25 @@ msgstr "Non verificato"
 msgid "Remove server %1"
 msgstr "Rimuovi server %1"
 
-#: src/qml/SettingRow.qml:22
+#: src/qml/SettingRow.qml:25
 msgctxt "@info:accessible a settings group heading and a setting under it"
 msgid "%1: %2"
 msgstr "%1: %2"
 
-#: src/qml/SettingRow.qml:45
+#: src/qml/SettingRow.qml:51
 msgid "Items added within the last 7 days are marked New until they are played"
 msgstr ""
 "Gli elementi aggiunti negli ultimi 7 giorni sono contrassegnati come nuovi "
 "finché non vengono riprodotti"
+
+#: src/qml/SettingRow.qml:53
+msgid "On for this run: Kinefin was started with --ignore-certificate-errors"
+msgstr "Attivo per questo avvio: Kinefin è stato avviato con --ignore-certificate-errors"
+
+#: src/qml/SettingRow.qml:54
+msgid ""
+"Accepts invalid server certificates. Unsafe on networks you do not trust"
+msgstr "Accetta certificati del server non validi. Non sicuro sulle reti di cui non ti fidi"
 
 #: src/qml/SettingsPage.qml:20
 msgid "Settings"
@@ -3779,12 +3801,24 @@ msgctxt "@title:group"
 msgid "Settings"
 msgstr "Impostazioni"
 
-#: src/qml/SettingsPage.qml:337
+#: src/qml/SettingsPage.qml:314
+msgid ""
+"Certificate errors are ignored for this run (--ignore-certificate-errors): "
+"anyone on the network could read the password and the session"
+msgstr "Gli errori del certificato sono ignorati per questo avvio (--ignore-certificate-errors): chiunque sulla rete potrebbe leggere la password e la sessione"
+
+#: src/qml/SettingsPage.qml:314
+msgid ""
+"Certificate errors are ignored: anyone on the network could read the "
+"password and the session"
+msgstr "Gli errori del certificato sono ignorati: chiunque sulla rete potrebbe leggere la password e la sessione"
+
+#: src/qml/SettingsPage.qml:348
 msgctxt "@title:group"
 msgid "Jellyfin account"
 msgstr "Account Jellyfin"
 
-#: src/qml/SettingsPage.qml:348
+#: src/qml/SettingsPage.qml:359
 msgid "Stored on your Jellyfin server"
 msgstr "Salvato sul tuo server Jellyfin"
 

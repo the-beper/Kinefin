@@ -32,6 +32,7 @@ class ImageNetworkAccess : public QNetworkAccessManager {
 
   private:
     std::shared_ptr<ImageOrigin> m_origin;
+    quint64 m_acceptanceSeen = 0;
     qint64 m_maxImageBytes = kMaxImageBytes;
 };
 

@@ -5,6 +5,7 @@
 #include "player/PlaybackEngine.h"
 #include "settings/ClientSettings.h"
 
+#include <QFileInfo>
 #include <QGuiApplication>
 #include <QRegularExpression>
 #include <QScreen>
@@ -33,6 +34,50 @@ PlayerSettings::PlayerSettings(ClientSettings &settings, PlaybackEngine &engine,
                     || section == QLatin1String("subtitles") || section == QLatin1String("other"))
                     apply();
             });
+    // Only what the TLS options decide, as followRate() does for the rate: a full apply would reset what the user changed while playing
+    const auto followTls = [this] {
+        if (!m_engine.isInitialized())
+            return;
+        applyTls();
+        applyOverrides({QStringLiteral("tls-verify"), QStringLiteral("tls-ca-file")});
+    };
+    connect(&settings, &ClientSettings::certificateErrorsIgnoredChanged, this, followTls);
+    connect(&settings, &ClientSettings::valueChanged, this,
+            [followTls](const QString &section, const QString &key) {
+                if (section == QLatin1String("main")
+                    && key == QLatin1String("autodetectCertBundle"))
+                    followTls();
+            });
+}
+
+QStringList PlayerSettings::certBundleCandidates()
+{
+    return {QStringLiteral("/etc/ssl/certs/ca-certificates.crt"),
+            QStringLiteral("/etc/pki/tls/certs/ca-bundle.crt"),
+            QStringLiteral("/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"),
+            QStringLiteral("/etc/ssl/ca-bundle.pem"), QStringLiteral("/etc/ssl/cert.pem")};
+}
+
+QString PlayerSettings::detectCertBundle(const QStringList &candidates)
+{
+    for (const QString &path : candidates) {
+        const QFileInfo info(path);
+        if (info.isFile() && info.isReadable())
+            return path;
+    }
+    return {};
+}
+
+void PlayerSettings::applyTls()
+{
+    m_engine.setMpvProperty(QStringLiteral("tls-verify"),
+                            mpvBool(!m_settings.certificateErrorsIgnored()));
+    const bool autodetect =
+        m_settings.value(QStringLiteral("main"), QStringLiteral("autodetectCertBundle")).toBool();
+    const QString bundle = autodetect ? detectCertBundle(certBundleCandidates()) : QString();
+    // Without a bundle mpv and FFmpeg use their own defaults. An empty string is a path to mpv, not "unset": a bundle set earlier in the session stays until the next start (it is the system's own)
+    if (!bundle.isEmpty())
+        m_engine.setMpvProperty(QStringLiteral("tls-ca-file"), bundle);
 }
 
 void PlayerSettings::setWindow(QWindow *window)
@@ -80,6 +125,7 @@ void PlayerSettings::apply()
     applyAudio();
     applyVideo();
     applySubtitles();
+    applyTls();
     applyOverrides(); // intentionally last; same precedence as the web client
 }
 

@@ -11,6 +11,7 @@
 #include <QNetworkDiskCache>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QSslError>
 
 Q_LOGGING_CATEGORY(imageCacheLog, "kinefin.imagecache")
 
@@ -65,6 +66,11 @@ ImageNetworkAccess::ImageNetworkAccess(std::shared_ptr<ImageOrigin> origin,
                                        const QString &cacheDirectory, QObject *parent)
     : QNetworkAccessManager(parent), m_origin(std::move(origin))
 {
+    // Read at each error, so a change of the setting reaches the next request without a restart
+    connect(this, &QNetworkAccessManager::sslErrors, this, [this](QNetworkReply *reply) {
+        if (m_origin && m_origin->ignoreCertificateErrors())
+            reply->ignoreSslErrors();
+    });
     // No cookie jar is ever created: requests opt out of cookies below and the lazily created default jar stays unused
     if (cacheDirectory.isEmpty())
         return;
@@ -85,6 +91,11 @@ QNetworkReply *ImageNetworkAccess::createRequest(Operation operation,
                                                  QIODevice *outgoingData)
 {
     const QUrl base = m_origin ? m_origin->get() : QUrl();
+    // On this manager's own thread: the connections of an ended acceptance go before the next request
+    if (m_origin && m_origin->acceptanceEnded() != m_acceptanceSeen) {
+        m_acceptanceSeen = m_origin->acceptanceEnded();
+        clearConnectionCache();
+    }
     if (operation != GetOperation || !JellyfinClient::isServerImageUrl(base, request.url())) {
         // Without a server (signed out, or the session just ended) an image still in flight is expected to fail: only a request that does not belong to the active server is worth a warning
         if (base.isEmpty())

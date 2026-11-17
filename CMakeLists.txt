@@ -378,6 +378,7 @@ if(BUILD_TESTING)
     add_test(NAME jellyfin_live COMMAND test_jellyfin_live)
 
     add_executable(test_update_checker tests/test_update_checker.cpp)
+    target_compile_definitions(test_update_checker PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(test_update_checker PRIVATE kinefin_core Qt6::Test Qt6::Network)
     add_test(NAME update_checker COMMAND test_update_checker)
 

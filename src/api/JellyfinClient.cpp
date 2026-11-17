@@ -9,6 +9,7 @@
 #include <QJsonParseError>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QSslError>
 #include <QUrlQuery>
 
 #include <algorithm>
@@ -441,6 +442,13 @@ JellyfinClient::JellyfinClient(QObject *parent) : QObject(parent)
     m_reportRetryTimer.setSingleShot(true);
     connect(&m_reportRetryTimer, &QTimer::timeout, this, [this] { sendNextPlaybackReport(); });
     connect(this, &JellyfinClient::loginSucceeded, this, [this] { reportCapabilities(); });
+    // Every request of the client goes through m_network. The error is accepted only while the setting is on; otherwise it is remembered, so a reply that ends in an error afterwards is told from a plain failure
+    connect(&m_network, &QNetworkAccessManager::sslErrors, this, [this](QNetworkReply *reply) {
+        if (m_ignoreCertificateErrors)
+            reply->ignoreSslErrors();
+        else
+            reply->setProperty("certificateRejected", true);
+    });
 }
 
 JellyfinClient::~JellyfinClient()
@@ -460,6 +468,17 @@ bool JellyfinClient::setDeviceIdentity(const QString &name, const QString &id,
     m_deviceId = id;
     m_version = version;
     return true;
+}
+
+void JellyfinClient::setIgnoreCertificateErrors(bool ignore)
+{
+    if (ignore == m_ignoreCertificateErrors)
+        return;
+    m_ignoreCertificateErrors = ignore;
+    // A kept-alive connection accepted with an invalid certificate would carry the next requests without a new handshake: off, the pool starts over
+    if (!ignore)
+        m_network.clearConnectionCache();
+    Q_EMIT ignoreCertificateErrorsChanged(ignore);
 }
 
 void JellyfinClient::setAllowInsecureHttp(bool allowed)
@@ -482,10 +501,8 @@ bool JellyfinClient::connectToServer(const QUrl &baseUrl)
 
 void JellyfinClient::startProbe(const QUrl &url, quint64 generation, int redirects)
 {
+    // The sslErrors of the manager (see the constructor) fire only for a certificate that failed verification, never for a port that does not speak TLS
     QNetworkReply *reply = m_network.get(requestFor(url, false));
-    // sslErrors fires only for a certificate that failed verification, never for a port that does not speak TLS
-    connect(reply, &QNetworkReply::sslErrors, reply,
-            [reply] { reply->setProperty("certificateRejected", true); });
     attach(reply, generation, [this, generation, redirects](QNetworkReply *finished) {
         const int status = finished->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         if (finished->error() != QNetworkReply::NoError

@@ -22,6 +22,7 @@
 
 #include "FakeJellyfin.h"
 #include "MemoryTokenStore.h"
+#include "SelfSignedServer.h"
 #include "api/PlaybackReport.h"
 #include "app/ConnectionController.h"
 #include "settings/BrowseStateStore.h"
@@ -48,47 +49,6 @@ QString address(const FakeJellyfin &server)
     return server.url(QStringLiteral("/jellyfin")).toString();
 }
 
-// A TLS server whose certificate is self-signed: a client that verifies it rejects the handshake, and `handshakes` counts the connections it got
-class SelfSignedServer {
-  public:
-    // The pair is a local test fixture, not part of the repository: without it the certificate tests skip
-    static bool fixturesPresent()
-    {
-        const QString directory =
-            QString::fromUtf8(KINEFIN_SOURCE_DIR) + QStringLiteral("/tests/fixtures/");
-        return QFile::exists(directory + QStringLiteral("selfsigned_cert.pem"))
-               && QFile::exists(directory + QStringLiteral("selfsigned_key.pem"));
-    }
-
-    bool listen()
-    {
-        const QString directory =
-            QString::fromUtf8(KINEFIN_SOURCE_DIR) + QStringLiteral("/tests/fixtures/");
-        QFile certificateFile(directory + QStringLiteral("selfsigned_cert.pem"));
-        QFile keyFile(directory + QStringLiteral("selfsigned_key.pem"));
-        if (!certificateFile.open(QIODevice::ReadOnly) || !keyFile.open(QIODevice::ReadOnly))
-            return false;
-        const QSslCertificate certificate(&certificateFile, QSsl::Pem);
-        const QSslKey key(&keyFile, QSsl::Ec, QSsl::Pem);
-        if (certificate.isNull() || key.isNull())
-            return false;
-        QSslConfiguration configuration = QSslConfiguration::defaultConfiguration();
-        configuration.setLocalCertificate(certificate);
-        configuration.setPrivateKey(key);
-        m_server.setSslConfiguration(configuration);
-        QObject::connect(&m_server, &QSslServer::startedEncryptionHandshake, &m_server,
-                         [this] { ++handshakes; });
-        return m_server.listen(QHostAddress::LocalHost);
-    }
-
-    QString address() const { return QStringLiteral("127.0.0.1:%1").arg(m_server.serverPort()); }
-
-    int handshakes = 0;
-
-  private:
-    QSslServer m_server;
-};
-
 QStringList urlStrings(const QList<QUrl> &urls)
 {
     QStringList result;
@@ -98,7 +58,8 @@ QStringList urlStrings(const QList<QUrl> &urls)
 }
 
 const QString kCertificateError = QStringLiteral(
-    "The server's certificate is not valid: check the certificate, or the address and the port");
+    "The server's certificate is not valid: check the certificate, the address and the port, or "
+    "turn on Ignore Certificate Errors in Settings");
 
 const QString kMoviesA = QStringLiteral("e2a1aa11a8d94b5c999a25cf59abcd01");
 const QString kMoviesB = QStringLiteral("b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2");
@@ -731,6 +692,61 @@ class TestConnectionController : public QObject {
         QVERIFY(result.value(QStringLiteral("resolvedUrl")).toString().isEmpty());
         QTest::qWait(300);
         QCOMPARE(tls.handshakes, 1);
+    }
+
+    // With Ignore Certificate Errors on, the self-signed server is an ordinary server: no certificate error, no fallback to HTTP
+    void connectAcceptsASelfSignedCertificateWhenErrorsAreIgnored()
+    {
+        if (!QSslSocket::supportsSsl())
+            QSKIP("no TLS backend");
+        if (!SelfSignedServer::fixturesPresent())
+            QSKIP("no self-signed certificate fixture in tests/fixtures");
+        SelfSignedServer tls;
+        tls.body = fixture(QStringLiteral("system_info_public"));
+        QVERIFY(tls.listen());
+        auto controller = makeController();
+        controller->setIgnoreCertificateErrors(true);
+        controller->connectToWithFallback(tls.address());
+        QTRY_VERIFY(controller->state() == ConnectionController::NeedsLogin);
+        QVERIFY(controller->errorText().isEmpty());
+        QVERIFY(controller->serverUrl().startsWith(QStringLiteral("https://")));
+        QVERIFY(tls.completed >= 1);
+    }
+
+    void testAcceptsASelfSignedCertificateWhenErrorsAreIgnored()
+    {
+        if (!QSslSocket::supportsSsl())
+            QSKIP("no TLS backend");
+        if (!SelfSignedServer::fixturesPresent())
+            QSKIP("no self-signed certificate fixture in tests/fixtures");
+        SelfSignedServer tls;
+        tls.body = fixture(QStringLiteral("system_info_public"));
+        QVERIFY(tls.listen());
+        auto controller = makeController();
+        controller->setIgnoreCertificateErrors(true);
+        const QString typed = tls.address();
+        controller->testServer(typed, true);
+        QTRY_VERIFY(!controller->serverReachability()
+                         .value(typed)
+                         .toMap()
+                         .value(QStringLiteral("testing"))
+                         .toBool());
+        const auto result = controller->serverReachability().value(typed).toMap();
+        QVERIFY(result.value(QStringLiteral("reachable")).toBool());
+        QVERIFY(result.value(QStringLiteral("resolvedUrl"))
+                    .toString()
+                    .startsWith(QStringLiteral("https://")));
+        // The setting is read per request: turned off again, the same server is refused
+        controller->setIgnoreCertificateErrors(false);
+        controller->testServer(typed, true);
+        QTRY_VERIFY(!controller->serverReachability()
+                         .value(typed)
+                         .toMap()
+                         .value(QStringLiteral("testing"))
+                         .toBool());
+        const auto refused = controller->serverReachability().value(typed).toMap();
+        QVERIFY(!refused.value(QStringLiteral("reachable")).toBool());
+        QCOMPARE(refused.value(QStringLiteral("message")).toString(), kCertificateError);
     }
 
     void connectSignInAndLibraries()

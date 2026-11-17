@@ -161,6 +161,53 @@ class TestClientSettings : public QObject {
         QCOMPARE(changed.at(0).at(1).toString(), QStringLiteral("fullscreen"));
     }
 
+    void certificateErrorsIgnoredFollowsTheStoredValue()
+    {
+        ClientSettings settings(path());
+        QSignalSpy changed(&settings, &ClientSettings::certificateErrorsIgnoredChanged);
+        QVERIFY(!settings.certificateErrorsIgnored());
+        QVERIFY(!settings.certificateErrorsIgnoredByCommandLine());
+        QVERIFY(settings.setValue(QStringLiteral("main"), QStringLiteral("ignoreSSLErrors"), true));
+        QVERIFY(settings.certificateErrorsIgnored());
+        QCOMPARE(changed.size(), 1);
+        // The same value again is no change
+        QVERIFY(settings.setValue(QStringLiteral("main"), QStringLiteral("ignoreSSLErrors"), true));
+        QCOMPARE(changed.size(), 1);
+        QVERIFY(
+            settings.setValue(QStringLiteral("main"), QStringLiteral("ignoreSSLErrors"), false));
+        QVERIFY(!settings.certificateErrorsIgnored());
+        QCOMPARE(changed.size(), 2);
+        // A visible setting of the Application group
+        QVERIFY(
+            Kinefin::findSetting(QStringLiteral("main"), QStringLiteral("ignoreSSLErrors"))->hidden
+            == false);
+    }
+
+    void theCommandLineOverridesWithoutWritingTheStoredValue()
+    {
+        {
+            ClientSettings settings(path());
+            QSignalSpy changed(&settings, &ClientSettings::certificateErrorsIgnoredChanged);
+            settings.setCertificateErrorsIgnoredByCommandLine(true);
+            QVERIFY(settings.certificateErrorsIgnored());
+            QVERIFY(settings.certificateErrorsIgnoredByCommandLine());
+            QCOMPARE(changed.size(), 1);
+            QVERIFY(!settings.value(QStringLiteral("main"), QStringLiteral("ignoreSSLErrors"))
+                         .toBool());
+            // The stored value changes under the flag: the effective value stays on and nothing is announced
+            QVERIFY(
+                settings.setValue(QStringLiteral("main"), QStringLiteral("ignoreSSLErrors"), true));
+            QVERIFY(settings.setValue(QStringLiteral("main"), QStringLiteral("ignoreSSLErrors"),
+                                      false));
+            QVERIFY(settings.certificateErrorsIgnored());
+            QCOMPARE(changed.size(), 1);
+        }
+        // Nothing but the explicit writes above reached the file
+        ClientSettings reopened(path());
+        QVERIFY(!reopened.certificateErrorsIgnored());
+        QVERIFY(reopened.isDefault(QStringLiteral("main"), QStringLiteral("ignoreSSLErrors")));
+    }
+
     void unknownKeysSurviveAWrite()
     {
         writeFile(path(), "[video]\nfuture_key=7\n");

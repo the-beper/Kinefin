@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "integration/UpdateChecker.h"
 
+#include <QFile>
 #include <QHostAddress>
 #include <QPointer>
 #include <QSignalSpy>
@@ -112,6 +113,20 @@ class TestUpdateChecker final : public QObject {
                      qPrintable(invalid));
             QVERIFY2(!UpdateChecker::compareVersions(invalid, QStringLiteral("1.2.3")),
                      qPrintable(invalid));
+        }
+    }
+
+    // GitHub stays verified whatever Ignore Certificate Errors says: the checker has its own network manager, takes no setting and never accepts a TLS error
+    void neverAcceptsCertificateErrors()
+    {
+        for (const char *name : {"UpdateChecker.h", "UpdateChecker.cpp"}) {
+            QFile source(QString::fromUtf8(KINEFIN_SOURCE_DIR) + QStringLiteral("/src/integration/")
+                         + QString::fromUtf8(name));
+            QVERIFY(source.open(QIODevice::ReadOnly));
+            const QByteArray text = source.readAll();
+            for (const char *forbidden :
+                 {"ignoreSsl", "sslErrors", "ClientSettings", "IgnoreCertificate"})
+                QVERIFY2(!text.contains(forbidden), forbidden);
         }
     }
 

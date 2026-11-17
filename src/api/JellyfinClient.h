@@ -122,6 +122,9 @@ class JellyfinClient final : public QObject {
     // A stable DeviceId must be supplied by the profile layer, not generated afresh on every login. Reject fields that could inject auth directives
     bool setDeviceIdentity(const QString &name, const QString &id, const QString &version);
     void setAllowInsecureHttp(bool allowed); // explicit user opt-in for non-loopback HTTP
+    // Accept the server's invalid TLS certificates (the Ignore Certificate Errors setting). Applies to the requests and connections started after the call; a connection already accepted stays up until it ends
+    void setIgnoreCertificateErrors(bool ignore);
+    [[nodiscard]] bool ignoresCertificateErrors() const { return m_ignoreCertificateErrors; }
 
     bool connectToServer(const QUrl &baseUrl);
     bool authenticate(const QString &username, const QString &password);
@@ -283,6 +286,8 @@ class JellyfinClient final : public QObject {
     QString accessToken() const;
 
   Q_SIGNALS:
+    // The WebSocket drops a connection it accepted under the old value and opens a new one
+    void ignoreCertificateErrorsChanged(bool ignore);
     void serverReady(const QString &serverId);
     // userName(), userImageTag() and isAdministrator() are already set when this fires
     void loginSucceeded(const QString &userId);
@@ -460,6 +465,7 @@ class JellyfinClient final : public QObject {
     quint64 m_generation = 0;
     State m_state = State::Disconnected;
     bool m_allowInsecureHttp = false;
+    bool m_ignoreCertificateErrors = false;
     bool m_quickPollInFlight = false;
     // Flipped by the WebSocket component while an authenticated socket exists; `reportCapabilities()` carries it
     bool m_mediaControlAnnounced = false;

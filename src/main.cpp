@@ -85,6 +85,9 @@ int main(int argc, char *argv[])
     parser.addOption(
         {QStringLiteral("desktop"), QStringLiteral("Start the desktop interface (the only one).")});
     parser.addOption({QStringLiteral("tv"), QStringLiteral("Not supported.")});
+    parser.addOption({QStringLiteral("ignore-certificate-errors"),
+                      QStringLiteral("Accept invalid TLS certificates from the server for this run "
+                                     "(unsafe).")});
     Kinefin::addProfileOptions(parser);
     parser.process(app);
     if (parser.isSet(QStringLiteral("tv"))) {
@@ -171,6 +174,8 @@ int main(int argc, char *argv[])
         return 1;
     }
     Kinefin::ClientSettings settings(Kinefin::ClientSettings::pathForProfile(profileId));
+    settings.setCertificateErrorsIgnoredByCommandLine(
+        parser.isSet(QStringLiteral("ignore-certificate-errors")));
     const auto settingsLevel = Kinefin::parseLogLevel(
         settings.value(QStringLiteral("main"), QStringLiteral("logLevel")).toString());
     // Warnings of the settings constructor (a newer-format file moved aside) precede the log file: they reach stderr only, because the log level is itself a setting
@@ -189,6 +194,11 @@ int main(int argc, char *argv[])
         return 1;
     }
     Kinefin::ConnectionController connection(profileId, deviceId, QStringLiteral(KINEFIN_VERSION));
+    connection.setIgnoreCertificateErrors(settings.certificateErrorsIgnored());
+    QObject::connect(&settings, &Kinefin::ClientSettings::certificateErrorsIgnoredChanged,
+                     &connection, [&connection, &settings] {
+                         connection.setIgnoreCertificateErrors(settings.certificateErrorsIgnored());
+                     });
     Kinefin::PlayerController player(connection.playbackClient(), *connection.queue(), settings,
                                      profileId);
     QObject::connect(&connection, &Kinefin::ConnectionController::aboutToLeaveSession, &player,

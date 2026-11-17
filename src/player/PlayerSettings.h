@@ -37,7 +37,14 @@ class PlayerSettings final : public QObject {
     // While held, `apply()` leaves the speed alone: a watching-together group plays at 1.0 whatever the settings say
     void setSpeedHeld(bool held) { m_speedHeld = held; }
 
+    // The CA bundle paths tried by `autodetectCertBundle`, in order
+    static QStringList certBundleCandidates();
+    // The first of `candidates` that is a readable file, or empty
+    static QString detectCertBundle(const QStringList &candidates);
+
   private:
+    // `tls-verify` follows `certificateErrorsIgnored` (mpv itself does not verify by default), `tls-ca-file` follows `autodetectCertBundle`; mpv.conf entries are applied after them
+    void applyTls();
     void applyAudio();
     void applyVideo();
     // `reset` also clears the modifiers when the setting is `custom`, which otherwise leaves mpv alone

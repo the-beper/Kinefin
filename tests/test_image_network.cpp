@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Kinefin contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "FakeJellyfin.h"
+#include "SelfSignedServer.h"
 #include "imagecache/ImageNetworkAccess.h"
 #include "imagecache/ImageOrigin.h"
 
@@ -10,6 +11,7 @@
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QSignalSpy>
+#include <QSslSocket>
 #include <QTemporaryDir>
 #include <QtTest>
 
@@ -205,6 +207,40 @@ class TestImageNetwork : public QObject {
         QTRY_COMPARE(clearedFinished.size(), 1);
         QVERIFY(cleared->error() != QNetworkReply::NoError);
         QCOMPARE(server.imageRequests, 1);
+    }
+
+    // A self-signed server is refused unless the origin says to ignore certificate errors, and the value is read per request
+    void selfSignedCertificateIsAcceptedOnlyWhileIgnored()
+    {
+        if (!QSslSocket::supportsSsl())
+            QSKIP("no TLS backend");
+        if (!SelfSignedServer::fixturesPresent())
+            QSKIP("no self-signed certificate fixture in tests/fixtures");
+        SelfSignedServer tls;
+        QVERIFY(tls.listen());
+        const QUrl base(QStringLiteral("https://") + tls.address() + QStringLiteral("/jellyfin"));
+        auto origin = std::make_shared<Kinefin::ImageOrigin>();
+        origin->set(base);
+        Kinefin::ImageNetworkAccess network(origin);
+
+        std::unique_ptr<QNetworkReply> verified(network.get(QNetworkRequest(imageUrl(base))));
+        QSignalSpy verifiedFinished(verified.get(), &QNetworkReply::finished);
+        QTRY_COMPARE(verifiedFinished.size(), 1);
+        QVERIFY(verified->error() != QNetworkReply::NoError);
+        QCOMPARE(tls.completed, 0);
+
+        origin->setIgnoreCertificateErrors(true);
+        std::unique_ptr<QNetworkReply> accepted(network.get(QNetworkRequest(imageUrl(base))));
+        QSignalSpy acceptedFinished(accepted.get(), &QNetworkReply::finished);
+        QTRY_COMPARE(acceptedFinished.size(), 1);
+        QCOMPARE(tls.completed, 1);
+
+        origin->setIgnoreCertificateErrors(false);
+        std::unique_ptr<QNetworkReply> again(network.get(QNetworkRequest(imageUrl(base))));
+        QSignalSpy againFinished(again.get(), &QNetworkReply::finished);
+        QTRY_COMPARE(againFinished.size(), 1);
+        QVERIFY(again->error() != QNetworkReply::NoError);
+        QCOMPARE(tls.completed, 1);
     }
 
     void userImageIsFetchedAnonymouslyAndForeignOnesAreRefused()

@@ -535,6 +535,21 @@ class TestJellyfinSocketClient : public QObject {
         QCOMPARE(flow.socket.state(), Kinefin::JellyfinSocketClient::State::Disconnected);
     }
 
+    // A connection accepted under Ignore Certificate Errors does not outlive the setting: turning it off opens a verified one, turning it on touches nothing
+    // Only a socket that was accepted with an invalid certificate is reopened when the option goes off: a verified one (here a plain one) stays as it is
+    void aVerifiedConnectionStaysWhenCertificateErrorsStopBeingIgnored()
+    {
+        ConnectedSocket flow;
+        QVERIFY(flow.connectAndAuthenticate());
+        QVERIFY(flow.waitConnection());
+        QCOMPARE(flow.server.upgradeAttempts, 1);
+        flow.client.setIgnoreCertificateErrors(true);
+        flow.client.setIgnoreCertificateErrors(false);
+        QTest::qWait(300);
+        QCOMPARE(flow.server.upgradeAttempts, 1);
+        QVERIFY(flow.waitState(Kinefin::JellyfinSocketClient::State::Authenticated, 3000));
+    }
+
     void tokenRotationUsesNewToken()
     {
         ConnectedSocket flow;
