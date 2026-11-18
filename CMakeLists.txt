@@ -191,7 +191,7 @@ target_compile_definitions(kinefin_integration PRIVATE TRANSLATION_DOMAIN="kinef
 target_link_libraries(kinefin_integration PUBLIC kinefin_player Qt6::DBus Qt6::Gui Qt6::Network KF6::I18n)
 
 # The QML module lives in a static library of its own so that the UI tests can import it like the application does
-foreach(page Main PlayerPage OsdButton MiniPlayer PlaybackInfoOverlay ShellHeader AboutDialog ShortcutsDialog RemoteSessionsDialog SyncPlayDialog MediaInfoDialog HomePage LibraryTile LibraryPage ResumeItemsPage MediaCard CardMenu CardRow EpisodeRow ItemDetailsPage SearchPage QueuePage FilterDialog GenreRailsView GenreRailsPage LibraryContent ItemListRow ItemRowGrid LoginPage UserPickerPage MessageBox ServersPage SettingsPage SettingRow UserPreferencesForm UserPreferencesSaveBar FavoritesPage FavoritesGroupPage TopFade MediaListRow PlaylistsPage PlaylistPage PlaylistDialogs AddToPlaylistDialog PageToolbar PageBackButton FadeInOnShow PageTitle DownloadsPage RuleDialog)
+foreach(page Main PlayerPage OsdButton MiniPlayer PlaybackInfoOverlay ShellHeader AboutDialog ShortcutsDialog RemoteSessionsDialog SyncPlayDialog MediaInfoDialog HomePage LibraryTile LibraryPage ResumeItemsPage MediaCard CardMenu CardRow EpisodeRow ItemDetailsPage SearchPage QueuePage FilterDialog GenreRailsView GenreRailsPage LibraryContent ItemListRow ItemRowGrid LoginPage UserPickerPage MessageBox ServersPage SettingsPage SettingRow UserPreferencesForm UserPreferencesSaveBar FavoritesPage FavoritesGroupPage TopFade MediaListRow PlaylistsPage PlaylistPage PlaylistDialogs AddToPlaylistDialog PageToolbar PageBackButton FadeInOnShow PageTitle DownloadsPage RuleDialog SubtitleSearchDialog)
     set_source_files_properties(src/qml/${page}.qml PROPERTIES QT_RESOURCE_ALIAS ${page}.qml)
 endforeach()
 # The images the pages draw themselves, beside the QML files they belong to
@@ -236,6 +236,7 @@ qt_add_qml_module(kinefin_ui
         src/qml/QueuePage.qml
         src/qml/DownloadsPage.qml
         src/qml/RuleDialog.qml
+        src/qml/SubtitleSearchDialog.qml
         src/qml/FilterDialog.qml
         src/qml/GenreRailsView.qml
         src/qml/GenreRailsPage.qml
@@ -282,6 +283,11 @@ target_link_libraries(kinefin_ui PUBLIC
 )
 
 add_executable(kinefin src/main.cpp)
+qt_add_resources(kinefin "licenses"
+    PREFIX "/"
+    BASE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSES"
+    FILES LICENSES/GPL-3.0-or-later.txt
+)
 target_link_libraries(kinefin PRIVATE
     kinefin_ui kinefin_uiplugin kinefin_core kinefin_player kinefin_integration
     Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Quick Qt6::Qml Qt6::QuickControls2 Qt6::DBus
@@ -297,7 +303,29 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/build/flatpak/build-id")
     endif()
 endif()
 target_compile_definitions(kinefin PRIVATE KINEFIN_VERSION="${PROJECT_VERSION}" KINEFIN_DISPLAY_VERSION="${KINEFIN_DISPLAY_VERSION}" TRANSLATION_DOMAIN="kinefin")
-ki18n_install(po)
+
+# po/ is flat (<language>.po), while ki18n_install expects <language>/<domain>.po and would install the catalogs under the wrong names: compile each one to <locale>/<language>/LC_MESSAGES/kinefin.mo instead
+if(NOT KDE_INSTALL_LOCALEDIR)
+    set(KDE_INSTALL_LOCALEDIR "share/locale")
+endif()
+find_package(Gettext REQUIRED)
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/po/LINGUAS" KINEFIN_LANGUAGES)
+set(KINEFIN_MO_FILES)
+foreach(language IN LISTS KINEFIN_LANGUAGES)
+    set(po_file "${CMAKE_CURRENT_SOURCE_DIR}/po/${language}.po")
+    set(mo_file "${CMAKE_CURRENT_BINARY_DIR}/locale/${language}/kinefin.mo")
+    add_custom_command(
+        OUTPUT "${mo_file}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/locale/${language}"
+        COMMAND ${GETTEXT_MSGFMT_EXECUTABLE} -c -o "${mo_file}" "${po_file}"
+        DEPENDS "${po_file}"
+        COMMENT "Compiling the ${language} translation"
+        VERBATIM
+    )
+    install(FILES "${mo_file}" DESTINATION "${KDE_INSTALL_LOCALEDIR}/${language}/LC_MESSAGES")
+    list(APPEND KINEFIN_MO_FILES "${mo_file}")
+endforeach()
+add_custom_target(kinefin-translations ALL DEPENDS ${KINEFIN_MO_FILES})
 
 install(TARGETS kinefin ${KDE_INSTALL_TARGETS_DEFAULT_ARGS})
 install(FILES data/io.github.the_beper.Kinefin.desktop DESTINATION ${KDE_INSTALL_APPDIR})

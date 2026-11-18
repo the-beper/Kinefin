@@ -188,6 +188,9 @@ class JellyfinClient final : public QObject {
     // writes by canonical GUID; the state changes only after a confirmed reply.
     // The endpoint requires userId on 12.4, not the legacy /Users/... route.
     bool setItemPlayed(const QString &itemId, bool played);
+    // Remote subtitle search and download through the server's provider plugin (`RemoteSearch/Subtitles`); false without the policy, an invalid id/language or a session. A 401 expires the session and emits no remote*Failed signal, because the shell signs out and closes the player
+    bool searchRemoteSubtitles(const QString &itemId, const QString &language);
+    bool downloadRemoteSubtitle(const QString &itemId, const QString &subtitleId);
     // The entries of one playlist (`GET /Playlists/{id}/Items`), paged: each item carries its `PlaylistItemId` (copies of one item share one), `playlistEntriesReady` carries the page and the `TotalRecordCount`. `startIndex` is 0 or more, `limit` 1 or more and is cut to MaxPlaylistPageSize. Same channel rules as fetchItems; failures arrive as listingFailed("PlaylistEntries")
     bool fetchPlaylistEntries(const QString &playlistId, int startIndex, int limit,
                               int channel = 0);
@@ -282,6 +285,8 @@ class JellyfinClient final : public QObject {
     bool isAdministrator() const;
     // `Policy.EnableContentDownloading` as the server last reported it (login reply, then `/Users/Me`); false when unknown, absent or not a bool, and unless authenticated. A convenience for hiding the download actions: the server enforces the route policy
     bool canDownload() const;
+    // `Policy.EnableSubtitleManagement` of the signed-in user, false while unknown or without a session: the OpenSubtitles entry is hidden
+    bool canManageSubtitles() const;
     // `Policy.SyncPlayAccess` as the server last reported it (login reply, then `/Users/Me`): "CreateAndJoinGroups", "JoinGroups" or "None"; empty when unknown and unless authenticated
     QString syncPlayAccess() const;
     QString deviceId() const;
@@ -334,6 +339,11 @@ class JellyfinClient final : public QObject {
     void playbackInfoFailed(const QString &itemId, int httpStatus, const QString &reason);
     // The listing results: envelope families carry the items and the `TotalRecordCount` the server echoed, the two bare-array families (`/Items/Latest`, `/Sessions`) carry only the array; nothing here ever contains an access token or a server-provided error string
     void itemsReady(const QJsonArray &items, int totalRecordCount, int channel);
+    void remoteSubtitlesReady(const QJsonArray &subtitles);
+    void remoteSubtitlesFailed(int httpStatus);
+    void remoteSubtitleDownloaded(const QString &itemId, const QString &subtitleId);
+    void remoteSubtitleDownloadFailed(const QString &itemId, const QString &subtitleId,
+                                      int httpStatus);
     void resumeItemsReady(const QJsonArray &items, int totalRecordCount, int channel);
     void latestItemsReady(const QJsonArray &items, int channel);
     void nextUpReady(const QJsonArray &items, int totalRecordCount, int channel);
@@ -432,6 +442,7 @@ class JellyfinClient final : public QObject {
     QString m_userImageTag;
     bool m_isAdministrator = false;
     bool m_canDownload = false;
+    bool m_canManageSubtitles = false;
     QString m_syncPlayAccess;
     QByteArray m_token;
     QByteArray m_quickConnectSecret;

@@ -70,6 +70,12 @@ class PlayerController final : public QObject {
     Q_PROPERTY(bool loading READ loading NOTIFY changed)
     // A file played from the downloads folder: no server session, no reporting, no server-only chrome
     Q_PROPERTY(bool localPlayback READ localPlayback NOTIFY localPlaybackChanged)
+    // OpenSubtitles through the server plugin: hidden without the policy, one search at a time
+    Q_PROPERTY(bool canManageSubtitles READ canManageSubtitles NOTIFY changed)
+    Q_PROPERTY(QVariantList remoteSubtitles READ remoteSubtitles NOTIFY remoteSubtitlesChanged)
+    Q_PROPERTY(
+        bool remoteSubtitleSearching READ remoteSubtitleSearching NOTIFY remoteSubtitlesChanged)
+    Q_PROPERTY(QString remoteSubtitleError READ remoteSubtitleError NOTIFY remoteSubtitlesChanged)
     Q_PROPERTY(bool paused READ paused NOTIFY changed)
     Q_PROPERTY(bool buffering READ buffering NOTIFY changed)
     Q_PROPERTY(QString itemId READ itemId NOTIFY changed)
@@ -128,6 +134,10 @@ class PlayerController final : public QObject {
         return m_loading || m_awaitingGroup || m_session.state() == PlaybackSession::State::Opening;
     }
     bool localPlayback() const { return m_localPlayback; }
+    bool canManageSubtitles() const;
+    QVariantList remoteSubtitles() const { return m_remoteSubtitles; }
+    bool remoteSubtitleSearching() const { return m_remoteSubtitleSearching; }
+    QString remoteSubtitleError() const { return m_remoteSubtitleError; }
     bool paused() const { return m_session.state() == PlaybackSession::State::Paused; }
     bool buffering() const { return m_session.state() == PlaybackSession::State::Buffering; }
     QString itemId() const { return m_itemId; }
@@ -219,6 +229,10 @@ class PlayerController final : public QObject {
     Q_INVOKABLE void previewAt(qint64 ticks);
     Q_INVOKABLE void clearPreview();
     Q_INVOKABLE void refreshTracks();
+    // Search the server's subtitle provider for the current item and language (ISO 639-2)
+    Q_INVOKABLE bool searchRemoteSubtitles(const QString &language);
+    // Download one result; on success the item reopens at the current position so the new track is in the source, keeping the queue and the series list
+    Q_INVOKABLE bool downloadRemoteSubtitle(const QString &subtitleId);
     // One of the `video.aspect` values except `custom`: applied at once to this playback only, the setting is not written
     Q_INVOKABLE void setAspectMode(const QString &mode);
     // The chapter at a position of the timeline, -1 before the first or without chapters
@@ -289,6 +303,9 @@ class PlayerController final : public QObject {
     void localPlaybackChanged();
     // A local file's position, and whether it reached its end; the shell stores it on the download
     void localPositionChanged(const QString &itemId, qint64 ticks, bool played);
+    void remoteSubtitlesChanged();
+    void remoteSubtitleDownloaded(const QString &subtitleId);
+    void remoteSubtitleDownloadFailed(const QString &subtitleId, int httpStatus);
     // A seek was asked of mpv, to this position
     void seeked(qint64 ticks);
     void tracksChanged();
@@ -475,6 +492,9 @@ class PlayerController final : public QObject {
     bool m_nextEpisodeAutoPlay = true;
     bool m_loading = false;
     bool m_localPlayback = false;
+    QVariantList m_remoteSubtitles;
+    bool m_remoteSubtitleSearching = false;
+    QString m_remoteSubtitleError;
     struct PendingLocal {
         QString path;
         QString itemId;

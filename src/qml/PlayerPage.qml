@@ -962,6 +962,23 @@ Kirigami.Page {
         objectName: "playerAudioMenu"
         onAboutToHide: page.popupGone()
     }
+    SubtitleSearchDialog {
+        id: subtitleSearchDialog
+        player: page.player
+    }
+
+    Connections {
+        target: page.player
+        // The shell tests load the page without a player
+        ignoreUnknownSignals: true
+        function onRemoteSubtitleDownloaded(subtitleId) {
+            page.Window.window?.showPassiveNotification(i18n("Subtitle downloaded"));
+        }
+        function onRemoteSubtitleDownloadFailed(subtitleId, httpStatus) {
+            page.Window.window?.showPassiveNotification(i18n("The subtitle could not be downloaded: check the connection and try again"));
+        }
+    }
+
     SubtitlesMenu {
         id: subtitlesMenu
         objectName: "playerSubtitlesMenu"
@@ -1248,6 +1265,14 @@ Kirigami.Page {
             }
             onObjectAdded: (index, object) => self.insertItem(index + 1, object)
             onObjectRemoved: (index, object) => self.removeItem(object)
+        }
+        Controls.MenuSeparator { visible: page.player.canManageSubtitles }
+        Controls.MenuItem {
+            objectName: self.namePrefix + "SearchOnline"
+            text: i18n("Search Online Subtitles…")
+            icon.name: "search"
+            visible: page.player.canManageSubtitles && !page.player.localPlayback
+            onTriggered: subtitleSearchDialog.open()
         }
         Controls.MenuSeparator { visible: page.player.externalSubtitles.length > 0 }
         Controls.MenuItem {

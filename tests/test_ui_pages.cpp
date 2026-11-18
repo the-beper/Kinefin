@@ -1971,7 +1971,28 @@ class PlayerStub : public QObject {
     Q_PROPERTY(QVariantMap upNext MEMBER upNext NOTIFY changed)
     Q_PROPERTY(int upNextSeconds MEMBER upNextSeconds NOTIFY changed)
     Q_PROPERTY(bool hasSeriesChoices MEMBER hasSeriesChoices NOTIFY changed)
+    Q_PROPERTY(bool canManageSubtitles MEMBER canManageSubtitles NOTIFY changed)
+    Q_PROPERTY(QVariantList remoteSubtitles MEMBER remoteSubtitles NOTIFY remoteSubtitlesChanged)
+    Q_PROPERTY(
+        bool remoteSubtitleSearching MEMBER remoteSubtitleSearching NOTIFY remoteSubtitlesChanged)
+    Q_PROPERTY(QString remoteSubtitleError MEMBER remoteSubtitleError NOTIFY remoteSubtitlesChanged)
   public:
+    bool canManageSubtitles = false;
+    QVariantList remoteSubtitles;
+    bool remoteSubtitleSearching = false;
+    QString remoteSubtitleError;
+    QStringList remoteSearches;
+    QStringList remoteDownloads;
+    Q_INVOKABLE bool searchRemoteSubtitles(const QString &language)
+    {
+        remoteSearches << language;
+        return true;
+    }
+    Q_INVOKABLE bool downloadRemoteSubtitle(const QString &subtitleId)
+    {
+        remoteDownloads << subtitleId;
+        return true;
+    }
     Q_INVOKABLE bool playItem(const QString &id, qint64)
     {
         record(QStringLiteral("playItem"), id);
@@ -2129,6 +2150,9 @@ class PlayerStub : public QObject {
   Q_SIGNALS:
     void changed();
     void chaptersChanged();
+    void remoteSubtitlesChanged();
+    void remoteSubtitleDownloaded(const QString &subtitleId);
+    void remoteSubtitleDownloadFailed(const QString &subtitleId, int httpStatus);
     void finished();
 
   private:
@@ -13206,6 +13230,82 @@ class TestUiPages : public QObject {
         }
         QTest::qWait(300);
         QVERIFY(gWarnings.filter(QStringLiteral("evil.invalid")).isEmpty());
+    }
+
+    void playerOnlineSubtitleSearchIsPolicyGatedAndDownloads()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(openPlayer(ui, stub));
+
+        QObject *menu = ui.popup(QStringLiteral("playerSubtitlesMenu"));
+        QVERIFY(menu);
+        QVERIFY(QMetaObject::invokeMethod(menu, "open"));
+        QTRY_VERIFY(menu->property("opened").toBool());
+        const auto searchEntry = [&]() -> QQuickItem * {
+            for (QQuickItem *item : ui.menuItems(QStringLiteral("playerSubtitlesMenu"))) {
+                if (item->objectName() == QLatin1String("playerSearchOnline"))
+                    return item;
+            }
+            return nullptr;
+        };
+        // Hidden, not disabled, without the server policy
+        QVERIFY(searchEntry());
+        QVERIFY(!searchEntry()->isVisible());
+        stub.canManageSubtitles = true;
+        Q_EMIT stub.changed();
+        QTRY_VERIFY(searchEntry()->isVisible());
+        QVERIFY(QMetaObject::invokeMethod(searchEntry(), "click"));
+
+        QObject *dialog = ui.popup(QStringLiteral("subtitleSearchDialog"));
+        QVERIFY(dialog);
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QTRY_COMPARE(stub.remoteSearches, QStringList{QStringLiteral("eng")});
+
+        // The no-provider answer is explained, and an empty answer is not mistaken for a pending one
+        auto label = [dialog](const char *name) {
+            return dialog->findChild<QQuickItem *>(QString::fromLatin1(name));
+        };
+        stub.remoteSubtitleSearching = false;
+        stub.remoteSubtitleError = QStringLiteral("noprovider");
+        Q_EMIT stub.remoteSubtitlesChanged();
+        QTRY_VERIFY(label("subtitleSearchError")->isVisible());
+        QCOMPARE(label("subtitleSearchError")->property("text").toString(),
+                 QStringLiteral("No online subtitle provider is installed on the server. Ask the "
+                                "server administrator to install one"));
+        QVERIFY(!label("subtitleSearchEmpty")->isVisible());
+        stub.remoteSubtitleError.clear();
+        Q_EMIT stub.remoteSubtitlesChanged();
+        QTRY_VERIFY(label("subtitleSearchEmpty")->isVisible());
+        QCOMPARE(label("subtitleSearchEmpty")->property("text").toString(),
+                 QStringLiteral("No subtitles found"));
+
+        // A result: Download hands the id over and closes the dialog
+        stub.remoteSubtitles = {
+            QVariantMap{{QStringLiteral("id"), QStringLiteral("42")},
+                        {QStringLiteral("name"), QStringLiteral("English (SDH)")},
+                        {QStringLiteral("provider"), QStringLiteral("OpenSubtitles")},
+                        {QStringLiteral("format"), QStringLiteral("srt")},
+                        {QStringLiteral("downloads"), 12}}};
+        Q_EMIT stub.remoteSubtitlesChanged();
+        QObject *results = dialog->findChild<QObject *>(QStringLiteral("subtitleResults"));
+        QVERIFY(results);
+        QTRY_COMPARE(results->property("count").toInt(), 1);
+        QQuickItem *row = nullptr;
+        QVERIFY(QMetaObject::invokeMethod(results, "itemAt", Q_RETURN_ARG(QQuickItem *, row),
+                                          Q_ARG(int, 0)));
+        QQuickItem *download = nullptr;
+        for (QQuickItem *candidate : allItems(row)) {
+            if (candidate->objectName() == QLatin1String("subtitleResultDownloadButton"))
+                download = candidate;
+        }
+        QVERIFY(download);
+        QVERIFY(QMetaObject::invokeMethod(download, "click"));
+        QCOMPARE(stub.remoteDownloads, QStringList{QStringLiteral("42")});
+        QTRY_VERIFY(!dialog->property("opened").toBool());
     }
 
     void playerUpNextCardPlaysOnReturnAndCancelsOnEscape()

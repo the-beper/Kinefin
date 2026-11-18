@@ -20,6 +20,9 @@
 #include <QApplication>
 #include <QCommandLineParser>
 #include <QCoreApplication>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
 #include <QGuiApplication>
 #include <QIcon>
 #include <QMessageBox>
@@ -37,11 +40,31 @@
 #include <memory>
 #include <optional>
 
+namespace {
+// Qt reads QT_QPA_PLATFORM before QApplication exists, so the option is applied here; the parser also accepts it for --help and for the `--platform=<p>` form Qt does not take itself
+void applyPlatformOption(int argc, char **argv)
+{
+    const QByteArray prefix = QByteArrayLiteral("--platform=");
+    for (int i = 1; i < argc; ++i) {
+        const QByteArray argument(argv[i]);
+        if (argument == "--platform" && i + 1 < argc) {
+            qputenv("QT_QPA_PLATFORM", argv[i + 1]);
+            return;
+        }
+        if (argument.startsWith(prefix)) {
+            qputenv("QT_QPA_PLATFORM", argument.mid(prefix.size()));
+            return;
+        }
+    }
+}
+} // namespace
+
 int main(int argc, char *argv[])
 {
     // mpvqt uses QQuickFramebufferObject, which requires Qt Quick's OpenGL
     // graphics API. Select it before any QQuickWindow is constructed.
     QQuickWindow::setGraphicsApi(QSGRendererInterface::OpenGL);
+    applyPlatformOption(argc, argv);
     QApplication app(argc, argv);
     // org.kde.desktop needs QApplication; an environment variable naming another style wins
     if (qEnvironmentVariableIsEmpty("QT_QUICK_CONTROLS_STYLE"))
@@ -85,11 +108,42 @@ int main(int argc, char *argv[])
     parser.addOption(
         {QStringLiteral("desktop"), QStringLiteral("Start the desktop interface (the only one).")});
     parser.addOption({QStringLiteral("tv"), QStringLiteral("Not supported.")});
+    parser.addOption({QStringLiteral("platform"), QStringLiteral("Equivalent to QT_QPA_PLATFORM."),
+                      QStringLiteral("platform")});
+    parser.addOption({QStringLiteral("config-dir"),
+                      QStringLiteral("Store profiles, downloads and caches under this directory "
+                                     "instead of the XDG directories."),
+                      QStringLiteral("path")});
+    parser.addOption({{QStringLiteral("l"), QStringLiteral("licenses")},
+                      QStringLiteral("Show the GPL license text and exit.")});
     parser.addOption({QStringLiteral("ignore-certificate-errors"),
                       QStringLiteral("Accept invalid TLS certificates from the server for this run "
                                      "(unsafe).")});
     Kinefin::addProfileOptions(parser);
     parser.process(app);
+    if (parser.isSet(QStringLiteral("licenses"))) {
+        QFile licenses(QStringLiteral(":/GPL-3.0-or-later.txt"));
+        if (!licenses.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            qCritical("The license text is missing from this build");
+            return 1;
+        }
+        QTextStream(stdout) << QString::fromUtf8(licenses.readAll());
+        return 0;
+    }
+    if (parser.isSet(QStringLiteral("config-dir"))) {
+        const QString value = parser.value(QStringLiteral("config-dir"));
+        if (value.isEmpty()) {
+            QTextStream(stderr) << "kinefin: --config-dir needs a path" << Qt::endl;
+            return 2;
+        }
+        const QString root = QDir::cleanPath(QFileInfo(value).absoluteFilePath());
+        if (!QFileInfo(root).dir().exists()) {
+            QTextStream(stderr) << "kinefin: the parent of the config directory does not exist"
+                                << Qt::endl;
+            return 1;
+        }
+        Kinefin::setProfileRoot(root);
+    }
     if (parser.isSet(QStringLiteral("tv"))) {
         qCritical("The TV interface is not supported");
         return 2;

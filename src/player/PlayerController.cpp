@@ -361,6 +361,59 @@ PlayerController::PlayerController(JellyfinClient &client, PlayQueue &queue,
     connect(&m_engine, &PlaybackEngine::videoParamsChanged, &m_mpvSettings,
             &PlayerSettings::applyLoadedAspect);
     connect(&m_engine, &PlaybackEngine::streamEnded, this, &PlayerController::onEnd);
+    connect(&m_client, &JellyfinClient::remoteSubtitlesReady, this,
+            [this](const QJsonArray &subtitles) {
+                m_remoteSubtitles.clear();
+                for (const QJsonValue &value : subtitles) {
+                    if (!value.isObject())
+                        continue;
+                    const QJsonObject object = value.toObject();
+                    const auto text = [&object](QLatin1String key, int max) {
+                        return object.value(key).toString().simplified().left(max);
+                    };
+                    const QString id = object.value(QStringLiteral("Id")).toString();
+                    if (id.isEmpty() || id.size() > 128)
+                        continue;
+                    m_remoteSubtitles.append(QVariantMap{
+                        {QStringLiteral("id"), id},
+                        {QStringLiteral("name"), text(QLatin1String("Name"), 200)},
+                        {QStringLiteral("provider"), text(QLatin1String("ProviderName"), 80)},
+                        {QStringLiteral("format"), text(QLatin1String("Format"), 16)},
+                        {QStringLiteral("author"), text(QLatin1String("Author"), 120)},
+                        {QStringLiteral("downloads"),
+                         object.value(QStringLiteral("DownloadCount")).toInt()},
+                        {QStringLiteral("forced"), object.value(QStringLiteral("Forced")).toBool()},
+                        {QStringLiteral("hearingImpaired"),
+                         object.value(QStringLiteral("HearingImpaired")).toBool()}});
+                }
+                m_remoteSubtitleSearching = false;
+                m_remoteSubtitleError.clear();
+                Q_EMIT remoteSubtitlesChanged();
+            });
+    connect(&m_client, &JellyfinClient::remoteSubtitlesFailed, this, [this](int httpStatus) {
+        m_remoteSubtitleSearching = false;
+        m_remoteSubtitleError = httpStatus == 0     ? QStringLiteral("network")
+                                : httpStatus == 404 ? QStringLiteral("noprovider")
+                                                    : QStringLiteral("failed");
+        m_remoteSubtitles.clear();
+        Q_EMIT remoteSubtitlesChanged();
+    });
+    connect(&m_client, &JellyfinClient::remoteSubtitleDownloaded, this,
+            [this](const QString &itemId, const QString &subtitleId) {
+                if (itemId != m_itemId)
+                    return;
+                Q_EMIT remoteSubtitleDownloaded(subtitleId);
+                // The same item again, not a new queue: a group keeps its queue and a series keeps its episodes
+                startItem(itemId, positionTicks(), m_groupItem);
+            });
+    connect(&m_client, &JellyfinClient::remoteSubtitleDownloadFailed, this,
+            [this](const QString &itemId, const QString &subtitleId, int httpStatus) {
+                if (itemId != m_itemId)
+                    return;
+                Q_EMIT remoteSubtitleDownloadFailed(subtitleId, httpStatus);
+            });
+    // A refreshed /Users/Me can change the policy the OSD entry reads
+    connect(&m_client, &JellyfinClient::userProfileRefreshed, this, [this] { Q_EMIT changed(); });
     m_sleep.setSingleShot(true);
     connect(&m_sleep, &QTimer::timeout, this, [this] { stop(); });
     m_seekReport.setSingleShot(true);
@@ -551,6 +604,10 @@ bool PlayerController::startItem(const QString &id, qint64 resumeTicks, bool gro
     m_externalSubtitles.clear();
     m_subtitleOptions.clear();
     m_pendingSubtitle.clear();
+    m_remoteSubtitles.clear();
+    m_remoteSubtitleSearching = false;
+    m_remoteSubtitleError.clear();
+    Q_EMIT remoteSubtitlesChanged();
     m_trickplay.reset();
     m_trickplayInfo = {};
     m_itemChapters.clear();
@@ -578,6 +635,36 @@ bool PlayerController::startItem(const QString &id, qint64 resumeTicks, bool gro
         requestPending();
     Q_EMIT changed();
     return true;
+}
+
+bool PlayerController::canManageSubtitles() const
+{
+    // A downloaded file has no server source to fetch a subtitle into
+    return !m_localPlayback && m_client.canManageSubtitles();
+}
+
+bool PlayerController::searchRemoteSubtitles(const QString &language)
+{
+    if (m_itemId.isEmpty() || m_localPlayback || !m_client.canManageSubtitles()
+        || m_remoteSubtitleSearching)
+        return false;
+    m_remoteSubtitles.clear();
+    m_remoteSubtitleSearching = true;
+    m_remoteSubtitleError.clear();
+    Q_EMIT remoteSubtitlesChanged();
+    if (!m_client.searchRemoteSubtitles(m_itemId, language)) {
+        m_remoteSubtitleSearching = false;
+        m_remoteSubtitleError = QStringLiteral("failed");
+        Q_EMIT remoteSubtitlesChanged();
+        return false;
+    }
+    return true;
+}
+
+bool PlayerController::downloadRemoteSubtitle(const QString &subtitleId)
+{
+    return !m_localPlayback && !m_itemId.isEmpty()
+           && m_client.downloadRemoteSubtitle(m_itemId, subtitleId);
 }
 
 bool PlayerController::playLocalFile(const QString &path, const QString &itemId,
@@ -634,6 +721,10 @@ bool PlayerController::openLocal()
     m_subtitleOptions.clear();
     m_externalSubtitles.clear();
     m_pendingSubtitle.clear();
+    m_remoteSubtitles.clear();
+    m_remoteSubtitleSearching = false;
+    m_remoteSubtitleError.clear();
+    Q_EMIT remoteSubtitlesChanged();
     m_skipLabel.clear();
     m_skipEnd = 0;
     clearPreview();

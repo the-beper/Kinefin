@@ -9,6 +9,7 @@
 #include <QJsonParseError>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QRegularExpression>
 #include <QSslError>
 #include <QUrlQuery>
 
@@ -337,6 +338,15 @@ bool userCanDownload(const QJsonObject &user)
     const QJsonValue flag = user.value(QStringLiteral("Policy"))
                                 .toObject()
                                 .value(QStringLiteral("EnableContentDownloading"));
+    return flag.isBool() && flag.toBool();
+}
+
+// `Policy.EnableSubtitleManagement` of a UserDto: false when absent or not a bool
+bool userCanManageSubtitles(const QJsonObject &user)
+{
+    const QJsonValue flag = user.value(QStringLiteral("Policy"))
+                                .toObject()
+                                .value(QStringLiteral("EnableSubtitleManagement"));
     return flag.isBool() && flag.toBool();
 }
 
@@ -727,6 +737,7 @@ void JellyfinClient::finishAuthentication(QNetworkReply *finished)
     m_userImageTag = validUserImageTag(user.value(QStringLiteral("PrimaryImageTag")));
     m_isAdministrator = userIsAdministrator(user);
     m_canDownload = userCanDownload(user);
+    m_canManageSubtitles = userCanManageSubtitles(user);
     m_syncPlayAccess = userSyncPlayAccess(user);
     m_state = State::Authenticated;
     Q_EMIT loginSucceeded(m_userId);
@@ -1880,6 +1891,67 @@ bool JellyfinClient::setItemPlayed(const QString &itemId, bool played)
     return true;
 }
 
+bool JellyfinClient::searchRemoteSubtitles(const QString &itemId, const QString &language)
+{
+    static const QRegularExpression languagePattern(QStringLiteral("\\A[A-Za-z]{2,3}\\z"));
+    if (!isAuthenticated() || !canManageSubtitles() || !isValidJellyfinId(itemId)
+        || !languagePattern.match(language).hasMatch())
+        return false;
+    const QUrl url = endpoint(QStringLiteral("/Items/") + itemId
+                              + QStringLiteral("/RemoteSearch/Subtitles/") + language);
+    QNetworkReply *reply = m_network.get(requestFor(url, true));
+    attach(reply, m_generation, [this](QNetworkReply *finished) {
+        const int status = finished->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (status == 401) {
+            invalidateSession();
+            return;
+        }
+        if (finished->error() != QNetworkReply::NoError || status != 200) {
+            Q_EMIT remoteSubtitlesFailed(status);
+            return;
+        }
+        QJsonArray subtitles;
+        if (!parseArray(finished, &subtitles)) {
+            Q_EMIT remoteSubtitlesFailed(status);
+            return;
+        }
+        Q_EMIT remoteSubtitlesReady(subtitles);
+    });
+    return true;
+}
+
+bool JellyfinClient::downloadRemoteSubtitle(const QString &itemId, const QString &subtitleId)
+{
+    const auto safeId = [](const QString &id) {
+        if (id.isEmpty() || id.size() > 128)
+            return false;
+        return std::all_of(id.cbegin(), id.cend(), [](QChar character) {
+            const char16_t value = character.unicode();
+            return (value >= u'0' && value <= u'9') || (value >= u'a' && value <= u'z')
+                   || (value >= u'A' && value <= u'Z') || value == u'-' || value == u'_'
+                   || value == u'.';
+        });
+    };
+    if (!isAuthenticated() || !canManageSubtitles() || !isValidJellyfinId(itemId)
+        || !safeId(subtitleId))
+        return false;
+    const QUrl url = endpoint(QStringLiteral("/Items/") + itemId
+                              + QStringLiteral("/RemoteSearch/Subtitles/") + subtitleId);
+    QNetworkReply *reply = postEmpty(m_network, requestFor(url, true));
+    attach(reply, m_generation, [this, itemId, subtitleId](QNetworkReply *finished) {
+        const int status = finished->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (status == 401) {
+            invalidateSession();
+            return;
+        }
+        if (finished->error() == QNetworkReply::NoError && (status == 200 || status == 204))
+            Q_EMIT remoteSubtitleDownloaded(itemId, subtitleId);
+        else
+            Q_EMIT remoteSubtitleDownloadFailed(itemId, subtitleId, status);
+    });
+    return true;
+}
+
 QUrl JellyfinClient::imageUrl(const QString &itemId, const QString &imageType, int maxWidth,
                               const QString &tag, int quality, const QString &format) const
 {
@@ -2421,6 +2493,7 @@ bool JellyfinClient::verifySession()
         m_userImageTag = validUserImageTag(me.value(QStringLiteral("PrimaryImageTag")));
         m_isAdministrator = userIsAdministrator(me);
         m_canDownload = userCanDownload(me);
+        m_canManageSubtitles = userCanManageSubtitles(me);
         m_syncPlayAccess = userSyncPlayAccess(me);
         Q_EMIT userProfileRefreshed(m_userId, m_userName, m_userImageTag);
     });
@@ -2719,6 +2792,7 @@ void JellyfinClient::clearToken()
     m_userImageTag.clear();
     m_isAdministrator = false;
     m_canDownload = false;
+    m_canManageSubtitles = false;
     m_syncPlayAccess.clear();
     if (hadToken)
         Q_EMIT credentialsCleared();
@@ -2820,6 +2894,11 @@ QString JellyfinClient::userImageTag() const
 bool JellyfinClient::isAdministrator() const
 {
     return m_isAdministrator;
+}
+
+bool JellyfinClient::canManageSubtitles() const
+{
+    return m_state == State::Authenticated && m_canManageSubtitles;
 }
 
 bool JellyfinClient::canDownload() const

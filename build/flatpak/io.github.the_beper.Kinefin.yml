@@ -3,6 +3,8 @@ runtime: org.kde.Platform
 runtime-version: "6.11"
 sdk: org.kde.Sdk
 command: kinefin
+# A standalone .flatpak bundle carries no separate locale extension: keep every catalog in /app/share/locale so the installed app is translated
+separate-locales: false
 finish-args:
   # Wayland only: the desktop session is Wayland on every target platform (Fedora GNOME is Wayland-only since 43, Plasma dropped its X11 session upstream in 6.8; there is no fallback-x11 socket on purpose, see docs/feature-parity.md §11).
   - --socket=wayland

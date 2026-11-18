@@ -103,6 +103,7 @@ class FakeJellyfin {
         QJsonObject policy = policedUser.value(QStringLiteral("Policy")).toObject();
         policy.insert(QStringLiteral("IsAdministrator"), administratorValue(account));
         policy.insert(QStringLiteral("EnableContentDownloading"), canDownloadValue());
+        policy.insert(QStringLiteral("EnableSubtitleManagement"), canManageSubtitlesValue());
         if (!syncPlayAccess.isEmpty())
             policy.insert(QStringLiteral("SyncPlayAccess"), syncPlayAccess);
         policedUser.insert(QStringLiteral("Policy"), policy);
@@ -150,12 +151,20 @@ class FakeJellyfin {
     {
         return canDownloadRaw ? *canDownloadRaw : QJsonValue(canDownload);
     }
+    // `Policy.EnableSubtitleManagement` of every user (the login reply and /Users/Me); `canManageSubtitlesRaw` replaces the value as is
+    bool canManageSubtitles = true;
+    std::optional<QJsonValue> canManageSubtitlesRaw;
+    QJsonValue canManageSubtitlesValue() const
+    {
+        return canManageSubtitlesRaw ? *canManageSubtitlesRaw : QJsonValue(canManageSubtitles);
+    }
     // `Policy.SyncPlayAccess` of every user (the login reply and /Users/Me); empty leaves the field out
     QString syncPlayAccess;
     QJsonObject policyOf(const FakeUser *user) const
     {
         QJsonObject policy{{QStringLiteral("IsAdministrator"), administratorValue(user)},
-                           {QStringLiteral("EnableContentDownloading"), canDownloadValue()}};
+                           {QStringLiteral("EnableContentDownloading"), canDownloadValue()},
+                           {QStringLiteral("EnableSubtitleManagement"), canManageSubtitlesValue()}};
         if (!syncPlayAccess.isEmpty())
             policy.insert(QStringLiteral("SyncPlayAccess"), syncPlayAccess);
         return policy;
@@ -236,6 +245,12 @@ class FakeJellyfin {
     bool downloadIgnoreRange = false;
     QByteArray downloadBody;
     QByteArray downloadEtag = QByteArrayLiteral("\"etag-1\"");
+    // Remote subtitle search/download through the server plugin
+    QByteArray remoteSubtitleSearchBody = "[]";
+    int remoteSubtitleSearchStatus = 0;
+    int remoteSubtitleDownloadStatus = 204;
+    QList<QByteArray> remoteSubtitleSearches;
+    QList<QByteArray> remoteSubtitleDownloads;
     struct HeldDownload {
         QTcpSocket *socket = nullptr;
         int status = 0;
@@ -709,6 +724,36 @@ class FakeJellyfin {
             m_heldPlaylistWrites.append({socket, status, body});
         else
             respond(socket, status, body);
+    }
+
+    // GET/POST /Items/{id}/RemoteSearch/Subtitles/{language|id}; false when the request is another route
+    bool handleRemoteSubtitleRoute(QTcpSocket *socket, const QByteArray &method,
+                                   const QByteArray &route, const QByteArray &authorization)
+    {
+        const QList<QByteArray> parts = route.split('?').first().split('/');
+        const qsizetype at = parts.indexOf("RemoteSearch");
+        if (at < 2 || at + 2 >= parts.size() || parts.at(at + 1) != "Subtitles")
+            return false;
+        if (!hasSessionToken(authorization)) {
+            respond(socket, 401, {});
+            return true;
+        }
+        if (method == "GET") {
+            remoteSubtitleSearches.append(parts.last());
+            if (remoteSubtitleSearchStatus != 0) {
+                respond(socket, remoteSubtitleSearchStatus, {});
+                return true;
+            }
+            respondBytes(socket, 200, remoteSubtitleSearchBody,
+                         "Content-Type: application/json\r\n");
+            return true;
+        }
+        if (method == "POST") {
+            remoteSubtitleDownloads.append(parts.last());
+            respond(socket, remoteSubtitleDownloadStatus, {});
+            return true;
+        }
+        return false;
     }
 
     // GET /Items/{id}/Download; false when the request is another route
@@ -1342,6 +1387,8 @@ class FakeJellyfin {
             }
             return;
         }
+        if (handleRemoteSubtitleRoute(socket, method, route, authorization))
+            return;
         if (handleDownloadRoute(socket, method, route, range, ifRange, authorization))
             return;
         // Before the listing routes: `/Playlists/{id}/Items?` would read as the Items family

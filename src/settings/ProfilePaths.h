@@ -13,7 +13,11 @@ bool validProfileId(const QString &profileId);
 // What `--create-profile` accepts: the profile's id is its name, 1-64 characters of [A-Za-z0-9_] (safe in file names, D-Bus names and shell)
 bool validProfileName(const QString &name);
 
-// `~/.local/share/kinefin/profiles/<id>`, `~/.cache/kinefin/profiles/<id>` and `<data>/logs`; empty for an invalid `profileId`
+// `--config-dir`: one absolute root that replaces the XDG locations for this run (`<root>/profiles.json`, `<root>/profiles/<id>`, `<root>/cache/<id>`); an empty root restores the XDG layout. Set it before the first path is read. KWallet entries are keyed by profile and server ids only, so two roots that share a profile id share its tokens
+void setProfileRoot(const QString &root);
+QString profileRoot();
+
+// `~/.local/share/kinefin/profiles/<id>`, `~/.cache/kinefin/profiles/<id>` and `<data>/logs`; under a profile root, `<root>/profiles/<id>` and `<root>/cache/<id>`. Empty for an invalid `profileId`
 QString profileDataDirectory(const QString &profileId);
 QString profileCacheDirectory(const QString &profileId);
 QString profileLogDirectory(const QString &profileId);

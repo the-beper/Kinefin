@@ -3020,6 +3020,87 @@ class TestJellyfinClient : public QObject {
         QVERIFY(!client.canDownload());
     }
 
+    void remoteSubtitlesNeedThePolicy()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        server.remoteSubtitleSearchBody =
+            QByteArrayLiteral("[{\"Id\":\"abc123\",\"Name\":\"English\","
+                              "\"ProviderName\":\"OpenSubtitles\",\"Format\":\"srt\"}]");
+        Kinefin::JellyfinClient client;
+        QVERIFY(!client.canManageSubtitles());
+        QVERIFY(login(client, server));
+        QVERIFY(client.canManageSubtitles());
+        QSignalSpy ready(&client, &Kinefin::JellyfinClient::remoteSubtitlesReady);
+        QVERIFY(client.searchRemoteSubtitles(kPlayItem, QStringLiteral("eng")));
+        QTRY_COMPARE(ready.count(), 1);
+        QCOMPARE(ready.first().at(0).toJsonArray().size(), 1);
+        QCOMPARE(server.remoteSubtitleSearches.constLast(), QByteArray("eng"));
+        QVERIFY(!client.searchRemoteSubtitles(kPlayItem, QStringLiteral("../x")));
+
+        QSignalSpy downloaded(&client, &Kinefin::JellyfinClient::remoteSubtitleDownloaded);
+        QVERIFY(client.downloadRemoteSubtitle(kPlayItem, QStringLiteral("abc123")));
+        QTRY_COMPARE(downloaded.count(), 1);
+        QCOMPARE(server.remoteSubtitleDownloads.constLast(), QByteArray("abc123"));
+        QVERIFY(!client.downloadRemoteSubtitle(kPlayItem, QStringLiteral("../escape")));
+
+        client.forgetSession();
+        QVERIFY(!client.canManageSubtitles());
+        server.canManageSubtitles = false;
+        QVERIFY(login(client, server));
+        QVERIFY(!client.canManageSubtitles());
+        QVERIFY(!client.searchRemoteSubtitles(kPlayItem, QStringLiteral("eng")));
+        client.forgetSession();
+        server.canManageSubtitlesRaw = QStringLiteral("yes");
+        QVERIFY(login(client, server));
+        QVERIFY(!client.canManageSubtitles());
+        client.disconnectFromServer();
+    }
+
+    void remoteSubtitleFailuresAreReported()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        QSignalSpy ready(&client, &Kinefin::JellyfinClient::remoteSubtitlesReady);
+        QSignalSpy failed(&client, &Kinefin::JellyfinClient::remoteSubtitlesFailed);
+
+        server.remoteSubtitleSearchStatus = 500;
+        QVERIFY(client.searchRemoteSubtitles(kPlayItem, QStringLiteral("eng")));
+        QTRY_COMPARE(failed.size(), 1);
+        QCOMPARE(failed.takeFirst().at(0).toInt(), 500);
+        QCOMPARE(ready.size(), 0);
+
+        // A body that is not an array of objects breaks the contract, not just the JSON syntax
+        server.remoteSubtitleSearchStatus = 0;
+        server.remoteSubtitleSearchBody = QByteArrayLiteral("{}");
+        QVERIFY(client.searchRemoteSubtitles(kPlayItem, QStringLiteral("eng")));
+        QTRY_COMPARE(failed.size(), 1);
+        QCOMPARE(ready.size(), 0);
+        server.remoteSubtitleSearchBody = QByteArrayLiteral("[\"not an object\"]");
+        QVERIFY(client.searchRemoteSubtitles(kPlayItem, QStringLiteral("eng")));
+        QTRY_COMPARE(failed.size(), 1);
+        QCOMPARE(ready.size(), 0);
+
+        QSignalSpy downloadFailed(&client, &Kinefin::JellyfinClient::remoteSubtitleDownloadFailed);
+        server.remoteSubtitleDownloadStatus = 500;
+        QVERIFY(client.downloadRemoteSubtitle(kPlayItem, QStringLiteral("abc123")));
+        QTRY_COMPARE(downloadFailed.size(), 1);
+        QCOMPARE(downloadFailed.first().at(0).toString(), kPlayItem);
+        QCOMPARE(downloadFailed.first().at(1).toString(), QStringLiteral("abc123"));
+        QCOMPARE(downloadFailed.first().at(2).toInt(), 500);
+
+        // A 401 is the session ending, not a search failure the dialog could explain
+        QSignalSpy expired(&client, &Kinefin::JellyfinClient::sessionExpired);
+        const int failuresBefore401 = failed.size();
+        server.remoteSubtitleSearchStatus = 401;
+        QVERIFY(client.searchRemoteSubtitles(kPlayItem, QStringLiteral("eng")));
+        QTRY_COMPARE(expired.size(), 1);
+        QVERIFY(!client.isAuthenticated());
+        QCOMPARE(failed.size(), failuresBefore401);
+    }
+
     void downloadUrlNeedsAnAuthenticatedSession()
     {
         FakeJellyfin server;

@@ -15,6 +15,29 @@
 #include <unistd.h>
 
 namespace Kinefin {
+namespace {
+QString s_profileRoot;
+
+QString underProfileRoot(const QString &suffix)
+{
+    if (s_profileRoot.isEmpty())
+        return {};
+    if (s_profileRoot.endsWith(QLatin1Char('/')))
+        return s_profileRoot + suffix;
+    return s_profileRoot + QLatin1Char('/') + suffix;
+}
+} // namespace
+
+void setProfileRoot(const QString &root)
+{
+    s_profileRoot = root.isEmpty() ? QString() : QDir::cleanPath(root);
+}
+
+QString profileRoot()
+{
+    return s_profileRoot;
+}
+
 bool validProfileId(const QString &profileId)
 {
     static const QRegularExpression pattern(
@@ -32,6 +55,8 @@ QString profileDataDirectory(const QString &profileId)
 {
     if (!validProfileId(profileId))
         return {};
+    if (!s_profileRoot.isEmpty())
+        return underProfileRoot(QStringLiteral("profiles/") + profileId);
     return QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation)
            + QStringLiteral("/kinefin/profiles/") + profileId;
 }
@@ -40,6 +65,8 @@ QString profileCacheDirectory(const QString &profileId)
 {
     if (!validProfileId(profileId))
         return {};
+    if (!s_profileRoot.isEmpty())
+        return underProfileRoot(QStringLiteral("cache/") + profileId);
     return QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation)
            + QStringLiteral("/kinefin/profiles/") + profileId;
 }

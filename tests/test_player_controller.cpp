@@ -250,6 +250,32 @@ class TestPlayerController : public QObject {
         QTRY_COMPARE(chain.controller.rate(), 2.0);
     }
 
+    void aDownloadedSubtitleReloadsWithoutLosingTheQueue()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        const QHash<QString, QString> names{{kMovie, QStringLiteral("Arcturus")},
+                                            {kOtherMovie, QStringLiteral("Boreal")}};
+        for (const QString &id : {kMovie, kOtherMovie}) {
+            chain.server.itemsById.insert(id, movieBody(id, names.value(id)));
+            QSignalSpy added(&chain.queue, &Kinefin::PlayQueue::added);
+            QVERIFY(chain.queue.add(id, Kinefin::PlayQueue::Last));
+            QTRY_COMPARE(added.size(), 1);
+        }
+        QVERIFY(chain.controller.playQueue(0));
+        QTRY_COMPARE(chain.controller.queueCount(), 2);
+        const int index = chain.controller.currentIndex();
+        QSignalSpy downloaded(&chain.controller, &PlayerController::remoteSubtitleDownloaded);
+        QVERIFY(chain.controller.downloadRemoteSubtitle(QStringLiteral("abc123")));
+        QTRY_COMPARE(downloaded.size(), 1);
+        QCOMPARE(downloaded.first().at(0).toString(), QStringLiteral("abc123"));
+        QCOMPARE(chain.server.remoteSubtitleDownloads.constLast(), QByteArray("abc123"));
+        // The reload keeps the queue and the current index: only a new playItem would drop them
+        QCOMPARE(chain.controller.queueCount(), 2);
+        QCOMPARE(chain.controller.currentIndex(), index);
+        QVERIFY(chain.controller.hasNext());
+    }
+
     void aMovieKeepsNoSeriesChoice()
     {
         Chain chain;

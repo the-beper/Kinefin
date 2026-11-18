@@ -112,6 +112,8 @@ std::optional<ProfileIndexData> readLocked(QString *error)
 
 QString profileIndexPath()
 {
+    if (!profileRoot().isEmpty())
+        return profileRoot() + QStringLiteral("/profiles.json");
     return QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation)
            + QStringLiteral("/kinefin/profiles.json");
 }

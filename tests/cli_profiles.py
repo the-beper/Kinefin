@@ -58,6 +58,33 @@ class ProfileFlags(unittest.TestCase):
     def test_bad_log_level_exits_2(self) -> None:
         self.assertEqual(self.run_kinefin("--log-level", "loud").returncode, 2)
 
+    def test_config_dir_moves_everything_under_one_root(self) -> None:
+        root = f"{self.home.name}/root"
+        result = self.run_kinefin("--config-dir", root, "--list-profiles")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("* default\tDefault", result.stdout)
+        self.assertTrue(os.path.exists(f"{root}/profiles.json"))
+        self.assertFalse(os.path.exists(f"{self.home.name}/config/kinefin/profiles.json"))
+        self.assertEqual(self.run_kinefin("--config-dir", root, "--create-profile", "work").returncode, 0)
+        self.assertIn("work", self.run_kinefin("--config-dir", root, "--list-profiles").stdout)
+        self.assertFalse(os.path.exists(f"{self.home.name}/config/kinefin"))
+
+    def test_config_dir_needs_an_existing_parent(self) -> None:
+        result = self.run_kinefin("--config-dir", f"{self.home.name}/missing/root", "--list-profiles")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("parent", result.stderr)
+
+    def test_licenses_prints_the_gpl(self) -> None:
+        result = self.run_kinefin("--licenses")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("GNU GENERAL PUBLIC LICENSE", result.stdout)
+
+    def test_platform_equals_form_is_accepted(self) -> None:
+        # No inherited platform: only the pre-scan can make this run headless
+        self.env.pop("QT_QPA_PLATFORM")
+        result = self.run_kinefin("--platform=offscreen", "--list-profiles")
+        self.assertEqual(result.returncode, 0, result.stderr)
+
 
 if __name__ == "__main__":
     BINARY = os.path.abspath(sys.argv.pop(1))
