@@ -1417,6 +1417,7 @@ Kirigami.Page {
             objectName: moreRoot.namePrefix + "QueueItem"
             text: i18n("Now Playing Queue")
             icon.name: "media-track-queue-amarok"
+            visible: !page.player.localPlayback
             onTriggered: queuePanel.open()
         }
         Controls.MenuItem {
@@ -1433,6 +1434,7 @@ Kirigami.Page {
             objectName: moreRoot.namePrefix + "PlaybackInfoItem"
             text: i18nc("@action:inmenu", "Playback Info")
             icon.name: "dialog-information"
+            visible: !page.player.localPlayback
             checkable: true
             checked: page.playbackInfoShown
             onTriggered: page.playbackInfoShown = !page.playbackInfoShown

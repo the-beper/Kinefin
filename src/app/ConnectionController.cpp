@@ -241,7 +241,8 @@ ConnectionController::ConnectionController(const QString &profileId, const QStri
                                            const QString &version, TokenStore *store,
                                            QObject *parent)
     : QObject(parent), m_ownedStore(store ? nullptr : new KWalletTokenStore), m_client(this),
-      m_sync(&m_client, store ? store : m_ownedStore.get(), profileId, this)
+      m_sync(&m_client, store ? store : m_ownedStore.get(), profileId, this),
+      m_downloads(&m_client, profileId)
 {
     // The sync connects to the client first, so on every shared signal it has already saved, restored or forgotten when the slots below run
     m_identityValid = m_client.setDeviceIdentity(QStringLiteral("Kinefin"), deviceId, version);
@@ -254,6 +255,17 @@ ConnectionController::ConnectionController(const QString &profileId, const QStri
         m_browse.setStoragePath(dataDirectory + QStringLiteral("/browse.json"));
     }
     m_remoteCommands.attach(&m_socket);
+    // A library scan only wakes the rule scanner: LibraryChanged is a hint, never an item list
+    connect(&m_socket, &JellyfinSocketClient::libraryChanged, this,
+            [this] { m_downloads.scheduleRuleScan(); });
+    connect(this, &ConnectionController::stateChanged, this, [this] {
+        const bool online = state() == Authenticated;
+        m_downloads.setOnline(online);
+        if (online) {
+            m_downloads.reconcileOutbox();
+            m_downloads.scanRules();
+        }
+    });
     // The error is accepted only while the setting is on; otherwise it is remembered, so a probe that ends in an error afterwards is told from a plain failure
     connect(&m_probeNetwork, &QNetworkAccessManager::sslErrors, this, [this](QNetworkReply *reply) {
         if (m_ignoreCertificateErrors)
@@ -580,6 +592,57 @@ void ConnectionController::tryNextConnection()
     Q_EMIT serverUrlChanged();
 }
 
+bool ConnectionController::canWorkOffline() const
+{
+    const QList<ServerCredential> saved = m_sync.credentials();
+    const QList<DownloadRecord> records = m_downloads.store()->records();
+    for (const DownloadRecord &record : records) {
+        if (record.state != QLatin1String("completed") && record.state != QLatin1String("exported"))
+            continue;
+        for (const ServerCredential &entry : saved) {
+            if (entry.serverId.compare(record.serverId, Qt::CaseInsensitive) == 0
+                && entry.userId.compare(record.userId, Qt::CaseInsensitive) == 0)
+                return true;
+        }
+    }
+    return false;
+}
+
+bool ConnectionController::workOffline()
+{
+    if (m_state == Offline)
+        return true;
+    if (m_state == Authenticated)
+        return false;
+    QList<DownloadRecord> records = m_downloads.store()->records();
+    std::sort(records.begin(), records.end(),
+              [](const DownloadRecord &left, const DownloadRecord &right) {
+                  return left.updatedAt > right.updatedAt;
+              });
+    const QList<ServerCredential> saved = m_sync.credentials();
+    for (const DownloadRecord &record : records) {
+        if (record.state != QLatin1String("completed") && record.state != QLatin1String("exported"))
+            continue;
+        for (const ServerCredential &entry : saved) {
+            if (entry.serverId.compare(record.serverId, Qt::CaseInsensitive) != 0
+                || entry.userId.compare(record.userId, Qt::CaseInsensitive) != 0)
+                continue;
+            m_sync.cancelRestore();
+            m_client.disconnectFromServer();
+            if (!m_libraries.isEmpty()) {
+                m_libraries.clear();
+                Q_EMIT librariesChanged();
+            }
+            setError({});
+            m_serverUrl = entry.url;
+            m_offlineUserName = entry.username;
+            setState(Offline);
+            return true;
+        }
+    }
+    return false;
+}
+
 void ConnectionController::connectTo(const QString &address)
 {
     if (m_state != Idle && m_state != NeedsLogin)
@@ -718,6 +781,11 @@ void ConnectionController::cancel()
     m_connectionFallback.clear();
     if (m_state == Idle)
         return;
+    if (m_state == Offline) {
+        m_offlineUserName.clear();
+        setState(Idle);
+        return;
+    }
     if (m_state == Authenticated)
         preparePlaybackDisconnect();
     clearQuickConnect();
@@ -777,6 +845,11 @@ void ConnectionController::signOut()
 {
     if (m_state == Idle)
         return;
+    if (m_state == Offline) {
+        m_offlineUserName.clear();
+        setState(Idle);
+        return;
+    }
     if (m_state == Authenticated && !m_client.userId().isEmpty()) {
         removeUser(m_client.userId());
         return;
@@ -1430,6 +1503,8 @@ void ConnectionController::setState(State state)
     if (m_state == state)
         return;
     m_state = state;
+    if (state != Offline)
+        m_offlineUserName.clear();
     if (state == Idle || state == Connecting)
         m_publicSource.clear();
     if (state == Idle || state == Authenticated)
@@ -1455,6 +1530,7 @@ void ConnectionController::setIgnoreCertificateErrors(bool ignore)
         m_probeNetwork.clearConnectionCache();
     m_ignoreCertificateErrors = ignore;
     m_client.setIgnoreCertificateErrors(ignore);
+    m_downloads.setIgnoreCertificateErrors(ignore);
     if (m_imageOrigin)
         m_imageOrigin->setIgnoreCertificateErrors(ignore);
 }

@@ -491,6 +491,36 @@ class TestItemDetailsModel : public QObject {
         QCOMPARE(bare.criticRating, -1.0);
     }
 
+    void parsesTheDownloadFields()
+    {
+        const QJsonObject source{{QStringLiteral("Id"), kMovie},
+                                 {QStringLiteral("Container"), QStringLiteral("mkv")},
+                                 {QStringLiteral("Size"), 1234},
+                                 {QStringLiteral("ETag"), QStringLiteral("\"abc\"")}};
+        const QJsonObject item{{QStringLiteral("Id"), kMovie},
+                               {QStringLiteral("Name"), QStringLiteral("Movie")},
+                               {QStringLiteral("Type"), QStringLiteral("Movie")},
+                               {QStringLiteral("CanDownload"), false},
+                               {QStringLiteral("MediaSources"), QJsonArray{source}}};
+        const Kinefin::ItemDetails parsed = Kinefin::parseItemDetails(item);
+        QVERIFY(parsed.valid);
+        QVERIFY(!parsed.canDownload);
+        QCOMPARE(parsed.sources.size(), 1);
+        QCOMPARE(parsed.sources.constFirst().container, QStringLiteral("mkv"));
+        QCOMPARE(parsed.sources.constFirst().size, 1234);
+        QCOMPARE(parsed.sources.constFirst().etag, QStringLiteral("\"abc\""));
+
+        // An absent flag leaves the policy in charge, and the item's Etag spelling still reads as a fallback
+        QJsonObject fallback = item;
+        fallback.remove(QStringLiteral("CanDownload"));
+        fallback.insert(
+            QStringLiteral("MediaSources"),
+            QJsonArray{QJsonObject{{QStringLiteral("Etag"), QStringLiteral("\"old\"")}}});
+        const Kinefin::ItemDetails withoutFlag = Kinefin::parseItemDetails(fallback);
+        QVERIFY(withoutFlag.canDownload);
+        QCOMPARE(withoutFlag.sources.constFirst().etag, QStringLiteral("\"old\""));
+    }
+
     void mediaBadgesComeFromTheFirstSource()
     {
         Fixture f;
@@ -576,10 +606,11 @@ class TestItemDetailsModel : public QObject {
             FakeJellyfin::capturedListingQuery(f.server.itemsRoutes.constFirst());
         QCOMPARE(wire.queryItemValue(QStringLiteral("ids")), kMovie);
         const QString fields = wire.queryItemValue(QStringLiteral("fields"));
-        for (const QString &field : {QStringLiteral("Overview"), QStringLiteral("Genres"),
-                                     QStringLiteral("People"), QStringLiteral("Chapters"),
-                                     QStringLiteral("MediaSources"), QStringLiteral("Taglines"),
-                                     QStringLiteral("OriginalTitle"), QStringLiteral("Studios")})
+        for (const QString &field :
+             {QStringLiteral("Overview"), QStringLiteral("Genres"), QStringLiteral("People"),
+              QStringLiteral("Chapters"), QStringLiteral("MediaSources"),
+              QStringLiteral("Taglines"), QStringLiteral("OriginalTitle"),
+              QStringLiteral("Studios"), QStringLiteral("CanDownload")})
             QVERIFY2(fields.contains(field), qPrintable(field));
         QVERIFY(!wire.hasQueryItem(QStringLiteral("parentId")));
         QVERIFY(!wire.hasQueryItem(QStringLiteral("limit")));

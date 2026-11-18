@@ -17,6 +17,7 @@
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QImageReader>
 #include <QJsonDocument>
 #include <QJsonParseError>
@@ -25,6 +26,8 @@
 #include <QSaveFile>
 #include <QStandardPaths>
 #include <QUrl>
+
+#include <utility>
 
 #include <algorithm>
 #include <cmath>
@@ -430,6 +433,11 @@ void PlayerController::detachVideo(MpvAbstractItem *item)
 
 void PlayerController::onAccountLeaving()
 {
+    m_pendingLocal = {};
+    if (m_localPlayback) {
+        m_localPlayback = false;
+        Q_EMIT localPlaybackChanged();
+    }
     persistQueueCursor();
     m_stopping = true;
     m_awaitingGroup = false;
@@ -497,6 +505,11 @@ bool PlayerController::startItem(const QString &id, qint64 resumeTicks, bool gro
 {
     if (!isValidJellyfinId(id) || resumeTicks < 0 || m_client.userId().isEmpty())
         return false;
+    m_pendingLocal = {};
+    if (m_localPlayback) {
+        m_localPlayback = false;
+        Q_EMIT localPlaybackChanged();
+    }
     const bool sameItem = id == m_itemId;
     // Preserve the prior item's cursor before the new id replaces it.
     if (!m_itemId.isEmpty() && !sameItem)
@@ -567,6 +580,106 @@ bool PlayerController::startItem(const QString &id, qint64 resumeTicks, bool gro
     return true;
 }
 
+bool PlayerController::playLocalFile(const QString &path, const QString &itemId,
+                                     const QString &title, const QString &subtitle,
+                                     qint64 resumeTicks)
+{
+    const QFileInfo info(path);
+    if (!info.isAbsolute() || !info.isFile() || info.isSymLink() || !isValidJellyfinId(itemId)
+        || resumeTicks < 0 || grouped())
+        return false;
+    m_pendingLocal.path = path;
+    m_pendingLocal.itemId = itemId;
+    m_pendingLocal.title = title.left(512);
+    m_pendingLocal.subtitle = subtitle.left(512);
+    m_pendingLocal.resumeTicks = resumeTicks;
+    m_pendingLocal.pending = true;
+    m_loading = true;
+    m_errorText.clear();
+    if (!m_localPlayback) {
+        m_localPlayback = true;
+        Q_EMIT localPlaybackChanged();
+    }
+    if (m_session.state() == PlaybackSession::State::Idle)
+        openLocal(); // the engine may attach with the player page, which opens it
+    else
+        m_engine.stop(); // the end of the previous item opens the local one
+    return true;
+}
+
+bool PlayerController::openLocal()
+{
+    if (!m_pendingLocal.pending)
+        return false;
+    if (!m_engine.isInitialized() || m_session.state() != PlaybackSession::State::Idle)
+        return false;
+    const PendingLocal request = std::exchange(m_pendingLocal, {});
+    m_client.cancelPlaybackInfo();
+    cancelSeriesRequest();
+    m_seriesPlaylistWanted = false;
+    m_groupItem = false;
+    m_awaitingGroup = false;
+    m_groupAdvance.stop();
+    m_mpvSettings.setSpeedHeld(false);
+    persistQueueCursor();
+    m_queue.setCurrentPlaybackItemId({});
+    m_playlist.clear();
+    m_queueIndex = -1;
+    if (!m_itemSeriesId.isEmpty()) {
+        m_itemSeriesId.clear();
+        Q_EMIT seriesChoicesChanged();
+    }
+    m_seriesApplied = false;
+    m_rateDecided = false;
+    m_subtitleOptions.clear();
+    m_externalSubtitles.clear();
+    m_pendingSubtitle.clear();
+    m_skipLabel.clear();
+    m_skipEnd = 0;
+    clearPreview();
+    m_selectedAudioId = 0;
+    m_selectedSubtitleId = 0;
+    m_selectedAudioIndex.reset();
+    m_selectedSubtitleIndex.reset();
+    m_itemId = request.itemId;
+    m_title = request.title;
+    m_subtitle = request.subtitle;
+    m_primaryTag.clear();
+    m_resumeTicks = request.resumeTicks;
+    m_resumedFrom = request.resumeTicks;
+    m_loading = false;
+    m_fileLoaded = false;
+    m_stopping = false;
+    m_errorText.clear();
+    m_playlist.clear();
+    m_queueIndex = -1;
+    m_segments.clear();
+    m_trickplay.reset();
+    m_trickplayInfo = {};
+    m_itemChapters.clear();
+    updateChapters();
+    resetUpNext();
+    m_audioTracks.clear();
+    m_subtitleTracks.clear();
+    m_audioFacts.clear();
+    m_subtitleFacts.clear();
+    Q_EMIT tracksChanged();
+    m_mpvSettings.apply();
+    PlaybackSource source;
+    source.itemId = request.itemId;
+    source.mediaSourceId = QStringLiteral("local");
+    source.playSessionId = QStringLiteral("local");
+    source.method = PlaybackSource::Method::Local;
+    source.url = QUrl::fromLocalFile(request.path);
+    if (!m_engine.open(source, false)) {
+        m_errorText = i18n("The downloaded file could not be opened.");
+        Q_EMIT changed();
+        return false;
+    }
+    Q_EMIT changed();
+    return true;
+}
+
 bool PlayerController::playQueue(int index, qint64 startTicks)
 {
     if (index < 0 || index >= m_queue.count() || startTicks < 0
@@ -627,6 +740,10 @@ bool PlayerController::resumeQueue()
 
 void PlayerController::requestPending()
 {
+    if (m_pendingLocal.pending) {
+        openLocal();
+        return;
+    }
     if (!m_loading || !m_engine.isInitialized() || m_itemId.isEmpty()
         || m_session.state() != PlaybackSession::State::Idle)
         return;
@@ -957,6 +1074,8 @@ void PlayerController::onState(PlaybackSession::State, PlaybackSession::State to
         m_clock.stop();
         if (m_loading)
             QTimer::singleShot(0, this, &PlayerController::requestPending);
+        if (m_pendingLocal.pending)
+            QTimer::singleShot(0, this, &PlayerController::openLocal);
     }
     Q_EMIT changed();
 }
@@ -982,6 +1101,16 @@ void PlayerController::onEnd(const QString &reason)
             Q_EMIT changed();
             return;
         }
+        clearCurrent();
+        Q_EMIT finished();
+        Q_EMIT changed();
+        return;
+    }
+    // A local file has no queue, no repeat of a server item and no reporting: it just ends
+    if (m_localPlayback && !m_pendingLocal.pending) {
+        Q_EMIT localPositionChanged(m_itemId, m_engine.positionTicks(),
+                                    reason == QLatin1String("eof"));
+        m_queue.setCurrentPlaybackItemId({});
         clearCurrent();
         Q_EMIT finished();
         Q_EMIT changed();
@@ -1038,6 +1167,11 @@ void PlayerController::clearCurrent()
     m_awaitingGroup = false;
     m_groupAdvance.stop();
     m_mpvSettings.setSpeedHeld(false);
+    m_pendingLocal = {};
+    if (m_localPlayback) {
+        m_localPlayback = false;
+        Q_EMIT localPlaybackChanged();
+    }
     if (!m_itemSeriesId.isEmpty()) {
         m_itemSeriesId.clear();
         Q_EMIT seriesChoicesChanged();
@@ -1048,8 +1182,11 @@ void PlayerController::pause()
 {
     if (grouped())
         m_group->requestPause();
-    else
+    else {
         m_engine.pause();
+        if (m_localPlayback)
+            Q_EMIT localPositionChanged(m_itemId, m_engine.positionTicks(), false);
+    }
 }
 void PlayerController::resume()
 {

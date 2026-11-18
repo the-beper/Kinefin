@@ -18,6 +18,8 @@ src/qml/SyncPlayDialog.qml
 src/qml/MediaInfoDialog.qml
 src/qml/SearchPage.qml
 src/qml/QueuePage.qml
+src/qml/DownloadsPage.qml
+src/qml/RuleDialog.qml
 src/qml/FilterDialog.qml
 src/qml/GenreRailsView.qml
 src/qml/GenreRailsPage.qml

@@ -57,6 +57,8 @@ struct SourceSummary {
     QString id;
     QString name;
     QString container;
+    // The server's entity tag of the file, empty when it sent none
+    QString etag;
     qint64 size = 0;
     qint64 bitrate = 0;
     QList<StreamSummary> streams;
@@ -98,6 +100,8 @@ struct ItemDetails {
     QStringList writers;
     bool played = false;
     bool favorite = false;
+    // The item's CanDownload when the server sent one; absent or unreadable leaves it true, so the policy decides
+    bool canDownload = true;
     qreal playedPercentage = 0;
     int unplayedCount = -1;
     qint64 resumePositionTicks = 0;

@@ -88,6 +88,8 @@ QVariant SettingsSectionModel::data(const QModelIndex &index, int role) const
         return definition.min;
     case MaximumRole:
         return definition.max;
+    case DisabledRole:
+        return definition.disabled;
     default:
         return {};
     }
@@ -102,8 +104,8 @@ bool SettingsSectionModel::setData(const QModelIndex &index, const QVariant &val
 
 QHash<int, QByteArray> SettingsSectionModel::roleNames() const
 {
-    return {{KeyRole, "key"},         {LabelRole, "label"},    {KindRole, "kind"},
-            {OptionsRole, "options"}, {ValueRole, "value"},    {IsDefaultRole, "isDefault"},
-            {MinimumRole, "minimum"}, {MaximumRole, "maximum"}};
+    return {{KeyRole, "key"},         {LabelRole, "label"},     {KindRole, "kind"},
+            {OptionsRole, "options"}, {ValueRole, "value"},     {IsDefaultRole, "isDefault"},
+            {MinimumRole, "minimum"}, {MaximumRole, "maximum"}, {DisabledRole, "disabled"}};
 }
 } // namespace Kinefin

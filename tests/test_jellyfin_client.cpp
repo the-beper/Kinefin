@@ -2965,6 +2965,79 @@ class TestJellyfinClient : public QObject {
         QVERIFY(!client.isAdministrator());
     }
 
+    void downloadPolicyComesFromTheLogin()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(!client.canDownload());
+        bool flagAtSignal = false;
+        connect(&client, &Kinefin::JellyfinClient::loginSucceeded, this,
+                [&] { flagAtSignal = client.canDownload(); });
+        server.canDownload = true;
+        QVERIFY(login(client, server));
+        QVERIFY(client.canDownload());
+        QVERIFY(flagAtSignal);
+
+        const QList<QJsonValue> cannotDownload{false, QJsonValue(QJsonValue::Undefined),
+                                               QStringLiteral("true"), 1, QJsonValue::Null};
+        for (const QJsonValue &value : cannotDownload) {
+            client.forgetSession();
+            QVERIFY(!client.canDownload());
+            server.canDownloadRaw = value;
+            QVERIFY(login(client, server));
+            QVERIFY2(!client.canDownload(), qPrintable(QString::number(value.type())));
+        }
+        client.forgetSession();
+        server.canDownloadRaw.reset();
+        server.canDownload = true;
+        QVERIFY(login(client, server));
+        QVERIFY(client.canDownload());
+        client.disconnectFromServer();
+        QVERIFY(!client.canDownload());
+    }
+
+    void verifySessionRefreshesTheDownloadPolicy()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        server.users = {{kAliceId, "tokenalice", QStringLiteral("Alice"), {}}};
+        Kinefin::JellyfinClient client;
+        QVERIFY(loginAs(client, server, QStringLiteral("Alice")));
+        QVERIFY(client.canDownload());
+        QSignalSpy refreshed(&client, &Kinefin::JellyfinClient::userProfileRefreshed);
+        server.canDownload = false;
+        QVERIFY(client.verifySession());
+        QTRY_COMPARE(refreshed.size(), 1);
+        QVERIFY(!client.canDownload());
+        server.canDownload = true;
+        QVERIFY(client.verifySession());
+        QTRY_COMPARE(refreshed.size(), 2);
+        QVERIFY(client.canDownload());
+        server.canDownloadRaw = QStringLiteral("yes");
+        QVERIFY(client.verifySession());
+        QTRY_COMPARE(refreshed.size(), 3);
+        QVERIFY(!client.canDownload());
+    }
+
+    void downloadUrlNeedsAnAuthenticatedSession()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(client.downloadUrl(kPlayItem).isEmpty());
+        QVERIFY(login(client, server));
+        const QUrl url = client.downloadUrl(kPlayItem);
+        QVERIFY(url.isValid());
+        QVERIFY(url.path().endsWith(QStringLiteral("/Items/%1/Download").arg(kPlayItem)));
+        QVERIFY(!url.hasQuery());
+        QVERIFY(!url.toString().contains(QStringLiteral("Token")));
+        QVERIFY(client.downloadUrl(QStringLiteral("../escape")).isEmpty());
+        QVERIFY(client.downloadUrl(QString()).isEmpty());
+        client.forgetSession();
+        QVERIFY(client.downloadUrl(kPlayItem).isEmpty());
+    }
+
     void verifySessionRefreshesTheAdministratorFlag()
     {
         FakeJellyfin server;

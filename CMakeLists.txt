@@ -46,6 +46,22 @@ add_library(kinefin_core STATIC
     src/api/PlaybackReport.h
     src/api/SyncPlayProtocol.cpp
     src/api/SyncPlayProtocol.h
+    src/downloads/DownloadManager.cpp
+    src/downloads/DownloadManager.h
+    src/downloads/DownloadStore.cpp
+    src/downloads/DownloadStore.h
+    src/downloads/DownloadTransfer.cpp
+    src/downloads/DownloadTransfer.h
+    src/downloads/WatchedOutbox.cpp
+    src/downloads/WatchedOutbox.h
+    src/downloads/ExportNames.cpp
+    src/downloads/ExportNames.h
+    src/downloads/DownloadRules.cpp
+    src/downloads/DownloadRules.h
+    src/integration/NetworkMeter.cpp
+    src/integration/NetworkMeter.h
+    src/models/DownloadsModel.cpp
+    src/models/DownloadsModel.h
     src/syncplay/ServerClock.cpp
     src/syncplay/ServerClock.h
     src/syncplay/SyncPlayGroupsModel.cpp
@@ -136,7 +152,7 @@ target_include_directories(kinefin_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 # Lets the QML module see the core library's types that src/app/ClientSettingsQml.h exposes.
 qt_extract_metatypes(kinefin_core)
 target_compile_definitions(kinefin_core PRIVATE TRANSLATION_DOMAIN="kinefin")
-target_link_libraries(kinefin_core PUBLIC Qt6::Core Qt6::Network Qt6::WebSockets KF6::Wallet KF6::ConfigCore KF6::I18n)
+target_link_libraries(kinefin_core PUBLIC Qt6::Core Qt6::DBus Qt6::Network Qt6::WebSockets KF6::Wallet KF6::ConfigCore KF6::I18n)
 
 add_library(kinefin_player STATIC
     src/player/PlaybackEngine.cpp
@@ -175,7 +191,7 @@ target_compile_definitions(kinefin_integration PRIVATE TRANSLATION_DOMAIN="kinef
 target_link_libraries(kinefin_integration PUBLIC kinefin_player Qt6::DBus Qt6::Gui Qt6::Network KF6::I18n)
 
 # The QML module lives in a static library of its own so that the UI tests can import it like the application does
-foreach(page Main PlayerPage OsdButton MiniPlayer PlaybackInfoOverlay ShellHeader AboutDialog ShortcutsDialog RemoteSessionsDialog SyncPlayDialog MediaInfoDialog HomePage LibraryTile LibraryPage ResumeItemsPage MediaCard CardMenu CardRow EpisodeRow ItemDetailsPage SearchPage QueuePage FilterDialog GenreRailsView GenreRailsPage LibraryContent ItemListRow ItemRowGrid LoginPage UserPickerPage MessageBox ServersPage SettingsPage SettingRow UserPreferencesForm UserPreferencesSaveBar FavoritesPage FavoritesGroupPage TopFade MediaListRow PlaylistsPage PlaylistPage PlaylistDialogs AddToPlaylistDialog PageToolbar PageBackButton FadeInOnShow PageTitle)
+foreach(page Main PlayerPage OsdButton MiniPlayer PlaybackInfoOverlay ShellHeader AboutDialog ShortcutsDialog RemoteSessionsDialog SyncPlayDialog MediaInfoDialog HomePage LibraryTile LibraryPage ResumeItemsPage MediaCard CardMenu CardRow EpisodeRow ItemDetailsPage SearchPage QueuePage FilterDialog GenreRailsView GenreRailsPage LibraryContent ItemListRow ItemRowGrid LoginPage UserPickerPage MessageBox ServersPage SettingsPage SettingRow UserPreferencesForm UserPreferencesSaveBar FavoritesPage FavoritesGroupPage TopFade MediaListRow PlaylistsPage PlaylistPage PlaylistDialogs AddToPlaylistDialog PageToolbar PageBackButton FadeInOnShow PageTitle DownloadsPage RuleDialog)
     set_source_files_properties(src/qml/${page}.qml PROPERTIES QT_RESOURCE_ALIAS ${page}.qml)
 endforeach()
 # The images the pages draw themselves, beside the QML files they belong to
@@ -218,6 +234,8 @@ qt_add_qml_module(kinefin_ui
         src/qml/ItemDetailsPage.qml
         src/qml/SearchPage.qml
         src/qml/QueuePage.qml
+        src/qml/DownloadsPage.qml
+        src/qml/RuleDialog.qml
         src/qml/FilterDialog.qml
         src/qml/GenreRailsView.qml
         src/qml/GenreRailsPage.qml
@@ -243,6 +261,8 @@ qt_add_qml_module(kinefin_ui
         src/app/UpdateCheckerQml.h
         src/app/ConnectionController.cpp
         src/app/ConnectionController.h
+        src/app/DownloadsController.cpp
+        src/app/DownloadsController.h
         src/app/ImageNetworkFactory.cpp
         src/app/ImageNetworkFactory.h
         src/app/ModelsQml.h
@@ -466,6 +486,36 @@ if(BUILD_TESTING)
     add_executable(test_browse_state_store tests/test_browse_state_store.cpp)
     target_link_libraries(test_browse_state_store PRIVATE kinefin_core Qt6::Test)
     add_test(NAME browse_state_store COMMAND test_browse_state_store)
+
+    add_executable(test_download_store tests/test_download_store.cpp)
+    target_link_libraries(test_download_store PRIVATE kinefin_core Qt6::Test)
+    add_test(NAME download_store COMMAND test_download_store)
+
+    add_executable(test_download_transfer tests/test_download_transfer.cpp)
+    target_compile_definitions(test_download_transfer PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    target_link_libraries(test_download_transfer PRIVATE kinefin_core Qt6::Test Qt6::Network)
+    add_test(NAME download_transfer COMMAND test_download_transfer)
+
+    add_executable(test_download_manager tests/test_download_manager.cpp)
+    target_compile_definitions(test_download_manager PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    target_link_libraries(test_download_manager PRIVATE kinefin_core Qt6::Test Qt6::Network)
+    add_test(NAME download_manager COMMAND test_download_manager)
+
+    add_executable(test_downloads_model tests/test_downloads_model.cpp)
+    target_link_libraries(test_downloads_model PRIVATE kinefin_core Qt6::Test)
+    add_test(NAME downloads_model COMMAND test_downloads_model)
+
+    add_executable(test_download_export tests/test_download_export.cpp)
+    target_link_libraries(test_download_export PRIVATE kinefin_core Qt6::Test)
+    add_test(NAME download_export COMMAND test_download_export)
+
+    add_executable(test_watched_outbox tests/test_watched_outbox.cpp)
+    target_link_libraries(test_watched_outbox PRIVATE kinefin_core Qt6::Test)
+    add_test(NAME watched_outbox COMMAND test_watched_outbox)
+
+    add_executable(test_network_meter tests/test_network_meter.cpp)
+    target_link_libraries(test_network_meter PRIVATE kinefin_core Qt6::Test Qt6::DBus)
+    add_test(NAME network_meter COMMAND test_network_meter)
 
     add_executable(test_genre_rails_model tests/test_genre_rails_model.cpp)
     target_compile_definitions(test_genre_rails_model PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")

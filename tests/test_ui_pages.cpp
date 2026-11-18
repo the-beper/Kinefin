@@ -18,6 +18,7 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QDateTime>
+#include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
@@ -5437,8 +5438,8 @@ class TestUiPages : public QObject {
             const char *root;
             const char *page;
             int index;
-        } tabs[] = {{"Favorites", Qt::Key_4, "favorites", "favoritesPage", 3},
-                    {"Playlists", Qt::Key_5, "playlists", "playlistsPage", 4}};
+        } tabs[] = {{"Favorites", Qt::Key_5, "favorites", "favoritesPage", 4},
+                    {"Playlists", Qt::Key_6, "playlists", "playlistsPage", 5}};
         for (const auto &tab : tabs) {
             for (const bool byKey : {false, true}) {
                 const QString root = QString::fromLatin1(tab.root);
@@ -5451,9 +5452,9 @@ class TestUiPages : public QObject {
                 QTRY_COMPARE(ui.currentDetails()->objectName(), page);
                 QTRY_VERIFY(!ui.tabSwitching());
                 QCOMPARE(ui.stackDepth(), 1);
-                // The type tabs come with the libraries: all five must be there before one is read by its place
-                QTRY_COMPARE(ui.tabButtons().size(), 5);
-                for (int index = 0; index < 5; ++index)
+                // The type tabs come with the libraries: all six must be there before one is read by its place
+                QTRY_COMPARE(ui.tabButtons().size(), 6);
+                for (int index = 0; index < 6; ++index)
                     QTRY_COMPARE(ui.tabButtons().value(index)->property("checked").toBool(),
                                  index == tab.index);
                 // Back at the root of a tab does nothing, as on Home
@@ -5476,7 +5477,7 @@ class TestUiPages : public QObject {
         QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("favoritesGroupPage"));
         QCOMPARE(ui.stackDepth(), 2);
         QCOMPARE(ui.window->property("currentSection").toString(), QStringLiteral("favorites"));
-        QTRY_VERIFY(ui.tabButtons().value(3)->property("checked").toBool());
+        QTRY_VERIFY(ui.tabButtons().value(4)->property("checked").toBool());
         QVERIFY(ui.clickTab(QStringLiteral("Favorites")));
         QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("favoritesPage"));
         QTRY_COMPARE(ui.stackDepth(), 1);
@@ -5622,7 +5623,7 @@ class TestUiPages : public QObject {
         ui.window->resize(minimumWidth, minimumHeight);
         QTRY_COMPARE(ui.window->size(), QSize(minimumWidth, minimumHeight));
         QTRY_VERIFY(ui.shellHeader()->property("compact").toBool());
-        QTRY_COMPARE(ui.tabButtons().size(), 5);
+        QTRY_COMPARE(ui.tabButtons().size(), 6);
         // The box becomes a search button, and the controls of the bar stay clear of each other and inside the window
         QQuickItem *field = ui.item(QStringLiteral("headerSearchField"));
         QQuickItem *button = ui.item(QStringLiteral("headerSearchButton"));
@@ -5672,7 +5673,7 @@ class TestUiPages : public QObject {
         };
         const auto labelsShow = [&ui](bool labelled) {
             const QList<QQuickItem *> tabs = ui.tabButtons();
-            if (tabs.size() != 5)
+            if (tabs.size() != 6)
                 return false;
             for (const QQuickItem *tab : tabs) {
                 if (tab->property("display").toInt() != (labelled ? 2 : 0))
@@ -5722,7 +5723,7 @@ class TestUiPages : public QObject {
                      qPrintable(problems.join(QLatin1Char('\n'))));
     }
 
-    void theShortcutsDialogListsAllFiveTabs()
+    void theShortcutsDialogListsAllTabs()
     {
         Ui ui(m_home->path());
         QVERIFY(ui.load());
@@ -5739,9 +5740,9 @@ class TestUiPages : public QObject {
         }
         const qsizetype home = keys.indexOf(QStringLiteral("Ctrl+1"));
         QVERIFY(home >= 0);
-        const QStringList wanted{QStringLiteral("Home"), QStringLiteral("Movies"),
-                                 QStringLiteral("Shows"), QStringLiteral("Favorites"),
-                                 QStringLiteral("Playlists")};
+        const QStringList wanted{QStringLiteral("Home"),      QStringLiteral("Movies"),
+                                 QStringLiteral("Shows"),     QStringLiteral("Downloads"),
+                                 QStringLiteral("Favorites"), QStringLiteral("Playlists")};
         for (qsizetype i = 0; i < wanted.size(); ++i) {
             QCOMPARE(keys.value(home + i), QStringLiteral("Ctrl+%1").arg(i + 1));
             QCOMPARE(labels.value(keys.value(home + i)), wanted.at(i));
@@ -5754,9 +5755,10 @@ class TestUiPages : public QObject {
         ui.serveSearch();
         QVERIFY(ui.load());
         QVERIFY(buildState(ui, QStringLiteral("home")));
-        QCOMPARE(ui.tabNames(), QStringList({QStringLiteral("Home"), QStringLiteral("Movies"),
-                                             QStringLiteral("Shows"), QStringLiteral("Favorites"),
-                                             QStringLiteral("Playlists")}));
+        QCOMPARE(ui.tabNames(),
+                 QStringList({QStringLiteral("Home"), QStringLiteral("Movies"),
+                              QStringLiteral("Shows"), QStringLiteral("Downloads"),
+                              QStringLiteral("Favorites"), QStringLiteral("Playlists")}));
         // Home marks itself, and only itself, wherever the front page belongs
         const auto tabChecked = [&](int index, bool expected) {
             return ui.tabButtons().value(index)->property("checked").toBool() == expected;
@@ -5803,11 +5805,11 @@ class TestUiPages : public QObject {
             int index;
             const char *name;
             const char *root;
-        } roots[] = {{3, "Favorites", "favorites"}, {4, "Playlists", "playlists"}};
+        } roots[] = {{4, "Favorites", "favorites"}, {5, "Playlists", "playlists"}};
         for (const auto &entry : roots) {
             QVERIFY(ui.clickTab(QLatin1String(entry.name)));
             QTRY_COMPARE(ui.rootTab(), QString::fromLatin1(entry.root));
-            for (int other = 0; other < 5; ++other)
+            for (int other = 0; other < 6; ++other)
                 QTRY_VERIFY(tabChecked(other, other == entry.index));
         }
     }
@@ -5852,7 +5854,7 @@ class TestUiPages : public QObject {
             QTest::mouseMove(ui.window, QPoint(width / 2, 400));
             QTRY_COMPARE(geometries(), reference);
             const QList<QQuickItem *> tabs = ui.tabButtons();
-            QCOMPARE(tabs.size(), 5);
+            QCOMPARE(tabs.size(), 6);
             for (int i = 0; i < tabs.size(); ++i) {
                 QTRY_COMPARE(tabs[i]->property("checked").toBool(), i == current);
                 QTRY_COMPARE(indicatorShows(tabs[i]), i == current);
@@ -5863,7 +5865,7 @@ class TestUiPages : public QObject {
                 QCOMPARE(rect.height(), reference[0].height());
             }
         };
-        QTRY_VERIFY(geometries().size() == 5);
+        QTRY_VERIFY(geometries().size() == 6);
         QTest::qWait(300);
         const QList<QRectF> reference = geometries();
         checkState(0, reference);
@@ -5871,11 +5873,9 @@ class TestUiPages : public QObject {
             const char *name;
             const char *root;
             int index;
-        } steps[] = {{"Movies", "movies", 1},
-                     {"Shows", "tvshows", 2},
-                     {"Favorites", "favorites", 3},
-                     {"Playlists", "playlists", 4},
-                     {"Home", "home", 0}};
+        } steps[] = {{"Movies", "movies", 1},       {"Shows", "tvshows", 2},
+                     {"Downloads", "downloads", 3}, {"Favorites", "favorites", 4},
+                     {"Playlists", "playlists", 5}, {"Home", "home", 0}};
         for (const auto &step : steps) {
             QVERIFY(ui.clickTab(QLatin1String(step.name)));
             QTRY_COMPARE(ui.rootTab(), QString::fromLatin1(step.root));
@@ -5894,8 +5894,9 @@ class TestUiPages : public QObject {
         Ui ui(m_home->path());
         QVERIFY(ui.load());
         QVERIFY(buildState(ui, QStringLiteral("home")));
-        // All five tabs, wrapping: Home, Movies, Shows, Favorites, Playlists
-        for (const char *root : {"movies", "tvshows", "favorites", "playlists", "home"}) {
+        // All six tabs, wrapping: Home, Movies, Shows, Downloads, Favorites, Playlists
+        for (const char *root :
+             {"movies", "tvshows", "downloads", "favorites", "playlists", "home"}) {
             QTest::keyClick(ui.window, Qt::Key_PageDown, Qt::ControlModifier);
             QTRY_COMPARE(ui.rootTab(), QString::fromLatin1(root));
         }
@@ -5903,6 +5904,8 @@ class TestUiPages : public QObject {
         QTRY_COMPARE(ui.rootTab(), QStringLiteral("playlists"));
         QTest::keyClick(ui.window, Qt::Key_PageUp, Qt::ControlModifier);
         QTRY_COMPARE(ui.rootTab(), QStringLiteral("favorites"));
+        QTest::keyClick(ui.window, Qt::Key_PageUp, Qt::ControlModifier);
+        QTRY_COMPARE(ui.rootTab(), QStringLiteral("downloads"));
         QTest::keyClick(ui.window, Qt::Key_PageUp, Qt::ControlModifier);
         QTRY_COMPARE(ui.rootTab(), QStringLiteral("tvshows"));
 
@@ -5919,7 +5922,8 @@ class TestUiPages : public QObject {
         ui.controller.reloadLibraries();
         QTRY_COMPARE(ui.tabNames(),
                      QStringList({QStringLiteral("Home"), QStringLiteral("Shows"),
-                                  QStringLiteral("Favorites"), QStringLiteral("Playlists")}));
+                                  QStringLiteral("Downloads"), QStringLiteral("Favorites"),
+                                  QStringLiteral("Playlists")}));
         QTRY_COMPARE(ui.rootTab(), QStringLiteral("home"));
         QTest::keyClick(ui.window, Qt::Key_PageDown, Qt::ControlModifier);
         QTRY_COMPARE(ui.rootTab(), QStringLiteral("tvshows"));
@@ -7214,9 +7218,9 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(ui.layoutProblems().isEmpty());
         QQuickItem *menuButton = ui.item(QStringLiteral("mainMenuButton"));
         QVERIFY(menuButton);
-        // The order inside the header: the five tabs, then the right cluster, the menu button last (Home has no Back button to come before them)
+        // The order inside the header: the six tabs, then the right cluster, the menu button last (Home has no Back button to come before them)
         const QList<QQuickItem *> tabs = ui.tabButtons();
-        QCOMPARE(tabs.size(), 5);
+        QCOMPARE(tabs.size(), 6);
         tabs.first()->forceActiveFocus(Qt::TabFocusReason);
         QTRY_VERIFY(tabs.first()->hasActiveFocus());
         for (const QQuickItem *tab : tabs.mid(1)) {
@@ -7745,6 +7749,213 @@ class TestUiPages : public QObject {
         QTRY_COMPARE(ui.rootTab(), QStringLiteral("favorites"));
     }
 
+    void theDownloadsTabDownloadsAnItem()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        ui.serveMovie();
+        // The fake sends 64 KiB from its Download route: the record the page reads must expect that file
+        QJsonObject movie = QJsonDocument::fromJson(ui.server.itemsById.value(kMovieId)).object();
+        QJsonArray sources = movie.value(QStringLiteral("MediaSources")).toArray();
+        QJsonObject source = sources.first().toObject();
+        source.insert(QStringLiteral("Size"), 64 * 1024);
+        source.insert(QStringLiteral("ETag"), QStringLiteral("etag-1"));
+        sources.replace(0, source);
+        movie.insert(QStringLiteral("MediaSources"), sources);
+        ui.server.itemsById.insert(kMovieId, QJsonDocument(movie).toJson(QJsonDocument::Compact));
+
+        QVERIFY(QMetaObject::invokeMethod(ui.shellAction(QStringLiteral("downloadsTabAction")),
+                                          "trigger"));
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("downloadsPage"));
+        QTRY_COMPARE(ui.rootTab(), QStringLiteral("downloads"));
+        QVERIFY(ui.showsText(QStringLiteral("No downloads yet")));
+        // The footer label keeps the same distance from the left edge as from the top and bottom
+        QQuickItem *footer = ui.item(QStringLiteral("downloadsFooter"));
+        QVERIFY(footer);
+        QQuickItem *count = ui.item(QStringLiteral("downloadsFooterCount"));
+        QVERIFY(count);
+        const QPointF at = count->mapToItem(footer, QPointF(0, 0));
+        // The same distance from the left edge as from the top
+        QCOMPARE(at.x(), at.y());
+
+        QVERIFY(ui.controller.downloads()->downloadItem(kMovieId));
+        QQuickItem *toast = ui.item(QStringLiteral("downloadToast"));
+        QTRY_VERIFY(toast && toast->isVisible());
+        QVERIFY(ui.showsText(QStringLiteral("Download queued")));
+        QTRY_VERIFY_WITH_TIMEOUT(ui.showsText(QStringLiteral("Arcturus (2012)")), scaled(10000));
+        QTRY_VERIFY_WITH_TIMEOUT(ui.showsText(QStringLiteral("Available on This Device")),
+                                 scaled(10000));
+        QCOMPARE(ui.controller.downloads()->downloadState(kMovieId), QStringLiteral("completed"));
+        // The completed row offers Play; the shell test has no player, so only its presence is checked
+        QQuickItem *play = ui.item(QStringLiteral("downloadPlay_") + kMovieId);
+        QVERIFY(play && play->isVisible());
+        QQuickItem *poster = ui.item(QStringLiteral("downloadPoster_") + kMovieId);
+        QVERIFY(poster);
+        QVERIFY(poster->property("source").toUrl().isValid());
+        // A local completion queues one watched-state event, which the sign-in reconciliation sends
+        ui.controller.downloads()->updateLocalProgress(kMovieId, 600000000, true);
+        QCOMPARE(ui.controller.downloads()->pendingSyncCount(), 1);
+        QVERIFY(ui.showsText(QStringLiteral("1 item to sync")));
+        ui.controller.downloads()->reconcileOutbox();
+        QTRY_COMPARE_WITH_TIMEOUT(ui.controller.downloads()->pendingSyncCount(), 0, scaled(5000));
+        // Export keeps the sandbox copy and writes the host layout below the chosen folder
+        QTemporaryDir host;
+        QVERIFY(host.isValid());
+        ui.controller.downloads()->setKodiSidecars(true);
+        ui.controller.downloads()->exportDownload(ui.controller.playbackClient().serverId(),
+                                                  ui.controller.playbackClient().userId(), kMovieId,
+                                                  QUrl::fromLocalFile(host.path()));
+        QTRY_COMPARE_WITH_TIMEOUT(ui.controller.downloads()->downloadState(kMovieId),
+                                  QStringLiteral("exported"), scaled(5000));
+        QVERIFY(QFile::exists(host.path() + QStringLiteral("/Movies/Arcturus (2012) (2012).nfo")));
+        QVERIFY2(QDir(host.path() + QStringLiteral("/Movies")).exists(),
+                 qPrintable(QDir(host.path())
+                                .entryList(QDir::AllEntries | QDir::NoDotAndDotDot)
+                                .join(QLatin1Char(','))));
+        QVERIFY(QFile::exists(host.path() + QStringLiteral("/Movies/Arcturus (2012) (2012).mkv")));
+        // The completed row has Play and one More menu; Remove Download asks first, then drops the row and the record
+        QQuickItem *more = ui.item(QStringLiteral("downloadMore_") + kMovieId);
+        QVERIFY(more && more->isVisible());
+        ui.clickCenter(more);
+        QQuickItem *remove = nullptr;
+        QTRY_VERIFY((remove = ui.item(QStringLiteral("downloadRemove_") + kMovieId)) != nullptr
+                    && remove->isVisible());
+        QVERIFY(remove->isEnabled());
+        QObject *dialog =
+            ui.currentDetails()->findChild<QObject *>(QStringLiteral("downloadsPageRemoveDialog"));
+        QVERIFY(dialog);
+        QVERIFY(QMetaObject::invokeMethod(remove, "click"));
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QVERIFY(QMetaObject::invokeMethod(dialog, "close"));
+        QTRY_VERIFY(!dialog->property("opened").toBool());
+        QCOMPARE(ui.controller.downloads()->downloadState(kMovieId), QStringLiteral("exported"));
+        QVERIFY(QMetaObject::invokeMethod(remove, "click"));
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QObject *confirm = dialog->findChild<QObject *>(QStringLiteral("removeDownloadConfirm"));
+        QVERIFY(confirm);
+        QVERIFY(QMetaObject::invokeMethod(confirm, "trigger"));
+        QTRY_VERIFY_WITH_TIMEOUT(ui.controller.downloads()->downloadState(kMovieId).isEmpty(),
+                                 scaled(5000));
+        QTRY_VERIFY(ui.showsText(QStringLiteral("No downloads yet")));
+    }
+
+    void aSeriesRuleFollowsTheSeriesPage()
+    {
+        Ui ui(m_home->path());
+        ui.serveShow();
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        QQuickItem *series = openDetails(ui, kSeriesId);
+        QVERIFY(series);
+        QObject *action =
+            ui.currentDetails()->findChild<QObject *>(QStringLiteral("automaticDownloadsAction"));
+        QVERIFY(action);
+        QVERIFY(QMetaObject::invokeMethod(action, "trigger"));
+        QObject *dialog = ui.currentDetails()->findChild<QObject *>(QStringLiteral("ruleDialog"));
+        QVERIFY(dialog);
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QObject *save = dialog->findChild<QObject *>(QStringLiteral("ruleDialogSave"));
+        QVERIFY(save);
+        QVERIFY(QMetaObject::invokeMethod(save, "trigger"));
+        QTRY_COMPARE(ui.controller.downloads()
+                         ->seriesRule(kSeriesId)
+                         .value(QStringLiteral("kind"))
+                         .toString(),
+                     QStringLiteral("nextN"));
+        QObject *stop =
+            ui.currentDetails()->findChild<QObject *>(QStringLiteral("stopDownloadsAction"));
+        QVERIFY(stop);
+        QVERIFY(QMetaObject::invokeMethod(stop, "trigger"));
+        QTRY_VERIFY(ui.controller.downloads()->seriesRule(kSeriesId).isEmpty());
+    }
+
+    void anItemThatCannotBeDownloadedHasNoAction()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QJsonObject movie = QJsonDocument::fromJson(ui.server.itemsById.value(kMovieId)).object();
+        movie.insert(QStringLiteral("CanDownload"), false);
+        ui.server.itemsById.insert(kMovieId, QJsonDocument(movie).toJson(QJsonDocument::Compact));
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+
+        QSignalSpy failed(ui.controller.downloads(), &Kinefin::DownloadsController::downloadFailed);
+        QVERIFY(ui.controller.downloads()->downloadItem(kMovieId));
+        QTRY_COMPARE(failed.count(), 1);
+        QCOMPARE(failed.first().at(1).toString(), QStringLiteral("unsupported"));
+        QVERIFY(ui.controller.downloads()->downloadState(kMovieId).isEmpty());
+
+        // The details page hides the action for the same item
+        QVERIFY(QMetaObject::invokeMethod(ui.window, "openItem", Q_ARG(QVariant, kMovieId),
+                                          Q_ARG(QVariant, QVariant())));
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("itemDetailsPage"));
+        QTRY_VERIFY(!ui.currentDetails()->property("downloadable").toBool());
+    }
+
+    void workOfflineShowsTheDownloadsWithoutASession()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        ui.serveMovie();
+        QJsonObject movie = QJsonDocument::fromJson(ui.server.itemsById.value(kMovieId)).object();
+        QJsonArray sources = movie.value(QStringLiteral("MediaSources")).toArray();
+        QJsonObject source = sources.first().toObject();
+        source.insert(QStringLiteral("Size"), 64 * 1024);
+        source.insert(QStringLiteral("ETag"), QStringLiteral("etag-1"));
+        sources.replace(0, source);
+        movie.insert(QStringLiteral("MediaSources"), sources);
+        ui.server.itemsById.insert(kMovieId, QJsonDocument(movie).toJson(QJsonDocument::Compact));
+        QVERIFY(ui.controller.downloads()->downloadItem(kMovieId));
+        QTRY_COMPARE_WITH_TIMEOUT(ui.controller.downloads()->downloadState(kMovieId),
+                                  QStringLiteral("completed"), scaled(10000));
+
+        // Work Offline belongs to a connection that failed or ended, not to a live session
+        ui.controller.cancel();
+        QTRY_COMPARE(ui.controller.state(), ConnectionController::Idle);
+        QVERIFY(ui.controller.canWorkOffline());
+        QVERIFY(ui.controller.workOffline());
+        QTRY_COMPARE(ui.controller.state(), ConnectionController::Offline);
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("downloadsPage"));
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Arcturus (2012)")));
+        // Only the Downloads tab is offered, and the menu leaves Offline
+        QVERIFY(!ui.shellAction(QStringLiteral("homeTabAction"))->property("visible").toBool());
+        QVERIFY(ui.shellAction(QStringLiteral("downloadsTabAction"))->property("visible").toBool());
+        QVERIFY(ui.shellAction(QStringLiteral("leaveOfflineAction"))->property("visible").toBool());
+        QVERIFY(
+            !ui.shellAction(QStringLiteral("switchServerAction"))->property("visible").toBool());
+        QVERIFY(QMetaObject::invokeMethod(ui.shellAction(QStringLiteral("leaveOfflineAction")),
+                                          "trigger"));
+        QTRY_COMPARE(ui.controller.state(), ConnectionController::Idle);
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("serversPage"));
+    }
+
+    void theDownloadsPageFollowsTheServerPolicy()
+    {
+        Ui ui(m_home->path());
+        ui.server.canDownload = false;
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        QCOMPARE(ui.controller.downloads()->canDownload(), false);
+
+        QVERIFY(QMetaObject::invokeMethod(ui.shellAction(QStringLiteral("downloadsTabAction")),
+                                          "trigger"));
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("downloadsPage"));
+        QTRY_VERIFY(ui.item(QStringLiteral("downloadsPermissionNote"))->isVisible());
+        QVERIFY(ui.showsText(QStringLiteral("This server does not allow downloads for this user"),
+                             false));
+
+        // The Settings entry disappears with the permission
+        QVERIFY(
+            QMetaObject::invokeMethod(ui.shellAction(QStringLiteral("settingsAction")), "trigger"));
+        QTRY_VERIFY(ui.item(QStringLiteral("settingsPage")) != nullptr);
+        QVERIFY(!ui.item(QStringLiteral("settingsCategory_downloads")));
+        QVERIFY(QMetaObject::invokeMethod(ui.shellAction(QStringLiteral("downloadsTabAction")),
+                                          "trigger"));
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("downloadsPage"));
+    }
+
     void theHeaderDisablesWhatNeedsASession()
     {
         Ui ui(m_home->path());
@@ -7755,7 +7966,7 @@ class TestUiPages : public QObject {
         QVERIFY(!ui.shellAction(QStringLiteral("homeTabAction"))->property("enabled").toBool());
         QVERIFY(!ui.item(QStringLiteral("queueButton"))->isEnabled());
         QVERIFY(!ui.item(QStringLiteral("headerSearchField"))->isEnabled());
-        for (const char *name : {"favoritesTabAction", "playlistsTabAction"})
+        for (const char *name : {"downloadsTabAction", "favoritesTabAction", "playlistsTabAction"})
             QVERIFY2(!ui.shellAction(QLatin1String(name))->property("enabled").toBool(), name);
         // Settings and About work without one
         QVERIFY(ui.shellAction(QStringLiteral("settingsAction"))->property("enabled").toBool());
@@ -8806,10 +9017,13 @@ class TestUiPages : public QObject {
             names << actions.at(i)->objectName();
             texts << actions.at(i)->property("text").toString();
         }
-        QCOMPARE(names.mid(0, 4),
-                 (QStringList{QStringLiteral("playNextAction"), QStringLiteral("addToQueueAction"),
-                              QStringLiteral("addToPlaylistAction"),
-                              QStringLiteral("toggleFavoriteAction")}));
+        QCOMPARE(
+            names.mid(0, 7),
+            (QStringList{QStringLiteral("playNextAction"), QStringLiteral("addToQueueAction"),
+                         QStringLiteral("addToPlaylistAction"), QStringLiteral("downloadAction"),
+                         QStringLiteral("automaticDownloadsAction"),
+                         QStringLiteral("stopDownloadsAction"),
+                         QStringLiteral("toggleFavoriteAction")}));
         // Refresh is the main menu's, for every page
         QVERIFY(!texts.contains(QStringLiteral("Refresh")));
     }
@@ -9173,7 +9387,8 @@ class TestUiPages : public QObject {
         ui.serveViews({{kMovies, QStringLiteral("Movies"), QStringLiteral("movies")}});
         QVERIFY(ui.load());
         QVERIFY(ui.signIn());
-        const QStringList always{QStringLiteral("Favorites"), QStringLiteral("Playlists")};
+        const QStringList always{QStringLiteral("Downloads"), QStringLiteral("Favorites"),
+                                 QStringLiteral("Playlists")};
         QTRY_COMPARE(ui.tabNames(),
                      (QStringList{QStringLiteral("Home"), QStringLiteral("Movies")} + always));
         // Only series: the Movies tab goes and Shows takes its place
@@ -9485,10 +9700,10 @@ class TestUiPages : public QObject {
         QVERIFY(QMetaObject::invokeMethod(selector, "activated", Q_ARG(int, 0)));
         QTRY_COMPARE(ui.controller.movies()->libraryId(), QString());
         QTRY_COMPARE(selector->property("currentIndex").toInt(), 0);
-        // The five tabs come first in the Tab order, then the rest of the header, the selector and the grid after them
+        // The six tabs come first in the Tab order, then the rest of the header, the selector and the grid after them
         QTRY_VERIFY(ui.layoutProblems().isEmpty());
         const QList<QQuickItem *> tabs = ui.tabButtons();
-        QCOMPARE(tabs.size(), 5);
+        QCOMPARE(tabs.size(), 6);
         tabs.first()->forceActiveFocus(Qt::TabFocusReason);
         QTRY_VERIFY(tabs.first()->hasActiveFocus());
         const QList<QQuickItem *> visited = ui.tabCycle();
@@ -9697,11 +9912,8 @@ class TestUiPages : public QObject {
         const struct {
             Qt::Key key;
             const char *root;
-        } all[] = {{Qt::Key_2, "movies"},
-                   {Qt::Key_3, "tvshows"},
-                   {Qt::Key_4, "favorites"},
-                   {Qt::Key_5, "playlists"},
-                   {Qt::Key_1, "home"}};
+        } all[] = {{Qt::Key_2, "movies"},    {Qt::Key_3, "tvshows"},   {Qt::Key_4, "downloads"},
+                   {Qt::Key_5, "favorites"}, {Qt::Key_6, "playlists"}, {Qt::Key_1, "home"}};
         for (const auto &step : all) {
             QTest::keyClick(ui.window, step.key, Qt::ControlModifier);
             QTRY_COMPARE(ui.rootTab(), QString::fromLatin1(step.root));
@@ -9711,11 +9923,15 @@ class TestUiPages : public QObject {
         ui.controller.reloadLibraries();
         QTRY_COMPARE(ui.tabNames(),
                      QStringList({QStringLiteral("Home"), QStringLiteral("Shows"),
-                                  QStringLiteral("Favorites"), QStringLiteral("Playlists")}));
+                                  QStringLiteral("Downloads"), QStringLiteral("Favorites"),
+                                  QStringLiteral("Playlists")}));
         const struct {
             Qt::Key key;
             const char *root;
-        } fewer[] = {{Qt::Key_2, "tvshows"}, {Qt::Key_3, "favorites"}, {Qt::Key_4, "playlists"}};
+        } fewer[] = {{Qt::Key_2, "tvshows"},
+                     {Qt::Key_3, "downloads"},
+                     {Qt::Key_4, "favorites"},
+                     {Qt::Key_5, "playlists"}};
         for (const auto &step : fewer) {
             QTest::keyClick(ui.window, step.key, Qt::ControlModifier);
             QTRY_COMPARE(ui.rootTab(), QString::fromLatin1(step.root));
@@ -9756,7 +9972,7 @@ class TestUiPages : public QObject {
             ui.controller.login(QStringLiteral("fixture-user"), QStringLiteral("fixture-password"));
         QTRY_VERIFY(ui.item(QStringLiteral("homePage")) != nullptr);
         // The tabs of the libraries appear with the views: a click before that lands on a tab that moves
-        QTRY_COMPARE(ui.tabNames().size(), 5);
+        QTRY_COMPARE(ui.tabNames().size(), 6);
         QVERIFY(ui.clickTab(QStringLiteral("Movies")));
         QTRY_COMPARE(ui.rootTab(), QStringLiteral("movies"));
         QTRY_COMPARE(ui.controller.movies()->libraryId(), kMovies2);
@@ -10399,9 +10615,9 @@ class TestUiPages : public QObject {
         QCOMPARE(ui.rootTab(), QStringLiteral("movies"));
         QCOMPARE(ui.window->property("currentSection").toString(), QStringLiteral("settings"));
         QTRY_COMPARE(field->property("placeholderText").toString(), QStringLiteral("Search"));
-        // The type tabs come with the libraries: all five must be there before one is read by its place
-        QTRY_COMPARE(ui.tabButtons().size(), 5);
-        for (int index = 0; index < 5; ++index)
+        // The type tabs come with the libraries: all six must be there before one is read by its place
+        QTRY_COMPARE(ui.tabButtons().size(), 6);
+        for (int index = 0; index < 6; ++index)
             QTRY_VERIFY(!ui.tabButtons().value(index)->property("checked").toBool());
         field->forceActiveFocus(Qt::TabFocusReason);
         QTRY_VERIFY(field->hasActiveFocus());
@@ -10905,8 +11121,8 @@ class TestUiPages : public QObject {
         QVERIFY(buildState(ui, QStringLiteral("home")));
         const QVariant homeToolBarStyle =
             ui.item(QStringLiteral("homePage"))->property("globalToolBarStyle");
-        QCOMPARE(ui.tabNames().value(3), QStringLiteral("Favorites"));
-        QQuickItem *tab = ui.tabButtons().value(3);
+        QCOMPARE(ui.tabNames().value(4), QStringLiteral("Favorites"));
+        QQuickItem *tab = ui.tabButtons().value(4);
         QVERIFY(tab && tab->isVisible() && tab->isEnabled());
         QVERIFY(!tab->property("checked").toBool());
         QTRY_VERIFY(!ui.controller.libraries().isEmpty());
@@ -10927,10 +11143,10 @@ class TestUiPages : public QObject {
         QCOMPARE(fade->y(), 0.0);
         // The tab marks itself and no other does
         QCOMPARE(ui.window->property("currentSection").toString(), QStringLiteral("favorites"));
-        // The type tabs come with the libraries: all five must be there before one is read by its place
-        QTRY_COMPARE(ui.tabButtons().size(), 5);
-        for (int index = 0; index < 5; ++index)
-            QTRY_COMPARE(ui.tabButtons().value(index)->property("checked").toBool(), index == 3);
+        // The type tabs come with the libraries: all six must be there before one is read by its place
+        QTRY_COMPARE(ui.tabButtons().size(), 6);
+        for (int index = 0; index < 6; ++index)
+            QTRY_COMPARE(ui.tabButtons().value(index)->property("checked").toBool(), index == 4);
         // By type, the default: the movies, the shows and the episode, with their counts
         QCOMPARE(ui.controller.favorites()->count(), 6);
         QTRY_COMPARE(favoriteGroupTitles(ui),
@@ -11264,10 +11480,10 @@ class TestUiPages : public QObject {
         QCOMPARE(ui.rootTab(), QStringLiteral("favorites"));
         QCOMPARE(ui.window->property("currentSection").toString(), QStringLiteral("favorites"));
         QTRY_COMPARE(field->property("placeholderText").toString(), QStringLiteral("Search"));
-        // The type tabs come with the libraries: all five must be there before one is read by its place
-        QTRY_COMPARE(ui.tabButtons().size(), 5);
-        for (int index = 0; index < 5; ++index)
-            QTRY_COMPARE(ui.tabButtons().value(index)->property("checked").toBool(), index == 3);
+        // The type tabs come with the libraries: all six must be there before one is read by its place
+        QTRY_COMPARE(ui.tabButtons().size(), 6);
+        for (int index = 0; index < 6; ++index)
+            QTRY_COMPARE(ui.tabButtons().value(index)->property("checked").toBool(), index == 4);
         field->forceActiveFocus(Qt::TabFocusReason);
         QTRY_VERIFY(field->hasActiveFocus());
         ui.type(QStringLiteral("ab"));

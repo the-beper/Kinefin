@@ -123,6 +123,61 @@ Kirigami.ScrollablePage {
         visible: page.details.status === ItemDetailsModel.Ready && page.details.playable
         onTriggered: page.Window.window.addToPlaylist(page.details.itemId)
     }
+    // The download record of this item for the signed-in user; the engine owns it, the page only names the action
+    readonly property int downloadsRevision: page.connection.downloads.revision
+    readonly property string downloadState: {
+        downloadsRevision; // the binding follows every queue change
+        return page.connection.downloads.canDownload && page.details.status === ItemDetailsModel.Ready ? page.connection.downloads.downloadState(page.details.itemId) : "";
+    }
+    readonly property bool downloadable: page.connection.downloads.canDownload && page.details.canDownload && ["Movie", "Episode", "Video"].indexOf(page.details.type) >= 0
+    readonly property bool downloadCancellable: ["queued", "fetching", "waiting"].indexOf(downloadState) >= 0
+    readonly property bool downloadRemovable: ["paused", "error", "completed", "exported"].indexOf(downloadState) >= 0
+    readonly property Kirigami.Action downloadAction: Kirigami.Action {
+        objectName: "downloadAction"
+        text: page.downloadRemovable ? i18n("Remove Download…") : page.downloadCancellable ? i18n("Cancel Download") : i18n("Download")
+        icon.name: page.downloadRemovable ? "edit-delete" : page.downloadCancellable ? "process-stop" : "folder-download"
+        visible: page.downloadable
+        onTriggered: {
+            if (page.downloadRemovable)
+                page.Window.window.confirmRemoveDownload(page.details.itemId);
+            else if (page.downloadCancellable)
+                page.connection.downloads.removeCurrentDownload(page.details.itemId);
+            else
+                page.Window.window.askDownload(page.details.itemId);
+        }
+    }
+    // Automatic downloads of a series or a season; the rule store has one rule per series
+    readonly property int rulesRevision: page.connection.downloads.rulesRevision
+    readonly property string ruleSeriesId: page.details.type === "Series" ? page.details.itemId : page.details.seriesId
+    readonly property var seriesRule: {
+        rulesRevision; // the binding follows the rule store
+        return ruleSeriesId.length > 0 ? page.connection.downloads.seriesRule(ruleSeriesId) : ({});
+    }
+    readonly property Kirigami.Action automaticDownloadsAction: Kirigami.Action {
+        objectName: "automaticDownloadsAction"
+        text: page.seriesRule.kind ? i18n("Edit Automatic Downloads…") : i18n("Automatic Downloads…")
+        icon.name: "folder-download"
+        visible: page.details.status === ItemDetailsModel.Ready
+                 && (page.details.type === "Series" || page.details.type === "Season")
+                 && page.connection.downloads.canDownload
+        onTriggered: ruleDialog.open()
+    }
+    readonly property Kirigami.Action stopDownloadsAction: Kirigami.Action {
+        objectName: "stopDownloadsAction"
+        text: i18n("Stop Automatic Downloads")
+        icon.name: "edit-delete-remove"
+        visible: page.automaticDownloadsAction.visible && page.seriesRule.kind !== undefined
+        onTriggered: page.connection.downloads.removeSeriesRule(page.ruleSeriesId)
+    }
+    RuleDialog {
+        id: ruleDialog
+        downloads: page.connection.downloads
+        seriesId: page.ruleSeriesId
+        seriesName: page.details.type === "Series" ? page.details.name : page.details.seriesName
+        seasonNumber: page.details.seasonNumber
+        currentKind: page.seriesRule.kind ?? "nextN"
+        currentCount: page.seriesRule.count ?? 3
+    }
     readonly property Kirigami.Action favoriteAction: Kirigami.Action {
         objectName: "toggleFavoriteAction"
         text: page.details.favorite ? i18n("Remove from Favorites") : i18n("Add to Favorites")
@@ -200,7 +255,7 @@ Kirigami.ScrollablePage {
         }
     }
 
-    actions: [page.playNextAction, page.addToQueueAction, page.addToPlaylistAction, page.favoriteAction, page.togglePlayedAction, page.mediaInfoAction]
+    actions: [page.playNextAction, page.addToQueueAction, page.addToPlaylistAction, page.downloadAction, page.automaticDownloadsAction, page.stopDownloadsAction, page.favoriteAction, page.togglePlayedAction, page.mediaInfoAction]
     // The row of the page carries the way back and the actions, as on the Movies and Shows tabs; the hero names the item
     globalToolBarStyle: Kirigami.ApplicationHeaderStyle.None
     // Without Kirigami's title row the page names itself to a screen reader

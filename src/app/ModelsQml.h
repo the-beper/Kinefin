@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "DownloadsController.h"
 #include "RemoteCommands.h"
+#include "models/DownloadsModel.h"
 #include "models/FavoritesGroupsModel.h"
 #include "models/FavoritesModel.h"
 #include "models/FilterOptionsModel.h"
@@ -30,6 +32,20 @@
 
 // Makes the core library's models known to QML without linking the core to QtQml
 namespace Kinefin {
+struct DownloadsModelForeign {
+    Q_GADGET
+    QML_FOREIGN(Kinefin::DownloadsModel)
+    QML_NAMED_ELEMENT(DownloadsModel)
+    QML_UNCREATABLE("Created by the application")
+};
+
+struct DownloadsControllerForeign {
+    Q_GADGET
+    QML_FOREIGN(Kinefin::DownloadsController)
+    QML_NAMED_ELEMENT(DownloadsController)
+    QML_UNCREATABLE("Created by the application")
+};
+
 struct LibraryItemsModelForeign {
     Q_GADGET
     QML_FOREIGN(Kinefin::LibraryItemsModel)

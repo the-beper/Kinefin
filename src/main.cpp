@@ -195,6 +195,28 @@ int main(int argc, char *argv[])
     }
     Kinefin::ConnectionController connection(profileId, deviceId, QStringLiteral(KINEFIN_VERSION));
     connection.setIgnoreCertificateErrors(settings.certificateErrorsIgnored());
+    // The download queue follows the client settings of this profile at once
+    const auto applyDownloadSettings = [&settings, &connection] {
+        connection.downloads()->setParallelDownloads(
+            settings.value(QStringLiteral("downloads"), QStringLiteral("parallel")).toInt());
+        connection.downloads()->setUnmeteredOnly(
+            settings.value(QStringLiteral("downloads"), QStringLiteral("unmeteredOnly")).toBool());
+        connection.downloads()->setKodiSidecars(
+            settings.value(QStringLiteral("downloads"), QStringLiteral("kodiSidecars")).toBool());
+    };
+    applyDownloadSettings();
+    QObject::connect(
+        &settings, &Kinefin::ClientSettings::valueChanged, &connection,
+        [&settings, &connection](const QString &section, const QString &key) {
+            if (section != QLatin1String("downloads"))
+                return;
+            if (key == QLatin1String("parallel"))
+                connection.downloads()->setParallelDownloads(settings.value(section, key).toInt());
+            else if (key == QLatin1String("unmeteredOnly"))
+                connection.downloads()->setUnmeteredOnly(settings.value(section, key).toBool());
+            else if (key == QLatin1String("kodiSidecars"))
+                connection.downloads()->setKodiSidecars(settings.value(section, key).toBool());
+        });
     QObject::connect(&settings, &Kinefin::ClientSettings::certificateErrorsIgnoredChanged,
                      &connection, [&connection, &settings] {
                          connection.setIgnoreCertificateErrors(settings.certificateErrorsIgnored());

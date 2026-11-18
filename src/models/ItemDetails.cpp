@@ -163,6 +163,10 @@ SourceSummary parseMediaSource(const QJsonObject &source)
     summary.id = text(source.value(QStringLiteral("Id")), kMaxToken);
     summary.name = text(source.value(QStringLiteral("Name")), ItemDetails::MaxShort);
     summary.container = token(source.value(QStringLiteral("Container")));
+    // MediaSourceInfo spells it ETag; the item itself uses Etag
+    summary.etag = text(source.value(QStringLiteral("ETag")), 256);
+    if (summary.etag.isEmpty())
+        summary.etag = text(source.value(QStringLiteral("Etag")), 256);
     summary.size = boundedInt64(source.value(QStringLiteral("Size")), 0, 1'000'000'000'000'000, 0);
     summary.bitrate = boundedInt64(source.value(QStringLiteral("Bitrate")), 0, 100'000'000'000, 0);
     const QJsonValue streams = source.value(QStringLiteral("MediaStreams"));
@@ -229,6 +233,8 @@ ItemDetails parseItemDetails(const QJsonObject &item)
         if (percentage.isDouble() && percentage.toDouble() >= 0 && percentage.toDouble() <= 100)
             details.playedPercentage = percentage.toDouble();
     }
+    // Absent or unreadable leaves the policy in charge
+    details.canDownload = item.value(QStringLiteral("CanDownload")).toBool(true);
 
     details.seriesName = text(item.value(QStringLiteral("SeriesName")), ItemDetails::MaxName);
     details.seriesId = validId(item.value(QStringLiteral("SeriesId")));

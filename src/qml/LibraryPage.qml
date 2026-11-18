@@ -342,7 +342,7 @@ Kirigami.Page {
                     },
                     SubtabAction {
                         subtabId: "collections"
-                        icon.name: "folder-video"
+                        icon.name: "view-catalog"
                     },
                     SubtabAction {
                         subtabId: "upcoming"

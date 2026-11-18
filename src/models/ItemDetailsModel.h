@@ -43,6 +43,8 @@ class ItemDetailsModel final : public QObject {
     Q_PROPERTY(QStringList writers READ writers NOTIFY detailsChanged)
     Q_PROPERTY(bool played READ played NOTIFY detailsChanged)
     Q_PROPERTY(bool favorite READ favorite NOTIFY detailsChanged)
+    // The item's own CanDownload, true unless the server denied it
+    Q_PROPERTY(bool canDownload READ canDownload NOTIFY detailsChanged)
     Q_PROPERTY(bool favoriteBusy READ favoriteBusy NOTIFY favoriteWriteStateChanged)
     Q_PROPERTY(bool favoriteError READ favoriteError NOTIFY favoriteWriteStateChanged)
     Q_PROPERTY(bool playedBusy READ playedBusy NOTIFY playedWriteStateChanged)
@@ -116,6 +118,7 @@ class ItemDetailsModel final : public QObject {
     QStringList writers() const { return m_details.writers; }
     bool played() const { return m_details.played; }
     bool favorite() const { return m_details.favorite; }
+    bool canDownload() const { return m_details.canDownload; }
     bool favoriteBusy() const { return m_favoriteBusy; }
     bool favoriteError() const { return m_favoriteError; }
     bool playedBusy() const { return m_playedBusy; }

@@ -68,6 +68,10 @@ class FakeJellyfin {
                                  [this, socket] { readRequest(socket); });
                 QObject::connect(socket, &QTcpSocket::disconnected, socket, [this, socket] {
                     m_buffers.remove(socket);
+                    for (qsizetype i = heldDownloads.size() - 1; i >= 0; --i) {
+                        if (heldDownloads.at(i).socket == socket)
+                            heldDownloads.removeAt(i);
+                    }
                     // A later socket may be allocated at this address and must not inherit the WebSocket role
                     m_wsTaken.remove(socket);
                     socket->deleteLater();
@@ -98,6 +102,7 @@ class FakeJellyfin {
         QJsonObject policedUser = object.value(QStringLiteral("User")).toObject();
         QJsonObject policy = policedUser.value(QStringLiteral("Policy")).toObject();
         policy.insert(QStringLiteral("IsAdministrator"), administratorValue(account));
+        policy.insert(QStringLiteral("EnableContentDownloading"), canDownloadValue());
         if (!syncPlayAccess.isEmpty())
             policy.insert(QStringLiteral("SyncPlayAccess"), syncPlayAccess);
         policedUser.insert(QStringLiteral("Policy"), policy);
@@ -138,11 +143,19 @@ class FakeJellyfin {
             return *administratorRaw;
         return user ? user->administrator : administrator;
     }
+    // `Policy.EnableContentDownloading` of every user (the login reply and /Users/Me); `canDownloadRaw` replaces the value as is
+    bool canDownload = true;
+    std::optional<QJsonValue> canDownloadRaw;
+    QJsonValue canDownloadValue() const
+    {
+        return canDownloadRaw ? *canDownloadRaw : QJsonValue(canDownload);
+    }
     // `Policy.SyncPlayAccess` of every user (the login reply and /Users/Me); empty leaves the field out
     QString syncPlayAccess;
     QJsonObject policyOf(const FakeUser *user) const
     {
-        QJsonObject policy{{QStringLiteral("IsAdministrator"), administratorValue(user)}};
+        QJsonObject policy{{QStringLiteral("IsAdministrator"), administratorValue(user)},
+                           {QStringLiteral("EnableContentDownloading"), canDownloadValue()}};
         if (!syncPlayAccess.isEmpty())
             policy.insert(QStringLiteral("SyncPlayAccess"), syncPlayAccess);
         return policy;
@@ -211,6 +224,41 @@ class FakeJellyfin {
     QByteArray lastImageRoute;
     QByteArray lastImageAuth;
     QByteArray lastImageCookie;
+    // GET /Items/{id}/Download: a deterministic body per id, Range/If-Range honoured unless a knob says otherwise
+    int downloadRequests = 0;
+    QByteArray lastDownloadRoute;
+    QByteArray lastDownloadAuth;
+    QByteArray lastDownloadRange;
+    QByteArray lastDownloadIfRange;
+    int downloadStatus = 0;
+    bool redirectDownload = false;
+    bool holdDownload = false;
+    bool downloadIgnoreRange = false;
+    QByteArray downloadBody;
+    QByteArray downloadEtag = QByteArrayLiteral("\"etag-1\"");
+    struct HeldDownload {
+        QTcpSocket *socket = nullptr;
+        int status = 0;
+        QByteArray body;
+        QByteArray extra;
+    };
+    QList<HeldDownload> heldDownloads;
+    QByteArray downloadBodyFor(const QByteArray &id) const
+    {
+        if (!downloadBody.isEmpty())
+            return downloadBody;
+        QByteArray body(64 * 1024, '\0');
+        for (qsizetype i = 0; i < body.size(); ++i)
+            body[i] = id.at(i % id.size());
+        return body;
+    }
+    void releaseDownloads()
+    {
+        const QList<HeldDownload> held = heldDownloads;
+        heldDownloads.clear();
+        for (const HeldDownload &entry : held)
+            respondBytes(entry.socket, entry.status, entry.body, entry.extra);
+    }
     // Every plain HTTP request that was parsed, whatever the route (a refused image request must leave this at 0)
     int requestCount = 0;
     QByteArray lastViewsAuth;
@@ -663,6 +711,82 @@ class FakeJellyfin {
             respond(socket, status, body);
     }
 
+    // GET /Items/{id}/Download; false when the request is another route
+    bool handleDownloadRoute(QTcpSocket *socket, const QByteArray &method, const QByteArray &route,
+                             const QByteArray &range, const QByteArray &ifRange,
+                             const QByteArray &authorization)
+    {
+        if (method != "GET")
+            return false;
+        const QList<QByteArray> parts = route.split('?').first().split('/');
+        if (parts.size() < 4 || parts.at(parts.size() - 3) != "Items" || parts.last() != "Download")
+            return false;
+        const QByteArray id = parts.at(parts.size() - 2);
+        if (id.size() != 32 || !std::all_of(id.cbegin(), id.cend(), [](char c) {
+                return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+            }))
+            return false;
+        ++downloadRequests;
+        lastDownloadRoute = route;
+        lastDownloadAuth = authorization;
+        lastDownloadRange = range;
+        lastDownloadIfRange = ifRange;
+        if (!hasSessionToken(authorization)) {
+            respond(socket, 401, {});
+            return true;
+        }
+        if (downloadStatus != 0) {
+            respond(socket, downloadStatus, {});
+            return true;
+        }
+        if (redirectDownload) {
+            respond(socket, 302, {}, "Location: https://unexpected.invalid/Items/x/Download\r\n");
+            return true;
+        }
+        QByteArray body = downloadBodyFor(id);
+        QByteArray extra;
+        if (!downloadEtag.isEmpty())
+            extra += "ETag: " + downloadEtag + "\r\n";
+        extra += "Accept-Ranges: bytes\r\n";
+        const bool ifRangeMismatch = !range.isEmpty() && !ifRange.isEmpty()
+                                     && !downloadEtag.isEmpty() && ifRange != downloadEtag;
+        if (range.isEmpty() || downloadIgnoreRange || ifRangeMismatch) {
+            answerDownload(socket, 200, body, extra);
+            return true;
+        }
+        const QByteArray spec = range.mid(range.indexOf("bytes=") + 6);
+        if (!range.startsWith("bytes=") || !spec.endsWith('-')) {
+            answerDownload(socket, 416, {}, extra);
+            return true;
+        }
+        bool ok = false;
+        const qint64 start = spec.chopped(1).toLongLong(&ok);
+        if (!ok || start < 0) {
+            answerDownload(socket, 416, {}, extra);
+            return true;
+        }
+        const qint64 total = body.size();
+        if (start >= total) {
+            extra += "Content-Range: bytes */" + QByteArray::number(total) + "\r\n";
+            answerDownload(socket, 416, {}, extra);
+            return true;
+        }
+        extra += "Content-Range: bytes " + QByteArray::number(start) + "-"
+                 + QByteArray::number(total - 1) + "/" + QByteArray::number(total) + "\r\n";
+        answerDownload(socket, 206, body.mid(start), extra);
+        return true;
+    }
+
+    void answerDownload(QTcpSocket *socket, int status, const QByteArray &body,
+                        const QByteArray &extra)
+    {
+        if (holdDownload) {
+            heldDownloads.append({socket, status, body, extra});
+            return;
+        }
+        respondBytes(socket, status, body, extra);
+    }
+
     // The /Playlists routes and DELETE /Items/{id}; false when the request is none of them
     bool handlePlaylistRoute(QTcpSocket *socket, const QByteArray &method, const QByteArray &route,
                              const QByteArray &body, const QByteArray &authorization,
@@ -914,6 +1038,18 @@ class FakeJellyfin {
             .toJson(QJsonDocument::Compact);
     }
 
+    static void respondBytes(QTcpSocket *socket, int status, const QByteArray &body,
+                             const QByteArray &extraHeaders = {})
+    {
+        QByteArray result = "HTTP/1.1 " + QByteArray::number(status)
+                            + (status == 200 ? " OK\r\n" : " Response\r\n");
+        result += "Content-Type: application/octet-stream\r\nContent-Length: "
+                  + QByteArray::number(body.size()) + "\r\n";
+        result += extraHeaders + "Connection: close\r\n\r\n" + body;
+        socket->write(result);
+        socket->disconnectFromHost();
+    }
+
     static void respond(QTcpSocket *socket, int status, const QByteArray &body,
                         const QByteArray &extraHeaders = {})
     {
@@ -953,6 +1089,8 @@ class FakeJellyfin {
         QByteArray cookie;
         QByteArray contentType;
         QByteArray websocketKey;
+        QByteArray range;
+        QByteArray ifRange;
         bool upgradeRequest = false;
         for (const QByteArray &raw : lines) {
             const QByteArray line = raw.trimmed();
@@ -964,6 +1102,10 @@ class FakeJellyfin {
                 cookie = line.mid(7).trimmed();
             if (line.toLower().startsWith("content-type:"))
                 contentType = line.mid(13).trimmed();
+            if (line.toLower().startsWith("range:"))
+                range = line.mid(6).trimmed();
+            if (line.toLower().startsWith("if-range:"))
+                ifRange = line.mid(9).trimmed();
             if (line.toLower().startsWith("sec-websocket-key:"))
                 websocketKey = line.mid(18).trimmed();
             if (line.toLower().startsWith("upgrade:")
@@ -1200,6 +1342,8 @@ class FakeJellyfin {
             }
             return;
         }
+        if (handleDownloadRoute(socket, method, route, range, ifRange, authorization))
+            return;
         // Before the listing routes: `/Playlists/{id}/Items?` would read as the Items family
         if (handlePlaylistRoute(socket, method, route, body, authorization, contentType))
             return;

@@ -243,6 +243,8 @@ class JellyfinClient final : public QObject {
     bool reportCapabilities();
     // The `Authorization` header value the player must send with the media URL; empty unless authenticated. It carries the access token: never log it or put it in a URL, and check that the player does not forward it to another host on redirects
     QByteArray streamAuthorization() const;
+    // The original file of an item (`GET /Items/{id}/Download`): the same token-free URL convention as the player, authenticated by streamAuthorization() and never by a query parameter. Empty unless authenticated or for an invalid id
+    QUrl downloadUrl(const QString &itemId) const;
     // The request the WebSocket component opens for `<base>/socket` (https→wss, ws only on a transport that may carry credentials): a fresh attempt asks every time, so the token is never copied anywhere. Empty and invalid unless authenticated. The token travels only in the `Authorization` header, never in a query parameter
     [[nodiscard]] QNetworkRequest webSocketRequest() const;
     // Re-checks a live session against the server (`GET /Users/Me`): a 401 expires it, anything else that fails is silent; a good reply for the session's own user refreshes userName(), userImageTag() and isAdministrator() and emits userProfileRefreshed, one for another user is treated like a 401. One request in flight at a time. Returns false when it cannot even be sent
@@ -278,6 +280,8 @@ class JellyfinClient final : public QObject {
     QString userImageTag() const;
     // `Policy.IsAdministrator` of the signed-in user as the server last reported it (login reply, then `/Users/Me`); false when unknown, absent or not a bool, and unless authenticated (a restored session knows it only once verifySession() answers). A convenience for hiding entries: the server enforces the rights
     bool isAdministrator() const;
+    // `Policy.EnableContentDownloading` as the server last reported it (login reply, then `/Users/Me`); false when unknown, absent or not a bool, and unless authenticated. A convenience for hiding the download actions: the server enforces the route policy
+    bool canDownload() const;
     // `Policy.SyncPlayAccess` as the server last reported it (login reply, then `/Users/Me`): "CreateAndJoinGroups", "JoinGroups" or "None"; empty when unknown and unless authenticated
     QString syncPlayAccess() const;
     QString deviceId() const;
@@ -289,7 +293,7 @@ class JellyfinClient final : public QObject {
     // The WebSocket drops a connection it accepted under the old value and opens a new one
     void ignoreCertificateErrorsChanged(bool ignore);
     void serverReady(const QString &serverId);
-    // userName(), userImageTag() and isAdministrator() are already set when this fires
+    // userName(), userImageTag(), isAdministrator() and canDownload() are already set when this fires
     void loginSucceeded(const QString &userId);
     // A `/Users/Me` reply for the current session's user: `userName` is the last known good name, `imageTag` empty when the user has no avatar
     void userProfileRefreshed(const QString &userId, const QString &userName,
@@ -427,6 +431,7 @@ class JellyfinClient final : public QObject {
     QString m_userName;
     QString m_userImageTag;
     bool m_isAdministrator = false;
+    bool m_canDownload = false;
     QString m_syncPlayAccess;
     QByteArray m_token;
     QByteArray m_quickConnectSecret;

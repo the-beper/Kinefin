@@ -31,6 +31,8 @@ struct SettingDefinition {
     KLazyLocalizedString label;
     // The heading of the card the setting sits in on the Settings page; empty for a section that is one card. The visible rows of a group are consecutive in the table
     KLazyLocalizedString group;
+    // Shown but not settable, with the reason in its description
+    bool disabled = false;
 };
 
 [[nodiscard]] const QList<SettingDefinition> &settingDefinitions();

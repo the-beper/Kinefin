@@ -68,6 +68,8 @@ class PlayerController final : public QObject {
     Q_OBJECT
     Q_PROPERTY(bool active READ active NOTIFY changed)
     Q_PROPERTY(bool loading READ loading NOTIFY changed)
+    // A file played from the downloads folder: no server session, no reporting, no server-only chrome
+    Q_PROPERTY(bool localPlayback READ localPlayback NOTIFY localPlaybackChanged)
     Q_PROPERTY(bool paused READ paused NOTIFY changed)
     Q_PROPERTY(bool buffering READ buffering NOTIFY changed)
     Q_PROPERTY(QString itemId READ itemId NOTIFY changed)
@@ -125,6 +127,7 @@ class PlayerController final : public QObject {
     {
         return m_loading || m_awaitingGroup || m_session.state() == PlaybackSession::State::Opening;
     }
+    bool localPlayback() const { return m_localPlayback; }
     bool paused() const { return m_session.state() == PlaybackSession::State::Paused; }
     bool buffering() const { return m_session.state() == PlaybackSession::State::Buffering; }
     QString itemId() const { return m_itemId; }
@@ -182,6 +185,9 @@ class PlayerController final : public QObject {
     void detachVideo(MpvAbstractItem *item);
 
     Q_INVOKABLE bool playItem(const QString &id, qint64 resumeTicks = 0);
+    // Plays a completed download from its local path; title and subtitle come from the download record. No request is made and nothing is reported
+    Q_INVOKABLE bool playLocalFile(const QString &path, const QString &itemId, const QString &title,
+                                   const QString &subtitle = QString(), qint64 resumeTicks = 0);
     // Plays the queue from a row, at `startTicks` (0 to 24 h; else refused)
     Q_INVOKABLE bool playQueue(int index, qint64 startTicks = 0);
     Q_INVOKABLE bool resumeQueue();
@@ -280,6 +286,9 @@ class PlayerController final : public QObject {
 
   Q_SIGNALS:
     void changed();
+    void localPlaybackChanged();
+    // A local file's position, and whether it reached its end; the shell stores it on the download
+    void localPositionChanged(const QString &itemId, qint64 ticks, bool played);
     // A seek was asked of mpv, to this position
     void seeked(qint64 ticks);
     void tracksChanged();
@@ -307,6 +316,7 @@ class PlayerController final : public QObject {
     // The server's stream index of mpv's track `id` of `type`: direct play and embedded tracks only
     std::optional<int> streamIndexOfTrack(const QString &type, int id) const;
     void requestPending();
+    bool openLocal();
     void onSource(const PlaybackSource &source);
     void onPlaybackItem(const QString &id, const QJsonObject &item);
     void onSeriesEpisodes(const QJsonArray &items, int total, int channel);
@@ -464,6 +474,15 @@ class PlayerController final : public QObject {
     bool m_seriesPlaylistWanted = false;
     bool m_nextEpisodeAutoPlay = true;
     bool m_loading = false;
+    bool m_localPlayback = false;
+    struct PendingLocal {
+        QString path;
+        QString itemId;
+        QString title;
+        QString subtitle;
+        qint64 resumeTicks = 0;
+        bool pending = false;
+    } m_pendingLocal;
     bool m_stopping = false;
     bool m_trackRestored = false;
     int m_selectedAudioId = 0;

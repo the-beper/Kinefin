@@ -42,7 +42,7 @@ struct PlaybackMediaInfo {
 };
 
 struct PlaybackSource {
-    enum class Method { Direct, Transcode };
+    enum class Method { Direct, Transcode, Local };
 
     QString itemId;
     QString mediaSourceId;

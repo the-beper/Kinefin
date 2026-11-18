@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import QtQuick
 import QtQuick.Controls as QQC2
+import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 
 Kirigami.ApplicationWindow {
@@ -30,12 +31,14 @@ Kirigami.ApplicationWindow {
     // Invalidates deferred link navigation when an account changes or a newer link arrives
     property int itemRequestGeneration: 0
     readonly property bool signedIn: connection.state === ConnectionController.Authenticated
+    // A saved owner's downloads, shown without a session; only the Downloads tab and the player work
+    readonly property bool offline: connection.state === ConnectionController.Offline
     // A server is chosen while its sign-in or a session is in progress: the main menu offers Switch Server for it
     readonly property bool serverChosen: connection.state !== ConnectionController.Idle
     // The header modes in pixels: Compact below the narrowest bar that keeps the box and the queue (about 30 grid units), Wide from 36 grid units; tests derive their window sizes from these
     readonly property int compactLimit: Math.ceil(shellHeader.minimumBarWidth)
     // The smallest window: the Compact header with every tab fits, and the pages keep room to show something
-    minimumWidth: Math.max(Kirigami.Units.gridUnit * 20, Math.ceil(shellHeader.compactBarWidth))
+    minimumWidth: Kirigami.Units.gridUnit * 24
     minimumHeight: Kirigami.Units.gridUnit * 20
     readonly property int wideLimit: Kirigami.Units.gridUnit * 36
     // The widest a block of reading content (item header, queue rows) gets before it is centred: the pages read it from here so they agree
@@ -479,6 +482,9 @@ Kirigami.ApplicationWindow {
         case ConnectionController.Authenticated:
             page = "HomePage.qml";
             break;
+        case ConnectionController.Offline:
+            page = "DownloadsPage.qml";
+            break;
         }
         // A failed connection must not wipe out the form and the error
         if (page === "ServersPage.qml" && pageStack.depth === 1
@@ -682,6 +688,41 @@ Kirigami.ApplicationWindow {
                     window.endPlayback();
             });
         }
+    }
+
+    // A manual download starts at once on an unmetered or unknown network, and asks first when the network may charge for it
+    function askDownload(itemId) {
+        if (!connection.downloads.metered) {
+            connection.downloads.downloadItem(itemId);
+            return;
+        }
+        meteredDownloadDialog.itemId = itemId;
+        meteredDownloadDialog.open();
+    }
+
+    // A completed download plays from its own file: no server request, no session report
+    function playDownload(serverId, userId, itemId) {
+        if (!window.player)
+            return false;
+        const info = connection.downloads.playableDownload(serverId, userId, itemId);
+        if (!info.path) {
+            window.showPassiveNotification(i18n("The downloaded file is not available"));
+            return false;
+        }
+        const episode = info.type === "Episode" && info.seriesName.length > 0;
+        const title = episode ? info.seriesName : info.name;
+        const subtitle = episode && info.seasonNumber > 0 && info.episodeNumber > 0
+            ? i18nc("episode label and episode title", "%1 — %2", i18nc("season and episode number", "S%1:E%2", info.seasonNumber, info.episodeNumber), info.name)
+            : "";
+        if (!window.player.playLocalFile(info.path, itemId, title, subtitle, info.positionTicks || 0)) {
+            window.showPassiveNotification(i18n("The downloaded file could not be played"));
+            return false;
+        }
+        if (!showPlayerPage()) {
+            window.player.stop();
+            return false;
+        }
+        return true;
     }
 
     // In a SyncPlay group a play is the group's request: the player opens when the group's item starts (onItemOpened below)
@@ -910,6 +951,51 @@ Kirigami.ApplicationWindow {
         cardMenu.popup(card, x ?? 0, y ?? card.height);
     }
 
+    function downloadFailureText(reason) {
+        switch (reason) {
+        case "forbidden":
+            return i18n("The server does not allow downloads for this user");
+        case "notfound":
+            return i18n("The item is no longer on the server");
+        case "unsupported":
+            return i18n("This item cannot be downloaded");
+        case "network":
+            return i18n("Could not reach the server");
+        case "queue":
+            return i18n("The download could not be queued");
+        }
+        return i18n("The download could not be started");
+    }
+
+    // The confirmation of Remove Download, from the card menu and the details page
+    function confirmRemoveDownload(itemId) {
+        removeDownloadDialog.itemId = itemId;
+        removeDownloadDialog.open();
+    }
+
+    Connections {
+        target: window.player
+        // The shell tests have no player: the handler is only meaningful once one is attached
+        ignoreUnknownSignals: true
+        function onLocalPositionChanged(itemId, ticks, played) {
+            window.connection.downloads.updateLocalProgress(itemId, ticks, played);
+        }
+    }
+
+    Connections {
+        target: connection.downloads
+        function onDownloadFailed(itemId, reason) {
+            window.showPassiveNotification(window.downloadFailureText(reason), "long");
+        }
+        function onDownloadEnqueued(itemId) {
+            downloadToast.visible = true;
+            downloadToastTimer.restart();
+        }
+        function onExportFinished(itemId, ok) {
+            window.showPassiveNotification(ok ? i18n("Exported to the chosen folder") : i18n("Could not export the download. Choose another folder and try again"));
+        }
+    }
+
     CardMenu {
         id: cardMenu
 
@@ -921,6 +1007,9 @@ Kirigami.ApplicationWindow {
         onResumeRequested: (targetId, ticks) => window.playItem(targetId, ticks)
         // A refused send means a write for the item already runs: its answer updates the card
         onFavoriteRequested: (targetId, favorite) => window.connection.setFavorite(targetId, favorite)
+        onDownloadRequested: targetId => window.askDownload(targetId)
+        onCancelDownloadRequested: targetId => window.connection.downloads.removeCurrentDownload(targetId)
+        onRemoveDownloadRequested: targetId => window.confirmRemoveDownload(targetId)
         onAddToPlaylistRequested: targetId => window.addToPlaylist(targetId)
         onQueueRequested: (targetId, next) => window.queueItem(targetId, next)
         queueAvailable: window.groupRouting || !window.connection.queue.busy
@@ -961,6 +1050,8 @@ Kirigami.ApplicationWindow {
             return 2;
         case ConnectionController.ChoosingUser:
             return 3;
+        case ConnectionController.Offline:
+            return 4;
         default:
             return 0;
         }
@@ -1031,6 +1122,8 @@ Kirigami.ApplicationWindow {
             return "favorites";
         case "playlistsPage":
             return "playlists";
+        case "downloadsPage":
+            return "downloads";
         }
         return "";
     }
@@ -1045,7 +1138,8 @@ Kirigami.ApplicationWindow {
         openTabScope(name, libraryId, false);
     }
     function openTabScope(name, libraryId, recentlyAdded) {
-        if (!signedIn || askBeforeLeaving(() => openTabScope(name, libraryId, recentlyAdded)))
+        if ((!signedIn && !offline) || (offline && name !== "downloads")
+            || askBeforeLeaving(() => openTabScope(name, libraryId, recentlyAdded)))
             return;
         const openList = () => recentlyAdded ? connection.openRecentlyAdded(name, libraryId ?? "") : connection.openType(name, libraryId ?? "");
         const leaving = pageStack.get(0);
@@ -1094,6 +1188,8 @@ Kirigami.ApplicationWindow {
             page = pageStack.push(Qt.resolvedUrl("FavoritesPage.qml"), { connection: connection, shell: window });
         else if (name === "playlists")
             page = pageStack.push(Qt.resolvedUrl("PlaylistsPage.qml"), { connection: connection, shell: window });
+        else if (name === "downloads")
+            page = pageStack.push(Qt.resolvedUrl("DownloadsPage.qml"), { connection: connection });
         else
             page = pageStack.push(Qt.resolvedUrl("LibraryPage.qml"), { model: name === "movies" ? connection.movies : connection.shows, tabType: name, connection: connection });
         if (tabState[name] && page?.restoreViewPosition)
@@ -1102,7 +1198,7 @@ Kirigami.ApplicationWindow {
 
     // The visible order of the tabs, which decides the side the new one slides in from
     function tabOrder(name) {
-        return ["home", "movies", "tvshows", "favorites", "playlists"].indexOf(name);
+        return ["home", "movies", "tvshows", "downloads", "favorites", "playlists"].indexOf(name);
     }
 
     // The new tab enters from the side it has in the tab bar; the row stays invisible from before the push until the motion starts, so the new page never shows one frame at rest
@@ -1218,6 +1314,13 @@ Kirigami.ApplicationWindow {
         if (!signedIn)
             return;
         openTab("playlists");
+    }
+
+    // The Downloads tab: the queue and what is available on this device
+    function openDownloads() {
+        if (!signedIn && !offline)
+            return;
+        openTab("downloads");
     }
 
     // A playlist opens above the page asking (the pages above it give way); `name`, when the caller knows it, titles the page
@@ -1459,6 +1562,8 @@ Kirigami.ApplicationWindow {
     function goHome() {
         if (signedIn)
             openTab("home");
+        else if (offline)
+            openTab("downloads");
         else
             showPageForState();
     }
@@ -1556,6 +1661,95 @@ Kirigami.ApplicationWindow {
             shellHeader.showAboutDialog();
         } else if (startupPage === "settings") {
             pageStack.push(Qt.resolvedUrl("SettingsPage.qml"), { settings: settings, connection: connection });
+        }
+    }
+
+    // A queued download answers in the app's own message box instead of a platform toast
+    MessageBox {
+        id: downloadToast
+        objectName: "downloadToast"
+        anchors {
+            horizontalCenter: parent.horizontalCenter
+            bottom: parent.bottom
+            bottomMargin: Kirigami.Units.largeSpacing + window.miniPlayerSpace
+        }
+        width: Math.min(Kirigami.Units.gridUnit * 30, window.width - Kirigami.Units.largeSpacing * 2)
+        z: 100
+        visible: false
+        type: Kirigami.MessageType.Information
+        text: i18n("Download queued")
+        actions: [
+            Kirigami.Action {
+                text: i18n("Open Downloads")
+                icon.name: "folder-download"
+                onTriggered: {
+                    window.openDownloads();
+                    downloadToast.visible = false;
+                }
+            }
+        ]
+    }
+    Timer {
+        id: downloadToastTimer
+        interval: 6000
+        onTriggered: downloadToast.visible = false
+    }
+
+    Kirigami.PromptDialog {
+        id: meteredDownloadDialog
+        objectName: "meteredDownloadDialog"
+
+        property string itemId
+
+        title: i18nc("@title:window", "Download Over Metered Network")
+        preferredWidth: Kirigami.Units.gridUnit * 26
+        standardButtons: Kirigami.Dialog.Cancel
+        customFooterActions: [
+            Kirigami.Action {
+                objectName: "meteredDownloadConfirm"
+                text: i18n("Download")
+                icon.name: "folder-download"
+                onTriggered: {
+                    window.connection.downloads.downloadItem(meteredDownloadDialog.itemId);
+                    meteredDownloadDialog.close();
+                }
+            }
+        ]
+
+        QQC2.Label {
+            Layout.fillWidth: true
+            wrapMode: Text.Wrap
+            textFormat: Text.PlainText
+            text: i18n("This network may charge for data. Download this item anyway")
+        }
+    }
+
+    Kirigami.PromptDialog {
+        id: removeDownloadDialog
+        objectName: "removeDownloadDialog"
+
+        property string itemId
+
+        title: i18n("Remove Download")
+        preferredWidth: Kirigami.Units.gridUnit * 26
+        standardButtons: Kirigami.Dialog.Cancel
+        customFooterActions: [
+            Kirigami.Action {
+                objectName: "removeDownloadConfirm"
+                text: i18n("Remove Download")
+                icon.name: "edit-delete"
+                onTriggered: {
+                    window.connection.downloads.removeCurrentDownload(removeDownloadDialog.itemId);
+                    removeDownloadDialog.close();
+                }
+            }
+        ]
+
+        QQC2.Label {
+            Layout.fillWidth: true
+            wrapMode: Text.Wrap
+            textFormat: Text.PlainText
+            text: i18n("Remove this download? The file stays on the server")
         }
     }
 

@@ -211,9 +211,10 @@ bool PlaybackEngine::open(const PlaybackSource &source, bool startPaused)
     identity.itemId = source.itemId.toStdString();
     identity.mediaSourceId = source.mediaSourceId.toStdString();
     identity.playSessionId = source.playSessionId.toStdString();
-    const PlaybackSession::Route route = source.method == PlaybackSource::Method::Transcode
-                                             ? PlaybackSession::Route::Transcoded
-                                             : PlaybackSession::Route::Direct;
+    const PlaybackSession::Route route =
+        source.method == PlaybackSource::Method::Transcode ? PlaybackSession::Route::Transcoded
+        : source.method == PlaybackSource::Method::Local   ? PlaybackSession::Route::Offline
+                                                           : PlaybackSession::Route::Direct;
     if (!m_session.open(std::move(identity), route)) {
         return false;
     }
@@ -232,11 +233,15 @@ bool PlaybackEngine::open(const PlaybackSource &source, bool startPaused)
         m_canSeek = false;
         Q_EMIT canSeekChanged(m_canSeek);
     }
-    applyStreamAuthorization();
+    if (route == PlaybackSession::Route::Offline)
+        setProperty(QStringLiteral("http-header-fields"), QVariantList{});
+    else
+        applyStreamAuthorization();
     // mpv keeps `pause` from one file to the next: every open says what it wants
     setProperty(QStringLiteral("pause"), startPaused);
     qCDebug(playerLog) << "opening"
                        << (route == PlaybackSession::Route::Transcoded ? "a transcoded stream"
+                           : route == PlaybackSession::Route::Offline  ? "a local file"
                                                                        : "a direct stream");
     const QVariant load =
         command({QStringLiteral("loadfile"), source.url.toString(QUrl::FullyEncoded)});

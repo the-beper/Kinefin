@@ -1255,6 +1255,28 @@ class TestPlayerController : public QObject {
         QVERIFY(!chain.controller.selectSubtitleStreamIndex(-1));
     }
 
+    void playsALocalFile()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        const QString clip = QUrl(TestWav::writeWavClip(chain.dir, 2)).toLocalFile();
+        QVERIFY(!clip.isEmpty());
+        QVERIFY(chain.engine()->init({QStringLiteral("vo=null"), QStringLiteral("ao=null")}));
+        QSignalSpy local(&chain.controller, &PlayerController::localPlaybackChanged);
+        QVERIFY(chain.controller.playLocalFile(clip, kMovie, QStringLiteral("Local Movie"),
+                                               QStringLiteral("Local Subtitle")));
+        QVERIFY(chain.controller.localPlayback());
+        QCOMPARE(chain.controller.title(), QStringLiteral("Local Movie"));
+        QCOMPARE(chain.controller.subtitle(), QStringLiteral("Local Subtitle"));
+        QCOMPARE(chain.server.playbackInfoRequests, 0);
+        QCOMPARE(local.count(), 1);
+        QTRY_VERIFY(chain.controller.canSeek());
+        QVERIFY(chain.server.reportLog.isEmpty());
+        chain.controller.stop();
+        QTRY_VERIFY(!chain.controller.localPlayback());
+        QVERIFY(chain.server.reportLog.isEmpty());
+    }
+
   private:
     // The item plays a generated clip, handed over as the source the server would have chosen with `method`
     static bool playsClip(Chain &chain, Kinefin::PlaybackSource::Method method)

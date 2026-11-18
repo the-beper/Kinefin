@@ -23,6 +23,7 @@ class SettingsSectionModel final : public QAbstractListModel {
         IsDefaultRole,
         MinimumRole,
         MaximumRole,
+        DisabledRole,
     };
 
     // An empty `group` keeps every row of the section

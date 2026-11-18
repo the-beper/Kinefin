@@ -29,6 +29,16 @@ Controls.Menu {
     // The kinds the details page can mark as favorite
     readonly property bool favoritable: ["Movie", "Series", "Season", "Episode", "BoxSet", "Video"].indexOf(itemType) >= 0
 
+    // What the download engine says of this item for the signed-in user: empty when there is no record
+    readonly property bool downloadable: connection.downloads.canDownload && playable
+    readonly property int downloadsRevision: connection.downloads.revision
+    readonly property string downloadState: {
+        downloadsRevision; // the binding follows every queue change
+        return downloadable ? connection.downloads.downloadState(itemId) : "";
+    }
+    readonly property bool downloadCancellable: ["queued", "fetching", "waiting"].indexOf(downloadState) >= 0
+    readonly property bool downloadRemovable: ["paused", "error", "completed", "exported"].indexOf(downloadState) >= 0
+
     // The page that opened the item gives way, as for a click on the card
     signal openRequested(string targetId)
     // A popup is not an Item, so the window that plays is passed in by the owner
@@ -36,6 +46,9 @@ Controls.Menu {
     signal playRequested(string targetId)
     signal resumeRequested(string targetId, real ticks)
     signal favoriteRequested(string targetId, bool favorite)
+    signal downloadRequested(string targetId)
+    signal cancelDownloadRequested(string targetId)
+    signal removeDownloadRequested(string targetId)
     signal addToPlaylistRequested(string targetId)
     // Play Next (`next`) or Add to Queue: the shell decides which queue, the user's or a SyncPlay group's
     signal queueRequested(string targetId, bool next)
@@ -105,8 +118,32 @@ Controls.Menu {
         height: visible ? implicitHeight : 0
         onTriggered: menu.addToPlaylistRequested(menu.itemId)
     }
+    Controls.MenuItem {
+        objectName: "cardMenuDownload"
+        text: i18n("Download")
+        icon.name: "folder-download"
+        visible: menu.downloadable && menu.downloadState.length === 0
+        height: visible ? implicitHeight : 0
+        onTriggered: menu.downloadRequested(menu.itemId)
+    }
+    Controls.MenuItem {
+        objectName: "cardMenuCancelDownload"
+        text: i18n("Cancel Download")
+        icon.name: "process-stop"
+        visible: menu.downloadCancellable
+        height: visible ? implicitHeight : 0
+        onTriggered: menu.cancelDownloadRequested(menu.itemId)
+    }
+    Controls.MenuItem {
+        objectName: "cardMenuRemoveDownload"
+        text: i18n("Remove Download…")
+        icon.name: "edit-delete"
+        visible: menu.downloadRemovable
+        height: visible ? implicitHeight : 0
+        onTriggered: menu.removeDownloadRequested(menu.itemId)
+    }
     Controls.MenuSeparator {
-        visible: menu.favoritable
+        visible: menu.favoritable || menu.downloadable
         height: visible ? implicitHeight : 0
     }
     Controls.MenuItem {

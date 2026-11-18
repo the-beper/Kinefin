@@ -23,14 +23,17 @@ Kirigami.Page {
     readonly property bool signedIn: connection.state === ConnectionController.Authenticated
     // The height of the bar at the bottom of the page: the mini player docks above it instead of over its buttons
     readonly property real miniPlayerClearance: saveBar.visible ? saveBar.height : 0
+    // The server can deny downloads to this user: the entry and its settings disappear with the permission
+    readonly property bool downloadsAvailable: signedIn && connection.downloads.canDownload
     readonly property var deviceEntries: [
         { section: "main", title: i18n("General"), icon: "preferences-system-windows" },
         { section: "audio", title: i18n("Audio"), icon: "audio-speakers" },
         { section: "video", title: i18n("Video"), icon: "video-display" },
         { section: "subtitles", title: i18n("Subtitles"), icon: "media-view-subtitles-symbolic" },
-        { section: "library", title: i18n("Library"), icon: "folder-videos" },
+        { section: "library", title: i18n("Library"), icon: "folder-videos" }
+    ].concat(downloadsAvailable ? [{ section: "downloads", title: i18n("Downloads"), icon: "folder-download" }] : []).concat([
         { section: "other", title: i18n("mpv Configuration"), icon: "preferences-other" }
-    ]
+    ])
     readonly property var accountEntries: signedIn ? [{ section: "user", title: i18n("User"), icon: "preferences-desktop-user" }] : []
     readonly property var entries: deviceEntries.concat(accountEntries)
     property string activeSection: "main"
@@ -150,6 +153,17 @@ Kirigami.Page {
     // The session ended under the User entry
     onSignedInChanged: {
         if (!signedIn && activeSection === "user") {
+            activeSection = "main";
+            entryOpen = false;
+        }
+        if (!downloadsAvailable && activeSection === "downloads") {
+            activeSection = "main";
+            entryOpen = false;
+        }
+    }
+    // The server may withdraw the permission while the section shows
+    onDownloadsAvailableChanged: {
+        if (!downloadsAvailable && activeSection === "downloads") {
             activeSection = "main";
             entryOpen = false;
         }

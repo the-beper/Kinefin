@@ -17,6 +17,7 @@
 #include <memory>
 #include <optional>
 
+#include "DownloadsController.h"
 #include "RemoteCommands.h"
 #include "api/JellyfinClient.h"
 #include "api/JellyfinSocketClient.h"
@@ -66,6 +67,10 @@ class ConnectionController : public QObject {
     // `Policy.IsAdministrator` of the signed-in user, false while unknown (a restored session until its re-check answers): only for showing or hiding entries, the server enforces the rights
     Q_PROPERTY(bool currentUserIsAdministrator READ currentUserIsAdministrator NOTIFY
                    currentUserIsAdministratorChanged)
+    // True in the Offline state: only the Downloads tab and the player are usable
+    Q_PROPERTY(bool offline READ offline NOTIFY stateChanged)
+    // The saved user whose downloads are shown while offline
+    Q_PROPERTY(QString offlineUserName READ offlineUserName NOTIFY stateChanged)
     Q_PROPERTY(QVariantList libraries READ libraries NOTIFY librariesChanged)
     // True only after a successful /UserViews response in this session; an
     // empty list before that is loading or a failed request, not an empty library.
@@ -97,6 +102,8 @@ class ConnectionController : public QObject {
     Q_PROPERTY(Kinefin::FavoritesGroupsModel *favoriteGroups READ favoriteGroups CONSTANT)
     // What other Jellyfin sessions ask of this one over the WebSocket: the shell plays it
     Q_PROPERTY(Kinefin::RemoteCommands *remoteCommands READ remoteCommands CONSTANT)
+    // The downloads of the profile: its model, the policy and the actions the Downloads page and the item pages take
+    Q_PROPERTY(Kinefin::DownloadsController *downloads READ downloads CONSTANT)
 
   public:
     enum State {
@@ -107,7 +114,8 @@ class ConnectionController : public QObject {
         SigningIn,       // password login in flight
         QuickConnectPending, // a Quick Connect code is (about to be) shown
         Authenticated,
-        ChoosingUser // the server is known and has saved users: waiting for the choice of one (QML compares states by name, so new values go last)
+        ChoosingUser, // the server is known and has saved users: waiting for the choice of one (QML compares states by name, so new values go last)
+        Offline       // a saved owner's downloads are shown and played; no session, no request
     };
     Q_ENUM(State)
 
@@ -127,6 +135,8 @@ class ConnectionController : public QObject {
     QString loginUserName() const { return m_loginUserName; }
     QString currentUserId() const { return m_client.userId(); }
     bool currentUserIsAdministrator() const { return m_client.isAdministrator(); }
+    bool offline() const { return m_state == Offline; }
+    QString offlineUserName() const { return m_offlineUserName; }
     bool hasSavedUsers() const { return !m_users.isEmpty(); }
     QVariantList libraries() const { return m_libraries; }
     bool librariesLoaded() const { return m_librariesLoaded; }
@@ -167,6 +177,7 @@ class ConnectionController : public QObject {
     PlaylistEntriesModel *playlistEntries() { return &m_playlistEntries; }
     FavoritesGroupsModel *favoriteGroups() { return &m_favoriteGroups; }
     RemoteCommands *remoteCommands() { return &m_remoteCommands; }
+    DownloadsController *downloads() { return &m_downloads; }
     // For tests: the server's push channel this controller owns
     JellyfinSocketClient *socket() { return &m_socket; }
 
@@ -183,6 +194,10 @@ class ConnectionController : public QObject {
 
     // Connects to the most recently used stored server, if there is one
     Q_INVOKABLE void start();
+    // Enters Offline on the saved user with the most recent completed download; false when there is none
+    Q_INVOKABLE bool workOffline();
+    // Whether a saved user has a completed download to show offline
+    Q_INVOKABLE bool canWorkOffline() const;
     // `address` is what the user typed; without a scheme it is taken as https. Once the server answers: no saved user goes to the sign-in, a single saved user that is remembered and does not ask for the password is restored, a single other one goes to the sign-in with the name filled in, and two or more go to the picker (ChoosingUser)
     Q_INVOKABLE void connectTo(const QString &address);
     // The user accepted sending credentials over plain HTTP to this server (this connection only)
@@ -339,6 +354,8 @@ class ConnectionController : public QObject {
     // The items whose favorite write came from `setFavorite`, by dashless lower-case id: the details page reports its own failures
     QSet<QString> m_cardFavoriteRequests;
     ServerCredentialSync m_sync;
+    // After the sync, so the sync has connected to the client first on every shared signal
+    DownloadsController m_downloads;
     LibraryItemsModel m_library{&m_client, LibraryItemsModel::TileChannel};
     LibraryItemsModel m_movies{&m_client, LibraryItemsModel::MoviesChannel};
     LibraryItemsModel m_shows{&m_client, LibraryItemsModel::ShowsChannel};
@@ -381,6 +398,7 @@ class ConnectionController : public QObject {
         m_publicSource; // what the server listed, before the saved users are taken out
     QVariantList m_publicUsers;
     QString m_loginUserName;
+    QString m_offlineUserName;
     QString m_currentUserId;                   // the last value announced
     bool m_currentUserIsAdministrator = false; // the last value announced
     QString m_restoringUserId;                 // the saved user a restore in flight is for

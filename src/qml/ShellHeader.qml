@@ -6,7 +6,7 @@ import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 import org.kde.kirigamiaddons.components as Components
 
-// The top bar: the Home, Movies, Shows, Favorites and Playlists tabs at the left, content-sized with an underline under the current one (Movies and Shows only while the server has a library of the type), and search, queue and the one menu button (the account avatar) at the right; the menu holds the account and the application entries. The tabs carry their labels while they fit with the search box at its minimum width (`labelledTabs`) and are icon-only otherwise; Compact (narrower than the bar with icon-only tabs and the box at its minimum, `minimumBarWidth`) turns the box into a search button and folds the queue into the menu
+// The top bar: the Home, Movies, Shows, Downloads, Favorites and Playlists tabs at the left, content-sized with an underline under the current one (Movies and Shows only while the server has a library of the type), and search, queue and the one menu button (the account avatar) at the right; the menu holds the account and the application entries. The tabs carry their labels while they fit with the search box at its minimum width (`labelledTabs`) and are icon-only otherwise; Compact (narrower than the bar with icon-only tabs and the box at its minimum, `minimumBarWidth`) turns the box into a search button and folds the queue into the menu
 Item {
     id: root
     objectName: "shellHeader"
@@ -16,6 +16,7 @@ Item {
 
     readonly property ConnectionController connection: shell.connection
     readonly property bool signedIn: connection.state === ConnectionController.Authenticated
+    readonly property bool offline: connection.state === ConnectionController.Offline
     readonly property bool serverChosen: connection.state !== ConnectionController.Idle
     // Watching together; null when the application gives none
     readonly property var syncPlay: shell.syncPlay ?? null
@@ -139,7 +140,7 @@ Item {
     }
 
     // The tabs in their order; the Ctrl+N shortcuts follow the position among the visible ones
-    readonly property var tabActions: [homeAction, moviesAction, tvShowsAction, favoritesTabAction, playlistsTabAction]
+    readonly property var tabActions: [homeAction, moviesAction, tvShowsAction, downloadsAction, favoritesTabAction, playlistsTabAction]
     function tabShortcut(action) {
         let position = 0;
         for (const candidate of tabActions) {
@@ -182,10 +183,6 @@ Item {
     readonly property bool labelledTabs: !compact && barWidth(true) <= width
     // The narrowest bar that keeps the box and the queue: the shell's Compact limit, so nothing overlaps whatever the font and the icon sizes
     readonly property real minimumBarWidth: barWidth(false)
-    // The narrowest Compact bar, with the most it can hold (the back button and all five tabs): the shell's minimum window width
-    readonly property real compactBarWidth: Kirigami.Units.smallSpacing + headerBackButton.implicitWidth + Kirigami.Units.smallSpacing
-        + tabActions.length * (tabHorizontalPadding * 2 + Kirigami.Units.iconSizes.smallMedium) + (tabActions.length - 1) * tabSpacing
-        + Kirigami.Units.smallSpacing * 2 + searchButton.implicitWidth + rightCluster.spacing + mainMenuButton.implicitWidth + Kirigami.Units.smallSpacing
 
     // The list the box searches: the model of the type tab at the root of the stack; on any other page the box feeds the global search
     readonly property var localModel: {
@@ -248,6 +245,7 @@ Item {
             bottom: parent.bottom
         }
         spacing: root.tabSpacing
+        visible: root.tabActions.filter(action => action.visible).length > 1
 
         Repeater {
             model: root.tabActions
@@ -541,6 +539,7 @@ Item {
         property string section: "home"
         text: i18nc("@title:tab", "Home")
         icon.name: "go-home"
+        visible: root.signedIn
         enabled: root.signedIn
         shortcut: root.tabShortcut(homeAction)
         onTriggered: shell.goHome()
@@ -572,12 +571,25 @@ Item {
         onTriggered: shell.openTab("tvshows")
     }
     Kirigami.Action {
+        id: downloadsAction
+        objectName: "downloadsTabAction"
+
+        property string section: "downloads"
+        text: i18nc("@title:tab", "Downloads")
+        icon.name: "folder-download"
+        visible: root.signedIn || root.offline
+        enabled: root.signedIn || root.offline
+        shortcut: root.tabShortcut(downloadsAction)
+        onTriggered: shell.openDownloads()
+    }
+    Kirigami.Action {
         id: favoritesTabAction
         objectName: "favoritesTabAction"
 
         property string section: "favorites"
         text: i18nc("@title:tab", "Favorites")
         icon.name: "favorite"
+        visible: root.signedIn
         enabled: root.signedIn
         shortcut: root.tabShortcut(favoritesTabAction)
         onTriggered: shell.openFavorites()
@@ -589,6 +601,7 @@ Item {
         property string section: "playlists"
         text: i18nc("@title:tab", "Playlists")
         icon.name: "view-media-playlist"
+        visible: root.signedIn
         enabled: root.signedIn
         shortcut: root.tabShortcut(playlistsTabAction)
         onTriggered: shell.openPlaylists()
@@ -676,7 +689,7 @@ Item {
 
         text: i18nc("@action:inmenu", "Queue")
         icon.name: "media-track-queue-amarok"
-        visible: root.compact
+        visible: root.compact && root.signedIn
         enabled: root.signedIn
         onTriggered: shell.openSection("queuePage", "QueuePage.qml", { connection: shell.connection })
     }
@@ -723,12 +736,21 @@ Item {
         onTriggered: root.afterUnsavedSettled(() => signOutDialog.openFor(root.currentUser ? root.currentUser.name : ""))
     }
     Kirigami.Action {
+        id: leaveOfflineAction
+        objectName: "leaveOfflineAction"
+
+        text: i18nc("@action:inmenu Leaves the offline downloads and shows the servers", "Leave Offline")
+        icon.name: "network-disconnect"
+        visible: root.offline
+        onTriggered: root.connection.cancel()
+    }
+    Kirigami.Action {
         id: switchServerAction
         objectName: "switchServerAction"
 
         text: i18nc("@action:inmenu Goes back to the list of servers", "Switch Server")
         icon.name: "network-server"
-        visible: root.serverChosen
+        visible: root.serverChosen && !root.offline
         onTriggered: root.afterUnsavedSettled(() => root.connection.cancel())
     }
 
@@ -821,8 +843,13 @@ Item {
         }
         QQC2.MenuItem {
             objectName: "switchServerItem"
-            visible: root.serverChosen
+            visible: switchServerAction.visible
             action: switchServerAction
+        }
+        QQC2.MenuItem {
+            objectName: "leaveOfflineItem"
+            visible: leaveOfflineAction.visible
+            action: leaveOfflineAction
         }
         QQC2.MenuSeparator {
             visible: root.serverChosen

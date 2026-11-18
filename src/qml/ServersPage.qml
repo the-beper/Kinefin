@@ -94,6 +94,13 @@ Kirigami.ScrollablePage {
             type: Kirigami.MessageType.Error
             text: page.connection.errorText
         }
+        Controls.Button {
+            Layout.fillWidth: true
+            visible: page.connection.canWorkOffline()
+            text: i18n("Work Offline")
+            icon.name: "folder-download"
+            onClicked: page.connection.workOffline()
+        }
         MessageBox {
             Layout.fillWidth: true
             Layout.topMargin: Kirigami.Units.largeSpacing

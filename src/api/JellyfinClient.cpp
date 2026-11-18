@@ -331,6 +331,15 @@ bool userIsAdministrator(const QJsonObject &user)
     return flag.isBool() && flag.toBool();
 }
 
+// `Policy.EnableContentDownloading` of a UserDto: false when the policy or the flag is absent or the flag is not a bool
+bool userCanDownload(const QJsonObject &user)
+{
+    const QJsonValue flag = user.value(QStringLiteral("Policy"))
+                                .toObject()
+                                .value(QStringLiteral("EnableContentDownloading"));
+    return flag.isBool() && flag.toBool();
+}
+
 // `Policy.SyncPlayAccess` of a UserDto: one of the three values the server knows, else empty
 QString userSyncPlayAccess(const QJsonObject &user)
 {
@@ -717,6 +726,7 @@ void JellyfinClient::finishAuthentication(QNetworkReply *finished)
     m_userName = validUserName(user.value(QStringLiteral("Name")));
     m_userImageTag = validUserImageTag(user.value(QStringLiteral("PrimaryImageTag")));
     m_isAdministrator = userIsAdministrator(user);
+    m_canDownload = userCanDownload(user);
     m_syncPlayAccess = userSyncPlayAccess(user);
     m_state = State::Authenticated;
     Q_EMIT loginSucceeded(m_userId);
@@ -2360,6 +2370,13 @@ QByteArray JellyfinClient::streamAuthorization() const
     return tokenAuthorization();
 }
 
+QUrl JellyfinClient::downloadUrl(const QString &itemId) const
+{
+    if (m_state != State::Authenticated || !isValidJellyfinId(itemId))
+        return {};
+    return endpoint(QStringLiteral("/Items/") + itemId + QStringLiteral("/Download"));
+}
+
 QNetworkRequest JellyfinClient::webSocketRequest() const
 {
     if (m_state != State::Authenticated || m_base.isEmpty())
@@ -2403,6 +2420,7 @@ bool JellyfinClient::verifySession()
             m_userName = name;
         m_userImageTag = validUserImageTag(me.value(QStringLiteral("PrimaryImageTag")));
         m_isAdministrator = userIsAdministrator(me);
+        m_canDownload = userCanDownload(me);
         m_syncPlayAccess = userSyncPlayAccess(me);
         Q_EMIT userProfileRefreshed(m_userId, m_userName, m_userImageTag);
     });
@@ -2700,6 +2718,7 @@ void JellyfinClient::clearToken()
     m_userName.clear();
     m_userImageTag.clear();
     m_isAdministrator = false;
+    m_canDownload = false;
     m_syncPlayAccess.clear();
     if (hadToken)
         Q_EMIT credentialsCleared();
@@ -2801,6 +2820,11 @@ QString JellyfinClient::userImageTag() const
 bool JellyfinClient::isAdministrator() const
 {
     return m_isAdministrator;
+}
+
+bool JellyfinClient::canDownload() const
+{
+    return m_state == State::Authenticated && m_canDownload;
 }
 
 QString JellyfinClient::syncPlayAccess() const

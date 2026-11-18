@@ -251,7 +251,8 @@ void ItemDetailsModel::reload()
     query.fields = {QStringLiteral("Overview"),      QStringLiteral("Genres"),
                     QStringLiteral("People"),        QStringLiteral("Chapters"),
                     QStringLiteral("MediaSources"),  QStringLiteral("Taglines"),
-                    QStringLiteral("OriginalTitle"), QStringLiteral("Studios")};
+                    QStringLiteral("OriginalTitle"), QStringLiteral("Studios"),
+                    QStringLiteral("CanDownload")};
     m_reloadOverlapsFavoriteWrite = m_favoriteBusy;
     m_reloadOverlapsPlayedWrite = m_playedBusy;
     setStatus(Loading);

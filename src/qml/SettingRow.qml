@@ -17,6 +17,7 @@ Loader {
     required property var value
     required property real minimum
     required property real maximum
+    required property bool disabled
     // The heading of the group the row sits under: a short label ("Color" under Border) is read with it
     property string groupTitle: ""
     // --ignore-certificate-errors forces ignoreSSLErrors on for the run: its switch shows on and cannot be turned off
@@ -52,11 +53,15 @@ Loader {
                 case "ignoreSSLErrors":
                     return row.forced ? i18n("On for this run: Kinefin was started with --ignore-certificate-errors")
                                       : i18n("Accepts invalid server certificates. Unsafe on networks you do not trust");
+                case "kodiSidecars":
+                    return i18n("Writes a .nfo and a poster next to each exported file");
+                case "exportOnCompletion":
+                    return i18n("Disabled until a persistent folder is granted on this system");
                 }
                 return "";
             }
             checked: row.forced || row.value
-            enabled: !row.forced
+            enabled: !row.forced && !row.disabled
             onToggled: row.model.value = checked
         }
     }
@@ -64,6 +69,7 @@ Loader {
     Component {
         id: choiceDelegate
         FormCard.FormComboBoxDelegate {
+            enabled: !row.disabled
             Accessible.name: row.accessibleLabel
             text: row.label
             model: row.options
@@ -77,6 +83,7 @@ Loader {
     Component {
         id: numberDelegate
         FormCard.FormSpinBoxDelegate {
+            enabled: !row.disabled
             Accessible.name: row.accessibleLabel
             // Only a decimal setting (the playback speed) has a range; it is edited in hundredths because a spin box counts integers
             readonly property bool fractional: row.maximum > row.minimum
@@ -118,6 +125,7 @@ Loader {
     Component {
         id: textDelegate
         FormCard.FormTextFieldDelegate {
+            enabled: !row.disabled
             Accessible.name: row.accessibleLabel
             label: row.label
             text: row.value
@@ -128,6 +136,7 @@ Loader {
     Component {
         id: multilineDelegate
         FormCard.FormTextAreaDelegate {
+            enabled: !row.disabled
             Accessible.name: row.accessibleLabel
             label: row.label
             text: row.value

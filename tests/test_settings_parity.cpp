@@ -117,6 +117,26 @@ class TestSettingsParity : public QObject {
         QCOMPARE(homeFavorites->type, SettingDefinition::Type::Bool);
         QCOMPARE(QString::fromUtf8(homeFavorites->group.untranslatedText()),
                  QString::fromUtf8(homeLibraries->group.untranslatedText()));
+        // The downloads of parity §10: parallel transfers and the unmetered-only rule, both visible
+        const auto *parallelDownloads =
+            Kinefin::findSetting(QStringLiteral("downloads"), QStringLiteral("parallel"));
+        QVERIFY(parallelDownloads && !parallelDownloads->hidden
+                && !parallelDownloads->label.isEmpty());
+        QCOMPARE(parallelDownloads->type, SettingDefinition::Type::Int);
+        QCOMPARE(parallelDownloads->defaultValue, QVariant(2));
+        const auto *unmeteredOnly =
+            Kinefin::findSetting(QStringLiteral("downloads"), QStringLiteral("unmeteredOnly"));
+        QVERIFY(unmeteredOnly && !unmeteredOnly->hidden && !unmeteredOnly->label.isEmpty());
+        QCOMPARE(unmeteredOnly->type, SettingDefinition::Type::Bool);
+        QCOMPARE(unmeteredOnly->defaultValue, QVariant(true));
+        const auto *sidecars =
+            Kinefin::findSetting(QStringLiteral("downloads"), QStringLiteral("kodiSidecars"));
+        QVERIFY(sidecars && !sidecars->hidden && !sidecars->disabled);
+        QCOMPARE(sidecars->defaultValue, QVariant(false));
+        const auto *autoExport =
+            Kinefin::findSetting(QStringLiteral("downloads"), QStringLiteral("exportOnCompletion"));
+        QVERIFY(autoExport && !autoExport->hidden && autoExport->disabled);
+        QCOMPARE(autoExport->defaultValue, QVariant(false));
         // The library sub-tab switches: only the Favorites and Collections of Movies and TV Shows are on by default
         const QStringList subTabs{
             QStringLiteral("tabs.movies.suggestions"), QStringLiteral("tabs.movies.favorites"),
@@ -135,7 +155,7 @@ class TestSettingsParity : public QObject {
                      qPrintable(key));
             QCOMPARE(subTab->defaultValue, QVariant(enabledByDefault.contains(key)));
         }
-        QCOMPARE(Kinefin::settingDefinitions().size(), defined + 4 + subTabs.size());
+        QCOMPARE(Kinefin::settingDefinitions().size(), defined + 8 + subTabs.size());
     }
 
     void everyDefaultIsValid()
