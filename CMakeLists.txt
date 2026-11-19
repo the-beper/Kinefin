@@ -533,6 +533,11 @@ if(BUILD_TESTING)
     target_link_libraries(test_downloads_model PRIVATE kinefin_core Qt6::Test)
     add_test(NAME downloads_model COMMAND test_downloads_model)
 
+    add_executable(test_downloads_controller tests/test_downloads_controller.cpp)
+    target_compile_definitions(test_downloads_controller PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}" TRANSLATION_DOMAIN="kinefin")
+    target_link_libraries(test_downloads_controller PRIVATE kinefin_ui kinefin_core Qt6::Test Qt6::Gui Qt6::Qml KF6::I18n)
+    add_test(NAME downloads_controller COMMAND test_downloads_controller)
+
     add_executable(test_download_export tests/test_download_export.cpp)
     target_link_libraries(test_download_export PRIVATE kinefin_core Qt6::Test)
     add_test(NAME download_export COMMAND test_download_export)

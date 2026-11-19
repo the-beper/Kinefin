@@ -33,7 +33,7 @@ struct DownloadRecord {
     QString type;
     // The server's container, letters and digits only; `bin` when it sent none
     QString container;
-    // The entity tag the download was started with, empty when the server sent none
+    // The item's own ETag (MediaSources[].ETag) the download was started with, empty when the server sent none; never an HTTP header value
     QString etag;
     // The primary image tag the row uses for its poster, empty when the server sent none
     QString primaryTag;
@@ -73,7 +73,8 @@ class DownloadStore final : public QObject {
   public:
     static constexpr int FileVersion = 1;
     static constexpr int MaxRecords = 2000;
-    static constexpr qint64 MaxFileBytes = 512 * 1024;
+    // A realistic record serializes to about 0.8 KB and the worst valid one to about 3.5 KB, so 4 MiB leaves the record cap as the one that binds in practice
+    static constexpr qint64 MaxFileBytes = 4 * 1024 * 1024;
 
     explicit DownloadStore(QObject *parent = nullptr);
     ~DownloadStore() override;
@@ -88,7 +89,7 @@ class DownloadStore final : public QObject {
     std::optional<DownloadRecord> find(const QString &serverId, const QString &userId,
                                        const QString &itemId) const;
     std::optional<DownloadRecord> findByKey(const QString &key) const;
-    // Inserts or replaces by key and schedules the write; `writeNow` writes before returning. False for an invalid record or a full queue whose completed entries cannot make room, and then the previous record stays as it was; a failed write keeps the change in memory and reports saveFailed()
+    // Inserts or replaces by key and schedules the write; `writeNow` writes before returning. False for an invalid record, a new record when `MaxRecords` are stored (completed and exported ones are never dropped to make room) or a change that would grow the file past `MaxFileBytes`, and then the previous record stays as it was; a failed write keeps the change in memory and reports saveFailed()
     bool upsert(const DownloadRecord &record, bool writeNow = true);
     bool remove(const QString &serverId, const QString &userId, const QString &itemId,
                 bool writeNow = true);
@@ -106,8 +107,6 @@ class DownloadStore final : public QObject {
     void scheduleSave();
     QByteArray serialize() const;
     bool write();
-    // Drops the least recently updated completed or exported record other than `keep`; false when there is none
-    bool evictCompleted(const QString &keep = QString());
 
     QString m_path;
     QList<DownloadRecord> m_records;

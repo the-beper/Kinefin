@@ -25,8 +25,14 @@ namespace Kinefin {
 namespace {
 constexpr int MaxSidecarBytes = 4096;
 constexpr int MaxAuthorizationBytes = 4096;
-constexpr qint64 MinFreeBytes = 1024 * 1024;
+constexpr qint64 MaxByteCount = qint64(1) << 50;
+constexpr qint64 MaxReserveBytes = qint64(1) << 61;
 constexpr int ProgressIntervalMs = 250;
+constexpr int SpaceIntervalMs = 250;
+// A fast link writes far more than the reserve in SpaceIntervalMs, so the bytes written since the last check bound it too
+constexpr qint64 SpaceCheckBytes = qint64(8) * 1024 * 1024;
+// An HTTP validator longer than this would not fit the sidecar, which would then make every resume start over
+constexpr int MaxValidatorBytes = 256;
 constexpr int SidecarIntervalMs = 2000;
 
 bool validRequest(const DownloadTransfer::Request &request)
@@ -46,6 +52,8 @@ bool validRequest(const DownloadTransfer::Request &request)
         return false;
     if (QFileInfo(request.targetPath).absolutePath()
         != QFileInfo(request.partialPath).absolutePath())
+        return false;
+    if (request.reserveBytes < 0 || request.reserveBytes > MaxReserveBytes)
         return false;
     if (request.targetPath == request.partialPath || request.targetPath == request.sidecarPath
         || request.partialPath == request.sidecarPath)
@@ -82,6 +90,19 @@ bool validHeaderValue(const QString &value)
 {
     return !value.isEmpty() && !value.contains(QChar(u'\r')) && !value.contains(QChar(u'\n'));
 }
+
+// A JSON number is range-checked as a double before it is cast: a value such as 1e300 from a damaged file is invalid, not undefined behaviour
+bool readCount(const QJsonValue &value, qint64 minimum, qint64 *out)
+{
+    if (!value.isDouble())
+        return false;
+    const double number = value.toDouble();
+    if (!std::isfinite(number) || number != std::floor(number) || number < double(minimum)
+        || number > double(MaxByteCount))
+        return false;
+    *out = qint64(number);
+    return true;
+}
 } // namespace
 
 // The worker owns the QNetworkAccessManager, the file and the sidecar; it is created on the manager's thread and moved to its own before begin()
@@ -111,14 +132,11 @@ class DownloadTransfer::Worker final : public QObject {
             completePartial();
             return;
         }
-        if (m_request.expectedSize >= 0) {
-            const QStorageInfo storage(QFileInfo(m_request.targetPath).absolutePath());
-            const qint64 needed = m_request.expectedSize - m_written + MinFreeBytes;
-            if (storage.isValid() && storage.bytesAvailable() >= 0
-                && storage.bytesAvailable() < needed) {
-                fail(Failure::NoSpace, 0);
-                return;
-            }
+        m_storage.setPath(QFileInfo(m_request.targetPath).absolutePath());
+        if (m_request.expectedSize >= 0
+            && lacksSpace(m_request.expectedSize - m_written + m_request.reserveBytes)) {
+            fail(Failure::NoSpace, 0);
+            return;
         }
         m_network = std::make_unique<QNetworkAccessManager>();
         QObject::connect(m_network.get(), &QNetworkAccessManager::sslErrors, this,
@@ -169,7 +187,7 @@ class DownloadTransfer::Worker final : public QObject {
         return true;
     }
 
-    bool readSidecar(qint64 *size, qint64 *written, QString *etag)
+    bool readSidecar(qint64 *size, qint64 *written, QString *etag, QString *validator)
     {
         QFile file(m_request.sidecarPath);
         if (!file.exists() || file.size() <= 0 || file.size() > MaxSidecarBytes
@@ -182,28 +200,20 @@ class DownloadTransfer::Worker final : public QObject {
         if (object.value(QStringLiteral("version")).toInt() != 1
             || object.value(QStringLiteral("key")).toString() != m_request.resumeKey)
             return false;
-        const QJsonValue storedSize = object.value(QStringLiteral("size"));
-        const QJsonValue storedWritten = object.value(QStringLiteral("written"));
-        if (!storedSize.isDouble() || !storedWritten.isDouble())
+        if (!readCount(object.value(QStringLiteral("size")), -1, size)
+            || !readCount(object.value(QStringLiteral("written")), 0, written))
             return false;
-        if (storedSize.toDouble() != std::floor(storedSize.toDouble())
-            || storedWritten.toDouble() != std::floor(storedWritten.toDouble()))
-            return false;
-        *size = qint64(storedSize.toDouble());
-        *written = qint64(storedWritten.toDouble());
         *etag = object.value(QStringLiteral("etag")).toString();
-        if (*size < -1 || *written < 0)
+        *validator = object.value(QStringLiteral("validator")).toString();
+        if (!validator->isEmpty() && !validHeaderValue(*validator))
             return false;
         if (*size >= 0 && *written > *size)
             return false;
         if (m_request.expectedSize >= 0 && *size >= 0 && *size != m_request.expectedSize)
             return false;
-        // The sidecar's ETag is the item's MediaSources[].ETag, or the response's when the server sent one and the item had none
-        const QString wanted = m_request.etag.isEmpty() ? *etag : m_request.etag;
-        if (!wanted.isEmpty() && !etag->isEmpty() && wanted != *etag)
+        // The sidecar's etag is the item's, compared with the request's only when both exist; the validator is an HTTP one and never compared with it
+        if (!m_request.etag.isEmpty() && !etag->isEmpty() && m_request.etag != *etag)
             return false;
-        if (m_request.etag.isEmpty() && !etag->isEmpty())
-            m_request.etag = *etag;
         if (m_request.expectedSize < 0 && *size >= 0)
             m_request.expectedSize = *size;
         return true;
@@ -222,6 +232,8 @@ class DownloadTransfer::Worker final : public QObject {
         QFile::remove(m_request.partialPath);
         QFile::remove(m_request.sidecarPath);
         m_written = 0;
+        m_spaceCheckedAt = m_written;
+        m_validator.clear();
         m_sidecarSize = m_request.expectedSize;
     }
 
@@ -232,15 +244,18 @@ class DownloadTransfer::Worker final : public QObject {
         qint64 size = -1;
         qint64 written = 0;
         QString etag;
-        const bool sidecar = readSidecar(&size, &written, &etag);
+        QString validator;
+        const bool sidecar = readSidecar(&size, &written, &etag, &validator);
         m_sidecarSize = size;
         if (!sidecar) {
             discardPartial();
             return true;
         }
+        m_validator = validator;
         const QFileInfo part(m_request.partialPath);
         if (!part.exists()) {
             m_written = 0;
+            m_spaceCheckedAt = m_written;
             writeSidecar();
             return true;
         }
@@ -254,6 +269,7 @@ class DownloadTransfer::Worker final : public QObject {
             return false;
         }
         m_written = written;
+        m_spaceCheckedAt = m_written;
         if (m_request.expectedSize >= 0 && m_written > m_request.expectedSize) {
             discardPartial();
             writeSidecar();
@@ -273,11 +289,10 @@ class DownloadTransfer::Worker final : public QObject {
 
     void writeSidecar()
     {
-        const QJsonObject object{{QStringLiteral("version"), 1},
-                                 {QStringLiteral("key"), m_request.resumeKey},
-                                 {QStringLiteral("etag"), m_request.etag},
-                                 {QStringLiteral("size"), m_sidecarSize},
-                                 {QStringLiteral("written"), m_written}};
+        const QJsonObject object{
+            {QStringLiteral("version"), 1},           {QStringLiteral("key"), m_request.resumeKey},
+            {QStringLiteral("etag"), m_request.etag}, {QStringLiteral("validator"), m_validator},
+            {QStringLiteral("size"), m_sidecarSize},  {QStringLiteral("written"), m_written}};
         if (writePrivateFile(m_request.sidecarPath,
                              QJsonDocument(object).toJson(QJsonDocument::Compact)))
             m_sidecarClock.restart();
@@ -298,8 +313,9 @@ class DownloadTransfer::Worker final : public QObject {
             request.setRawHeader("Range", QByteArrayLiteral("bytes=")
                                               + QByteArray::number(m_written)
                                               + QByteArrayLiteral("-"));
-            if (validHeaderValue(m_request.etag))
-                request.setRawHeader("If-Range", m_request.etag.toUtf8());
+            // A weak validator never matches in If-Range, so it would only turn the resume into a full download
+            if (validHeaderValue(m_validator) && !m_validator.startsWith(QLatin1String("W/")))
+                request.setRawHeader("If-Range", m_validator.toUtf8());
         }
         m_metaReady = false;
         m_reply = m_network->get(request);
@@ -313,6 +329,18 @@ class DownloadTransfer::Worker final : public QObject {
         QObject::connect(m_reply, &QNetworkReply::finished, this, [this] { replyFinished(); });
     }
 
+    // The response's validator for a later If-Range: the ETag, else Last-Modified
+    QString responseValidator() const
+    {
+        const QString etag = QString::fromLatin1(m_reply->rawHeader("ETag"));
+        if (validHeaderValue(etag) && etag.size() <= MaxValidatorBytes)
+            return etag;
+        const QString modified = QString::fromLatin1(m_reply->rawHeader("Last-Modified"));
+        return validHeaderValue(modified) && modified.size() <= MaxValidatorBytes ? modified
+                                                                                  : QString();
+    }
+
+    // True only when the current reply is ready to have its body written; a restart or a failure leaves the caller with nothing more to do
     bool prepareReply()
     {
         const int status = m_reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
@@ -328,7 +356,7 @@ class DownloadTransfer::Worker final : public QObject {
                 return false;
             }
         }
-        const QString responseEtag = QString::fromLatin1(m_reply->rawHeader("ETag"));
+        const QString validator = responseValidator();
         if (status == 200) {
             // The server ignored the range: truncate and restart from zero
             if (m_written > 0 || m_file.isOpen())
@@ -337,8 +365,7 @@ class DownloadTransfer::Worker final : public QObject {
                 m_request.expectedSize = contentLength;
                 m_sidecarSize = contentLength;
             }
-            if (validHeaderValue(responseEtag))
-                m_request.etag = responseEtag;
+            m_validator = validator;
         } else if (status == 206) {
             qint64 start = -1;
             qint64 end = -1;
@@ -351,20 +378,23 @@ class DownloadTransfer::Worker final : public QObject {
                 fail(Failure::Protocol, status);
                 return false;
             }
+            // Only the validator an earlier response gave is compared with this one
             const bool changed =
-                (!m_request.etag.isEmpty() && validHeaderValue(responseEtag)
-                 && responseEtag != m_request.etag)
+                (!m_validator.isEmpty() && !validator.isEmpty() && validator != m_validator)
                 || (total >= 0 && m_request.expectedSize >= 0 && total != m_request.expectedSize);
-            if (changed)
-                return restartFromZero(status, total);
+            if (changed) {
+                restartFromZero(status, total);
+                return false;
+            }
             if (total >= 0) {
                 m_request.expectedSize = total;
                 m_sidecarSize = total;
             }
-            if (validHeaderValue(responseEtag))
-                m_request.etag = responseEtag;
+            if (!validator.isEmpty())
+                m_validator = validator;
         } else {
-            return restartOrFail(status);
+            restartOrFail(status);
+            return false;
         }
         if (!openPartial()) {
             fail(Failure::Io, status);
@@ -375,11 +405,11 @@ class DownloadTransfer::Worker final : public QObject {
     }
 
     // One automatic restart after a changed size/tag or an unsatisfiable range; a second mismatch is a hard failure
-    bool restartFromZero(int status, qint64 total)
+    void restartFromZero(int status, qint64 total)
     {
         if (m_restarted) {
             fail(Failure::Changed, status);
-            return false;
+            return;
         }
         m_restarted = true;
         m_reply->disconnect(this);
@@ -393,33 +423,38 @@ class DownloadTransfer::Worker final : public QObject {
         } else {
             m_request.expectedSize = -1;
         }
-        m_request.etag.clear();
+        m_validator.clear();
         if (m_file.isOpen())
             m_file.close();
         if (!openPartial()) {
             fail(Failure::Io, status);
-            return false;
+            return;
         }
-        m_metaReady = true;
         sendRequest();
-        return true;
     }
 
-    bool restartOrFail(int status)
+    void restartOrFail(int status)
     {
         if (status == 416 && m_request.expectedSize >= 0 && m_written == m_request.expectedSize) {
             completePartial();
-            return false;
+            return;
         }
         if (status != 416 && status != 409 && status != 412) {
             fail(Failure::Http, status);
-            return false;
+            return;
         }
         if (m_restarted) {
             fail(status == 416 ? Failure::Protocol : Failure::Http, status);
-            return false;
+            return;
         }
-        return restartFromZero(status, -1);
+        restartFromZero(status, -1);
+    }
+
+    bool lacksSpace(qint64 needed)
+    {
+        m_storage.refresh();
+        return m_storage.isValid() && m_storage.bytesAvailable() >= 0
+               && m_storage.bytesAvailable() < needed;
     }
 
     void writeAvailable()
@@ -433,13 +468,18 @@ class DownloadTransfer::Worker final : public QObject {
             fail(Failure::SizeMismatch, 0);
             return;
         }
+        // A server that sends no size streams until the disk is full, so the reserve is checked on a timer for the whole transfer
+        if (!m_spaceClock.isValid() || m_spaceClock.elapsed() >= SpaceIntervalMs
+            || m_written + chunk.size() - m_spaceCheckedAt >= SpaceCheckBytes) {
+            m_spaceClock.restart();
+            m_spaceCheckedAt = m_written + chunk.size();
+            if (lacksSpace(m_request.reserveBytes + chunk.size())) {
+                fail(Failure::NoSpace, 0);
+                return;
+            }
+        }
         if (m_file.write(chunk) != chunk.size()) {
-            const QStorageInfo storage(QFileInfo(m_request.targetPath).absolutePath());
-            fail(storage.isValid() && storage.bytesAvailable() >= 0
-                         && storage.bytesAvailable() < MinFreeBytes
-                     ? Failure::NoSpace
-                     : Failure::Io,
-                 0);
+            fail(lacksSpace(m_request.reserveBytes) ? Failure::NoSpace : Failure::Io, 0);
             return;
         }
         m_written += chunk.size();
@@ -558,12 +598,18 @@ class DownloadTransfer::Worker final : public QObject {
     QFile m_file;
     qint64 m_written = 0;
     qint64 m_sidecarSize = -1;
+    // The HTTP validator (ETag, else Last-Modified) an earlier response of this download gave; the only one sent as If-Range
+    QString m_validator;
+    QStorageInfo m_storage;
     bool m_metaReady = false;
     bool m_done = false;
     bool m_cancelled = false;
     bool m_restarted = false;
     QElapsedTimer m_progressClock;
     QElapsedTimer m_sidecarClock;
+    QElapsedTimer m_spaceClock;
+    // m_written at the last free-space check
+    qint64 m_spaceCheckedAt = 0;
 };
 
 DownloadTransfer::DownloadTransfer(QObject *parent) : QObject(parent) {}

@@ -3034,7 +3034,9 @@ class TestJellyfinClient : public QObject {
         QSignalSpy ready(&client, &Kinefin::JellyfinClient::remoteSubtitlesReady);
         QVERIFY(client.searchRemoteSubtitles(kPlayItem, QStringLiteral("eng")));
         QTRY_COMPARE(ready.count(), 1);
-        QCOMPARE(ready.first().at(0).toJsonArray().size(), 1);
+        QCOMPARE(ready.first().at(0).toString(), kPlayItem);
+        QCOMPARE(ready.first().at(1).toString(), QStringLiteral("eng"));
+        QCOMPARE(ready.first().at(2).toJsonArray().size(), 1);
         QCOMPARE(server.remoteSubtitleSearches.constLast(), QByteArray("eng"));
         QVERIFY(!client.searchRemoteSubtitles(kPlayItem, QStringLiteral("../x")));
 
@@ -3043,6 +3045,8 @@ class TestJellyfinClient : public QObject {
         QTRY_COMPARE(downloaded.count(), 1);
         QCOMPARE(server.remoteSubtitleDownloads.constLast(), QByteArray("abc123"));
         QVERIFY(!client.downloadRemoteSubtitle(kPlayItem, QStringLiteral("../escape")));
+        QVERIFY(!client.downloadRemoteSubtitle(kPlayItem, QStringLiteral("..")));
+        QVERIFY(!client.downloadRemoteSubtitle(kPlayItem, QStringLiteral(".")));
 
         client.forgetSession();
         QVERIFY(!client.canManageSubtitles());
@@ -3069,7 +3073,9 @@ class TestJellyfinClient : public QObject {
         server.remoteSubtitleSearchStatus = 500;
         QVERIFY(client.searchRemoteSubtitles(kPlayItem, QStringLiteral("eng")));
         QTRY_COMPARE(failed.size(), 1);
-        QCOMPARE(failed.takeFirst().at(0).toInt(), 500);
+        QCOMPARE(failed.first().at(0).toString(), kPlayItem);
+        QCOMPARE(failed.first().at(1).toString(), QStringLiteral("eng"));
+        QCOMPARE(failed.takeFirst().at(2).toInt(), 500);
         QCOMPARE(ready.size(), 0);
 
         // A body that is not an array of objects breaks the contract, not just the JSON syntax

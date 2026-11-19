@@ -43,7 +43,10 @@ class TestWatchedOutbox : public QObject {
         WatchedOutbox outbox;
         outbox.setStoragePath(path);
         QVERIFY(outbox.append(watchedEvent(1)));
-        QVERIFY(outbox.append(watchedEvent(2)));
+        WatchedEvent conflicting = watchedEvent(2);
+        conflicting.conflict = true;
+        conflicting.played = false;
+        QVERIFY(outbox.append(conflicting));
         QCOMPARE(outbox.events().size(), 2);
         QVERIFY(QFile::exists(path));
 
@@ -53,6 +56,11 @@ class TestWatchedOutbox : public QObject {
         const std::optional<WatchedEvent> found = reloaded.find(kServer, kUser, hex(1));
         QVERIFY(found);
         QCOMPARE(found->eventId, QStringLiteral("event-1"));
+        QVERIFY(!found->conflict);
+        const std::optional<WatchedEvent> conflict = reloaded.find(kServer, kUser, hex(2));
+        QVERIFY(conflict);
+        QVERIFY(conflict->conflict);
+        QVERIFY(!conflict->played);
         QVERIFY(reloaded.remove(kServer, kUser, hex(1)));
         QCOMPARE(reloaded.events().size(), 1);
         QVERIFY(!reloaded.find(kServer, kUser, hex(1)));

@@ -8,8 +8,7 @@
 namespace Kinefin {
 std::optional<QString> parseItemLink(const QString &input)
 {
-    // Match the source text, not a decoded/normalized QUrl path: percent escapes,
-    // dot segments, a trailing slash, and attached userinfo must all be refused.
+    // Match the source text, not a decoded/normalized QUrl path: percent escapes, dot segments, a trailing slash, and attached userinfo must all be refused
     static const QRegularExpression pattern(QStringLiteral(R"(\Ajellyfin://item/([a-f0-9]{32})\z)"),
                                             QRegularExpression::CaseInsensitiveOption);
     const auto match = pattern.match(input);
@@ -20,13 +19,12 @@ std::optional<QString> parseItemLink(const QString &input)
 
 std::optional<QString> itemFromActivationArguments(const QStringList &arguments)
 {
-    // Those switches take a value as a separate argv entry when not written as
-    // --name=value. An option value is never a desktop link, even if it looks
-    // like one; only a genuine positional argument can navigate.
+    // Those switches take a value as a separate argv entry when not written as --name=value (the list follows the value options of main.cpp). An option value is never a desktop link, even if it looks like one; only a genuine positional argument can navigate
     static const QStringList valueOptions{
-        QStringLiteral("--profile"), QStringLiteral("--log-level"),
+        QStringLiteral("--profile"),        QStringLiteral("--log-level"),
         QStringLiteral("--create-profile"), QStringLiteral("--set-default-profile"),
-        QStringLiteral("--delete-profile")};
+        QStringLiteral("--delete-profile"), QStringLiteral("--config-dir"),
+        QStringLiteral("--platform")};
     bool skipValue = false;
     bool positionalOnly = false;
     std::optional<QString> found;
@@ -46,7 +44,7 @@ std::optional<QString> itemFromActivationArguments(const QStringList &arguments)
         const auto item = parseItemLink(argument);
         if (!item)
             continue;
-        // A forwarded activation must not navigate to two arbitrary items.
+        // A forwarded activation must not navigate to two arbitrary items
         if (found)
             return std::nullopt;
         found = item;

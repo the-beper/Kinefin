@@ -303,6 +303,38 @@ bool facetsLoaded(Kinefin::LibraryItemsModel *model)
         },
         10000);
 }
+
+// The id of the fixture movie
+const QString kDownloadedMovie = QStringLiteral("f0e1d2c3b4a5968778695a4b3c2d1e0f");
+
+// Signs Anna in and downloads the fixture movie to the end; `server` needs the user table of addTwoUsers. The fake sends 64 KiB from its Download route, so the record expects that file
+bool signInWithADownload(ConnectionController &controller, FakeJellyfin &server)
+{
+    QJsonObject movie = QJsonDocument::fromJson(fixture(QStringLiteral("movie_item")))
+                            .object()
+                            .value(QStringLiteral("Items"))
+                            .toArray()
+                            .first()
+                            .toObject();
+    QJsonArray sources = movie.value(QStringLiteral("MediaSources")).toArray();
+    QJsonObject source = sources.first().toObject();
+    source.insert(QStringLiteral("Size"), 64 * 1024);
+    source.insert(QStringLiteral("ETag"), QStringLiteral("etag-1"));
+    sources.replace(0, source);
+    movie.insert(QStringLiteral("MediaSources"), sources);
+    server.itemsById.insert(kDownloadedMovie, QJsonDocument(movie).toJson(QJsonDocument::Compact));
+    controller.connectTo(address(server));
+    if (!waitForState(controller, ConnectionController::NeedsLogin)
+        || !signInUser(controller, QStringLiteral("Anna"), 1)
+        || !controller.downloads()->downloadItem(kDownloadedMovie))
+        return false;
+    return QTest::qWaitFor(
+        [&] {
+            return controller.downloads()->downloadState(kDownloadedMovie)
+                   == QLatin1String("completed");
+        },
+        10000);
+}
 } // namespace
 
 class TestConnectionController : public QObject {
@@ -3212,6 +3244,85 @@ class TestConnectionController : public QObject {
         QTRY_COMPARE(recentRowIds(controller->homeRows()), (QStringList{kMoviesA, kMoviesB}));
         QTRY_COMPARE(server.listingRoutes.value(QStringLiteral("Latest")).size(), 5);
         QVERIFY(latestAsksNoPlayedFilter(server.listingRoutes.value(QStringLiteral("Latest")), 3));
+    }
+
+    // A user who has to type the password cannot be that user without a server: Work Offline is not offered for them
+    void workOfflineIsRefusedForAnAskPasswordUser()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        addTwoUsers(server);
+        auto controller = makeController();
+        QVERIFY(signInWithADownload(*controller, server));
+        QVERIFY(controller->canWorkOffline());
+        // The property follows the records at most once a second
+        QTRY_VERIFY(controller->property("offlineAvailable").toBool());
+        QSignalSpy availability(controller.get(), &ConnectionController::offlineAvailableChanged);
+
+        controller->setUserAskPassword(kAnna, true);
+        QVERIFY(userEntry(*controller, kAnna).value(QStringLiteral("askPassword")).toBool());
+        QVERIFY(!controller->canWorkOffline());
+        QTRY_COMPARE(availability.count(), 1);
+        QVERIFY(!controller->property("offlineAvailable").toBool());
+        controller->cancel();
+        QTRY_COMPARE(controller->state(), ConnectionController::Idle);
+        QVERIFY(!controller->canWorkOffline());
+        QVERIFY(!controller->workOffline());
+        QCOMPARE(controller->state(), ConnectionController::Idle);
+        QVERIFY(!controller->offline());
+    }
+
+    // A user whose token was dropped (not remembered, and not asking for the password either) has no session to fall back on
+    void workOfflineIsRefusedForAUserThatIsNotRemembered()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        addTwoUsers(server);
+        auto controller = makeController();
+        QVERIFY(signInWithADownload(*controller, server));
+        QVERIFY(controller->canWorkOffline());
+
+        controller->setUserAskPassword(kAnna, true);
+        controller->setUserAskPassword(kAnna, false);
+        QVERIFY(!userEntry(*controller, kAnna).value(QStringLiteral("askPassword")).toBool());
+        QVERIFY(!userEntry(*controller, kAnna).value(QStringLiteral("remembered")).toBool());
+        QVERIFY(!controller->canWorkOffline());
+        QVERIFY(!controller->property("offlineAvailable").toBool());
+        controller->cancel();
+        QTRY_COMPARE(controller->state(), ConnectionController::Idle);
+        QVERIFY(!controller->workOffline());
+        QCOMPARE(controller->state(), ConnectionController::Idle);
+    }
+
+    // Cancel and Sign Out from Offline end the state only: the saved user and the downloads stay
+    void cancelAndSignOutFromOfflineReturnToIdle()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        addTwoUsers(server);
+        auto controller = makeController();
+        QVERIFY(signInWithADownload(*controller, server));
+        controller->cancel();
+        QTRY_COMPARE(controller->state(), ConnectionController::Idle);
+
+        QVERIFY(controller->workOffline());
+        QCOMPARE(controller->state(), ConnectionController::Offline);
+        QCOMPARE(controller->offlineUserName(), QStringLiteral("Anna"));
+        QCOMPARE(controller->downloads()->ownerUserId(), kAnna);
+        controller->cancel();
+        QCOMPARE(controller->state(), ConnectionController::Idle);
+        QVERIFY(!controller->offline());
+        QVERIFY(controller->offlineUserName().isEmpty());
+        QVERIFY(controller->downloads()->ownerUserId().isEmpty());
+        QVERIFY(controller->canWorkOffline());
+
+        QVERIFY(controller->workOffline());
+        QCOMPARE(controller->state(), ConnectionController::Offline);
+        controller->signOut();
+        QCOMPARE(controller->state(), ConnectionController::Idle);
+        QVERIFY(controller->offlineUserName().isEmpty());
+        QVERIFY(controller->downloads()->ownerUserId().isEmpty());
+        QVERIFY(controller->canWorkOffline());
     }
 
   private:

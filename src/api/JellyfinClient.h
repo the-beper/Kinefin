@@ -149,8 +149,9 @@ class JellyfinClient final : public QObject {
                      int channel = 0);
     // One series' seasons, and its episodes per season (`seasonId` empty = every season, paged by `startIndex`/`limit`; `startIndex` < 0 lets the server default)
     bool fetchSeasons(const QString &seriesId, int channel = 0);
+    // `forRuleScan` asks for `DateCreated` instead of `Overview`: the server sends the date only when asked
     bool fetchEpisodes(const QString &seriesId, const QString &seasonId, int startIndex, int limit,
-                       int channel = 0);
+                       int channel = 0, bool forRuleScan = false);
     // Similar items of any item kind (the generic `/Items/{itemId}/Similar` route)
     bool fetchSimilarItems(const QString &itemId, int limit, int channel = 0);
     // Drops the pending requests of one channel (silently, like a superseded one) and forgets its bookkeeping: for a consumer that is going away, or one that abandons what it asked for and may use the channel again later. Channel 0 is not releasable
@@ -339,8 +340,10 @@ class JellyfinClient final : public QObject {
     void playbackInfoFailed(const QString &itemId, int httpStatus, const QString &reason);
     // The listing results: envelope families carry the items and the `TotalRecordCount` the server echoed, the two bare-array families (`/Items/Latest`, `/Sessions`) carry only the array; nothing here ever contains an access token or a server-provided error string
     void itemsReady(const QJsonArray &items, int totalRecordCount, int channel);
-    void remoteSubtitlesReady(const QJsonArray &subtitles);
-    void remoteSubtitlesFailed(int httpStatus);
+    // The search results carry the item and the language they were asked for, so a reply that arrives after the player moved on can be told apart
+    void remoteSubtitlesReady(const QString &itemId, const QString &language,
+                              const QJsonArray &subtitles);
+    void remoteSubtitlesFailed(const QString &itemId, const QString &language, int httpStatus);
     void remoteSubtitleDownloaded(const QString &itemId, const QString &subtitleId);
     void remoteSubtitleDownloadFailed(const QString &itemId, const QString &subtitleId,
                                       int httpStatus);

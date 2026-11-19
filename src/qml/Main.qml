@@ -575,7 +575,8 @@ Kirigami.ApplicationWindow {
 
     // A new play always opens the full player, from the mini player too
     function showPlayerPage() {
-        if (!window.signedIn || !window.player)
+        // A downloaded item plays without a session, in Offline too
+        if (!(window.signedIn || window.offline) || !window.player)
             return false;
         if (playbackPageShowing)
             return true;
@@ -609,12 +610,12 @@ Kirigami.ApplicationWindow {
         if (videoLoader.item)
             videoLoader.item.player = null;
         playbackMode = "none";
-        const live = connection.state === ConnectionController.Authenticated;
+        const live = connection.state === ConnectionController.Authenticated || window.offline;
         if (playbackPageShowing && live)
             pageStack.pop();
         playerPage = null;
         // Home is stale once a playback that outlived the player page ends
-        if (wasMini && live)
+        if (wasMini && signedIn)
             connection.reloadHome();
     }
 
@@ -700,6 +701,9 @@ Kirigami.ApplicationWindow {
         meteredDownloadDialog.open();
     }
 
+    // The record of the last local playback that started, overwritten by the next one
+    property var localOwner: null
+
     // A completed download plays from its own file: no server request, no session report
     function playDownload(serverId, userId, itemId) {
         if (!window.player)
@@ -718,6 +722,8 @@ Kirigami.ApplicationWindow {
             window.showPassiveNotification(i18n("The downloaded file could not be played"));
             return false;
         }
+        // Set only once the file plays: the player reports the previous file's last position while it is replaced, and that one belongs to the previous owner
+        window.localOwner = {serverId: serverId, userId: userId, itemId: itemId};
         if (!showPlayerPage()) {
             window.player.stop();
             return false;
@@ -967,7 +973,7 @@ Kirigami.ApplicationWindow {
         return i18n("The download could not be started");
     }
 
-    // The confirmation of Remove Download, from the card menu and the details page
+    // The confirmation of Delete Download, from the card menu and the details page
     function confirmRemoveDownload(itemId) {
         removeDownloadDialog.itemId = itemId;
         removeDownloadDialog.open();
@@ -978,7 +984,9 @@ Kirigami.ApplicationWindow {
         // The shell tests have no player: the handler is only meaningful once one is attached
         ignoreUnknownSignals: true
         function onLocalPositionChanged(itemId, ticks, played) {
-            window.connection.downloads.updateLocalProgress(itemId, ticks, played);
+            const owner = window.localOwner;
+            if (owner && owner.itemId === itemId)
+                window.connection.downloads.updateLocalProgress(owner.serverId, owner.userId, itemId, ticks, played);
         }
     }
 
@@ -988,8 +996,10 @@ Kirigami.ApplicationWindow {
             window.showPassiveNotification(window.downloadFailureText(reason), "long");
         }
         function onDownloadEnqueued(itemId) {
-            downloadToast.visible = true;
-            downloadToastTimer.restart();
+            window.showPassiveNotification(i18n("Download queued"), "long", i18n("Show Downloads"), () => window.openDownloads());
+        }
+        function onExportBusy(itemId) {
+            window.showPassiveNotification(i18n("Another export is still running. Try again when it ends"));
         }
         function onExportFinished(itemId, ok) {
             window.showPassiveNotification(ok ? i18n("Exported to the chosen folder") : i18n("Could not export the download. Choose another folder and try again"));
@@ -1664,37 +1674,6 @@ Kirigami.ApplicationWindow {
         }
     }
 
-    // A queued download answers in the app's own message box instead of a platform toast
-    MessageBox {
-        id: downloadToast
-        objectName: "downloadToast"
-        anchors {
-            horizontalCenter: parent.horizontalCenter
-            bottom: parent.bottom
-            bottomMargin: Kirigami.Units.largeSpacing + window.miniPlayerSpace
-        }
-        width: Math.min(Kirigami.Units.gridUnit * 30, window.width - Kirigami.Units.largeSpacing * 2)
-        z: 100
-        visible: false
-        type: Kirigami.MessageType.Information
-        text: i18n("Download queued")
-        actions: [
-            Kirigami.Action {
-                text: i18n("Open Downloads")
-                icon.name: "folder-download"
-                onTriggered: {
-                    window.openDownloads();
-                    downloadToast.visible = false;
-                }
-            }
-        ]
-    }
-    Timer {
-        id: downloadToastTimer
-        interval: 6000
-        onTriggered: downloadToast.visible = false
-    }
-
     Kirigami.PromptDialog {
         id: meteredDownloadDialog
         objectName: "meteredDownloadDialog"
@@ -1720,7 +1699,7 @@ Kirigami.ApplicationWindow {
             Layout.fillWidth: true
             wrapMode: Text.Wrap
             textFormat: Text.PlainText
-            text: i18n("This network may charge for data. Download this item anyway")
+            text: i18n("This network may charge for data. Download this item anyway?")
         }
     }
 
@@ -1730,13 +1709,13 @@ Kirigami.ApplicationWindow {
 
         property string itemId
 
-        title: i18n("Remove Download")
+        title: i18n("Delete Download")
         preferredWidth: Kirigami.Units.gridUnit * 26
         standardButtons: Kirigami.Dialog.Cancel
         customFooterActions: [
             Kirigami.Action {
                 objectName: "removeDownloadConfirm"
-                text: i18n("Remove Download")
+                text: i18n("Delete Download")
                 icon.name: "edit-delete"
                 onTriggered: {
                     window.connection.downloads.removeCurrentDownload(removeDownloadDialog.itemId);
@@ -1749,7 +1728,7 @@ Kirigami.ApplicationWindow {
             Layout.fillWidth: true
             wrapMode: Text.Wrap
             textFormat: Text.PlainText
-            text: i18n("Remove this download? The file stays on the server")
+            text: i18n("Delete this download? The file stays on the server")
         }
     }
 

@@ -9,8 +9,8 @@
 #include "integration/NetworkMeter.h"
 #include "models/DownloadsModel.h"
 
+#include <QDateTime>
 #include <QHash>
-#include <QNetworkAccessManager>
 #include <QObject>
 #include <QSet>
 #include <QString>
@@ -18,9 +18,13 @@
 #include <QUrl>
 #include <QVariantMap>
 
+#include <memory>
 #include <optional>
 
 namespace Kinefin {
+class ImageNetworkAccess;
+class ImageOrigin;
+
 // The download queue of the signed-in session: owns the engine and the model the Downloads page shows, asks the server for the item fields a download needs, and builds the resolver the engine calls at start time (the URL and the Authorization header, never stored). A manual download runs on any network; the engine's automatic ones follow the meter and the "only on unmetered networks" setting, failing closed while the meter is unknown
 class DownloadsController final : public QObject {
     Q_OBJECT
@@ -34,10 +38,13 @@ class DownloadsController final : public QObject {
     Q_PROPERTY(int revision READ revision NOTIFY revisionChanged)
     // The index could not be written: the queue lives for this session only
     Q_PROPERTY(bool storageFailed READ storageFailed NOTIFY storageFailedChanged)
-    // Watched-state events waiting for the server
+    // Watched-state events of the current owner waiting for the server
     Q_PROPERTY(int pendingSyncCount READ pendingSyncCount NOTIFY outboxChanged)
-    // Watched-state events the server contradicts; each has Keep Server / Mark Played actions
+    // Watched-state events of the current owner the server contradicts; each has Keep Server / Mark Played actions
     Q_PROPERTY(QVariantList outboxConflicts READ outboxConflicts NOTIFY outboxChanged)
+    // The owner of what the page lists: the signed-in user, or the saved user shown in Offline; both empty when there is none
+    Q_PROPERTY(QString ownerServerId READ ownerServerId NOTIFY ownerChanged)
+    Q_PROPERTY(QString ownerUserId READ ownerUserId NOTIFY ownerChanged)
     // Bumped when a series rule changes, so the series page follows it
     Q_PROPERTY(int rulesRevision READ rulesRevision NOTIFY rulesRevisionChanged)
 
@@ -54,8 +61,10 @@ class DownloadsController final : public QObject {
     bool metered() const { return m_meter.metered(); }
     int revision() const { return m_revision; }
     bool storageFailed() const { return m_storageFailed; }
-    int pendingSyncCount() const { return int(m_outbox.events().size()); }
+    int pendingSyncCount() const;
     QVariantList outboxConflicts() const;
+    QString ownerServerId() const;
+    QString ownerUserId() const;
     int rulesRevision() const { return m_rulesRevision; }
 
     // The session can serve downloads; false stops the active transfers and holds the queue
@@ -66,6 +75,12 @@ class DownloadsController final : public QObject {
     void setIgnoreCertificateErrors(bool ignore);
     // Re-reads the policy after a login or a profile refresh
     void refreshCanDownload();
+    // The saved user whose downloads Offline shows (no session then); empty ids go back to the signed-in user
+    void setOfflineOwner(const QString &serverId, const QString &userId);
+    // The origin the poster fetch is limited to, shared with the QML images; without one no poster is fetched
+    void setImageOrigin(std::shared_ptr<ImageOrigin> origin);
+    // Whether a completed record still has its media file
+    bool hasLocalFile(const DownloadRecord &record) const;
 
     // Fetches the item's fields and enqueues the original file; false when the policy denies it, the id is invalid or a fetch is already in flight. A later failure arrives as downloadFailed
     Q_INVOKABLE bool downloadItem(const QString &itemId);
@@ -88,8 +103,9 @@ class DownloadsController final : public QObject {
     // The cached poster of a record when there is one, else the server image URL
     Q_INVOKABLE QUrl posterSource(const QString &serverId, const QString &userId,
                                   const QString &itemId, const QString &tag) const;
-    // Stores where a local playback stopped and whether it was watched; writes the record now when the item ended
-    Q_INVOKABLE void updateLocalProgress(const QString &itemId, qint64 ticks, bool played);
+    // Stores where a local playback of that owner's record stopped; a watched item keeps position 0 and queues one watched-state event
+    Q_INVOKABLE void updateLocalProgress(const QString &serverId, const QString &userId,
+                                         const QString &itemId, qint64 ticks, bool played);
     // Sends the queued watched-state events, one at a time; called at sign-in, on reconnect and when the page opens online
     Q_INVOKABLE void reconcileOutbox();
     // Resolves a conflict: keepServer drops the event, otherwise it marks the item played on the server
@@ -119,7 +135,10 @@ class DownloadsController final : public QObject {
     void outboxChanged();
     void rulesRevisionChanged();
     void exportFinished(const QString &itemId, bool ok);
-    // The item could not be enqueued: "forbidden", "notfound", "unsupported", "network", "queue" or "failed"
+    // Another export still runs: nothing was started
+    void exportBusy(const QString &itemId);
+    void ownerChanged();
+    // A manual download could not be enqueued: "forbidden", "notfound", "unsupported", "network", "queue" or "failed"; the downloads of a rule stay silent
     void downloadFailed(const QString &itemId, const QString &reason);
     void downloadEnqueued(const QString &itemId);
 
@@ -127,8 +146,13 @@ class DownloadsController final : public QObject {
     void onItemsReady(const QJsonArray &items, int totalRecordCount, int channel);
     void onOutboxItemsReady(const QJsonArray &items, int channel);
     void onEpisodesReady(const QJsonArray &items, int totalRecordCount, int channel);
-    bool downloadItemForRule(const QString &itemId, const QString &ruleId);
+    bool downloadItemForRule(const QString &itemId, const QString &ruleId,
+                             const QDateTime &created = {});
+    // A rule download that failed after the scan moved the cursor past it: the cursor goes back before the episode, so the next scan offers it again
+    void rewindRuleCursor(const QString &seriesId, const QDateTime &created);
     void reconcileNext();
+    void refreshOwner();
+    bool ownedByCurrent(const QString &serverId, const QString &userId) const;
     void writeInfo(const DownloadRecord &record);
     void onListingFailed(const QString &family, int httpStatus, const QString &reason, int channel);
     std::optional<DownloadRecord> recordFor(const QJsonObject &item, const QString &ruleId) const;
@@ -144,10 +168,15 @@ class DownloadsController final : public QObject {
     // The item each pending one-shot item fetch was asked for
     QHash<int, QString> m_fetches;
     QHash<int, QString> m_fetchRules;
+    // The creation date of the episode each rule fetch is for
+    QHash<int, QDateTime> m_fetchRuleDates;
     // Outbox reconciliation: the channel of the item read, by event key, and the item whose played write is in flight
     QHash<int, QString> m_outboxFetches;
     QHash<int, QString> m_outboxVerifies;
-    QNetworkAccessManager m_imageNetwork;
+    std::unique_ptr<ImageNetworkAccess> m_images;
+    QString m_offlineServerId;
+    QString m_offlineUserId;
+    QString m_ownerKey;
     QThread *m_exportThread = nullptr;
     QSet<QString> m_outboxWrites;
     // The rule of each pending episodes listing

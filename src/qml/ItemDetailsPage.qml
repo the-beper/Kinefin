@@ -134,7 +134,7 @@ Kirigami.ScrollablePage {
     readonly property bool downloadRemovable: ["paused", "error", "completed", "exported"].indexOf(downloadState) >= 0
     readonly property Kirigami.Action downloadAction: Kirigami.Action {
         objectName: "downloadAction"
-        text: page.downloadRemovable ? i18n("Remove Download…") : page.downloadCancellable ? i18n("Cancel Download") : i18n("Download")
+        text: page.downloadRemovable ? i18n("Delete Download…") : page.downloadCancellable ? i18n("Cancel Download") : i18n("Download")
         icon.name: page.downloadRemovable ? "edit-delete" : page.downloadCancellable ? "process-stop" : "folder-download"
         visible: page.downloadable
         onTriggered: {
@@ -176,6 +176,7 @@ Kirigami.ScrollablePage {
         seriesName: page.details.type === "Series" ? page.details.name : page.details.seriesName
         seasonNumber: page.details.seasonNumber
         currentKind: page.seriesRule.kind ?? "nextN"
+        storedSeason: page.seriesRule.seasonNumber ?? -1
         currentCount: page.seriesRule.count ?? 3
     }
     readonly property Kirigami.Action favoriteAction: Kirigami.Action {

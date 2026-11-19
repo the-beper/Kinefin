@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Kinefin contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
-// The download index: the private atomic file, round trips, records dropped alone, later and damaged files kept aside, the caps and the eviction order
+// The download index: the private atomic file, round trips, records dropped alone, later and damaged files kept aside, the caps (a full queue refuses a new record and keeps the completed ones) and the debounced write
 #include "downloads/DownloadStore.h"
 
 #include <QFile>
@@ -193,8 +193,9 @@ class TestDownloadStore : public QObject {
                 ++accepted;
         }
         store.flush();
+        // Realistic records leave the record cap as the one that binds
+        QCOMPARE(accepted, DownloadStore::MaxRecords);
         QCOMPARE(store.records().size(), accepted);
-        QVERIFY(accepted < DownloadStore::MaxRecords + 20);
         QVERIFY(QFileInfo(path).size() <= DownloadStore::MaxFileBytes);
 
         DownloadStore reloaded;
@@ -202,28 +203,41 @@ class TestDownloadStore : public QObject {
         QCOMPARE(reloaded.records().size(), accepted);
     }
 
-    void evictsCompletedBeforeQueued()
+    void refusesANewRecordAtTheCapAndKeepsTheCompletedOnes()
     {
         QTemporaryDir dir;
         QVERIFY(dir.isValid());
         const QString path = dir.filePath(QStringLiteral("index.json"));
         DownloadStore store;
         store.setStoragePath(path);
-        DownloadRecord completed = record(0, QStringLiteral("completed"));
-        // Larger than a queued entry, so freeing it always makes room for the next one
-        completed.name = QString(DownloadRecord::MaxName, QLatin1Char('c'));
-        QVERIFY(store.upsert(completed, false));
-        int queued = 0;
-        for (int index = 1; index <= DownloadStore::MaxRecords; ++index) {
-            DownloadRecord entry = record(index);
-            entry.name = QString(200, QLatin1Char('q'));
-            if (store.upsert(entry, false))
-                ++queued;
+        for (int index = 0; index < DownloadStore::MaxRecords; ++index) {
+            const QString state =
+                index % 2 == 0 ? QStringLiteral("completed") : QStringLiteral("exported");
+            QVERIFY(store.upsert(record(index, state), false));
         }
-        QVERIFY(!store.find(kServer, kUser, hex(0)));
-        QCOMPARE(store.records().size(), queued);
+        QCOMPARE(store.records().size(), DownloadStore::MaxRecords);
+
+        QVERIFY(!store.upsert(record(DownloadStore::MaxRecords), false));
+        QCOMPARE(store.records().size(), DownloadStore::MaxRecords);
+        QVERIFY(!store.find(kServer, kUser, hex(DownloadStore::MaxRecords)));
+        for (int index = 0; index < DownloadStore::MaxRecords; ++index)
+            QVERIFY(store.find(kServer, kUser, hex(index)));
+
+        // An existing record is still updated, and a removal makes room again
+        DownloadRecord renamed = record(0, QStringLiteral("completed"));
+        renamed.name = QStringLiteral("Renamed");
+        QVERIFY(store.upsert(renamed, false));
+        QCOMPARE(store.find(kServer, kUser, hex(0))->name, QStringLiteral("Renamed"));
+        QVERIFY(store.remove(kServer, kUser, hex(1), false));
+        QVERIFY(store.upsert(record(DownloadStore::MaxRecords), false));
+        QCOMPARE(store.records().size(), DownloadStore::MaxRecords);
         store.flush();
-        QVERIFY(QFileInfo(path).size() <= DownloadStore::MaxFileBytes);
+
+        DownloadStore reloaded;
+        reloaded.setStoragePath(path);
+        QCOMPARE(reloaded.records().size(), DownloadStore::MaxRecords);
+        QVERIFY(reloaded.find(kServer, kUser, hex(0)));
+        QVERIFY(!reloaded.find(kServer, kUser, hex(1)));
     }
 
     void refusesAnUpdateThatDoesNotFit()
@@ -236,20 +250,24 @@ class TestDownloadStore : public QObject {
             QVERIFY(store.upsert(entry, false));
             shorts.append(entry);
         }
-        // The byte cap is reached well before the record cap, and a refused insert leaves less room than one short record
+        // A backslash doubles in JSON: names, tag and ETag at their caps make the largest valid record, so the byte cap is reached before the record cap
+        const auto heavy = [](DownloadRecord entry) {
+            entry.name = QString(DownloadRecord::MaxName, QLatin1Char('\\'));
+            entry.seriesName = QString(DownloadRecord::MaxName, QLatin1Char('\\'));
+            entry.etag = QString(DownloadRecord::MaxEtag, QLatin1Char('\\'));
+            entry.primaryTag = QString(DownloadRecord::MaxTag, QLatin1Char('\\'));
+            return entry;
+        };
         int index = 4;
-        while (store.upsert(record(index), false))
+        while (store.upsert(heavy(record(index)), false))
             ++index;
         const int filled = store.records().size();
-        // A backslash doubles in JSON, so growing a short name overflows even the little room left
-        const QString longName(DownloadRecord::MaxName, QLatin1Char('\\'));
         QVERIFY(filled > 10);
         QVERIFY(filled < DownloadStore::MaxRecords);
 
         bool refused = false;
         for (const DownloadRecord &entry : std::as_const(shorts)) {
-            DownloadRecord grown = entry;
-            grown.name = longName;
+            DownloadRecord grown = heavy(entry);
             if (store.upsert(grown, false))
                 continue;
             refused = true;
@@ -260,6 +278,67 @@ class TestDownloadStore : public QObject {
         }
         QVERIFY(refused);
         QCOMPARE(store.records().size(), filled);
+    }
+
+    // Progress arrives faster than the debounce interval: the write must still happen while it keeps coming
+    void savesWhileUpdatesKeepArriving()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString path = dir.filePath(QStringLiteral("index.json"));
+        DownloadStore store;
+        store.setStoragePath(path);
+        int step = 0;
+        QTRY_VERIFY_WITH_TIMEOUT(([&] {
+                                     DownloadRecord entry = record(1, QStringLiteral("fetching"));
+                                     entry.bytesWritten = ++step;
+                                     if (!store.upsert(entry, false))
+                                         return false;
+                                     const QJsonValue records =
+                                         fileObject(path).value(QStringLiteral("records"));
+                                     const QJsonObject first = records.toArray().at(0).toObject();
+                                     return first.value(QStringLiteral("bytesWritten")).toInt() > 0;
+                                 })(),
+                                 5000);
+    }
+
+    void dropsARecordWithAnOutOfRangeNumber_data()
+    {
+        QTest::addColumn<QString>("field");
+        QTest::addColumn<double>("value");
+        QTest::newRow("position 1e300") << QStringLiteral("positionTicks") << 1e300;
+        QTest::newRow("position negative") << QStringLiteral("positionTicks") << -1.0;
+        QTest::newRow("size 1e300") << QStringLiteral("size") << 1e300;
+        QTest::newRow("bytes written 1e300") << QStringLiteral("bytesWritten") << 1e300;
+        QTest::newRow("added at 1e300") << QStringLiteral("addedAt") << 1e300;
+    }
+
+    void dropsARecordWithAnOutOfRangeNumber()
+    {
+        QFETCH(QString, field);
+        QFETCH(double, value);
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString path = dir.filePath(QStringLiteral("index.json"));
+        DownloadStore store;
+        store.setStoragePath(path);
+        QVERIFY(store.upsert(record(1)));
+        QVERIFY(store.upsert(record(2)));
+        store.flush();
+
+        QJsonObject root = fileObject(path);
+        QJsonArray records = root.value(QStringLiteral("records")).toArray();
+        QCOMPARE(records.size(), 2);
+        QJsonObject damaged = records.at(0).toObject();
+        damaged.insert(field, value);
+        records.replace(0, damaged);
+        root.insert(QStringLiteral("records"), records);
+        QVERIFY(writeObject(path, root));
+
+        DownloadStore reloaded;
+        reloaded.setStoragePath(path);
+        QCOMPARE(reloaded.records().size(), 1);
+        QCOMPARE(reloaded.records().constFirst().itemId, hex(2));
     }
 
     void removeAndFlush()

@@ -1276,7 +1276,7 @@ Kirigami.Page {
         }
         Controls.MenuSeparator { visible: page.player.externalSubtitles.length > 0 }
         Controls.MenuItem {
-            text: i18n("Download external subtitles")
+            text: i18n("Download External Subtitles")
             enabled: false
             visible: page.player.externalSubtitles.length > 0
         }

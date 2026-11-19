@@ -71,6 +71,8 @@ class ConnectionController : public QObject {
     Q_PROPERTY(bool offline READ offline NOTIFY stateChanged)
     // The saved user whose downloads are shown while offline
     Q_PROPERTY(QString offlineUserName READ offlineUserName NOTIFY stateChanged)
+    // Whether Work Offline can start: a user who is remembered and does not ask for the password has a completed download whose file is still there
+    Q_PROPERTY(bool offlineAvailable READ offlineAvailable NOTIFY offlineAvailableChanged)
     Q_PROPERTY(QVariantList libraries READ libraries NOTIFY librariesChanged)
     // True only after a successful /UserViews response in this session; an
     // empty list before that is loading or a failed request, not an empty library.
@@ -136,6 +138,8 @@ class ConnectionController : public QObject {
     QString currentUserId() const { return m_client.userId(); }
     bool currentUserIsAdministrator() const { return m_client.isAdministrator(); }
     bool offline() const { return m_state == Offline; }
+    // The value last announced: the records are looked at again at most once a second
+    bool offlineAvailable() const { return m_offlineAvailable; }
     QString offlineUserName() const { return m_offlineUserName; }
     bool hasSavedUsers() const { return !m_users.isEmpty(); }
     QVariantList libraries() const { return m_libraries; }
@@ -196,7 +200,7 @@ class ConnectionController : public QObject {
     Q_INVOKABLE void start();
     // Enters Offline on the saved user with the most recent completed download; false when there is none
     Q_INVOKABLE bool workOffline();
-    // Whether a saved user has a completed download to show offline
+    // Whether a saved user that needs no password has a completed download to show offline
     Q_INVOKABLE bool canWorkOffline() const;
     // `address` is what the user typed; without a scheme it is taken as https. Once the server answers: no saved user goes to the sign-in, a single saved user that is remembered and does not ask for the password is restored, a single other one goes to the sign-in with the name filled in, and two or more go to the picker (ChoosingUser)
     Q_INVOKABLE void connectTo(const QString &address);
@@ -270,6 +274,7 @@ class ConnectionController : public QObject {
     void serverUrlChanged();
     void quickConnectCodeChanged();
     void serversChanged();
+    void offlineAvailableChanged();
     void serverReachabilityChanged();
     void usersChanged();
     void publicUsersChanged();
@@ -295,8 +300,11 @@ class ConnectionController : public QObject {
     void askPasswordOf(const QString &userId);
     // The saved user of the active server with this id
     std::optional<ServerCredential> savedUser(const QString &userId) const;
-    // Removes a user's token, record and saved queue
+    // Removes a user's token, record and saved queue; the downloads stay on disk for that user
     void forgetUserData(const QString &userId);
+    // The saved user of the newest completed download whose file is there, remembered and not asked for the password
+    std::optional<ServerCredential> offlineUser() const;
+    void refreshOfflineAvailable();
     // The session is gone, the server stays probed: no libraries, nothing pending
     void leaveSession();
     void preparePlaybackDisconnect();
@@ -399,6 +407,9 @@ class ConnectionController : public QObject {
     QVariantList m_publicUsers;
     QString m_loginUserName;
     QString m_offlineUserName;
+    bool m_offlineAvailable = false; // the last value announced
+    // A record changes with every progress tick: the files are looked at once a second at most
+    QTimer m_offlineRefresh;
     QString m_currentUserId;                   // the last value announced
     bool m_currentUserIsAdministrator = false; // the last value announced
     QString m_restoringUserId;                 // the saved user a restore in flight is for

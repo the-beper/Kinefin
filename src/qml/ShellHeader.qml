@@ -34,6 +34,11 @@ Item {
     property bool updateChecksEnabled: shell.settings.value("main", "checkForUpdates")
     property bool manualUpdateCheck: false
 
+    function openReleasePage(url) {
+        if (!Qt.openUrlExternally(url))
+            shell.showPassiveNotification(i18n("Could not open the release page in the browser"));
+    }
+
     UpdateChecker {
         id: updateChecker
         objectName: "updateChecker"
@@ -44,12 +49,12 @@ Item {
             updateDialog.version = version;
             updateDialog.releaseUrl = releaseUrl;
             if (!root.manualUpdateCheck) {
-                updateNotificationTimer.restart();
+                // The automatic check never opens a dialog by itself
+                shell.showPassiveNotification(i18n("Kinefin %1 is available", version), "long", i18nc("@action:button", "Open Release Page"), () => root.openReleasePage(releaseUrl));
                 return;
             }
-            // The user asked for this check: the result shows where they are, with no timer that could open a dialog under the pointer
+            // The user asked for this check: the result shows where they are
             root.manualUpdateCheck = false;
-            updateNotificationTimer.stop();
             if (aboutDialog.opened) {
                 aboutDialog.updateVersion = version;
                 aboutDialog.updateStatus = "available";
@@ -85,20 +90,6 @@ Item {
         onTriggered: updateChecker.check()
     }
 
-    // The delay of an update found by the automatic check before its dialog opens
-    Timer {
-        id: updateNotificationTimer
-        interval: 3000
-        repeat: false
-        onTriggered: {
-            if (!root.updateChecksEnabled)
-                return;
-            // Never two dialogs at once
-            aboutDialog.close();
-            updateDialog.open();
-        }
-    }
-
     Connections {
         target: root.shell.settings
         function onValueChanged(section, key) {
@@ -109,7 +100,6 @@ Item {
                 root.manualUpdateCheck = false;
                 aboutDialog.updateStatus = "";
                 updateChecker.cancel();
-                updateNotificationTimer.stop();
                 updateDialog.close();
             }
         }
@@ -911,15 +901,14 @@ Item {
         property url releaseUrl: ""
 
         title: i18nc("@title:window", "Update Available")
-        standardButtons: Kirigami.Dialog.Cancel
+        standardButtons: Kirigami.Dialog.Close
         customFooterActions: [
             Kirigami.Action {
                 text: i18nc("@action:button", "Open Release Page")
                 icon.name: "internet-web-browser"
                 onTriggered: {
                     updateDialog.close();
-                    if (!Qt.openUrlExternally(updateDialog.releaseUrl))
-                        shell.showPassiveNotification(i18n("Could not open the release page in the browser"));
+                    root.openReleasePage(updateDialog.releaseUrl);
                 }
             }
         ]
@@ -1035,5 +1024,6 @@ Item {
     ShortcutsDialog {
         id: shortcutsDialog
         objectName: "shortcutsDialog"
+        tabActions: root.tabActions
     }
 }

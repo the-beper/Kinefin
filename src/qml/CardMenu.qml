@@ -136,7 +136,7 @@ Controls.Menu {
     }
     Controls.MenuItem {
         objectName: "cardMenuRemoveDownload"
-        text: i18n("Remove Download…")
+        text: i18n("Delete Download…")
         icon.name: "edit-delete"
         visible: menu.downloadRemovable
         height: visible ? implicitHeight : 0

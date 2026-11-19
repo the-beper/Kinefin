@@ -96,9 +96,9 @@ Kirigami.ScrollablePage {
         }
         Controls.Button {
             Layout.fillWidth: true
-            visible: page.connection.canWorkOffline()
+            visible: page.connection.offlineAvailable
             text: i18n("Work Offline")
-            icon.name: "folder-download"
+            icon.name: "network-disconnect"
             onClicked: page.connection.workOffline()
         }
         MessageBox {

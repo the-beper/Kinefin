@@ -6355,8 +6355,8 @@ class TestUiPages : public QObject {
                  QStringLiteral("Kinefin 9.9.9 is available"));
         QVERIFY(!ui.shellHeader()->property("manualUpdateCheck").toBool());
 
-        // Longer than the delay of the automatic check's dialog: nothing opens under the user's mouse
-        QTest::qWait(3500);
+        // Nothing opens under the user's mouse
+        QTest::qWait(500);
         QVERIFY(about->property("opened").toBool());
         QVERIFY(!update->property("opened").toBool());
 
@@ -6384,7 +6384,7 @@ class TestUiPages : public QObject {
         QVERIFY(!about->property("opened").toBool());
     }
 
-    void anAutomaticUpdateCheckClosesAboutBeforeItsDialogOpens()
+    void anAutomaticUpdateCheckNeverOpensADialog()
     {
         Ui ui(m_home->path());
         QVERIFY(
@@ -6398,10 +6398,11 @@ class TestUiPages : public QObject {
             QMetaObject::invokeMethod(ui.shellAction(QStringLiteral("aboutAction")), "trigger"));
         QTRY_VERIFY(about->property("opened").toBool());
         announceUpdate(checker);
-        QVERIFY(!update->property("opened").toBool());
         QVERIFY(!ui.item(QStringLiteral("aboutViewUpdateButton"))->isVisible());
-        QTRY_VERIFY_WITH_TIMEOUT(update->property("opened").toBool(), scaled(8000));
-        QTRY_VERIFY(!about->property("opened").toBool());
+        // The notice is passive: neither the update dialog opens nor About closes
+        QTest::qWait(500);
+        QVERIFY(!update->property("opened").toBool());
+        QVERIFY(about->property("opened").toBool());
     }
 
     void theResultOfAManualUpdateCheckIsInlineWhileAboutIsOpenAndANotificationOtherwise_data()
@@ -7804,9 +7805,6 @@ class TestUiPages : public QObject {
         QCOMPARE(at.x(), at.y());
 
         QVERIFY(ui.controller.downloads()->downloadItem(kMovieId));
-        QQuickItem *toast = ui.item(QStringLiteral("downloadToast"));
-        QTRY_VERIFY(toast && toast->isVisible());
-        QVERIFY(ui.showsText(QStringLiteral("Download queued")));
         QTRY_VERIFY_WITH_TIMEOUT(ui.showsText(QStringLiteral("Arcturus (2012)")), scaled(10000));
         QTRY_VERIFY_WITH_TIMEOUT(ui.showsText(QStringLiteral("Available on This Device")),
                                  scaled(10000));
@@ -7818,7 +7816,9 @@ class TestUiPages : public QObject {
         QVERIFY(poster);
         QVERIFY(poster->property("source").toUrl().isValid());
         // A local completion queues one watched-state event, which the sign-in reconciliation sends
-        ui.controller.downloads()->updateLocalProgress(kMovieId, 600000000, true);
+        ui.controller.downloads()->updateLocalProgress(ui.controller.playbackClient().serverId(),
+                                                       ui.controller.playbackClient().userId(),
+                                                       kMovieId, 600000000, true);
         QCOMPARE(ui.controller.downloads()->pendingSyncCount(), 1);
         QVERIFY(ui.showsText(QStringLiteral("1 item to sync")));
         ui.controller.downloads()->reconcileOutbox();
@@ -7838,12 +7838,15 @@ class TestUiPages : public QObject {
                                 .entryList(QDir::AllEntries | QDir::NoDotAndDotDot)
                                 .join(QLatin1Char(','))));
         QVERIFY(QFile::exists(host.path() + QStringLiteral("/Movies/Arcturus (2012) (2012).mkv")));
-        // The completed row has Play and one More menu; Remove Download asks first, then drops the row and the record
+        // The completed row has Play and one More menu; Delete Download asks first, then drops the row and the record
         QQuickItem *more = ui.item(QStringLiteral("downloadMore_") + kMovieId);
         QVERIFY(more && more->isVisible());
+        // At most two trailing controls: the primary action and the menu, each with a distinct name
+        QCOMPARE(ui.itemsStartingWith(QStringLiteral("downloadPlay_")).size(), 1);
+        QVERIFY(ui.itemsStartingWith(QStringLiteral("downloadRemove_")).isEmpty());
         ui.clickCenter(more);
         QQuickItem *remove = nullptr;
-        QTRY_VERIFY((remove = ui.item(QStringLiteral("downloadRemove_") + kMovieId)) != nullptr
+        QTRY_VERIFY((remove = ui.item(QStringLiteral("downloadDelete_") + kMovieId)) != nullptr
                     && remove->isVisible());
         QVERIFY(remove->isEnabled());
         QObject *dialog =
@@ -7894,6 +7897,33 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(ui.controller.downloads()->seriesRule(kSeriesId).isEmpty());
     }
 
+    void reopeningTheRuleDialogShowsTheStoredKind()
+    {
+        Ui ui(m_home->path());
+        ui.serveShow();
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        QVERIFY(ui.controller.downloads()->setSeriesRule(kSeriesId, QStringLiteral("Series"),
+                                                         QStringLiteral("newEpisodes")));
+        QQuickItem *series = openDetails(ui, kSeriesId);
+        QVERIFY(series);
+        QObject *action =
+            ui.currentDetails()->findChild<QObject *>(QStringLiteral("automaticDownloadsAction"));
+        QVERIFY(action);
+        QObject *dialog = ui.currentDetails()->findChild<QObject *>(QStringLiteral("ruleDialog"));
+        QVERIFY(dialog);
+        for (int round = 0; round < 2; ++round) {
+            QVERIFY(QMetaObject::invokeMethod(action, "trigger"));
+            QTRY_VERIFY(dialog->property("opened").toBool());
+            QCOMPARE(dialog->property("selectedKind").toString(), QStringLiteral("newEpisodes"));
+            QObject *radio = dialog->findChild<QObject *>(QStringLiteral("ruleKindNewEpisodes"));
+            QVERIFY(radio);
+            QVERIFY(radio->property("checked").toBool());
+            QVERIFY(QMetaObject::invokeMethod(dialog, "close"));
+            QTRY_VERIFY(!dialog->property("opened").toBool());
+        }
+    }
+
     void anItemThatCannotBeDownloadedHasNoAction()
     {
         Ui ui(m_home->path());
@@ -7919,6 +7949,7 @@ class TestUiPages : public QObject {
 
     void workOfflineShowsTheDownloadsWithoutASession()
     {
+        PlayerStub stub;
         Ui ui(m_home->path());
         QVERIFY(ui.load());
         QVERIFY(buildState(ui, QStringLiteral("library")));
@@ -7949,6 +7980,15 @@ class TestUiPages : public QObject {
         QVERIFY(ui.shellAction(QStringLiteral("leaveOfflineAction"))->property("visible").toBool());
         QVERIFY(
             !ui.shellAction(QStringLiteral("switchServerAction"))->property("visible").toBool());
+        // A downloaded item plays without a session: the player page opens in Offline and leaves with the playback
+        QObject *root = ui.engine.rootObjects().constFirst();
+        QVERIFY(root->setProperty("player", QVariant::fromValue<QObject *>(&stub)));
+        QVariant shown;
+        QVERIFY(QMetaObject::invokeMethod(root, "showPlayerPage", Q_RETURN_ARG(QVariant, shown)));
+        QVERIFY(shown.toBool());
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("playerPage"));
+        QVERIFY(QMetaObject::invokeMethod(root, "endPlayback"));
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("downloadsPage"));
         QVERIFY(QMetaObject::invokeMethod(ui.shellAction(QStringLiteral("leaveOfflineAction")),
                                           "trigger"));
         QTRY_COMPARE(ui.controller.state(), ConnectionController::Idle);
@@ -13295,8 +13335,9 @@ class TestUiPages : public QObject {
         QVERIFY(results);
         QTRY_COMPARE(results->property("count").toInt(), 1);
         QQuickItem *row = nullptr;
-        QVERIFY(QMetaObject::invokeMethod(results, "itemAt", Q_RETURN_ARG(QQuickItem *, row),
-                                          Q_ARG(int, 0)));
+        QTRY_VERIFY(QMetaObject::invokeMethod(results, "itemAtIndex",
+                                              Q_RETURN_ARG(QQuickItem *, row), Q_ARG(int, 0))
+                    && row);
         QQuickItem *download = nullptr;
         for (QQuickItem *candidate : allItems(row)) {
             if (candidate->objectName() == QLatin1String("subtitleResultDownloadButton"))

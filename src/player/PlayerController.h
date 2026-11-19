@@ -319,6 +319,12 @@ class PlayerController final : public QObject {
   private:
     // The listing channel of the series' episodes (see the channel table in the architecture doc)
     static constexpr int EpisodesChannel = 4096;
+    // A provider may answer with thousands of results; the dialog lists the first ones
+    static constexpr int MaxRemoteSubtitles = 100;
+    bool remoteSearchIsCurrent(const QString &itemId, const QString &language) const;
+    void resetRemoteSubtitles();
+    // Emits localPositionChanged for the local file playing, if it loaded; `ended` is a real end of file
+    void reportLocalPosition(bool ended);
 
     // `grouped` starts an item of a watching-together group (see openGroupItem)
     bool startItem(const QString &id, qint64 resumeTicks, bool grouped = false);
@@ -494,7 +500,13 @@ class PlayerController final : public QObject {
     bool m_localPlayback = false;
     QVariantList m_remoteSubtitles;
     bool m_remoteSubtitleSearching = false;
+    // "<itemId>/<language>" of the search in flight: a reply for another one is dropped
+    QString m_remoteSubtitleQuery;
+    // The item of the subtitle download in flight, empty when none runs
+    QString m_remoteSubtitleDownloadItem;
     QString m_remoteSubtitleError;
+    // The reopen after a subtitle download keeps a paused video paused
+    bool m_reopenPaused = false;
     struct PendingLocal {
         QString path;
         QString itemId;

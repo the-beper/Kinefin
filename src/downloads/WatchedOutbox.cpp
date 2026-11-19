@@ -31,7 +31,8 @@ QJsonObject eventObject(const WatchedEvent &event)
     return {
         {QStringLiteral("serverId"), event.serverId},   {QStringLiteral("userId"), event.userId},
         {QStringLiteral("itemId"), event.itemId},       {QStringLiteral("eventId"), event.eventId},
-        {QStringLiteral("createdAt"), event.createdAt}, {QStringLiteral("played"), event.played}};
+        {QStringLiteral("createdAt"), event.createdAt}, {QStringLiteral("played"), event.played},
+        {QStringLiteral("conflict"), event.conflict}};
 }
 
 std::optional<WatchedEvent> readEvent(const QJsonObject &object)
@@ -51,9 +52,11 @@ std::optional<WatchedEvent> readEvent(const QJsonObject &object)
         || !text(QLatin1String("itemId"), &event.itemId)
         || !text(QLatin1String("eventId"), &event.eventId) || !created.isDouble())
         return std::nullopt;
-    createdAt = qint64(created.toDouble());
-    if (createdAt < 0 || createdAt > MaxTimestamp)
+    // Range-checked as a double: a value such as 1e300 must not reach the integer cast
+    const double createdNumber = created.toDouble();
+    if (!(createdNumber >= 0 && createdNumber <= double(MaxTimestamp)))
         return std::nullopt;
+    createdAt = qint64(createdNumber);
     event.createdAt = createdAt;
     const QJsonValue played = object.value(QLatin1String("played"));
     event.played = played.isBool() ? played.toBool() : true;

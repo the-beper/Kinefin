@@ -50,6 +50,8 @@ class DownloadsModel final : public QAbstractListModel {
     QVariant data(const QModelIndex &index, int role) const override;
     QHash<int, QByteArray> roleNames() const override;
 
+    // Lists only the records of this owner: the other owners' stay in the engine, unlisted. An empty id matches nothing; without a call every record is listed
+    void setOwner(const QString &serverId, const QString &userId);
     // Rebuilds the rows from the engine; called by the engine's signals and by the tests
     void refresh();
 
@@ -59,9 +61,13 @@ class DownloadsModel final : public QAbstractListModel {
   private:
     static bool downloaded(const DownloadRecord &record);
     static bool active(const DownloadRecord &record);
+    bool owned(const DownloadRecord &record) const;
     void updateRecord(const DownloadRecord &record);
 
     DownloadManager *m_manager = nullptr;
     QList<DownloadRecord> m_rows;
+    QString m_ownerServerId;
+    QString m_ownerUserId;
+    bool m_filtered = false;
 };
 } // namespace Kinefin

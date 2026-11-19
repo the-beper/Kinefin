@@ -24,6 +24,22 @@ bool DownloadsModel::active(const DownloadRecord &record)
     return !downloaded(record);
 }
 
+bool DownloadsModel::owned(const DownloadRecord &record) const
+{
+    return !m_filtered
+           || (!m_ownerServerId.isEmpty() && !m_ownerUserId.isEmpty()
+               && record.serverId.compare(m_ownerServerId, Qt::CaseInsensitive) == 0
+               && record.userId.compare(m_ownerUserId, Qt::CaseInsensitive) == 0);
+}
+
+void DownloadsModel::setOwner(const QString &serverId, const QString &userId)
+{
+    m_filtered = true;
+    m_ownerServerId = serverId;
+    m_ownerUserId = userId;
+    refresh();
+}
+
 int DownloadsModel::activeCount() const
 {
     return int(std::count_if(m_rows.cbegin(), m_rows.cend(), active));
@@ -125,6 +141,8 @@ QHash<int, QByteArray> DownloadsModel::roleNames() const
 
 void DownloadsModel::updateRecord(const DownloadRecord &record)
 {
+    if (!owned(record))
+        return;
     const QString key = record.key();
     int row = -1;
     for (int candidate = 0; candidate < m_rows.size(); ++candidate) {
@@ -150,6 +168,7 @@ void DownloadsModel::updateRecord(const DownloadRecord &record)
 void DownloadsModel::refresh()
 {
     QList<DownloadRecord> rows = m_manager->store()->records();
+    rows.removeIf([this](const DownloadRecord &record) { return !owned(record); });
     std::sort(rows.begin(), rows.end(),
               [](const DownloadRecord &left, const DownloadRecord &right) {
                   const bool leftActive = active(left);

@@ -18,9 +18,7 @@ const QString kTagPrefix = QStringLiteral("/releases/tag/");
 
 std::optional<QList<int>> components(const QString &version)
 {
-    // GitHub's final tags use digits, dots and numeric revision separators.
-    // Reject labels (e.g. -rc1), leading v, empty components and excessive
-    // numbers instead of trusting QVersionNumber's partial parses.
+    // GitHub's final tags use digits, dots and numeric revision separators. Reject labels (e.g. -rc1), leading v, empty components and excessive numbers instead of trusting QVersionNumber's partial parses
     static const QRegularExpression pattern(QStringLiteral("^[0-9]+(?:[.-][0-9]+)*$"));
     if (version.size() > 48 || !pattern.match(version).hasMatch())
         return std::nullopt;
@@ -83,8 +81,7 @@ QUrl UpdateChecker::releaseFromRedirect(const QUrl &target) const
     if (!target.isValid() || target.isEmpty() || !m_latestUrl.isValid()
         || !m_latestUrl.path().endsWith(kLatestSuffix))
         return {};
-    // Do not accept dot-segment normalization hidden in the redirect target.
-    // A path that contains traversal is not a canonical release URL.
+    // Do not accept dot-segment normalization hidden in the redirect target. A path that contains traversal is not a canonical release URL
     const QString rawPath = target.path(QUrl::FullyEncoded);
     for (const QString &segment : rawPath.split(QLatin1Char('/'))) {
         const QString decoded = QUrl::fromPercentEncoding(segment.toLatin1());
@@ -102,11 +99,9 @@ QUrl UpdateChecker::releaseFromRedirect(const QUrl &target) const
     if (!path.startsWith(expected))
         return {};
     const QString tag = path.mid(expected.size());
-    // release.yml publishes v<version> tags. A bare numeric tag is also
-    // accepted for older releases; the version used for comparison has no v.
+    // release.yml publishes v<version> tags. A bare numeric tag is also accepted for older releases; the version used for comparison has no v
     const QString version = tag.startsWith(QLatin1Char('v')) ? tag.mid(1) : tag;
-    // A URL may have an encoded slash/dot. Require the original path to be
-    // canonical as well as its decoded value before allowing the browser link.
+    // A URL may have an encoded slash/dot. Require the original path to be canonical as well as its decoded value before allowing the browser link
     if (tag.isEmpty() || !components(version) || url.path(QUrl::FullyEncoded) != expected + tag)
         return {};
     return url;
@@ -141,8 +136,7 @@ bool UpdateChecker::check()
         m_reply = nullptr;
         Q_EMIT checkingChanged();
 
-        // Never follow a 30x to an arbitrary host or parse an HTTP 200 HTML
-        // page. Only the redirect path carries the version we trust.
+        // Never follow a 30x to an arbitrary host or parse an HTTP 200 HTML page. Only the redirect path carries the version we trust
         const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const QUrl target = reply->attribute(QNetworkRequest::RedirectionTargetAttribute).toUrl();
         const QUrl release = releaseFromRedirect(target);

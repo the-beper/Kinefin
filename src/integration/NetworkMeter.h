@@ -8,7 +8,7 @@
 #include <optional>
 
 namespace Kinefin {
-// The `Metered` property of org.freedesktop.NetworkManager on the system bus: automatic downloads start only on an unmetered network, and an unknown value (no daemon, no permission, no answer yet) counts as metered. Manual downloads do not consult it
+// The `Metered` property of org.freedesktop.NetworkManager on the system bus: automatic downloads start only on an unmetered network, and an unknown value (no daemon, no permission, no answer yet, the daemon gone) counts as metered. The daemon's bus name is watched: losing its owner makes the value unknown, a new owner is read again. Manual downloads do not consult it
 class NetworkMeter final : public QObject {
     Q_OBJECT
 
@@ -35,6 +35,8 @@ class NetworkMeter final : public QObject {
     void apply(const std::optional<bool> &metered);
 
     QDBusConnection m_bus;
+    // Bumped by every read and every pushed value, so a Get reply that a newer answer overtook is dropped
+    quint64 m_sequence = 0;
     bool m_metered = true;
     bool m_known = false;
 };

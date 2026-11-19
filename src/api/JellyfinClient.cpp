@@ -23,6 +23,8 @@ constexpr int MaxRecommendationCategories = 20;
 constexpr int MaxRecommendationItems = 100;
 constexpr int MaxSuggestions = 100;
 constexpr int MaxUpcomingEpisodes = 100;
+// The server asks the provider (OpenSubtitles) while the request waits and sends nothing meanwhile: the usual 15 s transfer timeout is too short for that round trip
+constexpr int RemoteSubtitleTimeoutMs = 60'000;
 const QString publicSuffix = QStringLiteral("/System/Info/Public");
 
 bool validServerUrl(const QUrl &url)
@@ -1182,7 +1184,7 @@ bool JellyfinClient::fetchSeasons(const QString &seriesId, int channel)
 }
 
 bool JellyfinClient::fetchEpisodes(const QString &seriesId, const QString &seasonId, int startIndex,
-                                   int limit, int channel)
+                                   int limit, int channel, bool forRuleScan)
 {
     if (m_state != State::Authenticated || !isValidJellyfinId(seriesId)
         || (!seasonId.isEmpty() && !isValidJellyfinId(seasonId)) || startIndex < -1 || limit < -1)
@@ -1198,7 +1200,8 @@ bool JellyfinClient::fetchEpisodes(const QString &seriesId, const QString &seaso
         wire.addQueryItem(QStringLiteral("startIndex"), QString::number(startIndex));
     if (limit >= 0)
         wire.addQueryItem(QStringLiteral("limit"), QString::number(limit));
-    wire.addQueryItem(QStringLiteral("fields"), QStringLiteral("Overview"));
+    wire.addQueryItem(QStringLiteral("fields"),
+                      forRuleScan ? QStringLiteral("DateCreated") : QStringLiteral("Overview"));
     addImageTypeParameters(wire);
     wire.addQueryItem(QStringLiteral("userId"), m_userId);
     url.setQuery(wire);
@@ -1899,23 +1902,25 @@ bool JellyfinClient::searchRemoteSubtitles(const QString &itemId, const QString 
         return false;
     const QUrl url = endpoint(QStringLiteral("/Items/") + itemId
                               + QStringLiteral("/RemoteSearch/Subtitles/") + language);
-    QNetworkReply *reply = m_network.get(requestFor(url, true));
-    attach(reply, m_generation, [this](QNetworkReply *finished) {
+    QNetworkRequest request = requestFor(url, true);
+    request.setTransferTimeout(RemoteSubtitleTimeoutMs);
+    QNetworkReply *reply = m_network.get(request);
+    attach(reply, m_generation, [this, itemId, language](QNetworkReply *finished) {
         const int status = finished->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         if (status == 401) {
             invalidateSession();
             return;
         }
         if (finished->error() != QNetworkReply::NoError || status != 200) {
-            Q_EMIT remoteSubtitlesFailed(status);
+            Q_EMIT remoteSubtitlesFailed(itemId, language, status);
             return;
         }
         QJsonArray subtitles;
         if (!parseArray(finished, &subtitles)) {
-            Q_EMIT remoteSubtitlesFailed(status);
+            Q_EMIT remoteSubtitlesFailed(itemId, language, status);
             return;
         }
-        Q_EMIT remoteSubtitlesReady(subtitles);
+        Q_EMIT remoteSubtitlesReady(itemId, language, subtitles);
     });
     return true;
 }
@@ -1923,7 +1928,9 @@ bool JellyfinClient::searchRemoteSubtitles(const QString &itemId, const QString 
 bool JellyfinClient::downloadRemoteSubtitle(const QString &itemId, const QString &subtitleId)
 {
     const auto safeId = [](const QString &id) {
-        if (id.isEmpty() || id.size() > 128)
+        // A path segment of dots alone would be a dot segment of the route
+        if (id.isEmpty() || id.size() > 128 || id == QLatin1String(".")
+            || id == QLatin1String(".."))
             return false;
         return std::all_of(id.cbegin(), id.cend(), [](QChar character) {
             const char16_t value = character.unicode();
@@ -1937,7 +1944,9 @@ bool JellyfinClient::downloadRemoteSubtitle(const QString &itemId, const QString
         return false;
     const QUrl url = endpoint(QStringLiteral("/Items/") + itemId
                               + QStringLiteral("/RemoteSearch/Subtitles/") + subtitleId);
-    QNetworkReply *reply = postEmpty(m_network, requestFor(url, true));
+    QNetworkRequest request = requestFor(url, true);
+    request.setTransferTimeout(RemoteSubtitleTimeoutMs);
+    QNetworkReply *reply = postEmpty(m_network, request);
     attach(reply, m_generation, [this, itemId, subtitleId](QNetworkReply *finished) {
         const int status = finished->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         if (status == 401) {

@@ -9,18 +9,17 @@ import org.kde.kirigami as Kirigami
 Kirigami.Dialog {
     id: dialog
 
+    // The tab actions of the shell: Ctrl+N is the position among the visible tabs, so the rows follow the same list
+    property var tabActions: []
+    readonly property var tabRows: tabActions.filter(action => action.visible).map((action, index) => ["Ctrl+" + (index + 1), action.text])
+
     readonly property var rows: [
         ["Ctrl+Q", i18nc("@item:intable shortcut action", "Quit Kinefin")],
         ["Escape", i18nc("@item:intable shortcut action", "Go Back")],
         ["Alt+Left", i18nc("@item:intable shortcut action", "Go Back")],
         ["Ctrl+F", i18nc("@item:intable shortcut action", "Search")],
         ["F5", i18nc("@item:intable shortcut action", "Refresh")],
-        ["Ctrl+1", i18nc("@item:intable shortcut action", "Home")],
-        ["Ctrl+2", i18nc("@item:intable shortcut action", "Movies")],
-        ["Ctrl+3", i18nc("@item:intable shortcut action", "Shows")],
-        ["Ctrl+4", i18nc("@item:intable shortcut action", "Downloads")],
-        ["Ctrl+5", i18nc("@item:intable shortcut action", "Favorites")],
-        ["Ctrl+6", i18nc("@item:intable shortcut action", "Playlists")],
+        ...dialog.tabRows,
         ["Ctrl+PgUp", i18nc("@item:intable shortcut action", "Previous Tab")],
         ["Ctrl+PgDown", i18nc("@item:intable shortcut action", "Next Tab")],
         ["Ctrl+[", i18nc("@item:intable shortcut action", "Previous Tab")],

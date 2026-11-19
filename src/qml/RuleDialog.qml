@@ -13,9 +13,17 @@ Kirigami.PromptDialog {
     required property var downloads
     property string seriesId
     property string seriesName
+    // The season of the page that opened the dialog, -1 on the series page
     property int seasonNumber: -1
+    // The season of the stored rule, kept when a season rule is edited from the series page
+    property int storedSeason: -1
     property string currentKind: "nextN"
     property int currentCount: 3
+
+    // The kind the radio buttons show; set from the stored rule each time the dialog opens, since the page's details may still have been loading at creation
+    property string selectedKind: "nextN"
+    readonly property int ruleSeason: seasonNumber > 0 ? seasonNumber : (currentKind === "season" ? storedSeason : -1)
+    readonly property bool seasonAvailable: ruleSeason > 0
 
     title: i18n("Automatic Downloads")
     preferredWidth: Kirigami.Units.gridUnit * 26
@@ -27,43 +35,67 @@ Kirigami.PromptDialog {
             icon.name: "document-save"
             onTriggered: {
                 dialog.downloads.setSeriesRule(dialog.seriesId, dialog.seriesName,
-                                               kindBox.currentValue, dialog.seasonNumber,
+                                               dialog.selectedKind,
+                                               dialog.selectedKind === "season" ? dialog.ruleSeason : -1,
                                                countBox.value);
                 dialog.close();
             }
         }
     ]
 
-    Controls.ComboBox {
-        id: kindBox
-        Layout.fillWidth: true
-        textRole: "text"
-        valueRole: "value"
-        model: dialog.seasonNumber > 0
-            ? [{ text: i18n("Next episodes"), value: "nextN" },
-               { text: i18n("Whole season"), value: "season" },
-               { text: i18n("New episodes"), value: "newEpisodes" }]
-            : [{ text: i18n("Next episodes"), value: "nextN" },
-               { text: i18n("New episodes"), value: "newEpisodes" }]
-        Component.onCompleted: {
-            const index = model.findIndex(entry => entry.value === dialog.currentKind);
-            currentIndex = index >= 0 ? index : 0;
-        }
+    onAboutToShow: {
+        selectedKind = currentKind === "season" && !seasonAvailable ? "nextN" : currentKind;
+        countBox.value = currentCount;
     }
-    Controls.SpinBox {
-        id: countBox
-        Layout.fillWidth: true
-        from: 1
-        to: 3
-        value: dialog.currentCount
-        visible: kindBox.currentValue === "nextN"
-        Accessible.name: i18n("Episodes")
-    }
+
     Controls.Label {
         Layout.fillWidth: true
         wrapMode: Text.Wrap
         textFormat: Text.PlainText
-        visible: kindBox.currentValue === "season"
-        text: dialog.seasonNumber > 0 ? i18n("Season %1", dialog.seasonNumber) : i18n("The whole season")
+        text: i18n("Matching episodes are downloaded automatically")
+    }
+    // A click breaks a radio button's own binding: the handler keeps them in step with the kind, also across reopenings
+    onSelectedKindChanged: {
+        ruleKindNextN.checked = selectedKind === "nextN";
+        ruleKindSeason.checked = selectedKind === "season";
+        ruleKindNewEpisodes.checked = selectedKind === "newEpisodes";
+    }
+
+    Kirigami.FormLayout {
+        Layout.fillWidth: true
+
+        Controls.RadioButton {
+            id: ruleKindNextN
+            objectName: "ruleKindNextN"
+            Kirigami.FormData.label: i18nc("@label:radiobuttons", "Download:")
+            text: i18n("Next episodes")
+            checked: dialog.selectedKind === "nextN"
+            onToggled: dialog.selectedKind = "nextN"
+        }
+        Controls.RadioButton {
+            id: ruleKindSeason
+            objectName: "ruleKindSeason"
+            visible: dialog.seasonAvailable
+            text: i18n("Whole season")
+            checked: dialog.selectedKind === "season"
+            onToggled: dialog.selectedKind = "season"
+        }
+        Controls.RadioButton {
+            id: ruleKindNewEpisodes
+            objectName: "ruleKindNewEpisodes"
+            text: i18n("New episodes")
+            checked: dialog.selectedKind === "newEpisodes"
+            onToggled: dialog.selectedKind = "newEpisodes"
+        }
+        Controls.SpinBox {
+            id: countBox
+            objectName: "ruleCount"
+            Kirigami.FormData.label: i18nc("@label:spinbox", "Episodes:")
+            from: 1
+            to: 3
+            value: dialog.currentCount
+            visible: dialog.selectedKind === "nextN"
+            Accessible.name: i18n("Episodes")
+        }
     }
 }

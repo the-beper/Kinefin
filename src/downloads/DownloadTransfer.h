@@ -17,6 +17,9 @@ class DownloadTransfer final : public QObject {
     Q_OBJECT
 
   public:
+    // Kept free on the volume: with four transfers each checking every SpaceCheckBytes, the disk never runs out before one of them stops
+    static constexpr qint64 DefaultReserveBytes = qint64(64) * 1024 * 1024;
+
     enum class Failure { Network, Http, Protocol, SizeMismatch, Changed, Io, NoSpace, Cancelled };
     Q_ENUM(Failure)
 
@@ -30,7 +33,10 @@ class DownloadTransfer final : public QObject {
         QString resumeKey;
         // -1 when unknown, learned from Content-Length or Content-Range
         qint64 expectedSize = -1;
+        // The item's own ETag (MediaSources[].ETag): it only ties a sidecar to its record and is never sent to the server; the HTTP validator sent as If-Range is the one the sidecar saw in an earlier response
         QString etag;
+        // The free space that must stay on the volume; the transfer fails with NoSpace below it
+        qint64 reserveBytes = DefaultReserveBytes;
         bool ignoreCertificateErrors = false;
     };
 

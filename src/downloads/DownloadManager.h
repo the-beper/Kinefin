@@ -62,12 +62,14 @@ class DownloadManager final : public QObject {
     bool retry(const QString &serverId, const QString &userId, const QString &itemId);
     // Runs the queue now: for a gate that opened without setOnline or setMetered changing (the download policy became known)
     void wake();
+    // Stores the fields a caller owns (local position, played, exported state, info fields) of an existing record and emits recordChanged; false for an unknown key. While a transfer runs, its state, size, byte count, container and ETag are kept as they are
+    bool updateRecord(const DownloadRecord &record);
     // Sets a record's state (export) and tells the model; false for an unknown record
     bool setState(const QString &serverId, const QString &userId, const QString &itemId,
                   const QString &state);
     // Stops the transfer and keeps the partial file for a later resume; wanted is cleared
     bool pause(const QString &serverId, const QString &userId, const QString &itemId);
-    // Drops the item: the partial, the sidecar and the media file go, then the record
+    // Drops the item: its whole folder (media, partial, sidecar, poster, info, subtitles) goes, then the record
     bool remove(const QString &serverId, const QString &userId, const QString &itemId);
 
     // The validated path of a completed file; empty for anything else

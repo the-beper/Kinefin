@@ -836,7 +836,7 @@ QList<SettingDefinition> buildDefinitions()
          0,
          false,
          false,
-         kli18n("Write Kodi Sidecars"),
+         kli18n("Write Kodi Metadata Files"),
          KLazyLocalizedString()},
         {QStringLiteral("downloads"),
          QStringLiteral("exportOnCompletion"),
@@ -847,7 +847,7 @@ QList<SettingDefinition> buildDefinitions()
          0,
          false,
          false,
-         kli18n("Export on Completion"),
+         kli18n("Export When Download Completes"),
          KLazyLocalizedString(),
          true},
     };

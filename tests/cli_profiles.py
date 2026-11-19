@@ -74,6 +74,32 @@ class ProfileFlags(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("parent", result.stderr)
 
+    def test_config_dir_refuses_a_folder_of_other_files(self) -> None:
+        root = f"{self.home.name}/documents"
+        os.mkdir(root, 0o755)
+        with open(f"{root}/notes.txt", "w", encoding="utf-8") as notes:
+            notes.write("x")
+        result = self.run_kinefin("--config-dir", root, "--list-profiles")
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(os.stat(root).st_mode & 0o777, 0o755)
+        self.assertFalse(os.path.exists(f"{root}/profiles.json"))
+
+    def test_config_dir_refuses_a_file(self) -> None:
+        root = f"{self.home.name}/file"
+        with open(root, "w", encoding="utf-8") as file:
+            file.write("x")
+        self.assertEqual(self.run_kinefin("--config-dir", root, "--list-profiles").returncode, 1)
+
+    def test_config_dir_accepts_an_empty_folder_and_a_relative_path(self) -> None:
+        os.mkdir(f"{self.home.name}/empty")
+        result = subprocess.run([BINARY, "--config-dir", "empty", "--list-profiles"], env=self.env,
+                                capture_output=True, text=True, timeout=30, cwd=self.home.name)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(os.path.exists(f"{self.home.name}/empty/profiles.json"))
+
+    def test_config_dir_needs_a_value(self) -> None:
+        self.assertEqual(self.run_kinefin("--config-dir=", "--list-profiles").returncode, 2)
+
     def test_licenses_prints_the_gpl(self) -> None:
         result = self.run_kinefin("--licenses")
         self.assertEqual(result.returncode, 0, result.stderr)

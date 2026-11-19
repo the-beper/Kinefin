@@ -258,7 +258,15 @@ ConnectionController::ConnectionController(const QString &profileId, const QStri
     // A library scan only wakes the rule scanner: LibraryChanged is a hint, never an item list
     connect(&m_socket, &JellyfinSocketClient::libraryChanged, this,
             [this] { m_downloads.scheduleRuleScan(); });
+    m_offlineRefresh.setSingleShot(true);
+    m_offlineRefresh.setInterval(1000);
+    connect(&m_offlineRefresh, &QTimer::timeout, this, [this] { refreshOfflineAvailable(); });
+    connect(&m_downloads, &DownloadsController::revisionChanged, this, [this] {
+        if (!m_offlineRefresh.isActive())
+            m_offlineRefresh.start();
+    });
     connect(this, &ConnectionController::stateChanged, this, [this] {
+        refreshOfflineAvailable();
         const bool online = state() == Authenticated;
         m_downloads.setOnline(online);
         if (online) {
@@ -592,28 +600,8 @@ void ConnectionController::tryNextConnection()
     Q_EMIT serverUrlChanged();
 }
 
-bool ConnectionController::canWorkOffline() const
+std::optional<ServerCredential> ConnectionController::offlineUser() const
 {
-    const QList<ServerCredential> saved = m_sync.credentials();
-    const QList<DownloadRecord> records = m_downloads.store()->records();
-    for (const DownloadRecord &record : records) {
-        if (record.state != QLatin1String("completed") && record.state != QLatin1String("exported"))
-            continue;
-        for (const ServerCredential &entry : saved) {
-            if (entry.serverId.compare(record.serverId, Qt::CaseInsensitive) == 0
-                && entry.userId.compare(record.userId, Qt::CaseInsensitive) == 0)
-                return true;
-        }
-    }
-    return false;
-}
-
-bool ConnectionController::workOffline()
-{
-    if (m_state == Offline)
-        return true;
-    if (m_state == Authenticated)
-        return false;
     QList<DownloadRecord> records = m_downloads.store()->records();
     std::sort(records.begin(), records.end(),
               [](const DownloadRecord &left, const DownloadRecord &right) {
@@ -624,23 +612,56 @@ bool ConnectionController::workOffline()
         if (record.state != QLatin1String("completed") && record.state != QLatin1String("exported"))
             continue;
         for (const ServerCredential &entry : saved) {
+            // A user who has to type the password cannot be that user without a server
             if (entry.serverId.compare(record.serverId, Qt::CaseInsensitive) != 0
-                || entry.userId.compare(record.userId, Qt::CaseInsensitive) != 0)
+                || entry.userId.compare(record.userId, Qt::CaseInsensitive) != 0
+                || !entry.remembered || entry.askPassword)
                 continue;
-            m_sync.cancelRestore();
-            m_client.disconnectFromServer();
-            if (!m_libraries.isEmpty()) {
-                m_libraries.clear();
-                Q_EMIT librariesChanged();
-            }
-            setError({});
-            m_serverUrl = entry.url;
-            m_offlineUserName = entry.username;
-            setState(Offline);
-            return true;
+            if (m_downloads.hasLocalFile(record))
+                return entry;
         }
     }
-    return false;
+    return std::nullopt;
+}
+
+bool ConnectionController::canWorkOffline() const
+{
+    return offlineUser().has_value();
+}
+
+void ConnectionController::refreshOfflineAvailable()
+{
+    const bool available = canWorkOffline();
+    if (available == m_offlineAvailable)
+        return;
+    m_offlineAvailable = available;
+    Q_EMIT offlineAvailableChanged();
+}
+
+bool ConnectionController::workOffline()
+{
+    if (m_state == Offline)
+        return true;
+    if (m_state == Authenticated)
+        return false;
+    const std::optional<ServerCredential> entry = offlineUser();
+    if (!entry)
+        return false;
+    m_sync.cancelRestore();
+    m_client.disconnectFromServer();
+    m_connectionFallback.clear();
+    clearQuickConnect();
+    if (!m_libraries.isEmpty()) {
+        m_libraries.clear();
+        Q_EMIT librariesChanged();
+    }
+    setError({});
+    m_serverUrl = entry->url;
+    Q_EMIT serverUrlChanged();
+    m_offlineUserName = entry->username;
+    m_downloads.setOfflineOwner(entry->serverId, entry->userId);
+    setState(Offline);
+    return true;
 }
 
 void ConnectionController::connectTo(const QString &address)
@@ -838,6 +859,7 @@ void ConnectionController::forgetUserData(const QString &userId)
 {
     const QString serverId = m_client.serverId();
     m_queue.forgetStoredUser(serverId, userId);
+    // Downloads are not removed with the user: they stay on disk, hidden by the owner filter, and come back when that user signs in to the server again
     m_sync.forgetUser(serverId, userId);
 }
 
@@ -1503,8 +1525,10 @@ void ConnectionController::setState(State state)
     if (m_state == state)
         return;
     m_state = state;
-    if (state != Offline)
+    if (state != Offline) {
         m_offlineUserName.clear();
+        m_downloads.setOfflineOwner({}, {});
+    }
     if (state == Idle || state == Connecting)
         m_publicSource.clear();
     if (state == Idle || state == Authenticated)
@@ -1520,6 +1544,7 @@ void ConnectionController::setImageOrigin(std::shared_ptr<ImageOrigin> origin)
     m_imageOrigin = std::move(origin);
     if (m_imageOrigin)
         m_imageOrigin->setIgnoreCertificateErrors(m_ignoreCertificateErrors);
+    m_downloads.setImageOrigin(m_imageOrigin);
     updateImageOrigin();
 }
 
@@ -1591,6 +1616,7 @@ void ConnectionController::refreshServers()
     for (auto it = newestFirst.crbegin(); it != newestFirst.crend(); ++it)
         m_servers.append(*it);
     Q_EMIT serversChanged();
+    refreshOfflineAvailable();
 }
 
 void ConnectionController::refreshUsers()

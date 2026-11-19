@@ -244,7 +244,17 @@ class FakeJellyfin {
     bool holdDownload = false;
     bool downloadIgnoreRange = false;
     QByteArray downloadBody;
+    // The HTTP ETag header, independent of the item's own MediaSources ETag; empty sends none, and Last-Modified then serves as the validator
     QByteArray downloadEtag = QByteArrayLiteral("\"etag-1\"");
+    QByteArray downloadLastModified;
+    // Answers 206 even without a Range header (from byte 0)
+    bool downloadForce206 = false;
+    // Shifts the start of every 206 by this many bytes and says so in Content-Range
+    qint64 downloadStartShift = 0;
+    // The totals of the next 206 Content-Range headers, one per request, instead of the real size
+    QList<qint64> downloadClaimedTotals;
+    // Sends no Content-Length, so the body ends with the connection
+    bool downloadOmitLength = false;
     // Remote subtitle search/download through the server plugin
     QByteArray remoteSubtitleSearchBody = "[]";
     int remoteSubtitleSearchStatus = 0;
@@ -792,23 +802,29 @@ class FakeJellyfin {
         QByteArray extra;
         if (!downloadEtag.isEmpty())
             extra += "ETag: " + downloadEtag + "\r\n";
+        if (!downloadLastModified.isEmpty())
+            extra += "Last-Modified: " + downloadLastModified + "\r\n";
         extra += "Accept-Ranges: bytes\r\n";
-        const bool ifRangeMismatch = !range.isEmpty() && !ifRange.isEmpty()
-                                     && !downloadEtag.isEmpty() && ifRange != downloadEtag;
-        if (range.isEmpty() || downloadIgnoreRange || ifRangeMismatch) {
+        const QByteArray validator = downloadEtag.isEmpty() ? downloadLastModified : downloadEtag;
+        const bool ifRangeMismatch =
+            !range.isEmpty() && !ifRange.isEmpty() && !validator.isEmpty() && ifRange != validator;
+        if (!downloadForce206 && (range.isEmpty() || downloadIgnoreRange || ifRangeMismatch)) {
             answerDownload(socket, 200, body, extra);
             return true;
         }
-        const QByteArray spec = range.mid(range.indexOf("bytes=") + 6);
-        if (!range.startsWith("bytes=") || !spec.endsWith('-')) {
-            answerDownload(socket, 416, {}, extra);
-            return true;
-        }
-        bool ok = false;
-        const qint64 start = spec.chopped(1).toLongLong(&ok);
-        if (!ok || start < 0) {
-            answerDownload(socket, 416, {}, extra);
-            return true;
+        qint64 start = 0;
+        if (!range.isEmpty()) {
+            const QByteArray spec = range.mid(range.indexOf("bytes=") + 6);
+            if (!range.startsWith("bytes=") || !spec.endsWith('-')) {
+                answerDownload(socket, 416, {}, extra);
+                return true;
+            }
+            bool ok = false;
+            start = spec.chopped(1).toLongLong(&ok);
+            if (!ok || start < 0) {
+                answerDownload(socket, 416, {}, extra);
+                return true;
+            }
         }
         const qint64 total = body.size();
         if (start >= total) {
@@ -816,8 +832,11 @@ class FakeJellyfin {
             answerDownload(socket, 416, {}, extra);
             return true;
         }
+        start = qBound<qint64>(0, start + downloadStartShift, total - 1);
+        const qint64 claimed =
+            downloadClaimedTotals.isEmpty() ? total : downloadClaimedTotals.takeFirst();
         extra += "Content-Range: bytes " + QByteArray::number(start) + "-"
-                 + QByteArray::number(total - 1) + "/" + QByteArray::number(total) + "\r\n";
+                 + QByteArray::number(total - 1) + "/" + QByteArray::number(claimed) + "\r\n";
         answerDownload(socket, 206, body.mid(start), extra);
         return true;
     }
@@ -827,6 +846,13 @@ class FakeJellyfin {
     {
         if (holdDownload) {
             heldDownloads.append({socket, status, body, extra});
+            return;
+        }
+        if (downloadOmitLength) {
+            socket->write("HTTP/1.1 " + QByteArray::number(status) + " Response\r\n"
+                          + "Content-Type: application/octet-stream\r\n" + extra
+                          + "Connection: close\r\n\r\n" + body);
+            socket->disconnectFromHost();
             return;
         }
         respondBytes(socket, status, body, extra);

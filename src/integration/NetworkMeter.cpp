@@ -4,6 +4,7 @@
 
 #include <QDBusMessage>
 #include <QDBusPendingCallWatcher>
+#include <QDBusServiceWatcher>
 #include <QDBusVariant>
 
 namespace Kinefin {
@@ -24,6 +25,17 @@ NetworkMeter::NetworkMeter(const QDBusConnection &bus, QObject *parent)
         return;
     m_bus.connect(kService, kPath, kProperties, QStringLiteral("PropertiesChanged"), this,
                   SLOT(onPropertiesChanged(QString, QVariantMap, QStringList)));
+    auto *serviceWatcher =
+        new QDBusServiceWatcher(kService, m_bus, QDBusServiceWatcher::WatchForOwnerChange, this);
+    connect(serviceWatcher, &QDBusServiceWatcher::serviceOwnerChanged, this,
+            [this](const QString &, const QString &, const QString &newOwner) {
+                if (newOwner.isEmpty()) {
+                    ++m_sequence;
+                    apply(std::nullopt);
+                    return;
+                }
+                read();
+            });
     read();
 }
 
@@ -45,10 +57,13 @@ void NetworkMeter::read()
     QDBusMessage call =
         QDBusMessage::createMethodCall(kService, kPath, kProperties, QStringLiteral("Get"));
     call << kInterface << kMetered;
+    const quint64 ticket = ++m_sequence;
     auto *watcher = new QDBusPendingCallWatcher(m_bus.asyncCall(call), this);
     connect(watcher, &QDBusPendingCallWatcher::finished, this,
-            [this](QDBusPendingCallWatcher *watcher) {
+            [this, ticket](QDBusPendingCallWatcher *watcher) {
                 watcher->deleteLater();
+                if (ticket != m_sequence)
+                    return;
                 const QDBusMessage reply = watcher->reply();
                 if (reply.type() != QDBusMessage::ReplyMessage || reply.arguments().isEmpty()) {
                     apply(std::nullopt);
@@ -82,7 +97,9 @@ void NetworkMeter::onPropertiesChanged(const QString &interface, const QVariantM
         return;
     }
     const auto value = changed.constFind(kMetered);
-    if (value != changed.constEnd())
+    if (value != changed.constEnd()) {
+        ++m_sequence;
         apply(meteredFor(value.value().toInt()));
+    }
 }
 } // namespace Kinefin

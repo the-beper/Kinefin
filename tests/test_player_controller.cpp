@@ -276,6 +276,44 @@ class TestPlayerController : public QObject {
         QVERIFY(chain.controller.hasNext());
     }
 
+    void aSubtitleSearchReplyForAnotherQueryIsDropped()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        QVERIFY(chain.controller.playItem(kMovie, 0));
+        const QJsonArray result{QJsonObject{{QStringLiteral("Id"), QStringLiteral("abc123")},
+                                            {QStringLiteral("Name"), QStringLiteral("Stale")}}};
+        QVERIFY(chain.controller.searchRemoteSubtitles(QStringLiteral("eng")));
+        // Another item's or another language's answer leaves the search running
+        Q_EMIT chain.client.remoteSubtitlesReady(kOtherMovie, QStringLiteral("eng"), result);
+        Q_EMIT chain.client.remoteSubtitlesReady(kMovie, QStringLiteral("ita"), result);
+        Q_EMIT chain.client.remoteSubtitlesFailed(kMovie, QStringLiteral("ita"), 500);
+        QVERIFY(chain.controller.remoteSubtitleSearching());
+        QVERIFY(chain.controller.remoteSubtitleError().isEmpty());
+        QTRY_VERIFY(!chain.controller.remoteSubtitleSearching());
+        QVERIFY(chain.controller.remoteSubtitles().isEmpty());
+        // A search still in flight when another item starts never fills the new item's list
+        QVERIFY(chain.controller.searchRemoteSubtitles(QStringLiteral("eng")));
+        QVERIFY(chain.controller.playItem(kOtherMovie, 0));
+        Q_EMIT chain.client.remoteSubtitlesReady(kMovie, QStringLiteral("eng"), result);
+        QVERIFY(chain.controller.remoteSubtitles().isEmpty());
+        QVERIFY(!chain.controller.remoteSubtitleSearching());
+    }
+
+    void oneSubtitleDownloadRunsAtATime()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        QVERIFY(chain.controller.playItem(kMovie, 0));
+        QSignalSpy downloaded(&chain.controller, &PlayerController::remoteSubtitleDownloaded);
+        QVERIFY(chain.controller.downloadRemoteSubtitle(QStringLiteral("abc123")));
+        QVERIFY(!chain.controller.downloadRemoteSubtitle(QStringLiteral("def456")));
+        QTRY_COMPARE(downloaded.size(), 1);
+        QCOMPARE(chain.server.remoteSubtitleDownloads.size(), 1);
+        QVERIFY(chain.controller.downloadRemoteSubtitle(QStringLiteral("def456")));
+        QTRY_COMPARE(downloaded.size(), 2);
+    }
+
     void aMovieKeepsNoSeriesChoice()
     {
         Chain chain;
@@ -1301,6 +1339,61 @@ class TestPlayerController : public QObject {
         chain.controller.stop();
         QTRY_VERIFY(!chain.controller.localPlayback());
         QVERIFY(chain.server.reportLog.isEmpty());
+    }
+
+    void aLocalFileStoppedPastNinetyPercentIsWatched()
+    {
+        QFETCH(qint64, positionTicks);
+        QFETCH(bool, played);
+        Chain chain;
+        QVERIFY(chain.ok);
+        const QString clip = QUrl(TestWav::writeWavClip(chain.dir, 30)).toLocalFile();
+        QVERIFY(!clip.isEmpty());
+        QVERIFY(chain.engine()->init({QStringLiteral("vo=null"), QStringLiteral("ao=null")}));
+        QSignalSpy positions(&chain.controller, &PlayerController::localPositionChanged);
+        QVERIFY(chain.controller.playLocalFile(clip, kMovie, QStringLiteral("Local Movie"), {}));
+        QTRY_VERIFY(chain.controller.canSeek());
+        // Paused, the real clip stays where the seek put it
+        chain.controller.pause();
+        QTRY_VERIFY(chain.controller.paused());
+        constexpr qint64 halfSecond = 5'000'000;
+        chain.controller.seek(positionTicks);
+        QTRY_VERIFY(qAbs(chain.controller.positionTicks() - positionTicks) < halfSecond);
+        positions.clear();
+        chain.controller.stop();
+        QTRY_VERIFY(!chain.controller.localPlayback());
+        QCOMPARE(positions.size(), 1);
+        QCOMPARE(positions.first().at(0).toString(), kMovie);
+        QCOMPARE(positions.first().at(2).toBool(), played);
+        // A watched item starts again from the beginning
+        if (played)
+            QCOMPARE(positions.first().at(1).toLongLong(), qint64(0));
+        else
+            QVERIFY(qAbs(positions.first().at(1).toLongLong() - positionTicks) < halfSecond);
+    }
+    void aLocalFileStoppedPastNinetyPercentIsWatched_data()
+    {
+        QTest::addColumn<qint64>("positionTicks");
+        QTest::addColumn<bool>("played");
+        // Of the 30 s clip
+        QTest::newRow("midway") << qint64(100'000'000) << false;
+        QTest::newRow("past 90 %") << qint64(280'000'000) << true;
+    }
+
+    void aLocalFileThatNeverLoadedKeepsItsResumePoint()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        const QString clip = QUrl(TestWav::writeWavClip(chain.dir, 30)).toLocalFile();
+        QVERIFY(!clip.isEmpty());
+        QVERIFY(chain.engine()->init({QStringLiteral("vo=null"), QStringLiteral("ao=null")}));
+        QSignalSpy positions(&chain.controller, &PlayerController::localPositionChanged);
+        QVERIFY(chain.controller.playLocalFile(clip, kMovie, QStringLiteral("Local Movie"), {},
+                                               qint64(50'000'000)));
+        // mpv gives up before the file loaded: nothing overwrites the stored point
+        Q_EMIT chain.engine()->streamEnded(QStringLiteral("error"));
+        QVERIFY(!chain.controller.localPlayback());
+        QCOMPARE(positions.size(), 0);
     }
 
   private:

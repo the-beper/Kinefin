@@ -61,8 +61,7 @@ void applyPlatformOption(int argc, char **argv)
 
 int main(int argc, char *argv[])
 {
-    // mpvqt uses QQuickFramebufferObject, which requires Qt Quick's OpenGL
-    // graphics API. Select it before any QQuickWindow is constructed.
+    // mpvqt uses QQuickFramebufferObject, which requires Qt Quick's OpenGL graphics API. Select it before any QQuickWindow is constructed
     QQuickWindow::setGraphicsApi(QSGRendererInterface::OpenGL);
     applyPlatformOption(argc, argv);
     QApplication app(argc, argv);
@@ -142,6 +141,19 @@ int main(int argc, char *argv[])
                                 << Qt::endl;
             return 1;
         }
+        // The root is made owner-only: a folder that already holds other files (a home, ~/Documents) must not have its permissions changed
+        const QDir rootDir(root);
+        if (QFileInfo(root).exists()
+            && (!QFileInfo(root).isDir()
+                || (!rootDir.isEmpty(QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden
+                                     | QDir::System)
+                    && !rootDir.exists(QStringLiteral("profiles.json"))))) {
+            QTextStream(stderr)
+                << "kinefin: the config directory must be new, empty or an existing "
+                   "Kinefin config directory"
+                << Qt::endl;
+            return 1;
+        }
         Kinefin::setProfileRoot(root);
     }
     if (parser.isSet(QStringLiteral("tv"))) {
@@ -189,9 +201,7 @@ int main(int argc, char *argv[])
         return 2;
     }
 
-    // Register the activation handler before creating the shell. A second launch
-    // may arrive while the first is still restoring its profile or loading QML.
-    // Keep only the latest item request, without ever logging its URI.
+    // Register the activation handler before creating the shell. A second launch may arrive while the first is still restoring its profile or loading QML. Keep only the latest item request, without ever logging its URI
     QPointer<QQuickWindow> window;
     std::optional<QString> pendingItemId;
     if (!parser.positionalArguments().isEmpty())
@@ -200,6 +210,9 @@ int main(int argc, char *argv[])
     auto raiseWindow = [&window] {
         if (!window)
             return;
+        // show() keeps a minimized state; clearing only that flag keeps fullscreen and maximized
+        if (window->windowStates() & Qt::WindowMinimized)
+            window->setWindowStates(window->windowStates() & ~Qt::WindowMinimized);
         window->show();
         window->raise();
         window->requestActivate();
@@ -218,7 +231,7 @@ int main(int argc, char *argv[])
                          if (const auto item = Kinefin::itemFromActivationArguments(args))
                              showItem(*item);
                          else
-                             // Plain second launch: raise without changing pages.
+                             // Plain second launch: raise without changing pages
                              raiseWindow();
                      });
 

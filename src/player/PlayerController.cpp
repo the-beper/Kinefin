@@ -295,7 +295,7 @@ PlayerController::PlayerController(JellyfinClient &client, PlayQueue &queue,
     connect(&m_queue, &PlayQueue::edited, this, &PlayerController::updatePlaylist);
     connect(&client, &JellyfinClient::mediaSegmentsReady, this,
             [this](const QString &itemId, const QJsonArray &segments) {
-                if (itemId != m_itemId || !active())
+                if (itemId != m_itemId || !active() || m_localPlayback)
                     return;
                 m_segments.clear();
                 for (const QJsonValue &segment : segments)
@@ -352,8 +352,8 @@ PlayerController::PlayerController(JellyfinClient &client, PlayQueue &queue,
         m_trackChosen = false;
         applySeriesPlayback();
         refreshTracks();
-        // Opened paused, the Start went out as playing: a paused Progress follows once the position is known
-        if (m_groupItem)
+        // Opened paused (a group's item, or a reopen after a subtitle download), the Start went out as playing: a paused Progress follows once the position is known
+        if (m_groupItem || m_session.state() == PlaybackSession::State::Paused)
             m_seekReport.start();
         // A paused file may have told its only position before this: a group's Ready must not wait for another
         Q_EMIT changed();
@@ -362,9 +362,13 @@ PlayerController::PlayerController(JellyfinClient &client, PlayQueue &queue,
             &PlayerSettings::applyLoadedAspect);
     connect(&m_engine, &PlaybackEngine::streamEnded, this, &PlayerController::onEnd);
     connect(&m_client, &JellyfinClient::remoteSubtitlesReady, this,
-            [this](const QJsonArray &subtitles) {
+            [this](const QString &itemId, const QString &language, const QJsonArray &subtitles) {
+                if (!remoteSearchIsCurrent(itemId, language))
+                    return;
                 m_remoteSubtitles.clear();
                 for (const QJsonValue &value : subtitles) {
+                    if (m_remoteSubtitles.size() >= MaxRemoteSubtitles)
+                        break;
                     if (!value.isObject())
                         continue;
                     const QJsonObject object = value.toObject();
@@ -387,29 +391,41 @@ PlayerController::PlayerController(JellyfinClient &client, PlayQueue &queue,
                          object.value(QStringLiteral("HearingImpaired")).toBool()}});
                 }
                 m_remoteSubtitleSearching = false;
+                m_remoteSubtitleQuery.clear();
                 m_remoteSubtitleError.clear();
                 Q_EMIT remoteSubtitlesChanged();
             });
-    connect(&m_client, &JellyfinClient::remoteSubtitlesFailed, this, [this](int httpStatus) {
-        m_remoteSubtitleSearching = false;
-        m_remoteSubtitleError = httpStatus == 0     ? QStringLiteral("network")
-                                : httpStatus == 404 ? QStringLiteral("noprovider")
-                                                    : QStringLiteral("failed");
-        m_remoteSubtitles.clear();
-        Q_EMIT remoteSubtitlesChanged();
-    });
+    connect(&m_client, &JellyfinClient::remoteSubtitlesFailed, this,
+            [this](const QString &itemId, const QString &language, int httpStatus) {
+                if (!remoteSearchIsCurrent(itemId, language))
+                    return;
+                m_remoteSubtitleSearching = false;
+                m_remoteSubtitleQuery.clear();
+                m_remoteSubtitleError = httpStatus == 0     ? QStringLiteral("network")
+                                        : httpStatus == 404 ? QStringLiteral("noprovider")
+                                                            : QStringLiteral("failed");
+                m_remoteSubtitles.clear();
+                Q_EMIT remoteSubtitlesChanged();
+            });
     connect(&m_client, &JellyfinClient::remoteSubtitleDownloaded, this,
             [this](const QString &itemId, const QString &subtitleId) {
-                if (itemId != m_itemId)
+                // A reply for a download of an item played before is not this one's
+                if (itemId != m_itemId || m_remoteSubtitleDownloadItem != itemId || m_localPlayback)
                     return;
+                m_remoteSubtitleDownloadItem.clear();
                 Q_EMIT remoteSubtitleDownloaded(subtitleId);
-                // The same item again, not a new queue: a group keeps its queue and a series keeps its episodes
-                startItem(itemId, positionTicks(), m_groupItem);
+                // Before mpv told a position (still loading, or the resume seek pending) the item stands where it started
+                const qint64 at = m_engine.knownPositionTicks().value_or(m_resumedFrom);
+                const bool paused = m_session.state() == PlaybackSession::State::Paused;
+                // The same item again, not a new queue: a series keeps its episodes, and a paused video stays paused
+                if (startItem(itemId, at, m_groupItem))
+                    m_reopenPaused = paused;
             });
     connect(&m_client, &JellyfinClient::remoteSubtitleDownloadFailed, this,
             [this](const QString &itemId, const QString &subtitleId, int httpStatus) {
-                if (itemId != m_itemId)
+                if (itemId != m_itemId || m_remoteSubtitleDownloadItem != itemId)
                     return;
+                m_remoteSubtitleDownloadItem.clear();
                 Q_EMIT remoteSubtitleDownloadFailed(subtitleId, httpStatus);
             });
     // A refreshed /Users/Me can change the policy the OSD entry reads
@@ -475,6 +491,7 @@ void PlayerController::detachVideo(MpvAbstractItem *item)
     m_loading = false;
     m_trackTimer.stop();
     persistQueueCursor();
+    reportLocalPosition(false);
     m_queue.setCurrentPlaybackItemId({});
     m_engine.detach(item);
     disconnect(item, &QQuickItem::windowChanged, this, nullptr);
@@ -486,6 +503,8 @@ void PlayerController::detachVideo(MpvAbstractItem *item)
 
 void PlayerController::onAccountLeaving()
 {
+    // The end-file comes after the local flag is gone: the position is stored now
+    reportLocalPosition(false);
     m_pendingLocal = {};
     if (m_localPlayback) {
         m_localPlayback = false;
@@ -558,6 +577,8 @@ bool PlayerController::startItem(const QString &id, qint64 resumeTicks, bool gro
 {
     if (!isValidJellyfinId(id) || resumeTicks < 0 || m_client.userId().isEmpty())
         return false;
+    // A server item that replaces a local file: the local one stores where it stopped before its flag goes
+    reportLocalPosition(false);
     m_pendingLocal = {};
     if (m_localPlayback) {
         m_localPlayback = false;
@@ -604,10 +625,8 @@ bool PlayerController::startItem(const QString &id, qint64 resumeTicks, bool gro
     m_externalSubtitles.clear();
     m_subtitleOptions.clear();
     m_pendingSubtitle.clear();
-    m_remoteSubtitles.clear();
-    m_remoteSubtitleSearching = false;
-    m_remoteSubtitleError.clear();
-    Q_EMIT remoteSubtitlesChanged();
+    resetRemoteSubtitles();
+    m_reopenPaused = false;
     m_trickplay.reset();
     m_trickplayInfo = {};
     m_itemChapters.clear();
@@ -639,21 +658,23 @@ bool PlayerController::startItem(const QString &id, qint64 resumeTicks, bool gro
 
 bool PlayerController::canManageSubtitles() const
 {
-    // A downloaded file has no server source to fetch a subtitle into
-    return !m_localPlayback && m_client.canManageSubtitles();
+    // A downloaded file has no server source to fetch a subtitle into, and a group member cannot reopen its item alone without leaving the group's timing
+    return !m_localPlayback && !grouped() && m_client.canManageSubtitles();
 }
 
 bool PlayerController::searchRemoteSubtitles(const QString &language)
 {
-    if (m_itemId.isEmpty() || m_localPlayback || !m_client.canManageSubtitles()
-        || m_remoteSubtitleSearching)
+    // A new search replaces one in flight: the older reply no longer matches the query and is dropped
+    if (m_itemId.isEmpty() || !canManageSubtitles())
         return false;
     m_remoteSubtitles.clear();
     m_remoteSubtitleSearching = true;
+    m_remoteSubtitleQuery = m_itemId + QLatin1Char('/') + language;
     m_remoteSubtitleError.clear();
     Q_EMIT remoteSubtitlesChanged();
     if (!m_client.searchRemoteSubtitles(m_itemId, language)) {
         m_remoteSubtitleSearching = false;
+        m_remoteSubtitleQuery.clear();
         m_remoteSubtitleError = QStringLiteral("failed");
         Q_EMIT remoteSubtitlesChanged();
         return false;
@@ -663,8 +684,44 @@ bool PlayerController::searchRemoteSubtitles(const QString &language)
 
 bool PlayerController::downloadRemoteSubtitle(const QString &subtitleId)
 {
-    return !m_localPlayback && !m_itemId.isEmpty()
-           && m_client.downloadRemoteSubtitle(m_itemId, subtitleId);
+    // One download at a time: each success reopens the item
+    if (!m_remoteSubtitleDownloadItem.isEmpty() || m_itemId.isEmpty() || !canManageSubtitles()
+        || !m_client.downloadRemoteSubtitle(m_itemId, subtitleId))
+        return false;
+    m_remoteSubtitleDownloadItem = m_itemId;
+    return true;
+}
+
+bool PlayerController::remoteSearchIsCurrent(const QString &itemId, const QString &language) const
+{
+    return m_remoteSubtitleSearching && itemId == m_itemId
+           && m_remoteSubtitleQuery == itemId + QLatin1Char('/') + language;
+}
+
+void PlayerController::resetRemoteSubtitles()
+{
+    m_remoteSubtitles.clear();
+    m_remoteSubtitleSearching = false;
+    m_remoteSubtitleQuery.clear();
+    m_remoteSubtitleDownloadItem.clear();
+    m_remoteSubtitleError.clear();
+    Q_EMIT remoteSubtitlesChanged();
+}
+
+void PlayerController::reportLocalPosition(bool ended)
+{
+    // While a local file waits for the previous item to end, the current id and state are still that item's
+    if (!m_localPlayback || m_pendingLocal.pending || !m_fileLoaded || m_itemId.isEmpty())
+        return;
+    // Before mpv told a position the stored resume point stays
+    const std::optional<qint64> known = m_engine.knownPositionTicks();
+    if (!known)
+        return;
+    const qint64 ticks = *known;
+    const qint64 duration = m_engine.durationTicks();
+    // Watched at the end or past 90 %, as the server counts a played item; a watched item starts again from the beginning
+    const bool played = ended || (duration > 0 && ticks >= duration / 10 * 9);
+    Q_EMIT localPositionChanged(m_itemId, played ? 0 : ticks, played);
 }
 
 bool PlayerController::playLocalFile(const QString &path, const QString &itemId,
@@ -675,6 +732,13 @@ bool PlayerController::playLocalFile(const QString &path, const QString &itemId,
     if (!info.isAbsolute() || !info.isFile() || info.isSymLink() || !isValidJellyfinId(itemId)
         || resumeTicks < 0 || grouped())
         return false;
+    // A stored point past the cap the queue uses never makes the file unplayable
+    resumeTicks = std::min(resumeTicks, 24LL * 3600 * TicksPerSecond);
+    // The interrupted queue item keeps its real position: once loading, the cursor would fall back to the pending resume point
+    if (!m_localPlayback)
+        persistQueueCursor();
+    // A local file that replaces another one stores where that one stopped
+    reportLocalPosition(false);
     m_pendingLocal.path = path;
     m_pendingLocal.itemId = itemId;
     m_pendingLocal.title = title.left(512);
@@ -703,12 +767,12 @@ bool PlayerController::openLocal()
     const PendingLocal request = std::exchange(m_pendingLocal, {});
     m_client.cancelPlaybackInfo();
     cancelSeriesRequest();
+    dropSeriesPlaylist();
     m_seriesPlaylistWanted = false;
     m_groupItem = false;
     m_awaitingGroup = false;
     m_groupAdvance.stop();
     m_mpvSettings.setSpeedHeld(false);
-    persistQueueCursor();
     m_queue.setCurrentPlaybackItemId({});
     m_playlist.clear();
     m_queueIndex = -1;
@@ -721,12 +785,18 @@ bool PlayerController::openLocal()
     m_subtitleOptions.clear();
     m_externalSubtitles.clear();
     m_pendingSubtitle.clear();
-    m_remoteSubtitles.clear();
-    m_remoteSubtitleSearching = false;
-    m_remoteSubtitleError.clear();
-    Q_EMIT remoteSubtitlesChanged();
+    resetRemoteSubtitles();
+    m_reopenPaused = false;
     m_skipLabel.clear();
     m_skipEnd = 0;
+    // Nothing of a server item played before stays: its source, rate, aspect and trickplay tiles
+    m_source = PlaybackSource{};
+    m_keptRate.reset();
+    m_mpvSettings.setAspectOverride({});
+    m_requestedFrame.reset();
+    m_lastTile = {};
+    m_cachedTileIndex = -1;
+    m_pendingTileIndex = -1;
     clearPreview();
     m_selectedAudioId = 0;
     m_selectedSubtitleId = 0;
@@ -871,7 +941,7 @@ void PlayerController::onSource(const PlaybackSource &source)
             {QStringLiteral("name"),
              entry.label.isEmpty() ? i18n("External subtitle %1").arg(entry.index) : entry.label}});
     Q_EMIT tracksChanged();
-    if (!m_engine.open(source, m_groupItem)) {
+    if (!m_engine.open(source, m_groupItem || std::exchange(m_reopenPaused, false))) {
         m_errorText = i18n("The selected media source could not be opened.");
         Q_EMIT changed();
         return;
@@ -883,8 +953,8 @@ void PlayerController::onSource(const PlaybackSource &source)
 
 void PlayerController::onPlaybackItem(const QString &id, const QJsonObject &item)
 {
-    // A reply for an item that is no longer the current one must not name or lay out this one
-    if (id != m_itemId || !active())
+    // A reply for an item that is no longer the current one must not name or lay out this one, nor a server reply a local file of the same item
+    if (id != m_itemId || !active() || m_localPlayback)
         return;
     const ItemSummary summary = parseItemSummary(item);
     if (summary.valid) {
@@ -1199,8 +1269,8 @@ void PlayerController::onEnd(const QString &reason)
     }
     // A local file has no queue, no repeat of a server item and no reporting: it just ends
     if (m_localPlayback && !m_pendingLocal.pending) {
-        Q_EMIT localPositionChanged(m_itemId, m_engine.positionTicks(),
-                                    reason == QLatin1String("eof"));
+        // A file that never loaded keeps the resume point it had; one that failed midway keeps where it got to
+        reportLocalPosition(reason == QLatin1String("eof"));
         m_queue.setCurrentPlaybackItemId({});
         clearCurrent();
         Q_EMIT finished();
@@ -1275,8 +1345,7 @@ void PlayerController::pause()
         m_group->requestPause();
     else {
         m_engine.pause();
-        if (m_localPlayback)
-            Q_EMIT localPositionChanged(m_itemId, m_engine.positionTicks(), false);
+        reportLocalPosition(false);
     }
 }
 void PlayerController::resume()
@@ -1917,7 +1986,9 @@ void PlayerController::saveMemory()
 }
 void PlayerController::rememberTracks(int audioId, int subtitleId)
 {
-    if (m_itemId.isEmpty() || m_memoryFile.isEmpty())
+    // Offline there is no signed-in owner to key the memory by
+    if (m_itemId.isEmpty() || m_memoryFile.isEmpty() || m_client.serverId().isEmpty()
+        || m_client.userId().isEmpty())
         return;
     m_memory.insert(memoryKey(), QJsonObject{{QStringLiteral("audio"), audioId},
                                              {QStringLiteral("subtitle"), subtitleId}});

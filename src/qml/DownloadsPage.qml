@@ -82,19 +82,19 @@ Kirigami.ScrollablePage {
     function errorText(error) {
         switch (error) {
         case "network":
-            return i18n("No connection to the server");
+            return i18n("No connection to the server: check the network, then retry");
         case "http":
-            return i18n("The server refused the download");
+            return i18n("The server refused the download: check that this account may download, then retry");
         case "protocol":
-            return i18n("The server’s answer was not understood");
+            return i18n("The server’s answer was not understood: retry later");
         case "size":
-            return i18n("The file changed while downloading");
+            return i18n("The file size did not match what the server announced: retry");
         case "changed":
-            return i18n("The file changed on the server");
+            return i18n("The file changed on the server: retry to download the new version");
         case "io":
-            return i18n("The file could not be written");
+            return i18n("The file could not be written: check the permissions and the free space, then retry");
         case "nospace":
-            return i18n("Not enough disk space");
+            return i18n("Not enough disk space: free some space, then retry");
         case "cancelled":
             return i18n("Cancelled");
         }
@@ -112,7 +112,7 @@ Kirigami.ScrollablePage {
 
     function rowStatus(state, error, size, bytesWritten) {
         if (state === "fetching" && size > 0)
-            return i18n("%1 of %2", page.downloads.formattedSize(bytesWritten), page.downloads.formattedSize(size));
+            return i18nc("@info download progress, bytes written of the total size", "%1 of %2", page.downloads.formattedSize(bytesWritten), page.downloads.formattedSize(size));
         if (state === "completed" || state === "exported")
             return page.downloads.formattedSize(size);
         if (state === "error")
@@ -149,12 +149,12 @@ Kirigami.ScrollablePage {
         property string itemId
         property string itemName
 
-        title: i18n("Remove Download")
+        title: i18n("Delete Download")
         standardButtons: Kirigami.Dialog.Cancel
         customFooterActions: [
             Kirigami.Action {
                 objectName: "removeDownloadConfirm"
-                text: i18n("Remove Download")
+                text: i18n("Delete Download")
                 icon.name: "edit-delete"
                 onTriggered: {
                     page.downloads.removeDownload(removeDialog.serverId, removeDialog.userId, removeDialog.itemId);
@@ -168,8 +168,8 @@ Kirigami.ScrollablePage {
             wrapMode: Text.Wrap
             textFormat: Text.PlainText
             text: removeDialog.itemName.length > 0
-                ? i18n("Remove %1? The file stays on the server", removeDialog.itemName)
-                : i18n("Remove this download? The file stays on the server")
+                ? i18n("Delete %1? The file stays on the server", removeDialog.itemName)
+                : i18n("Delete this download? The file stays on the server")
         }
     }
 
@@ -201,8 +201,23 @@ Kirigami.ScrollablePage {
             if (item && item.downloaded)
                 page.Window.window.playDownload(item.serverId, item.userId, item.itemId);
         }
+        Keys.onMenuPressed: {
+            if (list.currentItem)
+                list.currentItem.openMenu();
+        }
+        Keys.onDeletePressed: {
+            const item = list.currentItem;
+            if (item && item.removable)
+                page.askRemove(item.serverId, item.userId, item.itemId, item.name);
+        }
+        Keys.onPressed: event => {
+            if (event.modifiers === Qt.ShiftModifier && event.key === Qt.Key_F10 && list.currentItem) {
+                list.currentItem.openMenu();
+                event.accepted = true;
+            }
+        }
 
-        // A row is a record of the queue, not a tab stop: the list is
+        // A row is a record of the queue; the list takes the keys as the Queue page's does: Return plays, Menu or Shift+F10 opens the row's menu, Delete asks to delete
         delegate: Controls.ItemDelegate {
             id: row
 
@@ -225,10 +240,22 @@ Kirigami.ScrollablePage {
             required property bool downloaded
             readonly property bool cancellable: ["queued", "fetching", "waiting"].indexOf(recordState) >= 0
             readonly property bool removable: ["paused", "error", "completed", "exported"].indexOf(recordState) >= 0
+            readonly property bool hasMenu: cancellable || removable
+
+            function openMenu() {
+                if (hasMenu)
+                    rowMenu.popup(rowMore, 0, rowMore.height);
+            }
 
             objectName: "downloadRow_" + itemId
             width: list.width
             highlighted: ListView.isCurrentItem && ListView.view.activeFocus
+            // Only a downloaded row acts on a click: no hover feedback elsewhere
+            hoverEnabled: downloaded
+            onClicked: {
+                if (row.downloaded)
+                    page.Window.window.playDownload(row.serverId, row.userId, row.itemId);
+            }
             Accessible.name: row.name
             Accessible.description: page.rowStatus(row.recordState, row.error, row.size, row.bytesWritten)
 
@@ -275,6 +302,10 @@ Kirigami.ScrollablePage {
                         elide: Text.ElideRight
                         font.weight: Font.DemiBold
                         color: row.highlighted ? Kirigami.Theme.highlightedTextColor : Kirigami.Theme.textColor
+                        Controls.ToolTip.text: text
+                        Controls.ToolTip.visible: truncated && nameHover.hovered
+                        Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
+                        HoverHandler { id: nameHover }
                     }
                     Controls.Label {
                         Layout.fillWidth: true
@@ -291,12 +322,17 @@ Kirigami.ScrollablePage {
                         visible: row.recordState === "fetching"
                         from: 0
                         to: 1
+                        // An unknown size has no fraction to show
+                        indeterminate: row.size <= 0 || row.progress < 0
                         value: Math.max(0, row.progress)
                     }
                     Controls.Label {
                         Layout.fillWidth: true
                         text: page.rowStatus(row.recordState, row.error, row.size, row.bytesWritten)
                         textFormat: Text.PlainText
+                        // An error ends with what to do: it wraps instead of losing that end
+                        wrapMode: row.recordState === "error" ? Text.Wrap : Text.NoWrap
+                        maximumLineCount: row.recordState === "error" ? 2 : 1
                         elide: Text.ElideRight
                         color: row.highlighted ? Kirigami.Theme.highlightedTextColor : (row.recordState === "error" ? Kirigami.Theme.negativeTextColor : Kirigami.Theme.disabledTextColor)
                         font: Kirigami.Theme.smallFont
@@ -305,32 +341,50 @@ Kirigami.ScrollablePage {
                 Controls.ToolButton {
                     objectName: "downloadPlay_" + row.itemId
                     Layout.alignment: Qt.AlignVCenter
-                    visible: row.downloaded || row.recordState === "paused" || row.recordState === "error"
-                    text: row.downloaded ? i18n("Play") : i18n("Resume")
-                    icon.name: row.downloaded ? "media-playback-start" : "media-playback-start"
+                    // The one action the row's state leads to: Play, Resume, Retry or Pause
+                    readonly property string rowAction: row.downloaded ? "play"
+                        : row.recordState === "paused" ? "resume"
+                        : row.recordState === "error" ? "retry"
+                        : row.cancellable ? "pause" : ""
+                    visible: rowAction.length > 0
+                    text: rowAction === "play" ? i18n("Play")
+                        : rowAction === "resume" ? i18n("Resume")
+                        : rowAction === "retry" ? i18n("Retry") : i18n("Pause")
+                    icon.name: rowAction === "retry" ? "view-refresh" : rowAction === "pause" ? "media-playback-pause" : "media-playback-start"
                     display: Controls.AbstractButton.IconOnly
+                    Accessible.name: rowAction === "play" ? i18nc("@action:button %1 is the item", "Play %1", row.name)
+                        : rowAction === "resume" ? i18nc("@action:button %1 is the item", "Resume %1", row.name)
+                        : rowAction === "retry" ? i18nc("@action:button %1 is the item", "Retry %1", row.name)
+                        : i18nc("@action:button %1 is the item", "Pause %1", row.name)
                     Controls.ToolTip.text: text
                     Controls.ToolTip.visible: hovered || visualFocus
                     Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
                     onClicked: {
-                        if (row.downloaded)
+                        switch (rowAction) {
+                        case "play":
                             page.Window.window.playDownload(row.serverId, row.userId, row.itemId);
-                        else
+                            break;
+                        case "pause":
+                            page.pauseRow(row.serverId, row.userId, row.itemId);
+                            break;
+                        default:
                             page.resumeRow(row.serverId, row.userId, row.itemId);
+                        }
                     }
                 }
                 Controls.ToolButton {
+                    id: rowMore
                     objectName: "downloadMore_" + row.itemId
                     Layout.alignment: Qt.AlignVCenter
-                    visible: row.removable
+                    visible: row.hasMenu
                     text: i18n("More Actions")
                     icon.name: "overflow-menu"
                     display: Controls.AbstractButton.IconOnly
+                    Accessible.name: i18nc("@action:button %1 is the item", "More Actions for %1", row.name)
                     Controls.ToolTip.text: text
                     Controls.ToolTip.visible: hovered || visualFocus
                     Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
                     onClicked: rowMenu.popup(rowMore, 0, rowMore.height)
-                    id: rowMore
                     Controls.Menu {
                         id: rowMenu
                         Controls.MenuItem {
@@ -338,6 +392,7 @@ Kirigami.ScrollablePage {
                             text: i18n("Export…")
                             icon.name: "document-export"
                             visible: row.downloaded
+                            height: visible ? implicitHeight : 0
                             onTriggered: {
                                 exportDialog.serverId = row.serverId;
                                 exportDialog.userId = row.userId;
@@ -346,36 +401,22 @@ Kirigami.ScrollablePage {
                             }
                         }
                         Controls.MenuItem {
-                            objectName: "downloadRemove_" + row.itemId
-                            text: i18n("Remove Download…")
+                            objectName: "downloadCancel_" + row.itemId
+                            text: i18n("Cancel Download")
+                            icon.name: "process-stop"
+                            visible: row.cancellable
+                            height: visible ? implicitHeight : 0
+                            onTriggered: page.cancelRow(row.serverId, row.userId, row.itemId)
+                        }
+                        Controls.MenuItem {
+                            objectName: "downloadDelete_" + row.itemId
+                            text: i18n("Delete Download…")
                             icon.name: "edit-delete"
+                            visible: row.removable
+                            height: visible ? implicitHeight : 0
                             onTriggered: page.askRemove(row.serverId, row.userId, row.itemId, row.name)
                         }
                     }
-                }
-                Controls.ToolButton {
-                    objectName: "downloadCancel_" + row.itemId
-                    Layout.alignment: Qt.AlignVCenter
-                    visible: row.cancellable
-                    text: i18n("Cancel Download")
-                    icon.name: "process-stop"
-                    display: Controls.AbstractButton.IconOnly
-                    Controls.ToolTip.text: text
-                    Controls.ToolTip.visible: hovered || visualFocus
-                    Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
-                    onClicked: page.cancelRow(row.serverId, row.userId, row.itemId)
-                }
-                Controls.ToolButton {
-                    objectName: "downloadRemove_" + row.itemId
-                    Layout.alignment: Qt.AlignVCenter
-                    visible: row.removable
-                    text: i18n("Remove Download…")
-                    icon.name: "edit-delete"
-                    display: Controls.AbstractButton.IconOnly
-                    Controls.ToolTip.text: text
-                    Controls.ToolTip.visible: hovered || visualFocus
-                    Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
-                    onClicked: page.askRemove(row.serverId, row.userId, row.itemId, row.name)
                 }
             }
         }
@@ -447,10 +488,12 @@ Kirigami.ScrollablePage {
                             }
                             Controls.ToolButton {
                                 text: i18n("Stop Automatic Downloads")
-                                icon.name: "edit-delete"
+                                icon.name: "edit-delete-remove"
                                 display: Controls.AbstractButton.IconOnly
+                                Accessible.name: i18nc("@action:button %1 is the series", "Stop Automatic Downloads of %1", modelData.seriesName.length > 0 ? modelData.seriesName : i18n("Unknown series"))
                                 Controls.ToolTip.text: text
                                 Controls.ToolTip.visible: hovered || visualFocus
+                                Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
                                 onClicked: page.downloads.removeSeriesRule(modelData.seriesId)
                             }
                         }
@@ -462,15 +505,15 @@ Kirigami.ScrollablePage {
                         required property var modelData
                         Layout.fillWidth: true
                         type: Kirigami.MessageType.Warning
-                        text: i18n("%1 was played on another device. Keep the server’s state or mark it played here", modelData.name)
+                        text: i18n("%1 was played on another device without being marked as watched there. Keep the server’s state or mark it as watched here", modelData.name)
                         actions: [
                             Kirigami.Action {
-                                text: i18n("Keep Server")
+                                text: i18n("Keep Server State")
                                 icon.name: "document-save"
                                 onTriggered: page.downloads.resolveOutboxConflict(modelData.serverId, modelData.userId, modelData.itemId, true)
                             },
                             Kirigami.Action {
-                                text: i18n("Mark Played")
+                                text: i18n("Mark as Watched")
                                 icon.name: "emblem-checked"
                                 onTriggered: page.downloads.resolveOutboxConflict(modelData.serverId, modelData.userId, modelData.itemId, false)
                             }

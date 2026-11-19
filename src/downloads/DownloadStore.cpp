@@ -140,7 +140,8 @@ bool readInteger(const QJsonObject &object, QLatin1String key, qint64 minimum, q
     if (!value.isDouble())
         return false;
     const double number = value.toDouble();
-    if (number != std::floor(number) || number < double(minimum) || number > double(maximum))
+    if (!std::isfinite(number) || number != std::floor(number) || number < double(minimum)
+        || number > double(maximum))
         return false;
     *out = qint64(number);
     return true;
@@ -203,9 +204,12 @@ std::optional<DownloadRecord> readRecord(const QJsonObject &object)
         return std::nullopt;
     record.meteredOverride = meteredOverride.toBool();
     // An index written before the poster existed has no tag: the row falls back to its type icon
-    const QJsonValue positionTicks = object.value(QLatin1String("positionTicks"));
-    if (positionTicks.isDouble())
-        record.positionTicks = qint64(positionTicks.toDouble());
+    if (object.contains(QLatin1String("positionTicks"))) {
+        if (!readInteger(object, QLatin1String("positionTicks"), 0, DownloadRecord::MaxRuntimeTicks,
+                         &number))
+            return std::nullopt;
+        record.positionTicks = number;
+    }
     const QJsonValue played = object.value(QLatin1String("played"));
     if (played.isBool())
         record.played = played.toBool();
@@ -339,7 +343,7 @@ bool DownloadStore::upsert(const DownloadRecord &record, bool writeNow)
         return false;
     const QString key = stored.key();
     const qint64 storedBytes = recordBytes(stored);
-    // A refused update has to leave the previous record exactly as it was, evictions included
+    // A refused update has to leave the previous record exactly as it was
     const QList<DownloadRecord> previous = m_records;
     const qint64 previousBytes = m_bytes;
     const bool previousDirty = m_dirty;
@@ -348,22 +352,15 @@ bool DownloadStore::upsert(const DownloadRecord &record, bool writeNow)
         m_bytes += storedBytes - recordBytes(m_records.at(row));
         m_records.replace(row, stored);
     } else {
-        while (m_records.size() >= MaxRecords) {
-            if (!evictCompleted()) {
-                m_records = previous;
-                m_bytes = previousBytes;
-                m_dirty = previousDirty;
-                return false;
-            }
-        }
+        // Completed and exported records are never dropped: their media stays on disk and nothing would adopt it again, so a full queue refuses the new record
+        if (m_records.size() >= MaxRecords)
+            return false;
         if (!m_records.isEmpty())
             ++m_bytes;
         m_bytes += storedBytes;
         m_records.append(stored);
     }
-    // Server text can make the file larger than the cap: give up completed entries, oldest first, never the record being stored
-    while (m_bytes > MaxFileBytes && evictCompleted(key)) {
-    }
+    // Server text can make the file larger than the cap: the change that does not fit is refused
     if (m_bytes > MaxFileBytes) {
         m_records = previous;
         m_bytes = previousBytes;
@@ -409,35 +406,12 @@ void DownloadStore::flush()
         write();
 }
 
-bool DownloadStore::evictCompleted(const QString &keep)
-{
-    int oldest = -1;
-    qint64 oldestStamp = 0;
-    for (int row = 0; row < m_records.size(); ++row) {
-        const DownloadRecord &record = m_records.at(row);
-        if (record.key() == keep)
-            continue;
-        if (record.state != QLatin1String("completed") && record.state != QLatin1String("exported"))
-            continue;
-        if (oldest < 0 || record.updatedAt < oldestStamp) {
-            oldest = row;
-            oldestStamp = record.updatedAt;
-        }
-    }
-    if (oldest < 0)
-        return false;
-    m_bytes -= recordBytes(m_records.at(oldest));
-    if (m_records.size() > 1)
-        --m_bytes;
-    m_records.removeAt(oldest);
-    m_dirty = true;
-    return true;
-}
-
 void DownloadStore::scheduleSave()
 {
     m_dirty = true;
-    m_saveTimer.start();
+    // A running timer is left alone: progress arrives faster than the interval, and restarting it would postpone the write for as long as the download runs
+    if (!m_saveTimer.isActive())
+        m_saveTimer.start();
 }
 
 QByteArray DownloadStore::serialize() const
@@ -527,9 +501,7 @@ void DownloadStore::load()
         m_records.append(*record);
     }
     m_bytes = serialize().size();
-    // A file that grew past the cap through its records alone is cut down to its completed entries' room, then to the oldest records, but never rewritten on load
-    while (m_bytes > MaxFileBytes && evictCompleted()) {
-    }
+    // The file size was capped above, so only a hand-edited file re-serializes past the cap (fields added since it was written): the first records go, and the file is not rewritten on load
     while (m_bytes > MaxFileBytes && !m_records.isEmpty()) {
         m_bytes -= recordBytes(m_records.constFirst());
         if (m_records.size() > 1)

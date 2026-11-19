@@ -11,8 +11,10 @@
 #include <QFileInfo>
 #include <QSet>
 #include <QTimer>
+#include <QUuid>
 
 #include <algorithm>
+#include <cstdio>
 #include <utility>
 
 namespace Kinefin {
@@ -71,6 +73,14 @@ void DownloadManager::setStoragePath(const QString &indexPath)
     for (DownloadTransfer *transfer : std::as_const(m_active))
         delete transfer;
     m_active.clear();
+    // A removal still waiting for its transfer to stop completes on the old profile: the transfers are gone, so nothing writes the files any more
+    for (auto removing = m_removing.cbegin(); removing != m_removing.cend(); ++removing) {
+        const std::optional<DownloadRecord> found = m_store.findByKey(removing.key());
+        if (!found || removing.value() != m_generation.value(removing.key()))
+            continue;
+        dropFiles(*found);
+        m_store.remove(found->serverId, found->userId, found->itemId, true);
+    }
     m_stopping.clear();
     m_removing.clear();
     m_generation.clear();
@@ -189,6 +199,32 @@ bool DownloadManager::enqueue(const DownloadRecord &record)
 void DownloadManager::wake()
 {
     pump();
+}
+
+bool DownloadManager::updateRecord(const DownloadRecord &record)
+{
+    const std::optional<DownloadRecord> found = m_store.findByKey(record.key());
+    if (!found)
+        return false;
+    DownloadRecord updated = record;
+    updated.addedAt = found->addedAt;
+    updated.updatedAt = now();
+    // The transfer owns these while it runs; a stale copy from a caller must not rewind them
+    if (m_active.contains(found->key())) {
+        updated.state = found->state;
+        updated.error = found->error;
+        updated.httpStatus = found->httpStatus;
+        updated.wanted = found->wanted;
+        updated.bytesWritten = found->bytesWritten;
+        updated.size = found->size;
+        updated.container = found->container;
+        updated.etag = found->etag;
+    }
+    if (!m_store.upsert(updated, true))
+        return false;
+    const std::optional<DownloadRecord> saved = m_store.findByKey(found->key());
+    Q_EMIT recordChanged(saved.value_or(updated));
+    return true;
 }
 
 bool DownloadManager::setState(const QString &serverId, const QString &userId,
@@ -435,6 +471,23 @@ void DownloadManager::finishTransfer(const QString &key, bool completed, qint64 
         return;
     const Stop stop = m_stopping.take(key);
     DownloadRecord record = *found;
+    // A write the store refuses leaves the record `fetching` with no transfer, which the queue never takes again: it becomes an io error instead, and the storage error is reported
+    const auto commit = [this, &found](const DownloadRecord &next) {
+        if (m_store.upsert(next, true))
+            return true;
+        Q_EMIT storageError();
+        DownloadRecord failed = *found;
+        failed.state = QStringLiteral("error");
+        failed.error = QStringLiteral("io");
+        failed.httpStatus = 0;
+        failed.wanted = true;
+        failed.updatedAt = now();
+        if (m_store.upsert(failed, true)) {
+            Q_EMIT recordChanged(failed);
+            Q_EMIT recordsChanged();
+        }
+        return false;
+    };
     if (stop == Stop::Remove) {
         // A record enqueued again while the old transfer was stopping is a new generation and keeps its files
         if (m_removing.take(key) != m_generation.value(key))
@@ -457,9 +510,10 @@ void DownloadManager::finishTransfer(const QString &key, bool completed, qint64 
         record.httpStatus = 0;
         record.wanted = true;
         record.updatedAt = now();
+        if (!commit(record))
+            return;
         m_retryAttempt.remove(key);
         m_retryPending.remove(key);
-        m_store.upsert(record, true);
         Q_EMIT recordChanged(record);
         Q_EMIT downloadCompleted(record);
         Q_EMIT recordsChanged();
@@ -470,7 +524,8 @@ void DownloadManager::finishTransfer(const QString &key, bool completed, qint64 
             return;
         record.error.clear();
         record.updatedAt = now();
-        m_store.upsert(record, true);
+        if (!commit(record))
+            return;
         Q_EMIT recordChanged(record);
         Q_EMIT recordsChanged();
         return;
@@ -483,7 +538,8 @@ void DownloadManager::finishTransfer(const QString &key, bool completed, qint64 
         record.error.clear();
         record.httpStatus = 0;
         record.updatedAt = now();
-        m_store.upsert(record, true);
+        if (!commit(record))
+            return;
         Q_EMIT recordChanged(record);
         Q_EMIT recordsChanged();
         return;
@@ -493,7 +549,8 @@ void DownloadManager::finishTransfer(const QString &key, bool completed, qint64 
     record.httpStatus = httpStatus;
     record.wanted = true;
     record.updatedAt = now();
-    m_store.upsert(record, true);
+    if (!commit(record))
+        return;
     Q_EMIT recordChanged(record);
     Q_EMIT recordsChanged();
     scheduleRetry(key, httpStatus);
@@ -518,15 +575,32 @@ bool DownloadManager::setRecordState(const QString &key, const QString &state, c
 
 void DownloadManager::dropFiles(const DownloadRecord &record)
 {
+    // targetPath() has validated the ids; the folder must also be the real per-item one under the root, never a link out of it
     const QString target = targetPath(record);
-    const QString partial = partialPath(record);
-    const QString sidecar = sidecarPath(record);
-    if (!target.isEmpty())
-        QFile::remove(target);
-    if (!partial.isEmpty())
-        QFile::remove(partial);
-    if (!sidecar.isEmpty())
-        QFile::remove(sidecar);
+    const QString root = QDir(m_store.rootDirectory()).canonicalPath();
+    if (target.isEmpty() || root.isEmpty())
+        return;
+    const QFileInfo directory(QFileInfo(target).absolutePath());
+    const QString owner = root + QLatin1Char('/') + record.serverId.toLower() + QLatin1Char('/')
+                          + record.userId.toLower();
+    if (!directory.isDir() || directory.isSymLink()
+        || directory.canonicalFilePath() != owner + QLatin1Char('/') + record.itemId.toLower())
+        return;
+    // The folder moves to a name of its own before it is removed: a link swapped in after the check above is removed as a link, never followed; QDir::removeRecursively removes a link inside the folder without following it
+    const QString tombstone =
+        owner + QStringLiteral("/.removing-") + QUuid::createUuid().toString(QUuid::Id128);
+    if (::rename(QFile::encodeName(directory.absoluteFilePath()).constData(),
+                 QFile::encodeName(tombstone).constData())
+        != 0)
+        return;
+    const QFileInfo moved(tombstone);
+    if (moved.isSymLink())
+        QFile::remove(tombstone);
+    else if (moved.isDir())
+        QDir(tombstone).removeRecursively();
+    // Only an empty folder goes: another item of the same owner keeps its parents
+    QDir().rmdir(owner);
+    QDir().rmdir(QFileInfo(owner).absolutePath());
 }
 
 void DownloadManager::scheduleRetry(const QString &key, int httpStatus)
@@ -580,6 +654,26 @@ void DownloadManager::stopActive(const QString &key, Stop reason)
             Q_EMIT downloadRemoved(found->serverId, found->userId, found->itemId);
             Q_EMIT recordsChanged();
         }
+        return;
+    }
+    // A removal outranks a pause and a pause outranks a hold: a later, weaker reason never replaces the pending one
+    const auto rank = [](Stop value) {
+        switch (value) {
+        case Stop::Remove:
+            return 3;
+        case Stop::Pause:
+            return 2;
+        case Stop::Hold:
+            return 1;
+        case Stop::None:
+            break;
+        }
+        return 0;
+    };
+    const auto pending = m_stopping.constFind(key);
+    if (pending != m_stopping.constEnd()) {
+        if (rank(reason) > rank(*pending))
+            m_stopping.insert(key, reason);
         return;
     }
     m_stopping.insert(key, reason);
