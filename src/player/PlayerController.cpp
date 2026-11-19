@@ -501,6 +501,12 @@ void PlayerController::detachVideo(MpvAbstractItem *item)
     Q_EMIT changed();
 }
 
+void PlayerController::videoRendererChanged(MpvAbstractItem *item)
+{
+    if (item && item == m_video)
+        m_engine.restoreVideo();
+}
+
 void PlayerController::onAccountLeaving()
 {
     // The end-file comes after the local flag is gone: the position is stored now

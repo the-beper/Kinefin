@@ -92,6 +92,8 @@ Item {
             onActiveChanged: if (active) miniButton.touchPress = true
         }
         onPressed: shownAtPress = !touchPress || mini.seenBefore(Date.now())
+        // A touch released off the button ends with no click: the next press must not count as a touch
+        onReleased: touchPress = false
         onCanceled: touchPress = false
         onClicked: {
             const shown = shownAtPress;

@@ -20,6 +20,9 @@ KNOWN_NOISE = ("Created graphical object was not placed in the graphics scene",)
 # The animation driver of a window closed while a page slide is settling is stopped once too often (Qt 6.11.2, offscreen): teardown noise of the framework, not of the shell
 KNOWN_NOISE += ("QUnifiedTimer::stopAnimationDriver: driver is not running",)
 
+# The offscreen platform has no window stacking: the return from picture in picture raises the main window
+KNOWN_NOISE += ("This plugin does not support raise()",)
+
 
 # KINEFIN_START_PAGE opens Settings as a page or About as a popup;
 # None is the plain Servers page.

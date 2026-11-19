@@ -7,7 +7,11 @@ MpvVideoItem::MpvVideoItem(QQuickItem *parent) : MpvAbstractItem(parent)
 {
     connect(this, &MpvAbstractItem::ready, this, [this] {
         m_ready = true;
-        attachWhenReady();
+        // A later ready is a new render context (the item moved to another window)
+        if (m_attached && m_player)
+            m_player->videoRendererChanged(this);
+        else
+            attachWhenReady();
     });
 }
 
@@ -29,6 +33,7 @@ void MpvVideoItem::setPlayer(QObject *object)
         return;
     if (m_player)
         m_player->detachVideo(this);
+    m_attached = false;
     m_player = candidate;
     attachWhenReady();
     Q_EMIT playerChanged();
@@ -37,5 +42,5 @@ void MpvVideoItem::setPlayer(QObject *object)
 void MpvVideoItem::attachWhenReady()
 {
     if (m_ready && m_player)
-        m_player->attachVideo(this, mpvController());
+        m_attached = m_player->attachVideo(this, mpvController());
 }

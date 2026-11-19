@@ -81,6 +81,33 @@ QVariantList headerEntries(PlaybackEngine &engine)
 {
     return engine.controller()->getProperty(QStringLiteral("http-header-fields")).toList();
 }
+
+// A tiny moving picture mpv reads natively (YUV4MPEG2, 4:2:0, 64x36 at 10 fps), for the video track cases the WAV clip cannot give
+QString writeY4mClip(const QTemporaryDir &dir, int seconds)
+{
+    constexpr int width = 64;
+    constexpr int height = 36;
+    QFile file(dir.filePath(QStringLiteral("clip.y4m")));
+    if (!file.open(QIODevice::WriteOnly))
+        return {};
+    file.write(QByteArrayLiteral("YUV4MPEG2 W64 H36 F10:1 Ip A1:1 C420jpeg\n"));
+    for (int frame = 0; frame < seconds * 10; ++frame) {
+        file.write(QByteArrayLiteral("FRAME\n"));
+        QByteArray luma(width * height, char(0));
+        for (int i = 0; i < luma.size(); ++i)
+            luma[i] = char(40 + (i % width + frame * 4) % 200);
+        file.write(luma);
+        file.write(QByteArray(width * height / 2, char(128)));
+    }
+    return file.error() == QFileDevice::NoError ? QUrl::fromLocalFile(file.fileName()).toString()
+                                                : QString();
+}
+
+bool videoOff(const QVariant &vid)
+{
+    return (vid.typeId() == QMetaType::Bool && !vid.toBool())
+           || vid.toString() == QLatin1String("no");
+}
 } // namespace
 
 class TestPlaybackEngine : public QObject {
@@ -692,6 +719,85 @@ class TestPlaybackEngine : public QObject {
 
         controller.stop();
         QTRY_VERIFY(controller.playbackInfo().isEmpty());
+    }
+
+    // The video item moved to another window and mpv turned the video off with the old render context: the track comes back, the playback goes on
+    void restoreVideoSelectsTheTrackTheFileWasShowing()
+    {
+        QTemporaryDir dir;
+        Chain chain(dir, 1);
+        QVERIFY(chain.ok);
+        chain.source.url = QUrl(writeY4mClip(dir, 4));
+        QVERIFY(chain.source.url.isValid());
+        QVERIFY(chain.engine.open(chain.source));
+        QTRY_COMPARE(chain.session.state(), PlaybackSession::State::Playing);
+        QTRY_COMPARE(chain.engine.mpvProperty(QStringLiteral("vid")).toLongLong(), qint64(1));
+        chain.engine.setMpvProperty(QStringLiteral("vid"), QStringLiteral("no"));
+        QTRY_VERIFY(videoOff(chain.engine.mpvProperty(QStringLiteral("vid"))));
+        chain.engine.restoreVideo();
+        QTRY_COMPARE(chain.engine.mpvProperty(QStringLiteral("vid")).toLongLong(), qint64(1));
+        QCOMPARE(chain.session.state(), PlaybackSession::State::Playing);
+    }
+
+    // A file whose video was never on (vid=no from a raw mpv.conf) keeps it off: the renderer did not turn it off
+    void restoreVideoLeavesAVideoTheUserTurnedOffAlone()
+    {
+        QTemporaryDir dir;
+        // An audio track keeps the file playing with its video off
+        const QString audio = QUrl(TestWav::writeWavClip(dir, 5)).toLocalFile();
+        Chain chain(dir, 1, {QStringLiteral("vid=no"), QStringLiteral("audio-files=") + audio});
+        QVERIFY(chain.ok);
+        chain.source.url = QUrl(writeY4mClip(dir, 4));
+        QVERIFY(chain.engine.open(chain.source));
+        QTRY_COMPARE(chain.session.state(), PlaybackSession::State::Playing);
+        chain.engine.restoreVideo();
+        QTest::qWait(300);
+        QVERIFY(videoOff(chain.engine.mpvProperty(QStringLiteral("vid"))));
+    }
+
+    // The renderer changed while the file opened, before any track was selected: the choice is made once the file is loaded
+    void restoreVideoDuringTheOpeningWaitsForTheLoad()
+    {
+        QTemporaryDir dir;
+        // An audio track keeps the file playing with its video off
+        const QString audio = QUrl(TestWav::writeWavClip(dir, 5)).toLocalFile();
+        Chain chain(dir, 1, {QStringLiteral("vid=no"), QStringLiteral("audio-files=") + audio});
+        QVERIFY(chain.ok);
+        chain.source.url = QUrl(writeY4mClip(dir, 4));
+        QVERIFY(chain.engine.open(chain.source));
+        QCOMPARE(chain.session.state(), PlaybackSession::State::Opening);
+        chain.engine.restoreVideo();
+        QTRY_COMPARE(chain.session.state(), PlaybackSession::State::Playing);
+        QTRY_COMPARE(chain.engine.mpvProperty(QStringLiteral("vid")).toLongLong(), qint64(1));
+    }
+
+    void videoTrackToRestoreFollowsThePreviousThenTheDefaultThenTheFirst()
+    {
+        const auto track = [](const char *type, int id, bool albumArt = false,
+                              bool isDefault = false) {
+            return QVariant(QVariantMap{{QStringLiteral("type"), QString::fromLatin1(type)},
+                                        {QStringLiteral("id"), id},
+                                        {QStringLiteral("albumart"), albumArt},
+                                        {QStringLiteral("default"), isDefault}});
+        };
+        using Kinefin::videoTrackToRestore;
+        // No video track at all
+        QVERIFY(!videoTrackToRestore({}, std::nullopt));
+        QVERIFY(!videoTrackToRestore({track("audio", 1), track("sub", 2)}, 1));
+        // One video track, with and without a previous choice (the previous id is of another type here)
+        const QVariantList one{track("audio", 1), track("video", 2)};
+        QCOMPARE(videoTrackToRestore(one, std::nullopt), std::optional<qint64>(2));
+        QCOMPARE(videoTrackToRestore(one, 1), std::optional<qint64>(2));
+        // An album-art cover is never the fallback
+        const QVariantList cover{track("video", 1, true), track("video", 2), track("audio", 3)};
+        QCOMPARE(videoTrackToRestore(cover, std::nullopt), std::optional<qint64>(2));
+        QVERIFY(!videoTrackToRestore({track("video", 1, true), track("audio", 2)}, std::nullopt));
+        // The default track beats an earlier one, and the previous track beats both when it is still there
+        const QVariantList two{track("video", 1), track("video", 2, false, true),
+                               track("video", 3)};
+        QCOMPARE(videoTrackToRestore(two, std::nullopt), std::optional<qint64>(2));
+        QCOMPARE(videoTrackToRestore(two, 3), std::optional<qint64>(3));
+        QCOMPARE(videoTrackToRestore(two, 9), std::optional<qint64>(2));
     }
 
   private:

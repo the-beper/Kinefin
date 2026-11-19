@@ -6,6 +6,7 @@
 
 #include "app/ConnectionController.h"
 #include "app/ImageNetworkFactory.h"
+#include "app/PipSurface.h"
 #include "imagecache/ImageOrigin.h"
 #include "integration/RemoteInputServer.h"
 #include "models/SearchModel.h"
@@ -87,6 +88,8 @@ const QStringList kKnownNoise = {
     QStringLiteral("Created graphical object was not placed in the graphics scene"),
     // The animation driver of a window destroyed while a page slide is settling is stopped once too often (Qt 6.11.2, offscreen)
     QStringLiteral("QUnifiedTimer::stopAnimationDriver: driver is not running"),
+    // The offscreen platform has no window stacking: the return from picture in picture raises the main window
+    QStringLiteral("This plugin does not support raise()"),
     // KIconTheme looks for the compiled breeze-icons resource the first time the desktop style draws an icon; inferred: the Fedora build image has no such resource file and the icons come from /usr/share/icons/breeze
     QStringLiteral("Icon theme \"breeze-internal\" not found"),
     // A list view resets while one of its delegates is still being created asynchronously (seen under the desktop style in the Favorites tests); the two indices depend on timing, and the page is empty or closed by then
@@ -2354,19 +2357,95 @@ void hoverMiniPlayer(const Ui &ui, const QQuickItem *mini)
     QTest::mouseMove(ui.window, middle);
 }
 
-// Plays the fixture movie, leaves the player by its Mini Player button and waits for the mini player; it, or null
+// Leaves the full player for the mini player through the first entry of More Actions, as a user does; false when the menu or the entry is missing
+bool chooseShowMiniPlayer(Ui &ui)
+{
+    // The page in front only: a player page of an earlier visit may still be on its way out
+    QQuickItem *page = ui.currentDetails();
+    if (!page || page->objectName() != QLatin1String("playerPage"))
+        return false;
+    QObject *menu = page->findChild<QObject *>(QStringLiteral("playerMoreMenu"));
+    QQuickItem *more = Ui::itemIn(page, QStringLiteral("playerMoreButton"));
+    if (!menu || !more)
+        return false;
+    ui.clickCenter(more);
+    QQuickItem *entry = nullptr;
+    if (!qWaitForScaled([&] {
+            entry = menu->findChild<QQuickItem *>(QStringLiteral("playerMoreMiniItem"));
+            return menu->property("opened").toBool() && entry && entry->isVisible()
+                   && entry->width() > 0;
+        }))
+        return false;
+    ui.clickCenter(entry);
+    return true;
+}
+
+// Plays the fixture movie, leaves the player by the Show Mini Player entry of More Actions and waits for the mini player; it, or null
 QQuickItem *openMiniPlayer(Ui &ui, PlayerStub &stub)
 {
     QQuickItem *page = openPlayer(ui, stub);
-    QQuickItem *button = page ? Ui::itemIn(page, QStringLiteral("playerMiniButton")) : nullptr;
-    if (!button)
+    if (!page || !chooseShowMiniPlayer(ui))
         return nullptr;
-    ui.clickCenter(button);
     QQuickItem *mini = nullptr;
     // Shown and at rest: it fades in rising a little, and its buttons are where a click lands only then
     const bool shown = qWaitForScaled(
         [&] { return (mini = shownMiniPlayer(ui)) != nullptr && mini->opacity() == 1.0; });
     return shown ? mini : nullptr;
+}
+
+// The picture-in-picture window while the shell has one, or null
+QQuickWindow *pictureInPictureWindow(const Ui &ui)
+{
+    return qobject_cast<QQuickWindow *>(
+        ui.window->property("pictureInPictureWindow").value<QObject *>());
+}
+
+// An item of the picture-in-picture window, or null
+QQuickItem *pictureInPictureItem(QQuickWindow *pip, const QString &objectName)
+{
+    for (QQuickItem *candidate : allItems(pip->contentItem())) {
+        if (candidate->objectName() == objectName)
+            return candidate;
+    }
+    return nullptr;
+}
+
+// Puts the pointer over the picture-in-picture window and clicks the centre of one of its controls
+bool clickPictureInPictureControl(QQuickWindow *pip, const QString &objectName)
+{
+    QTest::mouseMove(pip, QPoint(pip->width() / 2 + 1, pip->height() / 4 + 1));
+    QTest::mouseMove(pip, QPoint(pip->width() / 2, pip->height() / 4));
+    QQuickItem *button = nullptr;
+    if (!qWaitForScaled([&] {
+            button = pictureInPictureItem(pip, objectName);
+            return button && button->isVisible() && button->isEnabled();
+        }))
+        return false;
+    const QQuickItem *scrim = pictureInPictureItem(pip, QStringLiteral("pictureInPictureScrim"));
+    if (!scrim || !qWaitForScaled([&] { return scrim->opacity() == 1.0; }))
+        return false;
+    QTest::mouseClick(
+        pip, Qt::LeftButton, Qt::NoModifier,
+        button->mapToScene(QPointF(button->width() / 2, button->height() / 2)).toPoint());
+    return true;
+}
+
+// Plays the fixture movie, enters picture in picture by the full player's button and waits for the window; it, or null
+QQuickWindow *openPictureInPicture(Ui &ui, PlayerStub &stub)
+{
+    QQuickItem *page = openPlayer(ui, stub);
+    QQuickItem *button =
+        page ? Ui::itemIn(page, QStringLiteral("playerPictureInPictureButton")) : nullptr;
+    if (!button)
+        return nullptr;
+    ui.clickCenter(button);
+    QQuickWindow *pip = nullptr;
+    const bool shown = qWaitForScaled([&] {
+        pip = pictureInPictureWindow(ui);
+        return pip && pip->isVisible()
+               && ui.window->property("playbackMode").toString() == QStringLiteral("pip");
+    });
+    return shown ? pip : nullptr;
 }
 
 // The item with the keyboard focus once it has stopped changing for a few polls
@@ -12120,7 +12199,7 @@ class TestUiPages : public QObject {
     {
         QTest::addColumn<QString>("route");
         for (const char *route :
-             {"osd back", "escape", "alt-left", "mini player button", "tab", "find", "remote home"})
+             {"osd back", "escape", "alt-left", "more actions entry", "tab", "find", "remote home"})
             QTest::newRow(route) << QString::fromLatin1(route);
     }
 
@@ -12151,8 +12230,8 @@ class TestUiPages : public QObject {
             QTest::keyClick(ui.window, Qt::Key_Escape);
         else if (route == QLatin1String("alt-left"))
             QTest::keyClick(ui.window, Qt::Key_Left, Qt::AltModifier);
-        else if (route == QLatin1String("mini player button"))
-            ui.clickCenter(ui.item(QStringLiteral("playerMiniButton")));
+        else if (route == QLatin1String("more actions entry"))
+            QVERIFY(chooseShowMiniPlayer(ui));
         else if (route == QLatin1String("tab")) {
             // The header and its tabs are hidden in the full player: a tab opened by the shell (a link, a remote) clears the stack under it, once the Movies tab exists
             const auto hasMovies = [&ui] {
@@ -12457,7 +12536,7 @@ class TestUiPages : public QObject {
         // The item is still opening when the player is left
         stub.loading = true;
         Q_EMIT stub.changed();
-        ui.clickCenter(Ui::itemIn(page, QStringLiteral("playerMiniButton")));
+        QVERIFY(chooseShowMiniPlayer(ui));
         QTRY_VERIFY(shownMiniPlayer(ui));
         QCOMPARE(ui.window->property("playbackMode").toString(), QStringLiteral("mini"));
         // It fails: the full player comes back with the error and the way to close it
@@ -12486,7 +12565,7 @@ class TestUiPages : public QObject {
                     && bar->isVisible());
         QQuickItem *page = openPlayer(ui, stub);
         QVERIFY(page);
-        ui.clickCenter(Ui::itemIn(page, QStringLiteral("playerMiniButton")));
+        QVERIFY(chooseShowMiniPlayer(ui));
         QQuickItem *mini = nullptr;
         QTRY_VERIFY((mini = shownMiniPlayer(ui)) != nullptr);
         QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("settingsPage"));
@@ -12573,7 +12652,7 @@ class TestUiPages : public QObject {
         QCOMPARE(stub.calls, calls);
 
         // The same commands reach the player under another page
-        ui.clickCenter(Ui::itemIn(ui.currentDetails(), QStringLiteral("playerMiniButton")));
+        QVERIFY(chooseShowMiniPlayer(ui));
         QTRY_VERIFY(shownMiniPlayer(ui));
         stub.calls.clear();
         for (const QString &command : sequence)
@@ -12588,7 +12667,7 @@ class TestUiPages : public QObject {
         QTRY_COMPARE(ui.window->visibility(), QWindow::Windowed);
 
         // Stop ends the playback from the mini player
-        ui.clickCenter(Ui::itemIn(ui.currentDetails(), QStringLiteral("playerMiniButton")));
+        QVERIFY(chooseShowMiniPlayer(ui));
         QTRY_VERIFY(shownMiniPlayer(ui));
         stub.calls.clear();
         Q_EMIT remote.actionRequested(QStringLiteral("stop"));
@@ -12597,6 +12676,7 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(ui.item(QStringLiteral("videoRenderer")) == nullptr);
     }
 
+    // One mode button in the row, Picture in Picture before Full Screen; the mini player is the first entry of More Actions, so two look-alike icons never sit side by side
     void playerModeButtonsFitTheNarrowRow()
     {
         PlayerStub stub;
@@ -12606,10 +12686,19 @@ class TestUiPages : public QObject {
         QVERIFY(ui.opensWindowOfWidth(1000));
         QVERIFY(ui.signIn());
         QVERIFY(openPlayer(ui, stub));
-        QQuickItem *mini = ui.item(QStringLiteral("playerMiniButton"));
+        QVERIFY(ui.item(QStringLiteral("playerMiniButton")) == nullptr);
         QQuickItem *fullScreen = ui.item(QStringLiteral("playerFullScreenButton"));
-        QVERIFY(mini && fullScreen);
-        QCOMPARE(mini->property("text").toString(), QStringLiteral("Show Mini Player"));
+        QQuickItem *pictureInPicture = ui.item(QStringLiteral("playerPictureInPictureButton"));
+        QVERIFY(fullScreen && pictureInPicture);
+        QCOMPARE(pictureInPicture->property("text").toString(),
+                 QStringLiteral("Picture in Picture"));
+        QObject *menu = ui.popup(QStringLiteral("playerMoreMenu"));
+        QVERIFY(menu);
+        QQuickItem *first = nullptr;
+        QMetaObject::invokeMethod(menu, "itemAt", Q_RETURN_ARG(QQuickItem *, first), Q_ARG(int, 0));
+        QVERIFY(first);
+        QCOMPARE(first->objectName(), QStringLiteral("playerMoreMiniItem"));
+        QCOMPARE(first->property("text").toString(), QStringLiteral("Show Mini Player"));
         QQuickItem *page = ui.currentDetails();
         for (const int width : {1000, 440}) {
             QVERIFY(ui.opensWindowOfWidth(width));
@@ -12617,17 +12706,326 @@ class TestUiPages : public QObject {
             QTRY_COMPARE(page->property("narrow").toBool(),
                          width < ui.window->property("wideLimit").toInt());
             // Icon only at every width (AbstractButton.IconOnly), right before Full Screen, and inside the window
-            QTRY_VERIFY(mini->isVisible() && mini->width() > 0);
-            QCOMPARE(mini->property("display").toInt(), 0);
+            QTRY_VERIFY(pictureInPicture->isVisible() && pictureInPicture->width() > 0);
+            QCOMPARE(pictureInPicture->property("display").toInt(), 0);
             const auto fits = [&] {
-                const QRectF rect = sceneRect(mini);
-                return rect.left() >= 0 && rect.right() <= ui.window->width()
-                       && rect.right() <= sceneRect(fullScreen).left() + 1
+                const QRectF rect = sceneRect(pictureInPicture);
+                return rect.left() >= 0 && rect.right() <= sceneRect(fullScreen).left() + 1
                        && sceneRect(fullScreen).right() <= ui.window->width();
             };
             QTRY_VERIFY(fits());
-            QCOMPARE(mini->width(), fullScreen->width());
+            QCOMPARE(pictureInPicture->width(), fullScreen->width());
         }
+    }
+
+    void pictureInPictureMovesTheVideoToItsWindow()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *page = openPlayer(ui, stub);
+        QVERIFY(page);
+        QQuickItem *video = ui.item(QStringLiteral("videoRenderer"));
+        QVERIFY(video && page->isAncestorOf(video));
+        QVERIFY(pictureInPictureWindow(ui) == nullptr);
+        QPointer<QQuickItem> leavingPage(page);
+        ui.clickCenter(ui.item(QStringLiteral("playerPictureInPictureButton")));
+        QQuickWindow *pip = nullptr;
+        QTRY_VERIFY((pip = pictureInPictureWindow(ui)) != nullptr);
+        QCOMPARE(ui.window->property("playbackMode").toString(), QStringLiteral("pip"));
+        // The video is the one item, now in the window of its own, which is not transient
+        QTRY_COMPARE(video->window(), pip);
+        QQuickItem *slot = pictureInPictureItem(pip, QStringLiteral("pictureInPictureVideoSlot"));
+        QVERIFY(slot && slot->isAncestorOf(video));
+        QVERIFY(pip != ui.window);
+        QVERIFY(pip->transientParent() == nullptr);
+        QVERIFY(pip->flags().testFlag(Qt::WindowStaysOnTopHint));
+        // No frame: the window has its own X and moves and resizes by itself
+        QVERIFY(pip->flags().testFlag(Qt::FramelessWindowHint));
+        QTRY_VERIFY(leavingPage.isNull());
+        QVERIFY(ui.currentDetails()->objectName() != QLatin1String("playerPage"));
+        QVERIFY(ui.item(QStringLiteral("playerPage")) == nullptr);
+        QVERIFY(stub.active);
+        QVERIFY(!stub.calls.contains(QStringLiteral("stop")));
+        // A click on the video pauses
+        stub.calls.clear();
+        QTest::mouseClick(pip, Qt::LeftButton, Qt::NoModifier,
+                          QPoint(pip->width() / 2, pip->height() / 2));
+        QTRY_VERIFY(stub.calls.contains(QStringLiteral("togglePause")));
+        // Space pauses too
+        stub.calls.clear();
+        QTest::keyClick(pip, Qt::Key_Space);
+        QTRY_VERIFY(stub.calls.contains(QStringLiteral("togglePause")));
+        QVERIFY(!stub.calls.contains(QStringLiteral("stop")));
+    }
+
+    void pictureInPictureReturnsToTheFullPlayer_data()
+    {
+        QTest::addColumn<QString>("way");
+        for (const char *way : {"close button", "window close", "double click", "shortcut"})
+            QTest::newRow(way) << QString::fromLatin1(way);
+    }
+
+    // Closing the window, from its own X or the window manager, gives the video back to the full player, as a double click and the shortcut do: the playback goes on
+    void pictureInPictureReturnsToTheFullPlayer()
+    {
+        QFETCH(QString, way);
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickWindow *pip = openPictureInPicture(ui, stub);
+        QVERIFY(pip);
+        QPointer<QQuickWindow> pipGuard(pip);
+        stub.calls.clear();
+        QCOMPARE(pictureInPictureItem(pip, QStringLiteral("pictureInPictureCloseButton"))
+                     ->property("text")
+                     .toString(),
+                 QStringLiteral("Close Picture in Picture"));
+        if (way == QLatin1String("close button")) {
+            QVERIFY(
+                clickPictureInPictureControl(pip, QStringLiteral("pictureInPictureCloseButton")));
+        } else if (way == QLatin1String("window close")) {
+            pip->close();
+        } else if (way == QLatin1String("double click")) {
+            QTest::mouseDClick(pip, Qt::LeftButton, Qt::NoModifier,
+                               QPoint(pip->width() / 2, pip->height() / 4));
+        } else {
+            pip->requestActivate();
+            QTRY_VERIFY(pip->isActive());
+            // The press is enough, and the window it returns from may be gone before a release could reach it
+            QTest::keyPress(pip, Qt::Key_P, Qt::ControlModifier | Qt::ShiftModifier);
+        }
+        QTRY_COMPARE(ui.window->property("playbackMode").toString(), QStringLiteral("full"));
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("playerPage"));
+        // The item is back inside the page of the main window, and the picture-in-picture window is gone
+        QQuickItem *video = ui.item(QStringLiteral("videoRenderer"));
+        QVERIFY(video);
+        QTRY_VERIFY(ui.currentDetails()->isAncestorOf(video));
+        QCOMPARE(video->window(), ui.window);
+        QTRY_VERIFY(pipGuard.isNull());
+        QVERIFY(pictureInPictureWindow(ui) == nullptr);
+        QVERIFY(!stub.calls.contains(QStringLiteral("stop")));
+        QVERIFY(stub.active);
+        // A single click on the video does not return: the double click is the only way
+        if (way == QLatin1String("double click"))
+            QVERIFY(!stub.calls.contains(QStringLiteral("togglePause")));
+    }
+
+    // On a touch screen the first tap only shows the controls, on the video and on a hidden control alike, as on the mini player
+    void pictureInPictureTouchShowsTheControlsFirst()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickWindow *pip = openPictureInPicture(ui, stub);
+        QVERIFY(pip);
+        QQuickItem *scrim = pictureInPictureItem(pip, QStringLiteral("pictureInPictureScrim"));
+        QQuickItem *close =
+            pictureInPictureItem(pip, QStringLiteral("pictureInPictureCloseButton"));
+        QObject *timer = pip->findChild<QObject *>(QStringLiteral("pictureInPictureRevealTimer"));
+        QVERIFY(scrim && close && timer);
+        QTRY_COMPARE(scrim->opacity(), 0.0);
+        QPointingDevice *touch = QTest::createTouchDevice();
+        const auto tap = [&](const QPoint &at) {
+            QTest::touchEvent(pip, touch).press(0, at);
+            QTest::touchEvent(pip, touch).release(0, at);
+        };
+        const QPoint onVideo(pip->width() / 2, pip->height() / 4);
+        const QPoint onClose =
+            close->mapToScene(QPointF(close->width() / 2, close->height() / 2)).toPoint();
+        stub.calls.clear();
+        timer->setProperty("interval", 60000);
+        // A tap on the video shows the controls and neither pauses nor returns
+        tap(onVideo);
+        QTRY_COMPARE(scrim->opacity(), 1.0);
+        QTest::qWait(400);
+        QVERIFY(stub.calls.isEmpty());
+        QCOMPARE(ui.window->property("playbackMode").toString(), QStringLiteral("pip"));
+        // Hidden again, a tap on the X only shows the controls: the window stays
+        timer->setProperty("interval", 50);
+        QTRY_COMPARE(scrim->opacity(), 0.0);
+        timer->setProperty("interval", 60000);
+        tap(onClose);
+        QTRY_COMPARE(scrim->opacity(), 1.0);
+        QTest::qWait(100);
+        QCOMPARE(ui.window->property("playbackMode").toString(), QStringLiteral("pip"));
+        // Shown, the same tap closes the window and the full player takes the video back
+        tap(onClose);
+        QTRY_COMPARE(ui.window->property("playbackMode").toString(), QStringLiteral("full"));
+        QVERIFY(!stub.calls.contains(QStringLiteral("stop")));
+    }
+
+    // The timeline seeks where a drag lets go, and the time shows where the video is
+    void pictureInPictureHasATimeline()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        stub.durationTicks = 600 * 10000000LL;
+        stub.positionTicks = 60 * 10000000LL;
+        stub.canSeek = true;
+        Q_EMIT stub.changed();
+        QQuickWindow *pip = openPictureInPicture(ui, stub);
+        QVERIFY(pip);
+        QQuickItem *timeline =
+            pictureInPictureItem(pip, QStringLiteral("pictureInPictureTimeline"));
+        QQuickItem *time = pictureInPictureItem(pip, QStringLiteral("pictureInPictureTime"));
+        QVERIFY(timeline && time);
+        QVERIFY(timeline->isEnabled());
+        QCOMPARE(timeline->property("value").toDouble(), 60.0);
+        QCOMPARE(time->property("text").toString(), QStringLiteral("60 / 600"));
+        stub.calls.clear();
+        // Over the window, so the controls show, then a click at three quarters of the groove
+        QTest::mouseMove(pip, QPoint(pip->width() / 2, pip->height() / 2));
+        QQuickItem *scrim = pictureInPictureItem(pip, QStringLiteral("pictureInPictureScrim"));
+        QTRY_COMPARE(scrim->opacity(), 1.0);
+        const QPoint at =
+            timeline->mapToScene(QPointF(timeline->width() * 0.75, timeline->height() / 2))
+                .toPoint();
+        QTest::mouseClick(pip, Qt::LeftButton, Qt::NoModifier, at);
+        QTRY_VERIFY(std::any_of(stub.calls.cbegin(), stub.calls.cend(), [](const QString &call) {
+            return call.startsWith(QLatin1String("seek "));
+        }));
+        QCOMPARE(ui.window->property("playbackMode").toString(), QStringLiteral("pip"));
+    }
+
+    // A playback that fails in its own window comes back to the full player with its error, as from the mini player
+    void pictureInPictureFailureReturnsToTheFullPlayer()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickWindow *pip = openPictureInPicture(ui, stub);
+        QVERIFY(pip);
+        QPointer<QQuickWindow> pipGuard(pip);
+        stub.active = false;
+        stub.errorText = QStringLiteral("The video could not be opened. Try again.");
+        Q_EMIT stub.changed();
+        QTRY_COMPARE(ui.window->property("playbackMode").toString(), QStringLiteral("full"));
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("playerPage"));
+        QTRY_VERIFY(ui.showsText(stub.errorText));
+        QTRY_VERIFY(pipGuard.isNull());
+        QVERIFY(!stub.calls.contains(QStringLiteral("stop")));
+    }
+
+    // The window that could not create a render context gives the video back to the full player, playing on
+    void pictureInPictureRendererFailureReturnsToTheFullPlayer()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickWindow *pip = openPictureInPicture(ui, stub);
+        QVERIFY(pip);
+        QQuickItem *video = pictureInPictureItem(pip, QStringLiteral("videoRenderer"));
+        QVERIFY(video);
+        QVERIFY(QMetaObject::invokeMethod(video, "rendererFailed"));
+        QTRY_COMPARE(ui.window->property("playbackMode").toString(), QStringLiteral("full"));
+        QTRY_COMPARE(video->window(), ui.window);
+        QVERIFY(stub.active);
+        QVERIFY(!stub.calls.contains(QStringLiteral("stop")));
+    }
+
+    void pictureInPictureGoesOnSignOut()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickWindow *pip = openPictureInPicture(ui, stub);
+        QVERIFY(pip);
+        QPointer<QQuickWindow> pipGuard(pip);
+        ui.controller.signOut();
+        QTRY_VERIFY(ui.item(QStringLiteral("serversPage")) != nullptr);
+        QTRY_VERIFY(pipGuard.isNull());
+        QTRY_VERIFY(ui.item(QStringLiteral("videoRenderer")) == nullptr);
+        QCOMPARE(ui.window->property("playbackMode").toString(), QStringLiteral("none"));
+    }
+
+    // Back to the full player and straight into picture in picture again, before the window of the first visit is gone: the video ends in a window that stays
+    void pictureInPictureCanBeEnteredAgainAtOnce()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickWindow *pip = openPictureInPicture(ui, stub);
+        QVERIFY(pip);
+        QVERIFY(QMetaObject::invokeMethod(ui.window, "expandPlayer"));
+        QVERIFY(QMetaObject::invokeMethod(ui.window, "enterPictureInPicture"));
+        QTRY_COMPARE(ui.window->property("playbackMode").toString(), QStringLiteral("pip"));
+        // A few turns later the window is still there and holds the video
+        QTest::qWait(200);
+        QQuickWindow *now = pictureInPictureWindow(ui);
+        QVERIFY(now && now->isVisible());
+        QVERIFY(pictureInPictureItem(now, QStringLiteral("videoRenderer")));
+        QVERIFY(!stub.calls.contains(QStringLiteral("stop")));
+    }
+
+    // Offscreen there is no Wayland compositor: the picture-in-picture surface is not offered and the window stays an ordinary frameless one
+    void thePictureInPictureSurfaceIsUnavailableOffscreen()
+    {
+        Kinefin::PipSurface surface;
+        QVERIFY(!surface.available());
+        QVERIFY(!surface.assign(nullptr));
+        QWindow window;
+        QVERIFY(!surface.assign(&window));
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickWindow *pip = openPictureInPicture(ui, stub);
+        QVERIFY(pip && pip->isVisible());
+        QVERIFY(pip->width() >= pip->minimumWidth());
+        QCOMPARE(pip->height(), qRound(pip->width() * 9.0 / 16.0));
+    }
+
+    // A stop from elsewhere (the remote, MPRIS) ends the playback and takes the window away
+    void pictureInPictureGoesWithARemoteStop()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickWindow *pip = openPictureInPicture(ui, stub);
+        QVERIFY(pip);
+        QPointer<QQuickWindow> pipGuard(pip);
+        QVERIFY(QMetaObject::invokeMethod(ui.window, "playerAction",
+                                          Q_ARG(QVariant, QStringLiteral("stop"))));
+        QTRY_VERIFY(stub.calls.contains(QStringLiteral("stop")));
+        QTRY_COMPARE(ui.window->property("playbackMode").toString(), QStringLiteral("none"));
+        QTRY_VERIFY(pipGuard.isNull());
+        QTRY_VERIFY(ui.item(QStringLiteral("videoRenderer")) == nullptr);
+    }
+
+    void closingTheMainWindowClosesPictureInPicture()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickWindow *pip = openPictureInPicture(ui, stub);
+        QVERIFY(pip);
+        QPointer<QQuickWindow> pipGuard(pip);
+        ui.window->close();
+        QTRY_VERIFY(stub.calls.contains(QStringLiteral("stop")));
+        QTRY_VERIFY(pipGuard.isNull());
     }
 
     void homeLibrariesFollowTheSetting()
@@ -14709,17 +15107,26 @@ class TestUiPages : public QObject {
             if (entry && entry->isVisible() && !entry->inherits("QQuickMenuSeparator"))
                 entries << entry->property("text").toString();
         }
-        QCOMPARE(entries,
-                 QStringList(
-                     {QStringLiteral("Pause"), QStringLiteral("Previous"), QStringLiteral("Next"),
-                      QStringLiteral("Audio"), QStringLiteral("Subtitles"),
-                      QStringLiteral("Full Screen Mode"), QStringLiteral("Show Mini Player"),
-                      QStringLiteral("Shuffle"), QStringLiteral("Repeat"),
-                      QStringLiteral("Playback Speed"), QStringLiteral("Aspect Ratio"),
-                      QStringLiteral("Chapters"), QStringLiteral("AV Sync"),
-                      QStringLiteral("Sleep Timer"), QStringLiteral("Forget Series Choices"),
-                      QStringLiteral("Now Playing Queue"), QStringLiteral("Screenshot"),
-                      QStringLiteral("Playback Info"), QStringLiteral("Keep Controls Visible")}));
+        QCOMPARE(entries, QStringList({QStringLiteral("Pause"),
+                                       QStringLiteral("Previous"),
+                                       QStringLiteral("Next"),
+                                       QStringLiteral("Audio"),
+                                       QStringLiteral("Subtitles"),
+                                       QStringLiteral("Full Screen Mode"),
+                                       QStringLiteral("Show Mini Player"),
+                                       QStringLiteral("Picture in Picture"),
+                                       QStringLiteral("Shuffle"),
+                                       QStringLiteral("Repeat"),
+                                       QStringLiteral("Playback Speed"),
+                                       QStringLiteral("Aspect Ratio"),
+                                       QStringLiteral("Chapters"),
+                                       QStringLiteral("AV Sync"),
+                                       QStringLiteral("Sleep Timer"),
+                                       QStringLiteral("Forget Series Choices"),
+                                       QStringLiteral("Now Playing Queue"),
+                                       QStringLiteral("Screenshot"),
+                                       QStringLiteral("Playback Info"),
+                                       QStringLiteral("Keep Controls Visible")}));
         // The track submenus list what the bars' menus list
         for (const auto &[bar, context] :
              {std::pair{QStringLiteral("playerAudioMenu"),

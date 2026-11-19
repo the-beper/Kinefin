@@ -193,6 +193,8 @@ class PlayerController final : public QObject {
     // and detach precedes destruction (including account switch and window close).
     bool attachVideo(MpvAbstractItem *item, MpvController *controller);
     void detachVideo(MpvAbstractItem *item);
+    // The attached item got a new render context (it moved to another window), after which libmpv drops the picture: selects the video track again, nothing else changes
+    void videoRendererChanged(MpvAbstractItem *item);
 
     Q_INVOKABLE bool playItem(const QString &id, qint64 resumeTicks = 0);
     // Plays a completed download from its local path; title and subtitle come from the download record. No request is made and nothing is reported

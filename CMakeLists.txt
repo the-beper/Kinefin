@@ -21,9 +21,18 @@ qt_standard_project_setup(REQUIRES 6.6)
 set(KINEFIN_MPVQT_URL "https://download.kde.org/stable/mpvqt/mpvqt-1.2.1.tar.xz"
     CACHE STRING "URL of the pinned mpvqt 1.2.1 tarball (see the Flatpak manifest)")
 include(FetchContent)
+# The hash of the vendored renderer is part of the patch step, so an edit of third_party/mpvqt reaches an existing build tree too
+file(SHA256 ${CMAKE_CURRENT_SOURCE_DIR}/third_party/mpvqt/mpvrenderer.cpp KINEFIN_MPVQT_RENDERER_CPP)
+file(SHA256 ${CMAKE_CURRENT_SOURCE_DIR}/third_party/mpvqt/mpvrenderer.h KINEFIN_MPVQT_RENDERER_H)
 FetchContent_Declare(mpvqt
     URL "${KINEFIN_MPVQT_URL}"
     URL_HASH SHA256=6ff5f56a0edd8248073446e5cc038f47d4b17c46b6af43cf438123d0ac911189
+    # The renderer sources of third_party/mpvqt replace the tarball's (the build image has no patch tool); copy_if_different keeps a repeated populate harmless. A new mpvqt version needs them diffed against its own renderer first
+    PATCH_COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/mpvqt/mpvrenderer.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/mpvqt/mpvrenderer.h
+        <SOURCE_DIR>/src/
+    COMMAND ${CMAKE_COMMAND} -E echo "vendored mpvqt renderer ${KINEFIN_MPVQT_RENDERER_CPP} ${KINEFIN_MPVQT_RENDERER_H}"
 )
 set(BUILD_SHARED_LIBS OFF)
 FetchContent_MakeAvailable(mpvqt)
@@ -191,7 +200,7 @@ target_compile_definitions(kinefin_integration PRIVATE TRANSLATION_DOMAIN="kinef
 target_link_libraries(kinefin_integration PUBLIC kinefin_player Qt6::DBus Qt6::Gui Qt6::Network KF6::I18n)
 
 # The QML module lives in a static library of its own so that the UI tests can import it like the application does
-foreach(page Main PlayerPage OsdButton MiniPlayer PlaybackInfoOverlay ShellHeader AboutDialog ShortcutsDialog RemoteSessionsDialog SyncPlayDialog MediaInfoDialog HomePage LibraryTile LibraryPage ResumeItemsPage MediaCard CardMenu CardRow EpisodeRow ItemDetailsPage SearchPage QueuePage FilterDialog GenreRailsView GenreRailsPage LibraryContent ItemListRow ItemRowGrid LoginPage UserPickerPage MessageBox ServersPage SettingsPage SettingRow UserPreferencesForm UserPreferencesSaveBar FavoritesPage FavoritesGroupPage TopFade MediaListRow PlaylistsPage PlaylistPage PlaylistDialogs AddToPlaylistDialog PageToolbar PageBackButton FadeInOnShow PageTitle DownloadsPage RuleDialog SubtitleSearchDialog)
+foreach(page Main PlayerPage OsdButton MiniPlayer PictureInPictureWindow PlaybackInfoOverlay ShellHeader AboutDialog ShortcutsDialog RemoteSessionsDialog SyncPlayDialog MediaInfoDialog HomePage LibraryTile LibraryPage ResumeItemsPage MediaCard CardMenu CardRow EpisodeRow ItemDetailsPage SearchPage QueuePage FilterDialog GenreRailsView GenreRailsPage LibraryContent ItemListRow ItemRowGrid LoginPage UserPickerPage MessageBox ServersPage SettingsPage SettingRow UserPreferencesForm UserPreferencesSaveBar FavoritesPage FavoritesGroupPage TopFade MediaListRow PlaylistsPage PlaylistPage PlaylistDialogs AddToPlaylistDialog PageToolbar PageBackButton FadeInOnShow PageTitle DownloadsPage RuleDialog SubtitleSearchDialog)
     set_source_files_properties(src/qml/${page}.qml PROPERTIES QT_RESOURCE_ALIAS ${page}.qml)
 endforeach()
 # The images the pages draw themselves, beside the QML files they belong to
@@ -207,6 +216,7 @@ qt_add_qml_module(kinefin_ui
         src/qml/PlayerPage.qml
         src/qml/OsdButton.qml
         src/qml/MiniPlayer.qml
+        src/qml/PictureInPictureWindow.qml
         src/qml/MediaListRow.qml
         src/qml/PlaylistsPage.qml
         src/qml/PlaylistPage.qml
@@ -271,6 +281,8 @@ qt_add_qml_module(kinefin_ui
         src/app/MouseNavigation.h
         src/app/MpvVideoItem.cpp
         src/app/MpvVideoItem.h
+        src/app/PipSurface.cpp
+        src/app/PipSurface.h
         src/app/RemoteCommands.cpp
         src/app/RemoteCommands.h
 )
@@ -281,6 +293,40 @@ target_link_libraries(kinefin_ui PUBLIC
     Qt6::Gui Qt6::Quick Qt6::Qml Qt6::QuickControls2
     KF6::I18n KF6::I18nQml
 )
+# KWin's picture-in-picture surface needs QtWaylandClient's private headers: the Flatpak SDK ships them, the Fedora build image has the CMake target without them. Without them PipSurface reports itself unavailable and the window stays an ordinary one
+find_package(Qt6 QUIET COMPONENTS WaylandClient WaylandClientPrivate WaylandScannerTools)
+find_program(KINEFIN_WAYLAND_SCANNER wayland-scanner)
+set(KINEFIN_XX_PIP OFF)
+if(TARGET Qt6::WaylandClientPrivate AND COMMAND qt6_generate_wayland_protocol_client_sources AND KINEFIN_WAYLAND_SCANNER)
+    find_path(KINEFIN_WAYLAND_CLIENT_PRIVATE_DIR QtWaylandClient/private/qwaylandshellsurface_p.h
+        PATHS "${QT6_INSTALL_PREFIX}/${QT6_INSTALL_HEADERS}/QtWaylandClient/${Qt6WaylandClient_VERSION}"
+              "${QT6_INSTALL_PREFIX}/include/QtWaylandClient/${Qt6WaylandClient_VERSION}"
+              "${QT6_INSTALL_PREFIX}/include/qt6/QtWaylandClient/${Qt6WaylandClient_VERSION}"
+        NO_DEFAULT_PATH)
+    # Qt's own copy first: the interface tables below then describe the same xdg-shell as QtWaylandClient's
+    find_file(KINEFIN_XDG_SHELL_XML xdg-shell.xml
+        PATHS "${QT6_INSTALL_PREFIX}/${QT6_INSTALL_DATA}/wayland/protocols/xdg-shell"
+              "${QT6_INSTALL_PREFIX}/share/qt6/wayland/protocols/xdg-shell"
+              "${QT6_INSTALL_PREFIX}/share/wayland-protocols/stable/xdg-shell"
+        NO_DEFAULT_PATH)
+    if(KINEFIN_WAYLAND_CLIENT_PRIVATE_DIR AND KINEFIN_XDG_SHELL_XML)
+        # The scanner writes the protocols' interface tables as C sources
+        enable_language(C)
+        qt6_generate_wayland_protocol_client_sources(kinefin_ui FILES
+            ${CMAKE_CURRENT_SOURCE_DIR}/third_party/wayland/xx-pip-v1.xml)
+        # Only the interface tables of xdg-shell, which xx-pip-v1 refers to: its C++ wrappers come from QtWaylandClient, which exports them, and a second copy of those classes would stand in for Qt's own
+        set(KINEFIN_XDG_SHELL_TABLES ${CMAKE_CURRENT_BINARY_DIR}/kinefin-xdg-shell-interfaces.c)
+        add_custom_command(OUTPUT ${KINEFIN_XDG_SHELL_TABLES}
+            COMMAND ${KINEFIN_WAYLAND_SCANNER} private-code ${KINEFIN_XDG_SHELL_XML} ${KINEFIN_XDG_SHELL_TABLES}
+            DEPENDS ${KINEFIN_XDG_SHELL_XML}
+            VERBATIM)
+        target_sources(kinefin_ui PRIVATE ${KINEFIN_XDG_SHELL_TABLES})
+        target_link_libraries(kinefin_ui PRIVATE Qt6::WaylandClientPrivate)
+        target_compile_definitions(kinefin_ui PRIVATE KINEFIN_HAVE_XX_PIP)
+        set(KINEFIN_XX_PIP ON)
+    endif()
+endif()
+message(STATUS "KWin picture-in-picture surface (xx_pip_v1): ${KINEFIN_XX_PIP}")
 
 add_executable(kinefin src/main.cpp)
 qt_add_resources(kinefin "licenses"

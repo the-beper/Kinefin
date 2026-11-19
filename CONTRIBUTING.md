@@ -41,7 +41,9 @@ The UI tests (`test_ui_pages`) run as the shards `ui_pages_0` to `ui_pages_5`, w
 
 The build tree defaults to `/buildtmp/check` (a named podman volume build-env.sh mounts — incremental between runs). Keep CMake build trees outside the checkout: the `dist/` tree is scanned by the REUSE gate, which would otherwise have to cover the fetched third-party mpvqt sources. `dist/` is not in git. To run the built app in the container you are on your own — playback needs a real session; do that on the host once it can be host-built, or inside the container for offscreen-only experiments.
 
-mpvqt 1.2.1 is fetched by the root `CMakeLists.txt` (`FetchContent`, SHA256 pinned); the Flatpak manifest pins the same tarball and points `KINEFIN_MPVQT_URL` at it, so the two pins must move together.
+mpvqt 1.2.1 is fetched by the root `CMakeLists.txt` (`FetchContent`, SHA256 pinned); the Flatpak manifest pins the same tarball and points `KINEFIN_MPVQT_URL` at it, so the two pins must move together. Its renderer is replaced by the copy in `third_party/mpvqt/` (the patch step of `FetchContent`); a new mpvqt version needs that copy diffed against its own renderer first.
+
+The picture-in-picture window's KWin surface (`src/app/PipSurface.cpp`, the `xx_pip_v1` protocol vendored in `third_party/wayland/`) uses QtWaylandClient's private headers, which only the Flatpak SDK ships: it compiles in the Flatpak build alone (CMake prints `KWin picture-in-picture surface (xx_pip_v1): ON`), while the native build and the offscreen tests get the ordinary-window fallback.
 
 After changing `build/Containerfile`, rebuild the local image before checking:
 

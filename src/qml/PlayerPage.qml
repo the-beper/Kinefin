@@ -96,6 +96,11 @@ Kirigami.Page {
         shell.parkVideo();
         shell.pageStack.currentIndex = Math.max(0, shell.pageStack.currentIndex - 1);
     }
+    // The video moves into the picture-in-picture window and the page goes
+    function pictureInPicture() {
+        const shell = page.Window.window;
+        shell.enterPictureInPicture();
+    }
     function closePlayer() { page.Window.window.stopPlayback(); }
     // When a menu or popup last began to close: the click that closes one is not a click on the video
     property double popupClosedAt: 0
@@ -904,11 +909,12 @@ Kirigami.Page {
                         text: i18nc("@action:button subtitle tracks", "Subtitles")
                         onClicked: page.openMenu(subtitlesMenu, subtitlesButton)
                     }
+                    // The mini player has no button of its own beside this one, which looked too alike: it is the first entry of More Actions, and Back leads to it as well
                     OsdButton {
-                        objectName: "playerMiniButton"
-                        icon.name: "window-minimize-pip"
-                        text: i18nc("@action:button", "Show Mini Player")
-                        onClicked: page.leavePlayer()
+                        objectName: "playerPictureInPictureButton"
+                        icon.name: "window-duplicate"
+                        text: i18nc("@action:button", "Picture in Picture")
+                        onClicked: page.pictureInPicture()
                     }
                     OsdButton {
                         objectName: "playerFullScreenButton"
@@ -988,6 +994,15 @@ Kirigami.Page {
         id: moreMenu
         objectName: "playerMoreMenu"
         onAboutToHide: page.popupGone()
+        leading: [
+            Controls.MenuItem {
+                objectName: "playerMoreMiniItem"
+                icon.name: "window-minimize-pip"
+                text: i18nc("@action:button", "Show Mini Player")
+                onTriggered: page.leavePlayer()
+            },
+            Controls.MenuSeparator {}
+        ]
     }
     // The right click on the video: the controls of the bars and every entry of More Actions, built from the same components as the menus above so they never drift apart
     MoreMenu {
@@ -1043,6 +1058,12 @@ Kirigami.Page {
                 icon.name: "window-minimize-pip"
                 text: i18nc("@action:button", "Show Mini Player")
                 onTriggered: page.leavePlayer()
+            },
+            Controls.MenuItem {
+                objectName: "playerContextPictureInPictureItem"
+                icon.name: "window-duplicate"
+                text: i18nc("@action:button", "Picture in Picture")
+                onTriggered: page.pictureInPicture()
             },
             Controls.MenuSeparator {}
         ]

@@ -15,3 +15,17 @@ path = "data/io.github.the_beper.Kinefin.metainfo.xml"
 precedence = "override"
 SPDX-FileCopyrightText = "2026 Kinefin contributors"
 SPDX-License-Identifier = "CC0-1.0"
+
+# The vendored mpvqt renderer sources are LGPL, not GPL (copied over the fetched mpvqt tree at configure time)
+[[annotations]]
+path = "third_party/mpvqt/**"
+precedence = "override"
+SPDX-FileCopyrightText = ["2023 George Florea Bănuș <georgefb899@gmail.com>", "2026 Kinefin contributors"]
+SPDX-License-Identifier = "LGPL-2.1-only OR LGPL-3.0-only OR LicenseRef-KDE-Accepted-LGPL"
+
+# KWin's picture-in-picture protocol, vendored unchanged (no package ships it)
+[[annotations]]
+path = "third_party/wayland/xx-pip-v1.xml"
+precedence = "override"
+SPDX-FileCopyrightText = "2025 Vlad Zahorodnii"
+SPDX-License-Identifier = "MIT"

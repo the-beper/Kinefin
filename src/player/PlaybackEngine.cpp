@@ -147,6 +147,9 @@ void PlaybackEngine::wireController()
         m_session.opened();
         if (m_startPaused)
             m_session.pause();
+        // The renderer changed while the file opened: mpv may have loaded it without a context, so the video is chosen again now
+        if (std::exchange(m_restorePending, false))
+            restoreVideo(true);
         Q_EMIT fileLoaded();
     });
     // An event, unlike the `seeking` property, whose quick true-false flips mpv may leave unreported
@@ -172,6 +175,7 @@ void PlaybackEngine::wireController()
         {"decoder-frame-drop-count", MPV_FORMAT_INT64, 9},
         {"hwdec-current", MPV_FORMAT_STRING, 10},
         {"video-dec-params", MPV_FORMAT_NODE, 11},
+        {"vid", MPV_FORMAT_NODE, 12},
     };
     for (const Observed &entry : observed) {
         if (m_renderer)
@@ -224,6 +228,8 @@ bool PlaybackEngine::open(const PlaybackSource &source, bool startPaused)
     m_stopPending = false;
     m_stopWatchdog.stop();
     m_startPaused = startPaused;
+    m_videoTrackId.reset();
+    m_restorePending = false;
     settleSeek();
     if (m_durationTicks != 0) {
         m_durationTicks = 0;
@@ -436,6 +442,10 @@ void PlaybackEngine::onPropertyChanged(const QString &property, const QVariant &
     } else if (property == QLatin1String("video-dec-params")) {
         if (value.isValid())
             Q_EMIT videoParamsChanged();
+    } else if (property == QLatin1String("vid")) {
+        // Only a selected track is remembered: the off state is what restoreVideo repairs
+        if (value.typeId() == QMetaType::LongLong || value.typeId() == QMetaType::Int)
+            m_videoTrackId = value.toLongLong();
     } else if (const char *key = videoFactKey(property)) {
         const QString name = QString::fromLatin1(key);
         const bool isText = value.typeId() == QMetaType::QString;
@@ -454,6 +464,61 @@ void PlaybackEngine::onPropertyChanged(const QString &property, const QVariant &
             m_session.bufferRecovered();
         }
     }
+}
+
+std::optional<qint64> videoTrackToRestore(const QVariantList &trackList,
+                                          std::optional<qint64> previous)
+{
+    std::optional<qint64> first;
+    std::optional<qint64> marked;
+    for (const QVariant &entry : trackList) {
+        const QVariantMap track = entry.toMap();
+        const qint64 id = track.value(QStringLiteral("id")).toLongLong();
+        if (track.value(QStringLiteral("type")).toString() != QLatin1String("video") || id <= 0)
+            continue;
+        if (previous && id == *previous)
+            return id;
+        if (track.value(QStringLiteral("albumart")).toBool())
+            continue;
+        if (!first)
+            first = id;
+        if (!marked && track.value(QStringLiteral("default")).toBool())
+            marked = id;
+    }
+    return marked ? marked : first;
+}
+
+void PlaybackEngine::restoreVideo(bool afterLoad)
+{
+    if (m_controller == nullptr)
+        return;
+    switch (m_session.state()) {
+    case PlaybackSession::State::Playing:
+    case PlaybackSession::State::Paused:
+    case PlaybackSession::State::Buffering:
+        break;
+    case PlaybackSession::State::Opening:
+        // Settled once the file is loaded
+        m_restorePending = true;
+        return;
+    default:
+        return;
+    }
+    // A file whose video was never on (vid=no in a raw mpv.conf) was not turned off by the renderer: only a load during the change may choose a track the file never showed
+    if (!m_videoTrackId && !afterLoad)
+        return;
+    const QVariant vid = mpvProperty(QStringLiteral("vid"));
+    const bool off =
+        (vid.typeId() == QMetaType::Bool && !vid.toBool())
+        || (vid.typeId() == QMetaType::QString && vid.toString() == QLatin1String("no"));
+    if (!off)
+        return;
+    const std::optional<qint64> track =
+        videoTrackToRestore(mpvProperty(QStringLiteral("track-list")).toList(), m_videoTrackId);
+    if (!track)
+        return;
+    qCDebug(playerLog) << "video was turned off, selecting track" << *track;
+    setProperty(QStringLiteral("vid"), *track);
 }
 
 void PlaybackEngine::onEndFile(const QString &reason)

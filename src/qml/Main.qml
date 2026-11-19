@@ -278,10 +278,10 @@ Kirigami.ApplicationWindow {
         enabled: window.signedIn
         onActivated: window.openSearch()
     }
-    // Brings the mini player back to the full player
+    // Brings the mini player or the picture-in-picture window back to the full player
     Shortcut {
         sequences: ["Ctrl+Shift+P"]
-        enabled: window.playbackMode === "mini"
+        enabled: window.playbackMode === "mini" || window.playbackMode === "pip"
         onActivated: window.expandPlayer()
     }
 
@@ -459,6 +459,11 @@ Kirigami.ApplicationWindow {
             close.accepted = false;
             return;
         }
+        // The picture-in-picture window would keep the application alive: its playback stops first
+        if (playbackMode === "pip") {
+            stopPlayback();
+            pipOpen = false;
+        }
         // A full-screen or maximized window has no geometry of its own to keep; a full screen the player entered keeps the window it came from
         if (window.visibility === Window.Windowed)
             settings.setWindowGeometry(Qt.rect(x, y, width, height));
@@ -504,12 +509,15 @@ Kirigami.ApplicationWindow {
 
     readonly property bool playbackPageShowing: pageStack.currentItem?.objectName === "playerPage"
 
-    // How the playback shows: "none" while nothing plays, "full" while the player page is in front, "mini" while it goes on under another page. The C++ side knows nothing of it
+    // How the playback shows: "none" while nothing plays, "full" while the player page is in front, "mini" while it goes on under another page, "pip" while it shows in its own window. The C++ side knows nothing of it
     property string playbackMode: "none"
     // The player page pushed last; QML clears it when the page is deleted
     property Item playerPage: null
-    // Where the video item sits in the current mode: the slot of the player page or of the mini player, none without playback
-    readonly property Item videoSlot: playbackMode === "full" ? (playerPage?.videoSlot ?? null) : playbackMode === "mini" ? miniPlayer.videoSlot : null
+    // Whether the picture-in-picture window exists: set before the mode moves into it, cleared only after the video has left it, since the destruction of the window is what frees its render context
+    property bool pipOpen: false
+    readonly property var pictureInPictureWindow: pipLoader.item?.pip ?? null
+    // Where the video item sits in the current mode: the slot of the player page, of the mini player or of the picture-in-picture window, none without playback
+    readonly property Item videoSlot: playbackMode === "full" ? (playerPage?.videoSlot ?? null) : playbackMode === "mini" ? miniPlayer.videoSlot : playbackMode === "pip" ? (pictureInPictureWindow?.videoSlot ?? null) : null
     onVideoSlotChanged: placeVideo()
 
     // The one video item, built when playback starts and deleted only when it ends, so the mpv core and the session outlive every page; it is never a child of a page, only moved between the slots
@@ -525,6 +533,13 @@ Kirigami.ApplicationWindow {
             objectName: "videoRenderer"
             anchors.fill: parent
             player: window.player
+            // The picture-in-picture window could not render the video: it goes back to the full player, playing on
+            onRendererFailed: {
+                if (window.playbackMode !== "pip")
+                    return;
+                window.showPassiveNotification(i18n("The video could not be shown in its own window"));
+                window.expandPlayer();
+            }
         }
         onLoaded: window.placeVideo()
     }
@@ -565,6 +580,18 @@ Kirigami.ApplicationWindow {
         id: miniPlayer
         shell: window
     }
+    // The picture-in-picture window exists only while pipOpen; a Loader loads items only, so a plain item holds it
+    Loader {
+        id: pipLoader
+        active: window.pipOpen
+        sourceComponent: Item {
+            property alias pip: pipWindow
+            PictureInPictureWindow {
+                id: pipWindow
+                shell: window
+            }
+        }
+    }
     // The height from the bottom of the window that the docked mini player covers, for the content that ends there and has a control in the corner
     readonly property real miniPlayerSpace: playbackMode === "mini" ? miniPlayer.height + miniPlayer.margin * 2 : 0
 
@@ -573,7 +600,34 @@ Kirigami.ApplicationWindow {
     // A turn later: the expansion changes the mode this property is computed from
     onFailedInMiniChanged: if (failedInMini) Qt.callLater(expandPlayer)
 
-    // A new play always opens the full player, from the mini player too
+    // A playback that fails in the picture-in-picture window brings the full player back, with its error
+    readonly property bool failedInPip: playbackMode === "pip" && !!player && !player.active && !!player.errorText
+    onFailedInPipChanged: if (failedInPip) Qt.callLater(expandPlayer)
+
+    // Moves the playback from the full player into the picture-in-picture window: the window exists and the video is in it before the page leaves, so the item never stays in a page that goes away
+    function enterPictureInPicture() {
+        if (playbackMode !== "full" || !playbackPageShowing || !player?.active)
+            return;
+        pipOpen = true;
+        if (!pictureInPictureWindow) {
+            pipOpen = false;
+            return;
+        }
+        playbackMode = "pip";
+        placeVideo();
+        // As Kirigami's Back does: the index moves, the shell takes the page left above once the stack settles
+        pageStack.currentIndex = Math.max(0, pageStack.currentIndex - 1);
+    }
+
+    // The window goes a turn after the video left it, unless the mode went back to picture in picture meanwhile
+    function closePictureInPicture() {
+        Qt.callLater(() => {
+            if (window.playbackMode !== "pip")
+                window.pipOpen = false;
+        });
+    }
+
+    // A new play always opens the full player, from the mini player and from picture in picture too
     function showPlayerPage() {
         // A downloaded item plays without a session, in Offline too
         if (!(window.signedIn || window.offline) || !window.player)
@@ -594,11 +648,18 @@ Kirigami.ApplicationWindow {
         }
         playerPage = page;
         placeVideo();
+        if (before === "pip") {
+            closePictureInPicture();
+            if (window.visibility === Window.Minimized)
+                window.showNormal();
+            window.raise();
+            window.requestActivate();
+        }
         return true;
     }
 
     function expandPlayer() {
-        if (playbackMode === "mini")
+        if (playbackMode === "mini" || playbackMode === "pip")
             showPlayerPage();
     }
 
@@ -606,10 +667,13 @@ Kirigami.ApplicationWindow {
     function endPlayback() {
         if (playbackMode === "none")
             return;
-        const wasMini = playbackMode === "mini";
+        const wasMini = playbackMode === "mini" || playbackMode === "pip";
+        const wasPip = playbackMode === "pip";
         if (videoLoader.item)
             videoLoader.item.player = null;
         playbackMode = "none";
+        if (wasPip)
+            closePictureInPicture();
         const live = connection.state === ConnectionController.Authenticated || window.offline;
         if (playbackPageShowing && live)
             pageStack.pop();
@@ -655,7 +719,7 @@ Kirigami.ApplicationWindow {
         case "togglemute": player.toggleMute(); break;
         case "togglefullscreen":
             // A full screen needs the full player
-            if (playbackMode === "mini" && !showPlayerPage())
+            if ((playbackMode === "mini" || playbackMode === "pip") && !showPlayerPage())
                 break;
             togglePlayerFullscreen();
             break;
@@ -665,7 +729,9 @@ Kirigami.ApplicationWindow {
     // The player page in front gives way to the mini player, or ends the playback when there is nothing playing (an error shown, an item that ended); Home asks for its rows again once the page is gone, since positions change while something plays
     onPlaybackPageShowingChanged: {
         if (playbackPageShowing) {
-            if (playbackMode === "mini")
+            if (playbackMode === "pip")
+                closePictureInPicture();
+            if (playbackMode === "mini" || playbackMode === "pip")
                 playbackMode = "full";
             return;
         }

@@ -23,6 +23,10 @@ Q_DECLARE_LOGGING_CATEGORY(playerLog)
 namespace Kinefin {
 class JellyfinClient;
 
+// The video track `restoreVideo` selects again: `previous` (the last one mpv had selected) when the track list still has it as a video track, else the track marked default, else the first one, album art never being picked by the fallback; empty when the file has no such track
+std::optional<qint64> videoTrackToRestore(const QVariantList &trackList,
+                                          std::optional<qint64> previous);
+
 // The mpv side of the one PlaybackSession: it opens a negotiated `PlaybackSource` through MpvQt's `MpvController` and turns mpv lifecycle events into calls of the session's state machine. It owns no state logic: `PlaybackSession` stays the only place transitions are decided, and reporting keeps parity §9's cadence (`PlaybackReporter` observes the session; this class only feeds the probe through its accessors). The server URL never carries the access token: every open places the full `Authorization: MediaBrowser Token="…"` value as one mpv http-header-fields entry (the header mpv's ffmpeg path applies to every request of the stream, HLS segments included; verified against 12.4.0, api-notes.md). The property must be set through an mpv node array of one entry: libmpv 0.41 would slice the API string form on every comma of the header (verified offline)
 //
 // The event mapping (`--vo=null`/`--ao=null` in the test container works the same as the windowed route):
@@ -84,6 +88,9 @@ class PlaybackEngine final : public QObject {
     // mpv's own picture facts, cached from its property changes (no mpv call): `videoWidth`, `videoHeight` (dwidth, dheight), `droppedFrames` (frame-drop-count), `decoderDroppedFrames` (decoder-frame-drop-count), `hwdec` (hwdec-current); a key is present only while mpv has a value
     [[nodiscard]] QVariantMap videoFacts() const { return m_videoFacts; }
 
+    // The render context of the video item was replaced (the item moved to another window): libmpv turns the video off when the old context goes, so a loaded file whose `vid` is off gets its video track selected again. Nothing else changes: session, position and reports stay untouched. During the opening it waits for fileLoaded, where `afterLoad` lets it pick a track although none was selected yet
+    void restoreVideo(bool afterLoad = false);
+
     // The controller, for the windowed item and the tests only: the engine owns it, and callers should stay in the engine API for everything but attaching renderers
     [[nodiscard]] MpvController *controller() const { return m_controller; }
 
@@ -131,5 +138,9 @@ class PlaybackEngine final : public QObject {
     bool m_canSeek = false;
     qreal m_rate = 1.0;
     QVariantMap m_videoFacts;
+    // The last video track mpv reported as selected: `vid` reads off once the render context is gone
+    std::optional<qint64> m_videoTrackId;
+    // A renderer change came while the file opened: the video is chosen again at fileLoaded
+    bool m_restorePending = false;
 };
 } // namespace Kinefin
