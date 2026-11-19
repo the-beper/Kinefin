@@ -20,14 +20,17 @@
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QRegularExpression>
+#include <QSslError>
 #include <QThread>
 #include <QTimer>
 #include <QUuid>
 
 #include <algorithm>
 #include <cerrno>
+#include <cmath>
 #include <cstdio>
 #include <fcntl.h>
+#include <utility>
 
 Q_LOGGING_CATEGORY(downloadsLog, "kinefin.downloads")
 
@@ -50,6 +53,137 @@ QString cleanText(const QString &text, int max)
 
 // A poster is a 160 px image: anything larger is not one
 constexpr qint64 kMaxPosterBytes = 2 * 1024 * 1024;
+
+// The worst valid info file (200 chapters of 256 characters) is about 0.25 MiB
+constexpr qint64 kMaxInfoBytes = 512 * 1024;
+constexpr int kMaxSubtitleTitle = 120;
+
+// One line of server text: control, format (bidirectional overrides among them) and line-separator characters become spaces, then whitespace runs collapse
+QString oneLineText(const QString &text, int max)
+{
+    QString cleaned = text;
+    for (QChar &character : cleaned) {
+        const QChar::Category category = character.category();
+        if (category == QChar::Other_Control || category == QChar::Other_Format
+            || category == QChar::Separator_Line || category == QChar::Separator_Paragraph)
+            character = QLatin1Char(' ');
+    }
+    return cleaned.simplified().left(max);
+}
+
+QString validLanguage(const QString &language)
+{
+    static const QRegularExpression pattern(QStringLiteral("^[a-z]{2,3}\\z"));
+    return pattern.match(language).hasMatch() ? language : QString();
+}
+
+// The file extension of a text subtitle codec the controller keeps, empty for any other; in step with JellyfinClient::subtitleFileUrl and localSubtitles in PlayerController.cpp
+QString subtitleExtension(const QString &codec)
+{
+    if (codec == QLatin1String("srt") || codec == QLatin1String("subrip"))
+        return QStringLiteral("srt");
+    if (codec == QLatin1String("vtt") || codec == QLatin1String("webvtt"))
+        return QStringLiteral("vtt");
+    if (codec == QLatin1String("ass") || codec == QLatin1String("ssa"))
+        return codec;
+    return {};
+}
+
+// An external text subtitle stream of the server's MediaStreams, nothing else
+std::optional<SubtitleTrack> subtitleTrackOf(const QJsonObject &stream)
+{
+    if (stream.value(QStringLiteral("Type")).toString() != QLatin1String("Subtitle")
+        || !stream.value(QStringLiteral("IsExternal")).toBool(false)
+        || !stream.value(QStringLiteral("IsTextSubtitleStream")).toBool(false))
+        return std::nullopt;
+    const QString extension =
+        subtitleExtension(stream.value(QStringLiteral("Codec")).toString().toLower());
+    const QJsonValue index = stream.value(QStringLiteral("Index"));
+    if (extension.isEmpty() || !index.isDouble())
+        return std::nullopt;
+    const double number = index.toDouble();
+    if (!(number >= 0 && number <= 9999) || number != std::floor(number))
+        return std::nullopt;
+    SubtitleTrack track;
+    track.index = int(number);
+    track.extension = extension;
+    track.language = validLanguage(stream.value(QStringLiteral("Language")).toString());
+    track.title =
+        oneLineText(stream.value(QStringLiteral("DisplayTitle")).toString(), kMaxSubtitleTitle);
+    if (track.title.isEmpty())
+        track.title =
+            oneLineText(stream.value(QStringLiteral("Title")).toString(), kMaxSubtitleTitle);
+    return track;
+}
+
+QJsonObject infoObject(const DownloadRecord &record)
+{
+    return {{QStringLiteral("name"), record.name},
+            {QStringLiteral("type"), record.type},
+            {QStringLiteral("seriesName"), record.seriesName},
+            {QStringLiteral("seriesId"), record.seriesId},
+            {QStringLiteral("seasonId"), record.seasonId},
+            {QStringLiteral("seasonNumber"), record.seasonNumber},
+            {QStringLiteral("episodeNumber"), record.episodeNumber},
+            {QStringLiteral("year"), record.year},
+            {QStringLiteral("runtimeTicks"), record.runtimeTicks},
+            {QStringLiteral("container"), record.container},
+            {QStringLiteral("size"), record.size},
+            {QStringLiteral("etag"), record.etag},
+            {QStringLiteral("primaryTag"), record.primaryTag},
+            {QStringLiteral("positionTicks"), record.positionTicks},
+            {QStringLiteral("played"), record.played}};
+}
+
+// The chapters and subtitle files the info file of `directory` lists, validated again: the file is only as trustworthy as the disk, so a missing or malformed one gives empty lists
+void readInfoExtras(const QString &directory, QVariantList *chapters, QVariantList *subtitles)
+{
+    const QFileInfo infoFile(directory + QStringLiteral("/info.json"));
+    if (!infoFile.isFile() || infoFile.isSymLink())
+        return;
+    QFile file(infoFile.filePath());
+    if (!file.open(QIODevice::ReadOnly))
+        return;
+    const QByteArray bytes = file.read(kMaxInfoBytes + 1);
+    if (bytes.size() > kMaxInfoBytes)
+        return;
+    const QJsonDocument document = QJsonDocument::fromJson(bytes);
+    if (!document.isObject())
+        return;
+    const QJsonObject info = document.object();
+    for (const ChapterSummary &chapter : parseChapters(info.value(QStringLiteral("chapters")))) {
+        if (chapter.startTicks > DownloadRecord::MaxRuntimeTicks)
+            continue;
+        chapters->append(QVariantMap{{QStringLiteral("name"), chapter.name},
+                                     {QStringLiteral("startTicks"), chapter.startTicks}});
+    }
+    const QFileInfo subsDirectory(directory + QStringLiteral("/subs"));
+    if (!subsDirectory.isDir() || subsDirectory.isSymLink())
+        return;
+    const QString canonicalSubs = subsDirectory.canonicalFilePath();
+    static const QRegularExpression fileName(
+        QStringLiteral("^subs/([0-9]{1,4})\\.(srt|ass|ssa|vtt)\\z"));
+    for (const QJsonValue &value : info.value(QStringLiteral("subtitles")).toArray()) {
+        if (subtitles->size() == DownloadsController::MaxSubtitleTracks)
+            break;
+        const QJsonObject entry = value.toObject();
+        const QRegularExpressionMatch match =
+            fileName.match(entry.value(QStringLiteral("file")).toString());
+        // The index is written without leading zeros
+        if (!match.hasMatch() || QString::number(match.captured(1).toInt()) != match.captured(1))
+            continue;
+        const QFileInfo subtitle(directory + QLatin1Char('/') + match.captured(0));
+        if (!subtitle.isFile() || subtitle.isSymLink()
+            || !subtitle.canonicalFilePath().startsWith(canonicalSubs + QLatin1Char('/')))
+            continue;
+        subtitles->append(QVariantMap{
+            {QStringLiteral("path"), subtitle.absoluteFilePath()},
+            {QStringLiteral("language"),
+             validLanguage(entry.value(QStringLiteral("language")).toString())},
+            {QStringLiteral("title"),
+             oneLineText(entry.value(QStringLiteral("title")).toString(), kMaxSubtitleTitle)}});
+    }
+}
 
 // The server writes up to seven fractional digits: the cursor keeps the millisecond ones
 QDateTime parseServerDate(const QString &text)
@@ -184,6 +318,11 @@ DownloadsController::DownloadsController(JellyfinClient *client, const QString &
         source.ignoreCertificateErrors = m_ignoreCertificateErrors;
         return std::optional<DownloadSource>(source);
     });
+    connect(&m_subtitleNetwork, &QNetworkAccessManager::sslErrors, this,
+            [this](QNetworkReply *reply, const QList<QSslError> &errors) {
+                if (m_ignoreCertificateErrors)
+                    reply->ignoreSslErrors(errors);
+            });
     m_manager.setOnline(false);
     m_manager.setMetered(m_meter.metered() && m_unmeteredOnly);
     connect(&m_meter, &NetworkMeter::meteredChanged, this, [this](bool metered) {
@@ -247,6 +386,10 @@ DownloadsController::DownloadsController(JellyfinClient *client, const QString &
             m_client->releaseListingChannel(it.key());
         for (auto it = m_ruleFetches.cbegin(); it != m_ruleFetches.cend(); ++it)
             m_client->releaseListingChannel(it.key());
+        for (auto it = m_extrasFetches.cbegin(); it != m_extrasFetches.cend(); ++it)
+            m_client->releaseListingChannel(it.key());
+        dropExtras();
+        m_extrasFetches.clear();
         m_fetches.clear();
         m_fetchRules.clear();
         m_fetchRuleDates.clear();
@@ -274,6 +417,7 @@ DownloadsController::DownloadsController(JellyfinClient *client, const QString &
 
 DownloadsController::~DownloadsController()
 {
+    dropExtras();
     if (m_exportThread) {
         m_exportThread->wait();
         delete m_exportThread;
@@ -488,24 +632,9 @@ void DownloadsController::writeInfo(const DownloadRecord &record)
     const QString media = m_manager.localPath(record);
     if (media.isEmpty())
         return;
-    const QJsonObject info{{QStringLiteral("name"), record.name},
-                           {QStringLiteral("type"), record.type},
-                           {QStringLiteral("seriesName"), record.seriesName},
-                           {QStringLiteral("seriesId"), record.seriesId},
-                           {QStringLiteral("seasonId"), record.seasonId},
-                           {QStringLiteral("seasonNumber"), record.seasonNumber},
-                           {QStringLiteral("episodeNumber"), record.episodeNumber},
-                           {QStringLiteral("year"), record.year},
-                           {QStringLiteral("runtimeTicks"), record.runtimeTicks},
-                           {QStringLiteral("container"), record.container},
-                           {QStringLiteral("size"), record.size},
-                           {QStringLiteral("etag"), record.etag},
-                           {QStringLiteral("primaryTag"), record.primaryTag},
-                           {QStringLiteral("positionTicks"), record.positionTicks},
-                           {QStringLiteral("played"), record.played}};
     const QString directory = QFileInfo(media).absolutePath();
     writePrivateFile(directory + QStringLiteral("/info.json"),
-                     QJsonDocument(info).toJson(QJsonDocument::Compact));
+                     QJsonDocument(infoObject(record)).toJson(QJsonDocument::Compact));
     const QUrl poster = posterUrl(record.itemId, record.primaryTag);
     if (!poster.isEmpty() && m_images) {
         QNetworkReply *reply = m_images->get(QNetworkRequest(poster));
@@ -533,6 +662,217 @@ void DownloadsController::writeInfo(const DownloadRecord &record)
                 Q_EMIT revisionChanged();
             }
         });
+    }
+    fetchExtras(record);
+}
+
+bool DownloadsController::signedInOwns(const DownloadRecord &record) const
+{
+    return record.serverId.compare(m_client->serverId(), Qt::CaseInsensitive) == 0
+           && record.userId.compare(m_client->userId(), Qt::CaseInsensitive) == 0;
+}
+
+void DownloadsController::fetchExtras(const DownloadRecord &record)
+{
+    // Another user's record has no session to read it with
+    if (!signedInOwns(record))
+        return;
+    ItemQuery query;
+    query.itemIds = {record.itemId};
+    query.fields = {QStringLiteral("Chapters"), QStringLiteral("MediaSources")};
+    const int channel = m_nextChannel++;
+    if (m_client->fetchItems(query, channel))
+        m_extrasFetches.insert(channel, record.key());
+}
+
+void DownloadsController::onExtrasReady(const QJsonArray &items, int channel)
+{
+    const QString key = m_extrasFetches.take(channel);
+    m_client->releaseListingChannel(channel);
+    const std::optional<DownloadRecord> record = m_manager.store()->findByKey(key);
+    if (!record || items.isEmpty() || m_manager.localPath(*record).isEmpty())
+        return;
+    // Only the item that was asked for
+    const QJsonObject item = items.first().toObject();
+    if (item.value(QStringLiteral("Id")).toString().compare(record->itemId, Qt::CaseInsensitive)
+        != 0)
+        return;
+    DownloadExtras extras;
+    extras.key = key;
+    for (const ChapterSummary &chapter : parseChapters(item.value(QStringLiteral("Chapters")))) {
+        if (chapter.startTicks > DownloadRecord::MaxRuntimeTicks)
+            continue;
+        extras.chapters.append(
+            QJsonObject{{QStringLiteral("Name"), chapter.name},
+                        {QStringLiteral("StartPositionTicks"), chapter.startTicks}});
+    }
+    // The downloaded file is the first media source
+    const QJsonArray sources = item.value(QStringLiteral("MediaSources")).toArray();
+    const QJsonObject source = sources.isEmpty() ? QJsonObject() : sources.first().toObject();
+    const QString sourceId = source.value(QStringLiteral("Id")).toString();
+    if (isValidJellyfinId(sourceId)) {
+        extras.mediaSourceId = sourceId;
+        QSet<int> seen;
+        for (const QJsonValue &stream : source.value(QStringLiteral("MediaStreams")).toArray()) {
+            if (extras.pending.size() == MaxSubtitleTracks)
+                break;
+            const std::optional<SubtitleTrack> track = subtitleTrackOf(stream.toObject());
+            if (track && !seen.contains(track->index)) {
+                seen.insert(track->index);
+                extras.pending.append(*track);
+            }
+        }
+    }
+    if (extras.chapters.isEmpty() && extras.pending.isEmpty())
+        return;
+    m_extrasJobs.append(extras);
+    advanceExtras();
+}
+
+void DownloadsController::advanceExtras()
+{
+    while (!m_subtitleReply && !m_extrasJobs.isEmpty()) {
+        DownloadExtras &extras = m_extrasJobs.first();
+        if (extras.pending.isEmpty()) {
+            const DownloadExtras done = m_extrasJobs.takeFirst();
+            finishExtras(done);
+            continue;
+        }
+        const SubtitleTrack track = extras.pending.takeFirst();
+        const std::optional<DownloadRecord> record = m_manager.store()->findByKey(extras.key);
+        // The download may be gone, or the session another user's: nothing more is fetched for it
+        if (!record || !signedInOwns(*record) || m_manager.localPath(*record).isEmpty()) {
+            extras.pending.clear();
+            continue;
+        }
+        const QUrl url = m_client->subtitleFileUrl(record->itemId, extras.mediaSourceId,
+                                                   track.index, track.extension);
+        const QByteArray authorization = m_client->streamAuthorization();
+        if (url.isEmpty() || authorization.isEmpty())
+            continue;
+        QNetworkRequest request(url);
+        request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
+                             QNetworkRequest::ManualRedirectPolicy);
+        request.setAttribute(QNetworkRequest::CacheLoadControlAttribute,
+                             QNetworkRequest::AlwaysNetwork);
+        request.setTransferTimeout(30'000);
+        request.setRawHeader("Accept", "*/*");
+        request.setRawHeader("Accept-Encoding", "identity");
+        request.setRawHeader("Authorization", authorization);
+        m_subtitleBuffer.clear();
+        m_subtitleOversize = false;
+        QNetworkReply *reply = m_subtitleNetwork.get(request);
+        m_subtitleReply = reply;
+        // A bounded buffer keeps one network chunk from passing the cap before it is counted
+        reply->setReadBufferSize(64 * 1024);
+        // The transfer timeout restarts with every byte: a server that drips them would hold the only slot, so each file has a deadline too
+        QTimer::singleShot(60'000, reply, [this, reply] {
+            if (reply == m_subtitleReply)
+                reply->abort();
+        });
+        connect(reply, &QNetworkReply::metaDataChanged, this, [this, reply] {
+            if (reply == m_subtitleReply
+                && reply->header(QNetworkRequest::ContentLengthHeader).toLongLong()
+                       > MaxSubtitleBytes) {
+                m_subtitleOversize = true;
+                reply->abort();
+            }
+        });
+        connect(reply, &QNetworkReply::readyRead, this, [this, reply] {
+            if (reply != m_subtitleReply)
+                return;
+            m_subtitleBuffer += reply->readAll();
+            if (m_subtitleBuffer.size() > MaxSubtitleBytes) {
+                m_subtitleOversize = true;
+                m_subtitleBuffer.clear();
+                reply->abort();
+            }
+        });
+        const QString key = extras.key;
+        connect(reply, &QNetworkReply::finished, this,
+                [this, reply, key, track] { onSubtitleFinished(reply, key, track); });
+    }
+}
+
+void DownloadsController::onSubtitleFinished(QNetworkReply *reply, const QString &key,
+                                             const SubtitleTrack &track)
+{
+    if (reply != m_subtitleReply)
+        return;
+    m_subtitleReply.clear();
+    reply->deleteLater();
+    // An aborted reply is closed and has nothing more to read
+    if (reply->isOpen())
+        m_subtitleBuffer += reply->readAll();
+    const bool oversize = m_subtitleOversize || m_subtitleBuffer.size() > MaxSubtitleBytes;
+    const QByteArray data = std::exchange(m_subtitleBuffer, QByteArray());
+    // Only a plain 200: a redirect is never followed, so the token never leaves the server
+    const bool received =
+        !oversize && !data.isEmpty() && reply->error() == QNetworkReply::NoError
+        && reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() == 200;
+    bool written = false;
+    if (received) {
+        // The download may have been removed meanwhile: write into the folder it still has, never create one
+        const std::optional<DownloadRecord> current = m_manager.store()->findByKey(key);
+        const QString media = current ? m_manager.localPath(*current) : QString();
+        if (!media.isEmpty()) {
+            const QString directory = QFileInfo(media).absolutePath();
+            const QFileInfo subs(directory + QStringLiteral("/subs"));
+            if (QFileInfo(directory).isDir() && !subs.isSymLink()
+                && (!subs.exists() || subs.isDir()))
+                written = writePrivateFile(subs.filePath() + QLatin1Char('/')
+                                               + QString::number(track.index) + QLatin1Char('.')
+                                               + track.extension,
+                                           data);
+        }
+    }
+    if (!written)
+        qCInfo(downloadsLog) << "A subtitle file was not kept";
+    else if (!m_extrasJobs.isEmpty() && m_extrasJobs.first().key == key)
+        m_extrasJobs.first().written.append(track);
+    advanceExtras();
+}
+
+void DownloadsController::finishExtras(const DownloadExtras &extras)
+{
+    if (extras.chapters.isEmpty() && extras.written.isEmpty())
+        return;
+    const std::optional<DownloadRecord> record = m_manager.store()->findByKey(extras.key);
+    const QString media = record ? m_manager.localPath(*record) : QString();
+    if (media.isEmpty())
+        return;
+    const QString directory = QFileInfo(media).absolutePath();
+    if (!QFileInfo(directory).isDir())
+        return;
+    QJsonObject info = infoObject(*record);
+    if (!extras.chapters.isEmpty())
+        info.insert(QStringLiteral("chapters"), extras.chapters);
+    if (!extras.written.isEmpty()) {
+        QJsonArray subtitles;
+        for (const SubtitleTrack &track : extras.written) {
+            subtitles.append(
+                QJsonObject{{QStringLiteral("index"), track.index},
+                            {QStringLiteral("file"),
+                             QStringLiteral("subs/%1.%2").arg(track.index).arg(track.extension)},
+                            {QStringLiteral("language"), track.language},
+                            {QStringLiteral("title"), track.title}});
+        }
+        info.insert(QStringLiteral("subtitles"), subtitles);
+    }
+    writePrivateFile(directory + QStringLiteral("/info.json"),
+                     QJsonDocument(info).toJson(QJsonDocument::Compact));
+}
+
+void DownloadsController::dropExtras()
+{
+    m_extrasJobs.clear();
+    m_subtitleBuffer.clear();
+    if (QNetworkReply *reply = m_subtitleReply.data()) {
+        m_subtitleReply.clear();
+        // The handlers must not run for a reply that is being dropped
+        reply->disconnect(this);
+        reply->abort();
+        reply->deleteLater();
     }
 }
 
@@ -940,13 +1280,18 @@ QVariantMap DownloadsController::playableDownload(const QString &serverId, const
     const QString path = m_manager.localPath(*record);
     if (path.isEmpty())
         return {};
+    QVariantList chapters;
+    QVariantList subtitles;
+    readInfoExtras(QFileInfo(path).absolutePath(), &chapters, &subtitles);
     return {{QStringLiteral("path"), path},
             {QStringLiteral("name"), record->name},
             {QStringLiteral("type"), record->type},
             {QStringLiteral("seriesName"), record->seriesName},
             {QStringLiteral("seasonNumber"), record->seasonNumber},
             {QStringLiteral("episodeNumber"), record->episodeNumber},
-            {QStringLiteral("positionTicks"), record->positionTicks}};
+            {QStringLiteral("positionTicks"), record->positionTicks},
+            {QStringLiteral("chapters"), chapters},
+            {QStringLiteral("subtitles"), subtitles}};
 }
 
 QString DownloadsController::formattedSize(qint64 bytes) const
@@ -1067,6 +1412,10 @@ void DownloadsController::onItemsReady(const QJsonArray &items, int totalRecordC
         onOutboxItemsReady(items, channel);
         return;
     }
+    if (m_extrasFetches.contains(channel)) {
+        onExtrasReady(items, channel);
+        return;
+    }
     const auto fetch = m_fetches.find(channel);
     if (fetch == m_fetches.end())
         return;
@@ -1120,6 +1469,12 @@ void DownloadsController::onListingFailed(const QString &family, int httpStatus,
     }
     if (m_outboxFetches.contains(channel)) {
         m_outboxFetches.remove(channel);
+        m_client->releaseListingChannel(channel);
+        return;
+    }
+    if (m_extrasFetches.contains(channel)) {
+        // The info file stays as it is
+        m_extrasFetches.remove(channel);
         m_client->releaseListingChannel(channel);
         return;
     }

@@ -23,6 +23,7 @@
 #include <QJsonParseError>
 #include <QQuickWindow>
 #include <QRandomGenerator>
+#include <QRegularExpression>
 #include <QSaveFile>
 #include <QStandardPaths>
 #include <QUrl>
@@ -206,7 +207,10 @@ PlayerController::PlayerController(JellyfinClient &client, PlayQueue &queue,
               state.positionTicks = m_engine.knownPositionTicks();
               state.canSeek = m_engine.canSeek();
               state.audioStreamIndex = m_selectedAudioIndex;
-              state.subtitleStreamIndex = m_selectedSubtitleIndex;
+              // Subtitles the user turned off are -1, as jellyfin-web reports them
+              state.subtitleStreamIndex = m_selectedSubtitleIndex ? m_selectedSubtitleIndex
+                                          : m_subtitlesOff        ? std::optional<int>(-1)
+                                                                  : std::nullopt;
               state.volume = m_volume;
               state.muted = m_muted;
               // The episodes of a series played alone are not a queue the server hears of
@@ -239,9 +243,18 @@ PlayerController::PlayerController(JellyfinClient &client, PlayQueue &queue,
                 QSaveFile file(filename);
                 if (file.open(QIODevice::WriteOnly) && file.write(bytes) == bytes.size()
                     && file.commit()) {
+                    for (const ExternalSubtitle &subtitle : std::as_const(m_subtitleOptions)) {
+                        if (subtitle.url == url)
+                            m_loadedSubtitles.insert(filename, subtitle.index);
+                    }
                     m_engine.mpvCommand(
                         {QStringLiteral("sub-add"), filename, QStringLiteral("select")});
-                    QTimer::singleShot(250, this, &PlayerController::refreshTracks);
+                    m_subtitlesOff = false;
+                    // The report carries the new index once the tracks are read again
+                    QTimer::singleShot(250, this, [this] {
+                        refreshTracks();
+                        m_reporter.reportNow();
+                    });
                 }
                 m_pendingSubtitle.clear();
             });
@@ -364,6 +377,12 @@ PlayerController::PlayerController(JellyfinClient &client, PlayQueue &queue,
         m_fileLoaded = true;
         m_trackChosen = false;
         applySeriesPlayback();
+        // A download's subtitle files join the tracks before the remembered choice is restored; `auto` leaves the choice to it
+        if (m_localPlayback) {
+            for (const LocalSubtitle &file : std::as_const(m_localSubtitles))
+                m_engine.mpvCommand({QStringLiteral("sub-add"), file.path, QStringLiteral("auto"),
+                                     file.title, file.language});
+        }
         refreshTracks();
         // Opened paused (a group's item, or a reopen after a subtitle download), the Start went out as playing: a paused Progress follows once the position is known
         if (m_groupItem || m_session.state() == PlaybackSession::State::Paused)
@@ -613,11 +632,14 @@ bool PlayerController::startItem(const QString &id, qint64 resumeTicks, bool gro
     // A server item that replaces a local file: the local one stores where it stopped before its flag goes
     reportLocalPosition(false);
     m_pendingLocal = {};
+    m_localSubtitles.clear();
     if (m_localPlayback) {
         m_localPlayback = false;
         Q_EMIT localPlaybackChanged();
     }
     const bool sameItem = id == m_itemId;
+    if (!sameItem)
+        m_subtitlesOff = false;
     // Another item starts at full quality; the same one again (a reopen, Repeat One) keeps a lowered bit rate
     dropFallback();
     m_canRetry = false;
@@ -766,9 +788,56 @@ void PlayerController::reportLocalPosition(bool ended)
     Q_EMIT localPositionChanged(m_itemId, played ? 0 : ticks, played);
 }
 
+namespace {
+// The limit and the extensions are the downloads' own (DownloadsController::MaxSubtitleTracks, subtitleExtension)
+constexpr int MaxLocalSubtitles = 8;
+
+// The chapters a download stored, with the caps of the server's own: the same parser reads them
+QList<ChapterSummary> localChapters(const QVariantList &entries)
+{
+    QJsonArray chapters;
+    for (const QVariant &entry : entries) {
+        const QVariantMap map = entry.toMap();
+        chapters.append(
+            QJsonObject{{QStringLiteral("Name"), map.value(QStringLiteral("name")).toString()},
+                        {QStringLiteral("StartPositionTicks"),
+                         map.value(QStringLiteral("startTicks")).toLongLong()}});
+    }
+    return parseChapters(chapters);
+}
+
+// Only regular files of the download's own `subs` folder, with a text subtitle extension
+QList<PlayerController::LocalSubtitle> localSubtitles(const QVariantList &entries,
+                                                      const QFileInfo &media)
+{
+    static const QRegularExpression language(
+        QRegularExpression::anchoredPattern(QStringLiteral("[a-z]{2,3}")));
+    static const QStringList extensions{QStringLiteral("srt"), QStringLiteral("ass"),
+                                        QStringLiteral("ssa"), QStringLiteral("vtt")};
+    // Resolved, so a `subs` folder that is a link elsewhere is not the download's own
+    const QString folder = media.canonicalPath() + QStringLiteral("/subs");
+    QList<PlayerController::LocalSubtitle> result;
+    for (const QVariant &entry : entries) {
+        if (result.size() == MaxLocalSubtitles)
+            break;
+        const QVariantMap map = entry.toMap();
+        const QFileInfo file(map.value(QStringLiteral("path")).toString());
+        if (!file.isAbsolute() || !file.isFile() || file.isSymLink()
+            || QFileInfo(file.canonicalFilePath()).path() != folder
+            || !extensions.contains(file.suffix()))
+            continue;
+        const QString lang = map.value(QStringLiteral("language")).toString();
+        result.append({file.canonicalFilePath(),
+                       map.value(QStringLiteral("title")).toString().simplified().left(120),
+                       language.match(lang).hasMatch() ? lang : QString()});
+    }
+    return result;
+}
+} // namespace
+
 bool PlayerController::playLocalFile(const QString &path, const QString &itemId,
                                      const QString &title, const QString &subtitle,
-                                     qint64 resumeTicks)
+                                     qint64 resumeTicks, const QVariantMap &extras)
 {
     const QFileInfo info(path);
     if (!info.isAbsolute() || !info.isFile() || info.isSymLink() || !isValidJellyfinId(itemId)
@@ -786,6 +855,9 @@ bool PlayerController::playLocalFile(const QString &path, const QString &itemId,
     m_pendingLocal.title = title.left(512);
     m_pendingLocal.subtitle = subtitle.left(512);
     m_pendingLocal.resumeTicks = resumeTicks;
+    m_pendingLocal.chapters = localChapters(extras.value(QStringLiteral("chapters")).toList());
+    m_pendingLocal.subtitles =
+        localSubtitles(extras.value(QStringLiteral("subtitles")).toList(), info);
     m_pendingLocal.pending = true;
     m_loading = true;
     m_errorText.clear();
@@ -833,6 +905,8 @@ bool PlayerController::openLocal()
     m_subtitleOptions.clear();
     m_externalSubtitles.clear();
     m_pendingSubtitle.clear();
+    m_loadedSubtitles.clear();
+    m_subtitlesOff = false;
     resetRemoteSubtitles();
     m_reopenPaused = false;
     m_skipLabel.clear();
@@ -865,8 +939,9 @@ bool PlayerController::openLocal()
     m_segments.clear();
     m_trickplay.reset();
     m_trickplayInfo = {};
-    m_itemChapters.clear();
+    m_itemChapters = request.chapters;
     updateChapters();
+    m_localSubtitles = request.subtitles;
     resetUpNext();
     m_audioTracks.clear();
     m_subtitleTracks.clear();
@@ -1025,12 +1100,17 @@ JellyfinClient::StreamChoice PlayerController::currentStreams() const
 {
     JellyfinClient::StreamChoice streams = m_requestedStreams;
     streams.mediaSourceId = m_source.mediaSourceId;
-    // A direct play knows the server's indexes of the tracks that play; a transcode keeps what its request asked for
+    // A direct play knows the server's indexes of the tracks that play; a transcode keeps what its request asked for, unless a server's external subtitle was loaded since
     if (directPlay()) {
         if (m_selectedAudioIndex)
             streams.audioStreamIndex = m_selectedAudioIndex;
         streams.subtitleStreamIndex =
             m_selectedSubtitleId == 0 ? std::optional<int>(-1) : m_selectedSubtitleIndex;
+    } else if (m_selectedSubtitleIndex) {
+        streams.subtitleStreamIndex = m_selectedSubtitleIndex;
+    } else if (m_subtitlesOff) {
+        // No track selected in a transcode may also be a burned-in subtitle: only the user's own choice means none
+        streams.subtitleStreamIndex = -1;
     }
     return streams;
 }
@@ -1123,6 +1203,8 @@ void PlayerController::onSource(const PlaybackSource &source)
     m_loading = false;
     m_source = source;
     m_subtitleOptions = source.externalSubtitles;
+    // A new file drops the subtitle files mpv had added to the old one
+    m_loadedSubtitles.clear();
     m_externalSubtitles.clear();
     for (const ExternalSubtitle &entry : m_subtitleOptions)
         m_externalSubtitles.append(QVariantMap{
@@ -1517,6 +1599,8 @@ void PlayerController::onEnd(const QString &reason)
 
 void PlayerController::clearCurrent()
 {
+    m_localSubtitles.clear();
+    m_subtitlesOff = false;
     dropFallback();
     m_fallback.reset();
     m_preparedSource.reset();
@@ -1931,14 +2015,11 @@ void PlayerController::refreshTracks()
             label = type == QLatin1String("audio") ? i18n("Audio track %1").arg(id)
                                                    : i18n("Subtitle %1").arg(id);
         const bool selected = map.value(QStringLiteral("selected")).toBool();
-        const QVariant indexValue = map.value(QStringLiteral("ff-index"));
-        // The server's stream index is mpv's only for an embedded track of a direct play: a transcode or an external file has its own numbering
-        if (selected && direct && !map.value(QStringLiteral("external")).toBool()
-            && indexValue.isValid() && indexValue.toInt() >= 0) {
+        if (const std::optional<int> index = serverStreamIndex(map, direct); selected && index) {
             if (type == QLatin1String("audio"))
-                m_selectedAudioIndex = indexValue.toInt();
+                m_selectedAudioIndex = index;
             else
-                m_selectedSubtitleIndex = indexValue.toInt();
+                m_selectedSubtitleIndex = index;
         }
         if (selected) {
             if (type == QLatin1String("audio"))
@@ -1988,6 +2069,7 @@ void PlayerController::selectSubtitleTrack(int id)
     m_engine.setMpvProperty(QStringLiteral("sid"),
                             id == 0 ? QVariant(QStringLiteral("no")) : QVariant(id));
     m_selectedSubtitleId = id;
+    m_subtitlesOff = id == 0;
     m_trackChosen = true;
     m_selectedSubtitleIndex =
         id == 0 ? std::nullopt : streamIndexOfTrack(QStringLiteral("sub"), id);
@@ -2008,33 +2090,43 @@ bool PlayerController::directPlay() const
 }
 std::optional<int> PlayerController::streamIndexOfTrack(const QString &type, int id) const
 {
-    if (!directPlay())
+    if (!active() || !m_engine.isInitialized())
         return std::nullopt;
+    const bool direct = directPlay();
     const QVariantList tracks = m_engine.mpvProperty(QStringLiteral("track-list")).toList();
     for (const QVariant &entry : tracks) {
         const QVariantMap map = entry.toMap();
-        const QVariant indexValue = map.value(QStringLiteral("ff-index"));
         if (map.value(QStringLiteral("type")).toString() == type
-            && map.value(QStringLiteral("id")).toInt() == id
-            && !map.value(QStringLiteral("external")).toBool() && indexValue.isValid()
-            && indexValue.toInt() >= 0)
-            return indexValue.toInt();
+            && map.value(QStringLiteral("id")).toInt() == id)
+            return serverStreamIndex(map, direct);
     }
     return std::nullopt;
 }
+std::optional<int> PlayerController::serverStreamIndex(const QVariantMap &track, bool direct) const
+{
+    // An external file has its own numbering in mpv: only a server's subtitle this item downloaded maps back
+    if (track.value(QStringLiteral("external")).toBool()) {
+        const auto found = m_loadedSubtitles.constFind(
+            track.value(QStringLiteral("external-filename")).toString());
+        return found != m_loadedSubtitles.cend() ? std::optional<int>(*found) : std::nullopt;
+    }
+    // mpv's `ff-index` is the server's only in a direct play: a transcode has its own numbering
+    const QVariant index = track.value(QStringLiteral("ff-index"));
+    if (!direct || !index.isValid() || index.toInt() < 0)
+        return std::nullopt;
+    return index.toInt();
+}
 int PlayerController::trackOfStreamIndex(const QString &type, int index) const
 {
-    if (!directPlay())
+    if (!active() || !m_engine.isInitialized())
         return 0;
+    const bool direct = directPlay();
     const QVariantList tracks = m_engine.mpvProperty(QStringLiteral("track-list")).toList();
     for (const QVariant &entry : tracks) {
         const QVariantMap map = entry.toMap();
-        const QVariant indexValue = map.value(QStringLiteral("ff-index"));
         const int id = map.value(QStringLiteral("id")).toInt();
-        // An external track's ff-index counts in its own file, not in the server's media source
         if (map.value(QStringLiteral("type")).toString() == type && id > 0 && id <= 1024
-            && !map.value(QStringLiteral("external")).toBool() && indexValue.isValid()
-            && indexValue.toInt() == index)
+            && serverStreamIndex(map, direct) == index)
             return id;
     }
     return 0;
@@ -2053,16 +2145,17 @@ bool PlayerController::selectSubtitleStreamIndex(int index)
 {
     if (index < -1 || index > 1024)
         return false;
-    // Subtitles off needs no track, only the direct play the indexes belong to
+    // Subtitles off needs no track, only a stream whose subtitle indexes are the server's: a direct play, or a server's external subtitle loaded on a transcode
     if (index == -1) {
-        if (!directPlay())
+        if (!directPlay() && !m_selectedSubtitleIndex)
             return false;
         selectSubtitleTrack(0);
         return true;
     }
     const int id = trackOfStreamIndex(QStringLiteral("sub"), index);
+    // A server's external subtitle not loaded yet is downloaded, and selected once it is
     if (id == 0)
-        return false;
+        return downloadSubtitle(index);
     selectSubtitleTrack(id);
     return true;
 }

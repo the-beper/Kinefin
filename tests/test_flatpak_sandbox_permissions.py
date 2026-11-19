@@ -32,8 +32,6 @@ devices=input;dri;
 filesystems=xdg-config/kdeglobals:ro;
 
 [Session Bus Policy]
-io.github.the_beper.Kinefin=own
-io.github.the_beper.Kinefin.*=own
 org.mpris.MediaPlayer2.Kinefin.*=own
 org.freedesktop.ScreenSaver=talk
 org.kde.kwalletd6=talk

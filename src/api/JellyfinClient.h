@@ -257,6 +257,9 @@ class JellyfinClient final : public QObject {
     QByteArray streamAuthorization() const;
     // The original file of an item (`GET /Items/{id}/Download`): the same token-free URL convention as the player, authenticated by streamAuthorization() and never by a query parameter. Empty unless authenticated or for an invalid id
     QUrl downloadUrl(const QString &itemId) const;
+    // The file of one external text subtitle stream (`GET /Videos/{itemId}/{mediaSourceId}/Subtitles/{index}/0/Stream.{extension}`): the same token-free convention as downloadUrl(). Empty unless authenticated, for an invalid id, an index outside 0 to 9999 or an extension other than srt, ass, ssa or vtt
+    QUrl subtitleFileUrl(const QString &itemId, const QString &mediaSourceId, int index,
+                         const QString &extension) const;
     // The request the WebSocket component opens for `<base>/socket` (https→wss, ws only on a transport that may carry credentials): a fresh attempt asks every time, so the token is never copied anywhere. Empty and invalid unless authenticated. The token travels only in the `Authorization` header, never in a query parameter
     [[nodiscard]] QNetworkRequest webSocketRequest() const;
     // Re-checks a live session against the server (`GET /Users/Me`): a 401 expires it, anything else that fails is silent; a good reply for the session's own user refreshes userName(), userImageTag() and isAdministrator() and emits userProfileRefreshed, one for another user is treated like a 401. One request in flight at a time. Returns false when it cannot even be sent

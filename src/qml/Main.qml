@@ -792,7 +792,7 @@ Kirigami.ApplicationWindow {
         const subtitle = episode && info.seasonNumber > 0 && info.episodeNumber > 0
             ? i18nc("episode label and episode title", "%1 — %2", i18nc("season and episode number", "S%1:E%2", info.seasonNumber, info.episodeNumber), info.name)
             : "";
-        if (!window.player.playLocalFile(info.path, itemId, title, subtitle, info.positionTicks || 0)) {
+        if (!window.player.playLocalFile(info.path, itemId, title, subtitle, info.positionTicks || 0, info)) {
             window.showPassiveNotification(i18n("The downloaded file could not be played"));
             return false;
         }

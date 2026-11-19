@@ -10,9 +10,17 @@ podman image exists "$image" || podman build -t "$image" -f "$containerfile" "$(
 
 tty=; [ -t 0 ] && tty=-t
 
+[ "$#" -eq 0 ] && set -- bash
+set -- "$image" "$@"
+# The live harness's account goes in by name only: its values never stand on a command line, where any local user's ps would read them
+for name in KINEFIN_LIVE_BASE_URL KINEFIN_LIVE_USER KINEFIN_LIVE_PASSWORD KINEFIN_LIVE_ADMIN_USER KINEFIN_LIVE_ADMIN_PASSWORD; do
+    eval "present=\${$name+x}"
+    if [ -n "$present" ]; then set -- "--env=$name" "$@"; fi
+done
+
 exec podman run --rm -i $tty --userns=keep-id --network=host --security-opt label=disable \
     -e QT_QPA_PLATFORM=offscreen \
     -v "$root:$root" -w "$root" \
     -v kinefin-buildtmp:/buildtmp \
-    "$image" "${@:-bash}"
+    "$@"
 # The home directory inside is the container user's own (keep-id): nothing of the host's user data is touched, and no cache needs to be mounted for a C++/QML build.

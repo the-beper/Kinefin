@@ -72,8 +72,10 @@ bool carriesToken(const QUrl &url, QByteArrayView accessToken)
     if (accessToken.isEmpty())
         return false;
     const QString token = QString::fromUtf8(accessToken);
+    // QUrl refuses FullyDecoded for a whole URL: the decoded form is the encoded one, unescaped
     return url.toString(QUrl::FullyEncoded).contains(token, Qt::CaseInsensitive)
-           || url.toString(QUrl::FullyDecoded).contains(token, Qt::CaseInsensitive);
+           || QString::fromUtf8(QByteArray::fromPercentEncoding(url.toEncoded()))
+                  .contains(token, Qt::CaseInsensitive);
 }
 
 // A `TranscodingUrl` is root-relative and carries the access token as `ApiKey` (live-verified on 12.4): anything else, an absolute URL, a protocol-relative one, a path with dot segments, is refused, and the token query parameters are dropped

@@ -309,6 +309,20 @@ class FakeJellyfin {
     QByteArray subtitleDownloadBody = "1\n00:00:00,000 --> 00:00:01,000\nHello\n";
     int subtitleDownloadStatus = 200;
     bool redirectSubtitleDownload = false;
+    // The request line's target of every subtitle download
+    QList<QByteArray> subtitleDownloadRoutes;
+    // Holds the subtitle downloads until releaseSubtitleDownloads()
+    bool holdSubtitleDownload = false;
+    qsizetype heldSubtitleCount() const { return m_heldSubtitles.size(); }
+    void releaseSubtitleDownloads()
+    {
+        const auto held = m_heldSubtitles;
+        m_heldSubtitles.clear();
+        for (const QPointer<QTcpSocket> &socket : held) {
+            if (socket)
+                respondSubtitleDownload(socket);
+        }
+    }
     int trickplayMetadataRequests = 0;
     // The request line's target of the last playback item request
     QByteArray trickplayMetadataRoute;
@@ -1121,6 +1135,15 @@ class FakeJellyfin {
         socket->disconnectFromHost();
     }
 
+    void respondSubtitleDownload(QTcpSocket *socket) const
+    {
+        if (redirectSubtitleDownload)
+            respond(socket, 302, {}, "Location: https://unexpected.invalid/leak.srt\r\n");
+        else
+            respond(socket, subtitleDownloadStatus,
+                    subtitleDownloadStatus == 200 ? subtitleDownloadBody : QByteArray());
+    }
+
     static void respond(QTcpSocket *socket, int status, const QByteArray &body,
                         const QByteArray &extraHeaders = {})
     {
@@ -1653,11 +1676,11 @@ class FakeJellyfin {
         if (method == "GET" && route.contains("/Videos/") && route.contains("/Subtitles/")) {
             ++subtitleDownloadRequests;
             subtitleDownloadAuth = authorization;
-            if (redirectSubtitleDownload)
-                respond(socket, 302, {}, "Location: https://unexpected.invalid/leak.srt\r\n");
+            subtitleDownloadRoutes.append(route);
+            if (holdSubtitleDownload)
+                m_heldSubtitles.append(socket);
             else
-                respond(socket, subtitleDownloadStatus,
-                        subtitleDownloadStatus == 200 ? subtitleDownloadBody : QByteArray());
+                respondSubtitleDownload(socket);
             return;
         }
         if (method == "GET" && route.contains("/Videos/") && route.contains("/Trickplay/")) {
@@ -1734,6 +1757,7 @@ class FakeJellyfin {
     QHash<QTcpSocket *, QByteArray> m_buffers;
     QHash<QTcpSocket *, FakeSocketConnection *> m_wsTaken;
     QList<QPointer<QTcpSocket>> m_held;
+    QList<QPointer<QTcpSocket>> m_heldSubtitles;
     QList<QPair<QPointer<QTcpSocket>, QByteArray>> m_snapshots;
     QList<HeldPlaylistWrite> m_heldPlaylistWrites;
     QList<HeldPlaylistWrite> m_heldPlaylistEntries;

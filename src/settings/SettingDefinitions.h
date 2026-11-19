@@ -24,7 +24,7 @@ struct SettingDefinition {
     QList<Option> options;
     double min = 0;
     double max = 0;
-    // Hidden by upstream (parity ◇): stored and read, never shown or settable from the UI
+    // Hidden (parity ◇: upstream's choice, or a setting nothing reads yet): stored, never shown or settable from the UI
     bool hidden = false;
     // A string with line breaks, e.g. `other_conf`
     bool multiline = false;

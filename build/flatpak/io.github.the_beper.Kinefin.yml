@@ -13,9 +13,7 @@ finish-args:
   - --share=network
   - --device=dri
   - --device=input
-  # Single instance (KDBusService): the base name and any numbered variant share this prefix.
-  - --own-name=io.github.the_beper.Kinefin.*
-  - --own-name=io.github.the_beper.Kinefin
+  # Single instance (KDBusService) owns io.github.the_beper.Kinefin: Flatpak lets an app own its id and the names below it without a grant, and Flathub's linter refuses one (finish-args-unnecessary-appid-own-name).
   # MPRIS; the player suffixes the per-profile variant (parity: upstream appends .profile_<id>).
   - --own-name=org.mpris.MediaPlayer2.Kinefin.*
   # Inhibit the screensaver while playing, and release it otherwise (org.freedesktop.ScreenSaver).
@@ -114,7 +112,7 @@ modules:
               stable-only: true
               url-template: https://www.freedesktop.org/software/uchardet/releases/uchardet-$version.tar.xz
 
-  # TODO (gamepad input, after the first release): add an SDL3 module, which does not ship in org.kde.Sdk.
+  # Gamepad input (after the first release) needs no SDL3 module: org.kde.Platform 6.11 ships SDL 3.2.30.
   # mpvqt is NOT a standalone module: the app's root CMakeLists vendors it via FetchContent
   # and the build sandbox has no network to fetch with, so the kinefin module below carries
   # the exact pinned tarball as a local file source (downloaded by flatpak-builder on the
@@ -124,8 +122,9 @@ modules:
 
   # Qt6::WebSockets is not in org.kde.Platform 6.11 (verified live: no libQt6WebSockets on
   # 2026-11-08) nor in org.kde.Sdk, so the build must produce it for the app's own /app prefix.
-  # The runtime's Qt is exactly 6.11.2: the module's own find_package refuses 6.11.3 against
-  # it (observed in the first Flatpak round), so the pin is the matching patch release.
+  # The module's own find_package refuses another patch release of Qt than the SDK's (observed
+  # in the first Flatpak round), so the tag is the SDK's exact Qt version: 6.11.3 at the
+  # runtime commits of build/flatpak/runtime-pins.conf, and it moves with them.
   - name: qtwebsockets
     buildsystem: cmake-ninja
     config-opts:
@@ -137,8 +136,8 @@ modules:
     sources:
       - type: git
         url: https://github.com/qt/qtwebsockets.git
-        tag: v6.11.2
-        commit: 3eab06de7076a83514e98c2403baa433d137b013
+        tag: v6.11.3
+        commit: e78335eae2209180832d4c63f750bfd2c835e0c3
 
   # The Settings page uses FormCard (docs/architecture.md, KDE HIG exceptions); org.kde.Platform does not ship kirigami-addons. The version matches the one in the build image (build/Containerfile), where qmllint and the smoke test run.
   - name: kirigami-addons

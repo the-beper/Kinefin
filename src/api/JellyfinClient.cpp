@@ -2468,6 +2468,21 @@ QUrl JellyfinClient::downloadUrl(const QString &itemId) const
     return endpoint(QStringLiteral("/Items/") + itemId + QStringLiteral("/Download"));
 }
 
+QUrl JellyfinClient::subtitleFileUrl(const QString &itemId, const QString &mediaSourceId, int index,
+                                     const QString &extension) const
+{
+    // In step with subtitleExtension in DownloadsController.cpp and localSubtitles in PlayerController.cpp
+    static const QStringList extensions{QStringLiteral("srt"), QStringLiteral("ass"),
+                                        QStringLiteral("ssa"), QStringLiteral("vtt")};
+    if (m_state != State::Authenticated || !isValidJellyfinId(itemId)
+        || !isValidJellyfinId(mediaSourceId) || index < 0 || index > 9999
+        || !extensions.contains(extension))
+        return {};
+    return endpoint(QStringLiteral("/Videos/") + itemId + QLatin1Char('/') + mediaSourceId
+                    + QStringLiteral("/Subtitles/") + QString::number(index)
+                    + QStringLiteral("/0/Stream.") + extension);
+}
+
 QNetworkRequest JellyfinClient::webSocketRequest() const
 {
     if (m_state != State::Authenticated || m_base.isEmpty())

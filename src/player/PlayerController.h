@@ -202,9 +202,16 @@ class PlayerController final : public QObject {
     void videoRendererChanged(MpvAbstractItem *item);
 
     Q_INVOKABLE bool playItem(const QString &id, qint64 resumeTicks = 0);
-    // Plays a completed download from its local path; title and subtitle come from the download record. No request is made and nothing is reported
+    // A subtitle file of a download, checked to be one of its own
+    struct LocalSubtitle {
+        QString path;
+        QString title;
+        QString language;
+    };
+    // Plays a completed download from its local path; title and subtitle come from the download record, `extras` its `chapters` and `subtitles` (DownloadsController::playableDownload). No request is made and nothing is reported
     Q_INVOKABLE bool playLocalFile(const QString &path, const QString &itemId, const QString &title,
-                                   const QString &subtitle = QString(), qint64 resumeTicks = 0);
+                                   const QString &subtitle = QString(), qint64 resumeTicks = 0,
+                                   const QVariantMap &extras = {});
     // Plays the queue from a row, at `startTicks` (0 to 24 h; else refused)
     Q_INVOKABLE bool playQueue(int index, qint64 startTicks = 0);
     Q_INVOKABLE bool resumeQueue();
@@ -351,8 +358,9 @@ class PlayerController final : public QObject {
     bool directPlay() const;
     // mpv's track id of the `audio` or `sub` track with this `ff-index`, 0 when there is none or it is not a direct play
     int trackOfStreamIndex(const QString &type, int index) const;
-    // The server's stream index of mpv's track `id` of `type`: direct play and embedded tracks only
+    // The server's stream index of mpv's track `id` of `type`: an embedded track of a direct play, or a server's external subtitle this item loaded
     std::optional<int> streamIndexOfTrack(const QString &type, int id) const;
+    std::optional<int> serverStreamIndex(const QVariantMap &track, bool direct) const;
     void requestPending();
     // The fallback: the stream keeps starving, so the server is asked for the same item at `cap`
     void onStarving(qint64 cap);
@@ -486,6 +494,10 @@ class PlayerController final : public QObject {
     QString m_screenshotPath;
     QString m_profileDataDir;
     QUrl m_pendingSubtitle;
+    // The server's stream index of each external subtitle file loaded into mpv for this stream, by file name
+    QHash<QString, int> m_loadedSubtitles;
+    // The user turned subtitles off for this item; a same-item reopen keeps it
+    bool m_subtitlesOff = false;
     int m_cachedTileIndex = -1;
     int m_pendingTileIndex = -1;
     QVariantList m_audioTracks;
@@ -554,8 +566,12 @@ class PlayerController final : public QObject {
         QString title;
         QString subtitle;
         qint64 resumeTicks = 0;
+        QList<ChapterSummary> chapters;
+        QList<LocalSubtitle> subtitles;
         bool pending = false;
     } m_pendingLocal;
+    // The subtitle files of the download that plays, added to mpv once it loaded
+    QList<LocalSubtitle> m_localSubtitles;
     bool m_stopping = false;
     bool m_trackRestored = false;
     int m_selectedAudioId = 0;

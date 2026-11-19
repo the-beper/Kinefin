@@ -176,7 +176,7 @@ class PipShellIntegration : public QtWaylandClient::QWaylandShellIntegration {
     PipShell m_pip;
 };
 
-// One per application, made on first use on a Wayland connection. Never deleted: its protocol objects would outlive the connection at exit. The private QtWaylandClient API has no binary compatibility promise: another Qt minor version than the one it was built against leaves the window an ordinary one. Patch releases come with the runtime's updates (built against 6.11.2, the host's runtime ran 6.11.3 in the probe) and are accepted
+// One per application, made on first use on a Wayland connection. Never deleted: its protocol objects would outlive the connection at exit. The private QtWaylandClient API has no binary compatibility promise: another Qt minor version than the one it was built against leaves the window an ordinary one. Patch releases come with the runtime's updates and are accepted
 PipShellIntegration *integration()
 {
     static PipShellIntegration *const shared = [] {

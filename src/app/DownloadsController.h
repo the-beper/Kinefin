@@ -9,9 +9,15 @@
 #include "integration/NetworkMeter.h"
 #include "models/DownloadsModel.h"
 
+#include <QByteArray>
 #include <QDateTime>
 #include <QHash>
+#include <QJsonArray>
+#include <QList>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
 #include <QObject>
+#include <QPointer>
 #include <QSet>
 #include <QString>
 #include <QThread>
@@ -24,6 +30,25 @@
 namespace Kinefin {
 class ImageNetworkAccess;
 class ImageOrigin;
+
+// An external text subtitle of a downloaded item, as the server listed it and validated: the index and the extension are the only parts of it that ever reach a path
+struct SubtitleTrack {
+    int index = 0;
+    // srt, ass, ssa or vtt
+    QString extension;
+    // Three lowercase letters at most, empty when the server's is not
+    QString language;
+    QString title;
+};
+
+// What a completed download still gets from the server: the chapters, and the subtitle files that are fetched one request at a time and written next to the media file. `key` is the record's
+struct DownloadExtras {
+    QString key;
+    QString mediaSourceId;
+    QJsonArray chapters;
+    QList<SubtitleTrack> pending;
+    QList<SubtitleTrack> written;
+};
 
 // The download queue of the signed-in session: owns the engine and the model the Downloads page shows, asks the server for the item fields a download needs, and builds the resolver the engine calls at start time (the URL and the Authorization header, never stored). A manual download runs on any network; the engine's automatic ones follow the meter and the "only on unmetered networks" setting, failing closed while the meter is unknown
 class DownloadsController final : public QObject {
@@ -52,6 +77,10 @@ class DownloadsController final : public QObject {
     DownloadsController(JellyfinClient *client, const QString &profileId,
                         QObject *parent = nullptr);
     ~DownloadsController() override;
+
+    // In step with MaxLocalSubtitles in PlayerController.cpp
+    static constexpr int MaxSubtitleTracks = 8;
+    static constexpr qint64 MaxSubtitleBytes = 4 * 1024 * 1024;
 
     DownloadsModel *model() { return &m_model; }
     DownloadStore *store() { return m_manager.store(); }
@@ -153,7 +182,18 @@ class DownloadsController final : public QObject {
     void reconcileNext();
     void refreshOwner();
     bool ownedByCurrent(const QString &serverId, const QString &userId) const;
+    // The record belongs to the user the client is signed in as
+    bool signedInOwns(const DownloadRecord &record) const;
     void writeInfo(const DownloadRecord &record);
+    // Reads the item once more for its chapters and external text subtitles; the reply is handled by onExtrasReady
+    void fetchExtras(const DownloadRecord &record);
+    void onExtrasReady(const QJsonArray &items, int channel);
+    // Fetches the next subtitle of the queue's first job, and rewrites the info file of a job that has none left
+    void advanceExtras();
+    void onSubtitleFinished(QNetworkReply *reply, const QString &key, const SubtitleTrack &track);
+    void finishExtras(const DownloadExtras &extras);
+    // Forgets the queued extras and aborts the request in flight
+    void dropExtras();
     void onListingFailed(const QString &family, int httpStatus, const QString &reason, int channel);
     std::optional<DownloadRecord> recordFor(const QJsonObject &item, const QString &ruleId) const;
 
@@ -173,6 +213,13 @@ class DownloadsController final : public QObject {
     // Outbox reconciliation: the channel of the item read, by event key, and the item whose played write is in flight
     QHash<int, QString> m_outboxFetches;
     QHash<int, QString> m_outboxVerifies;
+    // The record key each pending extras read was asked for
+    QHash<int, QString> m_extrasFetches;
+    QList<DownloadExtras> m_extrasJobs;
+    QNetworkAccessManager m_subtitleNetwork;
+    QPointer<QNetworkReply> m_subtitleReply;
+    QByteArray m_subtitleBuffer;
+    bool m_subtitleOversize = false;
     std::unique_ptr<ImageNetworkAccess> m_images;
     QString m_offlineServerId;
     QString m_offlineUserId;

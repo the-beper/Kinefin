@@ -197,6 +197,50 @@ QByteArray contents(const QString &path)
     return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
 }
 
+// The id of the media source of the fixture movie
+const QString kSource = QStringLiteral("ms-arcturus-0001");
+
+QJsonObject subtitleStream(int index, const QString &codec, const QString &language,
+                           const QString &title, bool external = true, bool text = true)
+{
+    return {{QStringLiteral("Type"), QStringLiteral("Subtitle")},
+            {QStringLiteral("Index"), index},
+            {QStringLiteral("Codec"), codec},
+            {QStringLiteral("Language"), language},
+            {QStringLiteral("DisplayTitle"), title},
+            {QStringLiteral("IsExternal"), external},
+            {QStringLiteral("IsTextSubtitleStream"), text}};
+}
+
+QJsonObject chapterEntry(const QString &name, qint64 ticks)
+{
+    return {{QStringLiteral("Name"), name}, {QStringLiteral("StartPositionTicks"), ticks}};
+}
+
+// `item` with the streams of its first media source (whose id is kSource) and its chapters replaced
+QJsonObject withExtras(QJsonObject item, const QJsonArray &streams, const QJsonArray &chapters,
+                       const QString &sourceId = kSource)
+{
+    QJsonArray sources = item.value(QStringLiteral("MediaSources")).toArray();
+    QJsonObject source = sources.first().toObject();
+    source.insert(QStringLiteral("Id"), sourceId);
+    source.insert(QStringLiteral("MediaStreams"), streams);
+    sources.replace(0, source);
+    item.insert(QStringLiteral("MediaSources"), sources);
+    item.insert(QStringLiteral("Chapters"), chapters);
+    return item;
+}
+
+QJsonObject infoOf(const QString &folder)
+{
+    return QJsonDocument::fromJson(contents(folder + QStringLiteral("/info.json"))).object();
+}
+
+bool infoHas(const QString &folder, const QString &key)
+{
+    return infoOf(folder).contains(key);
+}
+
 // A fake server, a signed-in client and the controller on top of them; the files a test seeds go in between signIn() and open()
 struct Rig {
     FakeJellyfin server;
@@ -235,6 +279,15 @@ struct Rig {
         return result;
     }
 };
+
+// The folder of a completed download, empty when it is not playable
+QString itemFolder(Rig &rig, const QString &itemId)
+{
+    const QString path = rig.downloads->playableDownload(rig.serverId(), rig.userId(), itemId)
+                             .value(QStringLiteral("path"))
+                             .toString();
+    return path.isEmpty() ? QString() : QFileInfo(path).absolutePath();
+}
 } // namespace
 
 class TestDownloadsController : public QObject {
@@ -417,7 +470,8 @@ class TestDownloadsController : public QObject {
         // The refused ones come first in the scan order, so their replies are in before the accepted download finishes
         QTRY_COMPARE_WITH_TIMEOUT(rig.downloads->downloadState(accepted),
                                   QStringLiteral("completed"), 10000);
-        QCOMPARE(rig.server.itemsRoutes.size(), 3);
+        // The three item fetches and the chapters read of the finished download
+        QTRY_COMPARE(rig.server.itemsRoutes.size(), 4);
         QCOMPARE(enqueued.count(), 0);
         QCOMPARE(failed.count(), 0);
         QVERIFY(rig.downloads->downloadState(unsupported).isEmpty());
@@ -588,6 +642,342 @@ class TestDownloadsController : public QObject {
         QVERIFY(QFileInfo::exists(second + QStringLiteral(".nfo")));
         QVERIFY(!QFileInfo::exists(directory + QLatin1Char('/') + relative.completeBaseName()
                                    + QLatin1Char('.') + relative.suffix()));
+    }
+
+    // The chapters and the external text subtitles of the item reach info.json and the item folder; embedded, image-based and out-of-allowlist streams do not, and the player's map carries both lists
+    void chaptersAndTextSubtitlesAreKept()
+    {
+        Rig rig;
+        QVERIFY(rig.signIn());
+        rig.serve(withExtras(
+            downloadable(QStringLiteral("movie_item"), kMovie, QStringLiteral("Arcturus")),
+            QJsonArray{subtitleStream(3, QStringLiteral("subrip"), QStringLiteral("ita"),
+                                      QStringLiteral("Italian SRT")),
+                       subtitleStream(4, QStringLiteral("pgssub"), QStringLiteral("eng"),
+                                      QStringLiteral("Image"), true, false),
+                       subtitleStream(5, QStringLiteral("subrip"), QStringLiteral("eng"),
+                                      QStringLiteral("Embedded"), false, true),
+                       subtitleStream(6, QStringLiteral("WebVTT"), QStringLiteral("eng"),
+                                      QStringLiteral("English\nVTT"))},
+            QJsonArray{chapterEntry(QStringLiteral("Intro"), 0),
+                       chapterEntry(QStringLiteral("Middle"), 9'000'000'000),
+                       chapterEntry(QStringLiteral("Past the runtime cap"), qint64(1) << 41)}));
+        rig.open();
+        QVERIFY(rig.downloads->downloadItem(kMovie));
+        QTRY_COMPARE_WITH_TIMEOUT(rig.downloads->downloadState(kMovie), QStringLiteral("completed"),
+                                  10000);
+        const QString folder = itemFolder(rig, kMovie);
+        QVERIFY(!folder.isEmpty());
+        // The info file is rewritten once, after the last subtitle file
+        QTRY_VERIFY_WITH_TIMEOUT(infoHas(folder, QStringLiteral("subtitles")), 10000);
+
+        QCOMPARE(rig.server.subtitleDownloadRequests, 2);
+        QVERIFY(!rig.server.subtitleDownloadAuth.isEmpty());
+        QCOMPARE(rig.server.subtitleDownloadAuth, rig.client.streamAuthorization());
+        const QByteArray prefix = QByteArrayLiteral("/Videos/") + kMovie.toUtf8() + '/'
+                                  + kSource.toUtf8() + QByteArrayLiteral("/Subtitles/");
+        QCOMPARE(rig.server.subtitleDownloadRoutes.size(), 2);
+        QVERIFY(rig.server.subtitleDownloadRoutes.at(0).endsWith(
+            QByteArray(prefix + "3/0/Stream.srt")));
+        QVERIFY(rig.server.subtitleDownloadRoutes.at(1).endsWith(
+            QByteArray(prefix + "6/0/Stream.vtt")));
+        QCOMPARE(contents(folder + QStringLiteral("/subs/3.srt")), rig.server.subtitleDownloadBody);
+        QCOMPARE(contents(folder + QStringLiteral("/subs/6.vtt")), rig.server.subtitleDownloadBody);
+        QVERIFY(!QFileInfo::exists(folder + QStringLiteral("/subs/4.srt")));
+        QVERIFY(!QFileInfo::exists(folder + QStringLiteral("/subs/5.srt")));
+
+        const QJsonObject info = infoOf(folder);
+        QCOMPARE(info.value(QStringLiteral("name")).toString(), QStringLiteral("Arcturus"));
+        const QJsonArray chapters = info.value(QStringLiteral("chapters")).toArray();
+        QCOMPARE(chapters.size(), 2);
+        QCOMPARE(chapters.at(1).toObject().value(QStringLiteral("Name")).toString(),
+                 QStringLiteral("Middle"));
+        QCOMPARE(
+            qint64(
+                chapters.at(1).toObject().value(QStringLiteral("StartPositionTicks")).toDouble()),
+            qint64(9'000'000'000));
+        const QJsonArray subtitles = info.value(QStringLiteral("subtitles")).toArray();
+        QCOMPARE(subtitles.size(), 2);
+        QCOMPARE(subtitles.at(0).toObject().value(QStringLiteral("index")).toInt(), 3);
+        QCOMPARE(subtitles.at(0).toObject().value(QStringLiteral("file")).toString(),
+                 QStringLiteral("subs/3.srt"));
+        QCOMPARE(subtitles.at(0).toObject().value(QStringLiteral("language")).toString(),
+                 QStringLiteral("ita"));
+        QCOMPARE(subtitles.at(0).toObject().value(QStringLiteral("title")).toString(),
+                 QStringLiteral("Italian SRT"));
+        QCOMPARE(subtitles.at(1).toObject().value(QStringLiteral("file")).toString(),
+                 QStringLiteral("subs/6.vtt"));
+        QCOMPARE(subtitles.at(1).toObject().value(QStringLiteral("title")).toString(),
+                 QStringLiteral("English VTT"));
+
+        const QVariantMap play =
+            rig.downloads->playableDownload(rig.serverId(), rig.userId(), kMovie);
+        const QVariantList playChapters = play.value(QStringLiteral("chapters")).toList();
+        QCOMPARE(playChapters.size(), 2);
+        QCOMPARE(playChapters.at(1).toMap().value(QStringLiteral("name")).toString(),
+                 QStringLiteral("Middle"));
+        QCOMPARE(playChapters.at(1).toMap().value(QStringLiteral("startTicks")).toLongLong(),
+                 qint64(9'000'000'000));
+        const QVariantList playSubtitles = play.value(QStringLiteral("subtitles")).toList();
+        QCOMPARE(playSubtitles.size(), 2);
+        const QString first = playSubtitles.at(0).toMap().value(QStringLiteral("path")).toString();
+        QVERIFY(QDir::isAbsolutePath(first));
+        QCOMPARE(first, QDir(folder).filePath(QStringLiteral("subs/3.srt")));
+        QCOMPARE(playSubtitles.at(0).toMap().value(QStringLiteral("language")).toString(),
+                 QStringLiteral("ita"));
+        QCOMPARE(playSubtitles.at(1).toMap().value(QStringLiteral("title")).toString(),
+                 QStringLiteral("English VTT"));
+    }
+
+    // A stream that is not an external text subtitle of an allowed codec with an index in range asks for nothing, and the chapters still land
+    void unsuitableSubtitleStreamsAreNotFetched()
+    {
+        Rig rig;
+        QVERIFY(rig.signIn());
+        QJsonObject noIndex = subtitleStream(0, QStringLiteral("subrip"), QStringLiteral("eng"),
+                                             QStringLiteral("No index"));
+        noIndex.remove(QStringLiteral("Index"));
+        QJsonObject fraction = subtitleStream(0, QStringLiteral("subrip"), QStringLiteral("eng"),
+                                              QStringLiteral("Fraction"));
+        fraction.insert(QStringLiteral("Index"), 1.5);
+        QJsonObject audio = subtitleStream(1, QStringLiteral("subrip"), QStringLiteral("eng"),
+                                           QStringLiteral("Audio"));
+        audio.insert(QStringLiteral("Type"), QStringLiteral("Audio"));
+        rig.serve(withExtras(
+            downloadable(QStringLiteral("movie_item"), kMovie, QStringLiteral("Arcturus")),
+            QJsonArray{subtitleStream(2, QStringLiteral("pgssub"), QStringLiteral("eng"),
+                                      QStringLiteral("Image"), true, false),
+                       subtitleStream(3, QStringLiteral("subrip"), QStringLiteral("eng"),
+                                      QStringLiteral("Embedded"), false, true),
+                       subtitleStream(4, QStringLiteral("mov_text"), QStringLiteral("eng"),
+                                      QStringLiteral("Other codec")),
+                       subtitleStream(10000, QStringLiteral("subrip"), QStringLiteral("eng"),
+                                      QStringLiteral("Index too large")),
+                       subtitleStream(-1, QStringLiteral("subrip"), QStringLiteral("eng"),
+                                      QStringLiteral("Negative index")),
+                       fraction, noIndex, audio},
+            QJsonArray{chapterEntry(QStringLiteral("Intro"), 0)}));
+        rig.open();
+        QVERIFY(rig.downloads->downloadItem(kMovie));
+        QTRY_COMPARE_WITH_TIMEOUT(rig.downloads->downloadState(kMovie), QStringLiteral("completed"),
+                                  10000);
+        const QString folder = itemFolder(rig, kMovie);
+        QVERIFY(!folder.isEmpty());
+        QTRY_VERIFY_WITH_TIMEOUT(infoHas(folder, QStringLiteral("chapters")), 10000);
+
+        QCOMPARE(rig.server.subtitleDownloadRequests, 0);
+        QVERIFY(!infoHas(folder, QStringLiteral("subtitles")));
+        QVERIFY(!QFileInfo::exists(folder + QStringLiteral("/subs")));
+    }
+
+    // The media source id is a path segment of the request: an unsafe one asks for no subtitle at all
+    void anUnsafeMediaSourceIdFetchesNoSubtitle()
+    {
+        Rig rig;
+        QVERIFY(rig.signIn());
+        rig.serve(withExtras(
+            downloadable(QStringLiteral("movie_item"), kMovie, QStringLiteral("Arcturus")),
+            QJsonArray{subtitleStream(2, QStringLiteral("subrip"), QStringLiteral("eng"),
+                                      QStringLiteral("English"))},
+            QJsonArray{chapterEntry(QStringLiteral("Intro"), 0)}, QStringLiteral("a/../b")));
+        rig.open();
+        QVERIFY(rig.downloads->downloadItem(kMovie));
+        QTRY_COMPARE_WITH_TIMEOUT(rig.downloads->downloadState(kMovie), QStringLiteral("completed"),
+                                  10000);
+        const QString folder = itemFolder(rig, kMovie);
+        QVERIFY(!folder.isEmpty());
+        QTRY_VERIFY_WITH_TIMEOUT(infoHas(folder, QStringLiteral("chapters")), 10000);
+
+        QCOMPARE(rig.server.subtitleDownloadRequests, 0);
+        QVERIFY(!infoHas(folder, QStringLiteral("subtitles")));
+        QVERIFY(!QFileInfo::exists(folder + QStringLiteral("/subs")));
+    }
+
+    void aRefusedSubtitleFileLeavesNothing_data()
+    {
+        QTest::addColumn<int>("status");
+        QTest::addColumn<bool>("redirect");
+        QTest::addColumn<int>("bodySize");
+        QTest::newRow("not found") << 404 << false << -1;
+        QTest::newRow("server error") << 500 << false << -1;
+        QTest::newRow("redirect") << 200 << true << -1;
+        QTest::newRow("empty body") << 200 << false << 0;
+        QTest::newRow("too large")
+            << 200 << false << int(DownloadsController::MaxSubtitleBytes + 1);
+    }
+
+    // A refused, redirected, empty or oversized file is skipped without a retry: no file, no entry, and the rest of the info file is written
+    void aRefusedSubtitleFileLeavesNothing()
+    {
+        QFETCH(int, status);
+        QFETCH(bool, redirect);
+        QFETCH(int, bodySize);
+        Rig rig;
+        QVERIFY(rig.signIn());
+        rig.server.subtitleDownloadStatus = status;
+        rig.server.redirectSubtitleDownload = redirect;
+        if (bodySize >= 0)
+            rig.server.subtitleDownloadBody = QByteArray(bodySize, 'x');
+        rig.serve(withExtras(
+            downloadable(QStringLiteral("movie_item"), kMovie, QStringLiteral("Arcturus")),
+            QJsonArray{subtitleStream(2, QStringLiteral("subrip"), QStringLiteral("eng"),
+                                      QStringLiteral("English"))},
+            QJsonArray{chapterEntry(QStringLiteral("Intro"), 0)}));
+        rig.open();
+        QVERIFY(rig.downloads->downloadItem(kMovie));
+        QTRY_COMPARE_WITH_TIMEOUT(rig.downloads->downloadState(kMovie), QStringLiteral("completed"),
+                                  10000);
+        const QString folder = itemFolder(rig, kMovie);
+        QVERIFY(!folder.isEmpty());
+        // The rewrite comes after the only subtitle attempt
+        QTRY_VERIFY_WITH_TIMEOUT(infoHas(folder, QStringLiteral("chapters")), 10000);
+
+        QCOMPARE(rig.server.subtitleDownloadRequests, 1);
+        QVERIFY(!QFileInfo::exists(folder + QStringLiteral("/subs/2.srt")));
+        QVERIFY(!infoHas(folder, QStringLiteral("subtitles")));
+        const QVariantMap play =
+            rig.downloads->playableDownload(rig.serverId(), rig.userId(), kMovie);
+        QCOMPARE(play.value(QStringLiteral("chapters")).toList().size(), 1);
+        QVERIFY(play.value(QStringLiteral("subtitles")).toList().isEmpty());
+    }
+
+    // The download is removed while its subtitle is on the wire: nothing is written, the folder is not created again, and the next item's subtitle (queued behind it) still arrives
+    void aRemovedDownloadGetsNoSubtitleFile()
+    {
+        Rig rig;
+        QVERIFY(rig.signIn());
+        const QString other = hexId('b', 1);
+        const QJsonArray streams{subtitleStream(1, QStringLiteral("srt"), QStringLiteral("eng"),
+                                                QStringLiteral("English"))};
+        const QJsonArray chapters{chapterEntry(QStringLiteral("Intro"), 0)};
+        rig.serve(withExtras(
+            downloadable(QStringLiteral("movie_item"), kMovie, QStringLiteral("Arcturus")), streams,
+            chapters));
+        rig.serve(withExtras(
+            downloadable(QStringLiteral("movie_item"), other, QStringLiteral("Betelgeuse")),
+            streams, chapters));
+        rig.server.holdSubtitleDownload = true;
+        rig.open();
+        QVERIFY(rig.downloads->downloadItem(kMovie));
+        QTRY_COMPARE_WITH_TIMEOUT(rig.downloads->downloadState(kMovie), QStringLiteral("completed"),
+                                  10000);
+        QTRY_COMPARE_WITH_TIMEOUT(rig.server.heldSubtitleCount(), qsizetype(1), 10000);
+        const QString folder = itemFolder(rig, kMovie);
+        QVERIFY(!folder.isEmpty());
+        QVERIFY(rig.downloads->downloadItem(other));
+        QTRY_COMPARE_WITH_TIMEOUT(rig.downloads->downloadState(other), QStringLiteral("completed"),
+                                  10000);
+        const QString otherFolder = itemFolder(rig, other);
+        QVERIFY(!otherFolder.isEmpty());
+
+        QVERIFY(rig.downloads->removeDownload(rig.serverId(), rig.userId(), kMovie));
+        QVERIFY(!QFileInfo::exists(folder));
+        rig.server.holdSubtitleDownload = false;
+        rig.server.releaseSubtitleDownloads();
+        // One request is in flight at a time: the other item's file is only fetched after the removed item's reply was handled
+        QTRY_VERIFY_WITH_TIMEOUT(infoHas(otherFolder, QStringLiteral("subtitles")), 10000);
+        QVERIFY(QFileInfo::exists(otherFolder + QStringLiteral("/subs/1.srt")));
+        QVERIFY(!QFileInfo::exists(folder));
+        QCOMPARE(rig.server.subtitleDownloadRequests, 2);
+    }
+
+    // The info file is read back as untrusted: only canonical subs/<index>.<ext> regular files inside the item folder, at most eight, cleaned text, and an unreadable file gives empty lists
+    void playableDownloadValidatesTheInfoFile()
+    {
+        Rig rig;
+        QVERIFY(rig.signIn());
+        rig.serve(withExtras(
+            downloadable(QStringLiteral("movie_item"), kMovie, QStringLiteral("Arcturus")),
+            QJsonArray(), QJsonArray()));
+        rig.open();
+        QVERIFY(rig.downloads->downloadItem(kMovie));
+        QTRY_COMPARE_WITH_TIMEOUT(rig.downloads->downloadState(kMovie), QStringLiteral("completed"),
+                                  10000);
+        const QString folder = itemFolder(rig, kMovie);
+        QVERIFY(!folder.isEmpty());
+        const QString subs = folder + QStringLiteral("/subs");
+        QVERIFY(QDir().mkpath(subs));
+        QVERIFY(writeFile(subs + QStringLiteral("/2.srt"), "x"));
+        QVERIFY(writeFile(subs + QStringLiteral("/02.srt"), "x"));
+        QVERIFY(writeFile(subs + QStringLiteral("/2.exe"), "x"));
+        QVERIFY(writeFile(folder + QStringLiteral("/outside.srt"), "x"));
+        QVERIFY(QFile::link(subs + QStringLiteral("/2.srt"), subs + QStringLiteral("/3.srt")));
+        const auto entry = [](const QString &file, const QString &language, const QString &title) {
+            return QJsonObject{{QStringLiteral("index"), 2},
+                               {QStringLiteral("file"), file},
+                               {QStringLiteral("language"), language},
+                               {QStringLiteral("title"), title}};
+        };
+        const QJsonObject info{
+            {QStringLiteral("chapters"),
+             QJsonArray{chapterEntry(QStringLiteral("One\nline"), 5),
+                        chapterEntry(QStringLiteral("Past the runtime cap"), qint64(1) << 41),
+                        chapterEntry(QStringLiteral("Last"), 7)}},
+            {QStringLiteral("subtitles"),
+             QJsonArray{entry(QStringLiteral("subs/2.srt"), QStringLiteral("ITA"),
+                              QStringLiteral("Line\none") + QChar(0x202E) + QStringLiteral("two")),
+                        entry(QStringLiteral("subs/3.srt"), QStringLiteral("ita"), {}),
+                        entry(QStringLiteral("subs/02.srt"), QStringLiteral("ita"), {}),
+                        entry(QStringLiteral("subs/2.exe"), QStringLiteral("ita"), {}),
+                        entry(QStringLiteral("subs/9.srt"), QStringLiteral("ita"), {}),
+                        entry(QStringLiteral("../outside.srt"), QStringLiteral("ita"), {}),
+                        entry(QStringLiteral("/etc/passwd"), QStringLiteral("ita"), {}),
+                        QStringLiteral("subs/2.srt")}}};
+        QVERIFY(writeFile(folder + QStringLiteral("/info.json"),
+                          QJsonDocument(info).toJson(QJsonDocument::Compact)));
+
+        QVariantMap play = rig.downloads->playableDownload(rig.serverId(), rig.userId(), kMovie);
+        QVERIFY(!play.value(QStringLiteral("path")).toString().isEmpty());
+        const QVariantList chapters = play.value(QStringLiteral("chapters")).toList();
+        QCOMPARE(chapters.size(), 2);
+        QCOMPARE(chapters.at(0).toMap().value(QStringLiteral("name")).toString(),
+                 QStringLiteral("One line"));
+        QCOMPARE(chapters.at(0).toMap().value(QStringLiteral("startTicks")).toLongLong(),
+                 qint64(5));
+        QCOMPARE(chapters.at(1).toMap().value(QStringLiteral("name")).toString(),
+                 QStringLiteral("Last"));
+        const QVariantList subtitles = play.value(QStringLiteral("subtitles")).toList();
+        QCOMPARE(subtitles.size(), 1);
+        QCOMPARE(subtitles.at(0).toMap().value(QStringLiteral("path")).toString(),
+                 QDir(folder).filePath(QStringLiteral("subs/2.srt")));
+        QVERIFY(subtitles.at(0).toMap().value(QStringLiteral("language")).toString().isEmpty());
+        QCOMPARE(subtitles.at(0).toMap().value(QStringLiteral("title")).toString(),
+                 QStringLiteral("Line one two"));
+
+        // At most eight tracks, whatever the file lists
+        QJsonArray many;
+        for (int index = 10; index < 20; ++index) {
+            QVERIFY(writeFile(subs + QStringLiteral("/%1.srt").arg(index), "x"));
+            many.append(entry(QStringLiteral("subs/%1.srt").arg(index), QStringLiteral("eng"),
+                              QStringLiteral("Track")));
+        }
+        QVERIFY(writeFile(folder + QStringLiteral("/info.json"),
+                          QJsonDocument(QJsonObject{{QStringLiteral("subtitles"), many}})
+                              .toJson(QJsonDocument::Compact)));
+        play = rig.downloads->playableDownload(rig.serverId(), rig.userId(), kMovie);
+        QCOMPARE(play.value(QStringLiteral("subtitles")).toList().size(),
+                 DownloadsController::MaxSubtitleTracks);
+
+        // Malformed and oversized files give empty lists, never a failed call
+        QVERIFY(writeFile(folder + QStringLiteral("/info.json"), "{ not json"));
+        play = rig.downloads->playableDownload(rig.serverId(), rig.userId(), kMovie);
+        QVERIFY(!play.value(QStringLiteral("path")).toString().isEmpty());
+        QVERIFY(play.value(QStringLiteral("chapters")).toList().isEmpty());
+        QVERIFY(play.value(QStringLiteral("subtitles")).toList().isEmpty());
+        QVERIFY(writeFile(
+            folder + QStringLiteral("/info.json"),
+            QJsonDocument(
+                QJsonObject{{QStringLiteral("chapters"),
+                             QJsonArray{chapterEntry(QStringLiteral("Late"), 1)}},
+                            {QStringLiteral("padding"), QString(600 * 1024, QLatin1Char('x'))}})
+                .toJson(QJsonDocument::Compact)));
+        play = rig.downloads->playableDownload(rig.serverId(), rig.userId(), kMovie);
+        QVERIFY(!play.value(QStringLiteral("path")).toString().isEmpty());
+        QVERIFY(play.value(QStringLiteral("chapters")).toList().isEmpty());
+        QVERIFY(QFile::remove(folder + QStringLiteral("/info.json")));
+        play = rig.downloads->playableDownload(rig.serverId(), rig.userId(), kMovie);
+        QVERIFY(!play.value(QStringLiteral("path")).toString().isEmpty());
+        QVERIFY(play.value(QStringLiteral("subtitles")).toList().isEmpty());
     }
 
   private:

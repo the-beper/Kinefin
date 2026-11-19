@@ -3166,6 +3166,42 @@ class TestJellyfinClient : public QObject {
         QVERIFY(client.downloadUrl(kPlayItem).isEmpty());
     }
 
+    void subtitleFileUrlIsBuiltOnlyForValidInput()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        const QString source = QStringLiteral("0123abcd-ef01-2345-6789-abcdef012345");
+        QVERIFY(client.subtitleFileUrl(kPlayItem, source, 2, QStringLiteral("srt")).isEmpty());
+        QVERIFY(login(client, server));
+        const QUrl url = client.subtitleFileUrl(kPlayItem, source, 2, QStringLiteral("srt"));
+        QVERIFY(url.isValid());
+        QVERIFY(url.path().endsWith(
+            QStringLiteral("/Videos/%1/%2/Subtitles/2/0/Stream.srt").arg(kPlayItem, source)));
+        QVERIFY(!url.hasQuery());
+        QVERIFY(!url.toString().contains(QStringLiteral("Token")));
+        for (const QString &extension :
+             {QStringLiteral("ass"), QStringLiteral("ssa"), QStringLiteral("vtt")})
+            QVERIFY(!client.subtitleFileUrl(kPlayItem, source, 0, extension).isEmpty());
+        QVERIFY(!client.subtitleFileUrl(kPlayItem, source, 9999, QStringLiteral("srt")).isEmpty());
+
+        QVERIFY(
+            client.subtitleFileUrl(QStringLiteral("../escape"), source, 2, QStringLiteral("srt"))
+                .isEmpty());
+        QVERIFY(client.subtitleFileUrl(QString(), source, 2, QStringLiteral("srt")).isEmpty());
+        QVERIFY(client.subtitleFileUrl(kPlayItem, QStringLiteral("a/b"), 2, QStringLiteral("srt"))
+                    .isEmpty());
+        QVERIFY(client.subtitleFileUrl(kPlayItem, QString(), 2, QStringLiteral("srt")).isEmpty());
+        QVERIFY(client.subtitleFileUrl(kPlayItem, source, -1, QStringLiteral("srt")).isEmpty());
+        QVERIFY(client.subtitleFileUrl(kPlayItem, source, 10000, QStringLiteral("srt")).isEmpty());
+        for (const QString &extension :
+             {QString(), QStringLiteral("sub"), QStringLiteral("SRT"), QStringLiteral("srt/../x"),
+              QStringLiteral("srt?x=1"), QStringLiteral("webvtt")})
+            QVERIFY(client.subtitleFileUrl(kPlayItem, source, 2, extension).isEmpty());
+        client.forgetSession();
+        QVERIFY(client.subtitleFileUrl(kPlayItem, source, 2, QStringLiteral("srt")).isEmpty());
+    }
+
     void verifySessionRefreshesTheAdministratorFlag()
     {
         FakeJellyfin server;

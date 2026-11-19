@@ -4,9 +4,12 @@
 #include "api/JellyfinClient.h"
 #include "api/JellyfinSocketClient.h"
 #include "api/PlaybackReport.h"
+#include "models/PlayQueue.h"
 #include "player/PlaybackEngine.h"
 #include "player/PlaybackReporter.h"
 #include "player/PlaybackSession.h"
+#include "player/PlayerController.h"
+#include "settings/ClientSettings.h"
 
 #include <QDateTime>
 #include <QElapsedTimer>
@@ -16,10 +19,12 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QRegularExpression>
 #include <QScopeGuard>
 #include <QSignalSpy>
 #include <QTcpServer>
 #include <QTcpSocket>
+#include <QTemporaryDir>
 #include <QTimer>
 #include <QUrlQuery>
 #include <QUuid>
@@ -93,6 +98,9 @@ class TestJellyfinLive : public QObject {
     // Engine live gate INT-06 (~50 s): a byte-forwarding local proxy carries client and stream; cutting it mid-play gives exactly one Failed->Stopping->Idle path, no second play identity, and re-authentication on the real base recovers
     void engineInterruptionSeversAndRecovers();
 
+    // Adaptive bitrate fallback (~2-4 min): a real PlayerController plays a direct-playable movie of at least 5 Mbit/s through a local proxy, the proxy is throttled to 40 % of the file's bitrate, and the controller must lower the quality on its own: a transcode at a lower bitrate, one Stopped then one Start, Playing again near the same position, and a Stopped that clears the server's play
+    void playerFallsBackOnAThrottledLink();
+
     // Engine live gate INT-05 (~40 s): local-logout scope (a server-driven expiry needs an admin action this harness cannot reach). The engine keeps playing through a cleared credential, the stop needs no server, and no new playback identity forms
     void engineSurvivesALocalLogout();
 
@@ -156,7 +164,7 @@ class TestJellyfinLive : public QObject {
     // Engine live gate round helpers
     QString hdrItemId(Kinefin::JellyfinClient &client);
     bool findDirectPlayable(Kinefin::JellyfinClient &client, QString *itemId,
-                            Kinefin::PlaybackSource *source);
+                            Kinefin::PlaybackSource *source, qint64 minBitrate = 0);
     void assertTokenFreeMediaUrl(const QUrl &url);
     void recordAndAssertPlaying(Kinefin::JellyfinClient &client, const QString &deviceId,
                                 const Kinefin::PlaybackSource &source,
@@ -933,7 +941,7 @@ void TestJellyfinLive::tokenLogoutClosesEverything()
 
 // The first movie among the library's 20 whose PlaybackInfo negotiation under the parity default profile answers a *direct* source. PlaybackInfo runs one request at a time; a failed request just books a live fact and the loop moves on
 bool TestJellyfinLive::findDirectPlayable(Kinefin::JellyfinClient &client, QString *itemId,
-                                          Kinefin::PlaybackSource *source)
+                                          Kinefin::PlaybackSource *source, qint64 minBitrate)
 {
     const QJsonObject items = getJson(
         client, QStringLiteral(
@@ -957,6 +965,11 @@ bool TestJellyfinLive::findDirectPlayable(Kinefin::JellyfinClient &client, QStri
         const Kinefin::PlaybackSource found =
             ready.first().first().value<Kinefin::PlaybackSource>();
         if (found.method == Kinefin::PlaybackSource::Method::Direct) {
+            if (found.media.source.bitrate < minBitrate) {
+                qInfo() << LIVE_FACT << "direct-playable candidate" << candidate << "is only"
+                        << found.media.source.bitrate << "bit/s, trying the next";
+                continue;
+            }
             *itemId = candidate;
             *source = found;
             qInfo() << LIVE_FACT << "the first direct-playable candidate is" << candidate;
@@ -1234,7 +1247,7 @@ void TestJellyfinLive::engineProgressAdvancesUserData()
     client.disconnectFromServer();
 }
 
-/* The local byte forwarder behind INT-06 and the subpath BaseUrl round: the client and player both speak to it, it speaks to the real server. With an empty prefix the forwarded bytes leave untouched (cut() drops every connection, both directions). With a prefix it rewrites request line paths DOWN→UP, so a subpath BaseUrl (`<host>/jellyfin` deployments) behaves like the proxy-less case */
+/* The local byte forwarder behind INT-06 and the subpath BaseUrl round: the client and player both speak to it, it speaks to the real server. With an empty prefix the forwarded bytes leave untouched (cut() drops every connection, both directions). With a prefix it rewrites request line paths DOWN→UP, so a subpath BaseUrl (`<host>/jellyfin` deployments) behaves like the proxy-less case. setDownstreamRate paces the server-to-client bytes (a throttled link) and reports() lists the playback Start and Stopped requests that went upstream */
 class FixtureProxy : public QObject {
     Q_OBJECT
 
@@ -1242,6 +1255,8 @@ class FixtureProxy : public QObject {
     explicit FixtureProxy(QObject *parent = nullptr) : QObject(parent)
     {
         connect(&m_listener, &QTcpServer::newConnection, this, &FixtureProxy::accept);
+        m_pacer.setInterval(1000 / PacerTicksPerSecond);
+        connect(&m_pacer, &QTimer::timeout, this, &FixtureProxy::pace);
     }
 
     bool start(const QUrl &upstream, const QByteArray &prefix = {})
@@ -1252,10 +1267,33 @@ class FixtureProxy : public QObject {
         return m_listener.listen(QHostAddress::LocalHost);
     }
     quint16 port() const { return m_listener.serverPort(); }
+    // Server to client bytes per second, 0 for unthrottled; takes effect at once, also on open connections
+    void setDownstreamRate(qint64 bytesPerSecond)
+    {
+        m_rate = qMax(qint64(0), bytesPerSecond);
+        for (auto it = m_downOf.cbegin(); it != m_downOf.cend(); ++it)
+            it.key()->setReadBufferSize(m_rate > 0 || m_backpressure ? BoundedBuffer : 0);
+        if (m_rate > 0) {
+            m_pacer.start();
+            return;
+        }
+        m_pacer.stop();
+        const auto pairs = m_downOf;
+        for (auto it = pairs.cbegin(); it != pairs.cend(); ++it)
+            pump(it.key(), it.value());
+    }
+    // From now on the proxy moves no more server bytes than the client has taken (before any connection opens): without it a client that reads slowly sees a proxy that already holds everything the server could send, and a later throttle has nothing to bite on
+    void boundBuffers() { m_backpressure = true; }
+    // One line per upstream Start or Stopped request, in order, with the PlaySessionId when the body came with the request line
+    QStringList reports() const { return m_reports; }
+    // Bytes that went server to client so far
+    qint64 downstreamBytes() const { return m_downBytes; }
 
     void cut()
     {
         m_listener.close();
+        m_pacer.stop();
+        m_downOf.clear();
         for (auto *socket : m_sockets) {
             // Drop this object's own slots first: a queued readyRead must not reach a socket that is already closed or deleted
             socket->disconnect();
@@ -1267,6 +1305,42 @@ class FixtureProxy : public QObject {
     }
 
   private:
+    static constexpr int PacerTicksPerSecond = 20;
+    static constexpr int BoundedBuffer = 256 * 1024;
+
+    // Moves the server's bytes to the client: all of them, or, with bounded buffers, only while the client's socket holds less than the bound; the rest stays in `up`, so the server's TCP window closes. Under a throttle the pacer moves them
+    void pump(QTcpSocket *up, QTcpSocket *down)
+    {
+        if (m_rate > 0)
+            return;
+        if (!m_backpressure) {
+            relay(up, down, -1);
+            return;
+        }
+        while (up->bytesAvailable() > 0 && down->bytesToWrite() < BoundedBuffer)
+            relay(up, down, BoundedBuffer);
+    }
+
+    // Moves what `up` holds to `down`, at most `limit` bytes (-1 for all)
+    void relay(QTcpSocket *up, QTcpSocket *down, qint64 limit)
+    {
+        const QByteArray data = limit < 0 ? up->readAll() : up->read(limit);
+        if (!data.isEmpty())
+            down->write(data);
+        m_downBytes += data.size();
+    }
+
+    void noteReport(const QByteArray &data)
+    {
+        const bool isStart = data.startsWith("POST /Sessions/Playing HTTP");
+        if (!isStart && !data.startsWith("POST /Sessions/Playing/Stopped HTTP"))
+            return;
+        static const QRegularExpression sessionId(QStringLiteral("\"PlaySessionId\":\"([^\"]*)\""));
+        const QRegularExpressionMatch match = sessionId.match(QString::fromUtf8(data));
+        m_reports.append((isStart ? QStringLiteral("Start ") : QStringLiteral("Stopped "))
+                         + (match.hasMatch() ? match.captured(1) : QStringLiteral("(body apart)")));
+    }
+
     // Rewrites only when the chunk is the start of an HTTP request and the request line carries our prefix; chunked-first-line splits would skew the rewrite, which for the fixture's single-Qt-write requests does not occur. Upstream responses pass as-is (the server never learned about the prefix)
     static QByteArray stripPrefixFromRequest(QByteArray data, const QByteArray &prefix)
     {
@@ -1301,14 +1375,25 @@ class FixtureProxy : public QObject {
             const auto forward = [this](QTcpSocket *from, QTcpSocket *to, const bool strip) {
                 // Qt buffers these writes while the peer is still connecting; they flush on the connection, so no guard is needed and none must exist: dropping the first request bytes here is what broke the earlier round
                 QObject::connect(from, &QAbstractSocket::readyRead, from, [this, from, to, strip] {
+                    if (!strip) {
+                        pump(from, to);
+                        return;
+                    }
                     QByteArray data = from->readAll();
-                    if (strip && !m_prefix.isEmpty())
+                    noteReport(data);
+                    if (!m_prefix.isEmpty())
                         data = stripPrefixFromRequest(data, m_prefix);
                     to->write(data);
                 });
             };
             forward(down, up, true);
             forward(up, down, false);
+            m_downOf.insert(up, down);
+            if (m_rate > 0 || m_backpressure)
+                up->setReadBufferSize(BoundedBuffer);
+            if (m_backpressure)
+                QObject::connect(down, &QAbstractSocket::bytesWritten, down,
+                                 [this, up, down] { pump(up, down); });
             // Either side's close tears both down together: the survivor must never hold a dangling peer. removeOne compares pointers only, so a half-destroyed pair is still safe to unregister
             const auto retire = [this, down, up] {
                 down->close();
@@ -1317,6 +1402,7 @@ class FixtureProxy : public QObject {
                 up->deleteLater();
                 m_sockets.removeOne(down);
                 m_sockets.removeOne(up);
+                m_downOf.remove(up);
             };
             QObject::connect(down, &QAbstractSocket::disconnected, this, retire);
             QObject::connect(up, &QAbstractSocket::disconnected, this, retire);
@@ -1325,8 +1411,30 @@ class FixtureProxy : public QObject {
         }
     }
 
+    // One tick of the throttle: the budget of the tick is split among the connections that have bytes waiting
+    void pace()
+    {
+        const qint64 budget = qMax(qint64(1), m_rate / PacerTicksPerSecond);
+        const auto pairs = m_downOf;
+        QList<QTcpSocket *> waiting;
+        for (auto it = pairs.cbegin(); it != pairs.cend(); ++it)
+            if (it.key()->bytesAvailable() > 0 && it.value()->bytesToWrite() < BoundedBuffer)
+                waiting.append(it.key());
+        for (QTcpSocket *up : std::as_const(waiting)) {
+            // A write below can retire a pair
+            if (m_downOf.contains(up))
+                relay(up, pairs.value(up), qMax(qint64(1), budget / waiting.size()));
+        }
+    }
+
   private:
     QTcpServer m_listener;
+    QTimer m_pacer;
+    qint64 m_rate = 0;
+    qint64 m_downBytes = 0;
+    bool m_backpressure = false;
+    QHash<QTcpSocket *, QTcpSocket *> m_downOf;
+    QStringList m_reports;
     QString m_upstreamHost;
     quint16 m_upstreamPort = 0;
     QByteArray m_prefix;
@@ -1416,6 +1524,181 @@ void TestJellyfinLive::engineInterruptionSeversAndRecovers()
 
     // The stale header never rides a credential-less open: cleared, then the truth
     engine->deleteLater();
+    proxyClient.disconnectFromServer();
+    client.disconnectFromServer();
+}
+
+void TestJellyfinLive::playerFallsBackOnAThrottledLink()
+{
+    if (!m_live)
+        QSKIP("no KINEFIN_LIVE_* environment, skipping the live checks");
+    constexpr qint64 second = 10'000'000;
+    Kinefin::JellyfinClient client;
+    QVERIFY(authenticate(client));
+    QString itemId;
+    Kinefin::PlaybackSource source;
+    QVERIFY2(findDirectPlayable(client, &itemId, &source, 5'000'000),
+             "no direct-playable movie of 5 Mbit/s or more in the first 20");
+    const qint64 sourceBitrate = source.media.source.bitrate;
+    qInfo() << LIVE_FACT << "fallback round movie" << itemId << "source bitrate" << sourceBitrate
+            << "bit/s";
+
+    FixtureProxy proxy(this);
+    proxy.boundBuffers();
+    QVERIFY2(proxy.start(m_base), "the local forwarder could not listen");
+    QUrl through = m_base;
+    through.setHost(QStringLiteral("127.0.0.1"));
+    through.setPort(int(proxy.port()));
+
+    Kinefin::JellyfinClient proxyClient;
+    ++deviceSequence;
+    const QString proxyDeviceId = QStringLiteral("kinefin-live-fiddle-%1").arg(deviceSequence);
+    QVERIFY(proxyClient.setDeviceIdentity(QStringLiteral("Kinefin"), proxyDeviceId,
+                                          QStringLiteral("0.0.1")));
+    QVERIFY(proxyClient.connectToServer(through));
+    QSignalSpy proxyReady(&proxyClient, &Kinefin::JellyfinClient::serverReady);
+    QVERIFY2(proxyReady.wait(20000), "the server probe through the forwarder never answered");
+    QSignalSpy loggedIn(&proxyClient, &Kinefin::JellyfinClient::loginSucceeded);
+    QVERIFY(proxyClient.authenticate(m_user, m_password));
+    QVERIFY2(loggedIn.wait(20000), "the proxied login did not arrive");
+
+    // The smallest demuxer cache the setting offers, so a starving link shows within seconds; an empty profile id keeps the controller's memory files off the disk
+    QTemporaryDir dataDir;
+    QVERIFY(dataDir.isValid());
+    Kinefin::PlayQueue queue(&proxyClient);
+    Kinefin::ClientSettings settings(dataDir.filePath(QStringLiteral("kinefin.conf")));
+    QVERIFY(settings.setValue(QStringLiteral("video"), QStringLiteral("cache"), 10));
+    Kinefin::PlayerController controller(proxyClient, queue, settings, QString());
+    auto *engine = controller.findChild<Kinefin::PlaybackEngine *>();
+    QVERIFY(engine);
+    QVERIFY(engine->init({QStringLiteral("vo=null"), QStringLiteral("ao=null")}));
+    QSignalSpy infos(&proxyClient, &Kinefin::JellyfinClient::playbackInfoReady);
+    QSignalSpy lowered(&controller, &Kinefin::PlayerController::qualityLowered);
+    QSignalSpy unavailable(&controller, &Kinefin::PlayerController::qualityUnavailable);
+    const auto playing = [&controller] {
+        return controller.active() && !controller.loading() && !controller.buffering()
+               && !controller.paused() && controller.canSeek();
+    };
+
+    QVERIFY(controller.playItem(itemId, 0));
+    QTRY_VERIFY_WITH_TIMEOUT(playing(), 30000);
+    QCOMPARE(infos.size(), 1);
+    const auto first = infos.first().first().value<Kinefin::PlaybackSource>();
+    QCOMPARE(first.method, Kinefin::PlaybackSource::Method::Direct);
+    QCOMPARE(int(first.url.port()), int(proxy.port()));
+    QTRY_VERIFY_WITH_TIMEOUT(controller.positionTicks() > 3 * second, 20000);
+    const qint64 movingFrom = controller.positionTicks();
+    QTest::qWait(2000);
+    QVERIFY2(controller.positionTicks() > movingFrom, "the unthrottled playback did not advance");
+
+    // The middle of the film, where a UHD remux draws far more than in its opening minutes: with the demuxer cache at its smallest the link then starves within seconds of a throttle
+    const qint64 middle = controller.durationTicks() / 2;
+    QVERIFY2(middle > 600 * second, "the film is shorter than 20 minutes");
+    // Without a renderer mpv plays the audio only and reads the video past on the wire, so the cache holds minutes of audio in 10 MiB: a cache of 1 MiB, filled again by that seek, runs dry in seconds
+    engine->setMpvProperty(QStringLiteral("demuxer-max-bytes"), QStringLiteral("1MiB"));
+    controller.seek(middle);
+    QTRY_VERIFY_WITH_TIMEOUT(controller.positionTicks() > middle && playing(), 60000);
+    QTest::qWait(25000);
+
+    // The link drops to 40 % of what the playback draws now: with the cache full that is the pace of the file at this position, which a variable-rate file keeps far from its average bitrate
+    const qint64 drawnFrom = proxy.downstreamBytes();
+    QTest::qWait(20000);
+    const qint64 drawn = (proxy.downstreamBytes() - drawnFrom) * 8 / 20;
+    const qint64 bytesPerSecond = drawn * 4 / 10 / 8;
+    const qint64 beforeThrottle = controller.positionTicks();
+    QElapsedTimer sinceThrottle;
+    sinceThrottle.start();
+    proxy.setDownstreamRate(bytesPerSecond);
+    qInfo() << LIVE_FACT << "the playback drew" << drawn << "bit/s of the file's" << sourceBitrate
+            << "average; throttled to" << bytesPerSecond * 8 << "bit/s at position"
+            << beforeThrottle / second << "s; the fallback timings are the real ones";
+
+    QElapsedTimer progressLog;
+    progressLog.start();
+    qint64 lastBytes = proxy.downstreamBytes();
+    while ((lowered.isEmpty() && unavailable.isEmpty()) && sinceThrottle.elapsed() < 180000) {
+        QTest::qWait(200);
+        if (progressLog.elapsed() >= 10000) {
+            qInfo() << LIVE_FACT << sinceThrottle.elapsed() / 1000 << "s: position"
+                    << controller.positionTicks() / second << "s, buffering"
+                    << controller.buffering() << "demuxer cache s"
+                    << engine->mpvProperty(QStringLiteral("demuxer-cache-duration")).toDouble()
+                    << "link bit/s"
+                    << (proxy.downstreamBytes() - lastBytes) * 8 * 1000 / progressLog.elapsed();
+            lastBytes = proxy.downstreamBytes();
+            progressLog.restart();
+        }
+    }
+    QVERIFY2(!lowered.isEmpty() || !unavailable.isEmpty(),
+             "no fallback within 180 s of the throttle");
+    QVERIFY2(unavailable.isEmpty(), "the fallback asked for a lower stream and was refused");
+    const qint64 secondsToSwitch = sinceThrottle.elapsed() / 1000;
+    const qint64 cap = lowered.first().first().toLongLong();
+    qInfo() << LIVE_FACT << "qualityLowered cap" << cap << "bit/s," << secondsToSwitch
+            << "s after the throttle";
+    QCOMPARE(cap, Kinefin::lowerBitrate(sourceBitrate).value_or(0));
+    // The link recovers: the lower stream is judged on its own, not on the throttle
+    proxy.setDownstreamRate(0);
+
+    // The lower stream is a transcode of the same item, offered without a second request
+    QCOMPARE(infos.size(), 2);
+    const auto lower = infos.at(1).first().value<Kinefin::PlaybackSource>();
+    qInfo() << LIVE_FACT << "lower stream method" << int(lower.method) << "target bitrate"
+            << lower.media.targetBitrate << "bit/s, source" << lower.media.source.bitrate << "path"
+            << lower.url.path();
+    QCOMPARE(lower.itemId, itemId);
+    QCOMPARE(lower.method, Kinefin::PlaybackSource::Method::Transcode);
+    QVERIFY(lower.playSessionId != first.playSessionId);
+    QVERIFY2(lower.media.targetBitrate > 0 && lower.media.targetBitrate < sourceBitrate,
+             "the transcode is not at a lower bitrate than the source");
+    QCOMPARE(int(lower.url.port()), int(proxy.port()));
+    QTRY_COMPARE_WITH_TIMEOUT(
+        controller.playbackInfo().value(QStringLiteral("playMethod")).toString(),
+        QStringLiteral("Transcode"), 20000);
+
+    // Playing again near where it was: not before the throttle, and not further than the wall time allows
+    QTRY_VERIFY_WITH_TIMEOUT(playing(), 90000);
+    QTRY_VERIFY_WITH_TIMEOUT(controller.positionTicks() > 0, 20000);
+    const qint64 after = controller.positionTicks();
+    const qint64 wall = sinceThrottle.elapsed() / 1000;
+    qInfo() << LIVE_FACT << "playing again at" << after / second << "s (before the throttle"
+            << beforeThrottle / second << "s," << wall << "s of wall time since)";
+    QVERIFY2(after >= beforeThrottle - 5 * second, "the position went back after the switch");
+    QVERIFY2(after <= beforeThrottle + (wall + 30) * second, "the position jumped ahead");
+
+    // The new play is on the server as a transcode
+    QString method;
+    const auto serverMethod = [&] {
+        for (const auto &value : getDocument(client, QStringLiteral("/Sessions")).array()) {
+            const QJsonObject session = value.toObject();
+            if (session.value(QStringLiteral("DeviceId")).toString() == proxyDeviceId)
+                method = session.value(QStringLiteral("PlayState"))
+                             .toObject()
+                             .value(QStringLiteral("PlayMethod"))
+                             .toString();
+        }
+        return method;
+    };
+    QTRY_COMPARE_WITH_TIMEOUT(serverMethod(), QStringLiteral("Transcode"), 15000);
+    qInfo() << LIVE_FACT << "server session PlayMethod after the switch:" << method;
+
+    // The old stream's Stopped went out before the new stream's Start
+    QTest::qWait(3000);
+    const QStringList reports = proxy.reports();
+    qInfo() << LIVE_FACT << "upstream Start and Stopped requests in order:" << reports;
+    QVERIFY(reports.size() >= 3);
+    QCOMPARE(reports.at(0), QStringLiteral("Start ") + first.playSessionId);
+    QCOMPARE(reports.at(1), QStringLiteral("Stopped ") + first.playSessionId);
+    QCOMPARE(reports.at(2), QStringLiteral("Start ") + lower.playSessionId);
+    qInfo() << LIVE_FACT << "fallback steps taken:" << lowered.size();
+
+    controller.stop();
+    QTRY_VERIFY_WITH_TIMEOUT(!controller.active(), 30000);
+    QTRY_VERIFY_WITH_TIMEOUT(sessionSnapshot(client, proxyDeviceId, lower.playSessionId)
+                                 .contains(QStringLiteral("\"nowPlayingType\":\"\"")),
+                             15000);
+    qInfo() << LIVE_FACT << "server session record after stop:"
+            << sessionSnapshot(client, proxyDeviceId, lower.playSessionId);
     proxyClient.disconnectFromServer();
     client.disconnectFromServer();
 }

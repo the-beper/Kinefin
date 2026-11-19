@@ -1341,6 +1341,59 @@ class TestPlayerController : public QObject {
         QVERIFY(chain.server.reportLog.isEmpty());
     }
 
+    // A download's own chapters and subtitle files come with it; a file outside its `subs` folder, a link or another extension is not loaded
+    void aLocalFileCarriesItsChaptersAndSubtitles()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        const QString clip = QUrl(TestWav::writeWavClip(chain.dir, 10)).toLocalFile();
+        QVERIFY(!clip.isEmpty());
+        QVERIFY(QDir(chain.dir.path()).mkpath(QStringLiteral("subs")));
+        const auto write = [](const QString &path) {
+            QFile file(path);
+            return file.open(QIODevice::WriteOnly)
+                   && file.write("1\n00:00:00,000 --> 00:00:05,000\nHello\n") > 0;
+        };
+        const QString own = chain.dir.filePath(QStringLiteral("subs/4.srt"));
+        const QString outside = chain.dir.filePath(QStringLiteral("5.srt"));
+        const QString other = chain.dir.filePath(QStringLiteral("subs/6.txt"));
+        const QString link = chain.dir.filePath(QStringLiteral("subs/7.srt"));
+        QVERIFY(write(own) && write(outside) && write(other));
+        QVERIFY(QFile::link(own, link));
+        const auto subtitle = [](const QString &path, const QString &title) {
+            return QVariantMap{{QStringLiteral("path"), path},
+                               {QStringLiteral("title"), title},
+                               {QStringLiteral("language"), QStringLiteral("ita")}};
+        };
+        const QVariantMap extras{
+            {QStringLiteral("chapters"),
+             QVariantList{QVariantMap{{QStringLiteral("name"), QStringLiteral("Opening")},
+                                      {QStringLiteral("startTicks"), 0}},
+                          QVariantMap{{QStringLiteral("name"), QStringLiteral("Middle")},
+                                      {QStringLiteral("startTicks"), 50'000'000}}}},
+            {QStringLiteral("subtitles"), QVariantList{subtitle(own, QStringLiteral("Italian")),
+                                                       subtitle(outside, QStringLiteral("Outside")),
+                                                       subtitle(other, QStringLiteral("Other")),
+                                                       subtitle(link, QStringLiteral("Link"))}}};
+        QVERIFY(chain.engine()->init({QStringLiteral("vo=null"), QStringLiteral("ao=null")}));
+        QVERIFY(chain.controller.playLocalFile(clip, kMovie, QStringLiteral("Local Movie"), {}, 0,
+                                               extras));
+        QTRY_VERIFY(chain.controller.canSeek());
+        QTRY_COMPARE(chain.controller.chapters().size(), 2);
+        QCOMPARE(chain.controller.chapters().at(1).toMap().value(QStringLiteral("name")).toString(),
+                 QStringLiteral("Middle"));
+        QTRY_COMPARE(chain.controller.subtitleTracks().size(), 1);
+        QCOMPARE(chain.controller.subtitleTracks()
+                     .first()
+                     .toMap()
+                     .value(QStringLiteral("name"))
+                     .toString(),
+                 QStringLiteral("Italian"));
+        QCOMPARE(chain.server.playbackInfoRequests, 0);
+        chain.controller.stop();
+        QTRY_VERIFY(!chain.controller.localPlayback());
+    }
+
     void aLocalFileStoppedPastNinetyPercentIsWatched()
     {
         QFETCH(qint64, positionTicks);
@@ -1443,6 +1496,44 @@ class TestPlayerController : public QObject {
             QJsonDocument::fromJson(chain.server.lastPlaybackInfoBody).object();
         QCOMPARE(next.value(QStringLiteral("MaxStreamingBitrate")).toInteger(), 1'000'000'000);
         QVERIFY(!next.contains(QStringLiteral("MediaSourceId")));
+    }
+
+    // A server's external subtitle the user loaded is asked for with the lower stream and loaded again on it
+    void aLoadedExternalSubtitleFollowsTheFallback()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        QVERIFY(startsStarving(chain, true));
+        QTRY_COMPARE(chain.server.playbackInfoRequests, 1);
+        const QJsonObject body =
+            QJsonDocument::fromJson(chain.server.lastPlaybackInfoBody).object();
+        QCOMPARE(body.value(QStringLiteral("SubtitleStreamIndex")).toInt(), kExternalIndex);
+        QSignalSpy lowered(&chain.controller, &PlayerController::qualityLowered);
+        Kinefin::PlaybackSource lower = lowerSource(chain, 9'000'000);
+        lower.externalSubtitles = {externalSubtitle(chain)};
+        Q_EMIT chain.client.playbackInfoReady(lower);
+        QTRY_COMPARE(lowered.size(), 1);
+        QTRY_COMPARE(chain.server.subtitleDownloadRequests, 2);
+        QTRY_VERIFY(hasSelectedSubtitle(chain));
+        // The reports name it by the server's index, and a remote controller can pick it by that index
+        QTRY_VERIFY(std::any_of(chain.server.reportLog.cbegin(), chain.server.reportLog.cend(),
+                                [](const auto &report) {
+                                    return report.route.endsWith("/Sessions/Playing/Progress")
+                                           && QJsonDocument::fromJson(report.body)
+                                                      .object()
+                                                      .value(QStringLiteral("SubtitleStreamIndex"))
+                                                      .toInt(-2)
+                                                  == kExternalIndex;
+                                }));
+        QVERIFY(chain.controller.selectSubtitleStreamIndex(kExternalIndex));
+        // Turned off, it stays off on the next step down, although the transcode was asked with it
+        QVERIFY(chain.controller.selectSubtitleStreamIndex(-1));
+        QTRY_VERIFY(!hasSelectedSubtitle(chain));
+        stall(chain, true);
+        QTRY_COMPARE(chain.server.playbackInfoRequests, 2);
+        const QJsonObject second =
+            QJsonDocument::fromJson(chain.server.lastPlaybackInfoBody).object();
+        QCOMPARE(second.value(QStringLiteral("SubtitleStreamIndex")).toInt(), -1);
     }
 
     // The server answered the lower cap with a direct play of the same file: it plays at the file's rate, so it is no fallback
@@ -1586,8 +1677,27 @@ class TestPlayerController : public QObject {
         Q_EMIT chain.engine()->controller()->propertyChanged(QStringLiteral("paused-for-cache"),
                                                              on);
     }
-    // The movie plays a 30 s clip as an 18.3 Mbit/s direct play with short fallback timings, the server holds its PlaybackInfo answers, and the cache stalls
-    static bool startsStarving(Chain &chain)
+    static constexpr int kExternalIndex = 3;
+    static Kinefin::ExternalSubtitle externalSubtitle(Chain &chain)
+    {
+        Kinefin::ExternalSubtitle subtitle;
+        subtitle.index = kExternalIndex;
+        subtitle.format = QStringLiteral("srt");
+        subtitle.url =
+            chain.server.url(QStringLiteral("/jellyfin/Videos/%1/%2/Subtitles/%3/0/Stream.srt")
+                                 .arg(kMovie, kSourceId)
+                                 .arg(kExternalIndex));
+        return subtitle;
+    }
+    static bool hasSelectedSubtitle(Chain &chain)
+    {
+        const QVariantList tracks = chain.controller.subtitleTracks();
+        return std::any_of(tracks.cbegin(), tracks.cend(), [](const QVariant &track) {
+            return track.toMap().value(QStringLiteral("selected")).toBool();
+        });
+    }
+    // The movie plays a 30 s clip as an 18.3 Mbit/s direct play with short fallback timings, the server holds its PlaybackInfo answers, and the cache stalls; `withSubtitle` loads the server's external subtitle first
+    static bool startsStarving(Chain &chain, bool withSubtitle = false)
     {
         chain.controller.setFallbackTiming({200, 5000, 0, 0});
         chain.server.holdPlaybackInfo = true;
@@ -1601,6 +1711,8 @@ class TestPlayerController : public QObject {
         source.method = Kinefin::PlaybackSource::Method::Direct;
         source.url = QUrl(TestWav::writeWavClip(chain.dir, 30));
         source.media.source.bitrate = kSourceBitrate;
+        if (withSubtitle)
+            source.externalSubtitles = {externalSubtitle(chain)};
         if (source.url.isEmpty())
             return false;
         Q_EMIT chain.client.playbackInfoReady(source);
@@ -1608,6 +1720,10 @@ class TestPlayerController : public QObject {
         if (!QTest::qWaitFor([&chain] { return chain.controller.canSeek(); }, 10000)
             || !QTest::qWaitFor([&chain] { return chain.controller.positionTicks() > 2'000'000; },
                                 10000))
+            return false;
+        if (withSubtitle
+            && (!chain.controller.downloadSubtitle(kExternalIndex)
+                || !QTest::qWaitFor([&chain] { return hasSelectedSubtitle(chain); }, 10000)))
             return false;
         stall(chain, true);
         return true;
