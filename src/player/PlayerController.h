@@ -5,7 +5,9 @@
 #include <QImage>
 #include <QTemporaryDir>
 #include <QUrl>
+#include "api/JellyfinClient.h"
 #include "models/ItemDetails.h"
+#include "player/BitrateFallback.h"
 #include "player/GroupPlayback.h"
 #include "player/PlaybackEngine.h"
 #include "player/PlaybackReporter.h"
@@ -82,6 +84,8 @@ class PlayerController final : public QObject {
     Q_PROPERTY(QString title READ title NOTIFY changed)
     Q_PROPERTY(QString subtitle READ subtitle NOTIFY changed)
     Q_PROPERTY(QString errorText READ errorText NOTIFY changed)
+    // The error can be retried in place: a lowered stream that did not open
+    Q_PROPERTY(bool canRetry READ canRetry NOTIFY changed)
     Q_PROPERTY(qint64 positionTicks READ positionTicks NOTIFY changed)
     Q_PROPERTY(qint64 durationTicks READ durationTicks NOTIFY changed)
     Q_PROPERTY(bool canSeek READ canSeek NOTIFY changed)
@@ -146,6 +150,7 @@ class PlayerController final : public QObject {
     // The episode label and name of an episode (`S2:E6 — Weightless`), empty for anything else
     QString subtitle() const { return m_subtitle; }
     QString errorText() const { return m_errorText; }
+    bool canRetry() const { return m_canRetry; }
     qint64 positionTicks() const { return m_engine.positionTicks(); }
     qint64 durationTicks() const { return m_engine.durationTicks(); }
     bool canSeek() const { return m_engine.canSeek(); }
@@ -235,6 +240,10 @@ class PlayerController final : public QObject {
     Q_INVOKABLE bool searchRemoteSubtitles(const QString &language);
     // Download one result; on success the item reopens at the current position so the new track is in the source, keeping the queue and the series list
     Q_INVOKABLE bool downloadRemoteSubtitle(const QString &subtitleId);
+    // Opens the item again where the lowered stream failed, at the bit rate before that step; false when there is nothing to retry
+    Q_INVOKABLE bool retryPlayback();
+    // The timing of the starvation rule, for the tests
+    void setFallbackTiming(const BitrateFallback::Timing &timing) { m_fallback.setTiming(timing); }
     // One of the `video.aspect` values except `custom`: applied at once to this playback only, the setting is not written
     Q_INVOKABLE void setAspectMode(const QString &mode);
     // The chapter at a position of the timeline, -1 before the first or without chapters
@@ -308,6 +317,10 @@ class PlayerController final : public QObject {
     void remoteSubtitlesChanged();
     void remoteSubtitleDownloaded(const QString &subtitleId);
     void remoteSubtitleDownloadFailed(const QString &subtitleId, int httpStatus);
+    // The stream kept starving and plays on at a lower bit rate (bit/s, a step of the fallback ladder)
+    void qualityLowered(qint64 bitsPerSecond);
+    // The stream kept starving and the request for a lower one failed or was refused: playback goes on as it was
+    void qualityUnavailable();
     // A seek was asked of mpv, to this position
     void seeked(qint64 ticks);
     void tracksChanged();
@@ -341,6 +354,15 @@ class PlayerController final : public QObject {
     // The server's stream index of mpv's track `id` of `type`: direct play and embedded tracks only
     std::optional<int> streamIndexOfTrack(const QString &type, int id) const;
     void requestPending();
+    // The fallback: the stream keeps starving, so the server is asked for the same item at `cap`
+    void onStarving(qint64 cap);
+    // A PlaybackInfo reply that came while the item plays: the lowered stream, accepted when it is lower
+    void acceptFallback(const PlaybackSource &source);
+    bool fallbackApplies() const;
+    bool fallbackEligible() const;
+    std::optional<qint64> currentStreamBitrate() const;
+    JellyfinClient::StreamChoice currentStreams() const;
+    void dropFallback();
     bool openLocal();
     void onSource(const PlaybackSource &source);
     void onPlaybackItem(const QString &id, const QJsonObject &item);
@@ -504,6 +526,23 @@ class PlayerController final : public QObject {
     bool m_remoteSubtitleSearching = false;
     // "<itemId>/<language>" of the search in flight: a reply for another one is dropped
     QString m_remoteSubtitleQuery;
+    // The bit rate fallback: the rule, the request in flight, the lowered source waiting for the reopen and what the last request asked for
+    BitrateFallback m_fallback;
+    struct FallbackRequest {
+        QString playSessionId;
+        qint64 cap = 0;
+        JellyfinClient::StreamChoice streams;
+        bool active = false;
+    } m_fallbackRequest;
+    std::optional<PlaybackSource> m_preparedSource;
+    // The file opening is the lowered stream: its load completes the step, its failure offers Try Again
+    bool m_switchingStream = false;
+    qint64 m_requestedCap = UnlimitedBitrate;
+    JellyfinClient::StreamChoice m_requestedStreams;
+    // The cap before the step that failed, and where it failed: what Try Again opens again
+    qint64 m_capBeforeStep = UnlimitedBitrate;
+    qint64 m_retryTicks = 0;
+    bool m_canRetry = false;
     // The item of the subtitle download in flight, empty when none runs
     QString m_remoteSubtitleDownloadItem;
     QString m_remoteSubtitleError;

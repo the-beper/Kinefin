@@ -182,6 +182,19 @@ PlaybackMediaInfo mediaInfo(const QJsonObject &mediaSource, const QUrl &url,
     info.targetAudioCodec = firstCodec(queryValue(query, QStringLiteral("AudioCodec")));
     info.transcodeReasons = transcodeReasonNames(
         queryValue(query, QStringLiteral("TranscodeReasons")).left(2048).split(QLatin1Char(',')));
+    // Digits only and a sane range: a server value never becomes a number it did not spell out
+    const auto bitrate = [&query](const QString &key) -> qint64 {
+        static const QRegularExpression digits(
+            QRegularExpression::anchoredPattern(QStringLiteral("[0-9]{4,10}")));
+        const QString value = queryValue(query, key);
+        if (!digits.match(value).hasMatch())
+            return 0;
+        const qint64 number = value.toLongLong();
+        return number >= 1'000 && number <= 1'000'000'000 ? number : 0;
+    };
+    const qint64 video = bitrate(QStringLiteral("VideoBitrate"));
+    const qint64 audio = bitrate(QStringLiteral("AudioBitrate"));
+    info.targetBitrate = video > 0 ? video + audio : 0;
     if (info.transcodeReasons.isEmpty())
         info.transcodeReasons = reasonsOfSource(mediaSource);
     return info;

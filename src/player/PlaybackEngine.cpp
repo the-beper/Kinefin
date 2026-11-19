@@ -230,6 +230,7 @@ bool PlaybackEngine::open(const PlaybackSource &source, bool startPaused)
     m_startPaused = startPaused;
     m_videoTrackId.reset();
     m_restorePending = false;
+    m_cacheStalled = false;
     settleSeek();
     if (m_durationTicks != 0) {
         m_durationTicks = 0;
@@ -274,6 +275,9 @@ void PlaybackEngine::resume()
         return;
     }
     setProperty(QStringLiteral("pause"), false);
+    // mpv does not tell the flag again: a stall that outlasted the pause is seen as one
+    if (m_cacheStalled)
+        m_session.buffering();
 }
 
 void PlaybackEngine::stop()
@@ -458,6 +462,8 @@ void PlaybackEngine::onPropertyChanged(const QString &property, const QVariant &
             m_videoFacts.insert(name, value);
     } else if (property == QLatin1String("paused-for-cache")) {
         // Cache stalls only mean Buffering around an actually Playing session: the state machine refuses every other path silently
+        if (isFlag)
+            m_cacheStalled = value.toBool();
         if (isFlag && value.toBool()) {
             m_session.buffering();
         } else if (isFlag) {

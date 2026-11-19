@@ -592,6 +592,47 @@ class TestJellyfinClient : public QObject {
         QVERIFY(client.streamAuthorization().contains(kTokenField));
     }
 
+    // A lowered stream asks for the same source and streams at its cap; out-of-range choices are refused before any request
+    void playbackInfoBodyCarriesTheCapAndTheStreams()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        Kinefin::JellyfinClient::StreamChoice streams;
+        streams.mediaSourceId = QStringLiteral("c1b2a3d4e5f6071829304a5b6c7d8e9f");
+        streams.audioStreamIndex = 2;
+        streams.subtitleStreamIndex = -1;
+        QVERIFY(client.requestPlaybackInfo(kPlayItem, 50, Kinefin::buildDeviceProfile({}),
+                                           10'000'000, streams));
+        QTRY_COMPARE(server.playbackInfoRequests, 1);
+        const QJsonObject body = QJsonDocument::fromJson(server.lastPlaybackInfoBody).object();
+        QCOMPARE(body.value(QStringLiteral("MaxStreamingBitrate")).toVariant().toLongLong(),
+                 10'000'000);
+        QCOMPARE(body.value(QStringLiteral("MediaSourceId")).toString(), streams.mediaSourceId);
+        QCOMPARE(body.value(QStringLiteral("AudioStreamIndex")).toInt(), 2);
+        QCOMPARE(body.value(QStringLiteral("SubtitleStreamIndex")).toInt(), -1);
+        // The default request carries none of them
+        QVERIFY(client.requestPlaybackInfo(kPlayItem, 0, Kinefin::buildDeviceProfile({})));
+        QTRY_COMPARE(server.playbackInfoRequests, 2);
+        const QJsonObject plain = QJsonDocument::fromJson(server.lastPlaybackInfoBody).object();
+        QVERIFY(!plain.contains(QStringLiteral("MediaSourceId")));
+        QVERIFY(!plain.contains(QStringLiteral("AudioStreamIndex")));
+        QVERIFY(!plain.contains(QStringLiteral("SubtitleStreamIndex")));
+        Kinefin::JellyfinClient::StreamChoice bad;
+        bad.mediaSourceId = QStringLiteral("../x");
+        QVERIFY(!client.requestPlaybackInfo(kPlayItem, 0, Kinefin::buildDeviceProfile({}),
+                                            10'000'000, bad));
+        bad = {};
+        bad.audioStreamIndex = -1;
+        QVERIFY(!client.requestPlaybackInfo(kPlayItem, 0, Kinefin::buildDeviceProfile({}),
+                                            10'000'000, bad));
+        bad = {};
+        bad.subtitleStreamIndex = -2;
+        QVERIFY(!client.requestPlaybackInfo(kPlayItem, 0, Kinefin::buildDeviceProfile({}),
+                                            10'000'000, bad));
+    }
+
     void playbackInfoTranscode()
     {
         FakeJellyfin server;

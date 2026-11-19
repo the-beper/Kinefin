@@ -721,6 +721,30 @@ class TestPlaybackEngine : public QObject {
         QTRY_VERIFY(controller.playbackInfo().isEmpty());
     }
 
+    // mpv does not tell paused-for-cache again after a pause: a resume while the cache still holds the playback is a stall again
+    void resumeDuringACacheStallBuffersAgain()
+    {
+        QTemporaryDir dir;
+        Chain chain(dir, 30);
+        QVERIFY(chain.ok);
+        QVERIFY(chain.engine.open(chain.source));
+        QTRY_COMPARE(chain.session.state(), PlaybackSession::State::Playing);
+        Q_EMIT chain.engine.controller()->propertyChanged(QStringLiteral("paused-for-cache"), true);
+        QCOMPARE(chain.session.state(), PlaybackSession::State::Buffering);
+        chain.engine.pause();
+        QTRY_COMPARE(chain.session.state(), PlaybackSession::State::Paused);
+        chain.engine.resume();
+        QCOMPARE(chain.session.state(), PlaybackSession::State::Buffering);
+        Q_EMIT chain.engine.controller()->propertyChanged(QStringLiteral("paused-for-cache"),
+                                                          false);
+        QCOMPARE(chain.session.state(), PlaybackSession::State::Playing);
+        // Without a stall the resume plays
+        chain.engine.pause();
+        QTRY_COMPARE(chain.session.state(), PlaybackSession::State::Paused);
+        chain.engine.resume();
+        QCOMPARE(chain.session.state(), PlaybackSession::State::Playing);
+    }
+
     // The video item moved to another window and mpv turned the video off with the old render context: the track comes back, the playback goes on
     void restoreVideoSelectsTheTrackTheFileWasShowing()
     {

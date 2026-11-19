@@ -39,6 +39,8 @@ struct PlaybackMediaInfo {
     QString targetAudioCodec;
     // `TranscodeReason` enum names (letters only), from the TranscodingUrl or the media source
     QStringList transcodeReasons;
+    // The bit rate a transcode is made at, in bit/s: the TranscodingUrl's VideoBitrate plus AudioBitrate, each 1 kbit/s to 1 Gbit/s; 0 for a direct play or when unknown
+    qint64 targetBitrate = 0;
 };
 
 struct PlaybackSource {

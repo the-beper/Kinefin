@@ -307,6 +307,13 @@ PlayerController::PlayerController(JellyfinClient &client, PlayQueue &queue,
             });
     connect(&client, &JellyfinClient::playbackInfoFailed, this,
             [this](const QString &itemId, int, const QString &) {
+                // The request for a lower stream failed: playback goes on as it was
+                if (!m_loading && m_fallbackRequest.active && itemId == m_itemId) {
+                    m_fallbackRequest = {};
+                    m_fallback.exhaust();
+                    Q_EMIT qualityUnavailable();
+                    return;
+                }
                 if (!m_loading || itemId != m_itemId)
                     return;
                 m_loading = false;
@@ -328,6 +335,12 @@ PlayerController::PlayerController(JellyfinClient &client, PlayQueue &queue,
     });
     connect(&m_engine, &PlaybackEngine::canSeekChanged, this, &PlayerController::changed);
     connect(&m_engine, &PlaybackEngine::seekingChanged, this, &PlayerController::changed);
+    // A seek that lands gives the stream a grace before its stalls count again
+    connect(&m_engine, &PlaybackEngine::seekingChanged, this, [this] {
+        if (!m_engine.seeking())
+            m_fallback.restarted();
+    });
+    connect(&m_fallback, &BitrateFallback::starving, this, &PlayerController::onStarving);
     connect(&m_engine, &PlaybackEngine::rateChanged, this, [this] {
         updateUpNext();
         Q_EMIT changed();
@@ -355,6 +368,20 @@ PlayerController::PlayerController(JellyfinClient &client, PlayQueue &queue,
         // Opened paused (a group's item, or a reopen after a subtitle download), the Start went out as playing: a paused Progress follows once the position is known
         if (m_groupItem || m_session.state() == PlaybackSession::State::Paused)
             m_seekReport.start();
+        // The stream that plays now, for the fallback: a lowered one completes its step here
+        const bool lowered = std::exchange(m_switchingStream, false);
+        m_fallback.streamLoaded(currentStreamBitrate(), lowered);
+        if (lowered) {
+            // A transcode delivers the text subtitle that played as an external one: it is loaded again
+            if (const std::optional<int> subtitle = m_requestedStreams.subtitleStreamIndex;
+                subtitle && *subtitle >= 0
+                && std::any_of(m_subtitleOptions.cbegin(), m_subtitleOptions.cend(),
+                               [&subtitle](const ExternalSubtitle &entry) {
+                                   return entry.index == *subtitle;
+                               }))
+                downloadSubtitle(*subtitle);
+            Q_EMIT qualityLowered(m_requestedCap);
+        }
         // A paused file may have told its only position before this: a group's Ready must not wait for another
         Q_EMIT changed();
     });
@@ -591,6 +618,15 @@ bool PlayerController::startItem(const QString &id, qint64 resumeTicks, bool gro
         Q_EMIT localPlaybackChanged();
     }
     const bool sameItem = id == m_itemId;
+    // Another item starts at full quality; the same one again (a reopen, Repeat One) keeps a lowered bit rate
+    dropFallback();
+    m_canRetry = false;
+    // A group plays the group's stream: never at a cap this session lowered on its own
+    if (!sameItem || grouped) {
+        m_fallback.reset();
+        m_preparedSource.reset();
+        m_switchingStream = false;
+    }
     // Preserve the prior item's cursor before the new id replaces it.
     if (!m_itemId.isEmpty() && !sameItem)
         persistQueueCursor();
@@ -774,6 +810,12 @@ bool PlayerController::openLocal()
     m_client.cancelPlaybackInfo();
     cancelSeriesRequest();
     dropSeriesPlaylist();
+    // A local file never falls back
+    dropFallback();
+    m_fallback.reset();
+    m_preparedSource.reset();
+    m_switchingStream = false;
+    m_canRetry = false;
     m_seriesPlaylistWanted = false;
     m_groupItem = false;
     m_awaitingGroup = false;
@@ -923,17 +965,158 @@ void PlayerController::requestPending()
         m_keptRate.reset();
         m_rateDecided = true;
     }
+    // A lowered stream the server already offered opens without a second request
+    if (std::optional<PlaybackSource> prepared = std::exchange(m_preparedSource, std::nullopt);
+        prepared && prepared->itemId == m_itemId) {
+        onSource(*prepared);
+        return;
+    }
+    // At a lowered cap a reopen (a subtitle download, Repeat One, Try Again) asks for the streams the lowered one had: a transcode carries one audio track only
+    m_requestedCap = m_fallback.cap();
+    if (m_requestedCap >= UnlimitedBitrate)
+        m_requestedStreams = {};
     const QJsonObject profile = buildDeviceProfile(m_settings.deviceProfileOptions());
-    if (!m_client.requestPlaybackInfo(m_itemId, m_resumeTicks, profile)) {
+    if (!m_client.requestPlaybackInfo(m_itemId, m_resumeTicks, profile, m_requestedCap,
+                                      m_requestedStreams)) {
         m_loading = false;
         m_errorText = i18n("Unable to request playback from the server.");
         Q_EMIT changed();
     }
 }
 
+bool PlayerController::fallbackApplies() const
+{
+    return m_settings.value(QStringLiteral("video"), QStringLiteral("adaptive_bitrate")).toBool()
+           && !m_localPlayback && m_source.method != PlaybackSource::Method::Local && !m_groupItem
+           && !grouped() && !m_itemId.isEmpty();
+}
+
+bool PlayerController::fallbackEligible() const
+{
+    const PlaybackSession::State state = m_session.state();
+    if (!fallbackApplies() || m_loading || m_stopping || m_engine.seeking()
+        || (state != PlaybackSession::State::Playing && state != PlaybackSession::State::Buffering))
+        return false;
+    // Near the end a reopen would cost a play for little: the 90 % the played mark uses, and the Up Next card
+    const qint64 duration = m_engine.durationTicks();
+    if (duration > 0 && positionTicks() >= duration / 10 * 9)
+        return false;
+    return !m_upNextShown && !m_upNextCancelled;
+}
+
+namespace {
+// A direct play sends the file as it is, whatever cap was asked: only a transcode plays at its target or at the cap
+std::optional<qint64> sourceBitrate(const PlaybackSource &source, qint64 requestedCap)
+{
+    if (source.method == PlaybackSource::Method::Direct)
+        return streamBitrate(0, source.media.source.bitrate, UnlimitedBitrate);
+    return streamBitrate(source.media.targetBitrate, source.media.source.bitrate, requestedCap);
+}
+} // namespace
+
+std::optional<qint64> PlayerController::currentStreamBitrate() const
+{
+    if (!fallbackApplies())
+        return std::nullopt;
+    return sourceBitrate(m_source, m_requestedCap);
+}
+
+JellyfinClient::StreamChoice PlayerController::currentStreams() const
+{
+    JellyfinClient::StreamChoice streams = m_requestedStreams;
+    streams.mediaSourceId = m_source.mediaSourceId;
+    // A direct play knows the server's indexes of the tracks that play; a transcode keeps what its request asked for
+    if (directPlay()) {
+        if (m_selectedAudioIndex)
+            streams.audioStreamIndex = m_selectedAudioIndex;
+        streams.subtitleStreamIndex =
+            m_selectedSubtitleId == 0 ? std::optional<int>(-1) : m_selectedSubtitleIndex;
+    }
+    return streams;
+}
+
+void PlayerController::dropFallback()
+{
+    if (!std::exchange(m_fallbackRequest.active, false))
+        return;
+    m_fallbackRequest = {};
+    m_fallback.cancelPending();
+}
+
+void PlayerController::onStarving(qint64 cap)
+{
+    if (!fallbackEligible()) {
+        m_fallback.cancelPending();
+        return;
+    }
+    // Playback goes on untouched while the server is asked: a refusal never interrupts it
+    const JellyfinClient::StreamChoice streams = currentStreams();
+    const qint64 at = m_engine.knownPositionTicks().value_or(m_resumedFrom);
+    const QJsonObject profile = buildDeviceProfile(m_settings.deviceProfileOptions());
+    if (!m_client.requestPlaybackInfo(m_itemId, at, profile, cap, streams)) {
+        m_fallback.exhaust();
+        Q_EMIT qualityUnavailable();
+        return;
+    }
+    m_fallbackRequest = {m_source.playSessionId, cap, streams, true};
+}
+
+void PlayerController::acceptFallback(const PlaybackSource &source)
+{
+    if (!m_fallbackRequest.active)
+        return;
+    const FallbackRequest request = std::exchange(m_fallbackRequest, {});
+    // Only for the stream it was asked from, and only if it still may fall back: another item, a reopen, a pause, a seek, Up Next or the 90 % mark since then drops it, with the budget kept
+    if (source.itemId != m_itemId || m_source.playSessionId != request.playSessionId
+        || !fallbackEligible()) {
+        m_fallback.cancelPending();
+        return;
+    }
+    const std::optional<qint64> now = currentStreamBitrate();
+    const std::optional<qint64> next = sourceBitrate(source, request.cap);
+    if (!now || !next || *next >= *now) {
+        qCInfo(playerLog) << "the server offered no lower stream";
+        m_fallback.exhaust();
+        return;
+    }
+    const qint64 at = m_engine.knownPositionTicks().value_or(m_resumedFrom);
+    // The reopen cancels a series listing still on its way, which a slow link makes likely: the item's reply asks for it again
+    const bool relist = m_seriesPlaylistWanted || !m_seriesListItem.isEmpty();
+    // The same item again at the same position: the stop reports the old stream, the reopen the new one
+    if (!startItem(m_itemId, at, false))
+        return;
+    m_seriesPlaylistWanted = relist;
+    // Committed once the reopen runs; its request is the prepared source, opened at Idle
+    m_fallback.stepTaken(request.cap);
+    m_capBeforeStep = m_requestedCap;
+    m_requestedCap = request.cap;
+    m_requestedStreams = request.streams;
+    m_retryTicks = at;
+    m_preparedSource = source;
+    m_switchingStream = true;
+}
+
+bool PlayerController::retryPlayback()
+{
+    if (!m_canRetry || m_itemId.isEmpty())
+        return false;
+    m_canRetry = false;
+    const qint64 previous = m_capBeforeStep;
+    // The bit rate before the step that failed, and no further step for this item
+    m_fallback.reset();
+    if (previous < UnlimitedBitrate)
+        m_fallback.stepTaken(previous);
+    m_fallback.exhaust();
+    return startItem(m_itemId, m_retryTicks, false);
+}
+
 void PlayerController::onSource(const PlaybackSource &source)
 {
-    if (!m_loading || m_stopping || source.itemId != m_itemId)
+    if (!m_loading) {
+        acceptFallback(source);
+        return;
+    }
+    if (m_stopping || source.itemId != m_itemId)
         return;
     if (!m_engine.isInitialized() || m_session.state() != PlaybackSession::State::Idle)
         return;
@@ -948,7 +1131,15 @@ void PlayerController::onSource(const PlaybackSource &source)
              entry.label.isEmpty() ? i18n("External subtitle %1").arg(entry.index) : entry.label}});
     Q_EMIT tracksChanged();
     if (!m_engine.open(source, m_groupItem || std::exchange(m_reopenPaused, false))) {
-        m_errorText = i18n("The selected media source could not be opened.");
+        // A lowered stream that cannot even start offers Try Again, as one that fails while opening does
+        if (std::exchange(m_switchingStream, false)) {
+            m_fallback.exhaust();
+            m_canRetry = true;
+            m_errorText = i18n(
+                "The lower quality stream could not be opened. Try again at the previous quality.");
+        } else {
+            m_errorText = i18n("The selected media source could not be opened.");
+        }
         Q_EMIT changed();
         return;
     }
@@ -1232,8 +1423,13 @@ void PlayerController::dropSeriesPlaylist()
     m_seriesInfo.clear();
 }
 
-void PlayerController::onState(PlaybackSession::State, PlaybackSession::State to)
+void PlayerController::onState(PlaybackSession::State from, PlaybackSession::State to)
 {
+    // A cache stall of a server stream feeds the fallback; leaving it, for any state, ends the stall
+    if (to == PlaybackSession::State::Buffering && fallbackApplies())
+        m_fallback.stalled();
+    else if (from == PlaybackSession::State::Buffering)
+        m_fallback.recovered();
     if (to == PlaybackSession::State::Playing)
         m_clock.start();
     if (to == PlaybackSession::State::Idle) {
@@ -1283,6 +1479,16 @@ void PlayerController::onEnd(const QString &reason)
         Q_EMIT changed();
         return;
     }
+    // The lowered stream did not open: the item stays, with its error and Try Again at the bit rate before the step
+    if (std::exchange(m_switchingStream, false) && reason == QLatin1String("error")
+        && !m_stopping) {
+        m_fallback.exhaust();
+        m_canRetry = true;
+        m_errorText = i18n(
+            "The lower quality stream could not be opened. Try again at the previous quality.");
+        Q_EMIT changed();
+        return;
+    }
     const bool ended = reason == QLatin1String("eof") && !m_stopping;
     // Cancel on the Up Next card ends this playback here, without the advance or the replay of a repeat; a repeat mode chosen after it that replays the item wins
     const bool cancelled = m_upNextCancelled && pendingAdvance(false) >= 0;
@@ -1311,6 +1517,13 @@ void PlayerController::onEnd(const QString &reason)
 
 void PlayerController::clearCurrent()
 {
+    dropFallback();
+    m_fallback.reset();
+    m_preparedSource.reset();
+    m_switchingStream = false;
+    m_canRetry = false;
+    m_requestedCap = UnlimitedBitrate;
+    m_requestedStreams = {};
     dropSeriesPlaylist();
     m_itemId.clear();
     m_title.clear();

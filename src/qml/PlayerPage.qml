@@ -411,10 +411,25 @@ Kirigami.Page {
             textFormat: Text.PlainText
             text: page.player.errorText || i18n("Opening video…")
         }
-        Controls.Button {
-            visible: !!page.player.errorText
-            text: i18n("Close Player")
-            onClicked: page.closePlayer()
+        RowLayout {
+            Layout.alignment: Qt.AlignHCenter
+            spacing: Kirigami.Units.smallSpacing
+            // A lowered stream that did not open: it can be opened again where it stopped, at the bit rate before the step
+            Controls.Button {
+                objectName: "playerRetryButton"
+                visible: !!page.player.errorText && !!page.player.canRetry
+                // The primary action of the overlay when there is one
+                highlighted: true
+                text: i18nc("@action:button", "Try Again")
+                icon.name: "view-refresh"
+                onClicked: page.player.retryPlayback()
+            }
+            Controls.Button {
+                objectName: "playerCloseAfterErrorButton"
+                visible: !!page.player.errorText
+                text: i18n("Close Player")
+                onClicked: page.closePlayer()
+            }
         }
     }
     Controls.Button {

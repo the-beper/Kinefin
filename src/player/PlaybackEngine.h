@@ -131,6 +131,8 @@ class PlaybackEngine final : public QObject {
     bool m_stopPending = false;
     QTimer m_stopWatchdog;
     bool m_startPaused = false;
+    // mpv's last paused-for-cache: a resume while the cache still holds the playback is a stall again
+    bool m_cacheStalled = false;
     bool m_seekPending = false;
     qint64 m_seekTargetTicks = 0;
     QTimer m_seekWatchdog;

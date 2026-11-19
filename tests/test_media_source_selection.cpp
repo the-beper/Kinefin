@@ -161,6 +161,40 @@ class TestMediaSourceSelection : public QObject {
         QVERIFY(!url.toString().contains(QString::fromLatin1(kToken)));
     }
 
+    // The bit rate a transcode is made at comes from its URL, digits only and within 1 kbit/s to 1 Gbit/s; a direct play has none
+    void transcodeTargetBitrateIsBounded_data()
+    {
+        QTest::addColumn<QString>("query");
+        QTest::addColumn<qint64>("expected");
+        QTest::newRow("video and audio")
+            << QStringLiteral("VideoBitrate=7616000&AudioBitrate=384000") << qint64(8'000'000);
+        QTest::newRow("video only") << QStringLiteral("VideoBitrate=2000000") << qint64(2'000'000);
+        QTest::newRow("audio alone is no video rate")
+            << QStringLiteral("AudioBitrate=384000") << qint64(0);
+        QTest::newRow("letters") << QStringLiteral("VideoBitrate=12ab&AudioBitrate=384000")
+                                 << qint64(0);
+        QTest::newRow("negative") << QStringLiteral("VideoBitrate=-5000000") << qint64(0);
+        QTest::newRow("too large") << QStringLiteral("VideoBitrate=99999999999") << qint64(0);
+        QTest::newRow("too small") << QStringLiteral("VideoBitrate=999") << qint64(0);
+        QTest::newRow("trailing line break")
+            << QStringLiteral("VideoBitrate=4000000%0A") << qint64(0);
+        QTest::newRow("bad audio is left out")
+            << QStringLiteral("VideoBitrate=4000000&AudioBitrate=x") << qint64(4'000'000);
+    }
+    void transcodeTargetBitrateIsBounded()
+    {
+        QFETCH(QString, query);
+        QFETCH(qint64, expected);
+        const QString url =
+            QStringLiteral("/videos/") + kItem + QStringLiteral("/master.m3u8?") + query;
+        const SourceSelection result = select(response({source(kSourceId, false, true, url)}));
+        QVERIFY(result.source);
+        QCOMPARE(result.source->media.targetBitrate, expected);
+        const SourceSelection direct = select(response({source(kSourceId, true, false)}));
+        QVERIFY(direct.source);
+        QCOMPARE(direct.source->media.targetBitrate, qint64(0));
+    }
+
     void directWinsAcrossSources()
     {
         const QString transcodeUrl = QStringLiteral("/videos/x/master.m3u8?VideoBitrate=1");

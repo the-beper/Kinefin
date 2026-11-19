@@ -1396,7 +1396,237 @@ class TestPlayerController : public QObject {
         QCOMPARE(positions.size(), 0);
     }
 
+    // The stream keeps starving: the server is asked for the same item, at the same place and with the same streams, at the next step of the ladder; the lower stream replaces it, reported as a new session
+    void aStarvingStreamFallsBackToALowerOne()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        QVERIFY(startsStarving(chain));
+        QTRY_COMPARE(chain.server.playbackInfoRequests, 1);
+        const QJsonObject body =
+            QJsonDocument::fromJson(chain.server.lastPlaybackInfoBody).object();
+        QCOMPARE(body.value(QStringLiteral("MaxStreamingBitrate")).toInteger(), 10'000'000);
+        QCOMPARE(body.value(QStringLiteral("MediaSourceId")).toString(), kSourceId);
+        // Where it plays, with the audio and subtitles that play (none here)
+        QVERIFY(body.value(QStringLiteral("StartTimeTicks")).toInteger() > 0);
+        QCOMPARE(body.value(QStringLiteral("SubtitleStreamIndex")).toInt(), -1);
+        QSignalSpy lowered(&chain.controller, &PlayerController::qualityLowered);
+        chain.server.reportLog.clear();
+        Q_EMIT chain.client.playbackInfoReady(lowerSource(chain, 9'000'000));
+        QTRY_COMPARE(lowered.size(), 1);
+        QCOMPARE(lowered.first().at(0).toLongLong(), 10'000'000);
+        QCOMPARE(chain.controller.itemId(), kMovie);
+        // The old stream's Stopped, then the new stream's Start: never both sessions at once
+        QTRY_VERIFY(std::any_of(
+            chain.server.reportLog.cbegin(), chain.server.reportLog.cend(),
+            [](const auto &report) { return report.route.endsWith("/Sessions/Playing"); }));
+        QStringList sessions;
+        for (const auto &report : std::as_const(chain.server.reportLog)) {
+            if (report.route.endsWith("/Sessions/Playing/Stopped")
+                || report.route.endsWith("/Sessions/Playing"))
+                sessions.append(QString::fromLatin1(report.route).section(QLatin1Char('/'), -1)
+                                + QLatin1Char(' ')
+                                + QJsonDocument::fromJson(report.body)
+                                      .object()
+                                      .value(QStringLiteral("PlaySessionId"))
+                                      .toString());
+        }
+        QCOMPARE(sessions,
+                 (QStringList{QStringLiteral("Stopped s1"), QStringLiteral("Playing s2")}));
+        // The reopen opened the source the server had offered: no second request
+        QCOMPARE(chain.server.playbackInfoRequests, 1);
+        // Another item starts at full quality again
+        chain.server.holdPlaybackInfo = false;
+        QVERIFY(chain.controller.playItem(kOtherMovie, 0));
+        QTRY_COMPARE(chain.server.playbackInfoRequests, 2);
+        const QJsonObject next =
+            QJsonDocument::fromJson(chain.server.lastPlaybackInfoBody).object();
+        QCOMPARE(next.value(QStringLiteral("MaxStreamingBitrate")).toInteger(), 1'000'000'000);
+        QVERIFY(!next.contains(QStringLiteral("MediaSourceId")));
+    }
+
+    // The server answered the lower cap with a direct play of the same file: it plays at the file's rate, so it is no fallback
+    void aDirectPlayOfTheSameFileIsNotLower()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        QVERIFY(startsStarving(chain));
+        QTRY_COMPARE(chain.server.playbackInfoRequests, 1);
+        Kinefin::PlaybackSource same = lowerSource(chain, 0);
+        same.method = Kinefin::PlaybackSource::Method::Direct;
+        QSignalSpy lowered(&chain.controller, &PlayerController::qualityLowered);
+        chain.server.reportLog.clear();
+        Q_EMIT chain.client.playbackInfoReady(same);
+        QTest::qWait(400);
+        QCOMPARE(lowered.size(), 0);
+        QVERIFY(chain.server.reportLog.isEmpty());
+    }
+
+    // A reply for a stream that is no longer the one playing (another item) is dropped
+    void aReplyForAnotherItemIsDropped()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        QVERIFY(startsStarving(chain));
+        QTRY_COMPARE(chain.server.playbackInfoRequests, 1);
+        Kinefin::PlaybackSource stale = lowerSource(chain, 9'000'000);
+        stale.itemId = kOtherMovie;
+        QSignalSpy lowered(&chain.controller, &PlayerController::qualityLowered);
+        chain.server.reportLog.clear();
+        Q_EMIT chain.client.playbackInfoReady(stale);
+        QTest::qWait(400);
+        QCOMPARE(lowered.size(), 0);
+        QVERIFY(chain.server.reportLog.isEmpty());
+        QCOMPARE(chain.controller.itemId(), kMovie);
+    }
+
+    // A refused request leaves the playback as it was, and the item asks no more
+    void aRefusedFallbackLeavesPlaybackAlone()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        QVERIFY(startsStarving(chain));
+        QTRY_COMPARE(chain.server.playbackInfoRequests, 1);
+        QSignalSpy unavailable(&chain.controller, &PlayerController::qualityUnavailable);
+        chain.server.reportLog.clear();
+        Q_EMIT chain.client.playbackInfoFailed(kMovie, 500, QString());
+        QCOMPARE(unavailable.size(), 1);
+        QVERIFY(chain.controller.active());
+        // More stalls: no second request, and no stop was reported
+        stall(chain, false);
+        stall(chain, true);
+        QTest::qWait(600);
+        QCOMPARE(chain.server.playbackInfoRequests, 1);
+        QVERIFY(std::none_of(chain.server.reportLog.cbegin(), chain.server.reportLog.cend(),
+                             [](const auto &report) { return report.route.endsWith("/Stopped"); }));
+    }
+
+    // A stream that is not lower than the one playing is no fallback: it is dropped and the item asks no more
+    void aSourceThatIsNotLowerIsDropped()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        QVERIFY(startsStarving(chain));
+        QTRY_COMPARE(chain.server.playbackInfoRequests, 1);
+        QSignalSpy lowered(&chain.controller, &PlayerController::qualityLowered);
+        chain.server.reportLog.clear();
+        Q_EMIT chain.client.playbackInfoReady(lowerSource(chain, 20'000'000));
+        QTest::qWait(400);
+        QCOMPARE(lowered.size(), 0);
+        QVERIFY(chain.server.reportLog.isEmpty());
+        QVERIFY(chain.controller.active());
+    }
+
+    // A pause while the server is asked drops its answer: the stream stays, and the budget with it
+    void aPauseDropsThePendingFallback()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        QVERIFY(startsStarving(chain));
+        QTRY_COMPARE(chain.server.playbackInfoRequests, 1);
+        chain.controller.pause();
+        QTRY_VERIFY(chain.controller.paused());
+        chain.server.reportLog.clear();
+        QSignalSpy lowered(&chain.controller, &PlayerController::qualityLowered);
+        Q_EMIT chain.client.playbackInfoReady(lowerSource(chain, 9'000'000));
+        QTest::qWait(400);
+        QCOMPARE(lowered.size(), 0);
+        QVERIFY(std::none_of(chain.server.reportLog.cbegin(), chain.server.reportLog.cend(),
+                             [](const auto &report) { return report.route.endsWith("/Stopped"); }));
+        // Playing again, it starves again and asks again
+        chain.controller.resume();
+        QTRY_VERIFY(!chain.controller.paused());
+        stall(chain, true);
+        QTRY_COMPARE(chain.server.playbackInfoRequests, 2);
+    }
+
+    // The lowered stream does not open: the item stays with its error and Try Again, which asks at the bit rate before the step
+    void aFailedFallbackStreamOffersTryAgain()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        QVERIFY(startsStarving(chain));
+        QTRY_COMPARE(chain.server.playbackInfoRequests, 1);
+        Kinefin::PlaybackSource broken = lowerSource(chain, 9'000'000);
+        broken.url = QUrl::fromLocalFile(chain.dir.filePath(QStringLiteral("missing.wav")));
+        QSignalSpy finished(&chain.controller, &PlayerController::finished);
+        Q_EMIT chain.client.playbackInfoReady(broken);
+        QTRY_VERIFY(chain.controller.canRetry());
+        QCOMPARE(chain.controller.errorText(),
+                 QStringLiteral("The lower quality stream could not be opened. Try again at the "
+                                "previous quality."));
+        QCOMPARE(chain.controller.itemId(), kMovie);
+        QCOMPARE(finished.size(), 0);
+        chain.server.holdPlaybackInfo = false;
+        QVERIFY(chain.controller.retryPlayback());
+        QVERIFY(!chain.controller.canRetry());
+        QVERIFY(chain.controller.errorText().isEmpty());
+        QTRY_COMPARE(chain.server.playbackInfoRequests, 2);
+        const QJsonObject body =
+            QJsonDocument::fromJson(chain.server.lastPlaybackInfoBody).object();
+        QCOMPARE(body.value(QStringLiteral("MaxStreamingBitrate")).toInteger(), 1'000'000'000);
+    }
+
+    // With the setting off, a starving stream stays as it is
+    void noFallbackWithTheSettingOff()
+    {
+        Chain chain("[video]\nadaptive_bitrate=false\n");
+        QVERIFY(chain.ok);
+        QVERIFY(startsStarving(chain));
+        QTest::qWait(700);
+        QCOMPARE(chain.server.playbackInfoRequests, 0);
+    }
+
   private:
+    static constexpr qint64 kSourceBitrate = 18'300'000;
+    inline static const QString kSourceId = QStringLiteral("c1b2a3d4e5f6071829304a5b6c7d8e9f");
+    // mpv tells a cache stall begins or ends, as it would on a slow connection
+    static void stall(Chain &chain, bool on)
+    {
+        Q_EMIT chain.engine()->controller()->propertyChanged(QStringLiteral("paused-for-cache"),
+                                                             on);
+    }
+    // The movie plays a 30 s clip as an 18.3 Mbit/s direct play with short fallback timings, the server holds its PlaybackInfo answers, and the cache stalls
+    static bool startsStarving(Chain &chain)
+    {
+        chain.controller.setFallbackTiming({200, 5000, 0, 0});
+        chain.server.holdPlaybackInfo = true;
+        if (!chain.controller.playItem(kMovie, 0)
+            || !chain.engine()->init({QStringLiteral("vo=null"), QStringLiteral("ao=null")}))
+            return false;
+        Kinefin::PlaybackSource source;
+        source.itemId = kMovie;
+        source.mediaSourceId = kSourceId;
+        source.playSessionId = QStringLiteral("s1");
+        source.method = Kinefin::PlaybackSource::Method::Direct;
+        source.url = QUrl(TestWav::writeWavClip(chain.dir, 30));
+        source.media.source.bitrate = kSourceBitrate;
+        if (source.url.isEmpty())
+            return false;
+        Q_EMIT chain.client.playbackInfoReady(source);
+        // Playing for a moment, so the position the fallback asks for is a real one
+        if (!QTest::qWaitFor([&chain] { return chain.controller.canSeek(); }, 10000)
+            || !QTest::qWaitFor([&chain] { return chain.controller.positionTicks() > 2'000'000; },
+                                10000))
+            return false;
+        stall(chain, true);
+        return true;
+    }
+    // The server's lower stream: a transcode of the movie at `target` bit/s, another play session
+    static Kinefin::PlaybackSource lowerSource(Chain &chain, qint64 target)
+    {
+        Kinefin::PlaybackSource source;
+        source.itemId = kMovie;
+        source.mediaSourceId = kSourceId;
+        source.playSessionId = QStringLiteral("s2");
+        source.method = Kinefin::PlaybackSource::Method::Transcode;
+        // A file of its own: the one playing must not be written over
+        source.url = QUrl(TestWav::writeWavClip(chain.dir, 29));
+        source.media.targetBitrate = target;
+        source.media.source.bitrate = kSourceBitrate;
+        return source;
+    }
+
     // The item plays a generated clip, handed over as the source the server would have chosen with `method`
     static bool playsClip(Chain &chain, Kinefin::PlaybackSource::Method method)
     {

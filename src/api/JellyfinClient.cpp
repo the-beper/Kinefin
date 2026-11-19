@@ -2110,17 +2110,27 @@ bool JellyfinClient::fetchUserViews()
 
 bool JellyfinClient::requestPlaybackInfo(const QString &itemId, qint64 startTimeTicks,
                                          const QJsonObject &deviceProfile,
-                                         qint64 maxStreamingBitrate)
+                                         qint64 maxStreamingBitrate, const StreamChoice &streams)
 {
     if (m_state != State::Authenticated || !isValidJellyfinId(itemId) || startTimeTicks < 0
         || maxStreamingBitrate <= 0 || deviceProfile.isEmpty())
         return false;
+    if ((!streams.mediaSourceId.isEmpty() && !isValidJellyfinId(streams.mediaSourceId))
+        || (streams.audioStreamIndex && *streams.audioStreamIndex < 0)
+        || (streams.subtitleStreamIndex && *streams.subtitleStreamIndex < -1))
+        return false;
     cancelPlaybackInfo();
     const quint64 serial = m_playbackSerial;
-    const QJsonObject body{{QStringLiteral("UserId"), m_userId},
-                           {QStringLiteral("StartTimeTicks"), startTimeTicks},
-                           {QStringLiteral("MaxStreamingBitrate"), maxStreamingBitrate},
-                           {QStringLiteral("DeviceProfile"), deviceProfile}};
+    QJsonObject body{{QStringLiteral("UserId"), m_userId},
+                     {QStringLiteral("StartTimeTicks"), startTimeTicks},
+                     {QStringLiteral("MaxStreamingBitrate"), maxStreamingBitrate},
+                     {QStringLiteral("DeviceProfile"), deviceProfile}};
+    if (!streams.mediaSourceId.isEmpty())
+        body.insert(QStringLiteral("MediaSourceId"), streams.mediaSourceId);
+    if (streams.audioStreamIndex)
+        body.insert(QStringLiteral("AudioStreamIndex"), *streams.audioStreamIndex);
+    if (streams.subtitleStreamIndex)
+        body.insert(QStringLiteral("SubtitleStreamIndex"), *streams.subtitleStreamIndex);
     QNetworkRequest request = requestFor(
         endpoint(QStringLiteral("/Items/") + itemId + QStringLiteral("/PlaybackInfo")), true);
     request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));

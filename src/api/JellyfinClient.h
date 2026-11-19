@@ -222,10 +222,18 @@ class JellyfinClient final : public QObject {
     // The server's time (`GET /GetUtcTime`) for the SyncPlay clock: utcTimeReady carries the server's reception and transmission times (ms since the epoch), utcTimeFailed the status. A newer call supersedes a pending one silently. Returns false, without a request, when not authenticated
     bool fetchUtcTime();
 
+    // The streams a PlaybackInfo request asks the server for, so a lowered stream keeps the audio and subtitles that played; empty fields are left to the server
+    struct StreamChoice {
+        QString mediaSourceId;
+        std::optional<int> audioStreamIndex;
+        // -1 asks for no subtitles
+        std::optional<int> subtitleStreamIndex;
+    };
     // Asks the server how to play `itemId` and emits playbackInfoReady with the chosen source (media URL without the token) or playbackInfoFailed. Everything goes in the JSON body (the query parameters of this route are deprecated in 12.4); `maxStreamingBitrate` must be sent, the server default is 8 Mbps. Exactly one of the two signals follows a request, except that a newer request, cancelPlaybackInfo(), disconnectFromServer() and a session lost elsewhere (a 401 on another call) end it with no signal of its own; a 401 on this very request emits sessionExpired and then playbackInfoFailed. Returns false, without a request, when not authenticated or on invalid input
     bool requestPlaybackInfo(const QString &itemId, qint64 startTimeTicks,
                              const QJsonObject &deviceProfile,
-                             qint64 maxStreamingBitrate = DefaultMaxStreamingBitrate);
+                             qint64 maxStreamingBitrate = DefaultMaxStreamingBitrate,
+                             const StreamChoice &streams = {});
     void cancelPlaybackInfo();
     // Optional skip-intro/recap/outro data. Stale replies are discarded.
     bool fetchMediaSegments(const QString &itemId);

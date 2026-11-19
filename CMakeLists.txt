@@ -164,6 +164,8 @@ target_compile_definitions(kinefin_core PRIVATE TRANSLATION_DOMAIN="kinefin")
 target_link_libraries(kinefin_core PUBLIC Qt6::Core Qt6::DBus Qt6::Network Qt6::WebSockets KF6::Wallet KF6::ConfigCore KF6::I18n)
 
 add_library(kinefin_player STATIC
+    src/player/BitrateFallback.cpp
+    src/player/BitrateFallback.h
     src/player/PlaybackEngine.cpp
     src/player/PlaybackEngine.h
     src/player/GroupPlayback.h
@@ -422,6 +424,10 @@ if(BUILD_TESTING)
     target_compile_definitions(test_playback_engine PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(test_playback_engine PRIVATE kinefin_player Qt6::Test)
     add_test(NAME playback_engine COMMAND test_playback_engine)
+
+    add_executable(test_bitrate_fallback tests/test_bitrate_fallback.cpp)
+    target_link_libraries(test_bitrate_fallback PRIVATE kinefin_player Qt6::Test)
+    add_test(NAME bitrate_fallback COMMAND test_bitrate_fallback)
 
     add_executable(test_series_preferences tests/test_series_preferences.cpp)
     target_link_libraries(test_series_preferences PRIVATE kinefin_player Qt6::Test)

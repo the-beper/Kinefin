@@ -755,6 +755,14 @@ Kirigami.ApplicationWindow {
                     window.endPlayback();
             });
         }
+        // The stream kept starving: in every mode the notification says what it plays at now
+        function onQualityLowered(bitsPerSecond) {
+            const mbps = bitsPerSecond / 1000000;
+            window.showPassiveNotification(i18nc("@info %1 is a bit rate in Mbit/s", "Slow connection: playing at a lower quality (%1 Mbps)", Number(mbps).toLocaleString(Qt.locale(), "f", Number.isInteger(mbps) ? 0 : 1)));
+        }
+        function onQualityUnavailable() {
+            window.showPassiveNotification(i18n("No lower quality available. Playback continues at the current quality"));
+        }
     }
 
     // A manual download starts at once on an unmetered or unknown network, and asks first when the network may charge for it

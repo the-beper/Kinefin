@@ -1946,6 +1946,7 @@ class PlayerStub : public QObject {
     Q_PROPERTY(QString title MEMBER title NOTIFY changed)
     Q_PROPERTY(QString subtitle MEMBER subtitle NOTIFY changed)
     Q_PROPERTY(QString errorText MEMBER errorText NOTIFY changed)
+    Q_PROPERTY(bool canRetry MEMBER canRetry NOTIFY changed)
     Q_PROPERTY(qint64 positionTicks MEMBER positionTicks NOTIFY changed)
     Q_PROPERTY(qint64 durationTicks MEMBER durationTicks NOTIFY changed)
     Q_PROPERTY(bool canSeek MEMBER canSeek NOTIFY changed)
@@ -2037,6 +2038,7 @@ class PlayerStub : public QObject {
         Q_EMIT changed();
     }
     Q_INVOKABLE void toggleMute() { record(QStringLiteral("toggleMute")); }
+    Q_INVOKABLE bool retryPlayback() { return record(QStringLiteral("retryPlayback")); }
     Q_INVOKABLE void stop()
     {
         record(QStringLiteral("stop"));
@@ -2117,6 +2119,7 @@ class PlayerStub : public QObject {
     QString title = QStringLiteral("Abyss Station");
     QString subtitle = QStringLiteral("S2:E6 — Weightless");
     QString errorText;
+    bool canRetry = false;
     qint64 positionTicks = 0;
     qint64 durationTicks = 72000000000;
     bool canSeek = true;
@@ -2156,6 +2159,8 @@ class PlayerStub : public QObject {
     void remoteSubtitlesChanged();
     void remoteSubtitleDownloaded(const QString &subtitleId);
     void remoteSubtitleDownloadFailed(const QString &subtitleId, int httpStatus);
+    void qualityLowered(qint64 bitsPerSecond);
+    void qualityUnavailable();
     void finished();
 
   private:
@@ -12674,6 +12679,61 @@ class TestUiPages : public QObject {
         QCOMPARE(stub.calls, QStringList({QStringLiteral("stop")}));
         QTRY_VERIFY(!shownMiniPlayer(ui));
         QTRY_VERIFY(ui.item(QStringLiteral("videoRenderer")) == nullptr);
+    }
+
+    // The stream kept starving: the notification names the bit rate it plays at now, in every mode; a refusal says playback goes on
+    void aLoweredQualityIsAnnounced()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(openPlayer(ui, stub));
+        Q_EMIT stub.qualityLowered(10'000'000);
+        QTRY_VERIFY(ui.showsText(
+            QStringLiteral("Slow connection: playing at a lower quality (10 Mbps)"), false));
+        QVERIFY(chooseShowMiniPlayer(ui));
+        QTRY_VERIFY(shownMiniPlayer(ui));
+        Q_EMIT stub.qualityLowered(1'500'000);
+        QTRY_VERIFY(ui.showsText(
+            QStringLiteral("Slow connection: playing at a lower quality (1.5 Mbps)"), false));
+        Q_EMIT stub.qualityUnavailable();
+        QTRY_VERIFY(ui.showsText(
+            QStringLiteral("No lower quality available. Playback continues at the current quality"),
+            false));
+    }
+
+    // A lowered stream that did not open offers Try Again beside Close Player; another error offers Close Player alone
+    void theErrorOverlayOffersTryAgainForAFailedFallback()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *page = openPlayer(ui, stub);
+        QVERIFY(page);
+        stub.active = false;
+        stub.errorText = QStringLiteral(
+            "The lower quality stream could not be opened. Try again at the previous quality.");
+        stub.canRetry = true;
+        Q_EMIT stub.changed();
+        QQuickItem *retry = Ui::itemIn(page, QStringLiteral("playerRetryButton"));
+        QQuickItem *close = Ui::itemIn(page, QStringLiteral("playerCloseAfterErrorButton"));
+        QVERIFY(retry && close);
+        QTRY_VERIFY(retry->isVisible() && close->isVisible() && retry->width() > 0);
+        QCOMPARE(retry->property("text").toString(), QStringLiteral("Try Again"));
+        stub.calls.clear();
+        // The row lays the two buttons out a frame after they show
+        QTRY_VERIFY(!sceneRect(retry).intersects(sceneRect(close)));
+        ui.clickCenter(retry);
+        QTRY_VERIFY(stub.calls.contains(QStringLiteral("retryPlayback")));
+        QVERIFY(!stub.calls.contains(QStringLiteral("stop")));
+        stub.canRetry = false;
+        Q_EMIT stub.changed();
+        QTRY_VERIFY(!retry->isVisible());
+        QVERIFY(close->isVisible());
     }
 
     // One mode button in the row, Picture in Picture before Full Screen; the mini player is the first entry of More Actions, so two look-alike icons never sit side by side
