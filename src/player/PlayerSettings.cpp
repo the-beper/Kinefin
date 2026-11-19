@@ -29,10 +29,21 @@ PlayerSettings::PlayerSettings(ClientSettings &settings, PlaybackEngine &engine,
     : QObject(parent), m_settings(settings), m_engine(engine)
 {
     connect(&settings, &ClientSettings::valueChanged, this,
-            [this](const QString &section, const QString &) {
+            [this](const QString &section, const QString &key) {
+                // Night mode rebuilds only the audio chain: a full apply would reset the speed the user chose while playing
+                if (section == QLatin1String("audio") && key == QLatin1String("night_mode"))
+                    return;
                 if (section == QLatin1String("audio") || section == QLatin1String("video")
                     || section == QLatin1String("subtitles") || section == QLatin1String("other"))
                     apply();
+            });
+    connect(&settings, &ClientSettings::valueChanged, this,
+            [this](const QString &section, const QString &key) {
+                if (section != QLatin1String("audio") || key != QLatin1String("night_mode")
+                    || !m_engine.isInitialized())
+                    return;
+                applyAudioChain();
+                applyOverrides({QStringLiteral("af"), QStringLiteral("audio-spdif")});
             });
     // Only what the TLS options decide, as followRate() does for the rate: a full apply would reset what the user changed while playing
     const auto followTls = [this] {
@@ -68,13 +79,22 @@ QString PlayerSettings::detectCertBundle(const QStringList &candidates)
     return {};
 }
 
-void PlayerSettings::applyTls()
+bool PlayerSettings::tlsVerify() const
 {
-    m_engine.setMpvProperty(QStringLiteral("tls-verify"),
-                            mpvBool(!m_settings.certificateErrorsIgnored()));
+    return !m_settings.certificateErrorsIgnored();
+}
+
+QString PlayerSettings::tlsCaFile() const
+{
     const bool autodetect =
         m_settings.value(QStringLiteral("main"), QStringLiteral("autodetectCertBundle")).toBool();
-    const QString bundle = autodetect ? detectCertBundle(certBundleCandidates()) : QString();
+    return autodetect ? detectCertBundle(certBundleCandidates()) : QString();
+}
+
+void PlayerSettings::applyTls()
+{
+    m_engine.setMpvProperty(QStringLiteral("tls-verify"), mpvBool(tlsVerify()));
+    const QString bundle = tlsCaFile();
     // Without a bundle mpv and FFmpeg use their own defaults. An empty string is a path to mpv, not "unset": a bundle set earlier in the session stays until the next start (it is the system's own)
     if (!bundle.isEmpty())
         m_engine.setMpvProperty(QStringLiteral("tls-ca-file"), bundle);
@@ -156,30 +176,58 @@ void PlayerSettings::applyAudio()
     m_engine.setMpvProperty(QStringLiteral("audio-normalize-downmix"), mpvBool(normalize));
     m_engine.setMpvProperty(QStringLiteral("audio-swresample-o"),
                             QStringLiteral("surround_mix_level=1"));
-    QStringList codecs;
-    if (type != QLatin1String("basic")) {
-        for (const char *codec : {"ac3", "dts", "eac3", "truehd"}) {
-            if ((type == QLatin1String("hdmi") || QString::fromLatin1(codec) == QLatin1String("ac3")
-                 || QString::fromLatin1(codec) == QLatin1String("dts"))
-                && v(QByteArray("passthrough.").append(codec).constData()).toBool()) {
-                codecs.append(QString::fromLatin1(codec));
-            }
-        }
-        if (type == QLatin1String("hdmi") && v("passthrough.dts-hd").toBool()) {
-            codecs.removeAll(QStringLiteral("dts"));
-            codecs.append(QStringLiteral("dts-hd"));
-        }
-    }
-    m_engine.setMpvProperty(QStringLiteral("audio-spdif"), codecs.join(QLatin1Char(',')));
     m_engine.setMpvProperty(QStringLiteral("audio-channels"), type == QLatin1String("spdif")
                                                                   ? QStringLiteral("2.0")
                                                                   : v("channels").toString());
-    if (type == QLatin1String("spdif") && v("passthrough.ac3").toBool())
+    applyAudioChain();
+}
+
+QStringList PlayerSettings::passthroughCodecs() const
+{
+    const auto v = [this](const char *key) {
+        return m_settings.value(QStringLiteral("audio"), QString::fromLatin1(key));
+    };
+    const QString type = v("devicetype").toString();
+    QStringList codecs;
+    if (type == QLatin1String("basic"))
+        return codecs;
+    for (const char *codec : {"ac3", "dts", "eac3", "truehd"}) {
+        if ((type == QLatin1String("hdmi") || QString::fromLatin1(codec) == QLatin1String("ac3")
+             || QString::fromLatin1(codec) == QLatin1String("dts"))
+            && v(QByteArray("passthrough.").append(codec).constData()).toBool()) {
+            codecs.append(QString::fromLatin1(codec));
+        }
+    }
+    if (type == QLatin1String("hdmi") && v("passthrough.dts-hd").toBool()) {
+        codecs.removeAll(QStringLiteral("dts"));
+        codecs.append(QStringLiteral("dts-hd"));
+    }
+    return codecs;
+}
+
+bool PlayerSettings::passthroughConfigured() const
+{
+    return !passthroughCodecs().isEmpty();
+}
+
+void PlayerSettings::applyAudioChain()
+{
+    const auto v = [this](const char *key) {
+        return m_settings.value(QStringLiteral("audio"), QString::fromLatin1(key));
+    };
+    const bool night = v("night_mode").toBool();
+    // A filter cannot act on a bitstream: night mode decodes every passthrough codec (the settings keep their values)
+    m_engine.setMpvProperty(QStringLiteral("audio-spdif"),
+                            night ? QString() : passthroughCodecs().join(QLatin1Char(',')));
+    // `af add` appends: the night filter runs before the AC-3 re-encoder
+    m_engine.mpvCommand({QStringLiteral("af"), QStringLiteral("remove"), QStringLiteral("@night")});
+    m_engine.mpvCommand({QStringLiteral("af"), QStringLiteral("remove"), QStringLiteral("@ac3")});
+    if (night)
+        m_engine.mpvCommand({QStringLiteral("af"), QStringLiteral("add"),
+                             QStringLiteral("@night:lavfi-dynaudnorm=f=200:g=11:p=0.25:m=3")});
+    if (v("devicetype").toString() == QLatin1String("spdif") && v("passthrough.ac3").toBool())
         m_engine.mpvCommand(
             {QStringLiteral("af"), QStringLiteral("add"), QStringLiteral("@ac3:lavcac3enc")});
-    else
-        m_engine.mpvCommand(
-            {QStringLiteral("af"), QStringLiteral("remove"), QStringLiteral("@ac3")});
 }
 
 void PlayerSettings::applyVideo()
@@ -303,43 +351,58 @@ void PlayerSettings::applyDisplayRate()
     m_engine.setMpvProperty(QStringLiteral("audio-delay"), delay / 1000.0 + m_audioOffset);
 }
 
-void PlayerSettings::applySubtitles()
+QList<std::pair<QString, QVariant>> PlayerSettings::subtitleProperties() const
 {
     const auto v = [this](const char *key) {
         return m_settings.value(QStringLiteral("subtitles"), QString::fromLatin1(key));
     };
-    m_engine.setMpvProperty(QStringLiteral("sub-ass-style-overrides"),
-                            QString(QStringLiteral("ScaledBorderAndShadow=")
-                                    + mpvBool(v("ass_scale_border_and_shadow").toBool())));
-    m_engine.setMpvProperty(QStringLiteral("sub-ass-override"), v("ass_style_override").toString());
+    QList<std::pair<QString, QVariant>> properties;
+    properties.append({QStringLiteral("sub-ass-style-overrides"),
+                       QString(QStringLiteral("ScaledBorderAndShadow=")
+                               + mpvBool(v("ass_scale_border_and_shadow").toBool()))});
+    properties.append({QStringLiteral("sub-ass-override"), v("ass_style_override").toString()});
     const int size = v("size").toInt();
-    m_engine.setMpvProperty(QStringLiteral("sub-scale"), size > 0 ? size / 32.0 : 1.0);
+    const double scale = size > 0 ? size / 32.0 : 1.0;
+    properties.append({QStringLiteral("sub-scale"), scale});
+    // Unknown to 0.41, where `sub-scale` covers both; 0.42 sizes the second subtitle alone
+    properties.append({QStringLiteral("secondary-sub-scale"), scale});
     for (const auto &pair : {std::pair{"font", "sub-font"},
                              {"color", "sub-color"},
                              {"border_color", "sub-border-color"}}) {
         const QString value = v(pair.first).toString();
         if (!value.isEmpty())
-            m_engine.setMpvProperty(QString::fromLatin1(pair.second), value);
+            properties.append({QString::fromLatin1(pair.second), value});
     }
     const int border = v("border_size").toInt();
     if (border >= 0)
-        m_engine.setMpvProperty(QStringLiteral("sub-border-size"), border);
+        properties.append({QStringLiteral("sub-border-size"), border});
     const QString bg = v("background_color").toString();
     const QString alpha = v("background_transparency").toString();
     if (QRegularExpression(QStringLiteral("^#[0-9a-fA-F]{6}$")).match(bg).hasMatch()
         && QRegularExpression(QStringLiteral("^[0-9a-fA-F]{2}$")).match(alpha).hasMatch())
-        m_engine.setMpvProperty(QStringLiteral("sub-back-color"),
-                                QString(QStringLiteral("#") + alpha + bg.mid(1)));
+        properties.append(
+            {QStringLiteral("sub-back-color"), QString(QStringLiteral("#") + alpha + bg.mid(1))});
     const QStringList placement = v("placement").toString().split(QLatin1Char(','));
     const QString align = placement.value(0).trimmed().toLower();
     if (align == QLatin1String("left") || align == QLatin1String("center")
         || align == QLatin1String("right"))
-        m_engine.setMpvProperty(QStringLiteral("sub-align-x"), align);
+        properties.append({QStringLiteral("sub-align-x"), align});
     const QString vertical = placement.value(1, align).trimmed().toLower();
-    if (vertical == QLatin1String("top") || vertical == QLatin1String("bottom"))
-        m_engine.setMpvProperty(QStringLiteral("sub-pos"),
-                                vertical == QLatin1String("top") ? 10 : 100);
-    m_engine.setMpvProperty(QStringLiteral("sub-delay"), m_subtitleOffset);
+    if (vertical == QLatin1String("top") || vertical == QLatin1String("bottom")) {
+        properties.append({QStringLiteral("sub-pos"), vertical == QLatin1String("top") ? 10 : 100});
+        // The second subtitle takes the opposite edge, at the top by default
+        properties.append(
+            {QStringLiteral("secondary-sub-pos"), vertical == QLatin1String("top") ? 100 : 0});
+    }
+    properties.append({QStringLiteral("sub-delay"), m_subtitleOffset});
+    properties.append({QStringLiteral("secondary-sub-delay"), m_subtitleOffset});
+    return properties;
+}
+
+void PlayerSettings::applySubtitles()
+{
+    for (const auto &[name, value] : subtitleProperties())
+        m_engine.setMpvProperty(name, value);
 }
 
 void PlayerSettings::applyOverrides(const QStringList &only)
@@ -374,5 +437,7 @@ void PlayerSettings::setSubtitleOffset(double seconds)
 {
     m_subtitleOffset = qBound(-10.0, seconds, 10.0);
     m_engine.setMpvProperty(QStringLiteral("sub-delay"), m_subtitleOffset);
+    // One delay for both, as in jellyfin-web
+    m_engine.setMpvProperty(QStringLiteral("secondary-sub-delay"), m_subtitleOffset);
 }
 } // namespace Kinefin

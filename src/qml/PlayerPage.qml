@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import QtQuick
 import QtQuick.Controls as Controls
+import QtQuick.Dialogs
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 
@@ -192,6 +193,8 @@ Kirigami.Page {
         case Qt.Key_Space: page.playerAction("playpause"); break;
         case Qt.Key_M: page.playerAction("togglemute"); break;
         case Qt.Key_F: page.playerAction("togglefullscreen"); break;
+        case Qt.Key_I: page.player.markClipStart(); break;
+        case Qt.Key_O: page.player.markClipEnd(); break;
         case Qt.Key_Left: page.playerAction("rewind"); break;
         case Qt.Key_Right: page.playerAction("fastforward"); break;
         // The minute seeks have no command name: only the keyboard has them
@@ -456,6 +459,56 @@ Kirigami.Page {
         text: shownLabel
         icon.name: "media-skip-forward"
         onClicked: { page.player.skipSegment(); page.wakeChrome(); }
+    }
+    // A clip or GIF in the making, outside the bars like Up Next: Cancel stops it and removes the file
+    Rectangle {
+        id: clipCard
+        objectName: "playerClipCard"
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        anchors.margins: Kirigami.Units.largeSpacing
+        anchors.bottomMargin: bottomBar.height + Kirigami.Units.largeSpacing
+        enabled: page.player.clipSaving
+        visible: page.player.clipSaving
+        width: Math.min(clipRow.implicitWidth + Kirigami.Units.largeSpacing * 2, page.width - Kirigami.Units.largeSpacing * 2)
+        height: clipRow.implicitHeight + Kirigami.Units.largeSpacing * 2
+        radius: Kirigami.Units.cornerRadius
+        Kirigami.Theme.colorSet: Kirigami.Theme.Complementary
+        Kirigami.Theme.inherit: false
+        color: Qt.alpha(Kirigami.Theme.backgroundColor, 0.9)
+        border.width: 1
+        border.color: Qt.alpha(Kirigami.Theme.textColor, 0.2)
+        Accessible.role: Accessible.Grouping
+        Accessible.name: i18nc("@info accessible name of the card", "Saving the clip")
+        BarClickGuard {}
+        RowLayout {
+            id: clipRow
+            anchors.fill: parent
+            anchors.margins: Kirigami.Units.largeSpacing
+            spacing: Kirigami.Units.largeSpacing
+            ColumnLayout {
+                spacing: Kirigami.Units.smallSpacing
+                Controls.Label {
+                    objectName: "playerClipProgressLabel"
+                    text: page.player.clipSavingGif
+                          ? i18n("Saving the GIF: %1%", Math.round(page.player.clipProgress * 100))
+                          : i18n("Saving the clip: %1%", Math.round(page.player.clipProgress * 100))
+                }
+                Controls.ProgressBar {
+                    objectName: "playerClipProgress"
+                    Layout.fillWidth: true
+                    from: 0
+                    to: 1
+                    value: page.player.clipProgress
+                }
+            }
+            Controls.Button {
+                objectName: "playerClipCancel"
+                focusPolicy: Qt.TabFocus
+                text: i18n("Cancel")
+                onClicked: page.player.cancelClip()
+            }
+        }
     }
     // Up Next, outside the bars like Skip: its buttons take the keyboard only through Tab, so Return (Play Now) and Esc (Cancel) stay with the page
     Rectangle {
@@ -799,6 +852,20 @@ Kirigami.Page {
                             }
                         }
                         Accessible.name: i18n("Playback position")
+                        // The marked clip range, a translucent band under the chapter marks
+                        Rectangle {
+                            objectName: "playerClipBand"
+                            readonly property real duration: page.player.durationTicks
+                            readonly property real startFraction: duration > 0 && page.player.clipStartTicks >= 0 ? Math.min(1, page.player.clipStartTicks / duration) : 0
+                            readonly property real endFraction: duration > 0 && page.player.clipEndTicks > page.player.clipStartTicks ? Math.min(1, page.player.clipEndTicks / duration) : startFraction
+                            visible: page.player.clipStartTicks >= 0 && page.player.clipEndTicks > page.player.clipStartTicks
+                            x: timeline.leftPadding + timeline.handle.width / 2 + (timeline.mirrored ? 1 - endFraction : startFraction) * (timeline.availableWidth - timeline.handle.width)
+                            width: Math.abs(endFraction - startFraction) * (timeline.availableWidth - timeline.handle.width)
+                            y: Math.round(timeline.topPadding + (timeline.availableHeight - height) / 2)
+                            height: timeline.availableHeight
+                            color: Qt.alpha(Kirigami.Theme.highlightColor, 0.35)
+                            Accessible.ignored: true
+                        }
                         // A thin cut in the groove where each chapter but the first starts, at the handle's middle for that time; the one under the handle hides with it, and the bar's own tick marks stay off
                         Item {
                             id: chapterMarks
@@ -987,6 +1054,15 @@ Kirigami.Page {
         id: subtitleSearchDialog
         player: page.player
     }
+    FileDialog {
+        id: clipSaveDialog
+        property bool gif: false
+        fileMode: FileDialog.SaveFile
+        title: gif ? i18n("Save GIF") : i18n("Save Video Clip")
+        nameFilters: gif ? [i18n("GIF images (*.gif)")] : [i18n("Video clips (*.mp4 *.webm)")]
+        currentFile: page.player.suggestedClipUrl(gif)
+        onAccepted: page.player.saveClip(gif, selectedFile)
+    }
 
     Connections {
         target: page.player
@@ -997,6 +1073,9 @@ Kirigami.Page {
         }
         function onRemoteSubtitleDownloadFailed(subtitleId, httpStatus) {
             page.Window.window?.showPassiveNotification(i18n("The subtitle could not be downloaded: check the connection and try again"));
+        }
+        function onNightModePassthroughDisabled() {
+            page.Window.window?.showPassiveNotification(i18n("Night mode is on: passthrough is off until it is turned off"));
         }
     }
 
@@ -1051,6 +1130,7 @@ Kirigami.Page {
             Controls.MenuSeparator {},
             AudioMenu {
                 objectName: "playerContextAudioMenu"
+                namePrefix: "playerContext"
                 enabled: page.player.audioTracks.length > 0
                 title: i18nc("@action:button audio tracks", "Audio")
                 icon.name: "audio-headphones"
@@ -1265,6 +1345,8 @@ Kirigami.Page {
     // The entries of the Audio menu: the bottom bar's menu and the context menu's submenu are both one of these
     component AudioMenu: Controls.Menu {
         id: self
+        // The prefix of the entries' object names, so a second instance has names of its own
+        property string namePrefix: "player"
         Instantiator {
             model: page.player.audioTracks
             delegate: PlainMenuItem {
@@ -1276,6 +1358,14 @@ Kirigami.Page {
             }
             onObjectAdded: (index, object) => self.insertItem(index, object)
             onObjectRemoved: (index, object) => self.removeItem(object)
+        }
+        Controls.MenuSeparator {}
+        Controls.MenuItem {
+            objectName: self.namePrefix + "NightMode"
+            text: i18n("Night Mode")
+            checkable: true
+            checked: page.player.nightMode
+            onTriggered: page.player.setNightMode(checked)
         }
     }
     // The entries of the Subtitles menu, likewise
@@ -1301,6 +1391,35 @@ Kirigami.Page {
             }
             onObjectAdded: (index, object) => self.insertItem(index + 1, object)
             onObjectRemoved: (index, object) => self.removeItem(object)
+        }
+        // mpv's second subtitle slot: a text track other than the primary
+        Controls.Menu {
+            id: secondarySubtitlesMenu
+            objectName: self.namePrefix + "SecondarySubtitlesMenu"
+            title: i18n("Secondary Subtitles")
+            enabled: page.player.subtitleTracks.some(track => track.text && !track.selected)
+            Controls.MenuItem {
+                objectName: self.namePrefix + "SecondarySubtitlesOff"
+                text: i18nc("@item:inmenu no second subtitle", "Off")
+                checkable: true
+                autoExclusive: true
+                checked: !page.player.subtitleTracks.some(track => track.secondary)
+                onTriggered: page.player.selectSecondarySubtitleTrack(0)
+            }
+            Instantiator {
+                model: page.player.subtitleTracks
+                delegate: PlainMenuItem {
+                    visible: Boolean(modelData.text && !modelData.selected)
+                    plainText: modelData.name
+                    checkable: true
+                    autoExclusive: true
+                    checked: Boolean(modelData.secondary)
+                    onTriggered: page.player.selectSecondarySubtitleTrack(modelData.id)
+                }
+                onObjectAdded: (index, object) =>
+                                secondarySubtitlesMenu.insertItem(index + 1, object)
+                onObjectRemoved: (index, object) => secondarySubtitlesMenu.removeItem(object)
+            }
         }
         Controls.MenuSeparator { visible: page.player.canManageSubtitles }
         Controls.MenuItem {
@@ -1489,6 +1608,57 @@ Kirigami.Page {
                 page.player.screenshot();
                 page.wakeChrome();
                 screenshotNotice.restart();
+            }
+        }
+        Controls.Menu {
+            id: clipMenu
+            objectName: moreRoot.namePrefix + "ClipMenu"
+            title: i18n("Clip")
+            icon.name: "media-record"
+            Controls.MenuItem {
+                objectName: moreRoot.namePrefix + "ClipStart"
+                text: i18n("Set Start")
+                enabled: page.player.active
+                onTriggered: page.player.markClipStart()
+            }
+            Controls.MenuItem {
+                objectName: moreRoot.namePrefix + "ClipEnd"
+                text: i18n("Set End")
+                enabled: page.player.active
+                onTriggered: page.player.markClipEnd()
+            }
+            Controls.MenuSeparator {}
+            // The range in words, or why neither Save entry can be used
+            Controls.MenuItem {
+                objectName: moreRoot.namePrefix + "ClipLine"
+                text: page.player.clipLine
+                visible: text.length > 0
+                enabled: false
+            }
+            Controls.MenuItem {
+                objectName: moreRoot.namePrefix + "ClipSaveVideo"
+                text: i18n("Save Video Clip…")
+                enabled: page.player.clipVideoEnabled
+                onTriggered: {
+                    clipSaveDialog.gif = false;
+                    clipSaveDialog.open();
+                }
+            }
+            Controls.MenuItem {
+                objectName: moreRoot.namePrefix + "ClipSaveGif"
+                text: i18n("Save GIF…")
+                enabled: page.player.clipGifEnabled
+                onTriggered: {
+                    clipSaveDialog.gif = true;
+                    clipSaveDialog.open();
+                }
+            }
+            Controls.MenuSeparator {}
+            Controls.MenuItem {
+                objectName: moreRoot.namePrefix + "ClipClear"
+                text: i18n("Clear Clip")
+                enabled: page.player.clipStartTicks >= 0 || page.player.clipEndTicks >= 0
+                onTriggered: page.player.clearClip()
             }
         }
         Controls.MenuItem {

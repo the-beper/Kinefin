@@ -10,6 +10,10 @@ Everything that needs Qt, KF6 or ECM runs in a Podman container; see [CONTRIBUTI
 build/build-env.sh build/check.sh
 ```
 
+## KRunner
+
+While Kinefin is open and signed in, KRunner and Plasma's search fields built on it can find movies, series, episodes and collections on the signed-in server. The plugin is off by default: turn it on in System Settings, Search, Plasma Search. A query of three characters or more goes to that server as its `searchTerm` after a 300 ms pause; Return opens the item's details page, Play and Resume sit on the row. Nothing is sent while Kinefin is closed or signed out, or when the server is plain HTTP and not on this machine.
+
 ## Project status and release preparation
 
 The [implementation plan](docs/plan.md) and [feature delivery table](docs/feature-status.md) distinguish implemented code from features verified on a Jellyfin server and KDE Plasma desktop. The first-release tooling and remaining acceptance requirements are documented in [P9 first-release checklist](build/release/FIRST_RELEASE.md); see also [release tooling](build/release/README.md). A passing offline preflight is **not** permission to publish a release.

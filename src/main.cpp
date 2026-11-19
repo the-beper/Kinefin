@@ -4,6 +4,7 @@
 #include "app/ImageNetworkFactory.h"
 #include "app/Logging.h"
 #include "app/ProfileCommands.h"
+#include "integration/KRunnerProvider.h"
 #include "integration/LinkRouter.h"
 #include "integration/Mpris.h"
 #include "integration/MprisArtwork.h"
@@ -225,6 +226,19 @@ int main(int argc, char *argv[])
         window->setProperty("requestedItemId", QVariant(itemId));
         raiseWindow();
     };
+    // KRunner hands KRunner's XDG activation token: put it where the toolkit reads it for the window this raises, as KDBusService does for a second launch
+    auto withActivationToken = [](const QString &token, auto &&action) {
+        const QByteArray previous = qgetenv("XDG_ACTIVATION_TOKEN");
+        if (!token.isEmpty())
+            qputenv("XDG_ACTIVATION_TOKEN", token.toUtf8());
+        action();
+        if (token.isEmpty())
+            return;
+        if (previous.isEmpty())
+            qunsetenv("XDG_ACTIVATION_TOKEN");
+        else
+            qputenv("XDG_ACTIVATION_TOKEN", previous);
+    };
     KDBusService service(KDBusService::Unique);
     QObject::connect(&service, &KDBusService::activateRequested, &app,
                      [showItem, raiseWindow](const QStringList &args, const QString &) {
@@ -366,6 +380,24 @@ int main(int argc, char *argv[])
     QObject::connect(&mpris, &Kinefin::Mpris::raiseRequested, &app, raiseWindow);
     QObject::connect(&mpris, &Kinefin::Mpris::quitRequested, window, &QWindow::close);
     mpris.registerOnBus();
+    Kinefin::KRunnerProvider krunner(connection.playbackClient(), QDBusConnection::sessionBus());
+    QObject::connect(
+        &krunner, &Kinefin::KRunnerProvider::openRequested, &app,
+        [&showItem, &withActivationToken](const QString &itemId, const QString &token) {
+            withActivationToken(token, [&showItem, itemId] { showItem(itemId); });
+        });
+    QObject::connect(&krunner, &Kinefin::KRunnerProvider::playRequested, &app,
+                     [&raiseWindow, &withActivationToken,
+                      &window](const QString &itemId, qint64 ticks, const QString &token) {
+                         withActivationToken(token, [&raiseWindow, &window, itemId, ticks] {
+                             raiseWindow();
+                             if (window)
+                                 QMetaObject::invokeMethod(window, "playRequestedItem",
+                                                           Q_ARG(QVariant, itemId),
+                                                           Q_ARG(QVariant, ticks));
+                         });
+                     });
+    krunner.registerOnBus();
     Kinefin::MprisArtwork mprisArtwork(mpris, player, imageOrigin,
                                        Kinefin::profileCacheDirectory(profileId)
                                            + QStringLiteral("/mpris"));

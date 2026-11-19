@@ -8,6 +8,7 @@
 #include "api/JellyfinClient.h"
 #include "models/ItemDetails.h"
 #include "player/BitrateFallback.h"
+#include "player/ClipExporter.h"
 #include "player/GroupPlayback.h"
 #include "player/PlaybackEngine.h"
 #include "player/PlaybackReporter.h"
@@ -45,15 +46,20 @@ int chapterIndexAt(const QList<ChapterSummary> &chapters, qint64 ticks);
 qint64 chapterStepTarget(const QList<ChapterSummary> &chapters, qint64 positionTicks,
                          int direction);
 
-// The tracks to select once a file's tracks are known: the item's own remembered ids (`audio`, `subtitle`, 0 for off), then the series' choices, each kind only while the user remembers it. 0 leaves mpv's pick
+// The tracks to select once a file's tracks are known: the item's own remembered ids (`audio`, `subtitle`, 0 for off; `secondary`, 0 for none), then the series' choices, each kind only while the user remembers it. 0 leaves mpv's pick
 struct RememberedTracks {
     int audio = 0;
     int subtitle = 0;
     bool subtitleOff = false;
+    // The second subtitle (mpv's `secondary-sid`): a text track other than the primary
+    int secondary = 0;
 };
 RememberedTracks rememberedTracks(const QJsonObject &item, const SeriesChoice &series,
                                   const QList<TrackFact> &audio, const QList<TrackFact> &subtitles,
                                   bool rememberAudio, bool rememberSubtitles);
+
+// A subtitle codec mpv renders as text: only these can take the second slot
+bool textSubtitleCodec(const QString &codec);
 
 // When the Up Next card shows and when the next item starts, in ticks of the item
 struct UpNextWindow {
@@ -108,6 +114,17 @@ class PlayerController final : public QObject {
     Q_PROPERTY(QString skipLabel READ skipLabel NOTIFY changed)
     Q_PROPERTY(int sleepRemainingMinutes READ sleepRemainingMinutes NOTIFY changed)
     Q_PROPERTY(QString aspectMode READ aspectMode NOTIFY changed)
+    // The night-mode filter of the audio chain, remembered per profile: the OSD's check and the Settings switch are one setting
+    Q_PROPERTY(bool nightMode READ nightMode NOTIFY changed)
+    // Clip and GIF marks of the playing item, -1 when unset: the line the Clip menu states and the two Save entries
+    Q_PROPERTY(qint64 clipStartTicks READ clipStartTicks NOTIFY changed)
+    Q_PROPERTY(qint64 clipEndTicks READ clipEndTicks NOTIFY changed)
+    Q_PROPERTY(QString clipLine READ clipLine NOTIFY changed)
+    Q_PROPERTY(bool clipVideoEnabled READ clipVideoEnabled NOTIFY changed)
+    Q_PROPERTY(bool clipGifEnabled READ clipGifEnabled NOTIFY changed)
+    Q_PROPERTY(bool clipSaving READ clipSaving NOTIFY clipStateChanged)
+    Q_PROPERTY(bool clipSavingGif READ clipSavingGif NOTIFY clipStateChanged)
+    Q_PROPERTY(double clipProgress READ clipProgress NOTIFY clipStateChanged)
     // The chapters of the playing item, from the server: `name` (plain text, "Chapter N" when the server gives none), `startTicks` and `time` (as timeText shows it)
     Q_PROPERTY(QVariantList chapters READ chapters NOTIFY chaptersChanged)
     // Notified only when the chapter changes, not with every position
@@ -179,6 +196,15 @@ class PlayerController final : public QObject {
     QString skipLabel() const { return m_skipLabel; }
     // The aspect mode of this playback: the `video.aspect` setting until a choice is made, and again for the next item
     QString aspectMode() const { return m_mpvSettings.aspectMode(); }
+    bool nightMode() const;
+    qint64 clipStartTicks() const { return m_clipStart; }
+    qint64 clipEndTicks() const { return m_clipEnd; }
+    QString clipLine() const;
+    bool clipVideoEnabled() const { return !m_clipExporter.running() && clipReady(false, nullptr); }
+    bool clipGifEnabled() const { return !m_clipExporter.running() && clipReady(true, nullptr); }
+    bool clipSaving() const { return m_clipExporter.running(); }
+    bool clipSavingGif() const { return m_clipGif; }
+    double clipProgress() const { return m_clipProgress; }
     QVariantList chapters() const { return m_chapterList; }
     // The chapter playing now, -1 before the first or without chapters
     int currentChapter() const { return m_currentChapter; }
@@ -230,6 +256,8 @@ class PlayerController final : public QObject {
     Q_INVOKABLE void setRepeatMode(int mode); // 0 off, 1 all, 2 one
     Q_INVOKABLE void selectAudioTrack(int id);
     Q_INVOKABLE void selectSubtitleTrack(int id); // 0 = none
+    // The second subtitle shown with the primary (mpv's `secondary-sid`); 0 turns it off. Only a text track the primary does not use takes the slot
+    Q_INVOKABLE void selectSecondarySubtitleTrack(int id); // 0 = none
     // Selects the track whose server `MediaStream.Index` (mpv's `ff-index`) is `index`, in a direct play only; false, with nothing changed, when nothing plays, the server transcodes, the index is out of range (0 to 1024) or no track of that type has it
     Q_INVOKABLE bool selectAudioStreamIndex(int index);
     // As selectAudioStreamIndex for a subtitle track; -1 selects none
@@ -238,8 +266,21 @@ class PlayerController final : public QObject {
     Q_INVOKABLE void adjustSubtitleDelay(double seconds);
     Q_INVOKABLE void setSleepTimer(int minutes); // 0 disables
     Q_INVOKABLE void screenshot();
+    // The clip marks at the current position; both are cleared by another item and by a stop
+    Q_INVOKABLE void markClipStart();
+    Q_INVOKABLE void markClipEnd();
+    Q_INVOKABLE void clearClip();
+    // The file name the Save dialog proposes: the title and the start time, with the extension of the format
+    Q_INVOKABLE QString suggestedClipName(bool gif) const;
+    // The same name in the user's Videos folder, the starting point of the Save dialog
+    Q_INVOKABLE QUrl suggestedClipUrl(bool gif) const;
+    // Encodes the marked range into the file the portal granted; false, with no notification, when the marks or the route refuse it
+    Q_INVOKABLE bool saveClip(bool gif, const QUrl &destination);
+    Q_INVOKABLE void cancelClip();
     Q_INVOKABLE void skipSegment();
     Q_INVOKABLE bool downloadSubtitle(int index);
+    // A server external text subtitle not loaded yet, downloaded and shown as the second one
+    Q_INVOKABLE bool downloadSecondarySubtitle(int index);
     Q_INVOKABLE void previewAt(qint64 ticks);
     Q_INVOKABLE void clearPreview();
     Q_INVOKABLE void refreshTracks();
@@ -253,6 +294,8 @@ class PlayerController final : public QObject {
     void setFallbackTiming(const BitrateFallback::Timing &timing) { m_fallback.setTiming(timing); }
     // One of the `video.aspect` values except `custom`: applied at once to this playback only, the setting is not written
     Q_INVOKABLE void setAspectMode(const QString &mode);
+    // Turns the night-mode filter on or off, through the profile's setting; the chain is rebuilt at once
+    Q_INVOKABLE void setNightMode(bool enabled);
     // The chapter at a position of the timeline, -1 before the first or without chapters
     Q_INVOKABLE int chapterAt(qint64 ticks) const { return chapterIndexAt(m_chapters, ticks); }
     Q_INVOKABLE void jumpToChapter(int index);
@@ -328,6 +371,8 @@ class PlayerController final : public QObject {
     void qualityLowered(qint64 bitsPerSecond);
     // The stream kept starving and the request for a lower one failed or was refused: playback goes on as it was
     void qualityUnavailable();
+    // Night mode was turned on while a passthrough codec is selected: the codec is decoded instead, so the chain can act
+    void nightModePassthroughDisabled();
     // A seek was asked of mpv, to this position
     void seeked(qint64 ticks);
     void tracksChanged();
@@ -337,6 +382,11 @@ class PlayerController final : public QObject {
     void seriesChoicesChanged();
     void previewChanged();
     void finished();
+    // A clip or GIF reached the granted file (`fileName` only, `gif` for the wording), or did not: noSpace names the disk message
+    void clipSaved(const QString &fileName, bool gif);
+    void clipSaveFailed(bool noSpace);
+    // The export started, progressed (`clipProgress`) or ended
+    void clipStateChanged();
 
   private:
     // The listing channel of the series' episodes (see the channel table in the architecture doc)
@@ -406,6 +456,22 @@ class PlayerController final : public QObject {
     {
         return !m_itemSeriesId.isEmpty() && m_source.method == PlaybackSource::Method::Direct;
     }
+    // The tracks the second subtitle slot may take: text subtitles other than the primary
+    QList<TrackFact> secondarySubtitleFacts() const;
+    // The playing item can give a clip or GIF: local or direct play, SDR, a source file the exporter can read
+    bool clipReady(bool gif, QString *reason) const;
+    // What refuses a clip whatever its format (route, HDR), empty when nothing does
+    QString clipCommonReason() const;
+    qint64 clipLengthTicks() const;
+    void onClipFinished(const QString &stagingPath);
+    void onClipFailed(ClipExporter::Error error);
+    void cancelClipExport();
+    // mpv's `secondary-sid`, without the memory a choice writes: 0 turns it off
+    bool setSecondarySubtitle(int id);
+    // After a same-item reopen, the second subtitle comes back by its stream index or is downloaded again
+    void restoreSecondarySubtitle();
+    // One server subtitle download, into the primary or the second slot
+    bool downloadSubtitle(int index, bool secondary);
     // The series' speed and aspect, once the file is loaded and the series known; a restore, never a choice
     void applySeriesPlayback();
     // Track memory and queue positions of an owner (`server` or `server/user`) go
@@ -416,7 +482,7 @@ class PlayerController final : public QObject {
     void updateSkip();
     QString memoryKey() const;
     void restoreTracks();
-    void rememberTracks(int audioId, int subtitleId);
+    void rememberTracks(int audioId, int subtitleId, int secondaryId);
     void loadMemory();
     void saveMemory();
     void clearCurrent();
@@ -494,8 +560,25 @@ class PlayerController final : public QObject {
     QString m_screenshotPath;
     QString m_profileDataDir;
     QUrl m_pendingSubtitle;
-    // The server's stream index of each external subtitle file loaded into mpv for this stream, by file name
+    // Distinguishes two subtitle files saved within the same millisecond
+    int m_subtitleFileSeq = 0;
+    // Clip and GIF export: the marks of the playing item, the file the portal granted and the progress
+    ClipExporter m_clipExporter;
+    qint64 m_clipStart = -1;
+    qint64 m_clipEnd = -1;
+    QUrl m_clipDestination;
+    double m_clipProgress = 0;
+    bool m_clipGif = false;
+    int m_clipSeq = 0;
+    // The file of a local playback, the source of its clip
+    QString m_localSourcePath;
+    // The pending download goes to the second slot, not to the primary
+    bool m_pendingSubtitleSecondary = false;
+    // A subtitle file added for the second slot, waiting for mpv to list it
+    QString m_pendingSecondaryFile;
+    // The server's stream index of each external subtitle file loaded into mpv for this stream, by file name, in the order it was added (mpv's track ids follow that order)
     QHash<QString, int> m_loadedSubtitles;
+    QStringList m_loadedSubtitleOrder;
     // The user turned subtitles off for this item; a same-item reopen keeps it
     bool m_subtitlesOff = false;
     int m_cachedTileIndex = -1;
@@ -576,7 +659,10 @@ class PlayerController final : public QObject {
     bool m_trackRestored = false;
     int m_selectedAudioId = 0;
     int m_selectedSubtitleId = 0;
+    int m_secondarySubtitleId = 0;
     std::optional<int> m_selectedAudioIndex;
     std::optional<int> m_selectedSubtitleIndex;
+    // The server stream index of the second subtitle, kept to select it again after a same-item reopen
+    std::optional<int> m_secondaryStreamIndex;
 };
 } // namespace Kinefin

@@ -1668,6 +1668,314 @@ class TestPlayerController : public QObject {
         QCOMPARE(chain.server.playbackInfoRequests, 0);
     }
 
+    void secondarySubtitleShowsWithThePrimary()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        QVERIFY(playsTwoSubtitles(chain));
+        const int primary = selectedSubtitleId(chain);
+        QVERIFY(primary > 0);
+        QCOMPARE(secondarySubtitleId(chain), 0);
+        const int other = otherSubtitleId(chain, primary);
+        QVERIFY(other > 0);
+        QVERIFY(subtitleIsText(chain, primary) && subtitleIsText(chain, other));
+        chain.controller.selectSecondarySubtitleTrack(other);
+        QTRY_COMPARE(secondarySubtitleId(chain), other);
+        // The primary keeps its slot: one selected track and one second
+        QCOMPARE(selectedSubtitleId(chain), primary);
+        int selected = 0;
+        int secondary = 0;
+        for (const QVariant &value : chain.controller.subtitleTracks()) {
+            const QVariantMap track = value.toMap();
+            selected += track.value(QStringLiteral("selected")).toBool() ? 1 : 0;
+            secondary += track.value(QStringLiteral("secondary")).toBool() ? 1 : 0;
+        }
+        QCOMPARE(selected, 1);
+        QCOMPARE(secondary, 1);
+        // mpv agrees, and its selection order names the slot
+        QCOMPARE(chain.engine()->mpvProperty(QStringLiteral("secondary-sid")).toInt(), other);
+    }
+
+    void secondaryRefusesThePrimaryAndBitmapTracks()
+    {
+        // Only text codecs can take the second slot, and only a track other than the primary
+        using Kinefin::textSubtitleCodec;
+        for (const char *codec : {"subrip", "ass", "ssa", "webvtt", "mov_text", "text"})
+            QVERIFY2(textSubtitleCodec(QString::fromLatin1(codec)), codec);
+        for (const char *codec : {"hdmv_pgs_subtitle", "dvd_subtitle", "eia_608", ""})
+            QVERIFY2(!textSubtitleCodec(QString::fromLatin1(codec)), codec);
+        Chain chain;
+        QVERIFY(chain.ok);
+        QVERIFY(playsTwoSubtitles(chain));
+        const int primary = selectedSubtitleId(chain);
+        QVERIFY(primary > 0);
+        chain.controller.selectSecondarySubtitleTrack(primary);
+        QTest::qWait(100);
+        QCOMPARE(secondarySubtitleId(chain), 0);
+    }
+
+    void choosingTheSecondaryAsPrimaryClearsIt()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        QVERIFY(playsTwoSubtitles(chain));
+        const int primary = selectedSubtitleId(chain);
+        const int other = otherSubtitleId(chain, primary);
+        chain.controller.selectSecondarySubtitleTrack(other);
+        QTRY_COMPARE(secondarySubtitleId(chain), other);
+        // mpv refuses one track in both slots: the second one goes first
+        chain.controller.selectSubtitleTrack(other);
+        QTRY_COMPARE(selectedSubtitleId(chain), other);
+        QTRY_COMPARE(secondarySubtitleId(chain), 0);
+    }
+
+    void subtitleDelayMovesBoth()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        QVERIFY(playsTwoSubtitles(chain));
+        chain.controller.adjustSubtitleDelay(0.5);
+        QCOMPARE(chain.engine()->mpvProperty(QStringLiteral("sub-delay")).toDouble(), 0.5);
+        QCOMPARE(chain.engine()->mpvProperty(QStringLiteral("secondary-sub-delay")).toDouble(),
+                 0.5);
+    }
+
+    void secondaryRememberedPerItemAndPerSeries()
+    {
+        using Kinefin::rememberedTracks;
+        // Two text subtitles and one bitmap, which can never take the second slot
+        const QList<TrackFact> subtitles{{3, QStringLiteral("eng"), false, true},
+                                         {4, QStringLiteral("ita"), false, true},
+                                         {5, QStringLiteral("eng"), false, false}};
+        Kinefin::SeriesChoice series;
+        series.subtitle = TrackChoice{QStringLiteral("eng"), false, 0};
+        series.subtitle2 = TrackChoice{QStringLiteral("ita"), false, 0};
+        // The series' choices, when the item has none
+        auto tracks = rememberedTracks({}, series, {}, subtitles, false, true);
+        QCOMPARE(tracks.subtitle, 3);
+        QCOMPARE(tracks.secondary, 4);
+        // The item's own ids win
+        const QJsonObject item{{QStringLiteral("subtitle"), 3}, {QStringLiteral("subtitle2"), 4}};
+        tracks = rememberedTracks(item, series, {}, subtitles, false, true);
+        QCOMPARE(tracks.subtitle, 3);
+        QCOMPARE(tracks.secondary, 4);
+        // A stored second one that is the primary or a bitmap track falls back to the series
+        for (int stored : {3, 5}) {
+            const QJsonObject wrong{{QStringLiteral("subtitle"), 3},
+                                    {QStringLiteral("subtitle2"), stored}};
+            QCOMPARE(rememberedTracks(wrong, series, {}, subtitles, false, true).secondary, 4);
+            // Without a series' choice the slot stays off
+            QCOMPARE(rememberedTracks(wrong, {}, {}, subtitles, false, true).secondary, 0);
+        }
+        // The series' choice never takes the primary's track
+        Kinefin::SeriesChoice same;
+        same.subtitle = TrackChoice{QStringLiteral("eng"), false, 0};
+        same.subtitle2 = TrackChoice{QStringLiteral("eng"), false, 0};
+        QCOMPARE(rememberedTracks({}, same, {}, subtitles, false, true).secondary, 0);
+    }
+
+    void rememberSubtitlesOffSkipsTheSecondary()
+    {
+        using Kinefin::rememberedTracks;
+        const QList<TrackFact> subtitles{{3, QStringLiteral("eng"), false, true},
+                                         {4, QStringLiteral("ita"), false, true}};
+        Kinefin::SeriesChoice series;
+        series.subtitle2 = TrackChoice{QStringLiteral("ita"), false, 0};
+        const QJsonObject item{{QStringLiteral("subtitle"), 3}, {QStringLiteral("subtitle2"), 4}};
+        const auto tracks = rememberedTracks(item, series, {}, subtitles, false, false);
+        QCOMPARE(tracks.subtitle, 0);
+        QCOMPARE(tracks.secondary, 0);
+    }
+
+    void secondaryDownloadsAServerSubtitle()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        QVERIFY(directClipWithSubtitles(chain, {kExternalIndex, kExternalIndex + 1}));
+        QVERIFY(chain.controller.downloadSubtitle(kExternalIndex));
+        QTRY_VERIFY(hasSelectedSubtitle(chain));
+        const int primary = selectedSubtitleId(chain);
+        QVERIFY(primary > 0);
+        QVERIFY(chain.controller.downloadSecondarySubtitle(kExternalIndex + 1));
+        QTRY_VERIFY(secondarySubtitleId(chain) > 0);
+        const int secondary = secondarySubtitleId(chain);
+        QVERIFY(secondary != primary);
+        QVERIFY(subtitleIsText(chain, secondary));
+        QCOMPARE(chain.server.subtitleDownloadRequests, 2);
+    }
+
+    void secondaryFollowsAReopen()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        QVERIFY(startsStarving(chain, true));
+        QVERIFY(chain.controller.downloadSecondarySubtitle(kExternalIndex + 1));
+        QTRY_VERIFY(secondarySubtitleId(chain) > 0);
+        QSignalSpy lowered(&chain.controller, &PlayerController::qualityLowered);
+        Kinefin::PlaybackSource lower = lowerSource(chain, 9'000'000);
+        lower.externalSubtitles = {externalSubtitle(chain),
+                                   externalSubtitle(chain, kExternalIndex + 1)};
+        Q_EMIT chain.client.playbackInfoReady(lower);
+        QTRY_COMPARE(lowered.size(), 1);
+        // The new stream delivers neither file: the primary is loaded again and the second follows it
+        QTRY_VERIFY(selectedSubtitleId(chain) > 0);
+        QTRY_VERIFY(secondarySubtitleId(chain) > 0);
+        QVERIFY(selectedSubtitleId(chain) != secondarySubtitleId(chain));
+        QVERIFY(chain.server.subtitleDownloadRequests >= 4);
+    }
+
+    void secondaryDownloadFailureLeavesTheSlotOff()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        QVERIFY(directClipWithSubtitles(chain, {kExternalIndex, kExternalIndex + 1}));
+        chain.server.subtitleDownloadStatus = 500;
+        QVERIFY(chain.controller.downloadSecondarySubtitle(kExternalIndex + 1));
+        QTRY_COMPARE(chain.controller.errorText(),
+                     QStringLiteral("The secondary subtitles could not be downloaded"));
+        QCOMPARE(secondarySubtitleId(chain), 0);
+    }
+
+    void reportsCarryOnlyThePrimary()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        QVERIFY(directClipWithSubtitles(chain, {kExternalIndex, kExternalIndex + 1}));
+        QVERIFY(chain.controller.downloadSubtitle(kExternalIndex));
+        QTRY_VERIFY(hasSelectedSubtitle(chain));
+        QVERIFY(chain.controller.downloadSecondarySubtitle(kExternalIndex + 1));
+        QTRY_VERIFY(secondarySubtitleId(chain) > 0);
+        chain.server.reportLog.clear();
+        chain.controller.seek(5 * kSecond);
+        // Every report names the primary's server index, never the second one
+        const auto progress = [&chain] {
+            return std::any_of(chain.server.reportLog.cbegin(), chain.server.reportLog.cend(),
+                               [](const auto &report) {
+                                   return report.route.endsWith("/Sessions/Playing/Progress");
+                               });
+        };
+        QTRY_VERIFY(progress());
+        for (const auto &report : std::as_const(chain.server.reportLog)) {
+            if (!report.route.endsWith("/Sessions/Playing/Progress"))
+                continue;
+            const QJsonObject body = QJsonDocument::fromJson(report.body).object();
+            const int index = body.value(QStringLiteral("SubtitleStreamIndex")).toInt(-2);
+            QVERIFY(index == kExternalIndex || index == -1);
+        }
+    }
+
+    void clipMarksFollowTheItem()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        const QString clip = QUrl(TestWav::writeWavClip(chain.dir, 30)).toLocalFile();
+        QVERIFY(!clip.isEmpty());
+        QVERIFY(chain.engine()->init({QStringLiteral("vo=null"), QStringLiteral("ao=null")}));
+        QVERIFY(chain.controller.playLocalFile(clip, kMovie, QStringLiteral("Local Movie"), {}));
+        QTRY_VERIFY(chain.controller.canSeek());
+        QCOMPARE(chain.controller.clipStartTicks(), -1);
+        QCOMPARE(chain.controller.clipEndTicks(), -1);
+        QCOMPARE(chain.controller.clipLine(), QStringLiteral("Set a start and an end"));
+        chain.playsAt(2.0, 30);
+        chain.controller.markClipStart();
+        QCOMPARE(chain.controller.clipStartTicks(), qint64(20'000'000));
+        chain.playsAt(8.0, 30);
+        chain.controller.markClipEnd();
+        QCOMPARE(chain.controller.clipEndTicks(), qint64(80'000'000));
+        QVERIFY(chain.controller.clipLine().contains(QStringLiteral("(6 s)")));
+        QVERIFY(chain.controller.clipVideoEnabled());
+        QVERIFY(chain.controller.clipGifEnabled());
+        QVERIFY(chain.controller.suggestedClipName(true).endsWith(QStringLiteral(".gif")));
+        QVERIFY(chain.controller.suggestedClipName(false).endsWith(QStringLiteral(".webm"))
+                || chain.controller.suggestedClipName(false).endsWith(QStringLiteral(".mp4")));
+        // Another item starts with no marks
+        QVERIFY(chain.controller.playItem(kOtherMovie, 0));
+        QCOMPARE(chain.controller.clipStartTicks(), -1);
+        QCOMPARE(chain.controller.clipEndTicks(), -1);
+        chain.controller.clearClip();
+    }
+
+    void clipLengthLimits()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        const QString clip = QUrl(TestWav::writeWavClip(chain.dir, 90)).toLocalFile();
+        QVERIFY(!clip.isEmpty());
+        QVERIFY(chain.engine()->init({QStringLiteral("vo=null"), QStringLiteral("ao=null")}));
+        QVERIFY(chain.controller.playLocalFile(clip, kMovie, QStringLiteral("Local Movie"), {}));
+        QTRY_VERIFY(chain.controller.canSeek());
+        chain.playsAt(0.0, 90);
+        chain.controller.markClipStart();
+        chain.playsAt(20.0, 90);
+        chain.controller.markClipEnd();
+        // Twenty seconds is a video clip but not a GIF
+        QVERIFY(chain.controller.clipVideoEnabled());
+        QVERIFY(!chain.controller.clipGifEnabled());
+        QCOMPARE(chain.controller.clipLine(), QStringLiteral("00:00 to 00:20 (20 s)"));
+        chain.playsAt(70.0, 90);
+        chain.controller.markClipEnd();
+        QVERIFY(!chain.controller.clipVideoEnabled());
+        QVERIFY(!chain.controller.clipGifEnabled());
+        QCOMPARE(chain.controller.clipLine(),
+                 QStringLiteral("A video clip lasts at most 60 seconds"));
+        chain.controller.clearClip();
+        QCOMPARE(chain.controller.clipLine(), QStringLiteral("Set a start and an end"));
+    }
+
+    void clipRefusesATranscode()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        QVERIFY(chain.engine()->init({QStringLiteral("vo=null"), QStringLiteral("ao=null")}));
+        QVERIFY(chain.controller.playItem(kMovie, 0));
+        Kinefin::PlaybackSource source;
+        source.itemId = kMovie;
+        source.mediaSourceId = QStringLiteral("c1b2a3d4e5f6071829304a5b6c7d8e9f");
+        source.playSessionId = QStringLiteral("s1");
+        source.method = Kinefin::PlaybackSource::Method::Transcode;
+        source.url = QUrl(TestWav::writeWavClip(chain.dir, 30));
+        QVERIFY(!source.url.isEmpty());
+        Q_EMIT chain.client.playbackInfoReady(source);
+        QTRY_VERIFY(chain.controller.canSeek());
+        chain.playsAt(1.0, 30);
+        chain.controller.markClipStart();
+        chain.playsAt(5.0, 30);
+        chain.controller.markClipEnd();
+        QCOMPARE(chain.controller.clipLine(),
+                 QStringLiteral("Clips cannot be saved while the server transcodes"));
+        QVERIFY(!chain.controller.clipVideoEnabled());
+        QVERIFY(!chain.controller.clipGifEnabled());
+    }
+
+    void clipRefusesHdrVideo()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        QVERIFY(chain.engine()->init({QStringLiteral("vo=null"), QStringLiteral("ao=null")}));
+        QVERIFY(chain.controller.playItem(kMovie, 0));
+        Kinefin::PlaybackSource source;
+        source.itemId = kMovie;
+        source.mediaSourceId = QStringLiteral("c1b2a3d4e5f6071829304a5b6c7d8e9f");
+        source.playSessionId = QStringLiteral("s1");
+        source.method = Kinefin::PlaybackSource::Method::Direct;
+        source.url = QUrl(TestWav::writeWavClip(chain.dir, 30));
+        Kinefin::StreamSummary video;
+        video.type = QStringLiteral("Video");
+        video.videoRange = QStringLiteral("HDR");
+        video.videoRangeType = QStringLiteral("HDR10");
+        source.media.source.streams.append(video);
+        QVERIFY(!source.url.isEmpty());
+        Q_EMIT chain.client.playbackInfoReady(source);
+        QTRY_VERIFY(chain.controller.canSeek());
+        chain.playsAt(1.0, 30);
+        chain.controller.markClipStart();
+        chain.playsAt(5.0, 30);
+        chain.controller.markClipEnd();
+        QCOMPARE(chain.controller.clipLine(),
+                 QStringLiteral("Clips cannot be saved from HDR video"));
+        QVERIFY(!chain.controller.clipVideoEnabled());
+    }
+
   private:
     static constexpr qint64 kSourceBitrate = 18'300'000;
     inline static const QString kSourceId = QStringLiteral("c1b2a3d4e5f6071829304a5b6c7d8e9f");
@@ -1678,15 +1986,15 @@ class TestPlayerController : public QObject {
                                                              on);
     }
     static constexpr int kExternalIndex = 3;
-    static Kinefin::ExternalSubtitle externalSubtitle(Chain &chain)
+    static Kinefin::ExternalSubtitle externalSubtitle(Chain &chain, int index = kExternalIndex)
     {
         Kinefin::ExternalSubtitle subtitle;
-        subtitle.index = kExternalIndex;
+        subtitle.index = index;
         subtitle.format = QStringLiteral("srt");
         subtitle.url =
             chain.server.url(QStringLiteral("/jellyfin/Videos/%1/%2/Subtitles/%3/0/Stream.srt")
                                  .arg(kMovie, kSourceId)
-                                 .arg(kExternalIndex));
+                                 .arg(index));
         return subtitle;
     }
     static bool hasSelectedSubtitle(Chain &chain)
@@ -1695,6 +2003,101 @@ class TestPlayerController : public QObject {
         return std::any_of(tracks.cbegin(), tracks.cend(), [](const QVariant &track) {
             return track.toMap().value(QStringLiteral("selected")).toBool();
         });
+    }
+    static int subtitleIdWith(Chain &chain, const QString &flag)
+    {
+        for (const QVariant &value : chain.controller.subtitleTracks()) {
+            const QVariantMap track = value.toMap();
+            if (track.value(flag).toBool())
+                return track.value(QStringLiteral("id")).toInt();
+        }
+        return 0;
+    }
+    static int selectedSubtitleId(Chain &chain)
+    {
+        return subtitleIdWith(chain, QStringLiteral("selected"));
+    }
+    static int secondarySubtitleId(Chain &chain)
+    {
+        return subtitleIdWith(chain, QStringLiteral("secondary"));
+    }
+    static int otherSubtitleId(Chain &chain, int primary)
+    {
+        const QVariantList tracks = chain.controller.subtitleTracks();
+        for (const QVariant &value : tracks) {
+            const int id = value.toMap().value(QStringLiteral("id")).toInt();
+            if (id != primary)
+                return id;
+        }
+        return 0;
+    }
+    static bool subtitleIsText(Chain &chain, int id)
+    {
+        for (const QVariant &value : chain.controller.subtitleTracks()) {
+            const QVariantMap track = value.toMap();
+            if (track.value(QStringLiteral("id")).toInt() == id)
+                return track.value(QStringLiteral("text")).toBool();
+        }
+        return false;
+    }
+    // A ten-second local clip with two subtitle files; mpv picks the first as the primary
+    static bool playsTwoSubtitles(Chain &chain)
+    {
+        const QString clip = QUrl(TestWav::writeWavClip(chain.dir, 10)).toLocalFile();
+        if (clip.isEmpty() || !QDir(chain.dir.path()).mkpath(QStringLiteral("subs")))
+            return false;
+        const auto write = [](const QString &path) {
+            QFile file(path);
+            return file.open(QIODevice::WriteOnly)
+                   && file.write("1\n00:00:00,000 --> 00:00:05,000\nHello\n") > 0;
+        };
+        const QString english = chain.dir.filePath(QStringLiteral("subs/1.srt"));
+        const QString italian = chain.dir.filePath(QStringLiteral("subs/2.srt"));
+        if (!write(english) || !write(italian))
+            return false;
+        const auto subtitle = [](const QString &path, const QString &title) {
+            return QVariantMap{{QStringLiteral("path"), path},
+                               {QStringLiteral("title"), title},
+                               {QStringLiteral("language"), QStringLiteral("eng")}};
+        };
+        const QVariantMap extras{{QStringLiteral("subtitles"),
+                                  QVariantList{subtitle(english, QStringLiteral("English")),
+                                               subtitle(italian, QStringLiteral("Italian"))}}};
+        if (!chain.engine()->init({QStringLiteral("vo=null"), QStringLiteral("ao=null")})
+            || !chain.controller.playLocalFile(clip, kMovie, QStringLiteral("Local Movie"), {}, 0,
+                                               extras)
+            || !QTest::qWaitFor([&chain] { return chain.controller.subtitleTracks().size() == 2; },
+                                10000))
+            return false;
+        // `auto` may leave both unselected: the first track becomes the primary
+        if (selectedSubtitleId(chain) == 0) {
+            const int first = chain.controller.subtitleTracks()
+                                  .first()
+                                  .toMap()
+                                  .value(QStringLiteral("id"))
+                                  .toInt();
+            chain.controller.selectSubtitleTrack(first);
+        }
+        return QTest::qWaitFor([&chain] { return selectedSubtitleId(chain) > 0; }, 10000);
+    }
+    // A direct play of a ten-second clip, the server offering `indexes` as external subtitles
+    static bool directClipWithSubtitles(Chain &chain, const QList<int> &indexes)
+    {
+        if (!chain.engine()->init({QStringLiteral("vo=null"), QStringLiteral("ao=null")})
+            || !chain.controller.playItem(kMovie, 0))
+            return false;
+        Kinefin::PlaybackSource source;
+        source.itemId = kMovie;
+        source.mediaSourceId = kSourceId;
+        source.playSessionId = QStringLiteral("s1");
+        source.method = Kinefin::PlaybackSource::Method::Direct;
+        source.url = QUrl(TestWav::writeWavClip(chain.dir, 10));
+        for (int index : indexes)
+            source.externalSubtitles.append(externalSubtitle(chain, index));
+        if (source.url.isEmpty())
+            return false;
+        Q_EMIT chain.client.playbackInfoReady(source);
+        return QTest::qWaitFor([&chain] { return chain.controller.canSeek(); }, 10000);
     }
     // The movie plays a 30 s clip as an 18.3 Mbit/s direct play with short fallback timings, the server holds its PlaybackInfo answers, and the cache stalls; `withSubtitle` loads the server's external subtitle first
     static bool startsStarving(Chain &chain, bool withSubtitle = false)
@@ -1712,7 +2115,8 @@ class TestPlayerController : public QObject {
         source.url = QUrl(TestWav::writeWavClip(chain.dir, 30));
         source.media.source.bitrate = kSourceBitrate;
         if (withSubtitle)
-            source.externalSubtitles = {externalSubtitle(chain)};
+            source.externalSubtitles = {externalSubtitle(chain),
+                                        externalSubtitle(chain, kExternalIndex + 1)};
         if (source.url.isEmpty())
             return false;
         Q_EMIT chain.client.playbackInfoReady(source);

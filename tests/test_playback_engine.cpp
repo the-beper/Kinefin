@@ -82,6 +82,24 @@ QVariantList headerEntries(PlaybackEngine &engine)
     return engine.controller()->getProperty(QStringLiteral("http-header-fields")).toList();
 }
 
+// The labels of the audio filter chain, in the order the filters run
+QStringList audioFilterLabels(PlaybackEngine &engine)
+{
+    QStringList labels;
+    const QVariantList filters = engine.mpvProperty(QStringLiteral("af")).toList();
+    for (const QVariant &filter : filters)
+        labels << filter.toMap().value(QStringLiteral("label")).toString();
+    return labels;
+}
+
+// mpv reports a list option as a comma-joined string; a QVariantList is accepted too
+QString propertyText(const QVariant &value)
+{
+    if (value.typeId() == QMetaType::QStringList)
+        return value.toStringList().join(QLatin1Char(','));
+    return value.toString();
+}
+
 // A tiny moving picture mpv reads natively (YUV4MPEG2, 4:2:0, 64x36 at 10 fps), for the video track cases the WAV clip cannot give
 QString writeY4mClip(const QTemporaryDir &dir, int seconds)
 {
@@ -422,6 +440,109 @@ class TestPlaybackEngine : public QObject {
         customMpv.apply();
         QVERIFY(!verify());
         QCOMPARE(bundle(), QStringLiteral("/x.pem"));
+    }
+
+    void nightModeAddsTheFilterBeforeTheAc3Encoder()
+    {
+        JellyfinClient client;
+        PlaybackSession session;
+        PlaybackEngine engine(client, session);
+        QVERIFY(engine.init({QStringLiteral("vo=null"), QStringLiteral("ao=null")}));
+        ClientSettings settings(settingsFile(dir, QStringLiteral("night-chain.conf"),
+                                             "[audio]\ndevicetype=spdif\npassthrough.ac3=true\n"
+                                             "night_mode=true\n"));
+        PlayerSettings mpv(settings, engine);
+        mpv.apply();
+        // A filter cannot act on a bitstream: night mode decodes even with S/PDIF AC-3 chosen, and the re-encoder runs after the night filter
+        QCOMPARE(audioFilterLabels(engine),
+                 QStringList({QStringLiteral("night"), QStringLiteral("ac3")}));
+        QVERIFY(propertyText(engine.mpvProperty(QStringLiteral("audio-spdif"))).isEmpty());
+        QVERIFY(mpv.passthroughConfigured());
+    }
+
+    void nightModeEmptiesAudioSpdifAndRestoresIt()
+    {
+        JellyfinClient client;
+        PlaybackSession session;
+        PlaybackEngine engine(client, session);
+        QVERIFY(engine.init({QStringLiteral("vo=null"), QStringLiteral("ao=null")}));
+        ClientSettings settings(settingsFile(dir, QStringLiteral("night-toggle.conf"),
+                                             "[audio]\ndevicetype=spdif\npassthrough.ac3=true\n"));
+        PlayerSettings mpv(settings, engine);
+        mpv.apply();
+        QCOMPARE(audioFilterLabels(engine), QStringList({QStringLiteral("ac3")}));
+        QCOMPARE(propertyText(engine.mpvProperty(QStringLiteral("audio-spdif"))),
+                 QStringLiteral("ac3"));
+        // The toggle writes the setting; only the audio chain is rebuilt
+        QVERIFY(settings.setValue(QStringLiteral("audio"), QStringLiteral("night_mode"), true));
+        QCOMPARE(audioFilterLabels(engine),
+                 QStringList({QStringLiteral("night"), QStringLiteral("ac3")}));
+        QVERIFY(propertyText(engine.mpvProperty(QStringLiteral("audio-spdif"))).isEmpty());
+        QVERIFY(settings.setValue(QStringLiteral("audio"), QStringLiteral("night_mode"), false));
+        QCOMPARE(audioFilterLabels(engine), QStringList({QStringLiteral("ac3")}));
+        QCOMPARE(propertyText(engine.mpvProperty(QStringLiteral("audio-spdif"))),
+                 QStringLiteral("ac3"));
+    }
+
+    void nightModeToggleKeepsTheSpeed()
+    {
+        JellyfinClient client;
+        PlaybackSession session;
+        PlaybackEngine engine(client, session);
+        QVERIFY(engine.init({QStringLiteral("vo=null"), QStringLiteral("ao=null")}));
+        ClientSettings settings(dir.filePath(QStringLiteral("night-speed.conf")));
+        PlayerSettings mpv(settings, engine);
+        mpv.apply();
+        engine.setMpvProperty(QStringLiteral("speed"), 1.5);
+        QVERIFY(settings.setValue(QStringLiteral("audio"), QStringLiteral("night_mode"), true));
+        // A full apply would reset the speed to the setting
+        QCOMPARE(engine.mpvProperty(QStringLiteral("speed")).toDouble(), 1.5);
+        QVERIFY(audioFilterLabels(engine).contains(QStringLiteral("night")));
+        QVERIFY(settings.setValue(QStringLiteral("audio"), QStringLiteral("night_mode"), false));
+        QCOMPARE(engine.mpvProperty(QStringLiteral("speed")).toDouble(), 1.5);
+        QVERIFY(!audioFilterLabels(engine).contains(QStringLiteral("night")));
+    }
+
+    void secondarySubtitleStylingFollowsThePrimary()
+    {
+        JellyfinClient client;
+        PlaybackSession session;
+        PlaybackEngine engine(client, session);
+        QVERIFY(engine.init({QStringLiteral("vo=null"), QStringLiteral("ao=null")}));
+        ClientSettings settings(settingsFile(dir, QStringLiteral("subs.conf"),
+                                             "[subtitles]\nsize=42\nplacement=top\n"));
+        PlayerSettings mpv(settings, engine);
+        mpv.apply();
+        // The primary at the top: the second subtitle takes the bottom, and one delay moves both
+        QCOMPARE(engine.mpvProperty(QStringLiteral("sub-pos")).toDouble(), 10.0);
+        QCOMPARE(engine.mpvProperty(QStringLiteral("secondary-sub-pos")).toDouble(), 100.0);
+        mpv.setSubtitleOffset(0.5);
+        QCOMPARE(engine.mpvProperty(QStringLiteral("sub-delay")).toDouble(), 0.5);
+        QCOMPARE(engine.mpvProperty(QStringLiteral("secondary-sub-delay")).toDouble(), 0.5);
+        // `secondary-sub-scale` is set too; mpv 0.41 does not know it, and `sub-scale` sizes both there
+        // The primary back at the bottom puts the second subtitle at the top
+        QVERIFY(settings.setValue(QStringLiteral("subtitles"), QStringLiteral("placement"),
+                                  QStringLiteral("bottom")));
+        QCOMPARE(engine.mpvProperty(QStringLiteral("secondary-sub-pos")).toDouble(), 0.0);
+    }
+
+    void mpvConfAfAndAudioSpdifLinesWin()
+    {
+        JellyfinClient client;
+        PlaybackSession session;
+        PlaybackEngine engine(client, session);
+        QVERIFY(engine.init({QStringLiteral("vo=null"), QStringLiteral("ao=null")}));
+        ClientSettings settings(
+            settingsFile(dir, QStringLiteral("night-mpvconf.conf"),
+                         "[audio]\ndevicetype=hdmi\npassthrough.ac3=true\nnight_mode=true\n"
+                         "[other]\nother_conf=af=scaletempo\\naudio-spdif=ac3\n"));
+        PlayerSettings mpv(settings, engine);
+        mpv.apply();
+        // The user's mpv.conf is applied last and wins, as for every managed setting: an `af=` line replaces the chain, so the night filter is silently gone while the setting stays on
+        QCOMPARE(propertyText(engine.mpvProperty(QStringLiteral("audio-spdif"))),
+                 QStringLiteral("ac3"));
+        QVERIFY(!audioFilterLabels(engine).contains(QStringLiteral("night")));
+        QVERIFY(settings.value(QStringLiteral("audio"), QStringLiteral("night_mode")).toBool());
     }
 
     void aspectChoiceAppliesAtOnceAndSurvivesEveryApply()

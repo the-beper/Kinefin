@@ -2905,6 +2905,10 @@ bool JellyfinClient::isAuthenticated() const
 {
     return m_state == State::Authenticated;
 }
+bool JellyfinClient::isPlainHttpRemote() const
+{
+    return m_base.scheme() == QLatin1String("http") && !isLoopback(m_base);
+}
 QUrl JellyfinClient::serverUrl() const
 {
     return m_base;

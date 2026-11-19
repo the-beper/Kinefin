@@ -763,6 +763,13 @@ Kirigami.ApplicationWindow {
         function onQualityUnavailable() {
             window.showPassiveNotification(i18n("No lower quality available. Playback continues at the current quality"));
         }
+        // A clip or GIF saved while the user is anywhere in the app
+        function onClipSaved(fileName, gif) {
+            window.showPassiveNotification(gif ? i18n("GIF saved: %1", fileName) : i18n("Clip saved: %1", fileName));
+        }
+        function onClipSaveFailed(noSpace) {
+            window.showPassiveNotification(noSpace ? i18n("The clip could not be saved: not enough free disk space") : i18n("The clip could not be saved"));
+        }
     }
 
     // A manual download starts at once on an unmetered or unknown network, and asks first when the network may charge for it
@@ -813,6 +820,14 @@ Kirigami.ApplicationWindow {
             return true;
         if (!showPlayerPage()) { window.player.stop(); return false; }
         return true;
+    }
+
+    // A KRunner Play: signed out the item opens after sign-in; a play the player refuses opens its details page
+    function playRequestedItem(itemId, resumeTicks) {
+        if (playItem(itemId, resumeTicks || 0))
+            return;
+        requestedItemId = itemId;
+        openRequestedItem(pageStack.get(0));
     }
 
     function playQueue(index, startTicks) {

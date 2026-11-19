@@ -55,6 +55,8 @@ Loader {
                                       : i18n("Accepts invalid server certificates. Unsafe on networks you do not trust");
                 case "kodiSidecars":
                     return i18n("Writes a .nfo and a poster next to each exported file");
+                case "night_mode":
+                    return i18n("Quiet dialogue louder and loud scenes quieter. Audio passthrough is off while it is on");
                 case "exportOnCompletion":
                     return i18n("Disabled until a persistent folder is granted on this system");
                 }

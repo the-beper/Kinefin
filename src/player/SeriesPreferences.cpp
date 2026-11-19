@@ -75,6 +75,8 @@ QJsonObject cleanEntry(const QJsonObject &entry)
         clean.insert(QStringLiteral("subtitle"), QJsonObject{{QStringLiteral("off"), true}});
     else if (const auto track = readTrack(subtitle))
         clean.insert(QStringLiteral("subtitle"), trackObject(*track));
+    if (const auto track = readTrack(entry.value(QStringLiteral("subtitle2"))))
+        clean.insert(QStringLiteral("subtitle2"), trackObject(*track));
     if (const QJsonValue rate = entry.value(QStringLiteral("rate"));
         rate.isDouble() && validRate(rate.toDouble()))
         clean.insert(QStringLiteral("rate"), rate.toDouble());
@@ -264,6 +266,7 @@ SeriesChoice SeriesPreferences::choice(const QString &seriesId) const
     choice.subtitleOff = isSubtitleOff(subtitle);
     if (!choice.subtitleOff)
         choice.subtitle = readTrack(subtitle);
+    choice.subtitle2 = readTrack(entry.value(QStringLiteral("subtitle2")));
     if (const QJsonValue rate = entry.value(QStringLiteral("rate")); rate.isDouble())
         choice.rate = rate.toDouble();
     choice.aspect = entry.value(QStringLiteral("aspect")).toString();
@@ -310,6 +313,13 @@ void SeriesPreferences::setSubtitle(const QString &seriesId, bool off,
            off        ? QJsonValue(QJsonObject{{QStringLiteral("off"), true}})
            : subtitle ? QJsonValue(trackObject(*subtitle))
                       : QJsonValue(QJsonValue::Undefined));
+}
+
+void SeriesPreferences::setSecondarySubtitle(const QString &seriesId,
+                                             const std::optional<TrackChoice> &subtitle)
+{
+    update(seriesId, QStringLiteral("subtitle2"),
+           subtitle ? QJsonValue(trackObject(*subtitle)) : QJsonValue(QJsonValue::Undefined));
 }
 
 void SeriesPreferences::setRate(const QString &seriesId, std::optional<double> rate)

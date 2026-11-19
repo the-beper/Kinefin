@@ -1969,6 +1969,15 @@ class PlayerStub : public QObject {
     Q_PROPERTY(QString skipLabel MEMBER skipLabel NOTIFY changed)
     Q_PROPERTY(int sleepRemainingMinutes MEMBER sleepRemainingMinutes NOTIFY changed)
     Q_PROPERTY(QString aspectMode MEMBER aspectMode NOTIFY changed)
+    Q_PROPERTY(bool nightMode MEMBER nightMode NOTIFY changed)
+    Q_PROPERTY(QString clipLine MEMBER clipLine NOTIFY changed)
+    Q_PROPERTY(bool clipVideoEnabled MEMBER clipVideoEnabled NOTIFY changed)
+    Q_PROPERTY(bool clipGifEnabled MEMBER clipGifEnabled NOTIFY changed)
+    Q_PROPERTY(bool clipSaving MEMBER clipSaving NOTIFY changed)
+    Q_PROPERTY(bool clipSavingGif MEMBER clipSavingGif NOTIFY changed)
+    Q_PROPERTY(double clipProgress MEMBER clipProgress NOTIFY changed)
+    Q_PROPERTY(qint64 clipStartTicks MEMBER clipStartTicks NOTIFY changed)
+    Q_PROPERTY(qint64 clipEndTicks MEMBER clipEndTicks NOTIFY changed)
     Q_PROPERTY(QVariantList chapters MEMBER chapters NOTIFY chaptersChanged)
     Q_PROPERTY(int currentChapter MEMBER currentChapter NOTIFY changed)
     Q_PROPERTY(bool upNextShown MEMBER upNextShown NOTIFY changed)
@@ -2000,6 +2009,8 @@ class PlayerStub : public QObject {
     Q_INVOKABLE bool playItem(const QString &id, qint64)
     {
         record(QStringLiteral("playItem"), id);
+        if (playRefused)
+            return false;
         active = true;
         Q_EMIT changed();
         return true;
@@ -2064,6 +2075,43 @@ class PlayerStub : public QObject {
         aspectMode = mode;
         Q_EMIT changed();
     }
+    Q_INVOKABLE void setNightMode(bool enabled)
+    {
+        record(QStringLiteral("setNightMode"), enabled);
+        nightMode = enabled;
+        Q_EMIT changed();
+    }
+    Q_INVOKABLE void markClipStart()
+    {
+        record(QStringLiteral("markClipStart"));
+        clipStartTicks = positionTicks;
+        Q_EMIT changed();
+    }
+    Q_INVOKABLE void markClipEnd()
+    {
+        record(QStringLiteral("markClipEnd"));
+        clipEndTicks = positionTicks;
+        Q_EMIT changed();
+    }
+    Q_INVOKABLE void clearClip()
+    {
+        record(QStringLiteral("clearClip"));
+        clipStartTicks = -1;
+        clipEndTicks = -1;
+        Q_EMIT changed();
+    }
+    Q_INVOKABLE void cancelClip() { record(QStringLiteral("cancelClip")); }
+    Q_INVOKABLE void saveClip(bool gif, const QUrl &destination)
+    {
+        record(QStringLiteral("saveClip"), gif ? QStringLiteral("gif") : QStringLiteral("video"));
+        Q_UNUSED(destination);
+    }
+    Q_INVOKABLE QUrl suggestedClipUrl(bool gif) const
+    {
+        return QUrl::fromLocalFile(
+            QStringLiteral("/tmp/")
+            + (gif ? QStringLiteral("clip.gif") : QStringLiteral("clip.webm")));
+    }
     Q_INVOKABLE QVariantMap playbackInfo() const { return info; }
     Q_INVOKABLE int chapterAt(qint64 ticks) const
     {
@@ -2092,6 +2140,14 @@ class PlayerStub : public QObject {
     {
         record(QStringLiteral("selectSubtitleTrack"), id);
     }
+    Q_INVOKABLE void selectSecondarySubtitleTrack(int id)
+    {
+        record(QStringLiteral("selectSecondarySubtitleTrack"), id);
+    }
+    Q_INVOKABLE bool downloadSecondarySubtitle(int index)
+    {
+        return record(QStringLiteral("downloadSecondarySubtitle"), index);
+    }
     Q_INVOKABLE void adjustAudioDelay(double s) { record(QStringLiteral("adjustAudioDelay"), s); }
     Q_INVOKABLE void adjustSubtitleDelay(double s)
     {
@@ -2114,6 +2170,8 @@ class PlayerStub : public QObject {
     bool active = false;
     bool loading = false;
     bool paused = false;
+    // playItem() refuses, as it does for an item the server no longer offers
+    bool playRefused = false;
     // A toggle the player cannot honour, as before anything plays
     bool pauseChangesNothing = false;
     QString title = QStringLiteral("Abyss Station");
@@ -2142,6 +2200,15 @@ class PlayerStub : public QObject {
     QString skipLabel;
     int sleepRemainingMinutes = 0;
     QString aspectMode = QStringLiteral("normal");
+    bool nightMode = false;
+    QString clipLine;
+    bool clipVideoEnabled = false;
+    bool clipGifEnabled = false;
+    bool clipSaving = false;
+    bool clipSavingGif = false;
+    double clipProgress = 0;
+    qint64 clipStartTicks = -1;
+    qint64 clipEndTicks = -1;
     QVariantMap info;
     QVariantList chapters;
     int currentChapter = -1;
@@ -2160,6 +2227,9 @@ class PlayerStub : public QObject {
     void remoteSubtitleDownloaded(const QString &subtitleId);
     void remoteSubtitleDownloadFailed(const QString &subtitleId, int httpStatus);
     void qualityLowered(qint64 bitsPerSecond);
+    // The clip notifications of Main.qml; the stub never emits them, but the shell's Connections must match
+    void clipSaved(const QString &fileName, bool gif);
+    void clipSaveFailed(bool noSpace);
     void qualityUnavailable();
     void finished();
 
@@ -13730,6 +13800,235 @@ class TestUiPages : public QObject {
         QVERIFY(gWarnings.filter(QStringLiteral("evil.invalid")).isEmpty());
     }
 
+    void nightModeIsOneSwitchInBothAudioMenus()
+    {
+        PlayerStub stub;
+        stub.audioTracks = {QVariantMap{{QStringLiteral("id"), 1},
+                                        {QStringLiteral("name"), QStringLiteral("English")},
+                                        {QStringLiteral("selected"), true}}};
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(openPlayer(ui, stub));
+        QObject *barMenu = ui.popup(QStringLiteral("playerAudioMenu"));
+        QObject *contextMenu = ui.popup(QStringLiteral("playerContextAudioMenu"));
+        QVERIFY(barMenu && contextMenu);
+        // The bottom bar's menu: the tracks, then Night Mode after a separator
+        QVERIFY(QMetaObject::invokeMethod(barMenu, "open"));
+        QTRY_VERIFY(barMenu->property("opened").toBool());
+        QObject *entry = barMenu->findChild<QObject *>(QStringLiteral("playerNightMode"));
+        QVERIFY(entry);
+        QCOMPARE(entry->property("text").toString(), QStringLiteral("Night Mode"));
+        QVERIFY(entry->property("checkable").toBool());
+        QVERIFY(!entry->property("checked").toBool());
+        // The check follows the setting, from whichever side changes it
+        stub.nightMode = true;
+        Q_EMIT stub.changed();
+        QTRY_VERIFY(entry->property("checked").toBool());
+        stub.nightMode = false;
+        Q_EMIT stub.changed();
+        QTRY_VERIFY(!entry->property("checked").toBool());
+        // The entry writes the setting through the player with its checked state
+        entry->setProperty("checked", true);
+        QVERIFY(QMetaObject::invokeMethod(entry, "triggered"));
+        QVERIFY(stub.calls.contains(QStringLiteral("setNightMode true")));
+        QVERIFY(stub.nightMode);
+        entry->setProperty("checked", false);
+        QVERIFY(QMetaObject::invokeMethod(entry, "triggered"));
+        QVERIFY(stub.calls.contains(QStringLiteral("setNightMode false")));
+        QVERIFY(!stub.nightMode);
+        QVERIFY(Ui::closeMenu(barMenu));
+        // The context menu's Audio submenu carries the same entry under its own name
+        QObject *contextEntry =
+            contextMenu->findChild<QObject *>(QStringLiteral("playerContextNightMode"));
+        QVERIFY(contextEntry);
+        QCOMPARE(contextEntry->property("text").toString(), QStringLiteral("Night Mode"));
+        QVERIFY(contextEntry->property("checkable").toBool());
+    }
+
+    void secondarySubtitlesOfferTheTextTracksButThePrimary()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(openPlayer(ui, stub));
+        const QList<std::pair<QString, QString>> menus{
+            {QStringLiteral("playerSubtitlesMenu"), QStringLiteral("player")},
+            {QStringLiteral("playerContextSubtitlesMenu"), QStringLiteral("playerContext")}};
+        // Without a text track other than the primary the submenu is disabled
+        for (const auto &[menuName, prefix] : menus) {
+            QObject *menu = ui.popup(menuName);
+            QVERIFY2(menu, qPrintable(menuName));
+            QObject *submenu =
+                menu->findChild<QObject *>(prefix + QStringLiteral("SecondarySubtitlesMenu"));
+            QVERIFY2(submenu, qPrintable(prefix));
+            QVERIFY(!submenu->property("enabled").toBool());
+        }
+        stub.subtitleTracks = {QVariantMap{{QStringLiteral("id"), 1},
+                                           {QStringLiteral("name"), QStringLiteral("English")},
+                                           {QStringLiteral("selected"), true},
+                                           {QStringLiteral("secondary"), false},
+                                           {QStringLiteral("text"), true}},
+                               QVariantMap{{QStringLiteral("id"), 2},
+                                           {QStringLiteral("name"), QStringLiteral("Italian")},
+                                           {QStringLiteral("selected"), false},
+                                           {QStringLiteral("secondary"), false},
+                                           {QStringLiteral("text"), true}},
+                               QVariantMap{{QStringLiteral("id"), 3},
+                                           {QStringLiteral("name"), QStringLiteral("Bitmap")},
+                                           {QStringLiteral("selected"), false},
+                                           {QStringLiteral("secondary"), false},
+                                           {QStringLiteral("text"), false}}};
+        Q_EMIT stub.changed();
+        for (const auto &[menuName, prefix] : menus) {
+            QObject *menu = ui.popup(menuName);
+            QVERIFY(menu);
+            QObject *submenu =
+                menu->findChild<QObject *>(prefix + QStringLiteral("SecondarySubtitlesMenu"));
+            QVERIFY(submenu);
+            QTRY_VERIFY(submenu->property("enabled").toBool());
+        }
+        // The bar's menu opens the submenu: Off and the text track the primary does not use, in plain text (a bitmap track never takes the slot)
+        QObject *menu = ui.popup(QStringLiteral("playerSubtitlesMenu"));
+        QObject *submenu =
+            menu->findChild<QObject *>(QStringLiteral("playerSecondarySubtitlesMenu"));
+        QVERIFY(submenu);
+        QVERIFY(QMetaObject::invokeMethod(menu, "open"));
+        QTRY_VERIFY(menu->property("opened").toBool());
+        QQuickItem *entry = nullptr;
+        for (QQuickItem *item : ui.menuItems(QStringLiteral("playerSubtitlesMenu"))) {
+            if (item->property("subMenu").value<QObject *>() == submenu) {
+                entry = item;
+                break;
+            }
+        }
+        QVERIFY(entry);
+        QVERIFY(QMetaObject::invokeMethod(entry, "click"));
+        QTRY_VERIFY(submenu->property("opened").toBool());
+        QStringList names;
+        for (QQuickItem *item : ui.menuItems(QStringLiteral("playerSecondarySubtitlesMenu"))) {
+            if (!item->isVisible())
+                continue;
+            names << (item->objectName().isEmpty() ? item->property("plainText").toString()
+                                                   : item->property("text").toString());
+        }
+        QCOMPARE(names, (QStringList{QStringLiteral("Off"), QStringLiteral("Italian")}));
+        for (QQuickItem *item : ui.menuItems(QStringLiteral("playerSecondarySubtitlesMenu"))) {
+            if (item->isVisible()
+                && item->property("plainText").toString() == QLatin1String("Italian"))
+                QVERIFY(QMetaObject::invokeMethod(item, "triggered"));
+        }
+        QVERIFY(stub.calls.contains(QStringLiteral("selectSecondarySubtitleTrack 2")));
+        QVERIFY(Ui::closeMenu(menu));
+        QTest::qWait(100);
+    }
+
+    void clipMenuStatesTheRangeAndSaves()
+    {
+        PlayerStub stub;
+        stub.clipLine = QStringLiteral("00:10 to 00:20 (10 s)");
+        stub.clipVideoEnabled = true;
+        stub.clipGifEnabled = true;
+        stub.clipStartTicks = 100'000'000;
+        stub.clipEndTicks = 200'000'000;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(openPlayer(ui, stub));
+        QObject *more = ui.popup(QStringLiteral("playerMoreMenu"));
+        QObject *clip = ui.popup(QStringLiteral("playerClipMenu"));
+        QVERIFY(more && clip);
+        QVERIFY(QMetaObject::invokeMethod(more, "open"));
+        QTRY_VERIFY(more->property("opened").toBool());
+        QQuickItem *entry = nullptr;
+        for (QQuickItem *item : ui.menuItems(QStringLiteral("playerMoreMenu"))) {
+            if (item->property("subMenu").value<QObject *>() == clip) {
+                entry = item;
+                break;
+            }
+        }
+        QVERIFY(entry);
+        QVERIFY(QMetaObject::invokeMethod(entry, "click"));
+        QTRY_VERIFY(clip->property("opened").toBool());
+        QQuickItem *line = clip->findChild<QQuickItem *>(QStringLiteral("playerClipLine"));
+        QQuickItem *saveVideo =
+            clip->findChild<QQuickItem *>(QStringLiteral("playerClipSaveVideo"));
+        QQuickItem *saveGif = clip->findChild<QQuickItem *>(QStringLiteral("playerClipSaveGif"));
+        QQuickItem *clear = clip->findChild<QQuickItem *>(QStringLiteral("playerClipClear"));
+        QVERIFY(line && saveVideo && saveGif && clear);
+        // The range in words, both Save entries offered
+        QCOMPARE(line->property("text").toString(), QStringLiteral("00:10 to 00:20 (10 s)"));
+        QVERIFY(!line->isEnabled());
+        QVERIFY(saveVideo->isEnabled());
+        QVERIFY(saveGif->isEnabled());
+        QVERIFY(clear->isEnabled());
+        // A GIF too long leaves its entry disabled and the line states the video limit
+        stub.clipGifEnabled = false;
+        stub.clipLine = QStringLiteral("A video clip lasts at most 60 seconds");
+        Q_EMIT stub.changed();
+        QTRY_COMPARE(line->property("text").toString(),
+                     QStringLiteral("A video clip lasts at most 60 seconds"));
+        QVERIFY(!saveGif->isEnabled());
+        QVERIFY(saveVideo->isEnabled());
+        for (QQuickItem *item : ui.menuItems(QStringLiteral("playerClipMenu"))) {
+            if (item->objectName() == QLatin1String("playerClipStart"))
+                QVERIFY(QMetaObject::invokeMethod(item, "triggered"));
+        }
+        QVERIFY(stub.calls.contains(QStringLiteral("markClipStart")));
+        QVERIFY(Ui::closeMenu(more));
+        // The marked range shows on the timeline
+        QQuickItem *band = ui.item(QStringLiteral("playerClipBand"));
+        QVERIFY(band);
+        QTRY_VERIFY(band->isVisible());
+        // The export card shows the progress and Cancel stops it
+        stub.clipSaving = true;
+        stub.clipSavingGif = true;
+        stub.clipProgress = 0.5;
+        Q_EMIT stub.changed();
+        QQuickItem *card = ui.item(QStringLiteral("playerClipCard"));
+        QVERIFY(card);
+        QTRY_VERIFY(card->isVisible());
+        QQuickItem *label =
+            card->findChild<QQuickItem *>(QStringLiteral("playerClipProgressLabel"));
+        QVERIFY(label);
+        QCOMPARE(label->property("text").toString(), QStringLiteral("Saving the GIF: 50%"));
+        QQuickItem *cancel = card->findChild<QQuickItem *>(QStringLiteral("playerClipCancel"));
+        QVERIFY(cancel);
+        QTRY_VERIFY(QMetaObject::invokeMethod(cancel, "clicked"));
+        QVERIFY(stub.calls.contains(QStringLiteral("cancelClip")));
+    }
+
+    void playRequestedItemPlaysOrOpensTheDetails()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QObject *root = ui.engine.rootObjects().constFirst();
+        // Signed out the request waits for the sign-in, as a link does
+        QVERIFY(QMetaObject::invokeMethod(root, "playRequestedItem", Q_ARG(QVariant, kMovieId),
+                                          Q_ARG(QVariant, 0)));
+        QCOMPARE(root->property("requestedItemId").toString(), kMovieId);
+        root->setProperty("requestedItemId", QString());
+        QVERIFY(ui.signIn());
+        QVERIFY(openPlayer(ui, stub));
+        // Signed in, a KRunner Play starts the player
+        stub.calls.clear();
+        QVERIFY(QMetaObject::invokeMethod(root, "playRequestedItem", Q_ARG(QVariant, kMovieId),
+                                          Q_ARG(QVariant, 0)));
+        QVERIFY(stub.calls.contains(QStringLiteral("playItem ") + kMovieId));
+        // A play the player refuses opens the item's details page instead
+        stub.playRefused = true;
+        QVERIFY(QMetaObject::invokeMethod(root, "playRequestedItem", Q_ARG(QVariant, kMovieId),
+                                          Q_ARG(QVariant, 0)));
+        QTRY_VERIFY(ui.currentDetails()
+                    && ui.currentDetails()->objectName() == QStringLiteral("itemDetailsPage"));
+    }
+
     void playerOnlineSubtitleSearchIsPolicyGatedAndDownloads()
     {
         PlayerStub stub;
@@ -15185,6 +15484,7 @@ class TestUiPages : public QObject {
                                        QStringLiteral("Forget Series Choices"),
                                        QStringLiteral("Now Playing Queue"),
                                        QStringLiteral("Screenshot"),
+                                       QStringLiteral("Clip"),
                                        QStringLiteral("Playback Info"),
                                        QStringLiteral("Keep Controls Visible")}));
         // The track submenus list what the bars' menus list

@@ -4,6 +4,7 @@
 
 #include "api/DeviceProfile.h"
 #include "api/JellyfinClient.h"
+#include "downloads/ExportNames.h"
 #include "models/ItemSummary.h"
 #include "models/PlayQueue.h"
 #include "settings/ClientSettings.h"
@@ -26,6 +27,7 @@
 #include <QRegularExpression>
 #include <QSaveFile>
 #include <QStandardPaths>
+#include <QStorageInfo>
 #include <QUrl>
 
 #include <utility>
@@ -151,6 +153,15 @@ RememberedTracks rememberedTracks(const QJsonObject &item, const SeriesChoice &s
                    return track.id == id;
                });
     };
+    // Only a text subtitle other than the primary can take the second slot
+    const auto secondaryCandidates = [&subtitles](int primary) {
+        QList<TrackFact> candidates;
+        for (const TrackFact &track : subtitles) {
+            if (track.text && track.id != primary)
+                candidates.append(track);
+        }
+        return candidates;
+    };
     RememberedTracks result;
     if (rememberAudio) {
         // The item's own id, when this source has it; else the series' choice
@@ -170,8 +181,23 @@ RememberedTracks rememberedTracks(const QJsonObject &item, const SeriesChoice &s
             result.subtitleOff = true;
         else if (series.subtitle)
             result.subtitle = pickTrack(subtitles, *series.subtitle);
+        // The second subtitle: the item's own id first, then the series', never the primary nor a bitmap one
+        const QList<TrackFact> candidates = secondaryCandidates(result.subtitle);
+        const int storedSecond = item.value(QStringLiteral("subtitle2")).toInt();
+        if (listed(candidates, storedSecond))
+            result.secondary = storedSecond;
+        else if (series.subtitle2)
+            result.secondary = pickTrack(candidates, *series.subtitle2);
     }
     return result;
+}
+
+bool textSubtitleCodec(const QString &codec)
+{
+    static const QStringList text{QStringLiteral("subrip"),   QStringLiteral("ass"),
+                                  QStringLiteral("ssa"),      QStringLiteral("webvtt"),
+                                  QStringLiteral("mov_text"), QStringLiteral("text")};
+    return text.contains(codec);
 }
 
 std::optional<UpNextWindow> upNextWindow(qint64 durationTicks, const QVariantList &segments)
@@ -236,32 +262,50 @@ PlayerController::PlayerController(JellyfinClient &client, PlayQueue &queue,
             [this](const QUrl &url, const QByteArray &bytes) {
                 if (!active() || url != m_pendingSubtitle || !m_subtitleDir.isValid())
                     return;
+                const bool secondary = std::exchange(m_pendingSubtitleSecondary, false);
                 const QString extension = url.path().section(QLatin1Char('.'), -1).toLower();
                 const QString filename = m_subtitleDir.path() + QStringLiteral("/subtitle-")
                                          + QString::number(QDateTime::currentMSecsSinceEpoch())
+                                         + QLatin1Char('-') + QString::number(++m_subtitleFileSeq)
                                          + QLatin1Char('.') + extension;
                 QSaveFile file(filename);
                 if (file.open(QIODevice::WriteOnly) && file.write(bytes) == bytes.size()
                     && file.commit()) {
                     for (const ExternalSubtitle &subtitle : std::as_const(m_subtitleOptions)) {
-                        if (subtitle.url == url)
+                        if (subtitle.url == url) {
                             m_loadedSubtitles.insert(filename, subtitle.index);
+                            m_loadedSubtitleOrder.append(filename);
+                        }
                     }
-                    m_engine.mpvCommand(
-                        {QStringLiteral("sub-add"), filename, QStringLiteral("select")});
-                    m_subtitlesOff = false;
-                    // The report carries the new index once the tracks are read again
-                    QTimer::singleShot(250, this, [this] {
-                        refreshTracks();
-                        m_reporter.reportNow();
-                    });
+                    if (secondary) {
+                        // `auto` adds it without selecting it: the primary stays as it is
+                        m_engine.mpvCommand(
+                            {QStringLiteral("sub-add"), filename, QStringLiteral("auto")});
+                        m_pendingSecondaryFile = filename;
+                        QTimer::singleShot(250, this, &PlayerController::refreshTracks);
+                    } else {
+                        m_engine.mpvCommand(
+                            {QStringLiteral("sub-add"), filename, QStringLiteral("select")});
+                        m_subtitlesOff = false;
+                        // The report carries the new index once the tracks are read again
+                        QTimer::singleShot(250, this, [this] {
+                            refreshTracks();
+                            m_reporter.reportNow();
+                        });
+                        // A second subtitle the reopen could not ask for while this download was pending follows it
+                        if (m_secondaryStreamIndex && m_secondarySubtitleId == 0)
+                            QTimer::singleShot(500, this,
+                                               &PlayerController::restoreSecondarySubtitle);
+                    }
                 }
                 m_pendingSubtitle.clear();
             });
     connect(&client, &JellyfinClient::externalSubtitleFailed, this, [this](const QUrl &url) {
         if (url == m_pendingSubtitle) {
+            const bool secondary = std::exchange(m_pendingSubtitleSecondary, false);
             m_pendingSubtitle.clear();
-            m_errorText = i18n("Could not download the subtitle.");
+            m_errorText = secondary ? i18n("The secondary subtitles could not be downloaded")
+                                    : i18n("Could not download the subtitle.");
             Q_EMIT changed();
         }
     });
@@ -304,6 +348,12 @@ PlayerController::PlayerController(JellyfinClient &client, PlayQueue &queue,
                 m_pendingTileIndex = -1;
                 m_cachedTileIndex = index;
                 displayTileFrame(m_lastTile, *m_requestedFrame);
+            });
+    // The OSD's check and the Settings page's switch are one setting: each follows the other
+    connect(&m_settings, &ClientSettings::valueChanged, this,
+            [this](const QString &section, const QString &key) {
+                if (section == QLatin1String("audio") && key == QLatin1String("night_mode"))
+                    Q_EMIT changed();
             });
     connect(&m_queue, &PlayQueue::edited, this, &PlayerController::updatePlaylist);
     connect(&client, &JellyfinClient::mediaSegmentsReady, this,
@@ -377,6 +427,17 @@ PlayerController::PlayerController(JellyfinClient &client, PlayQueue &queue,
         m_fileLoaded = true;
         m_trackChosen = false;
         applySeriesPlayback();
+        // A transcode delivers the text subtitle that played as an external one: it is asked for before the restore, so a second subtitle can follow once it lands
+        const bool lowered = std::exchange(m_switchingStream, false);
+        if (lowered) {
+            if (const std::optional<int> subtitle = m_requestedStreams.subtitleStreamIndex;
+                subtitle && *subtitle >= 0
+                && std::any_of(m_subtitleOptions.cbegin(), m_subtitleOptions.cend(),
+                               [&subtitle](const ExternalSubtitle &entry) {
+                                   return entry.index == *subtitle;
+                               }))
+                downloadSubtitle(*subtitle);
+        }
         // A download's subtitle files join the tracks before the remembered choice is restored; `auto` leaves the choice to it
         if (m_localPlayback) {
             for (const LocalSubtitle &file : std::as_const(m_localSubtitles))
@@ -388,25 +449,21 @@ PlayerController::PlayerController(JellyfinClient &client, PlayQueue &queue,
         if (m_groupItem || m_session.state() == PlaybackSession::State::Paused)
             m_seekReport.start();
         // The stream that plays now, for the fallback: a lowered one completes its step here
-        const bool lowered = std::exchange(m_switchingStream, false);
         m_fallback.streamLoaded(currentStreamBitrate(), lowered);
-        if (lowered) {
-            // A transcode delivers the text subtitle that played as an external one: it is loaded again
-            if (const std::optional<int> subtitle = m_requestedStreams.subtitleStreamIndex;
-                subtitle && *subtitle >= 0
-                && std::any_of(m_subtitleOptions.cbegin(), m_subtitleOptions.cend(),
-                               [&subtitle](const ExternalSubtitle &entry) {
-                                   return entry.index == *subtitle;
-                               }))
-                downloadSubtitle(*subtitle);
+        if (lowered)
             Q_EMIT qualityLowered(m_requestedCap);
-        }
         // A paused file may have told its only position before this: a group's Ready must not wait for another
         Q_EMIT changed();
     });
     connect(&m_engine, &PlaybackEngine::videoParamsChanged, &m_mpvSettings,
             &PlayerSettings::applyLoadedAspect);
     connect(&m_engine, &PlaybackEngine::streamEnded, this, &PlayerController::onEnd);
+    connect(&m_clipExporter, &ClipExporter::progress, this, [this](double fraction) {
+        m_clipProgress = fraction;
+        Q_EMIT clipStateChanged();
+    });
+    connect(&m_clipExporter, &ClipExporter::finished, this, &PlayerController::onClipFinished);
+    connect(&m_clipExporter, &ClipExporter::failed, this, &PlayerController::onClipFailed);
     connect(&m_client, &JellyfinClient::remoteSubtitlesReady, this,
             [this](const QString &itemId, const QString &language, const QJsonArray &subtitles) {
                 if (!remoteSearchIsCurrent(itemId, language))
@@ -555,6 +612,10 @@ void PlayerController::videoRendererChanged(MpvAbstractItem *item)
 
 void PlayerController::onAccountLeaving()
 {
+    // A streamed source needs the token: nothing outlives the account
+    cancelClipExport();
+    m_clipStart = -1;
+    m_clipEnd = -1;
     // The end-file comes after the local flag is gone: the position is stored now
     reportLocalPosition(false);
     m_pendingLocal = {};
@@ -701,6 +762,13 @@ bool PlayerController::startItem(const QString &id, qint64 resumeTicks, bool gro
     m_cachedTileIndex = -1;
     m_pendingTileIndex = -1;
     clearPreview();
+    // Clips belong to the item that made them
+    if (!sameItem) {
+        cancelClipExport();
+        m_clipStart = -1;
+        m_clipEnd = -1;
+        m_localSourcePath.clear();
+    }
     m_audioTracks.clear();
     m_subtitleTracks.clear();
     m_audioFacts.clear();
@@ -709,6 +777,10 @@ bool PlayerController::startItem(const QString &id, qint64 resumeTicks, bool gro
     m_selectedSubtitleIndex.reset();
     m_selectedAudioId = 0;
     m_selectedSubtitleId = 0;
+    m_secondarySubtitleId = 0;
+    // A same-item reopen keeps the secondary it played and finds it again by its stream index
+    if (!sameItem)
+        m_secondaryStreamIndex.reset();
     Q_EMIT tracksChanged();
     // The title and the trickplay layout come from the item itself, asked alongside PlaybackInfo
     m_client.fetchPlaybackItem(id);
@@ -850,6 +922,11 @@ bool PlayerController::playLocalFile(const QString &path, const QString &itemId,
         persistQueueCursor();
     // A local file that replaces another one stores where that one stopped
     reportLocalPosition(false);
+    // Its clips are the file's own: the marks of the previous item do not carry over
+    cancelClipExport();
+    m_clipStart = -1;
+    m_clipEnd = -1;
+    m_localSourcePath = path;
     m_pendingLocal.path = path;
     m_pendingLocal.itemId = itemId;
     m_pendingLocal.title = title.left(512);
@@ -905,7 +982,10 @@ bool PlayerController::openLocal()
     m_subtitleOptions.clear();
     m_externalSubtitles.clear();
     m_pendingSubtitle.clear();
+    m_pendingSubtitleSecondary = false;
+    m_pendingSecondaryFile.clear();
     m_loadedSubtitles.clear();
+    m_loadedSubtitleOrder.clear();
     m_subtitlesOff = false;
     resetRemoteSubtitles();
     m_reopenPaused = false;
@@ -922,8 +1002,10 @@ bool PlayerController::openLocal()
     clearPreview();
     m_selectedAudioId = 0;
     m_selectedSubtitleId = 0;
+    m_secondarySubtitleId = 0;
     m_selectedAudioIndex.reset();
     m_selectedSubtitleIndex.reset();
+    m_secondaryStreamIndex.reset();
     m_itemId = request.itemId;
     m_title = request.title;
     m_subtitle = request.subtitle;
@@ -1205,6 +1287,7 @@ void PlayerController::onSource(const PlaybackSource &source)
     m_subtitleOptions = source.externalSubtitles;
     // A new file drops the subtitle files mpv had added to the old one
     m_loadedSubtitles.clear();
+    m_loadedSubtitleOrder.clear();
     m_externalSubtitles.clear();
     for (const ExternalSubtitle &entry : m_subtitleOptions)
         m_externalSubtitles.append(QVariantMap{
@@ -1601,6 +1684,12 @@ void PlayerController::clearCurrent()
 {
     m_localSubtitles.clear();
     m_subtitlesOff = false;
+    m_pendingSubtitleSecondary = false;
+    m_pendingSecondaryFile.clear();
+    cancelClipExport();
+    m_clipStart = -1;
+    m_clipEnd = -1;
+    m_localSourcePath.clear();
     dropFallback();
     m_fallback.reset();
     m_preparedSource.reset();
@@ -1627,6 +1716,12 @@ void PlayerController::clearCurrent()
     updateChapters();
     resetUpNext();
     m_fileLoaded = false;
+    m_selectedAudioId = 0;
+    m_selectedSubtitleId = 0;
+    m_secondarySubtitleId = 0;
+    m_selectedAudioIndex.reset();
+    m_selectedSubtitleIndex.reset();
+    m_secondaryStreamIndex.reset();
     m_groupItem = false;
     m_awaitingGroup = false;
     m_groupAdvance.stop();
@@ -1919,6 +2014,21 @@ void PlayerController::setAspectMode(const QString &mode)
     Q_EMIT changed();
 }
 
+bool PlayerController::nightMode() const
+{
+    return m_settings.value(QStringLiteral("audio"), QStringLiteral("night_mode")).toBool();
+}
+
+void PlayerController::setNightMode(bool enabled)
+{
+    // The settings observer rebuilds the chain; this only reports that decoding replaced passthrough
+    const bool decodes = enabled && m_mpvSettings.passthroughConfigured();
+    if (!m_settings.setValue(QStringLiteral("audio"), QStringLiteral("night_mode"), enabled))
+        return;
+    if (decodes)
+        Q_EMIT nightModePassthroughDisabled();
+}
+
 QVariantMap PlayerController::playbackInfo() const
 {
     QVariantMap info;
@@ -2001,6 +2111,7 @@ void PlayerController::refreshTracks()
     const bool direct = directPlay();
     // Subtitles turned off leave no selected track: the remembered choice is then none, not the last one
     m_selectedSubtitleId = 0;
+    m_secondarySubtitleId = 0;
     for (const QVariant &entry : tracks) {
         const QVariantMap map = entry.toMap();
         const QString type = map.value(QStringLiteral("type")).toString();
@@ -2015,7 +2126,13 @@ void PlayerController::refreshTracks()
             label = type == QLatin1String("audio") ? i18n("Audio track %1").arg(id)
                                                    : i18n("Subtitle %1").arg(id);
         const bool selected = map.value(QStringLiteral("selected")).toBool();
-        if (const std::optional<int> index = serverStreamIndex(map, direct); selected && index) {
+        // mpv's selection order within the type: 0 is `sid`, 1 `secondary-sid`
+        const bool secondary = type == QLatin1String("sub")
+                               && map.value(QStringLiteral("main-selection")).toInt() == 1;
+        const bool text = type == QLatin1String("sub")
+                          && textSubtitleCodec(map.value(QStringLiteral("codec")).toString());
+        if (const std::optional<int> index = serverStreamIndex(map, direct);
+            selected && index && !secondary) {
             if (type == QLatin1String("audio"))
                 m_selectedAudioIndex = index;
             else
@@ -2024,19 +2141,36 @@ void PlayerController::refreshTracks()
         if (selected) {
             if (type == QLatin1String("audio"))
                 m_selectedAudioId = id;
+            else if (secondary)
+                m_secondarySubtitleId = id;
             else
                 m_selectedSubtitleId = id;
         }
         const QVariantMap result{{QStringLiteral("id"), id},
                                  {QStringLiteral("name"), label},
-                                 {QStringLiteral("selected"), selected}};
+                                 {QStringLiteral("selected"), selected && !secondary},
+                                 {QStringLiteral("secondary"), secondary},
+                                 {QStringLiteral("text"), text}};
         (type == QLatin1String("audio") ? m_audioFacts : m_subtitleFacts)
             .append({id, trackLanguage(map.value(QStringLiteral("lang")).toString()),
-                     map.value(QStringLiteral("forced")).toBool()});
+                     map.value(QStringLiteral("forced")).toBool(), text});
         if (type == QLatin1String("audio"))
             audio.append(result);
         else
             subs.append(result);
+    }
+    // A file added for the second slot that mpv now lists becomes the secondary one, as the user asked
+    if (!m_pendingSecondaryFile.isEmpty()) {
+        for (const QVariant &entry : tracks) {
+            const QVariantMap map = entry.toMap();
+            if (map.value(QStringLiteral("type")).toString() == QLatin1String("sub")
+                && map.value(QStringLiteral("external-filename")).toString()
+                       == m_pendingSecondaryFile) {
+                m_pendingSecondaryFile.clear();
+                setSecondarySubtitle(map.value(QStringLiteral("id")).toInt());
+                break;
+            }
+        }
     }
     if (audio != m_audioTracks || subs != m_subtitleTracks) {
         m_audioTracks = audio;
@@ -2054,7 +2188,7 @@ void PlayerController::selectAudioTrack(int id)
         return;
     m_engine.setMpvProperty(QStringLiteral("aid"), id);
     m_trackChosen = true;
-    rememberTracks(id, m_selectedSubtitleId);
+    rememberTracks(id, m_selectedSubtitleId, m_secondarySubtitleId);
     if (const auto choice = choiceOf(m_audioFacts, id); choice && keepsSeriesTracks())
         seriesStore().setAudio(m_itemSeriesId, choice);
     // The report carries the new stream index (a remote controller shows it at once)
@@ -2066,6 +2200,9 @@ void PlayerController::selectSubtitleTrack(int id)
 {
     if (id < 0 || id > 1024 || !active())
         return;
+    // mpv refuses a track selected in both slots: the second one goes first
+    if (id != 0 && id == m_secondarySubtitleId)
+        selectSecondarySubtitleTrack(0);
     m_engine.setMpvProperty(QStringLiteral("sid"),
                             id == 0 ? QVariant(QStringLiteral("no")) : QVariant(id));
     m_selectedSubtitleId = id;
@@ -2073,7 +2210,7 @@ void PlayerController::selectSubtitleTrack(int id)
     m_trackChosen = true;
     m_selectedSubtitleIndex =
         id == 0 ? std::nullopt : streamIndexOfTrack(QStringLiteral("sub"), id);
-    rememberTracks(m_selectedAudioId, id);
+    rememberTracks(m_selectedAudioId, id, m_secondarySubtitleId);
     if (keepsSeriesTracks()) {
         const auto choice = choiceOf(m_subtitleFacts, id);
         if (id == 0 || choice)
@@ -2081,6 +2218,45 @@ void PlayerController::selectSubtitleTrack(int id)
     }
     QTimer::singleShot(0, this, &PlayerController::refreshTracks);
     m_reporter.reportNow();
+}
+QList<TrackFact> PlayerController::secondarySubtitleFacts() const
+{
+    QList<TrackFact> candidates;
+    for (const TrackFact &track : m_subtitleFacts) {
+        if (track.text && track.id != m_selectedSubtitleId)
+            candidates.append(track);
+    }
+    return candidates;
+}
+bool PlayerController::setSecondarySubtitle(int id)
+{
+    if (id < 0 || id > 1024 || !active())
+        return false;
+    if (id != 0) {
+        const QList<TrackFact> candidates = secondarySubtitleFacts();
+        if (!std::any_of(candidates.cbegin(), candidates.cend(),
+                         [id](const TrackFact &track) { return track.id == id; }))
+            return false;
+    }
+    m_engine.setMpvProperty(QStringLiteral("secondary-sid"),
+                            id == 0 ? QVariant(QStringLiteral("no")) : QVariant(id));
+    m_secondarySubtitleId = id;
+    m_secondaryStreamIndex = id == 0 ? std::nullopt : streamIndexOfTrack(QStringLiteral("sub"), id);
+    QTimer::singleShot(0, this, &PlayerController::refreshTracks);
+    return true;
+}
+void PlayerController::selectSecondarySubtitleTrack(int id)
+{
+    if (!setSecondarySubtitle(id))
+        return;
+    m_trackChosen = true;
+    rememberTracks(m_selectedAudioId, m_selectedSubtitleId, id);
+    if (keepsSeriesTracks()) {
+        const auto choice = id == 0 ? std::nullopt : choiceOf(secondarySubtitleFacts(), id);
+        // Off removes the series' choice; a track the series cannot describe leaves the store as it was
+        if (id == 0 || choice)
+            seriesStore().setSecondarySubtitle(m_itemSeriesId, choice);
+    }
 }
 bool PlayerController::directPlay() const
 {
@@ -2212,6 +2388,230 @@ void PlayerController::screenshot()
     Q_EMIT changed();
 }
 
+qint64 PlayerController::clipLengthTicks() const
+{
+    return m_clipStart >= 0 && m_clipEnd > m_clipStart ? m_clipEnd - m_clipStart : 0;
+}
+
+QString PlayerController::clipCommonReason() const
+{
+    const bool local = m_localPlayback && !m_localSourcePath.isEmpty();
+    if (!local && !directPlay())
+        return i18n("Clips cannot be saved while the server transcodes");
+    if (!local) {
+        const StreamSummary *video = pickStream(m_source.media.source, u"Video");
+        if (video
+            && (video->videoRange == QLatin1String("HDR")
+                || video->videoRangeType.startsWith(QLatin1String("HDR"))
+                || video->videoRangeType.startsWith(QLatin1String("DOVI"))))
+            return i18n("Clips cannot be saved from HDR video");
+    }
+    return {};
+}
+
+bool PlayerController::clipReady(bool gif, QString *reason) const
+{
+    const auto refuse = [reason](const QString &text) {
+        if (reason)
+            *reason = text;
+        return false;
+    };
+    if (clipLengthTicks() < TicksPerSecond)
+        return refuse(i18n("Set a start and an end"));
+    const QString common = clipCommonReason();
+    if (!common.isEmpty())
+        return refuse(common);
+    if (clipLengthTicks() > (gif ? 15 : 60) * TicksPerSecond)
+        return refuse(gif ? i18n("A GIF lasts at most 15 seconds")
+                          : i18n("A video clip lasts at most 60 seconds"));
+    const bool encoder = gif ? ClipExporter::hasEncoder(QStringLiteral("gif"))
+                             : (ClipExporter::hasEncoder(QStringLiteral("libx264"))
+                                || (ClipExporter::hasEncoder(QStringLiteral("libvpx-vp9"))
+                                    && ClipExporter::hasEncoder(QStringLiteral("libopus"))));
+    if (!encoder)
+        return refuse(i18n("No usable video encoder"));
+    return true;
+}
+
+QString PlayerController::clipLine() const
+{
+    if (!active())
+        return {};
+    if (clipLengthTicks() < TicksPerSecond)
+        return i18n("Set a start and an end");
+    const QString common = clipCommonReason();
+    if (!common.isEmpty())
+        return common;
+    if (clipLengthTicks() > 60 * TicksPerSecond)
+        return i18n("A video clip lasts at most 60 seconds");
+    return i18n("%1 to %2 (%3 s)", timeText(m_clipStart), timeText(m_clipEnd),
+                clipLengthTicks() / TicksPerSecond);
+}
+
+void PlayerController::markClipStart()
+{
+    if (!active())
+        return;
+    m_clipStart = positionTicks();
+    Q_EMIT changed();
+}
+
+void PlayerController::markClipEnd()
+{
+    if (!active())
+        return;
+    m_clipEnd = positionTicks();
+    Q_EMIT changed();
+}
+
+void PlayerController::clearClip()
+{
+    if (m_clipStart < 0 && m_clipEnd < 0)
+        return;
+    m_clipStart = -1;
+    m_clipEnd = -1;
+    Q_EMIT changed();
+}
+
+QString PlayerController::suggestedClipName(bool gif) const
+{
+    const QString title = m_title.isEmpty() ? m_subtitle : m_title;
+    const QString stem = ExportNames::component(title, QStringLiteral("Kinefin"));
+    const qint64 start = m_clipStart >= 0 ? m_clipStart : positionTicks();
+    const qint64 seconds = start / TicksPerSecond;
+    const QString time = QStringLiteral("%1-%2-%3")
+                             .arg(seconds / 3600, 2, 10, QLatin1Char('0'))
+                             .arg(seconds / 60 % 60, 2, 10, QLatin1Char('0'))
+                             .arg(seconds % 60, 2, 10, QLatin1Char('0'));
+    const QString extension = gif ? QStringLiteral(".gif")
+                              : ClipExporter::hasEncoder(QStringLiteral("libx264"))
+                                  ? QStringLiteral(".mp4")
+                                  : QStringLiteral(".webm");
+    return stem + QLatin1Char(' ') + time + extension;
+}
+
+QUrl PlayerController::suggestedClipUrl(bool gif) const
+{
+    QString folder = QStandardPaths::writableLocation(QStandardPaths::MoviesLocation);
+    if (folder.isEmpty())
+        folder = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    if (folder.isEmpty())
+        folder = QDir::homePath();
+    return QUrl::fromLocalFile(folder + QLatin1Char('/') + suggestedClipName(gif));
+}
+
+bool PlayerController::saveClip(bool gif, const QUrl &destination)
+{
+    if (m_clipExporter.running() || !destination.isLocalFile() || m_profileDataDir.isEmpty()
+        || !clipReady(gif, nullptr))
+        return false;
+    const QString target = destination.toLocalFile();
+    const QFileInfo targetInfo(target);
+    if (!targetInfo.isAbsolute() || targetInfo.isDir())
+        return false;
+    const QString directory = m_profileDataDir + QStringLiteral("/clips");
+    if (!ensurePrivateDirectory(directory))
+        return false;
+    const double seconds = double(clipLengthTicks()) / TicksPerSecond;
+    const double rate = gif ? 2.0 * 1024 * 1024 : (8.0 + 0.16) * 1000 * 1000 / 8.0;
+    const QStorageInfo storage(directory);
+    if (storage.isValid() && storage.bytesAvailable() < qint64(2.0 * rate * seconds)) {
+        QFile::remove(target);
+        Q_EMIT clipSaveFailed(true);
+        return false;
+    }
+    ClipRequest request;
+    request.format = gif ? ClipRequest::Format::Gif : ClipRequest::Format::Video;
+    const bool local = m_localPlayback && !m_localSourcePath.isEmpty();
+    request.source = local ? QUrl::fromLocalFile(m_localSourcePath) : m_source.url;
+    if (!local)
+        request.authorization = m_client.streamAuthorization();
+    request.startTicks = m_clipStart;
+    request.endTicks = m_clipEnd;
+    request.audioId = m_selectedAudioId;
+    request.subtitleId = m_selectedSubtitleId;
+    request.secondarySubtitleId = m_secondarySubtitleId;
+    if (local) {
+        for (const LocalSubtitle &file : std::as_const(m_localSubtitles))
+            request.subtitleFiles.append(file.path);
+    }
+    // The server's external subtitle files mpv added come after the download's own
+    request.subtitleFiles.append(m_loadedSubtitleOrder);
+    request.subtitleStyle = m_mpvSettings.subtitleProperties();
+    request.tlsVerify = m_mpvSettings.tlsVerify();
+    request.tlsCaFile = m_mpvSettings.tlsCaFile();
+    const QString extension = gif ? QStringLiteral(".gif")
+                              : ClipExporter::hasEncoder(QStringLiteral("libx264"))
+                                  ? QStringLiteral(".mp4")
+                                  : QStringLiteral(".webm");
+    const QString staging =
+        directory + QStringLiteral("/clip-")
+        + QDateTime::currentDateTimeUtc().toString(QStringLiteral("yyyyMMdd-HHmmss-zzz"))
+        + QLatin1Char('-') + QString::number(++m_clipSeq) + extension;
+    m_clipDestination = destination;
+    m_clipProgress = 0;
+    m_clipGif = gif;
+    // A refused start has already reported itself and removed the granted file
+    if (!m_clipExporter.start(request, staging))
+        return false;
+    Q_EMIT clipStateChanged();
+    return true;
+}
+
+void PlayerController::cancelClip()
+{
+    cancelClipExport();
+}
+
+void PlayerController::cancelClipExport()
+{
+    const bool wasRunning = m_clipExporter.running();
+    m_clipExporter.cancel();
+    if (m_clipDestination.isLocalFile())
+        QFile::remove(m_clipDestination.toLocalFile());
+    m_clipDestination.clear();
+    m_clipProgress = 0;
+    m_clipGif = false;
+    if (wasRunning)
+        Q_EMIT clipStateChanged();
+}
+
+void PlayerController::onClipFinished(const QString &stagingPath)
+{
+    const QString target =
+        m_clipDestination.isLocalFile() ? m_clipDestination.toLocalFile() : QString();
+    m_clipDestination.clear();
+    bool ok = false;
+    if (!target.isEmpty()) {
+        if (QFileInfo::exists(target))
+            QFile::remove(target);
+        ok = QFile::copy(stagingPath, target);
+    }
+    QFile::remove(stagingPath);
+    m_clipProgress = 0;
+    const bool gif = m_clipGif;
+    m_clipGif = false;
+    Q_EMIT clipStateChanged();
+    if (!ok) {
+        if (!target.isEmpty())
+            QFile::remove(target);
+        Q_EMIT clipSaveFailed(false);
+        return;
+    }
+    Q_EMIT clipSaved(QFileInfo(target).fileName(), gif);
+}
+
+void PlayerController::onClipFailed(ClipExporter::Error error)
+{
+    if (m_clipDestination.isLocalFile())
+        QFile::remove(m_clipDestination.toLocalFile());
+    m_clipDestination.clear();
+    m_clipProgress = 0;
+    m_clipGif = false;
+    Q_EMIT clipStateChanged();
+    Q_EMIT clipSaveFailed(error == ClipExporter::Error::NoSpace);
+}
+
 void PlayerController::refreshSegments()
 {
     m_segments.clear();
@@ -2296,14 +2696,17 @@ void PlayerController::saveMemory()
         return;
     writePrivateFile(m_memoryFile, bytes);
 }
-void PlayerController::rememberTracks(int audioId, int subtitleId)
+void PlayerController::rememberTracks(int audioId, int subtitleId, int secondaryId)
 {
     // Offline there is no signed-in owner to key the memory by
     if (m_itemId.isEmpty() || m_memoryFile.isEmpty() || m_client.serverId().isEmpty()
         || m_client.userId().isEmpty())
         return;
-    m_memory.insert(memoryKey(), QJsonObject{{QStringLiteral("audio"), audioId},
-                                             {QStringLiteral("subtitle"), subtitleId}});
+    QJsonObject entry{{QStringLiteral("audio"), audioId}, {QStringLiteral("subtitle"), subtitleId}};
+    // Absent for none: a track's mpv id means nothing once the file is replaced
+    if (secondaryId > 0)
+        entry.insert(QStringLiteral("subtitle2"), secondaryId);
+    m_memory.insert(memoryKey(), entry);
     saveMemory();
 }
 void PlayerController::restoreTracks()
@@ -2319,6 +2722,35 @@ void PlayerController::restoreTracks()
         m_engine.setMpvProperty(QStringLiteral("sid"), QStringLiteral("no"));
     else if (tracks.subtitle > 0)
         m_engine.setMpvProperty(QStringLiteral("sid"), tracks.subtitle);
+    // A same-item reopen knows the server's stream itself; otherwise the item's or the series' choice
+    if (m_rememberSubtitles) {
+        if (m_secondaryStreamIndex)
+            restoreSecondarySubtitle();
+        else if (tracks.secondary > 0)
+            setSecondarySubtitle(tracks.secondary);
+    }
+}
+
+void PlayerController::restoreSecondarySubtitle()
+{
+    if (!m_secondaryStreamIndex)
+        return;
+    if (const int id = trackOfStreamIndex(QStringLiteral("sub"), *m_secondaryStreamIndex); id > 0) {
+        // The new file lists the same embedded track: it takes the second slot again
+        if (setSecondarySubtitle(id))
+            return;
+    }
+    // A server's external subtitle: the new stream offers it, so the file is downloaded again and selected once listed
+    const bool offered = std::any_of(
+        m_subtitleOptions.cbegin(), m_subtitleOptions.cend(),
+        [this](const ExternalSubtitle &entry) { return entry.index == *m_secondaryStreamIndex; });
+    if (offered) {
+        // One download at a time: while the primary's is pending, its completion asks for this one
+        if (downloadSubtitle(*m_secondaryStreamIndex, true) || !m_pendingSubtitle.isEmpty())
+            return;
+    }
+    qCInfo(playerLog) << "the reopened stream has no second subtitle";
+    m_secondaryStreamIndex.reset();
 }
 
 SeriesPreferences &PlayerController::seriesStore()
@@ -2380,6 +2812,16 @@ void PlayerController::pruneMemory(const QString &owner)
 
 bool PlayerController::downloadSubtitle(int index)
 {
+    return downloadSubtitle(index, false);
+}
+
+bool PlayerController::downloadSecondarySubtitle(int index)
+{
+    return downloadSubtitle(index, true);
+}
+
+bool PlayerController::downloadSubtitle(int index, bool secondary)
+{
     if (!active() || !m_subtitleDir.isValid() || !m_pendingSubtitle.isEmpty())
         return false;
     for (const ExternalSubtitle &subtitle : m_subtitleOptions) {
@@ -2387,6 +2829,9 @@ bool PlayerController::downloadSubtitle(int index)
             continue;
         if (m_client.downloadExternalSubtitle(subtitle.url)) {
             m_pendingSubtitle = subtitle.url;
+            m_pendingSubtitleSecondary = secondary;
+            if (secondary)
+                m_secondaryStreamIndex = index;
             return true;
         }
         return false;

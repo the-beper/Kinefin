@@ -52,7 +52,9 @@ Kirigami.Dialog {
         ["Down", i18nc("@item:intable shortcut action", "Skip Back 1 Minute")],
         ["Up", i18nc("@item:intable shortcut action", "Skip Forward 1 Minute")],
         ["PgDown", i18nc("@item:intable shortcut action", "Previous Chapter")],
-        ["PgUp", i18nc("@item:intable shortcut action", "Next Chapter")]
+        ["PgUp", i18nc("@item:intable shortcut action", "Next Chapter")],
+        ["I", i18nc("@item:intable shortcut action", "Set the Clip Start")],
+        ["O", i18nc("@item:intable shortcut action", "Set the Clip End")]
     ]
 
     // The keys of a combination and the "+" between them; a "+" on its own or at the end ("Ctrl++") is a key

@@ -166,6 +166,8 @@ target_link_libraries(kinefin_core PUBLIC Qt6::Core Qt6::DBus Qt6::Network Qt6::
 add_library(kinefin_player STATIC
     src/player/BitrateFallback.cpp
     src/player/BitrateFallback.h
+    src/player/ClipExporter.cpp
+    src/player/ClipExporter.h
     src/player/PlaybackEngine.cpp
     src/player/PlaybackEngine.h
     src/player/GroupPlayback.h
@@ -189,6 +191,8 @@ endif()
 
 # The desktop around the app: MPRIS and the screensaver inhibition on the session bus, the remote-control socket
 add_library(kinefin_integration STATIC
+    src/integration/KRunnerProvider.cpp
+    src/integration/KRunnerProvider.h
     src/integration/Mpris.cpp
     src/integration/Mpris.h
     src/integration/MprisArtwork.cpp
@@ -377,6 +381,7 @@ add_custom_target(kinefin-translations ALL DEPENDS ${KINEFIN_MO_FILES})
 
 install(TARGETS kinefin ${KDE_INSTALL_TARGETS_DEFAULT_ARGS})
 install(FILES data/io.github.the_beper.Kinefin.desktop DESTINATION ${KDE_INSTALL_APPDIR})
+install(FILES data/krunner/io.github.the_beper.Kinefin.desktop DESTINATION ${KDE_INSTALL_DATADIR}/krunner/dbusplugins)
 install(DIRECTORY data/icons/hicolor DESTINATION ${KDE_INSTALL_ICONDIR})
 install(FILES data/io.github.the_beper.Kinefin.metainfo.xml DESTINATION ${KDE_INSTALL_METAINFODIR})
 
@@ -448,6 +453,15 @@ if(BUILD_TESTING)
     target_compile_definitions(test_mpris PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(test_mpris PRIVATE kinefin_integration kinefin_core Qt6::Test Qt6::Network Qt6::DBus)
     add_test(NAME mpris COMMAND dbus-run-session -- $<TARGET_FILE:test_mpris>)
+
+    add_executable(test_krunner tests/test_krunner.cpp)
+    target_compile_definitions(test_krunner PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    target_link_libraries(test_krunner PRIVATE kinefin_integration kinefin_core Qt6::Test Qt6::Network Qt6::DBus)
+    add_test(NAME krunner COMMAND dbus-run-session -- $<TARGET_FILE:test_krunner>)
+
+    add_executable(test_clip_exporter tests/test_clip_exporter.cpp)
+    target_link_libraries(test_clip_exporter PRIVATE kinefin_player Qt6::Test)
+    add_test(NAME clip_exporter COMMAND test_clip_exporter)
 
     add_executable(test_screensaver_inhibitor tests/test_screensaver_inhibitor.cpp)
     target_compile_definitions(test_screensaver_inhibitor PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")

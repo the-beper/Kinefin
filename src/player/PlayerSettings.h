@@ -6,6 +6,9 @@
 #include <QPointer>
 #include <QString>
 #include <QStringList>
+#include <QVariant>
+
+#include <utility>
 
 class QScreen;
 class QWindow;
@@ -36,6 +39,14 @@ class PlayerSettings final : public QObject {
     void applyLoadedAspect();
     // While held, `apply()` leaves the speed alone: a watching-together group plays at 1.0 whatever the settings say
     void setSpeedHeld(bool held) { m_speedHeld = held; }
+    // A passthrough codec is selected for the device type: night mode decodes it instead
+    [[nodiscard]] bool passthroughConfigured() const;
+    // The subtitle properties of the settings, in the order they are set: the clip exporter shows the same
+    // font, colours, size and placement as the player
+    [[nodiscard]] QList<std::pair<QString, QVariant>> subtitleProperties() const;
+    // The transport options of mpv for a second instance (the clip exporter): tls-verify and the detected bundle
+    [[nodiscard]] bool tlsVerify() const;
+    [[nodiscard]] QString tlsCaFile() const;
 
     // The CA bundle paths tried by `autodetectCertBundle`, in order
     static QStringList certBundleCandidates();
@@ -46,6 +57,10 @@ class PlayerSettings final : public QObject {
     // `tls-verify` follows `certificateErrorsIgnored` (mpv itself does not verify by default), `tls-ca-file` follows `autodetectCertBundle`; mpv.conf entries are applied after them
     void applyTls();
     void applyAudio();
+    // `audio-spdif` and the audio filter chain: the night filter before the AC-3 re-encoder. mpv.conf's `af` and `audio-spdif` lines are re-applied after it
+    void applyAudioChain();
+    // The passthrough codecs of the device type, in mpv's order
+    [[nodiscard]] QStringList passthroughCodecs() const;
     void applyVideo();
     // `reset` also clears the modifiers when the setting is `custom`, which otherwise leaves mpv alone
     void applyAspect(bool reset = false);

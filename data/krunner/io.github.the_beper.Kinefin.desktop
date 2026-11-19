@@ -1,0 +1,19 @@
+# SPDX-FileCopyrightText: 2026 Kinefin contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+[Desktop Entry]
+Type=Service
+Name=Kinefin
+Name[it]=Kinefin
+Comment=Find movies and TV series on your Jellyfin server while Kinefin is open; what you type is sent to that server
+Comment[it]=Trova film e serie TV sul tuo server Jellyfin mentre Kinefin è aperto; quello che digiti viene inviato a quel server
+Icon=io.github.the_beper.Kinefin
+X-KDE-PluginInfo-Name=io.github.the_beper.Kinefin
+X-KDE-PluginInfo-EnabledByDefault=false
+X-Plasma-API=DBus
+X-Plasma-DBusRunner-Service=io.github.the_beper.Kinefin.Runner*
+X-Plasma-DBusRunner-Path=/runner
+X-Plasma-Request-Actions-Once=true
+X-Plasma-Runner-Min-Letter-Count=3
+X-Plasma-Runner-Syntaxes=:q:
+X-Plasma-Runner-Syntax-Descriptions=Finds movies, series, episodes and collections on your Jellyfin server whose name matches :q:
+X-Plasma-Runner-Syntax-Descriptions[it]=Trova film, serie, episodi e raccolte sul tuo server Jellyfin il cui nome corrisponde a :q:

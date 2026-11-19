@@ -279,6 +279,8 @@ class JellyfinClient final : public QObject {
     bool restoreSession(const QString &userId, const QString &token);
     // Whether credentials may be sent to the probed server (HTTPS, loopback, or the explicit insecure-HTTP opt-in): what restoreSession() and authenticate() require of the transport
     bool canSendCredentials() const;
+    // A probed plain-HTTP server that is not loopback: KRunner sends no query there, since typed desktop text must not cross a network in the clear
+    bool isPlainHttpRemote() const;
     void disconnectFromServer();
     // Drops the session in memory without disconnecting: the server stays probed (Ready), only the token goes. What Switch User needs: the sign-in page of the same server is next
     void forgetSession();

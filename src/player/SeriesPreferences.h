@@ -25,6 +25,8 @@ struct SeriesChoice {
     // Subtitles turned off are a choice of their own
     bool subtitleOff = false;
     std::optional<TrackChoice> subtitle;
+    // A second subtitle shown with the primary (mpv's `secondary-sid`), a text track other than it
+    std::optional<TrackChoice> subtitle2;
     std::optional<double> rate;
     QString aspect;
 };
@@ -34,6 +36,8 @@ struct TrackFact {
     int id = 0;
     QString lang;
     bool forced = false;
+    // A text subtitle: a bitmap one can never take the second slot
+    bool text = false;
 };
 
 // mpv's language code as it is kept: lower case, `[a-z]{2,3}(-[a-z0-9]{1,8})?`, else (`und` included) empty
@@ -42,7 +46,7 @@ QString trackLanguage(const QString &code);
 // The mpv id of the track that answers a remembered choice: the language with the forced flag, then the language alone, then (no language stored) the same position; 0 when none fits. Languages compare through QLocale (`en` is `eng`)
 int pickTrack(const QList<TrackFact> &tracks, const TrackChoice &choice);
 
-// The choices of each server user, one file per owner, `<directory>/<serverId>_<userId>.json` (as the queue files): `{version 1, entries: {seriesId: {audio, subtitle, rate, aspect, seq}}}`, ids, language codes and numbers only. At most 500 series, fewer when their entries are large (the file stays within 64 KiB), the least recently chosen going first; a file over 64 KiB is deleted unread, a newer version is renamed `.broken`, a wrongly typed field is dropped alone and an entry with a bad id entirely. Writes wait 1 s and are flushed on an owner change and on destruction; without a directory the choices live in memory only
+// The choices of each server user, one file per owner, `<directory>/<serverId>_<userId>.json` (as the queue files): `{version 1, entries: {seriesId: {audio, subtitle, subtitle2, rate, aspect, seq}}}`, ids, language codes and numbers only. At most 500 series, fewer when their entries are large (the file stays within 64 KiB), the least recently chosen going first; a file over 64 KiB is deleted unread, a newer version is renamed `.broken`, a wrongly typed field is dropped alone and an entry with a bad id entirely. Writes wait 1 s and are flushed on an owner change and on destruction; without a directory the choices live in memory only
 class SeriesPreferences final : public QObject {
     Q_OBJECT
   public:
@@ -63,6 +67,7 @@ class SeriesPreferences final : public QObject {
     // Each replaces one field, an empty value removing it, and makes the series the most recent
     void setAudio(const QString &seriesId, const std::optional<TrackChoice> &audio);
     void setSubtitle(const QString &seriesId, bool off, const std::optional<TrackChoice> &subtitle);
+    void setSecondarySubtitle(const QString &seriesId, const std::optional<TrackChoice> &subtitle);
     void setRate(const QString &seriesId, std::optional<double> rate);
     void setAspect(const QString &seriesId, const QString &aspect);
     void forget(const QString &seriesId);

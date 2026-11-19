@@ -91,9 +91,60 @@ class TestSeriesPreferences : public QObject {
         const Kinefin::SeriesChoice choice = again.store.choice(kSeries);
         QCOMPARE(choice.audio, std::optional(TrackChoice{QStringLiteral("jpn"), false, 1}));
         QVERIFY(!choice.subtitleOff);
+        QVERIFY(!choice.subtitle2);
         QCOMPARE(choice.subtitle, std::optional(TrackChoice{QStringLiteral("en-us"), true, 0}));
         QCOMPARE(choice.rate, std::optional(1.25));
         QCOMPARE(choice.aspect, QStringLiteral("zoom"));
+    }
+
+    void subtitle2RoundTrip()
+    {
+        QTemporaryDir dir;
+        {
+            Store owner(dir);
+            owner.store.setSubtitle(kSeries, false, TrackChoice{QStringLiteral("eng"), true, 0});
+            owner.store.setSecondarySubtitle(kSeries, TrackChoice{QStringLiteral("ita"), false, 1});
+        }
+        const QJsonObject entry = readFile(ownerPath(dir))
+                                      .value(QStringLiteral("entries"))
+                                      .toObject()
+                                      .value(kSeries)
+                                      .toObject();
+        QCOMPARE(entry.value(QStringLiteral("subtitle2")),
+                 (QJsonObject{{QStringLiteral("lang"), QStringLiteral("ita")},
+                              {QStringLiteral("ordinal"), 1}}));
+        Store again(dir);
+        const Kinefin::SeriesChoice choice = again.store.choice(kSeries);
+        QCOMPARE(choice.subtitle2, std::optional(TrackChoice{QStringLiteral("ita"), false, 1}));
+        QVERIFY(choice.subtitle);
+        // Off removes only the second choice
+        again.store.setSecondarySubtitle(kSeries, std::nullopt);
+        QVERIFY(!again.store.choice(kSeries).subtitle2);
+        QVERIFY(again.store.choice(kSeries).subtitle);
+    }
+
+    void subtitle2DroppedWhenWronglyTyped()
+    {
+        QTemporaryDir dir;
+        const QJsonObject entries{
+            {kSeries, QJsonObject{{QStringLiteral("subtitle"),
+                                   QJsonObject{{QStringLiteral("lang"), QStringLiteral("eng")}}},
+                                  {QStringLiteral("subtitle2"), QStringLiteral("ita")}}},
+            {seriesId(1),
+             QJsonObject{{QStringLiteral("subtitle2"),
+                          QJsonObject{{QStringLiteral("lang"), QStringLiteral("<img src=x>")},
+                                      {QStringLiteral("ordinal"), 3}}}}}};
+        QVERIFY(writeFile(ownerPath(dir),
+                          QJsonDocument(QJsonObject{{QStringLiteral("version"), 1},
+                                                    {QStringLiteral("entries"), entries}})
+                              .toJson()));
+        Store owner(dir);
+        const Kinefin::SeriesChoice first = owner.store.choice(kSeries);
+        QVERIFY(first.subtitle);
+        QVERIFY(!first.subtitle2);
+        // A language that is no code goes; the position stays
+        QCOMPARE(owner.store.choice(seriesId(1)).subtitle2,
+                 std::optional(TrackChoice{QString(), false, 3}));
     }
 
     void anEmptyChoiceRemovesItsFieldAndTheLastOneTheFile()
