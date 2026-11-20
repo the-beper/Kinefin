@@ -400,6 +400,12 @@ class FakeJellyfin {
     QByteArray playedWriteRawBody;
     bool holdPlayedWrites = false;
     bool redirectPlayedWrites = false;
+    // POST /UserItems/{id}/UserData (the Undo of Mark as Watched): the route and the JSON body of each, answered with the user data it sets, or `playedWriteStatus`
+    struct UserDataWrite {
+        QByteArray route;
+        QJsonObject body;
+    };
+    QList<UserDataWrite> userDataWrites;
     int firstStoppedStatus = 0;
     int stoppedRequests = 0;
     bool holdReports = false;
@@ -1626,6 +1632,26 @@ class FakeJellyfin {
                                                   {QStringLiteral("Played"), isPlayed}})
                             .toJson(QJsonDocument::Compact));
             }
+            return;
+        }
+        if (method == "POST" && route.contains("/UserItems/")
+            && route.split('?').first().endsWith("/UserData")) {
+            const QJsonObject data = QJsonDocument::fromJson(body).object();
+            userDataWrites.append({route, data});
+            if (playedWriteStatus != 200 && playedWriteStatus != 204) {
+                respond(socket, playedWriteStatus, {});
+                return;
+            }
+            const QList<QByteArray> parts = route.split('?').first().split('/');
+            const QString id = QString::fromUtf8(parts.at(parts.size() - 2)).toLower();
+            respond(socket, 200,
+                    QJsonDocument(QJsonObject{{QStringLiteral("ItemId"), id},
+                                              {QStringLiteral("Played"),
+                                               data.value(QStringLiteral("Played"))},
+                                              {QStringLiteral("PlaybackPositionTicks"),
+                                               data.value(QStringLiteral("PlaybackPositionTicks"))},
+                                              {QStringLiteral("PlayedPercentage"), 25.0}})
+                        .toJson(QJsonDocument::Compact));
             return;
         }
         if (method == "POST"

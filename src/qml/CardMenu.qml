@@ -26,6 +26,9 @@ Controls.Menu {
 
     // The favorite state of the item the menu was opened for
     property bool favorite: false
+    // The watched state of the item the menu was opened for, and its saved position: the Undo of Mark as Watched puts it back
+    property bool played: false
+    property real positionTicks: 0
     // The kinds the details page can mark as favorite
     readonly property bool favoritable: ["Movie", "Series", "Season", "Episode", "BoxSet", "Video"].indexOf(itemType) >= 0
 
@@ -50,6 +53,7 @@ Controls.Menu {
     signal playOnRequested(string targetId, real ticks)
     signal resumeRequested(string targetId, real ticks)
     signal favoriteRequested(string targetId, bool favorite)
+    signal playedRequested(string targetId, bool played)
     signal downloadRequested(string targetId)
     signal cancelDownloadRequested(string targetId)
     signal removeDownloadRequested(string targetId)
@@ -158,7 +162,7 @@ Controls.Menu {
         onTriggered: menu.removeDownloadRequested(menu.itemId)
     }
     Controls.MenuSeparator {
-        visible: menu.favoritable || menu.downloadable
+        visible: menu.favoritable || menu.downloadable || menu.playable
         height: visible ? implicitHeight : 0
     }
     Controls.MenuItem {
@@ -168,6 +172,15 @@ Controls.Menu {
         visible: menu.favoritable
         height: visible ? implicitHeight : 0
         onTriggered: menu.favoriteRequested(menu.itemId, !menu.favorite)
+    }
+    // A video only, as on its details page: a series or season has the state of its episodes
+    Controls.MenuItem {
+        objectName: "cardMenuPlayed"
+        text: menu.played ? i18n("Mark as Unwatched") : i18n("Mark as Watched")
+        icon.name: menu.played ? "edit-undo" : "emblem-checked"
+        visible: menu.playable
+        height: visible ? implicitHeight : 0
+        onTriggered: menu.playedRequested(menu.itemId, !menu.played)
     }
     Controls.MenuSeparator {
         visible: menu.itemType === "Playlist"

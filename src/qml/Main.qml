@@ -1064,7 +1064,7 @@ Kirigami.ApplicationWindow {
 
     // The menu of a card (a right click, the Menu key or the button of the card): it opens at a point of the card, below it by default
     // `resumeTicks` is -1 for a card without a quick play, else its saved position (0: none)
-    function openCardMenu(card, itemId, type, seriesId, x, y, resumeTicks, favorite) {
+    function openCardMenu(card, itemId, type, seriesId, x, y, resumeTicks, favorite, played) {
         if (connection.state !== ConnectionController.Authenticated)
             return;
         cardMenu.itemId = itemId;
@@ -1072,6 +1072,8 @@ Kirigami.ApplicationWindow {
         cardMenu.seriesId = seriesId;
         cardMenu.resumeTicks = resumeTicks ?? -1;
         cardMenu.favorite = favorite ?? false;
+        cardMenu.played = played ?? false;
+        cardMenu.positionTicks = card.resumeTicks ?? 0;
         cardMenu.popup(card, x ?? 0, y ?? card.height);
     }
 
@@ -1141,6 +1143,7 @@ Kirigami.ApplicationWindow {
         onResumeRequested: (targetId, ticks) => window.playItem(targetId, ticks)
         // A refused send means a write for the item already runs: its answer updates the card
         onFavoriteRequested: (targetId, favorite) => window.connection.setFavorite(targetId, favorite)
+        onPlayedRequested: (targetId, played) => window.setItemPlayed(targetId, played, cardMenu.positionTicks)
         onDownloadRequested: targetId => window.askDownload(targetId)
         onCancelDownloadRequested: targetId => window.connection.downloads.removeCurrentDownload(targetId)
         onRemoveDownloadRequested: targetId => window.confirmRemoveDownload(targetId)
@@ -1785,12 +1788,48 @@ Kirigami.ApplicationWindow {
         }
     }
 
-    // A favorite write started from a card menu that the server refused
+    // A favorite or watched-state write started from a card that the server refused
     Connections {
         target: window.connection
         function onFavoriteUpdateFailed() {
             window.showPassiveNotification(i18n("Could not update Favorites. Check the connection and try again"));
         }
+        function onPlayedUpdateFailed(itemId) {
+            delete window.watchedUndo[itemId];
+            window.showPassiveNotification(i18n("Could not change the watched state. Check the connection and try again"));
+        }
+        // A Mark as Watched from a card took the item off Continue Watching: the notification offers it back, with its resume point
+        function onPlayedUpdated(itemId, played) {
+            if (!played || !(itemId in window.watchedUndo))
+                return;
+            const undo = window.watchedUndo[itemId];
+            delete window.watchedUndo[itemId];
+            window.showPassiveNotification(i18n("Marked as watched"), "long", i18nc("@action:button", "Undo"), () => {
+                // The notification can outlive the session it was for: another user's data is never touched
+                if (!window.signedIn || window.connection.currentUserId !== undo.userId)
+                    return;
+                if (!window.connection.undoPlayed(itemId, undo.positionTicks))
+                    window.showPassiveNotification(i18n("Could not change the watched state. Check the connection and try again"));
+            });
+        }
+    }
+
+    // The saved position of each item a card marked watched, until the server confirms the write
+    readonly property var watchedUndo: ({})
+
+    // Mark as Watched or Unwatched from a card: the card menu and Continue Watching's button; a write still on its way for the item refuses another
+    function setItemPlayed(itemId, played, positionTicks) {
+        if (!signedIn)
+            return;
+        if (!connection.setPlayed(itemId, played)) {
+            showPassiveNotification(i18n("Could not change the watched state: another change to this item is still being saved. Try again in a moment"));
+            return;
+        }
+        if (played)
+            watchedUndo[itemId] = {
+                positionTicks: positionTicks > 0 ? positionTicks : 0,
+                userId: connection.currentUserId
+            };
     }
 
     // What the queue did with an add, for the page that asked: the page itself shows nothing

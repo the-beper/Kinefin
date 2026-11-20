@@ -24,6 +24,26 @@ ItemRowModel::ItemRowModel(JellyfinClient *client, bool landscape, QObject *pare
                     Q_EMIT dataChanged(row, row, {FavoriteRole});
                 }
             });
+    connect(m_client, &JellyfinClient::itemPlayedUpdated, this,
+            [this](const QString &id, bool played) {
+                for (size_t i = 0; i < m_items.size(); ++i) {
+                    if (!sameItemId(m_items[i].id, id))
+                        continue;
+                    applyPlayed(m_items[i], played);
+                    const QModelIndex row = index(int(i));
+                    Q_EMIT dataChanged(row, row);
+                }
+            });
+    connect(m_client, &JellyfinClient::itemProgressUpdated, this,
+            [this](const QString &id, qint64 position, double percentage) {
+                for (size_t i = 0; i < m_items.size(); ++i) {
+                    if (!sameItemId(m_items[i].id, id))
+                        continue;
+                    applyProgress(m_items[i], position, percentage);
+                    const QModelIndex row = index(int(i));
+                    Q_EMIT dataChanged(row, row);
+                }
+            });
 }
 
 void ItemRowModel::setItems(const QJsonArray &items)

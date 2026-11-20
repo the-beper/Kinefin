@@ -2421,12 +2421,25 @@ class CastStub : public QObject {
     Q_PROPERTY(bool searching MEMBER searching NOTIFY changed)
     Q_PROPERTY(QString error MEMBER error NOTIFY changed)
   public:
-    Q_INVOKABLE void search() { ++searches; }
-    Q_INVOKABLE void stopSearch() { ++stops; }
+    // A search runs until the test ends it, as the real one does for its window
+    Q_INVOKABLE void search()
+    {
+        ++searches;
+        searching = searchStarts;
+        Q_EMIT changed();
+    }
+    Q_INVOKABLE void stopSearch()
+    {
+        ++stops;
+        searching = false;
+        Q_EMIT changed();
+    }
 
     CastTargetsStub model;
     QAbstractItemModel *targets = &model;
     bool searching = false;
+    // False: the search cannot start, as on a host without a usable interface
+    bool searchStarts = true;
     QString error;
     int searches = 0;
     int stops = 0;
@@ -9660,12 +9673,12 @@ class TestUiPages : public QObject {
         // This Computer stays above the devices while one plays: it is the way back
         QQuickItem *thisComputer = ui.item(QStringLiteral("castThisComputer"));
         QVERIFY(thisComputer && thisComputer->isVisible());
-        QVERIFY(sceneRect(thisComputer).bottom() <= sceneRect(list).top() + 1);
         QCOMPARE(thisComputer->property("text").toString(), QStringLiteral("This Computer"));
-        QVERIFY(!thisComputer->property("checked").toBool());
+        QVERIFY(!thisComputer->property("current").toBool());
         // The devices, their names as the markup characters they are
         QTRY_COMPARE(castDeviceRows(list).size(), 2);
         const QList<QQuickItem *> rows = castDeviceRows(list);
+        QVERIFY(sceneRect(thisComputer).bottom() <= sceneRect(rows.at(0)).top() + 1);
         QCOMPARE(rows.at(0)->property("text").toString(), QStringLiteral("<b>Living</b> room"));
         QCOMPARE(rows.at(1)->property("text").toString(), QStringLiteral("Bar & <u>Grill</u>"));
         int found = 0;
@@ -9674,13 +9687,14 @@ class TestUiPages : public QObject {
         found = 0;
         QVERIFY(ui.notPlainText(QStringLiteral("<i>Acme</i> TV"), &found).isEmpty());
         QVERIFY(found >= 1);
-        // The one that plays now is checked
-        QVERIFY(!rows.at(0)->property("checked").toBool());
-        QVERIFY(rows.at(1)->property("checked").toBool());
+        // The one that plays now is marked, and the keys start on it
+        QVERIFY(!rows.at(0)->property("current").toBool());
+        QVERIFY(rows.at(1)->property("current").toBool());
+        QCOMPARE(list->property("currentIndex").toInt(), 1);
         stub.castTargetId.clear();
         Q_EMIT stub.changed();
-        QTRY_VERIFY(thisComputer->property("checked").toBool());
-        QVERIFY(!rows.at(1)->property("checked").toBool());
+        QTRY_VERIFY(thisComputer->property("current").toBool());
+        QVERIFY(!rows.at(1)->property("current").toBool());
         // The error of the search shows in a box
         QQuickItem *error = ui.item(QStringLiteral("castError"));
         QVERIFY(error);
@@ -9694,6 +9708,130 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(!dialog->property("opened").toBool());
         QCOMPARE(stub.calls, QStringList{QStringLiteral("castTo uuid:tv")});
         QTRY_VERIFY(cast.stops >= 1);
+    }
+
+    void theCastDialogOpensOnTheSearchAndKeepsItsSize()
+    {
+        PlayerStub stub;
+        CastStub cast;
+        stub.cast = &cast;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QObject *root = ui.engine.rootObjects().constFirst();
+        QVERIFY(root->setProperty("player", QVariant::fromValue<QObject *>(&stub)));
+        // Before it opens the dialog is outside the window's items: its parts are found under it
+        QObject *dialog = ui.popup(QStringLiteral("castDialog"));
+        QVERIFY(dialog);
+        auto *searching = dialog->findChild<QQuickItem *>(QStringLiteral("castSearching"));
+        auto *noDevices = dialog->findChild<QQuickItem *>(QStringLiteral("castNoDevices"));
+        QVERIFY(searching && noDevices);
+        // The empty state never shows before a search ended, not even for a frame of the opening
+        int emptyShown = 0;
+        NotifyHook hook(noDevices, "visible", [&] {
+            if (noDevices->isVisible() && cast.searching)
+                ++emptyShown;
+        });
+        QVERIFY(QMetaObject::invokeMethod(root, "castCurrent"));
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QCOMPARE(cast.searches, 1);
+        QVERIFY(searching->isVisible());
+        QVERIFY(!noDevices->isVisible());
+        QCOMPARE(emptyShown, 0);
+        // The search shows in the room under This Computer, not over it
+        QQuickItem *thisComputer = ui.item(QStringLiteral("castThisComputer"));
+        QVERIFY(thisComputer);
+        QVERIFY(sceneRect(searching).top() >= sceneRect(thisComputer).bottom());
+        auto *content = dialog->property("contentItem").value<QQuickItem *>();
+        QVERIFY(content);
+        const QSizeF size(content->width(), content->height());
+        // The search ends with nothing: the same room shows the empty state, and the window keeps its size
+        cast.searching = false;
+        Q_EMIT cast.changed();
+        QTRY_VERIFY(noDevices->isVisible());
+        QVERIFY(!searching->isVisible());
+        QVERIFY(sceneRect(noDevices).top() >= sceneRect(thisComputer).bottom());
+        QCOMPARE(QSizeF(content->width(), content->height()), size);
+        // Search Again goes back to the search in place
+        QObject *again = nullptr;
+        QQmlListReference footer(dialog, "customFooterActions");
+        for (qsizetype i = 0; i < footer.count(); ++i) {
+            if (footer.at(i)->objectName() == QStringLiteral("castSearchAgain"))
+                again = footer.at(i);
+        }
+        QVERIFY(again);
+        QVERIFY(again->property("enabled").toBool());
+        QVERIFY(QMetaObject::invokeMethod(again, "trigger"));
+        QCOMPARE(cast.searches, 2);
+        QTRY_VERIFY(searching->isVisible());
+        QVERIFY(!noDevices->isVisible());
+        QVERIFY(!again->property("enabled").toBool());
+        QCOMPARE(QSizeF(content->width(), content->height()), size);
+        // A search that cannot start shows its error, not a search that never ends
+        QTest::keyClick(ui.window, Qt::Key_Escape);
+        QTRY_VERIFY(!dialog->property("opened").toBool());
+        cast.searchStarts = false;
+        cast.error = QStringLiteral("Could not search the network");
+        QVERIFY(QMetaObject::invokeMethod(root, "castCurrent"));
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QTRY_VERIFY(ui.item(QStringLiteral("castError"))->isVisible());
+        QVERIFY(!searching->isVisible());
+        QVERIFY(!noDevices->isVisible());
+    }
+
+    void theCastDialogPicksWithTheKeys()
+    {
+        PlayerStub stub;
+        CastStub cast;
+        cast.model.setTargets({{QStringLiteral("uuid:tv"), QStringLiteral("TV"), QString()},
+                               {QStringLiteral("uuid:kodi"), QStringLiteral("Kodi"), QString()}});
+        stub.cast = &cast;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QObject *root = ui.engine.rootObjects().constFirst();
+        QVERIFY(root->setProperty("player", QVariant::fromValue<QObject *>(&stub)));
+        QObject *dialog = ui.popup(QStringLiteral("castDialog"));
+        QVERIFY(dialog);
+        const auto open = [&] {
+            QVERIFY(QMetaObject::invokeMethod(root, "castCurrent"));
+            QTRY_VERIFY(dialog->property("opened").toBool());
+        };
+        open();
+        QQuickItem *list = ui.item(QStringLiteral("castTargets"));
+        QQuickItem *thisComputer = ui.item(QStringLiteral("castThisComputer"));
+        QVERIFY(list && thisComputer);
+        QTRY_VERIFY(list->hasActiveFocus());
+        // Nothing plays elsewhere: the keys start on This Computer, shown as the current row
+        QCOMPARE(list->property("currentIndex").toInt(), -1);
+        QVERIFY(thisComputer->property("highlighted").toBool());
+        // Down reaches the devices, Up from the first goes back to This Computer
+        QTest::keyClick(ui.window, Qt::Key_Down);
+        QTRY_COMPARE(list->property("currentIndex").toInt(), 0);
+        QVERIFY(!thisComputer->property("highlighted").toBool());
+        QTest::keyClick(ui.window, Qt::Key_Down);
+        QTRY_COMPARE(list->property("currentIndex").toInt(), 1);
+        QTest::keyClick(ui.window, Qt::Key_Up);
+        QTest::keyClick(ui.window, Qt::Key_Up);
+        QTRY_COMPARE(list->property("currentIndex").toInt(), -1);
+        QTRY_VERIFY(thisComputer->property("highlighted").toBool());
+        // Return on This Computer picks it
+        stub.calls.clear();
+        QTest::keyClick(ui.window, Qt::Key_Return);
+        QTRY_VERIFY(!dialog->property("opened").toBool());
+        QCOMPARE(stub.calls, QStringList{QStringLiteral("castTo local")});
+        // Space on a device picks the device
+        open();
+        QTRY_VERIFY(list->hasActiveFocus());
+        QTest::keyClick(ui.window, Qt::Key_Down);
+        QTest::keyClick(ui.window, Qt::Key_Down);
+        QTRY_COMPARE(list->property("currentIndex").toInt(), 1);
+        stub.calls.clear();
+        QTest::keyClick(ui.window, Qt::Key_Space);
+        QTRY_VERIFY(!dialog->property("opened").toBool());
+        QCOMPARE(stub.calls, QStringList{QStringLiteral("castTo uuid:kodi")});
     }
 
     void playOnWithAnItemPlaysItThereAndNotesARefusal()
@@ -10456,6 +10594,166 @@ class TestUiPages : public QObject {
         QVERIFY(QMetaObject::invokeMethod(entry, "click"));
         QTRY_COMPARE(failed.size(), 1);
         QVERIFY(!card(kMovieId)->property("favorite").toBool());
+    }
+
+    void cardMenuMarksTheItemWatchedOrUnwatched()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        const QString watchedId = QStringLiteral("a1a2a3a4b5b6c7c8d9d0e1e2f3f4a5a6");
+        const QString seriesId = QStringLiteral("b1b2b3b4c5c6d7d8e9e0f1f2a3a4b5b6");
+        const auto withState = [](const QString &id, const QString &type, bool played) {
+            QJsonObject item = fixtureObject(QStringLiteral("movie_item"));
+            item.insert(QStringLiteral("Id"), id);
+            item.insert(QStringLiteral("Type"), type);
+            QJsonObject userData = item.value(QStringLiteral("UserData")).toObject();
+            userData.insert(QStringLiteral("Played"), played);
+            item.insert(QStringLiteral("UserData"), userData);
+            return item;
+        };
+        ui.server.listingRawBody.insert(
+            QStringLiteral("Items"),
+            envelope(QJsonArray{withState(kMovieId, QStringLiteral("Movie"), false),
+                                withState(watchedId, QStringLiteral("Movie"), true),
+                                withState(seriesId, QStringLiteral("Series"), false)}));
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        QQuickItem *page = ui.item(QStringLiteral("libraryPage"));
+        const auto card = [page](const QString &id) {
+            return Ui::itemIn(page, QStringLiteral("mediaCard_") + id);
+        };
+        QTRY_VERIFY(card(kMovieId) && card(watchedId) && card(seriesId));
+        const auto menuVisible = [&ui] {
+            QObject *menu = ui.popup(QStringLiteral("cardMenu"));
+            return menu && menu->property("visible").toBool();
+        };
+        // The entry of a menu opened on the card, null when it does not show
+        const auto openEntryOf = [&](const QString &id) -> QQuickItem * {
+            QQuickItem *target = card(id);
+            const QPointF center =
+                target->mapToScene(QPointF(target->width() / 2, target->height() / 3));
+            QTest::mouseClick(ui.window, Qt::RightButton, Qt::NoModifier, center.toPoint());
+            QQuickItem *entry = nullptr;
+            const bool shown = qWaitForScaled([&] {
+                entry = menuVisible() ? ui.item(QStringLiteral("cardMenuPlayed")) : nullptr;
+                return entry && entry->isVisible();
+            });
+            return shown ? entry : nullptr;
+        };
+        const auto closeMenu = [&] {
+            QTest::keyClick(ui.window, Qt::Key_Escape);
+            QTRY_VERIFY(!menuVisible());
+        };
+
+        // An unwatched movie offers Mark as Watched: a POST, and the card and the next menu follow the answer
+        QQuickItem *entry = openEntryOf(kMovieId);
+        QVERIFY(entry);
+        QCOMPARE(entry->property("text").toString(), QStringLiteral("Mark as Watched"));
+        QVERIFY(QMetaObject::invokeMethod(entry, "click"));
+        QTRY_VERIFY(!menuVisible());
+        QTRY_COMPARE(ui.server.playedWrites.size(), 1);
+        QCOMPARE(ui.server.playedWrites.constLast().method, QByteArrayLiteral("POST"));
+        QVERIFY(ui.server.playedWrites.constLast().route.contains(kMovieId.toLatin1()));
+        QTRY_VERIFY(card(kMovieId)->property("played").toBool());
+        entry = openEntryOf(kMovieId);
+        QVERIFY(entry);
+        QTRY_COMPARE(entry->property("text").toString(), QStringLiteral("Mark as Unwatched"));
+        // Unwatched sends a DELETE and flips the card back
+        QVERIFY(QMetaObject::invokeMethod(entry, "click"));
+        QTRY_VERIFY(!menuVisible());
+        QTRY_COMPARE(ui.server.playedWrites.size(), 2);
+        QCOMPARE(ui.server.playedWrites.constLast().method, QByteArrayLiteral("DELETE"));
+        QTRY_VERIFY(!card(kMovieId)->property("played").toBool());
+
+        // A watched movie starts with Unwatched
+        entry = openEntryOf(watchedId);
+        QVERIFY(entry);
+        QCOMPARE(entry->property("text").toString(), QStringLiteral("Mark as Unwatched"));
+        closeMenu();
+
+        // A series has the state of its episodes: no entry
+        QVERIFY(!openEntryOf(seriesId));
+        closeMenu();
+
+        // A write the server refuses leaves the card as it was and is reported
+        ui.server.playedWriteStatus = 500;
+        QSignalSpy failed(&ui.controller, &ConnectionController::playedUpdateFailed);
+        entry = openEntryOf(kMovieId);
+        QVERIFY(entry);
+        QVERIFY(QMetaObject::invokeMethod(entry, "click"));
+        QTRY_COMPARE(failed.size(), 1);
+        QVERIFY(!card(kMovieId)->property("played").toBool());
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Could not change the watched state"), false));
+    }
+
+    void continueWatchingCardMarksTheItemWatched()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *card = nullptr;
+        QTRY_VERIFY((card = homeRowMovieCard(ui, 0)) != nullptr);
+        QQuickItem *button = nullptr;
+        QTRY_VERIFY((button = Ui::itemIn(card, QStringLiteral("cardMarkWatched"))) != nullptr);
+        QVERIFY(!button->isVisible());
+        // The card's menu button has its three dots in its middle, on whole pixels
+        QQuickItem *menuButton = Ui::itemIn(card, QStringLiteral("cardMenuButton"));
+        QQuickItem *dots = Ui::itemIn(card, QStringLiteral("cardMenuGlyph"));
+        QVERIFY(menuButton && dots);
+        const QPointF dotsCenter =
+            dots->mapToItem(menuButton, QPointF(dots->width() / 2, dots->height() / 2));
+        QVERIFY2(qAbs(dotsCenter.x() - menuButton->width() / 2) <= 0.5
+                     && qAbs(dotsCenter.y() - menuButton->height() / 2) <= 0.5,
+                 qPrintable(QStringLiteral("%1,%2 in %3x%4")
+                                .arg(dotsCenter.x())
+                                .arg(dotsCenter.y())
+                                .arg(menuButton->width())
+                                .arg(menuButton->height())));
+        QCOMPARE(dots->x(), std::round(dots->x()));
+        // The cards of the other rows have no such button
+        if (QQuickItem *nextUp = homeRowMovieCard(ui, 1))
+            QVERIFY(!Ui::itemIn(nextUp, QStringLiteral("cardMarkWatched")));
+        QVERIFY(revealCard(ui, card));
+        // With the Play button, the mouse over the card shows it, in the poster's top corner
+        QTest::mouseMove(
+            ui.window,
+            card->mapToScene(QPointF(card->width() * 0.15, card->height() * 0.1)).toPoint());
+        QTRY_VERIFY(button->isVisible());
+        QTRY_COMPARE(button->opacity(), 1.0);
+        const QRectF area = button->mapRectToItem(card, QRectF(QPointF(0, 0), button->size()));
+        QVERIFY(card->boundingRect().contains(area));
+        QVERIFY(area.center().x() > card->width() / 2 && area.center().y() < card->height() / 3);
+        QCOMPARE(button->property("text").toString(), QStringLiteral("Mark as Watched"));
+        // A click marks the item watched: a POST for it, and Home asks for its rows again
+        const qint64 resumeTicks = card->property("resumeTicks").toLongLong();
+        QVERIFY(resumeTicks > 0);
+        const int rowsBefore = ui.server.listingRoutes.value(QStringLiteral("Resume")).size();
+        ui.clickCenter(button);
+        QTRY_COMPARE(ui.server.playedWrites.size(), 1);
+        QCOMPARE(ui.server.playedWrites.constLast().method, QByteArrayLiteral("POST"));
+        QVERIFY(ui.server.playedWrites.constLast().route.contains(kMovieId.toLatin1()));
+        QTRY_VERIFY(ui.server.listingRoutes.value(QStringLiteral("Resume")).size() > rowsBefore);
+        // The notification offers it back: Undo makes it unwatched again at its resume point
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Marked as watched")));
+        QQuickItem *undo = nullptr;
+        QTRY_VERIFY([&] {
+            for (QQuickItem *candidate : ui.itemsWithText(QStringLiteral("Undo"), true)) {
+                if (candidate->inherits("QQuickAbstractButton") && candidate->isVisible())
+                    undo = candidate;
+            }
+            return undo != nullptr;
+        }());
+        const int rowsAfterMark = ui.server.listingRoutes.value(QStringLiteral("Resume")).size();
+        QVERIFY(QMetaObject::invokeMethod(undo, "click"));
+        QTRY_COMPARE(ui.server.userDataWrites.size(), 1);
+        QCOMPARE(ui.server.userDataWrites.constFirst().body,
+                 (QJsonObject{{QStringLiteral("Played"), false},
+                              {QStringLiteral("PlaybackPositionTicks"), double(resumeTicks)}}));
+        QTRY_VERIFY(ui.server.listingRoutes.value(QStringLiteral("Resume")).size() > rowsAfterMark);
+        // The Undo itself brings no notification of its own
+        QTest::qWait(200);
+        QVERIFY(!ui.showsText(QStringLiteral("Could not change the watched state"), false));
     }
 
     void theDetailsHeroKeepsPlayAndTheToolbarTheRest()
@@ -15747,7 +16045,7 @@ class TestUiPages : public QObject {
             root, "openCardMenu", Q_ARG(QVariant, QVariant::fromValue<QObject *>(card)),
             Q_ARG(QVariant, evening), Q_ARG(QVariant, QStringLiteral("Playlist")),
             Q_ARG(QVariant, QString()), Q_ARG(QVariant, 0), Q_ARG(QVariant, 0), Q_ARG(QVariant, -1),
-            Q_ARG(QVariant, false)));
+            Q_ARG(QVariant, false), Q_ARG(QVariant, false)));
         QObject *open = ui.popup(QStringLiteral("cardMenuOpen"));
         QTRY_VERIFY(open && open->property("visible").toBool());
         QVERIFY(QMetaObject::invokeMethod(open, "click"));
@@ -15882,7 +16180,7 @@ class TestUiPages : public QObject {
             return QMetaObject::invokeMethod(
                 root, "openCardMenu", Q_ARG(QVariant, QVariant::fromValue<QObject *>(card)),
                 Q_ARG(QVariant, id), Q_ARG(QVariant, type), Q_ARG(QVariant, QString()),
-                Q_ARG(QVariant, 0), Q_ARG(QVariant, 0), Q_ARG(QVariant, -1),
+                Q_ARG(QVariant, 0), Q_ARG(QVariant, 0), Q_ARG(QVariant, -1), Q_ARG(QVariant, false),
                 Q_ARG(QVariant, false));
         };
         QObject *cardMenu = ui.popup(QStringLiteral("cardMenu"));
@@ -15972,7 +16270,7 @@ class TestUiPages : public QObject {
             return QMetaObject::invokeMethod(
                 root, "openCardMenu", Q_ARG(QVariant, QVariant::fromValue<QObject *>(card)),
                 Q_ARG(QVariant, id), Q_ARG(QVariant, type), Q_ARG(QVariant, QString()),
-                Q_ARG(QVariant, 0), Q_ARG(QVariant, 0), Q_ARG(QVariant, -1),
+                Q_ARG(QVariant, 0), Q_ARG(QVariant, 0), Q_ARG(QVariant, -1), Q_ARG(QVariant, false),
                 Q_ARG(QVariant, false));
         };
         QObject *cardMenu = ui.popup(QStringLiteral("cardMenu"));

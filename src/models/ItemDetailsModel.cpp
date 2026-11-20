@@ -208,6 +208,17 @@ ItemDetailsModel::ItemDetailsModel(JellyfinClient *client, const QString &itemId
                         Q_EMIT playedWriteStateChanged();
                     }
                 });
+        // The Undo of a Mark as Watched gives the resume point back
+        connect(m_client, &JellyfinClient::itemProgressUpdated, this,
+                [this](const QString &id, qint64 position, double percentage) {
+                    if (!m_details.valid
+                        || QString(id).remove(QLatin1Char('-')).toLower()
+                               != QString(m_itemId).remove(QLatin1Char('-')).toLower())
+                        return;
+                    m_details.resumePositionTicks = position;
+                    m_details.playedPercentage = percentage;
+                    Q_EMIT detailsChanged();
+                });
         connect(m_client, &JellyfinClient::itemPlayedUpdateFailed, this,
                 [this](const QString &id, bool, int) {
                     if (!m_playedBusy

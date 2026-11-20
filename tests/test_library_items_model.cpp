@@ -197,6 +197,49 @@ class TestLibraryItemsModel : public QObject {
         QTRY_VERIFY(!f.model.data(first, LibraryItemsModel::FavoriteRole).toBool());
     }
 
+    void aWatchedAnswerUpdatesTheRowAndClearsItsProgress()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        QVERIFY(f.openMovies());
+        QTRY_COMPARE(f.model.status(), LibraryItemsModel::Ready);
+        const QModelIndex first = f.model.index(0);
+        const QString id = f.model.data(first, LibraryItemsModel::ItemIdRole).toString();
+        QVERIFY(!f.model.data(first, LibraryItemsModel::PlayedRole).toBool());
+        QVERIFY(f.client.setItemPlayed(id, true));
+        QTRY_VERIFY(f.model.data(first, LibraryItemsModel::PlayedRole).toBool());
+        // The server cleared the saved position with the write: no progress is left to show
+        QCOMPARE(f.model.data(first, LibraryItemsModel::PlayedPercentageRole).toReal(), 0.0);
+        // Another row keeps its state
+        QVERIFY(!f.model.data(f.model.index(1), LibraryItemsModel::PlayedRole).toBool());
+        QVERIFY(f.client.setItemPlayed(id, false));
+        QTRY_VERIFY(!f.model.data(first, LibraryItemsModel::PlayedRole).toBool());
+
+        // The Undo of a Mark as Watched: unwatched again at the resume point, with the share the server answers
+        QVERIFY(f.client.setItemPlayed(id, true));
+        QTRY_VERIFY(f.model.data(first, LibraryItemsModel::PlayedRole).toBool());
+        QVERIFY(!f.client.restoreItemProgress(id, 0));
+        const qint64 position = 30LL * 60 * 10'000'000;
+        QVERIFY(f.client.restoreItemProgress(id, position));
+        // One write per item at a time
+        QVERIFY(!f.client.restoreItemProgress(id, position));
+        QTRY_VERIFY(!f.model.data(first, LibraryItemsModel::PlayedRole).toBool());
+        QTRY_COMPARE(f.model.data(first, LibraryItemsModel::PlayedPercentageRole).toReal(), 25.0);
+        QCOMPARE(f.server.userDataWrites.size(), 1);
+        QCOMPARE(f.server.userDataWrites.constFirst().body,
+                 (QJsonObject{{QStringLiteral("Played"), false},
+                              {QStringLiteral("PlaybackPositionTicks"), double(position)}}));
+        QVERIFY(f.server.userDataWrites.constFirst().route.contains(id.toLatin1()));
+        // A refused write leaves the row as it was
+        f.server.playedWriteStatus = 500;
+        QVERIFY(f.client.setItemPlayed(id, true));
+        QSignalSpy failed(&f.client, &Kinefin::JellyfinClient::itemPlayedUpdateFailed);
+        QTRY_COMPARE(failed.size(), 1);
+        QVERIFY(f.client.restoreItemProgress(id, position));
+        QTRY_COMPARE(failed.size(), 2);
+        QVERIFY(!f.model.data(first, LibraryItemsModel::PlayedRole).toBool());
+    }
+
     void wireCarriesTheLibraryQuery()
     {
         Fixture f;

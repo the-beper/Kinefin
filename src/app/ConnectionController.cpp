@@ -336,8 +336,19 @@ ConnectionController::ConnectionController(const QString &profileId, const QStri
         if (m_cardFavoriteRequests.remove(QString(id).remove(QLatin1Char('-')).toLower()))
             Q_EMIT favoriteUpdateFailed(id);
     });
-    connect(&m_client, &JellyfinClient::credentialsCleared, this,
-            [this] { m_cardFavoriteRequests.clear(); });
+    connect(&m_client, &JellyfinClient::itemPlayedUpdated, this,
+            [this](const QString &id, bool played) {
+                if (m_cardPlayedRequests.remove(QString(id).remove(QLatin1Char('-')).toLower()))
+                    Q_EMIT playedUpdated(id, played);
+            });
+    connect(&m_client, &JellyfinClient::itemPlayedUpdateFailed, this, [this](const QString &id) {
+        if (m_cardPlayedRequests.remove(QString(id).remove(QLatin1Char('-')).toLower()))
+            Q_EMIT playedUpdateFailed(id);
+    });
+    connect(&m_client, &JellyfinClient::credentialsCleared, this, [this] {
+        m_cardFavoriteRequests.clear();
+        m_cardPlayedRequests.clear();
+    });
     // The favorites are scanned over the libraries the server lists, whatever the Home preferences hide; the model drops its snapshot when the list changes, and a lost session empties the list
     connect(this, &ConnectionController::librariesChanged, this,
             [this] { m_favorites.setLibraries(m_libraries); });
@@ -1113,6 +1124,26 @@ bool ConnectionController::setFavorite(const QString &itemId, bool favorite)
         return false;
     m_cardFavoriteRequests.insert(QString(itemId).remove(QLatin1Char('-')).toLower());
     return true;
+}
+
+bool ConnectionController::setPlayed(const QString &itemId, bool played)
+{
+    if (m_state != Authenticated || !m_client.setItemPlayed(itemId, played))
+        return false;
+    m_cardPlayedRequests.insert(QString(itemId).remove(QLatin1Char('-')).toLower());
+    return true;
+}
+
+bool ConnectionController::undoPlayed(const QString &itemId, qint64 positionTicks)
+{
+    if (m_state != Authenticated)
+        return false;
+    // Without a resume point unwatched is all there was
+    const bool sent = positionTicks > 0 ? m_client.restoreItemProgress(itemId, positionTicks)
+                                        : m_client.setItemPlayed(itemId, false);
+    if (sent)
+        m_cardPlayedRequests.insert(QString(itemId).remove(QLatin1Char('-')).toLower());
+    return sent;
 }
 
 bool ConnectionController::openFavorites()

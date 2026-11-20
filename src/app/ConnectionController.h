@@ -253,6 +253,10 @@ class ConnectionController : public QObject {
     Q_INVOKABLE bool openFavorites();
     // Sets the favorite flag of an item for the signed-in user (the card menu); false when the request cannot be sent, such as one already pending for the item. The cards follow `itemFavoriteUpdated` of the client, and a failed answer to a request made here is signalled by `favoriteUpdateFailed`
     Q_INVOKABLE bool setFavorite(const QString &itemId, bool favorite);
+    // Marks a video watched or unwatched for the signed-in user (the card menu and Continue Watching's button), as setFavorite does: the views follow `itemPlayedUpdated` of the client, and a failed answer to a request made here is signalled by `playedUpdateFailed`
+    Q_INVOKABLE bool setPlayed(const QString &itemId, bool played);
+    // The Undo of a Mark as Watched: unwatched again, at the saved position `positionTicks` when the item had one; the same signals as setPlayed
+    Q_INVOKABLE bool undoPlayed(const QString &itemId, qint64 positionTicks);
     // Asks the server for the libraries again (the Home page's retry)
     Q_INVOKABLE void reloadLibraries();
     // Removes a stored server with all its users, saved queues and browse state; disconnects first when it is the active one
@@ -269,6 +273,9 @@ class ConnectionController : public QObject {
 
   Q_SIGNALS:
     void favoriteUpdateFailed(const QString &itemId);
+    void playedUpdateFailed(const QString &itemId);
+    // A watched-state write made through setPlayed or undoPlayed that the server confirmed
+    void playedUpdated(const QString &itemId, bool played);
     void stateChanged();
     void errorTextChanged();
     void serverUrlChanged();
@@ -361,6 +368,8 @@ class ConnectionController : public QObject {
     JellyfinClient m_client;
     // The items whose favorite write came from `setFavorite`, by dashless lower-case id: the details page reports its own failures
     QSet<QString> m_cardFavoriteRequests;
+    // The items whose watched write came from `setPlayed`, by dashless lower-case id: the details page reports its own failures
+    QSet<QString> m_cardPlayedRequests;
     ServerCredentialSync m_sync;
     // After the sync, so the sync has connected to the client first on every shared signal
     DownloadsController m_downloads;

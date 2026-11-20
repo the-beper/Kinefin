@@ -88,6 +88,30 @@ QString overviewText(const QJsonValue &value, int limit)
     return text;
 }
 
+void applyPlayed(ItemSummary &item, bool played)
+{
+    item.played = played;
+    item.playedPercentage = 0;
+    item.positionTicks = 0;
+    item.remainingMinutes = -1;
+}
+
+void applyProgress(ItemSummary &item, qint64 positionTicks, double playedPercentage)
+{
+    constexpr double ticksPerMinute = 60.0 * 10'000'000;
+    item.positionTicks = std::max<qint64>(0, positionTicks);
+    const double runtimeTicks = item.runtimeMinutes * ticksPerMinute;
+    // A server that sends no share leaves it to the runtime
+    item.playedPercentage =
+        playedPercentage > 0 || runtimeTicks <= 0
+            ? std::clamp(playedPercentage, 0.0, 100.0)
+            : std::clamp(100.0 * double(item.positionTicks) / runtimeTicks, 0.0, 100.0);
+    item.remainingMinutes =
+        item.runtimeMinutes > 0 && item.positionTicks > 0 && item.positionTicks < runtimeTicks
+            ? int(std::ceil((runtimeTicks - double(item.positionTicks)) / ticksPerMinute))
+            : -1;
+}
+
 bool isRecentlyAdded(const ItemSummary &item, const QDateTime &nowUtc)
 {
     // A date more than a day ahead is a wrong clock or a hostile value: it never counts as new

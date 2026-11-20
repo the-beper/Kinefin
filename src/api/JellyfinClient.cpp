@@ -1905,6 +1905,59 @@ bool JellyfinClient::setItemPlayed(const QString &itemId, bool played)
     return true;
 }
 
+bool JellyfinClient::restoreItemProgress(const QString &itemId, qint64 positionTicks)
+{
+    constexpr qint64 maxTicks = 24LL * 3600 * 10'000'000;
+    if (!isAuthenticated() || !isValidJellyfinId(itemId) || !isValidJellyfinId(m_userId)
+        || positionTicks <= 0 || positionTicks > maxTicks)
+        return false;
+    const QString key = QString(itemId).remove(QLatin1Char('-')).toLower();
+    if (m_playedPending.contains(key))
+        return false;
+    m_playedPending.insert(key);
+
+    QUrl url = endpoint(QStringLiteral("/UserItems/") + itemId + QStringLiteral("/UserData"));
+    QUrlQuery query;
+    query.addQueryItem(QStringLiteral("userId"), m_userId);
+    url.setQuery(query);
+    QNetworkRequest request = requestFor(url, true);
+    request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    const QJsonObject body{{QStringLiteral("Played"), false},
+                           {QStringLiteral("PlaybackPositionTicks"), positionTicks}};
+    QNetworkReply *reply =
+        m_network.post(request, QJsonDocument(body).toJson(QJsonDocument::Compact));
+    attach(reply, m_generation, [this, itemId, key](QNetworkReply *finished) {
+        m_playedPending.remove(key);
+        const int status = finished->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (status == 401) {
+            invalidateSession();
+            return;
+        }
+        // 12.4 answers 200 with the UserItemDataDto it saved: only that, for this item, unwatched and with a position, counts
+        QJsonObject data;
+        const bool parsed = status == 200 && finished->error() == QNetworkReply::NoError
+                            && parseObject(finished, &data);
+        const QJsonValue id = data.value(QStringLiteral("ItemId"));
+        const double position = data.value(QStringLiteral("PlaybackPositionTicks")).toDouble(-1);
+        const bool valid =
+            parsed && data.value(QStringLiteral("Played")).isBool()
+            && !data.value(QStringLiteral("Played")).toBool() && position > 0
+            && position <= maxTicks
+            && (id.isUndefined()
+                || (id.isString()
+                    && QString(id.toString()).remove(QLatin1Char('-')).toLower() == key));
+        if (!valid) {
+            Q_EMIT itemPlayedUpdateFailed(itemId, false, status);
+            return;
+        }
+        const double percentage = data.value(QStringLiteral("PlayedPercentage")).toDouble(0);
+        Q_EMIT itemPlayedUpdated(itemId, false);
+        Q_EMIT itemProgressUpdated(itemId, qint64(position),
+                                   percentage >= 0 && percentage <= 100 ? percentage : 0);
+    });
+    return true;
+}
+
 bool JellyfinClient::searchRemoteSubtitles(const QString &itemId, const QString &language)
 {
     static const QRegularExpression languagePattern(QStringLiteral("\\A[A-Za-z]{2,3}\\z"));

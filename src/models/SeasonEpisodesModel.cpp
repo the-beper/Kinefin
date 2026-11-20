@@ -62,11 +62,17 @@ SeasonEpisodesModel::SeasonEpisodesModel(JellyfinClient *client, int channel, QO
                 &SeasonEpisodesModel::onEpisodesReady);
         connect(m_client, &JellyfinClient::listingFailed, this,
                 &SeasonEpisodesModel::onListingFailed);
-        // A 401, a disconnect, a server switch and a sign-out all end with this signal
         connect(m_client, &JellyfinClient::itemFavoriteUpdated, this,
                 [this](const QString &id, bool favorite) {
                     applyFavorite(id, favorite, FavoriteRole);
                 });
+        connect(m_client, &JellyfinClient::itemPlayedUpdated, this,
+                [this](const QString &id, bool played) { applyPlayedState(id, played); });
+        connect(m_client, &JellyfinClient::itemProgressUpdated, this,
+                [this](const QString &id, qint64 position, double percentage) {
+                    applyProgressState(id, position, percentage);
+                });
+        // A 401, a disconnect, a server switch and a sign-out all end with this signal
         connect(m_client, &JellyfinClient::credentialsCleared, this, [this] { clear(); });
     }
 }

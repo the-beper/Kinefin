@@ -52,6 +52,11 @@ struct ItemSummary {
 
 ItemSummary parseItemSummary(const QJsonObject &item);
 
+// A watched-state write the server confirmed: it also clears the saved position, so the progress and the time left go with it
+void applyPlayed(ItemSummary &item, bool played);
+// A saved position the server confirmed (an Undo of Mark as Watched): the progress and the time left come back
+void applyProgress(ItemSummary &item, qint64 positionTicks, double playedPercentage);
+
 // How long an unplayed item counts as new
 constexpr int NewItemDays = 7;
 

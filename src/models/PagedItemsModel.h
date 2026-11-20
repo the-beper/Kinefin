@@ -64,6 +64,10 @@ class PagedItemsModel : public QAbstractListModel {
     void holdPaging(Status status);
     // Sets the favorite flag of the resident rows of an item and tells the views about `role`, the favorite role of the derived class
     void applyFavorite(const QString &itemId, bool favorite, int role);
+    // Sets the watched state of the resident rows of an item, which also clears their progress; every role of the row is refreshed
+    void applyPlayedState(const QString &itemId, bool played);
+    // Sets the saved position of the resident rows of an item, as applyPlayedState does
+    void applyProgressState(const QString &itemId, qint64 positionTicks, double playedPercentage);
     bool pageInFlight() const { return m_inFlight >= 0; }
     // The reply of the page in flight, or a failure of it
     void deliverPage(const QJsonArray &items, int total);

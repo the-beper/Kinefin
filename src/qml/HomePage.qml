@@ -244,6 +244,8 @@ Kirigami.ScrollablePage {
                         onClicked: page.Window.window.openItem(itemId, page)
                         quickPlay: row.kind === HomeRowsModel.ContinueWatching
                         onQuickPlayRequested: page.Window.window.playItem(itemId, resumeTicks)
+                        quickMarkWatched: row.kind === HomeRowsModel.ContinueWatching
+                        onMarkWatchedRequested: page.Window.window.setItemPlayed(itemId, true, resumeTicks)
                         subtitle: {
                             if (episodeNumber >= 0) {
                                 const label = seasonNumber >= 0 ? i18nc("season and episode number", "S%1:E%2", seasonNumber, episodeNumber) : i18nc("episode number", "E%1", episodeNumber);

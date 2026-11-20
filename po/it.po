@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: kinefin 0\n"
 "Report-Msgid-Bugs-To: https://github.com/the-beper/Kinefin/issues\n"
-"POT-Creation-Date: 2026-11-20 13:39+0000\n"
+"POT-Creation-Date: 2026-11-20 14:55+0000\n"
 "PO-Revision-Date: 2026-11-07 00:00+0000\n"
 "Last-Translator: the-beper\n"
 "Language-Team: Italian\n"
@@ -22,7 +22,7 @@ msgstr ""
 "l'indirizzo e la porta, oppure attiva Ignora errori del certificato in "
 "Impostazioni"
 
-#: src/app/ConnectionController.cpp:363
+#: src/app/ConnectionController.cpp:374
 msgid ""
 "Could not save the session in KWallet. You will have to sign in again next "
 "time"
@@ -30,48 +30,48 @@ msgstr ""
 "Impossibile salvare la sessione in KWallet. Dovrai accedere di nuovo al "
 "prossimo avvio"
 
-#: src/app/ConnectionController.cpp:496
+#: src/app/ConnectionController.cpp:507
 msgid "Server not reachable"
 msgstr "Server non raggiungibile"
 
-#: src/app/ConnectionController.cpp:532
+#: src/app/ConnectionController.cpp:543
 msgid "Jellyfin server reachable"
 msgstr "Server Jellyfin raggiungibile"
 
-#: src/app/ConnectionController.cpp:534
+#: src/app/ConnectionController.cpp:545
 msgid "Jellyfin server reachable at %1"
 msgstr "Server Jellyfin raggiungibile su %1"
 
-#: src/app/ConnectionController.cpp:558 src/app/ConnectionController.cpp:580
-#: src/app/ConnectionController.cpp:680
+#: src/app/ConnectionController.cpp:569 src/app/ConnectionController.cpp:591
+#: src/app/ConnectionController.cpp:691
 msgid "Enter a valid server address"
 msgstr "Inserisci un indirizzo di server valido"
 
-#: src/app/ConnectionController.cpp:561
+#: src/app/ConnectionController.cpp:572
 msgid "Testing connection…"
 msgstr "Connessione in corso…"
 
-#: src/app/ConnectionController.cpp:676
+#: src/app/ConnectionController.cpp:687
 msgid "The device identity of this profile is invalid"
 msgstr "L'identità del dispositivo di questo profilo non è valida"
 
-#: src/app/ConnectionController.cpp:713
+#: src/app/ConnectionController.cpp:724
 msgid "Could not read the saved session. Enter the password"
 msgstr "Impossibile leggere la sessione salvata. Inserisci la password"
 
-#: src/app/ConnectionController.cpp:774
+#: src/app/ConnectionController.cpp:785
 msgid "Enter a username and a password"
 msgstr "Inserisci nome utente e password"
 
-#: src/app/ConnectionController.cpp:786
+#: src/app/ConnectionController.cpp:797
 msgid "Quick Connect is not available"
 msgstr "Quick Connect non è disponibile"
 
-#: src/app/ConnectionController.cpp:1053
+#: src/app/ConnectionController.cpp:1064
 msgid "Your session has expired. Sign in again"
 msgstr "La sessione è scaduta. Accedi di nuovo"
 
-#: src/app/ConnectionController.cpp:1068
+#: src/app/ConnectionController.cpp:1079
 msgid ""
 "Could not reach a Jellyfin server. Check the address and your network "
 "connection"
@@ -79,23 +79,23 @@ msgstr ""
 "Impossibile raggiungere un server Jellyfin. Controlla l'indirizzo e la "
 "connessione di rete"
 
-#: src/app/ConnectionController.cpp:1072
+#: src/app/ConnectionController.cpp:1083
 msgid "Wrong username or password"
 msgstr "Nome utente o password errati"
 
-#: src/app/ConnectionController.cpp:1073
+#: src/app/ConnectionController.cpp:1084
 msgid "Signing in failed. Try again, or check the server"
 msgstr "Accesso non riuscito. Riprova o controlla il server"
 
-#: src/app/ConnectionController.cpp:1078
+#: src/app/ConnectionController.cpp:1089
 msgid "Quick Connect is not available on this server"
 msgstr "Quick Connect non è disponibile su questo server"
 
-#: src/app/ConnectionController.cpp:1079
+#: src/app/ConnectionController.cpp:1090
 msgid "Quick Connect failed or expired. Start it again"
 msgstr "Quick Connect non riuscito o scaduto. Avvialo di nuovo"
 
-#: src/app/ConnectionController.cpp:1086
+#: src/app/ConnectionController.cpp:1097
 msgid "Could not load the libraries. Try again"
 msgstr "Impossibile caricare le librerie. Riprova"
 
@@ -107,13 +107,13 @@ msgstr "%1, %2"
 msgid "Could not search the network"
 msgstr "Impossibile cercare nella rete"
 
-#: src/player/PlayerController.cpp:74 src/qml/EpisodeRow.qml:38
+#: src/player/PlayerController.cpp:75 src/qml/EpisodeRow.qml:38
 #: src/qml/ItemDetailsPage.qml:67
 msgctxt "season and episode range"
 msgid "S%1:E%2–E%3"
 msgstr "S%1:E%2–E%3"
 
-#: src/player/PlayerController.cpp:76 src/qml/HomePage.qml:249
+#: src/player/PlayerController.cpp:77 src/qml/HomePage.qml:251
 #: src/qml/EpisodeRow.qml:38 src/qml/ItemDetailsPage.qml:67
 #: src/qml/ResumeItemsPage.qml:140 src/qml/SearchPage.qml:223
 #: src/qml/DownloadsPage.qml:107 src/qml/GenreRailsView.qml:223
@@ -124,13 +124,13 @@ msgctxt "season and episode number"
 msgid "S%1:E%2"
 msgstr "S%1:E%2"
 
-#: src/player/PlayerController.cpp:79 src/qml/EpisodeRow.qml:40
+#: src/player/PlayerController.cpp:80 src/qml/EpisodeRow.qml:40
 #: src/qml/ItemDetailsPage.qml:68
 msgctxt "episode number range"
 msgid "E%1–E%2"
 msgstr "E%1–E%2"
 
-#: src/player/PlayerController.cpp:81 src/qml/HomePage.qml:249
+#: src/player/PlayerController.cpp:82 src/qml/HomePage.qml:251
 #: src/qml/EpisodeRow.qml:41 src/qml/ItemDetailsPage.qml:68
 #: src/qml/ResumeItemsPage.qml:140 src/qml/SearchPage.qml:223
 #: src/qml/GenreRailsView.qml:223 src/qml/LibraryContent.qml:304
@@ -141,7 +141,7 @@ msgctxt "episode number"
 msgid "E%1"
 msgstr "E%1"
 
-#: src/player/PlayerController.cpp:87 src/qml/HomePage.qml:250
+#: src/player/PlayerController.cpp:88 src/qml/HomePage.qml:252
 #: src/qml/EpisodeRow.qml:48 src/qml/ResumeItemsPage.qml:141
 #: src/qml/SearchPage.qml:224 src/qml/GenreRailsView.qml:224
 #: src/qml/ItemRowGrid.qml:75 src/qml/Main.qml:829 src/qml/MediaListRow.qml:31
@@ -150,52 +150,53 @@ msgctxt "episode label and episode title"
 msgid "%1 — %2"
 msgstr "%1 — %2"
 
-#: src/player/PlayerController.cpp:352
+#: src/player/PlayerController.cpp:354
 msgid "The secondary subtitles could not be downloaded"
 msgstr "Impossibile scaricare i sottotitoli secondari"
 
-#: src/player/PlayerController.cpp:353
+#: src/player/PlayerController.cpp:355
 msgid "Could not download the subtitle."
 msgstr "Impossibile scaricare i sottotitoli."
 
-#: src/player/PlayerController.cpp:435
+#: src/player/PlayerController.cpp:437
 msgid "The video could not be opened. Try again."
 msgstr "Impossibile aprire il video. Riprova."
 
-#: src/player/PlayerController.cpp:1325
+#: src/player/PlayerController.cpp:1327
 msgid "The downloaded file could not be opened."
 msgstr "Impossibile aprire il file scaricato."
 
-#: src/player/PlayerController.cpp:1402 src/player/PlayerController.cpp:1798
+#: src/player/PlayerController.cpp:1405 src/player/PlayerController.cpp:1801
 msgid "The device is no longer available: search for it again from Play On."
-msgstr "Il dispositivo non è più disponibile: cercalo di nuovo da Riproduci su…"
+msgstr ""
+"Il dispositivo non è più disponibile: cercalo di nuovo da Riproduci su…"
 
-#: src/player/PlayerController.cpp:1413 src/player/PlayerController.cpp:1443
+#: src/player/PlayerController.cpp:1416 src/player/PlayerController.cpp:1446
 msgid "Unable to request playback from the server."
 msgstr "Impossibile richiedere la riproduzione al server."
 
-#: src/player/PlayerController.cpp:1549
+#: src/player/PlayerController.cpp:1552
 msgctxt "@item:inmenu maximum bit rate in Mbit/s"
 msgid "%1 Mbps"
 msgstr "%1 Mbps"
 
-#: src/player/PlayerController.cpp:1552
+#: src/player/PlayerController.cpp:1555
 msgid "Automatic"
 msgstr "Automatica"
 
-#: src/player/PlayerController.cpp:1555
+#: src/player/PlayerController.cpp:1558
 msgctxt "@item:inmenu automatic quality lowered on a slow connection"
 msgid "Automatic (%1 Mbps)"
 msgstr "Automatica (%1 Mbps)"
 
-#: src/player/PlayerController.cpp:1607
+#: src/player/PlayerController.cpp:1610
 msgid ""
 "The selected quality could not be opened. Try again at the previous quality."
 msgstr ""
 "Impossibile aprire il video alla qualità selezionata. Riprova con la qualità "
 "precedente."
 
-#: src/player/PlayerController.cpp:1608
+#: src/player/PlayerController.cpp:1611
 msgid ""
 "The lower quality stream could not be opened. Try again at the previous "
 "quality."
@@ -203,119 +204,126 @@ msgstr ""
 "Non è stato possibile aprire lo stream a qualità inferiore. Riprova con la "
 "qualità precedente."
 
-#: src/player/PlayerController.cpp:1776
+#: src/player/PlayerController.cpp:1779
 msgid "External subtitle %1"
 msgstr "Sottotitolo esterno %1"
 
-#: src/player/PlayerController.cpp:1783
+#: src/player/PlayerController.cpp:1786
 msgid "The selected media source could not be opened."
 msgstr "Impossibile aprire la sorgente multimediale selezionata."
 
-#: src/player/PlayerController.cpp:1807
+#: src/player/PlayerController.cpp:1811
 msgid ""
 "The server's stream link would give the device your sign-in, so it was not "
 "sent."
-msgstr "Il collegamento allo stream del server darebbe al dispositivo i tuoi dati di accesso, quindi non è stato inviato."
+msgstr ""
+"Il collegamento allo stream del server darebbe al dispositivo i tuoi dati di "
+"accesso, quindi non è stato inviato."
 
-#: src/player/PlayerController.cpp:1815
+#: src/player/PlayerController.cpp:1819
 msgctxt "@info %1 is a device name"
 msgid "%1 cannot play this kind of video."
 msgstr "%1 non può riprodurre questo tipo di video."
 
-#: src/player/PlayerController.cpp:1831
+#: src/player/PlayerController.cpp:1835
 msgid "The playback session could not be opened."
 msgstr "Impossibile aprire la sessione di riproduzione."
 
-#: src/player/PlayerController.cpp:1844 src/player/PlayerController.cpp:1938
+#: src/player/PlayerController.cpp:1848 src/player/PlayerController.cpp:1943
 msgctxt "@info %1 is a device name"
 msgid "%1 could not play this video: check that it can reach the server."
-msgstr "%1 non è riuscito a riprodurre questo video: verifica che possa raggiungere il server."
+msgstr ""
+"%1 non è riuscito a riprodurre questo video: verifica che possa raggiungere "
+"il server."
 
-#: src/player/PlayerController.cpp:1942
+#: src/player/PlayerController.cpp:1948
 msgctxt "@info %1 is a device name"
 msgid "%1 stopped responding: check that it is on and on this network."
-msgstr "%1 non risponde più: verifica che sia acceso e collegato a questa rete."
+msgstr ""
+"%1 non risponde più: verifica che sia acceso e collegato a questa rete."
 
-#: src/player/PlayerController.cpp:1945
+#: src/player/PlayerController.cpp:1951
 msgid ""
 "The server does not let other devices play its videos without a sign-in, so "
 "this video cannot be cast."
-msgstr "Il server non consente ad altri dispositivi di riprodurre i suoi video senza accesso, quindi questo video non può essere trasmesso."
+msgstr ""
+"Il server non consente ad altri dispositivi di riprodurre i suoi video senza "
+"accesso, quindi questo video non può essere trasmesso."
 
-#: src/player/PlayerController.cpp:2034
+#: src/player/PlayerController.cpp:2040
 msgctxt "@item a chapter the server gives no name"
 msgid "Chapter %1"
 msgstr "Capitolo %1"
 
-#: src/player/PlayerController.cpp:2870
+#: src/player/PlayerController.cpp:2876
 msgid "Audio track %1"
 msgstr "Traccia audio %1"
 
-#: src/player/PlayerController.cpp:2871
+#: src/player/PlayerController.cpp:2877
 msgid "Subtitle %1"
 msgstr "Sottotitolo %1"
 
-#: src/player/PlayerController.cpp:3149
+#: src/player/PlayerController.cpp:3155
 msgid "Could not save the screenshot."
 msgstr "Impossibile salvare lo screenshot."
 
-#: src/player/PlayerController.cpp:3168
+#: src/player/PlayerController.cpp:3174
 msgid "Clips cannot be saved while the server transcodes"
 msgstr "Impossibile salvare clip mentre il server transcodifica"
 
-#: src/player/PlayerController.cpp:3175
+#: src/player/PlayerController.cpp:3181
 msgid "Clips cannot be saved from HDR video"
 msgstr "Impossibile salvare clip da video HDR"
 
-#: src/player/PlayerController.cpp:3188 src/player/PlayerController.cpp:3209
+#: src/player/PlayerController.cpp:3194 src/player/PlayerController.cpp:3215
 msgid "Set a start and an end"
 msgstr "Imposta un inizio e una fine"
 
-#: src/player/PlayerController.cpp:3193 src/player/PlayerController.cpp:3241
+#: src/player/PlayerController.cpp:3199 src/player/PlayerController.cpp:3247
 msgid "A GIF lasts at most 15 seconds"
 msgstr "Una GIF dura al massimo 15 secondi"
 
-#: src/player/PlayerController.cpp:3194 src/player/PlayerController.cpp:3239
+#: src/player/PlayerController.cpp:3200 src/player/PlayerController.cpp:3245
 msgid "A video clip lasts at most 60 seconds"
 msgstr "Una clip video dura al massimo 60 secondi"
 
-#: src/player/PlayerController.cpp:3200 src/player/PlayerController.cpp:3230
+#: src/player/PlayerController.cpp:3206 src/player/PlayerController.cpp:3236
 msgid "No usable video encoder"
 msgstr "Nessun encoder video utilizzabile"
 
-#: src/player/PlayerController.cpp:3211
+#: src/player/PlayerController.cpp:3217
 msgid "End at %1; set a start"
 msgstr "Fine a %1; imposta un inizio"
 
-#: src/player/PlayerController.cpp:3213
+#: src/player/PlayerController.cpp:3219
 msgid "Start at %1; set an end"
 msgstr "Inizio a %1; imposta una fine"
 
-#: src/player/PlayerController.cpp:3215
+#: src/player/PlayerController.cpp:3221
 msgid "The end of the clip is before its start"
 msgstr "La fine della clip è prima del suo inizio"
 
-#: src/player/PlayerController.cpp:3216
+#: src/player/PlayerController.cpp:3222
 msgid "%1 to %2 (%3 s)"
 msgstr "%1 – %2 (%3 s)"
 
-#: src/player/PlayerController.cpp:3250
+#: src/player/PlayerController.cpp:3256
 msgid "Clip start at %1"
 msgstr "Inizio clip a %1"
 
-#: src/player/PlayerController.cpp:3259
+#: src/player/PlayerController.cpp:3265
 msgid "Clip end at %1"
 msgstr "Fine clip a %1"
 
-#: src/player/PlayerController.cpp:3441
+#: src/player/PlayerController.cpp:3447
 msgid "Skip Intro"
 msgstr "Salta introduzione"
 
-#: src/player/PlayerController.cpp:3442
+#: src/player/PlayerController.cpp:3448
 msgid "Skip Recap"
 msgstr "Salta riepilogo"
 
-#: src/player/PlayerController.cpp:3443
+#: src/player/PlayerController.cpp:3449
 msgid "Skip Outro"
 msgstr "Salta conclusione"
 
@@ -376,14 +384,14 @@ msgid "%1 — %2"
 msgstr "%1 — %2"
 
 #: src/integration/KRunnerProvider.cpp:176 src/qml/ItemDetailsPage.qml:96
-#: src/qml/DownloadsPage.qml:350 src/qml/MediaCard.qml:407
-#: src/qml/CardMenu.qml:66
+#: src/qml/DownloadsPage.qml:350 src/qml/MediaCard.qml:471
+#: src/qml/CardMenu.qml:70
 msgid "Play"
 msgstr "Riproduci"
 
 #: src/integration/KRunnerProvider.cpp:177 src/qml/ItemDetailsPage.qml:96
-#: src/qml/DownloadsPage.qml:351 src/qml/MediaCard.qml:407
-#: src/qml/CardMenu.qml:66 src/qml/PlayerPage.qml:142
+#: src/qml/DownloadsPage.qml:351 src/qml/MediaCard.qml:471
+#: src/qml/CardMenu.qml:70 src/qml/PlayerPage.qml:142
 #: src/qml/MiniPlayer.qml:240 src/qml/PictureInPictureWindow.qml:234
 msgid "Resume"
 msgstr "Riprendi"
@@ -1062,19 +1070,19 @@ msgid "%1 min"
 msgstr "%1 min"
 
 #: src/qml/EpisodeRow.qml:59 src/qml/ItemDetailsPage.qml:761
-#: src/qml/ItemListRow.qml:61 src/qml/MediaCard.qml:86
+#: src/qml/ItemListRow.qml:61 src/qml/MediaCard.qml:90
 #: src/qml/MediaListRow.qml:78
 msgctxt "state of an item"
 msgid "Played"
 msgstr "Visto"
 
 #: src/qml/EpisodeRow.qml:61 src/qml/ItemDetailsPage.qml:783
-#: src/qml/ItemListRow.qml:63 src/qml/MediaCard.qml:88
+#: src/qml/ItemListRow.qml:63 src/qml/MediaCard.qml:92
 msgid "Favorite"
 msgstr "Preferito"
 
 #: src/qml/EpisodeRow.qml:63 src/qml/ItemListRow.qml:69
-#: src/qml/MediaCard.qml:96
+#: src/qml/MediaCard.qml:100
 msgid "%1 percent watched"
 msgid_plural "%1 percent watched"
 msgstr[0] "%1 percento visto"
@@ -1110,17 +1118,17 @@ msgctxt "@action:button"
 msgid "Play On…"
 msgstr "Riproduci su…"
 
-#: src/qml/ItemDetailsPage.qml:108 src/qml/CardMenu.qml:107
+#: src/qml/ItemDetailsPage.qml:108 src/qml/CardMenu.qml:111
 #: src/qml/PlayerPage.qml:1077
 msgctxt "@info:tooltip"
 msgid "Not available while following a SyncPlay group"
 msgstr "Non disponibile mentre segui un gruppo SyncPlay"
 
-#: src/qml/ItemDetailsPage.qml:113 src/qml/CardMenu.qml:112
+#: src/qml/ItemDetailsPage.qml:113 src/qml/CardMenu.qml:116
 msgid "Play Next"
 msgstr "Riproduci dopo"
 
-#: src/qml/ItemDetailsPage.qml:122 src/qml/CardMenu.qml:121
+#: src/qml/ItemDetailsPage.qml:122 src/qml/CardMenu.qml:125
 msgid "Add to Queue"
 msgstr "Aggiungi alla coda"
 
@@ -1129,17 +1137,17 @@ msgid "Add to Playlist…"
 msgstr "Aggiungi alla scaletta…"
 
 #: src/qml/ItemDetailsPage.qml:146 src/qml/DownloadsPage.qml:413
-#: src/qml/CardMenu.qml:154
+#: src/qml/CardMenu.qml:158
 msgid "Delete Download…"
 msgstr "Elimina download…"
 
 #: src/qml/ItemDetailsPage.qml:146 src/qml/DownloadsPage.qml:405
-#: src/qml/CardMenu.qml:146
+#: src/qml/CardMenu.qml:150
 msgid "Cancel Download"
 msgstr "Annulla download"
 
 #: src/qml/ItemDetailsPage.qml:146 src/qml/SubtitleSearchDialog.qml:185
-#: src/qml/CardMenu.qml:138 src/qml/Main.qml:1861
+#: src/qml/CardMenu.qml:142 src/qml/Main.qml:1894
 msgid "Download"
 msgstr "Scarica"
 
@@ -1155,11 +1163,11 @@ msgstr "Download automatici…"
 msgid "Stop Automatic Downloads"
 msgstr "Ferma i download automatici"
 
-#: src/qml/ItemDetailsPage.qml:193 src/qml/CardMenu.qml:166
+#: src/qml/ItemDetailsPage.qml:193 src/qml/CardMenu.qml:170
 msgid "Remove from Favorites"
 msgstr "Rimuovi dai preferiti"
 
-#: src/qml/ItemDetailsPage.qml:193 src/qml/CardMenu.qml:166
+#: src/qml/ItemDetailsPage.qml:193 src/qml/CardMenu.qml:170
 msgid "Add to Favorites"
 msgstr "Aggiungi ai preferiti"
 
@@ -1197,11 +1205,12 @@ msgstr "Compositore"
 msgid "Ends at %1"
 msgstr "Termina alle %1"
 
-#: src/qml/ItemDetailsPage.qml:249
+#: src/qml/ItemDetailsPage.qml:249 src/qml/CardMenu.qml:179
 msgid "Mark as Unwatched"
 msgstr "Segna come non visto"
 
 #: src/qml/ItemDetailsPage.qml:249 src/qml/DownloadsPage.qml:516
+#: src/qml/MediaCard.qml:375 src/qml/CardMenu.qml:179
 msgid "Mark as Watched"
 msgstr "Segna come visto"
 
@@ -1216,7 +1225,7 @@ msgstr ""
 "Impossibile caricare questo elemento: controlla la connessione al server e "
 "riprova"
 
-#: src/qml/ItemDetailsPage.qml:413 src/qml/Main.qml:1792
+#: src/qml/ItemDetailsPage.qml:413 src/qml/Main.qml:1795
 msgid "Could not update Favorites. Check the connection and try again"
 msgstr "Impossibile aggiornare i preferiti. Controlla la connessione e riprova"
 
@@ -1265,14 +1274,14 @@ msgid "%1%"
 msgstr "%1%"
 
 #: src/qml/ItemDetailsPage.qml:704 src/qml/ItemListRow.qml:37
-#: src/qml/MediaCard.qml:58
+#: src/qml/MediaCard.qml:60
 msgid "%1 season"
 msgid_plural "%1 seasons"
 msgstr[0] "%1 stagione"
 msgstr[1] "%1 stagioni"
 
 #: src/qml/ItemDetailsPage.qml:713 src/qml/LibraryPage.qml:553
-#: src/qml/ItemListRow.qml:37 src/qml/MediaCard.qml:58
+#: src/qml/ItemListRow.qml:37 src/qml/MediaCard.qml:60
 msgid "%1 episode"
 msgid_plural "%1 episodes"
 msgstr[0] "%1 episodio"
@@ -1378,37 +1387,39 @@ msgstr "Questa stagione non ha episodi"
 msgid "Some episodes could not be loaded"
 msgstr "Alcuni episodi non sono stati caricati"
 
-#: src/qml/CastDialog.qml:24
+#: src/qml/CastDialog.qml:28
 msgctxt "@title:window"
 msgid "Play On"
 msgstr "Riproduci su"
 
-#: src/qml/CastDialog.qml:75
-msgctxt "@item:inlistbox the local player"
-msgid "This Computer"
-msgstr "Questo computer"
-
-#: src/qml/CastDialog.qml:148
-msgctxt "@info:status"
-msgid "Searching for devices…"
-msgstr "Ricerca dei dispositivi…"
-
-#: src/qml/CastDialog.qml:164 src/qml/CastDialog.qml:178
+#: src/qml/CastDialog.qml:37
 msgctxt "@action:button"
 msgid "Search Again"
 msgstr "Cerca di nuovo"
 
-#: src/qml/CastDialog.qml:175
+#: src/qml/CastDialog.qml:55 src/qml/CastDialog.qml:179
+msgctxt "@info:status"
+msgid "Searching for devices…"
+msgstr "Ricerca dei dispositivi…"
+
+#: src/qml/CastDialog.qml:130
+msgctxt "@item:inlistbox the local player"
+msgid "This Computer"
+msgstr "Questo computer"
+
+#: src/qml/CastDialog.qml:191
 msgctxt "@info:placeholder"
 msgid "No devices found"
 msgstr "Nessun dispositivo trovato"
 
-#: src/qml/CastDialog.qml:176
+#: src/qml/CastDialog.qml:192
 msgctxt "@info:placeholder"
 msgid ""
 "TVs and players that accept video over DLNA appear here when they are on "
 "this network."
-msgstr "Le TV e i lettori che accettano video tramite DLNA compaiono qui quando sono su questa rete."
+msgstr ""
+"Le TV e i lettori che accettano video tramite DLNA compaiono qui quando sono "
+"su questa rete."
 
 #: src/qml/LibraryPage.qml:33 src/qml/SearchPage.qml:150
 msgid "Movies"
@@ -2268,7 +2279,7 @@ msgid "%1 of %2"
 msgstr "%1 di %2"
 
 #: src/qml/DownloadsPage.qml:152 src/qml/DownloadsPage.qml:157
-#: src/qml/Main.qml:1884 src/qml/Main.qml:1890
+#: src/qml/Main.qml:1917 src/qml/Main.qml:1923
 msgid "Delete Download"
 msgstr "Elimina download"
 
@@ -2276,7 +2287,7 @@ msgstr "Elimina download"
 msgid "Delete %1? The file stays on the server"
 msgstr "Eliminare %1? Il file resta sul server"
 
-#: src/qml/DownloadsPage.qml:172 src/qml/Main.qml:1903
+#: src/qml/DownloadsPage.qml:172 src/qml/Main.qml:1936
 msgid "Delete this download? The file stays on the server"
 msgstr "Eliminare questo download? Il file resta sul server"
 
@@ -2310,7 +2321,7 @@ msgid "Pause %1"
 msgstr "Pausa %1"
 
 #: src/qml/DownloadsPage.qml:380 src/qml/ItemListRow.qml:221
-#: src/qml/MediaCard.qml:459 src/qml/PlayerPage.qml:1295
+#: src/qml/MediaCard.qml:538 src/qml/PlayerPage.qml:1295
 msgid "More Actions"
 msgstr "Altre azioni"
 
@@ -2779,82 +2790,87 @@ msgstr "Episodio %1"
 msgid "No item matches the search or the selected filters"
 msgstr "Nessun elemento corrisponde alla ricerca o ai filtri selezionati"
 
-#: src/qml/ItemListRow.qml:37 src/qml/MediaCard.qml:58
+#: src/qml/ItemListRow.qml:37 src/qml/MediaCard.qml:60
 msgctxt "seasons and episodes of a series"
 msgid "%1 · %2"
 msgstr "%1 · %2"
 
-#: src/qml/ItemListRow.qml:65 src/qml/MediaCard.qml:92
+#: src/qml/ItemListRow.qml:65 src/qml/MediaCard.qml:96
 msgid "Rated %1 out of 10"
 msgstr "Valutazione %1 su 10"
 
-#: src/qml/ItemListRow.qml:67 src/qml/MediaCard.qml:94
+#: src/qml/ItemListRow.qml:67 src/qml/MediaCard.qml:98
 msgid "%1 unplayed item"
 msgid_plural "%1 unplayed items"
 msgstr[0] "%1 elemento non riprodotto"
 msgstr[1] "%1 elementi non riprodotti"
 
-#: src/qml/ItemListRow.qml:223 src/qml/MediaCard.qml:461
+#: src/qml/ItemListRow.qml:223 src/qml/MediaCard.qml:540
 msgid "More Actions for %1"
 msgstr "Altre azioni per %1"
 
-#: src/qml/MediaCard.qml:90 src/qml/MediaCard.qml:280
+#: src/qml/MediaCard.qml:94 src/qml/MediaCard.qml:284
 msgctxt "badge on a recently added item"
 msgid "New"
 msgstr "Nuovo"
 
-#: src/qml/MediaCard.qml:98
+#: src/qml/MediaCard.qml:102
 msgid "%1 minute left"
 msgid_plural "%1 minutes left"
 msgstr[0] "%1 minuto rimanente"
 msgstr[1] "%1 minuti rimanenti"
 
-#: src/qml/MediaCard.qml:262
+#: src/qml/MediaCard.qml:266
 msgid "%1 min left"
 msgid_plural "%1 min left"
 msgstr[0] "%1 min rimanente"
 msgstr[1] "%1 min rimanenti"
 
-#: src/qml/MediaCard.qml:409
+#: src/qml/MediaCard.qml:377
+msgctxt "@action:button %1 is the name of a movie or an episode"
+msgid "Mark %1 as Watched"
+msgstr "Segna %1 come visto"
+
+#: src/qml/MediaCard.qml:473
 msgid "Resume %1"
 msgstr "Riprendi %1"
 
-#: src/qml/MediaCard.qml:409
+#: src/qml/MediaCard.qml:473
 msgid "Play %1"
 msgstr "Riproduci %1"
 
-#: src/qml/CardMenu.qml:76
+#: src/qml/CardMenu.qml:80
 msgid "Open"
 msgstr "Apri"
 
-#: src/qml/CardMenu.qml:82
+#: src/qml/CardMenu.qml:86
 msgid "Go to Series"
 msgstr "Vai alla serie"
 
-#: src/qml/CardMenu.qml:92
+#: src/qml/CardMenu.qml:96
 msgid "Play from Beginning"
 msgstr "Riproduci dall'inizio"
 
-#: src/qml/CardMenu.qml:92
+#: src/qml/CardMenu.qml:96
 msgid "Play Now"
 msgstr "Riproduci ora"
 
-#: src/qml/CardMenu.qml:101
+#: src/qml/CardMenu.qml:105
 msgctxt "@action:inmenu"
 msgid "Play On…"
 msgstr "Riproduci su…"
 
-#: src/qml/CardMenu.qml:130
+#: src/qml/CardMenu.qml:134
 msgctxt "@action:inmenu"
 msgid "Add to Playlist…"
 msgstr "Aggiungi alla scaletta…"
 
-#: src/qml/CardMenu.qml:178
+#: src/qml/CardMenu.qml:191
 msgctxt "@action:inmenu"
 msgid "Rename…"
 msgstr "Rinomina…"
 
-#: src/qml/CardMenu.qml:187
+#: src/qml/CardMenu.qml:200
 msgctxt "@action:inmenu"
 msgid "Delete…"
 msgstr "Elimina…"
@@ -3070,65 +3086,67 @@ msgstr ""
 "Impossibile aggiungere questo elemento alla coda del gruppo SyncPlay: "
 "controlla la connessione e riprova"
 
-#: src/qml/Main.qml:1081
+#: src/qml/Main.qml:1083
 msgid "The server does not allow downloads for this user"
 msgstr "Il server non consente download per questo utente"
 
-#: src/qml/Main.qml:1083
+#: src/qml/Main.qml:1085
 msgid "The item is no longer on the server"
 msgstr "L'elemento non è più sul server"
 
-#: src/qml/Main.qml:1085
+#: src/qml/Main.qml:1087
 msgid "This item cannot be downloaded"
 msgstr "Impossibile scaricare questo elemento"
 
-#: src/qml/Main.qml:1087
+#: src/qml/Main.qml:1089
 msgid "Could not reach the server"
 msgstr "Impossibile raggiungere il server"
 
-#: src/qml/Main.qml:1089
+#: src/qml/Main.qml:1091
 msgid "The download could not be queued"
 msgstr "Impossibile mettere il download in coda"
 
-#: src/qml/Main.qml:1091
+#: src/qml/Main.qml:1093
 msgid "The download could not be started"
 msgstr "Impossibile avviare il download"
 
-#: src/qml/Main.qml:1111
+#: src/qml/Main.qml:1113
 msgctxt "@info %1 is a device name"
 msgid "Playback was stopped on %1"
 msgstr "La riproduzione è stata interrotta su %1"
 
-#: src/qml/Main.qml:1121
+#: src/qml/Main.qml:1123
 msgid "Download queued"
 msgstr "Download in coda"
 
-#: src/qml/Main.qml:1121
+#: src/qml/Main.qml:1123
 msgid "Show Downloads"
 msgstr "Mostra i download"
 
-#: src/qml/Main.qml:1124
+#: src/qml/Main.qml:1126
 msgid "Another export is still running. Try again when it ends"
 msgstr "Un'altra esportazione è ancora in corso. Riprova quando è terminata"
 
-#: src/qml/Main.qml:1127
+#: src/qml/Main.qml:1129
 msgid "Exported to the chosen folder"
 msgstr "Esportato nella cartella scelta"
 
-#: src/qml/Main.qml:1127
+#: src/qml/Main.qml:1129
 msgid "Could not export the download. Choose another folder and try again"
 msgstr "Impossibile esportare il download. Scegli un'altra cartella e riprova"
 
-#: src/qml/Main.qml:1493
+#: src/qml/Main.qml:1496
 msgid "Could not start playback"
 msgstr "Impossibile avviare la riproduzione"
 
-#: src/qml/Main.qml:1493
+#: src/qml/Main.qml:1496
 msgctxt "@info %1 is a device name"
 msgid "Could not start playback on %1: open Play On again to search for it"
-msgstr "Impossibile avviare la riproduzione su %1: apri di nuovo Riproduci su… per cercarlo"
+msgstr ""
+"Impossibile avviare la riproduzione su %1: apri di nuovo Riproduci su… per "
+"cercarlo"
 
-#: src/qml/Main.qml:1586
+#: src/qml/Main.qml:1589
 msgid ""
 "The queue holds the first %1 item of the playlist: this entry is not among "
 "them"
@@ -3141,42 +3159,65 @@ msgstr[1] ""
 "La coda contiene solo i primi %1 elementi della scaletta: questa voce non è "
 "compresa"
 
-#: src/qml/Main.qml:1590
+#: src/qml/Main.qml:1593
 msgid "Only the first %1 item went into the queue"
 msgid_plural "Only the first %1 items went into the queue"
 msgstr[0] "Solo %1 elemento è stato aggiunto alla coda"
 msgstr[1] "Solo %1 elementi sono stati aggiunti alla coda"
 
-#: src/qml/Main.qml:1590
+#: src/qml/Main.qml:1593
 msgid "The queue now holds the playlist"
 msgstr "La coda contiene ora la scaletta"
 
-#: src/qml/Main.qml:1592 src/qml/Main.qml:1707
+#: src/qml/Main.qml:1595 src/qml/Main.qml:1710
 msgctxt "@action:button takes the queue back"
 msgid "Undo"
 msgstr "Annulla"
 
-#: src/qml/Main.qml:1707
+#: src/qml/Main.qml:1710
 msgid "Another device replaced the queue"
 msgstr "Un altro dispositivo ha sostituito la coda"
 
-#: src/qml/Main.qml:1800
+#: src/qml/Main.qml:1799
+msgid "Could not change the watched state. Check the connection and try again"
+msgstr ""
+"Impossibile aggiornare lo stato di visione. Controlla la connessione e "
+"riprova"
+
+#: src/qml/Main.qml:1807
+msgid "Marked as watched"
+msgstr "Segnato come visto"
+
+#: src/qml/Main.qml:1807
+msgctxt "@action:button"
+msgid "Undo"
+msgstr "Annulla"
+
+#: src/qml/Main.qml:1809 src/qml/Main.qml:1822
+msgid ""
+"Could not change the watched state: another change to this item is still "
+"being saved. Try again in a moment"
+msgstr ""
+"Impossibile aggiornare lo stato di visione: un'altra modifica a questo "
+"elemento è ancora in salvataggio. Riprova tra poco"
+
+#: src/qml/Main.qml:1833
 msgid "The queue is full: some items were left out, remove some to add more"
 msgstr ""
 "La coda è piena: alcuni elementi sono stati esclusi, rimuovine alcuni per "
 "aggiungerne altri"
 
-#: src/qml/Main.qml:1800
+#: src/qml/Main.qml:1833
 msgid "%1 item added to the queue"
 msgid_plural "%1 items added to the queue"
 msgstr[0] "%1 elemento aggiunto alla coda"
 msgstr[1] "%1 elementi aggiunti alla coda"
 
-#: src/qml/Main.qml:1803
+#: src/qml/Main.qml:1836
 msgid "There is nothing to play in this item"
 msgstr "Non c'è nulla da riprodurre in questo elemento"
 
-#: src/qml/Main.qml:1806
+#: src/qml/Main.qml:1839
 msgid ""
 "The queue could not be saved: check the free space and the permissions of "
 "the profile folder. It lasts until Kinefin closes"
@@ -3184,7 +3225,7 @@ msgstr ""
 "Impossibile salvare la coda: controlla lo spazio libero e i permessi della "
 "cartella del profilo. Resta fino alla chiusura di Kinefin"
 
-#: src/qml/Main.qml:1809
+#: src/qml/Main.qml:1842
 msgid ""
 "Could not add this to the queue: check the connection to the server and try "
 "again"
@@ -3192,12 +3233,12 @@ msgstr ""
 "Impossibile aggiungere questo elemento alla coda: controlla la connessione "
 "al server e riprova"
 
-#: src/qml/Main.qml:1855
+#: src/qml/Main.qml:1888
 msgctxt "@title:window"
 msgid "Download Over Metered Network"
 msgstr "Download su rete a consumo"
 
-#: src/qml/Main.qml:1874
+#: src/qml/Main.qml:1907
 msgid "This network may charge for data. Download this item anyway?"
 msgstr ""
 "Questa rete potrebbe essere a consumo. Scaricare comunque questo elemento?"

@@ -20,6 +20,8 @@ Controls.ItemDelegate {
     required property int year
     required property url imageUrl
     required property bool played
+    // The saved position in ticks, 0 without one: the Undo of Mark as Watched puts it back
+    required property real resumeTicks
     required property int unplayedCount
     required property real playedPercentage
     required property bool favorite
@@ -72,7 +74,7 @@ Controls.ItemDelegate {
 
     // Opens the card menu of the window: at the given point of the row, below it when none
     function openMenu(x, y) {
-        Window.window?.openCardMenu?.(row, itemId, type, seriesId, x ?? 0, y ?? row.height, -1, favorite);
+        Window.window?.openCardMenu?.(row, itemId, type, seriesId, x ?? 0, y ?? row.height, -1, favorite, played);
     }
 
     // A click makes this row the current one and gives its list the focus, so the focus comes back to this row after Back

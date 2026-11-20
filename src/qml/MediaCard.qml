@@ -45,6 +45,8 @@ Controls.ItemDelegate {
     property real imageAspect: 0
     // A playable card of Continue Watching: a Play button shows over the poster while the mouse is over the card, and the card menu has the same action
     property bool quickPlay: false
+    // Continue Watching: a button in the poster's corner, shown with the Play button, marks the item watched and so takes it off the row; the card menu has the same action
+    property bool quickMarkWatched: false
     property bool fitImage: false
     property bool showTitle: true
     property bool showYear: true
@@ -67,14 +69,16 @@ Controls.ItemDelegate {
     // The kinds the card menu plays: keep the two lists in step
     readonly property bool playable: ["Movie", "Episode", "Video"].indexOf(type) >= 0
     readonly property bool quickPlayEnabled: quickPlay && loaded && playable
+    readonly property bool quickMarkWatchedEnabled: quickMarkWatched && loaded && playable && !played
     // Asks the owner to start the item, from its saved position when it has one
     signal quickPlayRequested
+    signal markWatchedRequested
 
     // Opens the card menu of the window: at the given point of the card, below it when none
     function openMenu(x, y) {
         if (!card.hasMenu)
             return;
-        Window.window?.openCardMenu?.(card, itemId, type, seriesId, x ?? 0, y ?? card.height, card.quickPlayEnabled ? resumeTicks : -1, favorite);
+        Window.window?.openCardMenu?.(card, itemId, type, seriesId, x ?? 0, y ?? card.height, card.quickPlayEnabled ? resumeTicks : -1, favorite, played);
     }
 
     // The description lists only what applies to the item, and stays empty for a placeholder row
@@ -103,7 +107,7 @@ Controls.ItemDelegate {
     HoverHandler {
         id: cardHover
         objectName: "cardHover"
-        enabled: card.quickPlayEnabled
+        enabled: card.quickPlayEnabled || card.quickMarkWatchedEnabled
         acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
     }
 
@@ -348,6 +352,66 @@ Controls.ItemDelegate {
                 }
             }
 
+            // The Mark as Watched button of a Continue Watching card, in the corner where the watched mark shows, with the Play button while the mouse is over the card
+            Loader {
+                anchors {
+                    top: parent.top
+                    right: parent.right
+                    margins: Kirigami.Units.smallSpacing
+                }
+                width: Kirigami.Units.iconSizes.medium
+                height: width
+                active: card.quickMarkWatchedEnabled
+                sourceComponent: Controls.RoundButton {
+                    id: markWatchedButton
+                    objectName: "cardMarkWatched"
+                    opacity: cardHover.hovered ? 1 : 0
+                    visible: opacity > 0
+                    hoverEnabled: true
+                    focusPolicy: Qt.NoFocus
+                    display: Controls.AbstractButton.IconOnly
+                    icon.name: "checkmark-symbolic"
+                    icon.color: "white"
+                    text: i18n("Mark as Watched")
+                    // The card name is plain server text
+                    Accessible.name: i18nc("@action:button %1 is the name of a movie or an episode", "Mark %1 as Watched", card.name)
+                    Controls.ToolTip.text: text
+                    Controls.ToolTip.visible: hovered
+                    Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
+                    padding: 0
+                    background: Rectangle {
+                        radius: width / 2
+                        color: markWatchedButton.hovered || markWatchedButton.down ? Kirigami.Theme.highlightColor : Qt.rgba(0, 0, 0, 0.6)
+
+                        Behavior on color {
+                            ColorAnimation {
+                                duration: Kirigami.Units.shortDuration
+                            }
+                        }
+                    }
+                    contentItem: Item {
+                        Kirigami.Icon {
+                            x: Math.round((parent.width - width) / 2)
+                            y: Math.round((parent.height - height) / 2)
+                            width: Math.round(markWatchedButton.width * 0.6)
+                            height: width
+                            source: markWatchedButton.icon.name
+                            isMask: true
+                            color: markWatchedButton.icon.color
+                        }
+                    }
+
+                    Behavior on opacity {
+                        NumberAnimation {
+                            duration: Kirigami.Units.longDuration
+                            easing.type: Easing.InOutQuad
+                        }
+                    }
+
+                    onClicked: card.markWatchedRequested()
+                }
+            }
+
             // Only a Continue Watching card has the button
             Loader {
                 readonly property real diameter: Math.round(Math.min(parent.width, parent.height) * 0.4)
@@ -451,11 +515,28 @@ Controls.ItemDelegate {
                 Layout.preferredHeight: nameLabel.implicitHeight
                 focusPolicy: Qt.NoFocus
                 padding: 0
+                leftPadding: 0
+                rightPadding: 0
+                topPadding: 0
+                bottomPadding: 0
                 visible: card.loaded && card.hasMenu
                 display: Controls.AbstractButton.IconOnly
                 icon.name: "overflow-menu"
                 icon.width: Kirigami.Units.iconSizes.small
                 icon.height: Kirigami.Units.iconSizes.small
+                // The glyph drawn here, in the middle of the button on whole pixels: in a button this small the style's own margins push its icon off centre
+                contentItem: Item {
+                    Kirigami.Icon {
+                        objectName: "cardMenuGlyph"
+                        x: Math.round((parent.width - width) / 2)
+                        y: Math.round((parent.height - height) / 2)
+                        width: menuButton.icon.width
+                        height: menuButton.icon.height
+                        source: menuButton.icon.name
+                        isMask: true
+                        color: Kirigami.Theme.textColor
+                    }
+                }
                 text: i18n("More Actions")
                 // The tooltip keeps the short text: a screen reader hears which card the button belongs to
                 Accessible.name: i18n("More Actions for %1", card.name)
