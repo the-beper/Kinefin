@@ -255,14 +255,13 @@ class ConnectionController : public QObject {
     Q_INVOKABLE bool setFavorite(const QString &itemId, bool favorite);
     // Marks a video watched or unwatched for the signed-in user (the card menu and Continue Watching's button), as setFavorite does: the views follow `itemPlayedUpdated` of the client, and a failed answer to a request made here is signalled by `playedUpdateFailed`
     Q_INVOKABLE bool setPlayed(const QString &itemId, bool played);
-    // The Undo of a Mark as Watched: unwatched again, at the saved position `positionTicks` when the item had one; the same signals as setPlayed
-    Q_INVOKABLE bool undoPlayed(const QString &itemId, qint64 positionTicks);
+    // The Undo of a Mark as Watched: back at the saved position `positionTicks` when the item had one, unwatched unless `played` (a rewatch the server kept as played); the same signals as setPlayed
+    Q_INVOKABLE bool undoPlayed(const QString &itemId, qint64 positionTicks, bool played = false);
     // Asks the server for the libraries again (the Home page's retry)
     Q_INVOKABLE void reloadLibraries();
     // Removes a stored server with all its users, saved queues and browse state; disconnects first when it is the active one
     // Probe /System/Info/Public once, without a session/token. An address without a scheme (host, host:port, [ipv6]:port) is tried on https then http (see connectionCandidates) when `standardPortFallback` is set, and the reachability entry's resolvedUrl is the one that answered; one with a scheme is tried as given. A certificate error on an https candidate ends the test with its own message and never moves on to http
     Q_INVOKABLE void testServer(const QString &address, bool standardPortFallback = false);
-    Q_INVOKABLE void testSavedServers();
     // Connecting from the new-server form: the same candidates as testServer(address, true), moving to the next one only when an attempt fails at network level (refused, unreachable, timeout, a port that does not speak TLS). A certificate error stops with its own error text. The endpoint that answered is the one connected and saved; an http one goes through ConfirmInsecure as usual. Saved-server connections use connectTo() and never silently change their endpoint
     Q_INVOKABLE void connectToWithFallback(const QString &address);
     Q_INVOKABLE void removeServer(const QString &serverId);
@@ -283,6 +282,8 @@ class ConnectionController : public QObject {
     void serversChanged();
     void offlineAvailableChanged();
     void serverReachabilityChanged();
+    // A test of `address` (the saved URL, or the form's host and port) ended: `message` says what it found
+    void serverTested(const QString &address, bool reachable, const QString &message);
     void usersChanged();
     void publicUsersChanged();
     void loginUserNameChanged();

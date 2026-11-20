@@ -245,7 +245,7 @@ Kirigami.ScrollablePage {
                         quickPlay: row.kind === HomeRowsModel.ContinueWatching
                         onQuickPlayRequested: page.Window.window.playItem(itemId, resumeTicks)
                         quickMarkWatched: row.kind === HomeRowsModel.ContinueWatching
-                        onMarkWatchedRequested: page.Window.window.setItemPlayed(itemId, true, resumeTicks)
+                        onMarkWatchedRequested: page.Window.window.setItemPlayed(itemId, true, resumeTicks, played)
                         subtitle: {
                             if (episodeNumber >= 0) {
                                 const label = EpisodeLabel.label(seasonNumber, episodeNumber);

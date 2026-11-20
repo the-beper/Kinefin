@@ -491,10 +491,12 @@ void ConnectionController::setReachability(const QString &key, bool testing, boo
                             {QStringLiteral("reachable"), reachable},
                             {QStringLiteral("message"), message},
                             {QStringLiteral("resolvedUrl"), resolved.toString()}};
-    if (m_serverReachability.value(key).toMap() == state)
-        return;
-    m_serverReachability.insert(key, state);
-    Q_EMIT serverReachabilityChanged();
+    if (m_serverReachability.value(key).toMap() != state) {
+        m_serverReachability.insert(key, state);
+        Q_EMIT serverReachabilityChanged();
+    }
+    if (!testing)
+        Q_EMIT serverTested(key, reachable, message);
 }
 
 void ConnectionController::startProbeCheck(const QString &key, const QList<QUrl> &candidates,
@@ -504,7 +506,9 @@ void ConnectionController::startProbeCheck(const QString &key, const QList<QUrl>
         return;
     if (index >= candidates.size()) {
         m_probeReplies.remove(key);
-        setReachability(key, false, false, i18n("Server not reachable"));
+        setReachability(
+            key, false, false,
+            i18n("Server not reachable: check the address, the port and the network connection"));
         return;
     }
     QUrl endpoint = candidates.at(index);
@@ -571,15 +575,6 @@ void ConnectionController::testServer(const QString &address, bool standardPortF
     }
     setReachability(key, true, false, i18n("Testing connection…"));
     startProbeCheck(key, candidates, 0, generation);
-}
-
-void ConnectionController::testSavedServers()
-{
-    for (const QVariant &entry : std::as_const(m_servers)) {
-        const QString url = entry.toMap().value(QStringLiteral("url")).toString();
-        if (!m_probeReplies.contains(url))
-            testServer(url);
-    }
 }
 
 void ConnectionController::connectToWithFallback(const QString &address)
@@ -1134,13 +1129,14 @@ bool ConnectionController::setPlayed(const QString &itemId, bool played)
     return true;
 }
 
-bool ConnectionController::undoPlayed(const QString &itemId, qint64 positionTicks)
+bool ConnectionController::undoPlayed(const QString &itemId, qint64 positionTicks, bool played)
 {
     if (m_state != Authenticated)
         return false;
     // Without a resume point unwatched is all there was
-    const bool sent = positionTicks > 0 ? m_client.restoreItemProgress(itemId, positionTicks)
-                                        : m_client.setItemPlayed(itemId, false);
+    const bool sent = positionTicks > 0
+                          ? m_client.restoreItemProgress(itemId, positionTicks, played)
+                          : m_client.setItemPlayed(itemId, false);
     if (sent)
         m_cardPlayedRequests.insert(QString(itemId).remove(QLatin1Char('-')).toLower());
     return sent;

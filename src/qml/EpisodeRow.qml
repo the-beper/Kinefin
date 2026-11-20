@@ -51,7 +51,8 @@ Controls.ItemDelegate {
         const parts = [];
         if (runtimeText.length > 0)
             parts.push(runtimeText);
-        if (played)
+        // A rewatch stopped halfway is in progress, not watched, as on its card
+        if (played && !inProgress)
             parts.push(i18nc("state of an item", "Played"));
         if (favorite)
             parts.push(i18n("Favorite"));
@@ -125,7 +126,7 @@ Controls.ItemDelegate {
                 width: Kirigami.Units.iconSizes.smallMedium
                 height: width
                 radius: width / 2
-                visible: row.loaded && row.played
+                visible: row.loaded && row.played && !row.inProgress
                 color: Kirigami.Theme.highlightColor
 
                 Kirigami.Icon {

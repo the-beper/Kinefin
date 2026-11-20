@@ -1905,7 +1905,7 @@ bool JellyfinClient::setItemPlayed(const QString &itemId, bool played)
     return true;
 }
 
-bool JellyfinClient::restoreItemProgress(const QString &itemId, qint64 positionTicks)
+bool JellyfinClient::restoreItemProgress(const QString &itemId, qint64 positionTicks, bool played)
 {
     constexpr qint64 maxTicks = 24LL * 3600 * 10'000'000;
     if (!isAuthenticated() || !isValidJellyfinId(itemId) || !isValidJellyfinId(m_userId)
@@ -1922,18 +1922,18 @@ bool JellyfinClient::restoreItemProgress(const QString &itemId, qint64 positionT
     url.setQuery(query);
     QNetworkRequest request = requestFor(url, true);
     request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
-    const QJsonObject body{{QStringLiteral("Played"), false},
+    const QJsonObject body{{QStringLiteral("Played"), played},
                            {QStringLiteral("PlaybackPositionTicks"), positionTicks}};
     QNetworkReply *reply =
         m_network.post(request, QJsonDocument(body).toJson(QJsonDocument::Compact));
-    attach(reply, m_generation, [this, itemId, key](QNetworkReply *finished) {
+    attach(reply, m_generation, [this, itemId, key, played](QNetworkReply *finished) {
         m_playedPending.remove(key);
         const int status = finished->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         if (status == 401) {
             invalidateSession();
             return;
         }
-        // 12.4 answers 200 with the UserItemDataDto it saved: only that, for this item, unwatched and with a position, counts
+        // 12.4 answers 200 with the UserItemDataDto it saved: only that, for this item, in the asked watched state and with a position, counts
         QJsonObject data;
         const bool parsed = status == 200 && finished->error() == QNetworkReply::NoError
                             && parseObject(finished, &data);
@@ -1941,17 +1941,17 @@ bool JellyfinClient::restoreItemProgress(const QString &itemId, qint64 positionT
         const double position = data.value(QStringLiteral("PlaybackPositionTicks")).toDouble(-1);
         const bool valid =
             parsed && data.value(QStringLiteral("Played")).isBool()
-            && !data.value(QStringLiteral("Played")).toBool() && position > 0
+            && data.value(QStringLiteral("Played")).toBool() == played && position > 0
             && position <= maxTicks
             && (id.isUndefined()
                 || (id.isString()
                     && QString(id.toString()).remove(QLatin1Char('-')).toLower() == key));
         if (!valid) {
-            Q_EMIT itemPlayedUpdateFailed(itemId, false, status);
+            Q_EMIT itemPlayedUpdateFailed(itemId, played, status);
             return;
         }
         const double percentage = data.value(QStringLiteral("PlayedPercentage")).toDouble(0);
-        Q_EMIT itemPlayedUpdated(itemId, false);
+        Q_EMIT itemPlayedUpdated(itemId, played);
         Q_EMIT itemProgressUpdated(itemId, qint64(position),
                                    percentage >= 0 && percentage <= 100 ? percentage : 0);
     });

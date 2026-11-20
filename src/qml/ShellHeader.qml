@@ -134,8 +134,12 @@ Item {
         tabs[(current + step + tabs.length) % tabs.length].trigger();
     }
 
-    // The tabs in their order; the Ctrl+N shortcuts follow the position among the visible ones
-    readonly property var tabActions: [homeAction, moviesAction, tvShowsAction, downloadsAction, favoritesTabAction, playlistsTabAction]
+    // The tabs in their order: the fixed sections, then the library types after a divider; the Ctrl+N shortcuts follow the position among the visible ones
+    readonly property var fixedTabActions: [homeAction, downloadsAction, favoritesTabAction, playlistsTabAction]
+    readonly property var libraryTabActions: [moviesAction, tvShowsAction]
+    readonly property var tabActions: fixedTabActions.concat(libraryTabActions)
+    // The divider stands only between two groups that both show a tab
+    readonly property bool tabGroupsDivided: fixedTabActions.some(action => action.visible) && libraryTabActions.some(action => action.visible)
     function tabShortcut(action) {
         let position = 0;
         for (const candidate of tabActions) {
@@ -170,6 +174,9 @@ Item {
                 width += tabSpacing + Math.ceil(tabFontMetrics.advanceWidth(action.text));
             ++count;
         }
+        // The divider is one more item of the row, with its own margins
+        if (tabGroupsDivided)
+            width += tabSpacing + tabsDivider.implicitWidth + tabsDivider.Layout.leftMargin + tabsDivider.Layout.rightMargin;
         return width + Math.max(0, count - 1) * tabSpacing;
     }
     function barWidth(labelled) {
@@ -243,9 +250,29 @@ Item {
         visible: root.tabActions.filter(action => action.visible).length > 1
 
         Repeater {
-            model: root.tabActions
+            model: root.fixedTabActions
+            delegate: tabButton
+        }
 
-            delegate: Kirigami.NavigationTabButton {
+        Kirigami.Separator {
+            id: tabsDivider
+            objectName: "headerTabsDivider"
+            visible: root.tabGroupsDivided
+            Layout.alignment: Qt.AlignVCenter
+            Layout.preferredHeight: Kirigami.Units.gridUnit
+            Layout.leftMargin: Kirigami.Units.smallSpacing
+            Layout.rightMargin: Kirigami.Units.smallSpacing
+        }
+
+        Repeater {
+            model: root.libraryTabActions
+            delegate: tabButton
+        }
+
+        Component {
+            id: tabButton
+
+            Kirigami.NavigationTabButton {
                 id: tab
 
                 required property Kirigami.Action modelData
@@ -346,8 +373,8 @@ Item {
             Layout.preferredWidth: Math.min(root.searchMaximumWidth, Math.max(root.searchMinimumWidth,
                 root.width - root.tabsStart - root.tabsWidth(root.labelledTabs) - Kirigami.Units.smallSpacing * 2 - rightCluster.spacing - root.rightFixedWidth))
             Layout.alignment: Qt.AlignVCenter
-            visible: !root.compact
-            enabled: root.signedIn
+            // Before signing in (servers, sign-in, user picker) there is nothing to search and no queue: the menu alone stays
+            visible: !root.compact && root.signedIn
             // The shell owns Ctrl+F: the field's own sequence would make it ambiguous
             focusSequences: []
             maximumLength: 128
@@ -388,8 +415,7 @@ Item {
             objectName: "headerSearchButton"
 
             Layout.alignment: Qt.AlignVCenter
-            visible: root.compact
-            enabled: root.signedIn
+            visible: root.compact && root.signedIn
             text: i18nc("@action:button", "Search")
             icon.name: "search"
             display: QQC2.AbstractButton.IconOnly
@@ -407,7 +433,7 @@ Item {
             readonly property int queued: root.signedIn ? root.connection.queue.count : 0
 
             Layout.alignment: Qt.AlignVCenter
-            visible: !root.compact
+            visible: !root.compact && root.signedIn
             text: i18nc("@action:button", "Queue")
             // Not the icon of the Playlists tab
             icon.name: "media-track-queue-amarok"
@@ -416,7 +442,6 @@ Item {
             QQC2.ToolTip.visible: hovered || visualFocus
             QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
             Accessible.name: QQC2.ToolTip.text
-            enabled: root.signedIn
             down: shell.currentSection === "queue"
             onClicked: shell.openSection("queuePage", "QueuePage.qml", { connection: shell.connection })
 
@@ -452,7 +477,7 @@ Item {
 
             Layout.alignment: Qt.AlignVCenter
             Layout.preferredHeight: Kirigami.Units.gridUnit
-            visible: !root.compact
+            visible: !root.compact && root.signedIn
         }
 
         // The one menu: the avatar of the user marks the account, the arrow the menu; signed out it is the plain menu icon

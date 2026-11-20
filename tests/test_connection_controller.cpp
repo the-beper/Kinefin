@@ -396,7 +396,8 @@ class TestConnectionController : public QObject {
                      Kinefin::JellyfinSocketClient::State::Disconnected);
     }
 
-    void anonymousServerTestsAreOneShotPerVisitAndSendNoCredentials()
+    // A test runs only when asked, sends no credentials and says once that it ended
+    void aServerTestSendsNoCredentialsAndReportsItsEnd()
     {
         FakeJellyfin server;
         QVERIFY(server.listen());
@@ -406,7 +407,8 @@ class TestConnectionController : public QObject {
         const QString url =
             controller->servers().constFirst().toMap().value(QStringLiteral("url")).toString();
         const int previous = server.publicInfoRequests;
-        controller->testSavedServers();
+        QSignalSpy tested(controller.get(), &Kinefin::ConnectionController::serverTested);
+        controller->testServer(url);
         QTRY_VERIFY(controller->serverReachability()
                         .value(url)
                         .toMap()
@@ -414,8 +416,12 @@ class TestConnectionController : public QObject {
                         .toBool());
         QCOMPARE(server.publicInfoRequests, previous + 1);
         QVERIFY(server.lastPublicInfoAuth.isEmpty());
-        controller->testSavedServers();
+        QCOMPARE(tested.size(), 1);
+        QCOMPARE(tested.constFirst().at(0).toString(), url);
+        QVERIFY(tested.constFirst().at(1).toBool());
+        controller->testServer(url);
         QTRY_COMPARE(server.publicInfoRequests, previous + 2);
+        QTRY_COMPARE(tested.size(), 2);
         QVERIFY(!controller->serverReachability()
                      .value(url)
                      .toMap()

@@ -3,6 +3,7 @@
 // The player controller without a renderer: the engine is not attached, so an item stays loading and nothing is negotiated, but the item's own request, the playlist of a series and the end-of-file decision all run against the fake server; the tests of a repeat after a real end start the engine on its own (vo=null, ao=null) to give it the position and the duration of a played file
 #include "FakeJellyfin.h"
 #include "FakeRenderer.h"
+#include "MpvProbe.h"
 #include "WavClip.h"
 
 #include "models/PlayQueue.h"
@@ -18,6 +19,7 @@
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QtTest/QtTest>
+#include <mpv/client.h>
 #include <optional>
 
 using Kinefin::PlayerController;
@@ -31,6 +33,46 @@ const QString kThirdMovie = QStringLiteral("1f2e3d4c5b6a79887766a5b4c3d2e1f0");
 const QString kSeries = QStringLiteral("aa11bb22cc33dd44ee55ff6677889900");
 constexpr qint64 kSecond = 10'000'000;
 constexpr int kEpisodeChannel = 4096;
+
+// A video-only MPEG transport stream of `seconds` with a keyframe every 3 s, as Jellyfin's HLS transcodes have, made by an idle libmpv from the lavfi source with FFmpeg's own MPEG-2 encoder (the build image has no libx264)
+QString makeTransportStream(const QTemporaryDir &dir, int seconds)
+{
+    const QString path = dir.filePath(QStringLiteral("stream.ts"));
+    mpv_handle *handle = mpv_create();
+    if (!handle)
+        return {};
+    mpv_set_option_string(handle, "config", "no");
+    mpv_set_option_string(handle, "terminal", "no");
+    mpv_set_option_string(handle, "msg-level", "all=no");
+    mpv_set_option_string(handle, "o", path.toUtf8().constData());
+    mpv_set_option_string(handle, "of", "mpegts");
+    mpv_set_option_string(handle, "ovc", "mpeg2video");
+    mpv_set_option_string(handle, "ovcopts", "b=400k,g=75");
+    if (mpv_initialize(handle) < 0) {
+        mpv_terminate_destroy(handle);
+        return {};
+    }
+    const QByteArray command =
+        QStringLiteral("loadfile \"av://lavfi:testsrc2=duration=%1:size=320x240:rate=25\"")
+            .arg(seconds)
+            .toUtf8();
+    mpv_command_string(handle, command.constData());
+    QElapsedTimer timer;
+    timer.start();
+    bool ok = false;
+    while (timer.elapsed() < 60000) {
+        mpv_event *event = mpv_wait_event(handle, 0.1);
+        if (!event)
+            break;
+        if (event->event_id == MPV_EVENT_END_FILE) {
+            auto *end = static_cast<mpv_event_end_file *>(event->data);
+            ok = end && end->reason == MPV_END_FILE_REASON_EOF;
+            break;
+        }
+    }
+    mpv_terminate_destroy(handle);
+    return ok ? path : QString();
+}
 
 // The ids the fake server generates for its episodes
 QString episodeId(int number)
@@ -2253,7 +2295,8 @@ class TestPlayerController : public QObject {
         QCOMPARE(chain.controller.clipLine(), QStringLiteral("Set a start and an end"));
     }
 
-    void clipRefusesATranscode()
+    // A transcode's clip comes from mpv's cache: marks it does not hold refuse it. A local file plays uncached, so its seekable range never spans the four seconds of the marks
+    void clipOfATranscodeNeedsItsMarksCached()
     {
         Chain chain;
         QVERIFY(chain.ok);
@@ -2273,9 +2316,110 @@ class TestPlayerController : public QObject {
         chain.playsAt(5.0, 30);
         chain.controller.markClipEnd();
         QCOMPARE(chain.controller.clipReason(),
-                 QStringLiteral("Clips cannot be saved while the server transcodes"));
+                 QStringLiteral("The start of the clip is no longer buffered"));
         QVERIFY(!chain.controller.clipVideoEnabled());
         QVERIFY(!chain.controller.clipGifEnabled());
+    }
+
+    // The ids of a cache dump: only the selected streams, numbered per kind in their order, then the subtitle files the exporter adds
+    void dumpTrackIdsFollowTheSelectedStreams()
+    {
+        const auto track = [](const QString &type, int id, bool selected,
+                              const QString &file = {}) {
+            QVariantMap map{{QStringLiteral("type"), type},
+                            {QStringLiteral("id"), id},
+                            {QStringLiteral("selected"), selected},
+                            {QStringLiteral("external"), !file.isEmpty()}};
+            if (!file.isEmpty())
+                map.insert(QStringLiteral("external-filename"), file);
+            return QVariant(map);
+        };
+        const QStringList files{QStringLiteral("/p/a.srt"), QStringLiteral("/p/b.srt")};
+        // A remux with two audio tracks, the second playing, two embedded subtitles, the second shown, and two files, the second as the secondary subtitle
+        const QVariantList tracks{track(QStringLiteral("video"), 1, true),
+                                  track(QStringLiteral("audio"), 1, false),
+                                  track(QStringLiteral("audio"), 2, true),
+                                  track(QStringLiteral("sub"), 1, false),
+                                  track(QStringLiteral("sub"), 2, true),
+                                  track(QStringLiteral("sub"), 3, false, files.at(0)),
+                                  track(QStringLiteral("sub"), 4, true, files.at(1))};
+        Kinefin::DumpTrackIds ids = Kinefin::dumpTrackIds(tracks, 2, 2, 4, files);
+        QCOMPARE(ids.audio, 1);
+        QCOMPARE(ids.subtitle, 1);
+        QCOMPARE(ids.secondarySubtitle, 3);
+        // A transcode: one audio stream, no embedded subtitle, a file as the primary and nothing as the secondary; no audio chosen gives none
+        const QVariantList transcode{track(QStringLiteral("video"), 1, true),
+                                     track(QStringLiteral("audio"), 1, true),
+                                     track(QStringLiteral("sub"), 1, false, files.at(0)),
+                                     track(QStringLiteral("sub"), 2, true, files.at(1))};
+        ids = Kinefin::dumpTrackIds(transcode, 1, 2, 0, files);
+        QCOMPARE(ids.audio, 1);
+        QCOMPARE(ids.subtitle, 2);
+        QCOMPARE(ids.secondarySubtitle, 0);
+        QCOMPARE(Kinefin::dumpTrackIds(transcode, 0, 0, 0, files).audio, 0);
+        // A file the exporter does not add cannot be shown
+        ids = Kinefin::dumpTrackIds(tracks, 2, 3, 0, {files.at(1)});
+        QCOMPARE(ids.subtitle, 0);
+    }
+
+    // An export the app stopped during leaves its staging file, `.part` and cache dump: the profile's next controller removes them
+    void clipLeftoversGoAtStart()
+    {
+        const QString clips = m_data.filePath(QStringLiteral("kinefin/profiles/leftovers/clips"));
+        QVERIFY(QDir().mkpath(clips));
+        for (const QString &name :
+             {QStringLiteral("clip-1.webm.part"), QStringLiteral("clip-1-cache.ts")}) {
+            QFile file(clips + QLatin1Char('/') + name);
+            QVERIFY(file.open(QIODevice::WriteOnly));
+        }
+        Chain chain({}, QStringLiteral("leftovers"));
+        QVERIFY(chain.ok);
+        QCOMPARE(QDir(clips).entryList(QDir::Files), QStringList());
+    }
+
+    // The clip of a transcode is encoded from a dump of mpv's cache, which starts at the keyframe before the start mark: the clip lasts what the marks span, and neither the dump nor the staging file stays
+    void clipOfATranscodeIsEncodedFromTheCache()
+    {
+        if (!Kinefin::ClipExporter::hasEncoder(QStringLiteral("mpeg2video")))
+            QSKIP("no MPEG-2 encoder to make a transport stream");
+        Chain chain({}, QStringLiteral("streamclip"));
+        QVERIFY(chain.ok);
+        const QString stream = makeTransportStream(chain.dir, 12);
+        QVERIFY(!stream.isEmpty());
+        QVERIFY(chain.engine()->init(
+            {QStringLiteral("vo=null"), QStringLiteral("ao=null"), QStringLiteral("cache=yes")}));
+        QVERIFY(chain.controller.playItem(kMovie, 0));
+        Kinefin::PlaybackSource source;
+        source.itemId = kMovie;
+        source.mediaSourceId = QStringLiteral("c1b2a3d4e5f6071829304a5b6c7d8e9f");
+        source.playSessionId = QStringLiteral("s1");
+        source.method = Kinefin::PlaybackSource::Method::Transcode;
+        source.url = QUrl::fromLocalFile(stream);
+        Q_EMIT chain.client.playbackInfoReady(source);
+        QTRY_VERIFY(chain.controller.canSeek());
+        // The keyframes are at 3 and 6 s: the dump starts at 3, and the clip at 1.5 s into it
+        chain.playsAt(4.5, 12);
+        chain.controller.markClipStart();
+        chain.playsAt(8.5, 12);
+        chain.controller.markClipEnd();
+        // The cache reads the short file to its end at once
+        QTRY_VERIFY_WITH_TIMEOUT(chain.controller.clipVideoEnabled(), 10000);
+        QVERIFY(chain.controller.clipReason().isEmpty());
+        QSignalSpy saved(&chain.controller, &PlayerController::clipSaved);
+        QSignalSpy failed(&chain.controller, &PlayerController::clipSaveFailed);
+        const QString target =
+            chain.dir.filePath(Kinefin::ClipExporter::hasEncoder(QStringLiteral("libx264"))
+                                   ? QStringLiteral("clip.mp4")
+                                   : QStringLiteral("clip.webm"));
+        QVERIFY(chain.controller.saveClip(false, QUrl::fromLocalFile(target)));
+        const QDir clips(m_data.filePath(QStringLiteral("kinefin/profiles/streamclip/clips")));
+        QCOMPARE(clips.entryList({QStringLiteral("clip-*-cache.ts")}, QDir::Files).size(), 1);
+        QTRY_VERIFY_WITH_TIMEOUT(!saved.isEmpty() || !failed.isEmpty(), 60000);
+        QCOMPARE(saved.size(), 1);
+        // From A − A′ to B − A′ of the dump: a start left at A would cut the clip short by the dump's lead
+        const double duration = MpvProbe::duration(target);
+        QVERIFY2(duration > 3.5 && duration < 4.6, qPrintable(QString::number(duration)));
+        QCOMPARE(clips.entryList(QDir::Files | QDir::Hidden), QStringList());
     }
 
     void clipRefusesHdrVideo()

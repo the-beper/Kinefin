@@ -282,6 +282,12 @@ Kirigami.Page {
         objectName: "playerVideoSlot"
         anchors.fill: parent
     }
+    // The wheel anywhere over the player steps the volume as over the speaker, a touchpad's travel added up to whole notches; the bars let it through, what scrolls (a menu, the queue) keeps it
+    VolumeWheel {
+        objectName: "playerWheel"
+        anchors.fill: parent
+        onStepped: steps => page.stepVolume(steps)
+    }
     // A cast has no picture here: the device plays it, and this says where
     ColumnLayout {
         objectName: "playerCastView"
@@ -810,7 +816,7 @@ Kirigami.Page {
                     visible: !page.player.localPlayback
                     enabled: !blockedByGroup
                     icon.name: "kinefin-cast"
-                    text: i18nc("@action:button", "Cast…")
+                    text: i18nc("@action:button", "Cast")
                     Accessible.description: blockedByGroup ? Controls.ToolTip.text : ""
                     Controls.ToolTip.text: blockedByGroup ? i18nc("@info:tooltip", "Not available while following a SyncPlay group") : text
                     Controls.ToolTip.visible: (hovered || visualFocus) && (display === Controls.AbstractButton.IconOnly || blockedByGroup)
@@ -913,6 +919,11 @@ Kirigami.Page {
                             }
                         }
                         Accessible.name: i18n("Playback position")
+                        // Above the style's own wheel handling, which would seek a tenth of the film per notch: the wheel sets the volume here as everywhere in the player
+                        VolumeWheel {
+                            anchors.fill: parent
+                            onStepped: steps => page.stepVolume(steps)
+                        }
                         // The start and the end of the marked range, even alone: the band needs both
                         Rectangle {
                             objectName: "playerClipStartMark"
@@ -1416,7 +1427,7 @@ Kirigami.Page {
         anchors.fill: parent
         acceptedButtons: Qt.AllButtons
     }
-    // The wheel over the speaker and its slider: five per notch, a touchpad's travel added up to whole notches
+    // The wheel steps the volume: five per notch, a touchpad's travel added up to whole notches
     component VolumeWheel: MouseArea {
         id: wheelArea
         signal stepped(int steps)

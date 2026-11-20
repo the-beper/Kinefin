@@ -189,8 +189,8 @@ class JellyfinClient final : public QObject {
     // writes by canonical GUID; the state changes only after a confirmed reply.
     // The endpoint requires userId on 12.4, not the legacy /Users/... route.
     bool setItemPlayed(const QString &itemId, bool played);
-    // Takes back a Mark as Watched: unwatched again at `positionTicks`, the resume point the watched write cleared (`POST /UserItems/{id}/UserData`, live-verified on 12.4). Shares the one-write-per-item rule of setItemPlayed; success emits itemPlayedUpdated(id, false) and then itemProgressUpdated, a failure itemPlayedUpdateFailed(id, false, status)
-    bool restoreItemProgress(const QString &itemId, qint64 positionTicks);
+    // Takes back a Mark as Watched: back at `positionTicks`, the resume point the watched write cleared, and watched again only when `played` (a rewatch the server kept as played) (`POST /UserItems/{id}/UserData`, live-verified on 12.4). Shares the one-write-per-item rule of setItemPlayed; success emits itemPlayedUpdated(id, played) and then itemProgressUpdated, a failure itemPlayedUpdateFailed(id, played, status)
+    bool restoreItemProgress(const QString &itemId, qint64 positionTicks, bool played = false);
     // Remote subtitle search and download through the server's provider plugin (`RemoteSearch/Subtitles`); false without the policy, an invalid id/language or a session. A 401 expires the session and emits no remote*Failed signal, because the shell signs out and closes the player
     bool searchRemoteSubtitles(const QString &itemId, const QString &language);
     // The server answers the download before its refresh lists the file, and with 204 even when it could not save it: remoteSubtitleDownloaded comes once the item has one more external subtitle stream than before, remoteSubtitleNotSaved when none showed within the wait

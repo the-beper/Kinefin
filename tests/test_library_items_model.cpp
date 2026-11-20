@@ -230,6 +230,18 @@ class TestLibraryItemsModel : public QObject {
                  (QJsonObject{{QStringLiteral("Played"), false},
                               {QStringLiteral("PlaybackPositionTicks"), double(position)}}));
         QVERIFY(f.server.userDataWrites.constFirst().route.contains(id.toLatin1()));
+        // The Undo for a rewatch stopped halfway keeps it watched, at the same resume point
+        QVERIFY(f.client.setItemPlayed(id, true));
+        QTRY_VERIFY(f.model.data(first, LibraryItemsModel::PlayedRole).toBool());
+        QVERIFY(f.client.restoreItemProgress(id, position, true));
+        QTRY_COMPARE(f.server.userDataWrites.size(), 2);
+        QCOMPARE(f.server.userDataWrites.constLast().body,
+                 (QJsonObject{{QStringLiteral("Played"), true},
+                              {QStringLiteral("PlaybackPositionTicks"), double(position)}}));
+        QTRY_COMPARE(f.model.data(first, LibraryItemsModel::PlayedPercentageRole).toReal(), 25.0);
+        QVERIFY(f.model.data(first, LibraryItemsModel::PlayedRole).toBool());
+        QVERIFY(f.client.setItemPlayed(id, false));
+        QTRY_VERIFY(!f.model.data(first, LibraryItemsModel::PlayedRole).toBool());
         // A refused write leaves the row as it was
         f.server.playedWriteStatus = 500;
         QVERIFY(f.client.setItemPlayed(id, true));

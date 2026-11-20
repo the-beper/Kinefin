@@ -243,8 +243,9 @@ Kirigami.ScrollablePage {
 
     readonly property Kirigami.Action togglePlayedAction: Kirigami.Action {
         objectName: "togglePlayedAction"
-        text: page.details.played ? i18n("Mark as Unwatched") : i18n("Mark as Watched")
-        icon.name: page.details.played ? "edit-undo" : "emblem-checked"
+        // A rewatch stopped halfway is in progress, not watched, as on its card
+        text: page.details.played && !page.details.canResume ? i18n("Mark as Unwatched") : i18n("Mark as Watched")
+        icon.name: page.details.played && !page.details.canResume ? "edit-undo" : "emblem-checked"
         visible: page.details.status === ItemDetailsModel.Ready && page.details.playable
         enabled: !page.details.playedBusy
         onTriggered: page.details.togglePlayed()
@@ -740,7 +741,7 @@ Kirigami.ScrollablePage {
                                     RowLayout {
                                         objectName: "factPlayed"
                                         height: facts.rowHeight
-                                        visible: page.details.played
+                                        visible: page.details.played && !page.details.canResume
                                         spacing: Kirigami.Units.smallSpacing
                                         Accessible.role: Accessible.StaticText
                                         Accessible.name: playedLabel.text

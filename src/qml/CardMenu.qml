@@ -28,6 +28,8 @@ Controls.Menu {
     property bool favorite: false
     // The watched state of the item the menu was opened for, and its saved position: the Undo of Mark as Watched puts it back
     property bool played: false
+    // A rewatch stopped halfway is in progress, not watched: the server keeps Played on it, and Mark as Watched is what finishes it
+    readonly property bool watched: played && positionTicks <= 0
     property real positionTicks: 0
     // The kinds the details page can mark as favorite
     readonly property bool favoritable: ["Movie", "Series", "Season", "Episode", "BoxSet", "Video"].indexOf(itemType) >= 0
@@ -176,11 +178,11 @@ Controls.Menu {
     // A video only, as on its details page: a series or season has the state of its episodes
     Controls.MenuItem {
         objectName: "cardMenuPlayed"
-        text: menu.played ? i18n("Mark as Unwatched") : i18n("Mark as Watched")
-        icon.name: menu.played ? "edit-undo" : "emblem-checked"
+        text: menu.watched ? i18n("Mark as Unwatched") : i18n("Mark as Watched")
+        icon.name: menu.watched ? "edit-undo" : "emblem-checked"
         visible: menu.playable
         height: visible ? implicitHeight : 0
-        onTriggered: menu.playedRequested(menu.itemId, !menu.played)
+        onTriggered: menu.playedRequested(menu.itemId, !menu.watched)
     }
     Controls.MenuSeparator {
         visible: menu.itemType === "Playlist"

@@ -1143,7 +1143,7 @@ Kirigami.ApplicationWindow {
         onResumeRequested: (targetId, ticks) => window.playItem(targetId, ticks)
         // A refused send means a write for the item already runs: its answer updates the card
         onFavoriteRequested: (targetId, favorite) => window.connection.setFavorite(targetId, favorite)
-        onPlayedRequested: (targetId, played) => window.setItemPlayed(targetId, played, cardMenu.positionTicks)
+        onPlayedRequested: (targetId, played) => window.setItemPlayed(targetId, played, cardMenu.positionTicks, cardMenu.played)
         onDownloadRequested: targetId => window.askDownload(targetId)
         onCancelDownloadRequested: targetId => window.connection.downloads.removeCurrentDownload(targetId)
         onRemoveDownloadRequested: targetId => window.confirmRemoveDownload(targetId)
@@ -1808,17 +1808,17 @@ Kirigami.ApplicationWindow {
                 // The notification can outlive the session it was for: another user's data is never touched
                 if (!window.signedIn || window.connection.currentUserId !== undo.userId)
                     return;
-                if (!window.connection.undoPlayed(itemId, undo.positionTicks))
+                if (!window.connection.undoPlayed(itemId, undo.positionTicks, undo.played))
                     window.showPassiveNotification(i18n("Could not change the watched state. Check the connection and try again"));
             });
         }
     }
 
-    // The saved position of each item a card marked watched, until the server confirms the write
+    // The saved position and watched state of each item a card marked watched, until the server confirms the write
     readonly property var watchedUndo: ({})
 
-    // Mark as Watched or Unwatched from a card: the card menu and Continue Watching's button; a write still on its way for the item refuses another
-    function setItemPlayed(itemId, played, positionTicks) {
+    // Mark as Watched or Unwatched from a card: the card menu and Continue Watching's button; a write still on its way for the item refuses another; `wasPlayed` is the server's Played before the write, which a rewatch in progress has and its Undo keeps
+    function setItemPlayed(itemId, played, positionTicks, wasPlayed) {
         if (!signedIn)
             return;
         if (!connection.setPlayed(itemId, played)) {
@@ -1828,6 +1828,7 @@ Kirigami.ApplicationWindow {
         if (played)
             watchedUndo[itemId] = {
                 positionTicks: positionTicks > 0 ? positionTicks : 0,
+                played: !!wasPlayed,
                 userId: connection.currentUserId
             };
     }

@@ -302,7 +302,9 @@ bool ItemDetailsModel::togglePlayed()
     m_playedBusy = true;
     m_playedError = false;
     Q_EMIT playedWriteStateChanged();
-    if (!m_client->setItemPlayed(m_itemId, !m_details.played)) {
+    // A rewatch stopped halfway is in progress, not watched: the server keeps Played on it, and the toggle finishes it
+    const bool watched = m_details.played && m_details.resumePositionTicks <= 0;
+    if (!m_client->setItemPlayed(m_itemId, !watched)) {
         m_playedBusy = false;
         m_playedError = true;
         Q_EMIT playedWriteStateChanged();

@@ -48,9 +48,19 @@ Kirigami.ScrollablePage {
             hostField.forceActiveFocus(Qt.TabFocusReason);
     }
 
-    // The tests query the exact URL that is displayed; switching the form or
-    // opening another server cannot show a stale successful probe for a new URL.
-    Component.onCompleted: connection.testSavedServers()
+    // A server is tested only when its Test button asks, and the answer is a passive notification naming the address; the address is the user's own input, still kept from being read as markup
+    Connections {
+        target: page.connection
+        function onServerTested(address, reachable, message) {
+            const window = page.Window.window;
+            if (!window)
+                return;
+            // A form address that answered is named in the message already, with the endpoint that answered
+            const named = reachable && !address.includes("://");
+            // A failure stays longer: its message says what to check
+            window.showPassiveNotification(named ? window.plainNotificationText(message) : i18nc("@info %1 is a server address, %2 the result of its test", "%1: %2", window.plainNotificationText(address), window.plainNotificationText(message)), reachable ? "short" : "long");
+        }
+    }
 
     // Whether the connection under way came from the form without a scheme: an HTTP server it reached means HTTPS did not answer, which the warning says
     property bool automaticScheme: false
@@ -86,6 +96,8 @@ Kirigami.ScrollablePage {
     }
 
     ColumnLayout {
+        // Side by side, the columns and the line between them reach the bottom of the page
+        height: page.splitLayout ? Math.max(implicitHeight, page.flickable.height - page.topPadding - page.bottomPadding) : implicitHeight
         spacing: Kirigami.Units.largeSpacing * 2
 
         MessageBox {
@@ -124,6 +136,7 @@ Kirigami.ScrollablePage {
 
         GridLayout {
             Layout.fillWidth: true
+            Layout.fillHeight: page.splitLayout
             Layout.maximumWidth: page.maxContentWidth
             Layout.alignment: Qt.AlignHCenter
             columns: page.splitLayout ? 3 : 1
@@ -206,6 +219,14 @@ Kirigami.ScrollablePage {
                                 enabled: page.formAddress.length > 0 && !page.newServerStatus.testing && !page.busy && !page.confirming
                                 onClicked: page.connection.testServer(page.formAddress, true)
                             }
+                            Controls.BusyIndicator {
+                                objectName: "newServerTesting"
+                                visible: !!page.newServerStatus.testing
+                                running: visible
+                                Layout.preferredWidth: Kirigami.Units.iconSizes.smallMedium
+                                Layout.preferredHeight: width
+                                Accessible.name: i18nc("@info %1 is a server address", "Testing %1…", page.formAddress)
+                            }
                             Controls.Button {
                                 id: connectNewServer
                                 objectName: "connectNewServerButton"
@@ -214,31 +235,6 @@ Kirigami.ScrollablePage {
                                 icon.name: "network-connect"
                                 enabled: page.formAddress.length > 0 && !page.busy && !page.confirming
                                 onClicked: page.connectAddress(page.formAddress, true)
-                            }
-                        }
-                        RowLayout {
-                            Layout.fillWidth: true
-                            visible: page.newServerStatus.message !== undefined
-                            Controls.BusyIndicator {
-                                FadeInOnShow {}
-                                running: !!page.newServerStatus.testing
-                                visible: running
-                                Layout.preferredWidth: Kirigami.Units.iconSizes.smallMedium
-                                Layout.preferredHeight: width
-                            }
-                            Kirigami.Icon {
-                                source: page.newServerStatus.reachable ? "emblem-checked" : "dialog-warning"
-                                visible: !page.newServerStatus.testing
-                                Layout.preferredWidth: Kirigami.Units.iconSizes.smallMedium
-                                Layout.preferredHeight: width
-                            }
-                            // The message of a reachable server names the address that answered
-                            Controls.Label {
-                                objectName: "newServerStatusMessage"
-                                Layout.fillWidth: true
-                                text: page.newServerStatus.message ?? ""
-                                textFormat: Text.PlainText
-                                wrapMode: Text.Wrap
                             }
                         }
                         RowLayout {
@@ -295,30 +291,6 @@ Kirigami.ScrollablePage {
                             RowLayout {
                                 Layout.fillWidth: true
                                 spacing: Kirigami.Units.smallSpacing
-                                Controls.BusyIndicator {
-                                    FadeInOnShow {}
-                                    visible: !!saved.status.testing
-                                    running: visible
-                                    Layout.preferredWidth: Kirigami.Units.iconSizes.small
-                                    Layout.preferredHeight: width
-                                }
-                                Kirigami.Icon {
-                                    visible: !saved.status.testing
-                                    source: saved.status.reachable ? "emblem-checked" : "dialog-warning"
-                                    Layout.preferredWidth: Kirigami.Units.iconSizes.small
-                                    Layout.preferredHeight: width
-                                }
-                                Controls.Label {
-                                    Layout.fillWidth: true
-                                    text: saved.status.message ?? i18n("Not tested")
-                                    elide: Text.ElideRight
-                                    textFormat: Text.PlainText
-                                    opacity: 0.75
-                                }
-                            }
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: Kirigami.Units.smallSpacing
                                 enabled: !page.busy && !page.confirming
                                 Controls.Button {
                                     text: i18n("Connect")
@@ -327,10 +299,18 @@ Kirigami.ScrollablePage {
                                     onClicked: page.connectAddress(saved.modelData.url, false)
                                 }
                                 Controls.Button {
+                                    objectName: "testSavedServerButton"
                                     text: i18n("Test")
                                     icon.name: "network-server"
                                     enabled: !saved.status.testing
                                     onClicked: page.connection.testServer(saved.modelData.url)
+                                }
+                                Controls.BusyIndicator {
+                                    visible: !!saved.status.testing
+                                    running: visible
+                                    Layout.preferredWidth: Kirigami.Units.iconSizes.smallMedium
+                                    Layout.preferredHeight: width
+                                    Accessible.name: i18nc("@info %1 is a server address", "Testing %1…", saved.modelData.url)
                                 }
                                 Controls.Button {
                                     // The word of the confirmation it opens

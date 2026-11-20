@@ -55,11 +55,13 @@ Controls.ItemDelegate {
     // The watched share, 0 to 1: a series counts its episodes, anything else its playback position
     readonly property real progress: seriesProgress >= 0 ? seriesProgress : playedPercentage / 100
     readonly property bool inProgress: loaded && progress > 0 && progress < 1
+    // A rewatch stopped halfway is in progress, not watched, as on its card
+    readonly property bool watched: played && !(resumeTicks > 0)
     readonly property string description: {
         if (!loaded)
             return "";
         const parts = [];
-        if (played)
+        if (watched)
             parts.push(i18nc("state of an item", "Played"));
         if (favorite)
             parts.push(i18n("Favorite"));
@@ -201,7 +203,7 @@ Controls.ItemDelegate {
             objectName: "listRowPlayed"
             Layout.preferredWidth: Kirigami.Units.iconSizes.smallMedium
             Layout.preferredHeight: Kirigami.Units.iconSizes.smallMedium
-            visible: row.loaded && row.played
+            visible: row.loaded && row.watched
             source: "checkmark-symbolic"
         }
 

@@ -69,7 +69,9 @@ Controls.ItemDelegate {
     // The kinds the card menu plays: keep the two lists in step
     readonly property bool playable: ["Movie", "Episode", "Video"].indexOf(type) >= 0
     readonly property bool quickPlayEnabled: quickPlay && loaded && playable
-    readonly property bool quickMarkWatchedEnabled: quickMarkWatched && loaded && playable && !played
+    // A rewatch stopped halfway is in progress, not watched: the server keeps Played on it, the card shows its progress and no check
+    readonly property bool watched: played && !(resumeTicks > 0)
+    readonly property bool quickMarkWatchedEnabled: quickMarkWatched && loaded && playable && !watched
     // Asks the owner to start the item, from its saved position when it has one
     signal quickPlayRequested
     signal markWatchedRequested
@@ -86,7 +88,7 @@ Controls.ItemDelegate {
         if (!loaded)
             return "";
         const parts = [];
-        if (played)
+        if (watched)
             parts.push(i18nc("state of an item", "Played"));
         if (favorite)
             parts.push(i18n("Favorite"));
@@ -310,7 +312,7 @@ Controls.ItemDelegate {
                     right: parent.right
                     margins: Kirigami.Units.smallSpacing
                 }
-                active: card.loaded && card.played
+                active: card.loaded && card.watched
                 sourceComponent: Rectangle {
                     objectName: "cardPlayed"
                     width: Kirigami.Units.iconSizes.smallMedium

@@ -63,6 +63,15 @@ RememberedTracks rememberedTracks(const QJsonObject &item, const SeriesChoice &s
 // A subtitle codec mpv renders as text: only these can take the second slot
 bool textSubtitleCodec(const QString &codec);
 
+// The track ids a cache dump gives the player's choices: the dump holds only the streams mpv had selected, numbered per kind in their order, and the exporter adds `subtitleFiles` after them. `tracks` is mpv's `track-list`; 0 is none, also for a choice the dump cannot carry
+struct DumpTrackIds {
+    int audio = 0;
+    int subtitle = 0;
+    int secondarySubtitle = 0;
+};
+DumpTrackIds dumpTrackIds(const QVariantList &tracks, int audio, int subtitle,
+                          int secondarySubtitle, const QStringList &subtitleFiles);
+
 // When the Up Next card shows and when the next item starts, in ticks of the item
 struct UpNextWindow {
     qint64 showAt = 0;
@@ -547,11 +556,18 @@ class PlayerController final : public QObject {
     }
     // The tracks the second subtitle slot may take: text subtitles other than the primary
     QList<TrackFact> secondarySubtitleFacts() const;
-    // The playing item can give a clip or GIF: local or direct play, SDR, a source file the exporter can read
+    // The playing item can give a clip or GIF: SDR, and a local file, a direct play or a stream whose cache still holds the marks
     bool clipReady(bool gif, QString *reason) const;
-    // What refuses a clip whatever its format (route, HDR), empty when nothing does
+    // What refuses a clip whatever its format (HDR, marks gone from the cache), empty when nothing does
     QString clipCommonReason() const;
     qint64 clipLengthTicks() const;
+    // A streamed route (transcode or server remux): the clip comes from mpv's cache, not from a file the exporter could read
+    bool clipFromCache() const;
+    // One of mpv's cached ranges holds both marks
+    bool clipCached() const;
+    // Writes the cached range of the marks to `path` and returns where it starts (at or before the start mark), nothing on failure
+    std::optional<double> dumpClipCache(const QString &path);
+    void dropClipDump();
     void onClipFinished(const QString &stagingPath);
     void onClipFailed(ClipExporter::Error error);
     void cancelClipExport();
@@ -674,6 +690,8 @@ class PlayerController final : public QObject {
     double m_clipProgress = 0;
     bool m_clipGif = false;
     int m_clipSeq = 0;
+    // The cache dump a streamed clip encodes from, removed when the export ends
+    QString m_clipDump;
     // The file of a local playback, the source of its clip
     QString m_localSourcePath;
     // The pending download goes to the second slot, not to the primary

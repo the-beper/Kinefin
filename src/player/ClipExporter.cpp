@@ -154,6 +154,9 @@ bool ClipExporter::start(const ClipRequest &request, const QString &stagingPath)
     setOption(handle, "start", QByteArray::number(m_start, 'f', 3));
     setOption(handle, "end", QByteArray::number(m_end, 'f', 3));
     setOption(handle, "hr-seek", "yes");
+    // The demuxer seeks a second before the file's start, so the precise seek decodes forward from the first keyframe
+    if (request.decodeFromFileStart)
+        setOption(handle, "hr-seek-demuxer-offset", QByteArray::number(m_start + 1.0, 'f', 3));
     setOption(handle, "ocopy-metadata", "no");
     setOption(handle, "config", "no");
     setOption(handle, "load-scripts", "no");

@@ -219,6 +219,38 @@ bool textSubtitleCodec(const QString &codec)
     return text.contains(codec);
 }
 
+DumpTrackIds dumpTrackIds(const QVariantList &tracks, int audio, int subtitle,
+                          int secondarySubtitle, const QStringList &subtitleFiles)
+{
+    // The selected subtitle streams of the file, in their order; files added with sub-add are no streams of it
+    QList<int> streamSubtitles;
+    QHash<int, QString> subtitleFile;
+    bool audioInStream = false;
+    for (const QVariant &value : tracks) {
+        const QVariantMap track = value.toMap();
+        const QString type = track.value(QStringLiteral("type")).toString();
+        const int id = track.value(QStringLiteral("id")).toInt();
+        const bool external = track.value(QStringLiteral("external")).toBool();
+        if (type == QLatin1String("audio") && id == audio && audio > 0 && !external)
+            audioInStream = true;
+        if (type != QLatin1String("sub"))
+            continue;
+        if (external)
+            subtitleFile.insert(id, track.value(QStringLiteral("external-filename")).toString());
+        else if (track.value(QStringLiteral("selected")).toBool())
+            streamSubtitles.append(id);
+    }
+    const auto map = [&](int id) {
+        if (id <= 0)
+            return 0;
+        if (const qsizetype rank = streamSubtitles.indexOf(id); rank >= 0)
+            return int(rank) + 1;
+        const qsizetype file = subtitleFiles.indexOf(subtitleFile.value(id));
+        return subtitleFile.contains(id) && file >= 0 ? int(streamSubtitles.size() + file) + 1 : 0;
+    };
+    return {audioInStream ? 1 : 0, map(subtitle), map(secondarySubtitle)};
+}
+
 std::optional<UpNextWindow> upNextWindow(qint64 durationTicks, const QVariantList &segments)
 {
     if (durationTicks < 10 * 60 * TicksPerSecond)
@@ -285,6 +317,12 @@ PlayerController::PlayerController(JellyfinClient &client, PlayQueue &queue,
       m_mpvSettings(settings, m_engine, this)
 {
     m_profileDataDir = profileDataDirectory(profileId);
+    // What an export left behind when the app stopped during it: staging files, their `.part` and cache dumps
+    if (!m_profileDataDir.isEmpty()) {
+        QDir clips(m_profileDataDir + QStringLiteral("/clips"));
+        for (const QString &name : clips.entryList({QStringLiteral("clip-*")}, QDir::Files))
+            clips.remove(name);
+    }
     m_cast = new CastController(this);
     m_castSeek.setSingleShot(true);
     m_castSeek.setInterval(400);
@@ -3166,18 +3204,47 @@ qint64 PlayerController::clipLengthTicks() const
     return m_clipStart >= 0 && m_clipEnd > m_clipStart ? m_clipEnd - m_clipStart : 0;
 }
 
+bool PlayerController::clipFromCache() const
+{
+    return !(m_localPlayback && !m_localSourcePath.isEmpty()) && !directPlay();
+}
+
+bool PlayerController::clipCached() const
+{
+    if (m_casting || !m_engine.isInitialized())
+        return false;
+    const double start = double(m_clipStart) / TicksPerSecond;
+    const double end = double(m_clipEnd) / TicksPerSecond;
+    const QVariantList ranges = m_engine.mpvProperty(QStringLiteral("demuxer-cache-state"))
+                                    .toMap()
+                                    .value(QStringLiteral("seekable-ranges"))
+                                    .toList();
+    return std::any_of(ranges.cbegin(), ranges.cend(), [start, end](const QVariant &value) {
+        const QVariantMap range = value.toMap();
+        return range.value(QStringLiteral("start")).toDouble() <= start
+               && range.value(QStringLiteral("end")).toDouble() >= end;
+    });
+}
+
 QString PlayerController::clipCommonReason() const
 {
     const bool local = m_localPlayback && !m_localSourcePath.isEmpty();
-    if (!local && !directPlay())
-        return i18n("Clips cannot be saved while the server transcodes");
     if (!local) {
         const StreamSummary *video = pickStream(m_source.media.source, u"Video");
-        if (video
-            && (video->videoRange == QLatin1String("HDR")
-                || video->videoRangeType.startsWith(QLatin1String("HDR"))
-                || video->videoRangeType.startsWith(QLatin1String("DOVI"))))
+        bool hdr = video
+                   && (video->videoRange == QLatin1String("HDR")
+                       || video->videoRangeType.startsWith(QLatin1String("HDR"))
+                       || video->videoRangeType.startsWith(QLatin1String("DOVI")));
+        // A stream's clip is the picture mpv decodes: a transcode the server tone mapped is SDR whatever the source was
+        const QString gamma =
+            clipFromCache() ? m_engine.mpvProperty(QStringLiteral("video-params/gamma")).toString()
+                            : QString();
+        if (!gamma.isEmpty())
+            hdr = gamma == QLatin1String("pq") || gamma == QLatin1String("hlg");
+        if (hdr)
             return i18n("Clips cannot be saved from HDR video");
+        if (clipFromCache() && !clipCached())
+            return i18n("The start of the clip is no longer buffered");
     }
     return {};
 }
@@ -3315,8 +3382,15 @@ bool PlayerController::saveClip(bool gif, const QUrl &destination)
         return false;
     const double seconds = double(clipLengthTicks()) / TicksPerSecond;
     const double rate = gif ? 2.0 * 1024 * 1024 : (8.0 + 0.16) * 1000 * 1000 / 8.0;
+    const bool fromCache = clipFromCache();
+    // The dump of a streamed clip holds at most what mpv caches
+    const qint64 dumpBound = fromCache ? m_engine.mpvProperty(QStringLiteral("demuxer-cache-state"))
+                                             .toMap()
+                                             .value(QStringLiteral("total-bytes"))
+                                             .toLongLong()
+                                       : 0;
     const QStorageInfo storage(directory);
-    if (storage.isValid() && storage.bytesAvailable() < qint64(2.0 * rate * seconds)) {
+    if (storage.isValid() && storage.bytesAvailable() < qint64(2.0 * rate * seconds) + dumpBound) {
         QFile::remove(target);
         Q_EMIT clipSaveFailed(true);
         return false;
@@ -3325,7 +3399,7 @@ bool PlayerController::saveClip(bool gif, const QUrl &destination)
     request.format = gif ? ClipRequest::Format::Gif : ClipRequest::Format::Video;
     const bool local = m_localPlayback && !m_localSourcePath.isEmpty();
     request.source = local ? QUrl::fromLocalFile(m_localSourcePath) : m_source.url;
-    if (!local)
+    if (!local && !fromCache)
         request.authorization = m_client.streamAuthorization();
     request.startTicks = m_clipStart;
     request.endTicks = m_clipEnd;
@@ -3345,16 +3419,50 @@ bool PlayerController::saveClip(bool gif, const QUrl &destination)
                               : ClipExporter::hasEncoder(QStringLiteral("libx264"))
                                   ? QStringLiteral(".mp4")
                                   : QStringLiteral(".webm");
-    const QString staging =
+    const QString stem =
         directory + QStringLiteral("/clip-")
         + QDateTime::currentDateTimeUtc().toString(QStringLiteral("yyyyMMdd-HHmmss-zzz"))
-        + QLatin1Char('-') + QString::number(++m_clipSeq) + extension;
+        + QLatin1Char('-') + QString::number(++m_clipSeq);
+    const QString staging = stem + extension;
+    if (fromCache) {
+        const QString dump = stem + QStringLiteral("-cache.ts");
+        const std::optional<double> dumpStart = dumpClipCache(dump);
+        if (!dumpStart) {
+            QFile::remove(dump);
+            QFile::remove(target);
+            Q_EMIT clipSaveFailed(false);
+            return false;
+        }
+        m_clipDump = dump;
+        // The dump starts at 0 where the cache's keyframe before the start mark was
+        const qint64 offset = std::llround(*dumpStart * TicksPerSecond);
+        request.source = QUrl::fromLocalFile(dump);
+        request.startTicks = m_clipStart - offset;
+        request.endTicks = m_clipEnd - offset;
+        request.decodeFromFileStart = true;
+        const DumpTrackIds ids = dumpTrackIds(
+            m_engine.mpvProperty(QStringLiteral("track-list")).toList(), m_selectedAudioId,
+            m_selectedSubtitleId, m_secondarySubtitleId, request.subtitleFiles);
+        request.audioId = ids.audio;
+        request.subtitleId = ids.subtitle;
+        request.secondarySubtitleId = ids.secondarySubtitle;
+        // The subtitle files keep the item's times, the dump starts at A′
+        for (auto &[name, value] : request.subtitleStyle) {
+            if (name == QLatin1String("sub-delay") || name == QLatin1String("secondary-sub-delay"))
+                value = value.toDouble() - *dumpStart;
+        }
+    }
     m_clipDestination = destination;
     m_clipProgress = 0;
     m_clipGif = gif;
-    // A refused start has already reported itself and removed the granted file
-    if (!m_clipExporter.start(request, staging))
+    if (!m_clipExporter.start(request, staging)) {
+        // A refusal that reported itself has cleaned up already; the others leave the dump and the granted file
+        if (!m_clipDestination.isEmpty()) {
+            cancelClipExport();
+            Q_EMIT clipSaveFailed(false);
+        }
         return false;
+    }
     Q_EMIT clipStateChanged();
     return true;
 }
@@ -3364,10 +3472,49 @@ void PlayerController::cancelClip()
     cancelClipExport();
 }
 
+std::optional<double> PlayerController::dumpClipCache(const QString &path)
+{
+    if (!clipCached())
+        return std::nullopt;
+    const double start = double(m_clipStart) / TicksPerSecond;
+    const double end = double(m_clipEnd) / TicksPerSecond;
+    // The A-B marks only tell the two commands the range, which read them whatever the loop count: with the count at 0 the player never loops, also when it is before B
+    const QVariant loopCount = m_engine.mpvProperty(QStringLiteral("ab-loop-count"));
+    m_engine.setMpvProperty(QStringLiteral("ab-loop-count"), 0);
+    m_engine.setMpvProperty(QStringLiteral("ab-loop-a"), start);
+    m_engine.setMpvProperty(QStringLiteral("ab-loop-b"), end);
+    const bool aligned = m_engine.mpvCommand({QStringLiteral("ab-loop-align-cache")});
+    bool startKnown = false;
+    bool endKnown = false;
+    const double alignedStart =
+        m_engine.mpvProperty(QStringLiteral("ab-loop-a")).toDouble(&startKnown);
+    const double alignedEnd = m_engine.mpvProperty(QStringLiteral("ab-loop-b")).toDouble(&endKnown);
+    const bool dumped = aligned && startKnown && endKnown
+                        && m_engine.mpvCommand({QStringLiteral("ab-loop-dump-cache"), path});
+    m_engine.setMpvProperty(QStringLiteral("ab-loop-a"), QStringLiteral("no"));
+    m_engine.setMpvProperty(QStringLiteral("ab-loop-b"), QStringLiteral("no"));
+    if (loopCount.isValid())
+        m_engine.setMpvProperty(QStringLiteral("ab-loop-count"), loopCount);
+    // A start after the mark would cut the clip's first frames, an end well before the other mark its last ones: what they need left the cache. An end a frame short is the alignment's own, when B is a keyframe
+    if (!dumped || alignedStart > start + 0.001 || alignedEnd < end - 0.5
+        || QFileInfo(path).size() <= 0)
+        return std::nullopt;
+    return alignedStart;
+}
+
+void PlayerController::dropClipDump()
+{
+    if (m_clipDump.isEmpty())
+        return;
+    QFile::remove(m_clipDump);
+    m_clipDump.clear();
+}
+
 void PlayerController::cancelClipExport()
 {
     const bool wasRunning = m_clipExporter.running();
     m_clipExporter.cancel();
+    dropClipDump();
     if (m_clipDestination.isLocalFile())
         QFile::remove(m_clipDestination.toLocalFile());
     m_clipDestination.clear();
@@ -3389,6 +3536,7 @@ void PlayerController::onClipFinished(const QString &stagingPath)
         ok = QFile::copy(stagingPath, target);
     }
     QFile::remove(stagingPath);
+    dropClipDump();
     m_clipProgress = 0;
     const bool gif = m_clipGif;
     m_clipGif = false;
@@ -3404,6 +3552,7 @@ void PlayerController::onClipFinished(const QString &stagingPath)
 
 void PlayerController::onClipFailed(ClipExporter::Error error)
 {
+    dropClipDump();
     if (m_clipDestination.isLocalFile())
         QFile::remove(m_clipDestination.toLocalFile());
     m_clipDestination.clear();

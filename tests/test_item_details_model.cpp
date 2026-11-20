@@ -108,6 +108,30 @@ class TestItemDetailsModel : public QObject {
         QCOMPARE(f.server.playedWrites.constLast().method, QByteArrayLiteral("DELETE"));
     }
 
+    // A rewatch stopped halfway: the server keeps Played with a resume point, and the toggle finishes it instead of taking the watched state away
+    void aRewatchInProgressTogglesToWatched()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        QJsonObject item =
+            QJsonDocument::fromJson(fixtureItem(QStringLiteral("movie_item"))).object();
+        QJsonObject userData = item.value(QStringLiteral("UserData")).toObject();
+        userData.insert(QStringLiteral("Played"), true);
+        userData.insert(QStringLiteral("PlaybackPositionTicks"), 3'000'000'000.0);
+        item.insert(QStringLiteral("UserData"), userData);
+        f.server.itemsById.insert(kMovie, QJsonDocument(item).toJson(QJsonDocument::Compact));
+        auto movie = f.open(kMovie);
+        QTRY_COMPARE(movie->status(), ItemDetailsModel::Ready);
+        QVERIFY(movie->played());
+        QVERIFY(movie->canResume());
+        QVERIFY(movie->togglePlayed());
+        QTRY_VERIFY(!movie->playedBusy());
+        QCOMPARE(f.server.playedWrites.size(), 1);
+        QCOMPARE(f.server.playedWrites.constFirst().method, QByteArrayLiteral("POST"));
+        QVERIFY(movie->played());
+        QVERIFY(!movie->canResume());
+    }
+
     void watchedFailuresDoNotChangeStateAndCanBeRetried()
     {
         Fixture f;

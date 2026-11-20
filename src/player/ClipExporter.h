@@ -33,6 +33,8 @@ struct ClipRequest {
     QList<std::pair<QString, QVariant>> subtitleStyle;
     bool tlsVerify = true;
     QString tlsCaFile;
+    // A cache dump, which starts on a keyframe: it is decoded from its first frame up to the start, since a seek in a transport stream can land on the keyframe after the start and lose a GOP
+    bool decodeFromFileStart = false;
 };
 
 // A clip or GIF encoded in its own libmpv instance, so playback goes on untouched: every encoding
