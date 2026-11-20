@@ -67,32 +67,7 @@ QByteArray toBody(const QJsonObject &object)
 
 Kinefin::RendererInfo fakeRendererInfo(const FakeRenderer &fake)
 {
-    Kinefin::RendererInfo info;
-    info.udn = QStringLiteral("uuid:test-renderer");
-    info.name = QStringLiteral("Fake Renderer");
-    info.model = QStringLiteral("Test TV");
-    info.address = QHostAddress::LocalHost;
-    info.location = QUrl(fake.descriptionUrl());
-    info.avTransport.serviceType = QStringLiteral("urn:schemas-upnp-org:service:AVTransport:1");
-    info.avTransport.controlUrl = QUrl(fake.baseUrl() + QStringLiteral("/AVTransport/control"));
-    info.connectionManager.serviceType =
-        QStringLiteral("urn:schemas-upnp-org:service:ConnectionManager:1");
-    info.connectionManager.controlUrl =
-        QUrl(fake.baseUrl() + QStringLiteral("/ConnectionManager/control"));
-    info.renderingControl.serviceType =
-        QStringLiteral("urn:schemas-upnp-org:service:RenderingControl:1");
-    info.renderingControl.controlUrl =
-        QUrl(fake.baseUrl() + QStringLiteral("/RenderingControl/control"));
-    info.actions = {QStringLiteral("SetAVTransportURI"),
-                    QStringLiteral("Play"),
-                    QStringLiteral("Pause"),
-                    QStringLiteral("Stop"),
-                    QStringLiteral("Seek"),
-                    QStringLiteral("GetTransportInfo"),
-                    QStringLiteral("GetPositionInfo")};
-    info.seekModes = {QStringLiteral("REL_TIME")};
-    info.sinkMimeTypes = {QStringLiteral("video/x-matroska"), QStringLiteral("video/mp4")};
-    return info;
+    return fake.rendererInfo(QStringLiteral("Fake Renderer"));
 }
 
 // A media segment as the client hands it on, in seconds
@@ -1282,6 +1257,59 @@ class TestPlayerController : public QObject {
         QCOMPARE(chain.server.streamRoutes.size(), 1);
         QVERIFY(chain.server.streamAuthorizations.constFirst().isEmpty());
         QTRY_COMPARE(stoppedReports(chain), 1);
+    }
+
+    void aLocalPlaybackMovesToTheRendererAtItsPosition()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        FakeRenderer fake;
+        QVERIFY(fake.listen());
+        chain.controller.castController()->addRenderer(fakeRendererInfo(fake));
+        // The movie plays here: mpv runs a generated clip in place of the server's stream
+        QVERIFY(chain.controller.playItem(kMovie, 0));
+        QVERIFY(chain.engine()->init({QStringLiteral("vo=null"), QStringLiteral("ao=null")}));
+        Q_EMIT chain.client.playbackInfoFailed(kMovie, 500, QString());
+        QVERIFY(!chain.controller.loading());
+        QVERIFY(chain.opensClip(kMovie, 30));
+        chain.controller.seek(10 * kSecond);
+        QTRY_VERIFY(chain.controller.positionTicks() >= 10 * kSecond);
+        // Paused, so the position the renderer gets does not depend on how long the test takes
+        chain.controller.pause();
+        QTRY_VERIFY(chain.controller.paused());
+        QTRY_VERIFY(std::any_of(chain.server.reportLog.cbegin(), chain.server.reportLog.cend(),
+                                [](const FakeJellyfin::ReportLog &entry) {
+                                    return entry.route.endsWith("/Sessions/Playing");
+                                }));
+        const qsizetype reportsBefore = chain.server.reportLog.size();
+        // Play On from the bar: the local session ends, and the renderer starts where mpv was
+        QVERIFY(chain.controller.castTo(QStringLiteral("uuid:test-renderer")));
+        QTRY_VERIFY(chain.controller.casting());
+        QTRY_COMPARE(fake.transport, QStringLiteral("PLAYING"));
+        QVERIFY(fake.actions.contains(QStringLiteral("Seek")));
+        QVERIFY(fake.position >= 10 && fake.position <= 11);
+        // The local Stopped (its own play session) comes before the cast's Start, which waits for the renderer's first PLAYING
+        qsizetype stopped = -1;
+        qsizetype started = -1;
+        const auto ordered = [&] {
+            stopped = -1;
+            started = -1;
+            for (qsizetype i = reportsBefore; i < chain.server.reportLog.size(); ++i) {
+                const FakeJellyfin::ReportLog &entry = chain.server.reportLog.at(i);
+                if (stopped < 0 && entry.route.endsWith("/Sessions/Playing/Stopped"))
+                    stopped = i;
+                if (stopped >= 0 && started < 0 && entry.route.endsWith("/Sessions/Playing"))
+                    started = i;
+            }
+            return started > stopped && stopped >= 0;
+        };
+        QTRY_VERIFY(ordered());
+        QVERIFY(chain.server.reportLog.at(stopped).body.contains("\"PlaySessionId\":\"s1\""));
+        QVERIFY(!chain.server.reportLog.at(started).body.contains("\"PlaySessionId\":\"s1\""));
+        // No Start of the cast came before the local Stopped
+        for (qsizetype i = reportsBefore; i < stopped; ++i)
+            QVERIFY(!chain.server.reportLog.at(i).route.endsWith("/Sessions/Playing"));
+        chain.controller.stopCasting();
     }
 
     void theEndOnTheRendererClosesTheSessionAndForgetsTheDevice()

@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "cast/UpnpDescription.h"
+
 #include <QByteArray>
 #include <QHash>
 #include <QHostAddress>
@@ -33,6 +35,37 @@ class FakeRenderer : public QObject {
     quint16 port() const { return m_server.serverPort(); }
     QString baseUrl() const { return QStringLiteral("http://127.0.0.1:%1").arg(port()); }
     QString descriptionUrl() const { return baseUrl() + QStringLiteral("/description.xml"); }
+
+    // What discovery would have read of this renderer: a controller can be given it without a search
+    Kinefin::RendererInfo rendererInfo(const QString &name) const
+    {
+        Kinefin::RendererInfo info;
+        info.udn = QStringLiteral("uuid:test-renderer");
+        info.name = name;
+        info.model = QStringLiteral("Test TV");
+        info.address = QHostAddress::LocalHost;
+        info.location = QUrl(descriptionUrl());
+        const auto service = [this](const QString &kind) {
+            Kinefin::UpnpService entry;
+            entry.serviceType = QStringLiteral("urn:schemas-upnp-org:service:%1:1").arg(kind);
+            entry.controlUrl = QUrl(baseUrl() + QStringLiteral("/%1/control").arg(kind));
+            entry.scpdUrl = QUrl(baseUrl() + QStringLiteral("/%1/scpd.xml").arg(kind));
+            return entry;
+        };
+        info.avTransport = service(QStringLiteral("AVTransport"));
+        info.connectionManager = service(QStringLiteral("ConnectionManager"));
+        info.renderingControl = service(QStringLiteral("RenderingControl"));
+        info.actions = {QStringLiteral("SetAVTransportURI"),
+                        QStringLiteral("Play"),
+                        QStringLiteral("Pause"),
+                        QStringLiteral("Stop"),
+                        QStringLiteral("Seek"),
+                        QStringLiteral("GetTransportInfo"),
+                        QStringLiteral("GetPositionInfo")};
+        info.seekModes = {QStringLiteral("REL_TIME")};
+        info.sinkMimeTypes = {QStringLiteral("video/x-matroska"), QStringLiteral("video/mp4")};
+        return info;
+    }
 
     QByteArray description() const
     {

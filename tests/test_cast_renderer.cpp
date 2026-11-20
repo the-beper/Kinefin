@@ -17,32 +17,7 @@ using Kinefin::DlnaRenderer;
 namespace {
 Kinefin::RendererInfo rendererInfo(const FakeRenderer &fake)
 {
-    Kinefin::RendererInfo info;
-    info.udn = QStringLiteral("uuid:test-renderer");
-    info.name = QStringLiteral("Fake & Renderer");
-    info.model = QStringLiteral("Test TV");
-    info.address = QHostAddress::LocalHost;
-    info.location = QUrl(fake.descriptionUrl());
-    info.avTransport.serviceType = QStringLiteral("urn:schemas-upnp-org:service:AVTransport:1");
-    info.avTransport.controlUrl = QUrl(fake.baseUrl() + QStringLiteral("/AVTransport/control"));
-    info.avTransport.scpdUrl = QUrl(fake.baseUrl() + QStringLiteral("/AVTransport/scpd.xml"));
-    info.connectionManager.serviceType =
-        QStringLiteral("urn:schemas-upnp-org:service:ConnectionManager:1");
-    info.connectionManager.controlUrl =
-        QUrl(fake.baseUrl() + QStringLiteral("/ConnectionManager/control"));
-    info.renderingControl.serviceType =
-        QStringLiteral("urn:schemas-upnp-org:service:RenderingControl:1");
-    info.renderingControl.controlUrl =
-        QUrl(fake.baseUrl() + QStringLiteral("/RenderingControl/control"));
-    info.actions = {QStringLiteral("SetAVTransportURI"),
-                    QStringLiteral("Play"),
-                    QStringLiteral("Pause"),
-                    QStringLiteral("Stop"),
-                    QStringLiteral("Seek"),
-                    QStringLiteral("GetTransportInfo"),
-                    QStringLiteral("GetPositionInfo")};
-    info.seekModes = {QStringLiteral("REL_TIME")};
-    return info;
+    return fake.rendererInfo(QStringLiteral("Fake & Renderer"));
 }
 
 QString mediaUrl(const FakeRenderer &fake)

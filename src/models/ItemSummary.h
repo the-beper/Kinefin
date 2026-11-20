@@ -33,6 +33,8 @@ struct ItemSummary {
     int episodeNumber = -1;
     int episodeNumberEnd = -1;
     int runtimeMinutes = -1;
+    // `RunTimeTicks` as sent, 0 when unknown: the time left is counted from it, not from the rounded minutes
+    qint64 runtimeTicks = 0;
     int unplayedCount = -1;
     int remainingMinutes = -1;
     // The saved playback position (`UserData.PlaybackPositionTicks`), 0 when there is none

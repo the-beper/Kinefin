@@ -12,6 +12,7 @@
 #include "integration/MprisArtwork.h"
 #include "integration/RemoteInputServer.h"
 #include "integration/ScreenSaverInhibitor.h"
+#include "integration/SuspendInhibitor.h"
 #include "player/PlayerController.h"
 #include "settings/ClientSettings.h"
 #include "settings/KWalletTokenStore.h"
@@ -437,6 +438,7 @@ int main(int argc, char *argv[])
                                        Kinefin::profileCacheDirectory(profileId)
                                            + QStringLiteral("/mpris"));
     Kinefin::ScreenSaverInhibitor screenSaverInhibitor(player, QDBusConnection::sessionBus());
+    Kinefin::SuspendInhibitor suspendInhibitor(player, QDBusConnection::sessionBus());
     // Navigation keys from a remote reach the window like a keyboard's; no socket is a warning, never a failure
     remoteInput.setWindow(window);
     remoteInput.listen();

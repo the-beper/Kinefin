@@ -11,6 +11,7 @@
 #include <QSet>
 #include <QTimer>
 
+#include <functional>
 #include <vector>
 
 namespace Kinefin {
@@ -68,6 +69,8 @@ class PagedItemsModel : public QAbstractListModel {
     void applyPlayedState(const QString &itemId, bool played);
     // Sets the saved position of the resident rows of an item, as applyPlayedState does
     void applyProgressState(const QString &itemId, qint64 positionTicks, double playedPercentage);
+    // Applies `change` to each resident row of an item and refreshes every role of it
+    void updateResident(const QString &itemId, const std::function<void(ItemSummary &)> &change);
     bool pageInFlight() const { return m_inFlight >= 0; }
     // The reply of the page in flight, or a failure of it
     void deliverPage(const QJsonArray &items, int total);

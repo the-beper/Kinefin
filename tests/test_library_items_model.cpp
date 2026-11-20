@@ -240,6 +240,70 @@ class TestLibraryItemsModel : public QObject {
         QVERIFY(!f.model.data(first, LibraryItemsModel::PlayedRole).toBool());
     }
 
+    void aRuntimeOutOfRangeIsNoRuntime()
+    {
+        // A runtime the server sends past any real length, negative or beyond a 64-bit count is dropped, and the time left is not counted from it
+        for (const double ticks : {1e30, -5.0, 2e14}) {
+            const QJsonObject json{
+                {QStringLiteral("Id"), QStringLiteral("f0e1d2c3b4a5968778695a4b3c2d1e0f")},
+                {QStringLiteral("Name"), QStringLiteral("A movie")},
+                {QStringLiteral("Type"), QStringLiteral("Movie")},
+                {QStringLiteral("RunTimeTicks"), ticks}};
+            Kinefin::ItemSummary item = Kinefin::parseItemSummary(json);
+            QVERIFY(item.valid);
+            QCOMPARE(item.runtimeTicks, 0);
+            QCOMPARE(item.runtimeMinutes, -1);
+            Kinefin::applyProgress(item, 600'000'000, 0);
+            QCOMPARE(item.remainingMinutes, -1);
+            QCOMPARE(item.playedPercentage, 0.0);
+        }
+        // A real one counts the time left to the minute, from its exact length
+        const QJsonObject json{
+            {QStringLiteral("Id"), QStringLiteral("f0e1d2c3b4a5968778695a4b3c2d1e0f")},
+            {QStringLiteral("Name"), QStringLiteral("A movie")},
+            {QStringLiteral("Type"), QStringLiteral("Movie")},
+            {QStringLiteral("RunTimeTicks"), 5'430'000'000.0}};
+        Kinefin::ItemSummary item = Kinefin::parseItemSummary(json);
+        Kinefin::applyProgress(item, 5'400'000'000, 0);
+        QCOMPARE(item.remainingMinutes, 1);
+        QVERIFY(item.playedPercentage > 99 && item.playedPercentage < 100);
+    }
+
+    void anUndoAnswerThatIsNotTheRestoreFails()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        QVERIFY(f.openMovies());
+        QTRY_COMPARE(f.model.status(), LibraryItemsModel::Ready);
+        const QString id = f.model.data(f.model.index(0), LibraryItemsModel::ItemIdRole).toString();
+        const qint64 position = 30LL * 60 * 10'000'000;
+        QSignalSpy failed(&f.client, &Kinefin::JellyfinClient::itemPlayedUpdateFailed);
+        QSignalSpy updated(&f.client, &Kinefin::JellyfinClient::itemPlayedUpdated);
+        // Still watched, no position, another item, not an object: each is a failure, never applied
+        const QByteArray other = QByteArrayLiteral("fedcba9876543210fedcba9876543210");
+        QVERIFY(QString::fromLatin1(other) != id.toLower());
+        const QList<QByteArray> answers{
+            QByteArrayLiteral("{\"Played\":true,\"PlaybackPositionTicks\":18000000000}"),
+            QByteArrayLiteral("{\"Played\":false,\"PlaybackPositionTicks\":0}"),
+            "{\"ItemId\":\"" + other + "\",\"Played\":false,\"PlaybackPositionTicks\":18000000000}",
+            QByteArrayLiteral("[1,2]")};
+        for (int i = 0; i < answers.size(); ++i) {
+            f.server.userDataRawBody = answers.at(i);
+            QVERIFY(f.client.restoreItemProgress(id, position));
+            QTRY_COMPARE(failed.size(), i + 1);
+        }
+        QCOMPARE(updated.size(), 0);
+        // A position beyond a day is never sent
+        QVERIFY(!f.client.restoreItemProgress(id, 25LL * 3600 * 10'000'000));
+        // A 401 ends the session instead of failing the write
+        f.server.userDataRawBody.clear();
+        f.server.playedWriteStatus = 401;
+        QSignalSpy cleared(&f.client, &Kinefin::JellyfinClient::credentialsCleared);
+        QVERIFY(f.client.restoreItemProgress(id, position));
+        QTRY_COMPARE(cleared.size(), 1);
+        QCOMPARE(failed.size(), int(answers.size()));
+    }
+
     void wireCarriesTheLibraryQuery()
     {
         Fixture f;

@@ -10271,6 +10271,8 @@ class TestUiPages : public QObject {
         QTRY_COMPARE(ui.server.playedWrites.size(), 1);
         QTRY_COMPARE(mark->property("text").toString(), QStringLiteral("Mark as Unwatched"));
         QTRY_VERIFY(mark->property("enabled").toBool());
+        // The page shows its own state: no notification with Undo, which is for the cards
+        QVERIFY(!ui.showsText(QStringLiteral("Marked as watched")));
         QMetaObject::invokeMethod(mark, "trigger");
         QTRY_COMPARE(ui.server.playedWrites.size(), 2);
         QTRY_COMPARE(mark->property("text").toString(), QStringLiteral("Mark as Watched"));
@@ -10645,13 +10647,14 @@ class TestUiPages : public QObject {
             QTRY_VERIFY(!menuVisible());
         };
 
-        // An unwatched movie offers Mark as Watched: a POST, and the card and the next menu follow the answer
+        // An unwatched movie offers Mark as Watched: a POST, and the card and the next menu follow the answer, with the notification that offers it back
         QQuickItem *entry = openEntryOf(kMovieId);
         QVERIFY(entry);
         QCOMPARE(entry->property("text").toString(), QStringLiteral("Mark as Watched"));
         QVERIFY(QMetaObject::invokeMethod(entry, "click"));
         QTRY_VERIFY(!menuVisible());
         QTRY_COMPARE(ui.server.playedWrites.size(), 1);
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Marked as watched")));
         QCOMPARE(ui.server.playedWrites.constLast().method, QByteArrayLiteral("POST"));
         QVERIFY(ui.server.playedWrites.constLast().route.contains(kMovieId.toLatin1()));
         QTRY_VERIFY(card(kMovieId)->property("played").toBool());

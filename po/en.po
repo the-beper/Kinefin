@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: kinefin 0\n"
 "Report-Msgid-Bugs-To: https://github.com/the-beper/Kinefin/issues\n"
-"POT-Creation-Date: 2026-11-20 14:55+0000\n"
+"POT-Creation-Date: 2026-11-20 15:26+0000\n"
 "PO-Revision-Date: 2026-11-07 00:00+0000\n"
 "Last-Translator: the-beper\n"
 "Language-Team: English\n"
@@ -116,7 +116,7 @@ msgstr "S%1:E%2–E%3"
 #: src/qml/EpisodeRow.qml:38 src/qml/ItemDetailsPage.qml:67
 #: src/qml/ResumeItemsPage.qml:140 src/qml/SearchPage.qml:223
 #: src/qml/DownloadsPage.qml:107 src/qml/GenreRailsView.qml:223
-#: src/qml/LibraryContent.qml:304 src/qml/ItemListRow.qml:42
+#: src/qml/LibraryContent.qml:304 src/qml/ItemListRow.qml:44
 #: src/qml/ItemRowGrid.qml:74 src/qml/Main.qml:829 src/qml/MediaListRow.qml:30
 #: src/qml/FavoritesPage.qml:127 src/qml/FavoritesGroupPage.qml:123
 msgctxt "season and episode number"
@@ -133,7 +133,7 @@ msgstr "E%1–E%2"
 #: src/qml/EpisodeRow.qml:41 src/qml/ItemDetailsPage.qml:68
 #: src/qml/ResumeItemsPage.qml:140 src/qml/SearchPage.qml:223
 #: src/qml/GenreRailsView.qml:223 src/qml/LibraryContent.qml:304
-#: src/qml/ItemListRow.qml:42 src/qml/ItemRowGrid.qml:74
+#: src/qml/ItemListRow.qml:44 src/qml/ItemRowGrid.qml:74
 #: src/qml/MediaListRow.qml:30 src/qml/FavoritesPage.qml:127
 #: src/qml/FavoritesGroupPage.qml:123
 msgctxt "episode number"
@@ -395,11 +395,16 @@ msgctxt "@info reason the desktop shows for keeping the screen on"
 msgid "Playing a video"
 msgstr "Playing a video"
 
-#: src/main.cpp:89
+#: src/integration/SuspendInhibitor.cpp:62
+msgctxt "@info reason the desktop shows for staying awake"
+msgid "Casting a video to another device"
+msgstr "Casting a video to another device"
+
+#: src/main.cpp:90
 msgid "A native Jellyfin client for KDE Plasma"
 msgstr "A native Jellyfin client for KDE Plasma"
 
-#: src/main.cpp:400
+#: src/main.cpp:401
 msgid "The Kinefin interface could not be loaded"
 msgstr "The Kinefin interface could not be loaded"
 
@@ -1063,18 +1068,18 @@ msgid "%1 min"
 msgstr "%1 min"
 
 #: src/qml/EpisodeRow.qml:59 src/qml/ItemDetailsPage.qml:761
-#: src/qml/ItemListRow.qml:61 src/qml/MediaCard.qml:90
+#: src/qml/ItemListRow.qml:63 src/qml/MediaCard.qml:90
 #: src/qml/MediaListRow.qml:78
 msgctxt "state of an item"
 msgid "Played"
 msgstr "Played"
 
 #: src/qml/EpisodeRow.qml:61 src/qml/ItemDetailsPage.qml:783
-#: src/qml/ItemListRow.qml:63 src/qml/MediaCard.qml:92
+#: src/qml/ItemListRow.qml:65 src/qml/MediaCard.qml:92
 msgid "Favorite"
 msgstr "Favorite"
 
-#: src/qml/EpisodeRow.qml:63 src/qml/ItemListRow.qml:69
+#: src/qml/EpisodeRow.qml:63 src/qml/ItemListRow.qml:71
 #: src/qml/MediaCard.qml:100
 msgid "%1 percent watched"
 msgid_plural "%1 percent watched"
@@ -1140,7 +1145,7 @@ msgid "Cancel Download"
 msgstr "Cancel Download"
 
 #: src/qml/ItemDetailsPage.qml:146 src/qml/SubtitleSearchDialog.qml:185
-#: src/qml/CardMenu.qml:142 src/qml/Main.qml:1894
+#: src/qml/CardMenu.qml:142 src/qml/Main.qml:1900
 msgid "Download"
 msgstr "Download"
 
@@ -1263,7 +1268,7 @@ msgctxt "critic rating in percent"
 msgid "%1%"
 msgstr "%1%"
 
-#: src/qml/ItemDetailsPage.qml:704 src/qml/ItemListRow.qml:37
+#: src/qml/ItemDetailsPage.qml:704 src/qml/ItemListRow.qml:39
 #: src/qml/MediaCard.qml:60
 msgid "%1 season"
 msgid_plural "%1 seasons"
@@ -1271,7 +1276,7 @@ msgstr[0] "%1 season"
 msgstr[1] "%1 seasons"
 
 #: src/qml/ItemDetailsPage.qml:713 src/qml/LibraryPage.qml:553
-#: src/qml/ItemListRow.qml:37 src/qml/MediaCard.qml:60
+#: src/qml/ItemListRow.qml:39 src/qml/MediaCard.qml:60
 msgid "%1 episode"
 msgid_plural "%1 episodes"
 msgstr[0] "%1 episode"
@@ -2259,7 +2264,7 @@ msgid "%1 of %2"
 msgstr "%1 of %2"
 
 #: src/qml/DownloadsPage.qml:152 src/qml/DownloadsPage.qml:157
-#: src/qml/Main.qml:1917 src/qml/Main.qml:1923
+#: src/qml/Main.qml:1923 src/qml/Main.qml:1929
 msgid "Delete Download"
 msgstr "Delete Download"
 
@@ -2267,7 +2272,7 @@ msgstr "Delete Download"
 msgid "Delete %1? The file stays on the server"
 msgstr "Delete %1? The file stays on the server"
 
-#: src/qml/DownloadsPage.qml:172 src/qml/Main.qml:1936
+#: src/qml/DownloadsPage.qml:172 src/qml/Main.qml:1942
 msgid "Delete this download? The file stays on the server"
 msgstr "Delete this download? The file stays on the server"
 
@@ -2300,8 +2305,8 @@ msgctxt "@action:button %1 is the item"
 msgid "Pause %1"
 msgstr "Pause %1"
 
-#: src/qml/DownloadsPage.qml:380 src/qml/ItemListRow.qml:221
-#: src/qml/MediaCard.qml:538 src/qml/PlayerPage.qml:1295
+#: src/qml/DownloadsPage.qml:380 src/qml/ItemListRow.qml:223
+#: src/qml/MediaCard.qml:540 src/qml/PlayerPage.qml:1295
 msgid "More Actions"
 msgstr "More Actions"
 
@@ -2750,17 +2755,17 @@ msgstr ""
 "Could not load this genre: check the connection to the server and try again"
 
 #: src/qml/LibraryContent.qml:305 src/qml/LibraryContent.qml:311
-#: src/qml/ItemListRow.qml:43 src/qml/ItemListRow.qml:50
+#: src/qml/ItemListRow.qml:45 src/qml/ItemListRow.qml:52
 msgctxt "series name and episode label"
 msgid "%1 · %2"
 msgstr "%1 · %2"
 
-#: src/qml/LibraryContent.qml:310 src/qml/ItemListRow.qml:49
+#: src/qml/LibraryContent.qml:310 src/qml/ItemListRow.qml:51
 msgctxt "season and episode number spoken"
 msgid "Season %1, Episode %2"
 msgstr "Season %1, Episode %2"
 
-#: src/qml/LibraryContent.qml:310 src/qml/ItemListRow.qml:49
+#: src/qml/LibraryContent.qml:310 src/qml/ItemListRow.qml:51
 msgctxt "episode number spoken"
 msgid "Episode %1"
 msgstr "Episode %1"
@@ -2769,22 +2774,22 @@ msgstr "Episode %1"
 msgid "No item matches the search or the selected filters"
 msgstr "No item matches the search or the selected filters"
 
-#: src/qml/ItemListRow.qml:37 src/qml/MediaCard.qml:60
+#: src/qml/ItemListRow.qml:39 src/qml/MediaCard.qml:60
 msgctxt "seasons and episodes of a series"
 msgid "%1 · %2"
 msgstr "%1 · %2"
 
-#: src/qml/ItemListRow.qml:65 src/qml/MediaCard.qml:96
+#: src/qml/ItemListRow.qml:67 src/qml/MediaCard.qml:96
 msgid "Rated %1 out of 10"
 msgstr "Rated %1 out of 10"
 
-#: src/qml/ItemListRow.qml:67 src/qml/MediaCard.qml:98
+#: src/qml/ItemListRow.qml:69 src/qml/MediaCard.qml:98
 msgid "%1 unplayed item"
 msgid_plural "%1 unplayed items"
 msgstr[0] "%1 unplayed item"
 msgstr[1] "%1 unplayed items"
 
-#: src/qml/ItemListRow.qml:223 src/qml/MediaCard.qml:540
+#: src/qml/ItemListRow.qml:225 src/qml/MediaCard.qml:542
 msgid "More Actions for %1"
 msgstr "More Actions for %1"
 
@@ -3152,7 +3157,7 @@ msgstr "Undo"
 msgid "Another device replaced the queue"
 msgstr "Another device replaced the queue"
 
-#: src/qml/Main.qml:1799
+#: src/qml/Main.qml:1799 src/qml/Main.qml:1812
 msgid "Could not change the watched state. Check the connection and try again"
 msgstr "Could not change the watched state. Check the connection and try again"
 
@@ -3165,7 +3170,7 @@ msgctxt "@action:button"
 msgid "Undo"
 msgstr "Undo"
 
-#: src/qml/Main.qml:1809 src/qml/Main.qml:1822
+#: src/qml/Main.qml:1825
 msgid ""
 "Could not change the watched state: another change to this item is still "
 "being saved. Try again in a moment"
@@ -3173,21 +3178,21 @@ msgstr ""
 "Could not change the watched state: another change to this item is still "
 "being saved. Try again in a moment"
 
-#: src/qml/Main.qml:1833
+#: src/qml/Main.qml:1839
 msgid "The queue is full: some items were left out, remove some to add more"
 msgstr "The queue is full: some items were left out, remove some to add more"
 
-#: src/qml/Main.qml:1833
+#: src/qml/Main.qml:1839
 msgid "%1 item added to the queue"
 msgid_plural "%1 items added to the queue"
 msgstr[0] "%1 item added to the queue"
 msgstr[1] "%1 items added to the queue"
 
-#: src/qml/Main.qml:1836
+#: src/qml/Main.qml:1842
 msgid "There is nothing to play in this item"
 msgstr "There is nothing to play in this item"
 
-#: src/qml/Main.qml:1839
+#: src/qml/Main.qml:1845
 msgid ""
 "The queue could not be saved: check the free space and the permissions of "
 "the profile folder. It lasts until Kinefin closes"
@@ -3195,7 +3200,7 @@ msgstr ""
 "The queue could not be saved: check the free space and the permissions of "
 "the profile folder. It lasts until Kinefin closes"
 
-#: src/qml/Main.qml:1842
+#: src/qml/Main.qml:1848
 msgid ""
 "Could not add this to the queue: check the connection to the server and try "
 "again"
@@ -3203,12 +3208,12 @@ msgstr ""
 "Could not add this to the queue: check the connection to the server and try "
 "again"
 
-#: src/qml/Main.qml:1888
+#: src/qml/Main.qml:1894
 msgctxt "@title:window"
 msgid "Download Over Metered Network"
 msgstr "Download Over Metered Network"
 
-#: src/qml/Main.qml:1907
+#: src/qml/Main.qml:1913
 msgid "This network may charge for data. Download this item anyway?"
 msgstr "This network may charge for data. Download this item anyway?"
 

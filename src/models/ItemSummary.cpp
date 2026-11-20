@@ -100,7 +100,8 @@ void applyProgress(ItemSummary &item, qint64 positionTicks, double playedPercent
 {
     constexpr double ticksPerMinute = 60.0 * 10'000'000;
     item.positionTicks = std::max<qint64>(0, positionTicks);
-    const double runtimeTicks = item.runtimeMinutes * ticksPerMinute;
+    const double runtimeTicks =
+        item.runtimeTicks > 0 ? double(item.runtimeTicks) : item.runtimeMinutes * ticksPerMinute;
     // A server that sends no share leaves it to the runtime
     item.playedPercentage =
         playedPercentage > 0 || runtimeTicks <= 0
@@ -172,8 +173,10 @@ ItemSummary parseItemSummary(const QJsonObject &item)
         cappedString(item.value(QStringLiteral("SeriesPrimaryImageTag")), kMaxTokenLength);
     summary.overview = overviewText(item.value(QStringLiteral("Overview")), kMaxOverview);
     const double ticks = item.value(QStringLiteral("RunTimeTicks")).toDouble(0);
-    if (ticks > 0 && ticks < kMaxTicks)
+    if (ticks > 0 && ticks < kMaxTicks) {
         summary.runtimeMinutes = int(std::max(1.0, ticks / kTicksPerMinute));
+        summary.runtimeTicks = qint64(ticks);
+    }
     summary.communityRating = parseCommunityRating(item.value(QStringLiteral("CommunityRating")));
     summary.dateCreated = parseTimestamp(item.value(QStringLiteral("DateCreated")));
     summary.childCount = boundedCount(item.value(QStringLiteral("ChildCount")), 1'000'000);

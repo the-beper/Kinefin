@@ -216,33 +216,32 @@ void PagedItemsModel::applyFavorite(const QString &itemId, bool favorite, int ro
     }
 }
 
-void PagedItemsModel::applyPlayedState(const QString &itemId, bool played)
+void PagedItemsModel::updateResident(const QString &itemId,
+                                     const std::function<void(ItemSummary &)> &change)
 {
     for (auto page = m_pages.begin(); page != m_pages.end(); ++page) {
         for (size_t i = 0; i < page->size(); ++i) {
             ItemSummary &item = (*page)[i];
             if (!item.valid || !sameItemId(item.id, itemId))
                 continue;
-            applyPlayed(item, played);
+            change(item);
             const QModelIndex row = index(page.key() * m_pageSize + int(i));
             Q_EMIT dataChanged(row, row);
         }
     }
 }
 
+void PagedItemsModel::applyPlayedState(const QString &itemId, bool played)
+{
+    updateResident(itemId, [played](ItemSummary &item) { applyPlayed(item, played); });
+}
+
 void PagedItemsModel::applyProgressState(const QString &itemId, qint64 positionTicks,
                                          double playedPercentage)
 {
-    for (auto page = m_pages.begin(); page != m_pages.end(); ++page) {
-        for (size_t i = 0; i < page->size(); ++i) {
-            ItemSummary &item = (*page)[i];
-            if (!item.valid || !sameItemId(item.id, itemId))
-                continue;
-            applyProgress(item, positionTicks, playedPercentage);
-            const QModelIndex row = index(page.key() * m_pageSize + int(i));
-            Q_EMIT dataChanged(row, row);
-        }
-    }
+    updateResident(itemId, [positionTicks, playedPercentage](ItemSummary &item) {
+        applyProgress(item, positionTicks, playedPercentage);
+    });
 }
 
 void PagedItemsModel::evictBeyondLimit(int keep)

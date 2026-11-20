@@ -406,6 +406,8 @@ class FakeJellyfin {
         QJsonObject body;
     };
     QList<UserDataWrite> userDataWrites;
+    // Answered instead of the user data the write sets, when not empty
+    QByteArray userDataRawBody;
     int firstStoppedStatus = 0;
     int stoppedRequests = 0;
     bool holdReports = false;
@@ -1640,6 +1642,10 @@ class FakeJellyfin {
             userDataWrites.append({route, data});
             if (playedWriteStatus != 200 && playedWriteStatus != 204) {
                 respond(socket, playedWriteStatus, {});
+                return;
+            }
+            if (!userDataRawBody.isEmpty()) {
+                respond(socket, 200, userDataRawBody);
                 return;
             }
             const QList<QByteArray> parts = route.split('?').first().split('/');

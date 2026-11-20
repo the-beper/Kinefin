@@ -8,6 +8,7 @@ src/player/PlayerController.cpp
 src/integration/GamepadInput.cpp
 src/integration/KRunnerProvider.cpp
 src/integration/ScreenSaverInhibitor.cpp
+src/integration/SuspendInhibitor.cpp
 src/main.cpp
 src/settings/SettingDefinitions.cpp
 src/qml/HomePage.qml

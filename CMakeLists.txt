@@ -209,6 +209,8 @@ add_library(kinefin_integration STATIC
     src/integration/RemoteInputServer.h
     src/integration/ScreenSaverInhibitor.cpp
     src/integration/ScreenSaverInhibitor.h
+    src/integration/SuspendInhibitor.cpp
+    src/integration/SuspendInhibitor.h
     src/integration/SpatialNavigation.cpp
     src/integration/SpatialNavigation.h
 )
@@ -542,6 +544,11 @@ if(BUILD_TESTING)
     target_compile_definitions(test_screensaver_inhibitor PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(test_screensaver_inhibitor PRIVATE kinefin_integration kinefin_core Qt6::Test Qt6::Network Qt6::DBus)
     add_test(NAME screensaver_inhibitor COMMAND dbus-run-session -- $<TARGET_FILE:test_screensaver_inhibitor>)
+
+    add_executable(test_suspend_inhibitor tests/test_suspend_inhibitor.cpp)
+    target_compile_definitions(test_suspend_inhibitor PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    target_link_libraries(test_suspend_inhibitor PRIVATE kinefin_integration kinefin_core Qt6::Test Qt6::Network Qt6::DBus)
+    add_test(NAME suspend_inhibitor COMMAND dbus-run-session -- $<TARGET_FILE:test_suspend_inhibitor>)
 
     add_executable(test_remote_input tests/test_remote_input.cpp)
     target_link_libraries(test_remote_input PRIVATE kinefin_integration kinefin_core Qt6::Test Qt6::Gui Qt6::Network)
