@@ -800,16 +800,31 @@ Kirigami.Page {
                     text: i18nc("@action:button", "Show SyncPlay Group")
                     onClicked: page.Window.window?.openSyncPlay()
                 }
-                // A checkable button with one icon and one label: the pressed look says whether it holds (a deliberate HIG exception, see the architecture notes)
+                // Where the video plays: a device for a video that plays here, the way back for a cast
                 OsdButton {
-                    objectName: "playerLockButton"
+                    id: castButton
+                    objectName: "playerCastButton"
+                    Layout.alignment: Qt.AlignTop
+                    readonly property bool blockedByGroup: page.groupFollowing
+                    display: page.narrow ? Controls.AbstractButton.IconOnly : Controls.AbstractButton.TextBesideIcon
+                    visible: !page.player.localPlayback
+                    enabled: !blockedByGroup
+                    icon.name: "kinefin-cast"
+                    text: i18nc("@action:button", "Cast…")
+                    Accessible.description: blockedByGroup ? Controls.ToolTip.text : ""
+                    Controls.ToolTip.text: blockedByGroup ? i18nc("@info:tooltip", "Not available while following a SyncPlay group") : text
+                    Controls.ToolTip.visible: (hovered || visualFocus) && (display === Controls.AbstractButton.IconOnly || blockedByGroup)
+                    onClicked: page.Window.window.castCurrent()
+                }
+                // The video in a window of its own; the mini player has no button here, it is the first entry of More Actions and Back leads to it as well
+                OsdButton {
+                    objectName: "playerPictureInPictureButton"
                     Layout.alignment: Qt.AlignTop
                     display: page.narrow ? Controls.AbstractButton.IconOnly : Controls.AbstractButton.TextBesideIcon
-                    checkable: true
-                    checked: page.osdLocked
-                    icon.name: "object-locked"
-                    text: i18nc("@action:button", "Keep Controls Visible")
-                    onToggled: page.osdLocked = checked
+                    icon.name: "window-duplicate"
+                    text: i18nc("@action:button", "Picture-in-Picture")
+                    enabled: !page.player.casting
+                    onClicked: page.pictureInPicture()
                 }
             }
         }
@@ -1063,29 +1078,6 @@ Kirigami.Page {
                         enabled: !page.player.casting
                         onClicked: page.openMenu(subtitlesMenu, subtitlesButton)
                     }
-                    // A video that plays here moves to a device; a cast already has its own way back in the same dialog
-                    OsdButton {
-                        id: playOnButton
-                        objectName: "osdPlayOnButton"
-                        readonly property bool blockedByGroup: page.groupFollowing
-                        display: page.narrow ? Controls.AbstractButton.IconOnly : Controls.AbstractButton.TextBesideIcon
-                        visible: !page.player.localPlayback
-                        enabled: !blockedByGroup
-                        icon.name: "video-television"
-                        text: i18nc("@action:button", "Play On…")
-                        Accessible.description: blockedByGroup ? Controls.ToolTip.text : ""
-                        Controls.ToolTip.text: blockedByGroup ? i18nc("@info:tooltip", "Not available while following a SyncPlay group") : text
-                        Controls.ToolTip.visible: (hovered || visualFocus) && (display === Controls.AbstractButton.IconOnly || blockedByGroup)
-                        onClicked: page.Window.window.castCurrent()
-                    }
-                    // The mini player has no button of its own beside this one, which looked too alike: it is the first entry of More Actions, and Back leads to it as well
-                    OsdButton {
-                        objectName: "playerPictureInPictureButton"
-                        icon.name: "window-duplicate"
-                        text: i18nc("@action:button", "Picture in Picture")
-                        enabled: !page.player.casting
-                        onClicked: page.pictureInPicture()
-                    }
                     OsdButton {
                         objectName: "playerFullScreenButton"
                         icon.name: page.fullScreen ? "view-restore" : "view-fullscreen"
@@ -1294,15 +1286,6 @@ Kirigami.Page {
             namePrefix: "playerContextMore"
             title: i18n("More Actions")
             icon.name: "overflow-menu"
-        }
-        Controls.MenuSeparator {}
-        Controls.MenuItem {
-            objectName: "playerContextLockItem"
-            icon.name: "object-locked"
-            text: i18nc("@action:button", "Keep Controls Visible")
-            checkable: true
-            checked: page.osdLocked
-            onTriggered: page.osdLocked = !page.osdLocked
         }
     }
     Controls.Popup {
@@ -1866,6 +1849,15 @@ Kirigami.Page {
             checkable: true
             checked: page.playbackInfoShown
             onTriggered: page.playbackInfoShown = !page.playbackInfoShown
+        }
+        Controls.MenuSeparator {}
+        Controls.MenuItem {
+            objectName: moreRoot.namePrefix + "LockItem"
+            icon.name: "object-locked"
+            text: i18nc("@action:inmenu", "Keep Controls Visible")
+            checkable: true
+            checked: page.osdLocked
+            onTriggered: page.osdLocked = !page.osdLocked
         }
     }
     // A checkable entry of the Aspect Ratio menu: it follows the player's mode and sets it

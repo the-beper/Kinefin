@@ -207,7 +207,7 @@ Controls.ApplicationWindow {
                 x: pip.mirrored ? pip.edgeWidth : parent.width - width - pip.edgeWidth
                 y: pip.edgeWidth
                 icon.name: "window-close"
-                text: i18nc("@action:button closes the picture-in-picture window; the video goes back to the full player", "Close Picture in Picture")
+                text: i18nc("@action:button closes the picture-in-picture window; the video goes back to the full player", "Close Picture-in-Picture")
                 onClicked: pip.returnToPlayer()
             }
 

@@ -104,7 +104,7 @@ Kirigami.ScrollablePage {
     function detailText(seriesName, seasonNumber, episodeNumber, year) {
         let line = seriesName;
         if (seasonNumber > 0 && episodeNumber > 0)
-            line += (line.length > 0 ? " · " : "") + i18nc("season and episode number", "S%1:E%2", seasonNumber, episodeNumber);
+            line += (line.length > 0 ? " · " : "") + EpisodeLabel.label(seasonNumber, episodeNumber);
         else if (year > 0)
             line += (line.length > 0 ? " · " : "") + year;
         return line;

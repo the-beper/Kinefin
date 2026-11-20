@@ -1401,8 +1401,7 @@ void PlayerController::requestPending()
     if (castTarget()) {
         const RendererInfo *info = m_cast->infoFor(m_castTarget);
         if (!info) {
-            castFailed(
-                i18n("The device is no longer available: search for it again from Play On."));
+            castFailed(i18n("The device is no longer available: search for it again from Cast."));
             return;
         }
         const bool burnIn = m_selectedSubtitleId != 0
@@ -1798,7 +1797,7 @@ void PlayerController::startCast(const PlaybackSource &source)
 {
     const RendererInfo *info = m_cast->infoFor(m_castTarget);
     if (!info || m_session.state() != PlaybackSession::State::Idle) {
-        castFailed(i18n("The device is no longer available: search for it again from Play On."));
+        castFailed(i18n("The device is no longer available: search for it again from Cast."));
         return;
     }
     const QString name = m_cast->nameFor(m_castTarget);

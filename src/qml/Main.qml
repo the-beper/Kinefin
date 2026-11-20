@@ -826,7 +826,7 @@ Kirigami.ApplicationWindow {
         const episode = info.type === "Episode" && info.seriesName.length > 0;
         const title = episode ? info.seriesName : info.name;
         const subtitle = episode && info.seasonNumber > 0 && info.episodeNumber > 0
-            ? i18nc("episode label and episode title", "%1 — %2", i18nc("season and episode number", "S%1:E%2", info.seasonNumber, info.episodeNumber), info.name)
+            ? i18nc("episode label and episode title", "%1 — %2", EpisodeLabel.label(info.seasonNumber, info.episodeNumber), info.name)
             : "";
         if (!window.player.playLocalFile(info.path, itemId, title, subtitle, info.positionTicks || 0, info)) {
             window.showPassiveNotification(i18n("The downloaded file could not be played"));
@@ -1475,7 +1475,7 @@ Kirigami.ApplicationWindow {
         shell: window
     }
 
-    // Play On… of a video: with an item (the card menu, the details page) every choice plays that item there, This Computer included; without one (the OSD) the playing video moves to the choice
+    // Cast… of a video: with an item (the card menu, the details page) every choice plays that item there, This Computer included; without one (the OSD) the playing video moves to the choice
     CastDialog {
         id: castDialog
         player: window.player
@@ -1493,7 +1493,7 @@ Kirigami.ApplicationWindow {
                 started = window.player.castTo(udn);
             }
             if (!started)
-                window.showPassiveNotification(udn === "local" ? i18n("Could not start playback") : i18nc("@info %1 is a device name", "Could not start playback on %1: open Play On again to search for it", window.plainNotificationText(name)));
+                window.showPassiveNotification(udn === "local" ? i18n("Could not start playback") : i18nc("@info %1 is a device name", "Could not start playback on %1: open Cast again to search for it", window.plainNotificationText(name)));
         }
     }
 
@@ -1510,7 +1510,7 @@ Kirigami.ApplicationWindow {
         castDialog.open();
     }
 
-    // The OSD's Play On…: the playing video moves to the chosen device, or back to this computer
+    // The OSD's Cast: the playing video moves to the chosen device, or back to this computer
     function castCurrent() {
         if (!window.player || groupRouting)
             return;

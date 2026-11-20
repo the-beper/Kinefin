@@ -46,7 +46,7 @@ Controls.ToolBar {
             objectName: "prefsDiscardButton"
 
             text: i18nc("@action:button", "Discard")
-            icon.name: "edit-undo"
+            icon.name: "edit-delete"
             enabled: bar.prefs.dirty && !bar.busy
             onClicked: bar.prefs.discard()
         }

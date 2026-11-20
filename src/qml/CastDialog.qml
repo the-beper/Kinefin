@@ -25,7 +25,7 @@ Kirigami.Dialog {
     // `udn` is "local" for This Computer; `name` is the device's name, empty for This Computer
     signal targetChosen(string udn, string name)
 
-    title: i18nc("@title:window", "Play On")
+    title: i18nc("@title:window", "Cast")
     // One size in every state: the dialog sizes a list by its rows, and the search, the devices and the empty state must not move it
     preferredWidth: Kirigami.Units.gridUnit * 22
     preferredHeight: Kirigami.Units.gridUnit * 20

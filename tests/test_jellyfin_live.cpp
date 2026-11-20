@@ -5,6 +5,7 @@
 #include "api/JellyfinSocketClient.h"
 #include "api/PlaybackReport.h"
 #include "models/PlayQueue.h"
+#include "player/ClipExporter.h"
 #include "player/PlaybackEngine.h"
 #include "player/PlaybackReporter.h"
 #include "player/PlaybackSession.h"
@@ -95,6 +96,9 @@ class TestJellyfinLive : public QObject {
 
     // Engine live gate INT-04 (~60 s): >20 s of held-pause reporting, then stop; the server's user-data record keeps the continue point
     void engineProgressAdvancesUserData();
+
+    // Clip export from a transcode (~60 s): a movie capped into a transcode plays 25 s, the last 20 s are marked as an A-B range, `ab-loop-align-cache` and `ab-loop-dump-cache` write what mpv holds, and the time the two commands block the player and the distance of the aligned start from the mark are the facts; the dump is then encoded by ClipExporter from the mark on
+    void transcodeCacheDump();
 
     // Engine live gate INT-06 (~50 s): a byte-forwarding local proxy carries client and stream; cutting it mid-play gives exactly one Failed->Stopping->Idle path, no second play identity, and re-authentication on the real base recovers
     void engineInterruptionSeversAndRecovers();
@@ -1158,6 +1162,87 @@ void TestJellyfinLive::engineTranscodeLifecycle()
     qInfo() << LIVE_FACT << "server session record after stop:" << afterStop;
     QVERIFY2(afterStop.contains(QStringLiteral("\"nowPlayingType\":\"\"")),
              "the transcode survived the stop in the server session record");
+    engine->deleteLater();
+    client.disconnectFromServer();
+}
+
+void TestJellyfinLive::transcodeCacheDump()
+{
+    if (!m_live)
+        QSKIP("no KINEFIN_LIVE_* environment, skipping the live checks");
+    Kinefin::JellyfinClient client;
+    QVERIFY(authenticate(client));
+    QString itemId;
+    Kinefin::PlaybackSource direct;
+    QVERIFY2(findDirectPlayable(client, &itemId, &direct, 3'000'000),
+             "no direct-playable movie of at least 3 Mbit/s");
+    // A cap under the file's rate: the server transcodes
+    QSignalSpy ready(&client, &Kinefin::JellyfinClient::playbackInfoReady);
+    QVERIFY(
+        client.requestPlaybackInfo(itemId, qint64(0), Kinefin::buildDeviceProfile({}), 2'000'000));
+    QVERIFY2(ready.wait(20000), "no PlaybackInfo answer for the capped negotiation");
+    const Kinefin::PlaybackSource source = ready.first().first().value<Kinefin::PlaybackSource>();
+    QCOMPARE(source.method, Kinefin::PlaybackSource::Method::Transcode);
+
+    Kinefin::PlaybackSession session;
+    auto *engine = new Kinefin::PlaybackEngine(client, session, this);
+    QVERIFY(engine->init({QStringLiteral("vo=null"), QStringLiteral("ao=null")}));
+    Kinefin::PlaybackReporter reporter(session, client, [&engine] {
+        return Kinefin::PlaybackReporter::PlayerState{.positionTicks = engine->knownPositionTicks(),
+                                                      .canSeek = engine->canSeek()};
+    });
+    QVERIFY(engine->open(source));
+    QTRY_VERIFY_WITH_TIMEOUT(session.state() == Kinefin::PlaybackSession::State::Playing, 40000);
+    QTRY_VERIFY_WITH_TIMEOUT(engine->mpvProperty(QStringLiteral("time-pos")).toDouble() >= 25.0,
+                             60000);
+
+    const double position = engine->mpvProperty(QStringLiteral("time-pos")).toDouble();
+    const double a = position - 20.0;
+    const double b = position - 2.0;
+    // A failed check leaves nothing behind in the temporary folder
+    QTemporaryDir work;
+    QVERIFY(work.isValid());
+    const QString dump = work.filePath(QStringLiteral("dump.ts"));
+    QElapsedTimer blocked;
+    blocked.start();
+    engine->setMpvProperty(QStringLiteral("ab-loop-a"), a);
+    engine->setMpvProperty(QStringLiteral("ab-loop-b"), b);
+    const bool aligned = engine->mpvCommand({QStringLiteral("ab-loop-align-cache")});
+    const double alignedA = engine->mpvProperty(QStringLiteral("ab-loop-a")).toDouble();
+    const bool dumped = engine->mpvCommand({QStringLiteral("ab-loop-dump-cache"), dump});
+    engine->setMpvProperty(QStringLiteral("ab-loop-a"), QStringLiteral("no"));
+    engine->setMpvProperty(QStringLiteral("ab-loop-b"), QStringLiteral("no"));
+    const qint64 blockedMs = blocked.elapsed();
+    const double after = engine->mpvProperty(QStringLiteral("time-pos")).toDouble();
+    qInfo() << LIVE_FACT << "transcode dump marks" << a << b << "aligned" << aligned << "start"
+            << alignedA << "dumped" << dumped << "bytes" << QFileInfo(dump).size() << "blocked ms"
+            << blockedMs << "position before" << position << "after" << after;
+    QVERIFY2(aligned && dumped, "mpv refused ab-loop-align-cache or ab-loop-dump-cache");
+    QVERIFY(QFileInfo(dump).size() > 0);
+    QVERIFY2(alignedA <= a + 0.001 && a - alignedA < 12.0,
+             "the aligned start is after the mark or more than a GOP before it");
+    // The player went on: no loop back to A
+    QTest::qWait(1500);
+    QVERIFY(engine->mpvProperty(QStringLiteral("time-pos")).toDouble() > after);
+
+    // The dump encodes from the mark on, as a clip of a local file does
+    Kinefin::ClipExporter exporter;
+    QSignalSpy finished(&exporter, &Kinefin::ClipExporter::finished);
+    QSignalSpy failed(&exporter, &Kinefin::ClipExporter::failed);
+    Kinefin::ClipRequest request;
+    request.source = QUrl::fromLocalFile(dump);
+    request.startTicks = qint64((a - alignedA) * 10'000'000);
+    request.endTicks = qint64((b - alignedA) * 10'000'000);
+    const QString staging = work.filePath(QStringLiteral("clip.mp4"));
+    QVERIFY(exporter.start(request, staging));
+    QTRY_VERIFY_WITH_TIMEOUT(!finished.isEmpty() || !failed.isEmpty(), 120000);
+    qInfo() << LIVE_FACT << "transcode dump encoded clip bytes" << QFileInfo(staging).size()
+            << "failed" << failed.size();
+    QCOMPARE(failed.size(), 0);
+    QVERIFY(QFileInfo(staging).size() > 0);
+
+    engine->stop();
+    QTRY_VERIFY_WITH_TIMEOUT(session.state() == Kinefin::PlaybackSession::State::Idle, 40000);
     engine->deleteLater();
     client.disconnectFromServer();
 }

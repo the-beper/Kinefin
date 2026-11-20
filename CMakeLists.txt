@@ -322,6 +322,8 @@ qt_add_qml_module(kinefin_ui
         src/app/ConnectionController.h
         src/app/DownloadsController.cpp
         src/app/DownloadsController.h
+        src/app/EpisodeLabelQml.cpp
+        src/app/EpisodeLabelQml.h
         src/app/ImageNetworkFactory.cpp
         src/app/ImageNetworkFactory.h
         src/app/ModelsQml.h
@@ -643,7 +645,8 @@ if(BUILD_TESTING)
     foreach(shard RANGE ${last_shard})
         if(ui_pages_shard_${shard})
             add_test(NAME ui_pages_${shard} COMMAND test_ui_pages ${ui_pages_shard_${shard}})
-            set_tests_properties(ui_pages_${shard} PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" PROCESSORS 2)
+            # One processor each: on the two-core CI runner `ctest -j 2` then runs two shards at a time instead of one (PROCESSORS 2 made them strictly serial, 23 of the job's 40 minutes)
+            set_tests_properties(ui_pages_${shard} PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" PROCESSORS 1)
         endif()
     endforeach()
     add_test(NAME ui_pages_shards COMMAND ${CMAKE_COMMAND} -DBIN=$<TARGET_FILE:test_ui_pages> "-DSHARDED=${ui_pages_all}" -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_ui_shards.cmake)

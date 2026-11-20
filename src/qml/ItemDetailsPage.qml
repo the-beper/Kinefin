@@ -62,10 +62,7 @@ Kirigami.ScrollablePage {
     readonly property string episodeCode: {
         if (details.type === "Season" || details.episodeNumber < 0)
             return "";
-        const double = details.episodeNumberEnd > details.episodeNumber;
-        if (details.seasonNumber >= 0)
-            return double ? i18nc("season and episode range", "S%1:E%2–E%3", details.seasonNumber, details.episodeNumber, details.episodeNumberEnd) : i18nc("season and episode number", "S%1:E%2", details.seasonNumber, details.episodeNumber);
-        return double ? i18nc("episode number range", "E%1–E%2", details.episodeNumber, details.episodeNumberEnd) : i18nc("episode number", "E%1", details.episodeNumber);
+        return EpisodeLabel.label(details.seasonNumber, details.episodeNumber, details.episodeNumberEnd);
     }
     readonly property int startYear: details.year > 0 ? details.year : (dateOf(details.premiereDate)?.getFullYear() ?? 0)
     readonly property int endYear: dateOf(details.endDate)?.getFullYear() ?? 0
@@ -101,8 +98,8 @@ Kirigami.ScrollablePage {
     }
     readonly property Kirigami.Action playOnAction: Kirigami.Action {
         objectName: "playOnAction"
-        text: i18nc("@action:button", "Play On…")
-        icon.name: "video-television"
+        text: i18nc("@action:button", "Cast…")
+        icon.name: "kinefin-cast"
         visible: page.details.status === ItemDetailsModel.Ready && page.details.playable
         enabled: !!page.Window.window?.player && !page.Window.window?.groupRouting
         tooltip: page.Window.window?.groupRouting ? i18nc("@info:tooltip", "Not available while following a SyncPlay group") : ""

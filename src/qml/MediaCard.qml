@@ -511,8 +511,8 @@ Controls.ItemDelegate {
             Controls.ToolButton {
                 id: menuButton
                 objectName: "cardMenuButton"
-                Layout.preferredWidth: nameLabel.implicitHeight
-                Layout.preferredHeight: nameLabel.implicitHeight
+                Layout.preferredWidth: Math.round(nameLabel.implicitHeight)
+                Layout.preferredHeight: Math.round(nameLabel.implicitHeight)
                 focusPolicy: Qt.NoFocus
                 padding: 0
                 leftPadding: 0
@@ -521,26 +521,20 @@ Controls.ItemDelegate {
                 bottomPadding: 0
                 visible: card.loaded && card.hasMenu
                 display: Controls.AbstractButton.IconOnly
-                icon.name: "overflow-menu"
-                icon.width: Kirigami.Units.iconSizes.small
-                icon.height: Kirigami.Units.iconSizes.small
-                // The glyph drawn here, in the middle of the button on whole pixels: in a button this small the style's own margins push its icon off centre
+                // No icon of the button's own: the desktop style paints it in the background, off centre in a button this small, and the glyph below would be a second row of dots
                 contentItem: Item {
                     Kirigami.Icon {
                         objectName: "cardMenuGlyph"
                         x: Math.round((parent.width - width) / 2)
                         y: Math.round((parent.height - height) / 2)
-                        width: menuButton.icon.width
-                        height: menuButton.icon.height
-                        source: menuButton.icon.name
-                        isMask: true
-                        color: Kirigami.Theme.textColor
+                        width: Kirigami.Units.iconSizes.small
+                        height: Kirigami.Units.iconSizes.small
+                        source: "overflow-menu"
                     }
                 }
-                text: i18n("More Actions")
-                // The tooltip keeps the short text: a screen reader hears which card the button belongs to
+                // No text either: with no icon the style would paint it, elided to a row of dots. The tooltip has the short text, a screen reader hears which card the button belongs to
                 Accessible.name: i18n("More Actions for %1", card.name)
-                Controls.ToolTip.text: text
+                Controls.ToolTip.text: i18n("More Actions")
                 Controls.ToolTip.visible: hovered
                 Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
                 onClicked: {

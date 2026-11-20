@@ -301,13 +301,13 @@ Item {
                 subtitle: {
                     if (type !== "Episode" || episodeNumber < 0)
                         return "";
-                    const label = seasonNumber >= 0 ? i18nc("season and episode number", "S%1:E%2", seasonNumber, episodeNumber) : i18nc("episode number", "E%1", episodeNumber);
+                    const label = EpisodeLabel.label(seasonNumber, episodeNumber);
                     return seriesName.length > 0 ? i18nc("series name and episode label", "%1 · %2", seriesName, label) : label;
                 }
                 spokenSubtitle: {
                     if (type !== "Episode" || episodeNumber < 0)
                         return "";
-                    const label = seasonNumber >= 0 ? i18nc("season and episode number spoken", "Season %1, Episode %2", seasonNumber, episodeNumber) : i18nc("episode number spoken", "Episode %1", episodeNumber);
+                    const label = EpisodeLabel.spoken(seasonNumber, episodeNumber);
                     return seriesName.length > 0 ? i18nc("series name and episode label", "%1 · %2", seriesName, label) : label;
                 }
                 onClicked: content.ownerPage.Window.window.openItem(itemId, content.ownerPage)

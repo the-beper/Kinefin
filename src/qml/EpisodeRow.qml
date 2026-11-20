@@ -34,11 +34,7 @@ Controls.ItemDelegate {
     readonly property string numberText: {
         if (episodeNumber < 0)
             return "";
-        if (showSeason && seasonNumber >= 0)
-            return episodeNumberEnd > episodeNumber ? i18nc("season and episode range", "S%1:E%2–E%3", seasonNumber, episodeNumber, episodeNumberEnd) : i18nc("season and episode number", "S%1:E%2", seasonNumber, episodeNumber);
-        if (episodeNumberEnd > episodeNumber)
-            return i18nc("episode number range", "E%1–E%2", episodeNumber, episodeNumberEnd);
-        return i18nc("episode number", "E%1", episodeNumber);
+        return EpisodeLabel.label(showSeason ? seasonNumber : -1, episodeNumber, episodeNumberEnd);
     }
     readonly property string label: {
         if (!loaded)

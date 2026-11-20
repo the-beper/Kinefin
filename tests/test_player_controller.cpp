@@ -1282,7 +1282,7 @@ class TestPlayerController : public QObject {
                                     return entry.route.endsWith("/Sessions/Playing");
                                 }));
         const qsizetype reportsBefore = chain.server.reportLog.size();
-        // Play On from the bar: the local session ends, and the renderer starts where mpv was
+        // Cast from the bar: the local session ends, and the renderer starts where mpv was
         QVERIFY(chain.controller.castTo(QStringLiteral("uuid:test-renderer")));
         QTRY_VERIFY(chain.controller.casting());
         QTRY_COMPARE(fake.transport, QStringLiteral("PLAYING"));

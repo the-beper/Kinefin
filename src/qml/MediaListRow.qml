@@ -27,7 +27,7 @@ Controls.ItemDelegate {
     readonly property string title: {
         if (episodeNumber < 0)
             return name;
-        const label = seasonNumber >= 0 ? i18nc("season and episode number", "S%1:E%2", seasonNumber, episodeNumber) : i18nc("episode number", "E%1", episodeNumber);
+        const label = EpisodeLabel.label(seasonNumber, episodeNumber);
         const episode = name.length > 0 ? i18nc("episode label and episode title", "%1 — %2", label, name) : label;
         return seriesName.length > 0 ? i18nc("series name and episode", "%1 — %2", seriesName, episode) : episode;
     }

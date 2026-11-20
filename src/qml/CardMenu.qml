@@ -49,7 +49,7 @@ Controls.Menu {
     // False while following a SyncPlay group: the group decides what plays, so no device can take an item of its own
     property bool playOnAvailable: true
     signal playRequested(string targetId)
-    // Play On…: the target picker, then the same item at its resume point
+    // Cast…: the target picker, then the same item at its resume point
     signal playOnRequested(string targetId, real ticks)
     signal resumeRequested(string targetId, real ticks)
     signal favoriteRequested(string targetId, bool favorite)
@@ -102,8 +102,8 @@ Controls.Menu {
     }
     Controls.MenuItem {
         objectName: "cardMenuPlayOn"
-        text: i18nc("@action:inmenu", "Play On…")
-        icon.name: "video-television"
+        text: i18nc("@action:inmenu", "Cast…")
+        icon.name: "kinefin-cast"
         visible: menu.playable
         height: visible ? implicitHeight : 0
         enabled: menu.playAvailable && menu.playOnAvailable

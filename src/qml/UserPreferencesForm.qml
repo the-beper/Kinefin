@@ -345,7 +345,7 @@ ColumnLayout {
             },
             Kirigami.Action {
                 text: i18nc("@action:button", "Discard")
-                icon.name: "edit-undo"
+                icon.name: "edit-delete"
                 onTriggered: page.prefs.discard()
             }
         ]
@@ -679,7 +679,7 @@ ColumnLayout {
         customFooterActions: [
             Kirigami.Action {
                 text: i18nc("@action:button", "Discard")
-                icon.name: "edit-undo"
+                icon.name: "edit-delete"
                 onTriggered: {
                     const leave = leaveDialog.proceed;
                     leaveDialog.close();

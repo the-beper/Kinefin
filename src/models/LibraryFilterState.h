@@ -125,7 +125,7 @@ inline bool isRandomSort(const QString &key)
     return key == QLatin1String("Random");
 }
 
-// Turns `base` (the query of the view: parent, item types, recursion, card images, fixed constraints such as the Favorites tab's IsFavorite filter, search term) plus the filters and sort into the ItemQuery of one page: the sections that do not apply to `scope` are left out, the state's status tokens are merged into `base.filters`. Sorting other than by name or Random keeps SortName as the tie-break. Random is one page, `startIndex` 0 and `limit` at most RandomPageSize: a later start index is refused. Returns nullopt for a sort key the scope does not offer or a Random page past the first; the values themselves are validated by JellyfinClient::fetchItems
+// Turns `base` (the query of the view: parent, item types, recursion, card images, fixed constraints such as the Favorites tab's IsFavorite filter, search term) plus the filters and sort into the ItemQuery of one page: the sections that do not apply to `scope` are left out, the state's status tokens are merged into `base.filters`. Sorting other than by name or Random keeps SortName as the tie-break, and the Episodes scope sorts its episode order and names within each series. Random is one page, `startIndex` 0 and `limit` at most RandomPageSize: a later start index is refused. Returns nullopt for a sort key the scope does not offer or a Random page past the first; the values themselves are validated by JellyfinClient::fetchItems
 inline std::optional<ItemQuery> composeLibraryQuery(const ItemQuery &base, LibraryScope scope,
                                                     const LibraryFilterState &filterState,
                                                     const LibrarySort &sort, int startIndex = -1,
@@ -143,6 +143,11 @@ inline std::optional<ItemQuery> composeLibraryQuery(const ItemQuery &base, Libra
     query.sortBy = sort.key;
     if (sort.key != QLatin1String("SortName") && !random)
         query.sortBy += QStringLiteral(",SortName");
+    // Across a whole library the episodes' own order and names run season by season over every series at once (all the S1E1 first, observed on 12.4): the series comes first
+    if (scope == LibraryScope::Episodes
+        && (sort.key == QLatin1String("AiredEpisodeOrder")
+            || sort.key == QLatin1String("SortName")))
+        query.sortBy.prepend(QStringLiteral("SeriesSortName,"));
     query.sortOrder =
         sort.descending && !random ? QStringLiteral("Descending") : QStringLiteral("Ascending");
     if (random) {

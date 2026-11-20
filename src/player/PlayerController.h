@@ -80,7 +80,7 @@ class PlayerController final : public QObject {
     Q_PROPERTY(bool loading READ loading NOTIFY changed)
     // A file played from the downloads folder: no server session, no reporting, no server-only chrome
     Q_PROPERTY(bool localPlayback READ localPlayback NOTIFY localPlaybackChanged)
-    // The DLNA renderers the Play On picker lists, and the one that plays
+    // The DLNA renderers the Cast picker lists, and the one that plays
     Q_PROPERTY(Kinefin::CastController *cast READ castController CONSTANT)
     Q_PROPERTY(bool casting READ casting NOTIFY changed)
     // The renderer chosen for this playback (its UDN), empty when it plays here

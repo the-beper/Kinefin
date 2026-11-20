@@ -90,16 +90,9 @@ Kirigami.Dialog {
             draft = toggled(entry);
     }
 
-    // Whether the entry may be switched: taking a choice off always may, a value of a list section (genre, tag, rating, year) is refused when the query would be longer than the client sends
+    // Whether the entry may be switched: taking a choice off always may, any other choice is refused when the query would be longer than the client sends (a saved view can already be at the limit, and the model would drop the whole draft at Apply without a word)
     function canAdd(entry) {
-        switch (entry.facet) {
-        case "genreIds":
-        case "tags":
-        case "officialRatings":
-        case "years":
-            return isSelected(entry) || library.filtersFit(toggled(entry));
-        }
-        return true;
+        return isSelected(entry) || library.filtersFit(toggled(entry));
     }
 
     // The draft with the entry switched

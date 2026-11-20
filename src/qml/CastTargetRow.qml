@@ -5,7 +5,7 @@ import QtQuick.Controls as Controls
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 
-// One row of the Play On list: icon, name, an optional detail line, and a check mark on the target that plays now
+// One row of the Cast list: icon, name, an optional detail line, and a check mark on the target that plays now
 Controls.ItemDelegate {
     id: row
     property string iconName

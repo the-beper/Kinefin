@@ -3013,6 +3013,32 @@ class TestUiPages : public QObject {
         QVERIFY(ui.controller.errorText().isEmpty());
     }
 
+    void homeNeverReportsNoLibrariesWhenTheListingFails()
+    {
+        Ui ui(m_home->path());
+        // A response that is no listing: the request fails and the error has its own message
+        ui.server.viewsRawBody = QByteArrayLiteral("{}");
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QTRY_VERIFY(!ui.controller.errorText().isEmpty());
+        QVERIFY(!ui.controller.librariesLoaded());
+        QVERIFY(ui.showsText(ui.controller.errorText()));
+        QVERIFY(!ui.showsText(QStringLiteral("No libraries to show")));
+
+        // The server answers with an empty listing: the placeholder is correct now
+        ui.serveViews({});
+        ui.controller.reloadLibraries();
+        QTRY_VERIFY(ui.controller.librariesLoaded());
+        QTRY_VERIFY(ui.showsText(QStringLiteral("No libraries to show")));
+
+        // A later failure takes the placeholder away again and shows the error
+        ui.server.viewsRawBody = QByteArrayLiteral("{}");
+        ui.controller.reloadLibraries();
+        QTRY_VERIFY(!ui.controller.errorText().isEmpty());
+        QTRY_VERIFY(ui.showsText(ui.controller.errorText()));
+        QVERIFY(!ui.showsText(QStringLiteral("No libraries to show")));
+    }
+
     // MyMediaExcludes hides a tile only, LatestItemsExcludes a Recently Added row only, OrderedViews orders the tiles that stay
     void homeTilesAndRowsFollowTheUserConfiguration()
     {
@@ -3196,6 +3222,32 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(grid->property("count").toInt() > 0);
         QVERIFY(field->hasActiveFocus());
         QVERIFY(!grid->hasActiveFocus());
+    }
+
+    void theEpisodeLabelHelperBuildsEverySeasonAndEpisodeLabel()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QQmlComponent component(&ui.engine);
+        component.setData("import QtQml\nimport org.kde.kinefin\nQtObject {\n"
+                          "    property string joined: [\n"
+                          "        EpisodeLabel.label(2, 6),\n"
+                          "        EpisodeLabel.label(-1, 6),\n"
+                          "        EpisodeLabel.label(2, 6, 7),\n"
+                          "        EpisodeLabel.label(-1, 6, 7),\n"
+                          "        EpisodeLabel.label(2, 6, 6),\n"
+                          "        EpisodeLabel.label(2, 6, -1),\n"
+                          "        EpisodeLabel.spoken(2, 6),\n"
+                          "        EpisodeLabel.spoken(-1, 6)\n"
+                          "    ].join('|')\n"
+                          "}",
+                          QUrl());
+        std::unique_ptr<QObject> created(component.create());
+        QVERIFY2(created, qPrintable(component.errorString()));
+        // The catalog is not loaded for the test language: the messages read as their msgids
+        QCOMPARE(created->property("joined").toString(),
+                 QStringLiteral("S2:E6|E6|S2:E6–E7|E6–E7|S2:E6|S2:E6"
+                                "|Season 2, Episode 6|Episode 6"));
     }
 
     void aCardRowBuildsItsListWithItsFirstCards()
@@ -4870,6 +4922,53 @@ class TestUiPages : public QObject {
         QVERIFY(option->isEnabled());
         QTRY_VERIFY(!ui.showsText(hint));
         QVERIFY(toggleOption(ui, QStringLiteral("tags"), tag));
+        QTRY_VERIFY(rowShown() && option->property("selected").toBool());
+    }
+
+    void aChoiceThatIsNoListIsBlockedWhenTheQueryHasNoRoomForIt()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        auto *movies = ui.controller.movies();
+        QTRY_VERIFY(movies->filterOptions()->available());
+        QVERIFY(openFilterDialog(ui));
+        QObject *dialog = ui.popup(QStringLiteral("filterDialog"));
+        QVERIFY(dialog);
+        const QString hint = QStringLiteral("Too many filters selected: remove one to add this");
+        const QString rowName = QStringLiteral("filterOption_played_Played");
+        QQuickItem *option = nullptr;
+        const auto rowShown = [&] {
+            revealFilterEntry(ui, QStringLiteral("played"), QStringLiteral("Played"));
+            return (option = shownItem(ui, rowName)) != nullptr;
+        };
+        QTRY_VERIFY(rowShown());
+        QVERIFY(!option->property("blocked").toBool());
+
+        // A draft that leaves no room for the status filter, as a saved view at the limit does
+        Kinefin::LibraryFilterState full = tagsFillingTheQuery(*movies);
+        QVERIFY(!full.tags.isEmpty());
+        Kinefin::LibraryFilterState played = full;
+        played.played = Kinefin::PlayedState::Played;
+        QVERIFY(!movies->filtersFit(Kinefin::LibraryItemsModel::filtersToVariant(played)));
+        QVERIFY(dialog->setProperty("draft", Kinefin::LibraryItemsModel::filtersToVariant(full)));
+        QTRY_VERIFY(rowShown() && option->property("blocked").toBool());
+        QVERIFY(!option->isEnabled());
+        QCOMPARE(option->property("hint").toString(), hint);
+        QTRY_VERIFY(ui.showsText(hint));
+        // Neither a click nor the toggle of the dialog switches it
+        ui.clickCenter(option);
+        QVERIFY(toggleOption(ui, QStringLiteral("played"), QStringLiteral("Played")));
+        QCOMPARE(dialog->property("draft").toMap().value(QStringLiteral("played")).toString(),
+                 QStringLiteral("Any"));
+        QVERIFY(!option->property("selected").toBool());
+
+        // Without the tags there is room again
+        QVERIFY(dialog->setProperty(
+            "draft", Kinefin::LibraryItemsModel::filtersToVariant(Kinefin::LibraryFilterState{})));
+        QTRY_VERIFY(rowShown() && !option->property("blocked").toBool());
+        QVERIFY(option->isEnabled());
+        QVERIFY(toggleOption(ui, QStringLiteral("played"), QStringLiteral("Played")));
         QTRY_VERIFY(rowShown() && option->property("selected").toBool());
     }
 
@@ -8251,6 +8350,9 @@ class TestUiPages : public QObject {
         QTRY_COMPARE(ui.item(QStringLiteral("startupCover"))->opacity(), 1.0);
         QTRY_VERIFY(cancel->width() > 0 && ui.insideWindow(cancel));
         QCOMPARE(ui.controller.state(), ConnectionController::Connecting);
+        // The cover gives way to the page after 8 s by design, which a loaded runner can spend before this point: the deadline starts again, so the click lands on the cover
+        QVERIFY(QMetaObject::invokeMethod(ui.window, "showConnectCover"));
+        QTRY_COMPARE(ui.item(QStringLiteral("startupCover"))->opacity(), 1.0);
         ui.clickCenter(cancel);
         QTRY_COMPARE(ui.controller.state(), ConnectionController::Idle);
         QTRY_VERIFY(!ui.window->property("startupVisible").toBool());
@@ -9526,7 +9628,7 @@ class TestUiPages : public QObject {
             QObject *menu = ui.popup(QStringLiteral("cardMenu"));
             return menu && menu->property("visible").toBool();
         };
-        // The visible Play On entry of a menu opened on the card, null when it does not show
+        // The visible Cast entry of a menu opened on the card, null when it does not show
         const auto openMenu = [&]() -> QQuickItem * {
             const QPointF center = card->mapToScene(QPointF(card->width() / 2, card->height() / 3));
             QTest::mouseClick(ui.window, Qt::RightButton, Qt::NoModifier, center.toPoint());
@@ -9539,7 +9641,7 @@ class TestUiPages : public QObject {
         };
         QQuickItem *entry = openMenu();
         QVERIFY(entry);
-        QCOMPARE(entry->property("text").toString(), QStringLiteral("Play On…"));
+        QCOMPARE(entry->property("text").toString(), QStringLiteral("Cast…"));
         QVERIFY(entry->isEnabled());
         QTest::keyClick(ui.window, Qt::Key_Escape);
         QTRY_VERIFY(!menuVisible());
@@ -9563,10 +9665,10 @@ class TestUiPages : public QObject {
         QQuickItem *page = openPlayer(ui, stub);
         QVERIFY(page);
         QQuickItem *button = nullptr;
-        QTRY_VERIFY((button = Ui::itemIn(page, QStringLiteral("osdPlayOnButton"))) != nullptr);
+        QTRY_VERIFY((button = Ui::itemIn(page, QStringLiteral("playerCastButton"))) != nullptr);
         QTRY_VERIFY(button->isVisible());
-        QCOMPARE(button->property("text").toString(), QStringLiteral("Play On…"));
-        // Before Picture in Picture
+        QCOMPARE(button->property("text").toString(), QStringLiteral("Cast…"));
+        // In the top bar, before Picture-in-Picture
         QQuickItem *pictureInPicture =
             Ui::itemIn(page, QStringLiteral("playerPictureInPictureButton"));
         QVERIFY(pictureInPicture);
@@ -11966,6 +12068,20 @@ class TestUiPages : public QObject {
         QVERIFY(audio->property("checked").toBool());
     }
 
+    void theNewBadgeSettingExplainsItself()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(1000));
+        QVERIFY(ui.signIn());
+        QQuickItem *page = openSettings(ui);
+        QVERIFY(page);
+        QVERIFY(QMetaObject::invokeMethod(page, "selectSection",
+                                          Q_ARG(QVariant, QStringLiteral("library"))));
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Show New Badge on Recently Added Items")));
+        QTRY_VERIFY(ui.showsText(QStringLiteral("marked New until they are played"), false));
+    }
+
     void theUserFormComesOnceAfterQuickSectionChanges()
     {
         Ui ui(m_home->path());
@@ -12160,6 +12276,12 @@ class TestUiPages : public QObject {
         // Nothing to save yet
         QVERIFY(!ui.item(QStringLiteral("prefsSaveButton"))->isEnabled());
         QVERIFY(!ui.item(QStringLiteral("prefsDiscardButton"))->isEnabled());
+        // Discard wears the icon KDE gives it (KStandardGuiItem::discard), not Undo
+        QCOMPARE(
+            QQmlProperty(ui.item(QStringLiteral("prefsDiscardButton")), QStringLiteral("icon.name"))
+                .read()
+                .toString(),
+            QStringLiteral("edit-delete"));
         QVERIFY(remote.posts.isEmpty());
     }
 
@@ -13074,6 +13196,9 @@ class TestUiPages : public QObject {
         // Show All is cut from the same snapshot and says it may be partial
         QQuickItem *showAll = nullptr;
         QTRY_VERIFY((showAll = ui.item(QStringLiteral("favoritesShowAll_0"))) != nullptr);
+        // A button outside a toolbar, not a tool button
+        QVERIFY(showAll->inherits("QQuickAbstractButton"));
+        QVERIFY(!showAll->inherits("QQuickToolButton"));
         QVERIFY(QMetaObject::invokeMethod(showAll, "click"));
         QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("favoritesGroupPage"));
         QQuickItem *grid = nullptr;
@@ -14373,7 +14498,7 @@ class TestUiPages : public QObject {
         QVERIFY(close->isVisible());
     }
 
-    // One mode button in the row, Picture in Picture before Full Screen; the mini player is the first entry of More Actions, so two look-alike icons never sit side by side
+    // Cast and Picture-in-Picture sit in the top bar with their labels (icon only when narrow), Full Screen stays below; the mini player is the first entry of More Actions
     void playerModeButtonsFitTheNarrowRow()
     {
         PlayerStub stub;
@@ -14388,7 +14513,10 @@ class TestUiPages : public QObject {
         QQuickItem *pictureInPicture = ui.item(QStringLiteral("playerPictureInPictureButton"));
         QVERIFY(fullScreen && pictureInPicture);
         QCOMPARE(pictureInPicture->property("text").toString(),
-                 QStringLiteral("Picture in Picture"));
+                 QStringLiteral("Picture-in-Picture"));
+        QQuickItem *cast = ui.item(QStringLiteral("playerCastButton"));
+        QQuickItem *topBar = ui.item(QStringLiteral("playerTopBar"));
+        QVERIFY(cast && topBar);
         QObject *menu = ui.popup(QStringLiteral("playerMoreMenu"));
         QVERIFY(menu);
         QQuickItem *first = nullptr;
@@ -14402,16 +14530,19 @@ class TestUiPages : public QObject {
             // The page lays its row out for the new width a turn after the resize: the checks wait for that layout
             QTRY_COMPARE(page->property("narrow").toBool(),
                          width < ui.window->property("wideLimit").toInt());
-            // Icon only at every width (AbstractButton.IconOnly), right before Full Screen, and inside the window
+            // In the top bar, Cast before Picture-in-Picture, with their labels when wide (TextBesideIcon) and icon only when narrow, inside the window
             QTRY_VERIFY(pictureInPicture->isVisible() && pictureInPicture->width() > 0);
-            QCOMPARE(pictureInPicture->property("display").toInt(), 0);
+            const int display = width < ui.window->property("wideLimit").toInt() ? 0 : 2;
+            QTRY_COMPARE(pictureInPicture->property("display").toInt(), display);
+            QCOMPARE(cast->property("display").toInt(), display);
             const auto fits = [&] {
                 const QRectF rect = sceneRect(pictureInPicture);
-                return rect.left() >= 0 && rect.right() <= sceneRect(fullScreen).left() + 1
-                       && sceneRect(fullScreen).right() <= ui.window->width();
+                return topBar->isAncestorOf(pictureInPicture) && topBar->isAncestorOf(cast)
+                       && sceneRect(cast).right() <= rect.left() + 1 && rect.left() >= 0
+                       && rect.right() <= ui.window->width()
+                       && rect.bottom() <= sceneRect(fullScreen).top();
             };
             QTRY_VERIFY(fits());
-            QCOMPARE(pictureInPicture->width(), fullScreen->width());
         }
     }
 
@@ -14481,7 +14612,7 @@ class TestUiPages : public QObject {
         QCOMPARE(pictureInPictureItem(pip, QStringLiteral("pictureInPictureCloseButton"))
                      ->property("text")
                      .toString(),
-                 QStringLiteral("Close Picture in Picture"));
+                 QStringLiteral("Close Picture-in-Picture"));
         if (way == QLatin1String("close button")) {
             QVERIFY(
                 clickPictureInPictureControl(pip, QStringLiteral("pictureInPictureCloseButton")));
@@ -17006,16 +17137,20 @@ class TestUiPages : public QObject {
         wake();
         QTRY_VERIFY(osd->isVisible());
         QCOMPARE(pointer->property("cursorShape").toInt(), int(Qt::ArrowCursor));
-        QQuickItem *lock = ui.item(QStringLiteral("playerLockButton"));
+        // The lock is the last entry of More Actions, no button of the bars
+        QVERIFY(ui.item(QStringLiteral("playerLockButton")) == nullptr);
+        QObject *moreMenu = ui.popup(QStringLiteral("playerMoreMenu"));
+        QVERIFY(moreMenu);
+        auto *lock = moreMenu->findChild<QQuickItem *>(QStringLiteral("playerLockItem"));
         QVERIFY(lock);
         QCOMPARE(lock->property("text").toString(), QStringLiteral("Keep Controls Visible"));
-        ui.clickCenter(lock);
+        QVERIFY(QMetaObject::invokeMethod(lock, "click"));
         QTRY_VERIFY(page->property("osdLocked").toBool());
         QVERIFY(lock->property("checked").toBool());
         QTest::mouseMove(ui.window, onVideo);
         QTest::qWait(900);
         QVERIFY(osd->isVisible());
-        ui.clickCenter(lock);
+        QVERIFY(QMetaObject::invokeMethod(lock, "click"));
         QTRY_VERIFY(!page->property("osdLocked").toBool());
         wake();
         QTRY_VERIFY(!osd->isVisible());
@@ -17177,7 +17312,7 @@ class TestUiPages : public QObject {
         QTest::qWait(400);
         QVERIFY(!stub.calls.contains(QStringLiteral("togglePause")));
         QCOMPARE(ui.window->visibility(), QWindow::Windowed);
-        // The entries, separators aside: the bars' controls, the two track menus, the window, then every entry of More Actions, then the lock
+        // The entries, separators aside: the bars' controls, the two track menus, the window, then every entry of More Actions, the lock included
         QStringList entries;
         for (int i = 0; i < menu->property("count").toInt(); ++i) {
             QQuickItem *entry = nullptr;
@@ -17186,12 +17321,14 @@ class TestUiPages : public QObject {
             if (entry && entry->isVisible() && !entry->inherits("QQuickMenuSeparator"))
                 entries << entry->property("text").toString();
         }
-        QCOMPARE(
-            entries,
-            QStringList({QStringLiteral("Pause"), QStringLiteral("Previous"),
-                         QStringLiteral("Next"), QStringLiteral("Audio"),
-                         QStringLiteral("Subtitles"), QStringLiteral("Full Screen Mode"),
-                         QStringLiteral("More Actions"), QStringLiteral("Keep Controls Visible")}));
+        QCOMPARE(entries,
+                 QStringList({QStringLiteral("Pause"), QStringLiteral("Previous"),
+                              QStringLiteral("Next"), QStringLiteral("Audio"),
+                              QStringLiteral("Subtitles"), QStringLiteral("Full Screen Mode"),
+                              QStringLiteral("More Actions")}));
+        QObject *contextMore = ui.popup(QStringLiteral("playerContextMoreMenu"));
+        QVERIFY(contextMore);
+        QVERIFY(contextMore->findChild<QQuickItem *>(QStringLiteral("playerContextMoreLockItem")));
         // The track submenus list what the bars' menus list
         for (const auto &[bar, context] :
              {std::pair{QStringLiteral("playerAudioMenu"),

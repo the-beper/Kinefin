@@ -41,14 +41,14 @@ Controls.ItemDelegate {
     readonly property string episodeLine: {
         if (type !== "Episode" || episodeNumber < 0)
             return "";
-        const label = seasonNumber >= 0 ? i18nc("season and episode number", "S%1:E%2", seasonNumber, episodeNumber) : i18nc("episode number", "E%1", episodeNumber);
+        const label = EpisodeLabel.label(seasonNumber, episodeNumber);
         return seriesName.length > 0 ? i18nc("series name and episode label", "%1 · %2", seriesName, label) : label;
     }
     // What a screen reader says for the episode line: "S1:E3" would be spelled out
     readonly property string episodeSpoken: {
         if (episodeLine.length === 0)
             return "";
-        const label = seasonNumber >= 0 ? i18nc("season and episode number spoken", "Season %1, Episode %2", seasonNumber, episodeNumber) : i18nc("episode number spoken", "Episode %1", episodeNumber);
+        const label = EpisodeLabel.spoken(seasonNumber, episodeNumber);
         return seriesName.length > 0 ? i18nc("series name and episode label", "%1 · %2", seriesName, label) : label;
     }
     readonly property string secondLine: countsLine.length > 0 ? countsLine : (episodeLine.length > 0 ? episodeLine : (year > 0 ? String(year) : ""))

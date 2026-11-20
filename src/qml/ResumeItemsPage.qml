@@ -137,7 +137,7 @@ Kirigami.ScrollablePage {
             onClicked: page.Window.window.openItem(itemId, page)
             subtitle: {
                 if (episodeNumber >= 0) {
-                    const label = seasonNumber >= 0 ? i18nc("season and episode number", "S%1:E%2", seasonNumber, episodeNumber) : i18nc("episode number", "E%1", episodeNumber);
+                    const label = EpisodeLabel.label(seasonNumber, episodeNumber);
                     return episodeTitle.length > 0 ? i18nc("episode label and episode title", "%1 — %2", label, episodeTitle) : label;
                 }
                 return year > 0 ? String(year) : "";

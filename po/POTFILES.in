@@ -3,6 +3,7 @@
 # The check gate requires every i18n-bearing source to be listed; entries below are
 # extracted with xgettext and compared against the committed catalogs.
 src/app/ConnectionController.cpp
+src/app/EpisodeLabelQml.cpp
 src/cast/CastController.cpp
 src/player/PlayerController.cpp
 src/integration/GamepadInput.cpp

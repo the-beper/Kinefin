@@ -1588,13 +1588,21 @@ class TestLibraryItemsModel : public QObject {
         QVERIFY(openEpisodes(fresh));
         QCOMPARE(f.model.sortBy(), QStringLiteral("AiredEpisodeOrder"));
         QTRY_COMPARE(f.model.status(), LibraryItemsModel::Ready);
+        // Grouped by series: the episodes' own order alone runs over every series at once
         QCOMPARE(wireValue(f.server.itemsRoutes.constLast(), "sortBy"),
-                 QStringLiteral("AiredEpisodeOrder,SortName"));
-        // A stored choice stays, SortName included
+                 QStringLiteral("SeriesSortName,AiredEpisodeOrder,SortName"));
+        // A stored choice stays, SortName included, also within each series
         LibraryItemsModel::ViewState stored;
         stored.sortBy = QStringLiteral("SortName");
         QVERIFY(openEpisodes(stored));
         QCOMPARE(f.model.sortBy(), QStringLiteral("SortName"));
+        QTRY_COMPARE(wireValue(f.server.itemsRoutes.constLast(), "sortBy"),
+                     QStringLiteral("SeriesSortName,SortName"));
+        // A date is a date over the whole library
+        stored.sortBy = QStringLiteral("PremiereDate");
+        QVERIFY(openEpisodes(stored));
+        QTRY_COMPARE(wireValue(f.server.itemsRoutes.constLast(), "sortBy"),
+                     QStringLiteral("PremiereDate,SortName"));
         // The other scopes keep SortName as their default
         for (const Kinefin::LibraryScope scope :
              {Kinefin::LibraryScope::Movies, Kinefin::LibraryScope::Series,
