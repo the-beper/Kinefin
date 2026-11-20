@@ -88,6 +88,11 @@ QString overviewText(const QJsonValue &value, int limit)
     return text;
 }
 
+bool watchedToEnd(const ItemSummary &item)
+{
+    return item.played && item.positionTicks <= 0;
+}
+
 void applyPlayed(ItemSummary &item, bool played)
 {
     item.played = played;

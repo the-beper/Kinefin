@@ -2346,6 +2346,8 @@ class PlayerStub : public QObject {
     void clipSaveFailed(bool noSpace);
     void qualityChangeFailed();
     void clipMarkChanged(const QString &text);
+    void subtitleExtracting();
+    void subtitleBusy();
     void qualityUnavailable();
     // The device stopped on its own or another controller took it
     void castStoppedElsewhere(const QString &deviceName);

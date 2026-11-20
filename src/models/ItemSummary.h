@@ -56,6 +56,8 @@ ItemSummary parseItemSummary(const QJsonObject &item);
 
 // A watched-state write the server confirmed: it also clears the saved position, so the progress and the time left go with it
 void applyPlayed(ItemSummary &item, bool played);
+// Watched, as the lists show it: a rewatch stopped halfway keeps Played on the server but is in progress
+bool watchedToEnd(const ItemSummary &item);
 // A saved position the server confirmed (an Undo of Mark as Watched): the progress and the time left come back
 void applyProgress(ItemSummary &item, qint64 positionTicks, double playedPercentage);
 

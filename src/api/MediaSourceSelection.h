@@ -22,6 +22,8 @@ struct ExternalSubtitle {
     QString label;
     QString format;
     QUrl url;
+    // A stream of the file the server extracts on the first request, which it answers only once done (minutes for a large file)
+    bool extracted = false;
 };
 
 // The facts of the chosen media source for the Playback Info overlay. Everything comes from the server and is untrusted: strings are capped plain tokens, numbers range-checked, and no URL or query value other than the ones below is kept

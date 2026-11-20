@@ -456,6 +456,10 @@ class PlayerController final : public QObject {
     void finished();
     // The renderer stopped on its own or another controller took it: the player closes, the shell says where it stopped
     void castStoppedElsewhere(const QString &deviceName);
+    // A subtitle stream of the file is on its way: the server extracts it first, which can take minutes the first time
+    void subtitleExtracting();
+    // A subtitle for the other slot is still on its way: one download runs at a time
+    void subtitleBusy();
     // A mark was set: the shell shows where
     void clipMarkChanged(const QString &text);
     // A clip or GIF reached the granted file (`fileName` only, `gif` for the wording), or did not: noSpace names the disk message
@@ -577,6 +581,10 @@ class PlayerController final : public QObject {
     void restoreSecondarySubtitle();
     // One server subtitle download, into the primary or the second slot
     bool downloadSubtitle(int index, bool secondary);
+    // The user's request for a server subtitle: the loaded file when there is one, else a download that replaces the same slot's pending one
+    bool requestSubtitle(int index, bool secondary);
+    // Forgets the download on its way and stops it
+    void dropPendingSubtitle();
     // The series' speed and aspect, once the file is loaded and the series known; a restore, never a choice
     void applySeriesPlayback();
     // Track memory and queue positions of an owner (`server` or `server/user`) go

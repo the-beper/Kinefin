@@ -179,7 +179,7 @@ Controls.Menu {
     Controls.MenuItem {
         objectName: "cardMenuPlayed"
         text: menu.watched ? i18n("Mark as Unwatched") : i18n("Mark as Watched")
-        icon.name: menu.watched ? "edit-undo" : "emblem-checked"
+        icon.name: menu.watched ? "view-hidden" : "checkmark-symbolic"
         visible: menu.playable
         height: visible ? implicitHeight : 0
         onTriggered: menu.playedRequested(menu.itemId, !menu.watched)

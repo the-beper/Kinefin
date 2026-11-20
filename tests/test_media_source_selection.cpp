@@ -445,6 +445,51 @@ class TestMediaSourceSelection : public QObject {
         QVERIFY(!subtitle.url.toString().contains(QString::fromLatin1(kToken)));
     }
 
+    // In a transcode the server extracts the file's own text streams and sends them as External (12.4): they are offered with the sidecar files, through the same URL checks; an image stream stays burned in
+    void aTranscodeOffersTheFilesOwnTextSubtitles()
+    {
+        const auto subtitle = [](int index, bool external, bool text, const QString &method) {
+            return QJsonObject{
+                {QStringLiteral("Type"), QStringLiteral("Subtitle")},
+                {QStringLiteral("IsExternal"), external},
+                {QStringLiteral("IsTextSubtitleStream"), text},
+                {QStringLiteral("DeliveryMethod"), method},
+                {QStringLiteral("Index"), index},
+                {QStringLiteral("DisplayTitle"), QStringLiteral("Track %1").arg(index)},
+                {QStringLiteral("DeliveryUrl"),
+                 QStringLiteral("/Videos/%1/%2/Subtitles/%3/0/Stream.%4?ApiKey=%5")
+                     .arg(kItem, kSourceId)
+                     .arg(index)
+                     .arg(text ? QStringLiteral("srt") : QStringLiteral("sup"),
+                          QString::fromLatin1(kToken))}};
+        };
+        const QJsonArray streams{videoStream(), subtitle(0, true, true, QStringLiteral("External")),
+                                 subtitle(4, false, true, QStringLiteral("External")),
+                                 subtitle(5, false, false, QStringLiteral("Encode"))};
+        QJsonObject transcode = transcodeSource(QStringLiteral("VideoCodec=h264"));
+        transcode.insert(QStringLiteral("MediaStreams"), streams);
+        const auto selection = select(response({transcode}));
+        QVERIFY(selection.source);
+        QCOMPARE(selection.source->method, Kinefin::PlaybackSource::Method::Transcode);
+        QCOMPARE(selection.source->externalSubtitles.size(), 2);
+        QCOMPARE(selection.source->externalSubtitles.at(0).index, 0);
+        QCOMPARE(selection.source->externalSubtitles.at(1).index, 4);
+        // The server extracts the file's own stream on the first request: the client waits minutes for it, not seconds
+        QVERIFY(!selection.source->externalSubtitles.at(0).extracted);
+        QVERIFY(selection.source->externalSubtitles.at(1).extracted);
+        QVERIFY(!selection.source->externalSubtitles.at(1).url.hasQuery());
+        QVERIFY(!selection.source->externalSubtitles.at(1).url.toString().contains(
+            QString::fromLatin1(kToken)));
+        // A direct play has the file's own streams in the file: only the sidecar is a server file
+        QJsonObject direct = source(kSourceId, true, true);
+        direct.insert(QStringLiteral("MediaStreams"), streams);
+        const auto played = select(response({direct}));
+        QVERIFY(played.source);
+        QCOMPARE(played.source->method, Kinefin::PlaybackSource::Method::Direct);
+        QCOMPARE(played.source->externalSubtitles.size(), 1);
+        QCOMPARE(played.source->externalSubtitles.constFirst().index, 0);
+    }
+
     void rejectsUnsafeExternalSubtitles()
     {
         for (const QString &raw :

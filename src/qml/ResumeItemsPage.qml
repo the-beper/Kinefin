@@ -142,6 +142,13 @@ Kirigami.ScrollablePage {
                 }
                 return year > 0 ? String(year) : "";
             }
+            spokenSubtitle: {
+                if (episodeNumber >= 0) {
+                    const label = EpisodeLabel.spoken(seasonNumber, episodeNumber);
+                    return episodeTitle.length > 0 ? i18nc("episode label and episode title", "%1 — %2", label, episodeTitle) : label;
+                }
+                return year > 0 ? String(year) : "";
+            }
         }
     }
 }

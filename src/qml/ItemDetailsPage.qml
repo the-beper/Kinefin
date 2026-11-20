@@ -245,7 +245,7 @@ Kirigami.ScrollablePage {
         objectName: "togglePlayedAction"
         // A rewatch stopped halfway is in progress, not watched, as on its card
         text: page.details.played && !page.details.canResume ? i18n("Mark as Unwatched") : i18n("Mark as Watched")
-        icon.name: page.details.played && !page.details.canResume ? "edit-undo" : "emblem-checked"
+        icon.name: page.details.played && !page.details.canResume ? "view-hidden" : "checkmark-symbolic"
         visible: page.details.status === ItemDetailsModel.Ready && page.details.playable
         enabled: !page.details.playedBusy
         onTriggered: page.details.togglePlayed()

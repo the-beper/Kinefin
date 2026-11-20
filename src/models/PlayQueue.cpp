@@ -142,7 +142,7 @@ QVariant PlayQueue::data(const QModelIndex &index, int role) const
     case ImageUrlRole:
         return imageUrlFor(item);
     case PlayedRole:
-        return item.played;
+        return watchedToEnd(item);
     default:
         return {};
     }

@@ -296,12 +296,14 @@ Kirigami.ScrollablePage {
                                     text: i18n("Connect")
                                     icon.name: "network-connect"
                                     Layout.fillWidth: true
+                                    Accessible.name: i18nc("@action:button %1 is a server address", "Connect to %1", saved.modelData.url)
                                     onClicked: page.connectAddress(saved.modelData.url, false)
                                 }
                                 Controls.Button {
                                     objectName: "testSavedServerButton"
                                     text: i18n("Test")
                                     icon.name: "network-server"
+                                    Accessible.name: i18nc("@action:button %1 is a server address", "Test %1", saved.modelData.url)
                                     enabled: !saved.status.testing
                                     onClicked: page.connection.testServer(saved.modelData.url)
                                 }

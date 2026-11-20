@@ -2382,7 +2382,7 @@ bool allowedPlayerFile(const QUrl &base, const QUrl &url)
 }
 } // namespace
 
-bool JellyfinClient::downloadExternalSubtitle(const QUrl &url)
+bool JellyfinClient::downloadExternalSubtitle(const QUrl &url, bool extracted)
 {
     if (m_state != State::Authenticated || !allowedPlayerFile(m_base, url)
         || !url.path().contains(QStringLiteral("/Subtitles/")))
@@ -2393,8 +2393,16 @@ bool JellyfinClient::downloadExternalSubtitle(const QUrl &url)
     QNetworkRequest request = requestFor(url, true);
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
                          QNetworkRequest::ManualRedirectPolicy);
+    if (extracted)
+        request.setTransferTimeout(5 * 60 * 1000);
     QNetworkReply *reply = m_network.get(request);
     m_subtitleReply = reply;
+    // The 1 MiB cap holds while the body arrives, and the transfer timeout counts only silence: a server trickling bytes meets the total
+    connect(reply, &QNetworkReply::downloadProgress, reply, [reply](qint64 received, qint64) {
+        if (received > 1024 * 1024)
+            reply->abort();
+    });
+    QTimer::singleShot(extracted ? 6 * 60 * 1000 : 60 * 1000, reply, [reply] { reply->abort(); });
     attach(reply, m_generation, [this, url, serial](QNetworkReply *finished) {
         if (serial != m_subtitleSerial)
             return;
@@ -2417,6 +2425,13 @@ bool JellyfinClient::downloadExternalSubtitle(const QUrl &url)
         Q_EMIT externalSubtitleDownloaded(url, bytes);
     });
     return true;
+}
+
+void JellyfinClient::cancelExternalSubtitle()
+{
+    ++m_subtitleSerial;
+    if (m_subtitleReply)
+        m_subtitleReply->abort();
 }
 
 bool JellyfinClient::fetchPlaybackItem(const QString &itemId)

@@ -830,6 +830,9 @@ Kirigami.Page {
                     icon.name: "window-duplicate"
                     text: i18nc("@action:button", "Picture-in-Picture")
                     enabled: !page.player.casting
+                    Accessible.description: page.player.casting ? Controls.ToolTip.text : ""
+                    Controls.ToolTip.text: page.player.casting ? i18nc("@info:tooltip", "Not available while casting") : text
+                    Controls.ToolTip.visible: (hovered || visualFocus) && (display === Controls.AbstractButton.IconOnly || page.player.casting)
                     onClicked: page.pictureInPicture()
                 }
             }

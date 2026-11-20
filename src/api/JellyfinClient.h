@@ -247,7 +247,10 @@ class JellyfinClient final : public QObject {
     bool fetchMediaSegments(const QString &itemId);
     // Authenticated subtitle files are downloaded via Qt, never opened by mpv
     // over the network (which could forward player headers on redirects).
-    bool downloadExternalSubtitle(const QUrl &url);
+    // `extracted`: the server extracts the stream from the file on this request and sends nothing until done (142 to 159 s for 20 GB MKVs on 12.4), so the wait is minutes instead of seconds
+    bool downloadExternalSubtitle(const QUrl &url, bool extracted = false);
+    // Drops the subtitle download under way, if any: its answer is never signalled
+    void cancelExternalSubtitle();
     // The item being played (`GET /Users/{id}/Items/{id}`): its title fields, chapters and trickplay metadata; a stale reply is dropped and a failed one is silent
     bool fetchPlaybackItem(const QString &itemId);
     // Trickplay thumbnails are authenticated on the same origin and bounded in

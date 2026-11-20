@@ -191,16 +191,18 @@ PlaybackMediaInfo mediaInfo(const QJsonObject &mediaSource, const QUrl &url,
     return info;
 }
 
+// The text subtitles the server delivers as files: its sidecar files, and in a transcode also the file's own streams, which the server extracts (12.4 sends them as External with a DeliveryUrl of the same shape); a direct play has those in the file it plays
 void addExternalSubtitles(PlaybackSource &playback, const QJsonObject &mediaSource,
                           const QUrl &serverBase, QByteArrayView token)
 {
+    const bool transcode = playback.method == PlaybackSource::Method::Transcode;
     const QJsonArray streams = mediaSource.value(QStringLiteral("MediaStreams")).toArray();
     for (const QJsonValue &value : streams) {
         if (playback.externalSubtitles.size() == 32)
             return;
         const QJsonObject stream = value.toObject();
         if (stream.value(QStringLiteral("Type")).toString() != QLatin1String("Subtitle")
-            || !flag(stream, QStringLiteral("IsExternal"))
+            || (!flag(stream, QStringLiteral("IsExternal")) && !transcode)
             || !flag(stream, QStringLiteral("IsTextSubtitleStream"))
             || stream.value(QStringLiteral("DeliveryMethod")).toString()
                    != QLatin1String("External"))
@@ -226,6 +228,7 @@ void addExternalSubtitles(PlaybackSource &playback, const QJsonObject &mediaSour
             && extension != QLatin1String("ass") && extension != QLatin1String("ssa"))
             continue;
         subtitle.format = extension;
+        subtitle.extracted = !flag(stream, QStringLiteral("IsExternal"));
         playback.externalSubtitles.append(subtitle);
     }
 }

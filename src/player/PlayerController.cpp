@@ -803,7 +803,7 @@ void PlayerController::onAccountLeaving()
     m_subtitle.clear();
     m_primaryTag.clear();
     m_queue.setCurrentPlaybackItemId({});
-    m_pendingSubtitle.clear();
+    dropPendingSubtitle();
     clearPreview();
     m_itemChapters.clear();
     updateChapters();
@@ -1063,7 +1063,7 @@ bool PlayerController::startItem(const QString &id, qint64 resumeTicks, bool gro
         m_mpvSettings.setAspectOverride({});
     m_externalSubtitles.clear();
     m_subtitleOptions.clear();
-    m_pendingSubtitle.clear();
+    dropPendingSubtitle();
     // A download of this item still waiting for the server survives its reopen (a fallback step, a pick, Try Again): its answer must still find it
     const QString downloading = sameItem ? m_remoteSubtitleDownloadItem : QString();
     resetRemoteSubtitles();
@@ -1305,8 +1305,7 @@ bool PlayerController::openLocal()
     m_rateDecided = false;
     m_subtitleOptions.clear();
     m_externalSubtitles.clear();
-    m_pendingSubtitle.clear();
-    m_pendingSubtitleSecondary = false;
+    dropPendingSubtitle();
     m_pendingSecondaryFile.clear();
     m_loadedSubtitles.clear();
     m_loadedSubtitleOrder.clear();
@@ -2987,6 +2986,9 @@ void PlayerController::selectSubtitleTrack(int id)
 {
     if (id < 0 || id > 1024 || !active())
         return;
+    // A choice made now wins over a download for the same slot still on its way
+    if (!m_pendingSubtitleSecondary)
+        dropPendingSubtitle();
     // mpv refuses a track selected in both slots: the second one goes first
     if (id != 0 && id == m_secondarySubtitleId)
         selectSecondarySubtitleTrack(0);
@@ -3034,6 +3036,8 @@ bool PlayerController::setSecondarySubtitle(int id)
 }
 void PlayerController::selectSecondarySubtitleTrack(int id)
 {
+    if (m_pendingSubtitleSecondary)
+        dropPendingSubtitle();
     if (!setSecondarySubtitle(id))
         return;
     m_trackChosen = true;
@@ -3762,12 +3766,44 @@ void PlayerController::pruneMemory(const QString &owner)
 
 bool PlayerController::downloadSubtitle(int index)
 {
-    return downloadSubtitle(index, false);
+    return requestSubtitle(index, false);
 }
 
 bool PlayerController::downloadSecondarySubtitle(int index)
 {
-    return downloadSubtitle(index, true);
+    return requestSubtitle(index, true);
+}
+
+bool PlayerController::requestSubtitle(int index, bool secondary)
+{
+    if (!active())
+        return false;
+    // A file loaded already is chosen, not fetched again
+    if (const int id = trackOfStreamIndex(QStringLiteral("sub"), index); id != 0) {
+        if (secondary)
+            selectSecondarySubtitleTrack(id);
+        else
+            selectSubtitleTrack(id);
+        return true;
+    }
+    // The newer choice for the same slot replaces one still on its way; the other slot's is kept, and the user hears why nothing happens
+    if (!m_pendingSubtitle.isEmpty()) {
+        if (m_pendingSubtitleSecondary != secondary) {
+            Q_EMIT subtitleBusy();
+            return false;
+        }
+        dropPendingSubtitle();
+    }
+    return downloadSubtitle(index, secondary);
+}
+
+void PlayerController::dropPendingSubtitle()
+{
+    if (m_pendingSubtitle.isEmpty())
+        return;
+    m_client.cancelExternalSubtitle();
+    m_pendingSubtitle.clear();
+    m_pendingSubtitleSecondary = false;
 }
 
 bool PlayerController::downloadSubtitle(int index, bool secondary)
@@ -3777,11 +3813,13 @@ bool PlayerController::downloadSubtitle(int index, bool secondary)
     for (const ExternalSubtitle &subtitle : m_subtitleOptions) {
         if (subtitle.index != index)
             continue;
-        if (m_client.downloadExternalSubtitle(subtitle.url)) {
+        if (m_client.downloadExternalSubtitle(subtitle.url, subtitle.extracted)) {
             m_pendingSubtitle = subtitle.url;
             m_pendingSubtitleSecondary = secondary;
             if (secondary)
                 m_secondaryStreamIndex = index;
+            if (subtitle.extracted)
+                Q_EMIT subtitleExtracting();
             return true;
         }
         return false;

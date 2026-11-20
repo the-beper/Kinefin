@@ -793,6 +793,12 @@ Kirigami.ApplicationWindow {
         function onClipSaved(fileName, gif) {
             window.showPassiveNotification(gif ? i18n("GIF saved: %1", fileName) : i18n("Clip saved: %1", fileName));
         }
+        function onSubtitleBusy() {
+            window.showPassiveNotification(i18n("Another subtitle is still downloading: choose this one again once it has loaded"));
+        }
+        function onSubtitleExtracting() {
+            window.showPassiveNotification(i18n("The server is extracting these subtitles from the video: the first time it can take a few minutes"), "long");
+        }
         function onClipMarkChanged(text) {
             window.showPassiveNotification(text);
         }

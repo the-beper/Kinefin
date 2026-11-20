@@ -373,7 +373,7 @@ QVariant PlaylistEntriesModel::data(const QModelIndex &index, int role) const
     case ImageUrlRole:
         return listImageUrl(m_client, item, ImageWidth);
     case PlayedRole:
-        return item.played;
+        return watchedToEnd(item);
     case EntryIdRole:
         return entry.entryId;
     default:

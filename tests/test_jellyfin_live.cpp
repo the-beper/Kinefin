@@ -132,6 +132,9 @@ class TestJellyfinLive : public QObject {
     // Endpoint-matrix round, PlaybackInfo defaults (~30 s): the body without a bitrate ceiling vs an explicit low one vs no DeviceProfile at all — the TranscodingUrl bitrate the server picks is the fact
     void playbackInfoDefaultsProbe();
 
+    // Embedded text subtitles in a transcode (~20 s): a movie MKV with embedded SubRip streams, PlaybackInfo with Kinefin's device profile under a cap that forces a transcode; how the server delivers each embedded text stream (method, URL shape, query) and what the client's parser keeps are the facts
+    void subtitleDeliveryProbe();
+
     // Playlist editing (~10 s): a private playlist of three movies, the first entry moved to newIndex 2 and the order read back (what newIndex means), the owner's CanDelete on GET /Items/{id}, then the delete through the client. The playlist is removed even when a check fails
     void playlistEdits();
 
@@ -2372,6 +2375,131 @@ void TestJellyfinLive::trickplayLayoutProbe()
     QVERIFY2(!image.isNull(), "the trickplay tile did not decode as an image");
     qInfo() << LIVE_FACT << "tile 0.jpg:" << tile.size() << "bytes," << image.width() << "x"
             << image.height() << "pixels";
+    client.disconnectFromServer();
+}
+
+void TestJellyfinLive::subtitleDeliveryProbe()
+{
+    if (!m_live)
+        QSKIP("no KINEFIN_LIVE_* environment, skipping the live checks");
+    Kinefin::JellyfinClient client;
+    QVERIFY(authenticate(client));
+    QNetworkAccessManager network;
+    const auto send = [&](const QString &path, const QUrlQuery &query, const QJsonObject *body) {
+        QUrl url = client.serverUrl();
+        url.setPath(url.path() + path);
+        url.setQuery(query);
+        QNetworkRequest request(url);
+        request.setRawHeader(QByteArrayLiteral("Authorization"), client.streamAuthorization());
+        QNetworkReply *reply = nullptr;
+        if (body) {
+            request.setHeader(QNetworkRequest::ContentTypeHeader,
+                              QStringLiteral("application/json"));
+            reply = network.post(request, QJsonDocument(*body).toJson(QJsonDocument::Compact));
+        } else {
+            reply = network.get(request);
+        }
+        QSignalSpy done(reply, &QNetworkReply::finished);
+        done.wait(30000);
+        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const QJsonObject answer = QJsonDocument::fromJson(reply->readAll()).object();
+        reply->deleteLater();
+        return std::pair<int, QJsonObject>{status, answer};
+    };
+    // A movie MKV with at least two embedded SubRip streams
+    QUrlQuery listing;
+    listing.addQueryItem(QStringLiteral("userId"), client.userId());
+    listing.addQueryItem(QStringLiteral("includeItemTypes"), QStringLiteral("Movie"));
+    listing.addQueryItem(QStringLiteral("recursive"), QStringLiteral("true"));
+    listing.addQueryItem(QStringLiteral("limit"), QStringLiteral("400"));
+    listing.addQueryItem(QStringLiteral("fields"), QStringLiteral("MediaStreams,Container"));
+    const auto [listStatus, list] = send(QStringLiteral("/Items"), listing, nullptr);
+    QCOMPARE(listStatus, 200);
+    QString itemId;
+    for (const QJsonValue &value : list.value(QStringLiteral("Items")).toArray()) {
+        const QJsonObject item = value.toObject();
+        int embedded = 0;
+        for (const QJsonValue &stream : item.value(QStringLiteral("MediaStreams")).toArray()) {
+            const QJsonObject s = stream.toObject();
+            if (s.value(QStringLiteral("Type")).toString() == QLatin1String("Subtitle")
+                && !s.value(QStringLiteral("IsExternal")).toBool()
+                && s.value(QStringLiteral("Codec")).toString() == QLatin1String("subrip"))
+                ++embedded;
+        }
+        if (embedded >= 2
+            && item.value(QStringLiteral("Container")).toString().contains(QLatin1String("mkv"))) {
+            itemId = item.value(QStringLiteral("Id")).toString();
+            break;
+        }
+    }
+    QVERIFY2(!itemId.isEmpty(), "no movie MKV with two embedded SubRip streams");
+
+    const QJsonObject body{{QStringLiteral("UserId"), client.userId()},
+                           {QStringLiteral("MaxStreamingBitrate"), 2'000'000},
+                           {QStringLiteral("DeviceProfile"), Kinefin::buildDeviceProfile({})}};
+    const auto [status, answer] =
+        send(QStringLiteral("/Items/") + itemId + QStringLiteral("/PlaybackInfo"), {}, &body);
+    QCOMPARE(status, 200);
+    const QJsonObject source =
+        answer.value(QStringLiteral("MediaSources")).toArray().first().toObject();
+    QVERIFY2(!source.value(QStringLiteral("TranscodingUrl")).toString().isEmpty(),
+             "the cap did not make the server transcode");
+    const QUrlQuery transcode(QUrl(source.value(QStringLiteral("TranscodingUrl")).toString()));
+    qInfo() << LIVE_FACT << "subtitle delivery: TranscodingUrl SubtitleMethod"
+            << transcode.queryItemValue(QStringLiteral("SubtitleMethod")) << "SubtitleStreamIndex"
+            << transcode.queryItemValue(QStringLiteral("SubtitleStreamIndex")) << "SubtitleCodec"
+            << transcode.queryItemValue(QStringLiteral("SubtitleCodec"));
+    int embeddedExternal = 0;
+    for (const QJsonValue &value : source.value(QStringLiteral("MediaStreams")).toArray()) {
+        const QJsonObject stream = value.toObject();
+        if (stream.value(QStringLiteral("Type")).toString() != QLatin1String("Subtitle"))
+            continue;
+        const QString deliveryUrl = stream.value(QStringLiteral("DeliveryUrl")).toString();
+        // The URL's shape only: the ids masked, the query keys without values
+        QString shape = QUrl(deliveryUrl).path();
+        shape.replace(itemId, QStringLiteral("<item>"), Qt::CaseInsensitive);
+        shape.replace(source.value(QStringLiteral("Id")).toString(), QStringLiteral("<source>"),
+                      Qt::CaseInsensitive);
+        QStringList queryKeys;
+        for (const auto &[key, valueText] : QUrlQuery(QUrl(deliveryUrl)).queryItems())
+            queryKeys << key;
+        const bool external = stream.value(QStringLiteral("IsExternal")).toBool();
+        const QString method = stream.value(QStringLiteral("DeliveryMethod")).toString();
+        qInfo() << LIVE_FACT << "subtitle stream" << stream.value(QStringLiteral("Index")).toInt()
+                << "codec" << stream.value(QStringLiteral("Codec")).toString() << "external"
+                << external << "text"
+                << stream.value(QStringLiteral("IsTextSubtitleStream")).toBool() << "method"
+                << method << "url" << shape << "query keys" << queryKeys;
+        if (!external && method == QLatin1String("External") && !deliveryUrl.isEmpty())
+            ++embeddedExternal;
+    }
+    qInfo() << LIVE_FACT
+            << "embedded text streams delivered External with a URL:" << embeddedExternal;
+    // What the client's own parser keeps of the same answer
+    QSignalSpy ready(&client, &Kinefin::JellyfinClient::playbackInfoReady);
+    QVERIFY(
+        client.requestPlaybackInfo(itemId, qint64(0), Kinefin::buildDeviceProfile({}), 2'000'000));
+    QVERIFY(ready.wait(30000));
+    const auto parsed = ready.first().first().value<Kinefin::PlaybackSource>();
+    qInfo() << LIVE_FACT << "the parser keeps" << parsed.externalSubtitles.size()
+            << "server subtitles, method transcode"
+            << (parsed.method == Kinefin::PlaybackSource::Method::Transcode);
+    QCOMPARE(parsed.externalSubtitles.size(), embeddedExternal + 1);
+    // The server extracts an embedded stream when it is asked for: the time to the file and its size are the facts
+    const Kinefin::ExternalSubtitle &embedded = parsed.externalSubtitles.constLast();
+    QSignalSpy downloaded(&client, &Kinefin::JellyfinClient::externalSubtitleDownloaded);
+    QSignalSpy failed(&client, &Kinefin::JellyfinClient::externalSubtitleFailed);
+    QElapsedTimer fetch;
+    fetch.start();
+    QVERIFY(client.downloadExternalSubtitle(embedded.url));
+    QTRY_VERIFY_WITH_TIMEOUT(!downloaded.isEmpty() || !failed.isEmpty(), 120000);
+    const QByteArray bytes =
+        downloaded.isEmpty() ? QByteArray() : downloaded.first().at(1).toByteArray();
+    qInfo() << LIVE_FACT << "embedded stream" << embedded.index << "format" << embedded.format
+            << "downloaded" << !downloaded.isEmpty() << "in ms" << fetch.elapsed() << "bytes"
+            << bytes.size() << "arrow lines" << bytes.count("-->");
+    QCOMPARE(failed.size(), 0);
+    QVERIFY(bytes.contains("-->"));
     client.disconnectFromServer();
 }
 

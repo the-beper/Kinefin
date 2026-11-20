@@ -252,6 +252,19 @@ class TestLibraryItemsModel : public QObject {
         QVERIFY(!f.model.data(first, LibraryItemsModel::PlayedRole).toBool());
     }
 
+    // The lists show a rewatch stopped halfway as in progress: Played on the server with a saved position is not watched to the end
+    void aRewatchInProgressIsNotWatchedToTheEnd()
+    {
+        Kinefin::ItemSummary item;
+        QVERIFY(!Kinefin::watchedToEnd(item));
+        item.played = true;
+        QVERIFY(Kinefin::watchedToEnd(item));
+        item.positionTicks = 3'000'000'000;
+        QVERIFY(!Kinefin::watchedToEnd(item));
+        item.played = false;
+        QVERIFY(!Kinefin::watchedToEnd(item));
+    }
+
     void aRuntimeOutOfRangeIsNoRuntime()
     {
         // A runtime the server sends past any real length, negative or beyond a 64-bit count is dropped, and the time left is not counted from it

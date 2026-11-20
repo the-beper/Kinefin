@@ -2176,6 +2176,61 @@ class TestPlayerController : public QObject {
         QCOMPARE(chain.server.subtitleDownloadRequests, 2);
     }
 
+    // A stream of the file the server extracts on the first request: the shell is told the wait can be long, a sidecar file says nothing
+    void anExtractedSubtitleSaysItMayTakeMinutes()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        QVERIFY(chain.engine()->init({QStringLiteral("vo=null"), QStringLiteral("ao=null")}));
+        QVERIFY(chain.controller.playItem(kMovie, 0));
+        Kinefin::PlaybackSource source;
+        source.itemId = kMovie;
+        source.mediaSourceId = kSourceId;
+        source.playSessionId = QStringLiteral("s1");
+        source.method = Kinefin::PlaybackSource::Method::Transcode;
+        source.url = QUrl(TestWav::writeWavClip(chain.dir, 10));
+        Kinefin::ExternalSubtitle extracted = externalSubtitle(chain, kExternalIndex + 1);
+        extracted.extracted = true;
+        source.externalSubtitles = {externalSubtitle(chain), extracted};
+        Q_EMIT chain.client.playbackInfoReady(source);
+        QTRY_VERIFY(chain.controller.canSeek());
+        QSignalSpy extracting(&chain.controller, &PlayerController::subtitleExtracting);
+        QVERIFY(chain.controller.downloadSubtitle(kExternalIndex));
+        QTRY_VERIFY(hasSelectedSubtitle(chain));
+        QCOMPARE(extracting.size(), 0);
+        QVERIFY(chain.controller.downloadSecondarySubtitle(kExternalIndex + 1));
+        QCOMPARE(extracting.size(), 1);
+        QTRY_VERIFY(secondarySubtitleId(chain) > 0);
+    }
+
+    // A download still on its way gives way to the user: a choice for its slot drops it, a request for the other slot is told to wait, and a file loaded already is chosen without fetching it again
+    void aPendingSubtitleDownloadGivesWayToTheUser()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        QVERIFY(directClipWithSubtitles(chain, {kExternalIndex, kExternalIndex + 1}));
+        chain.server.holdSubtitleDownload = true;
+        QVERIFY(chain.controller.downloadSubtitle(kExternalIndex));
+        QTRY_COMPARE(chain.server.heldSubtitleCount(), 1);
+        QSignalSpy busy(&chain.controller, &PlayerController::subtitleBusy);
+        QVERIFY(!chain.controller.downloadSecondarySubtitle(kExternalIndex + 1));
+        QCOMPARE(busy.size(), 1);
+        // Off, chosen while the file is on its way: the late answer selects nothing
+        chain.controller.selectSubtitleTrack(0);
+        chain.server.releaseSubtitleDownloads();
+        QTest::qWait(400);
+        QVERIFY(!hasSelectedSubtitle(chain));
+        // The other slot is free again, and a second request for the same file picks the loaded one
+        chain.server.holdSubtitleDownload = false;
+        QVERIFY(chain.controller.downloadSubtitle(kExternalIndex));
+        QTRY_VERIFY(hasSelectedSubtitle(chain));
+        const int requests = chain.server.subtitleDownloadRequests;
+        chain.controller.selectSubtitleTrack(0);
+        QVERIFY(chain.controller.downloadSubtitle(kExternalIndex));
+        QTRY_VERIFY(hasSelectedSubtitle(chain));
+        QCOMPARE(chain.server.subtitleDownloadRequests, requests);
+    }
+
     void secondaryFollowsAReopen()
     {
         Chain chain;
