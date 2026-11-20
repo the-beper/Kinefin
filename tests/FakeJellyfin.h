@@ -253,6 +253,10 @@ class FakeJellyfin {
     QByteArray downloadLastModified;
     // Answers 206 even without a Range header (from byte 0)
     bool downloadForce206 = false;
+    // GET /Videos/{id}/stream...: a renderer's range probe answers 206 with one byte, or `streamStatus` when set; the requests and their Authorization headers are logged
+    int streamStatus = 0;
+    QList<QByteArray> streamRoutes;
+    QList<QByteArray> streamAuthorizations;
     // Shifts the start of every 206 by this many bytes and says so in Content-Range
     qint64 downloadStartShift = 0;
     // The totals of the next 206 Content-Range headers, one per request, instead of the real size
@@ -1456,6 +1460,17 @@ class FakeJellyfin {
             return;
         if (handleDownloadRoute(socket, method, route, range, ifRange, authorization))
             return;
+        if (method == "GET" && route.contains("/Videos/") && route.contains("/stream")) {
+            streamRoutes.append(route);
+            streamAuthorizations.append(authorization);
+            if (streamStatus != 0)
+                respond(socket, streamStatus, {});
+            else if (range.startsWith("bytes=0-0"))
+                respondBytes(socket, 206, "x", "Content-Range: bytes 0-0/1000\r\n");
+            else
+                respondBytes(socket, 200, "x");
+            return;
+        }
         // Before the listing routes: `/Playlists/{id}/Items?` would read as the Items family
         if (handlePlaylistRoute(socket, method, route, body, authorization, contentType))
             return;

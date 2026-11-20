@@ -99,6 +99,15 @@ Kirigami.ScrollablePage {
         enabled: page.details.status === ItemDetailsModel.Ready && !!page.Window.window?.player
         onTriggered: page.Window.window.playItem(page.details.itemId, page.details.canResume ? page.details.resumePositionTicks : 0)
     }
+    readonly property Kirigami.Action playOnAction: Kirigami.Action {
+        objectName: "playOnAction"
+        text: i18nc("@action:button", "Play On…")
+        icon.name: "video-television"
+        visible: page.details.status === ItemDetailsModel.Ready && page.details.playable
+        enabled: !!page.Window.window?.player && !page.Window.window?.groupRouting
+        tooltip: page.Window.window?.groupRouting ? i18nc("@info:tooltip", "Not available while following a SyncPlay group") : ""
+        onTriggered: page.Window.window.playOn(page.details.itemId, page.details.canResume ? page.details.resumePositionTicks : 0)
+    }
     readonly property Kirigami.Action playNextAction: Kirigami.Action {
         objectName: "playNextAction"
         text: i18n("Play Next")
@@ -256,7 +265,7 @@ Kirigami.ScrollablePage {
         }
     }
 
-    actions: [page.playNextAction, page.addToQueueAction, page.addToPlaylistAction, page.downloadAction, page.automaticDownloadsAction, page.stopDownloadsAction, page.favoriteAction, page.togglePlayedAction, page.mediaInfoAction]
+    actions: [page.playOnAction, page.playNextAction, page.addToQueueAction, page.addToPlaylistAction, page.downloadAction, page.automaticDownloadsAction, page.stopDownloadsAction, page.favoriteAction, page.togglePlayedAction, page.mediaInfoAction]
     // The row of the page carries the way back and the actions, as on the Movies and Shows tabs; the hero names the item
     globalToolBarStyle: Kirigami.ApplicationHeaderStyle.None
     // Without Kirigami's title row the page names itself to a screen reader

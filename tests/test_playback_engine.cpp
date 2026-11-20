@@ -510,7 +510,7 @@ class TestPlaybackEngine : public QObject {
         PlaybackEngine engine(client, session);
         QVERIFY(engine.init({QStringLiteral("vo=null"), QStringLiteral("ao=null")}));
         ClientSettings settings(settingsFile(dir, QStringLiteral("subs.conf"),
-                                             "[subtitles]\nsize=42\nplacement=top\n"));
+                                             "[subtitles]\nsize=42\nplacement=center,top\n"));
         PlayerSettings mpv(settings, engine);
         mpv.apply();
         // The primary at the top: the second subtitle takes the bottom, and one delay moves both
@@ -522,7 +522,7 @@ class TestPlaybackEngine : public QObject {
         // `secondary-sub-scale` is set too; mpv 0.41 does not know it, and `sub-scale` sizes both there
         // The primary back at the bottom puts the second subtitle at the top
         QVERIFY(settings.setValue(QStringLiteral("subtitles"), QStringLiteral("placement"),
-                                  QStringLiteral("bottom")));
+                                  QStringLiteral("center,bottom")));
         QCOMPARE(engine.mpvProperty(QStringLiteral("secondary-sub-pos")).toDouble(), 0.0);
     }
 

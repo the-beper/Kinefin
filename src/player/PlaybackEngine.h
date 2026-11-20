@@ -50,7 +50,7 @@ class PlaybackEngine final : public QObject {
     // Bind to the renderer-owned mpv instance on its worker thread. MpvAbstractItem
     // forwards all mutations to that thread; never make direct calls on its controller.
     bool attach(MpvAbstractItem *item, MpvController *controller);
-    void detach(MpvAbstractItem *item);
+    void detach(MpvAbstractItem *item, bool stopSession = true);
     void setMpvProperty(const QString &name, const QVariant &value);
     QVariant mpvProperty(const QString &name) const;
     // Returns false when mpv rejects the command (or is unavailable).

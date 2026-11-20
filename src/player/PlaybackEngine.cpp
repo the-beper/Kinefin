@@ -77,7 +77,9 @@ bool PlaybackEngine::init(const QStringList &options)
 
 bool PlaybackEngine::attach(MpvAbstractItem *item, MpvController *controller)
 {
-    if (!item || !controller || m_controller || m_session.state() != PlaybackSession::State::Idle)
+    if (!item || !controller || m_controller
+        || (m_session.state() != PlaybackSession::State::Idle
+            && m_session.route() != PlaybackSession::Route::Cast))
         return false;
     m_renderer = item;
     m_controller = controller;
@@ -86,13 +88,13 @@ bool PlaybackEngine::attach(MpvAbstractItem *item, MpvController *controller)
     return true;
 }
 
-void PlaybackEngine::detach(MpvAbstractItem *item)
+void PlaybackEngine::detach(MpvAbstractItem *item, bool stopSession)
 {
     if (!item || item != m_renderer)
         return;
     // The renderer's controller dies on its worker thread when the page closes.
     // Report Stopped before it does and do not keep its raw pointer afterwards.
-    if (m_session.state() != PlaybackSession::State::Idle) {
+    if (stopSession && m_session.state() != PlaybackSession::State::Idle) {
         m_session.stop();
         m_session.stopped();
     }

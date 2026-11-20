@@ -243,12 +243,12 @@ class TestPlaybackReporter : public QObject {
         QCOMPARE(chain.server.reportLog.size(), 0);
     }
 
-    void offlineAndCastRoutesNeverReport()
+    void offlineNeverReportsAndCastReports()
     {
-        for (const auto route : {PlaybackSession::Route::Offline, PlaybackSession::Route::Cast}) {
+        {
             Chain chain(std::chrono::milliseconds(40));
             QVERIFY(chain.ok);
-            QVERIFY(chain.session.open(kIdentity, route));
+            QVERIFY(chain.session.open(kIdentity, PlaybackSession::Route::Offline));
             QVERIFY(chain.session.opened());
             QVERIFY(chain.session.pause());
             QVERIFY(chain.session.resume());
@@ -256,6 +256,20 @@ class TestPlaybackReporter : public QObject {
             QVERIFY(chain.session.stopped());
             QTest::qWait(150);
             QCOMPARE(chain.server.reportLog.size(), 0);
+        }
+        {
+            Chain chain(std::chrono::seconds(30));
+            QVERIFY(chain.ok);
+            QVERIFY(chain.session.open(kIdentity, PlaybackSession::Route::Cast));
+            QVERIFY(chain.session.opened());
+            QTRY_COMPARE(chain.server.reportLog.size(), 1);
+            QVERIFY(chain.session.pause());
+            QTRY_COMPARE(chain.server.reportLog.size(), 2);
+            QVERIFY(chain.session.resume());
+            QTRY_COMPARE(chain.server.reportLog.size(), 3);
+            QVERIFY(chain.session.stop());
+            QTRY_COMPARE(chain.server.reportLog.size(), 4);
+            QVERIFY(chain.session.stopped());
         }
     }
 

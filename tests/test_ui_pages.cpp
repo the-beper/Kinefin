@@ -1866,6 +1866,18 @@ bool clickActionButtonWhenReady(const Ui &ui, const QString &actionName)
     return qWaitForScaled([&] { return clickActionButton(ui, actionName); }, 5000);
 }
 
+// Gives the focus to the first control of the window header, away from the page
+bool focusOutsideThePage(const Ui &ui)
+{
+    for (QQuickItem *item : allItems(ui.shellHeader())) {
+        if (item->activeFocusOnTab() && item->isVisible() && item->isEnabled()) {
+            item->forceActiveFocus(Qt::OtherFocusReason);
+            return item->hasActiveFocus();
+        }
+    }
+    return false;
+}
+
 // Report the buttons in the actual footer, including buttons without a bound
 // action, rather than unrelated toolbar buttons in the application window.
 QString describeButtons(const Ui &ui)
@@ -1986,6 +1998,16 @@ class PlayerStub : public QObject {
     Q_PROPERTY(QString screenshotPath MEMBER screenshotPath NOTIFY changed)
     Q_PROPERTY(QString skipLabel MEMBER skipLabel NOTIFY changed)
     Q_PROPERTY(int sleepRemainingMinutes MEMBER sleepRemainingMinutes NOTIFY changed)
+    Q_PROPERTY(bool sleepAtEndOfItem MEMBER sleepAtEndOfItem NOTIFY changed)
+    Q_PROPERTY(bool sleepAtEndOfQueue MEMBER sleepAtEndOfQueue NOTIFY changed)
+    Q_PROPERTY(bool casting MEMBER casting NOTIFY changed)
+    Q_PROPERTY(QString castTargetName MEMBER castTargetName NOTIFY changed)
+    Q_PROPERTY(bool castCanPause MEMBER castCanPause NOTIFY changed)
+    Q_PROPERTY(QString castTargetId MEMBER castTargetId NOTIFY changed)
+    Q_PROPERTY(bool castHasVolume MEMBER castHasVolume NOTIFY changed)
+    Q_PROPERTY(bool canContinueHere MEMBER canContinueHere NOTIFY changed)
+    Q_PROPERTY(bool localPlayback MEMBER localPlayback NOTIFY changed)
+    Q_PROPERTY(QObject *cast MEMBER cast NOTIFY changed)
     Q_PROPERTY(QString aspectMode MEMBER aspectMode NOTIFY changed)
     Q_PROPERTY(bool nightMode MEMBER nightMode NOTIFY changed)
     Q_PROPERTY(QString clipLine MEMBER clipLine NOTIFY changed)
@@ -2190,6 +2212,45 @@ class PlayerStub : public QObject {
     Q_INVOKABLE void setSleepTimer(int minutes)
     {
         record(QStringLiteral("setSleepTimer"), minutes);
+        if (minutes == 0) {
+            sleepAtEndOfItem = false;
+            sleepAtEndOfQueue = false;
+        }
+        Q_EMIT changed();
+    }
+    Q_INVOKABLE void setSleepAtEndOfItem(bool enabled)
+    {
+        record(QStringLiteral("setSleepAtEndOfItem"), enabled);
+        sleepAtEndOfItem = enabled;
+        if (enabled)
+            sleepAtEndOfQueue = false;
+        Q_EMIT changed();
+    }
+    Q_INVOKABLE void setSleepAtEndOfQueue(bool enabled)
+    {
+        record(QStringLiteral("setSleepAtEndOfQueue"), enabled);
+        sleepAtEndOfQueue = enabled;
+        if (enabled)
+            sleepAtEndOfItem = false;
+        Q_EMIT changed();
+    }
+    Q_INVOKABLE void stopCasting()
+    {
+        record(QStringLiteral("stopCasting"));
+        casting = false;
+        Q_EMIT changed();
+    }
+    Q_INVOKABLE bool castTo(const QString &udn)
+    {
+        record(QStringLiteral("castTo"), udn);
+        return !castRefused;
+    }
+    Q_INVOKABLE bool playItemOn(const QString &udn, const QString &id, qint64 resumeTicks)
+    {
+        const QString call =
+            udn + QLatin1Char(' ') + id + QLatin1Char(' ') + QString::number(resumeTicks);
+        record(QStringLiteral("playItemOn"), call);
+        return !castRefused;
     }
     Q_INVOKABLE void screenshot() { record(QStringLiteral("screenshot")); }
     Q_INVOKABLE void skipSegment() { record(QStringLiteral("skipSegment")); }
@@ -2233,6 +2294,18 @@ class PlayerStub : public QObject {
     QString screenshotPath;
     QString skipLabel;
     int sleepRemainingMinutes = 0;
+    bool sleepAtEndOfItem = false;
+    bool sleepAtEndOfQueue = false;
+    bool casting = false;
+    QString castTargetName;
+    bool castCanPause = false;
+    QString castTargetId;
+    bool castHasVolume = false;
+    bool canContinueHere = false;
+    bool localPlayback = false;
+    // castTo() and playItemOn() refuse, as they do while following a group or for an unknown device
+    bool castRefused = false;
+    QObject *cast = nullptr;
     QString aspectMode = QStringLiteral("normal");
     bool nightMode = false;
     QString clipLine;
@@ -2274,6 +2347,8 @@ class PlayerStub : public QObject {
     void qualityChangeFailed();
     void clipMarkChanged(const QString &text);
     void qualityUnavailable();
+    // The device stopped on its own or another controller took it
+    void castStoppedElsewhere(const QString &deviceName);
     void finished();
 
   private:
@@ -2283,6 +2358,101 @@ class PlayerStub : public QObject {
         return true;
     }
 };
+
+// The devices of the cast dialog, with the roles of the real targets model (udn, name, detail, kind)
+class CastTargetsStub : public QAbstractListModel {
+    Q_OBJECT
+  public:
+    struct Target {
+        QString udn;
+        QString name;
+        QString detail;
+    };
+    int rowCount(const QModelIndex &parent = {}) const override
+    {
+        return parent.isValid() ? 0 : int(targets.size());
+    }
+    QVariant data(const QModelIndex &index, int role) const override
+    {
+        if (!index.isValid() || index.row() >= targets.size())
+            return {};
+        const Target &target = targets.at(index.row());
+        switch (role) {
+        case Qt::UserRole + 1:
+            return target.udn;
+        case Qt::UserRole + 2:
+            return target.name;
+        case Qt::UserRole + 3:
+            return target.detail;
+        case Qt::UserRole + 4:
+            return QStringLiteral("renderer");
+        default:
+            return {};
+        }
+    }
+    QHash<int, QByteArray> roleNames() const override
+    {
+        return {{Qt::UserRole + 1, "udn"},
+                {Qt::UserRole + 2, "name"},
+                {Qt::UserRole + 3, "detail"},
+                {Qt::UserRole + 4, "kind"}};
+    }
+    void setTargets(const QList<Target> &list)
+    {
+        beginResetModel();
+        targets = list;
+        endResetModel();
+    }
+    Q_INVOKABLE int indexOf(const QString &udn) const
+    {
+        for (int row = 0; row < targets.size(); ++row) {
+            if (targets.at(row).udn == udn)
+                return row;
+        }
+        return -1;
+    }
+    QList<Target> targets;
+};
+
+// The cast controller of the player as far as the dialog reads it: the devices, the search state and the error
+class CastStub : public QObject {
+    Q_OBJECT
+    Q_PROPERTY(QAbstractItemModel *targets MEMBER targets CONSTANT)
+    Q_PROPERTY(bool searching MEMBER searching NOTIFY changed)
+    Q_PROPERTY(QString error MEMBER error NOTIFY changed)
+  public:
+    Q_INVOKABLE void search() { ++searches; }
+    Q_INVOKABLE void stopSearch() { ++stops; }
+
+    CastTargetsStub model;
+    QAbstractItemModel *targets = &model;
+    bool searching = false;
+    QString error;
+    int searches = 0;
+    int stops = 0;
+
+  Q_SIGNALS:
+    void changed();
+};
+
+// The focus ring of a card or a row is the border of its background, drawn for the highlighted one and for a visually focused one
+static bool cardRingShown(QQuickItem *card)
+{
+    auto *background = card ? card->property("background").value<QQuickItem *>() : nullptr;
+    return background && background->property("ring").toBool()
+           && QQmlProperty(background, QStringLiteral("border.width")).read().toInt() == 2;
+}
+
+// The rows of the cast dialog's device list: the delegates that carry a device's `udn`
+static QList<QQuickItem *> castDeviceRows(QQuickItem *list)
+{
+    QList<QQuickItem *> rows;
+    for (QQuickItem *candidate : allItems(list)) {
+        if (candidate->inherits("QQuickAbstractButton") && candidate->property("udn").isValid())
+            rows.append(candidate);
+    }
+    return rows;
+}
 
 // The remote-control object the executable gives the shell
 class RemoteStub : public QObject {
@@ -8944,6 +9114,20 @@ class TestUiPages : public QObject {
             }
             return {};
         };
+        // Where the focus went instead, for a failure on a slow runner
+        const auto focusPath = [&ui] {
+            QStringList path;
+            for (QQuickItem *item = ui.window->activeFocusItem(); item && path.size() < 4;
+                 item = item->parentItem()) {
+                const QRectF rect =
+                    item->mapRectToScene(QRectF(0, 0, item->width(), item->height()));
+                path << QStringLiteral("%1 at %2,%3")
+                            .arg(Ui::describe(item))
+                            .arg(rect.x())
+                            .arg(rect.y());
+            }
+            return path.join(QLatin1String(" < "));
+        };
         QVERIFY(input.dispatchKeycode(QStringLiteral("down")));
         // The first block is the library tiles, which come above the rows
         QTRY_VERIFY(ui.window->activeFocusItem()
@@ -8967,9 +9151,10 @@ class TestUiPages : public QObject {
         }
         // Up from the first row goes back to the tiles above it
         QVERIFY(input.dispatchKeycode(QStringLiteral("up")));
-        QTRY_VERIFY(ui.window->activeFocusItem()
-                    && ui.window->activeFocusItem()->objectName().startsWith(
-                        QLatin1String("libraryCard_")));
+        QTRY_VERIFY2(ui.window->activeFocusItem()
+                         && ui.window->activeFocusItem()->objectName().startsWith(
+                             QLatin1String("libraryCard_")),
+                     qPrintable(firstRow + QLatin1String(": ") + focusPath()));
         QVERIFY(input.dispatchKeycode(QStringLiteral("down")));
         QTRY_COMPARE(focusedRow(), firstRow);
         QVERIFY(input.dispatchKeycode(QStringLiteral("down")));
@@ -9220,6 +9405,352 @@ class TestUiPages : public QObject {
         QVERIFY(input.dispatchKeycode(QStringLiteral("down")));
         QTRY_VERIFY(ui.window->activeFocusItem()
                     && home->isAncestorOf(ui.window->activeFocusItem()));
+    }
+
+    void enteringALibrarySelectsNothing()
+    {
+        Ui ui(m_home->path());
+        ui.server.generatedItemTotal = 30;
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        QQuickItem *grid = ui.item(QStringLiteral("libraryGrid"));
+        QVERIFY(grid);
+        QTRY_VERIFY(grid->hasActiveFocus());
+        // The first card is current for Return but not highlighted until the user moves
+        const auto firstCard = [&]() -> QQuickItem * {
+            for (QQuickItem *card : allItems(grid)) {
+                if (card->objectName().startsWith(QStringLiteral("mediaCard_"))
+                    && card->isVisible())
+                    return card;
+            }
+            return nullptr;
+        };
+        QQuickItem *first = nullptr;
+        QTRY_VERIFY((first = firstCard()) != nullptr);
+        QVERIFY(!first->property("highlighted").toBool());
+        QVERIFY(!first->property("focusVisible").toBool());
+        const auto anyHighlighted = [&] {
+            for (QQuickItem *card : allItems(grid)) {
+                if (card->objectName().startsWith(QStringLiteral("mediaCard_")) && card->isVisible()
+                    && card->property("highlighted").toBool())
+                    return true;
+            }
+            return false;
+        };
+        QVERIFY(!anyHighlighted());
+        QTest::keyClick(ui.window, Qt::Key_Right);
+        QTRY_VERIFY(anyHighlighted());
+        QTRY_VERIFY(first->property("focusVisible").toBool());
+    }
+
+    void theCurrentHomeCardShowsTheFocusRingAfterKeyboardEntry()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        ui.server.listingRawBody.insert(
+            QStringLiteral("NextUp"),
+            envelope(QJsonArray{fixtureObject(QStringLiteral("movie_item"))}));
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *list = nullptr;
+        QTRY_VERIFY((list = ui.item(QStringLiteral("homeRowList_0"))) != nullptr);
+        QQuickItem *card = nullptr;
+        QTRY_VERIFY((card = list->property("currentItem").value<QQuickItem *>()) != nullptr);
+        // The cards take no focus of their own: the row drives the current one
+        list->forceActiveFocus(Qt::TabFocusReason);
+        QTRY_VERIFY(list->hasActiveFocus());
+        QTRY_VERIFY(card->property("highlighted").toBool());
+        QVERIFY(cardRingShown(card));
+        // Focus elsewhere: the ring goes
+        QVERIFY(focusOutsideThePage(ui));
+        QTRY_VERIFY(!list->hasActiveFocus());
+        QTRY_VERIFY(!cardRingShown(card));
+    }
+
+    void tabbingBackIntoTheLibraryGridShowsTheCurrentCard()
+    {
+        Ui ui(m_home->path());
+        ui.server.generatedItemTotal = 30;
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        QQuickItem *grid = ui.item(QStringLiteral("libraryGrid"));
+        QVERIFY(grid);
+        QTRY_VERIFY(grid->hasActiveFocus());
+        const auto currentCard = [&]() -> QQuickItem * {
+            return grid->property("currentItem").value<QQuickItem *>();
+        };
+        QQuickItem *card = nullptr;
+        QTRY_VERIFY((card = currentCard()) != nullptr);
+        // The page's own focus selects nothing
+        QVERIFY(!card->property("highlighted").toBool());
+        QVERIFY(!cardRingShown(card));
+        // The user's Backtab into the grid shows where the current card is
+        QVERIFY(focusOutsideThePage(ui));
+        QTRY_VERIFY(!grid->hasActiveFocus());
+        grid->forceActiveFocus(Qt::BacktabFocusReason);
+        QTRY_VERIFY(grid->hasActiveFocus());
+        QTRY_VERIFY(card->property("highlighted").toBool());
+        QVERIFY(cardRingShown(card));
+    }
+
+    void theCardMenuPlayOnIsDisabledWhileFollowingAGroup()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        ui.server.listingRawBody.insert(QStringLiteral("NextUp"), envelope({}));
+        ui.server.listingRawBody.insert(
+            QStringLiteral("Items"),
+            envelope(QJsonArray{fixtureObject(QStringLiteral("movie_item"))}));
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        QObject *root = ui.engine.rootObjects().constFirst();
+        QVERIFY(root->setProperty("player", QVariant::fromValue<QObject *>(&stub)));
+        QQuickItem *page = ui.item(QStringLiteral("libraryPage"));
+        QQuickItem *card = nullptr;
+        QTRY_VERIFY((card = Ui::itemIn(page, QStringLiteral("mediaCard_") + kMovieId)) != nullptr);
+        const auto menuVisible = [&ui] {
+            QObject *menu = ui.popup(QStringLiteral("cardMenu"));
+            return menu && menu->property("visible").toBool();
+        };
+        // The visible Play On entry of a menu opened on the card, null when it does not show
+        const auto openMenu = [&]() -> QQuickItem * {
+            const QPointF center = card->mapToScene(QPointF(card->width() / 2, card->height() / 3));
+            QTest::mouseClick(ui.window, Qt::RightButton, Qt::NoModifier, center.toPoint());
+            QQuickItem *entry = nullptr;
+            const bool shown = QTest::qWaitFor([&] {
+                entry = menuVisible() ? ui.item(QStringLiteral("cardMenuPlayOn")) : nullptr;
+                return entry && entry->isVisible();
+            });
+            return shown ? entry : nullptr;
+        };
+        QQuickItem *entry = openMenu();
+        QVERIFY(entry);
+        QCOMPARE(entry->property("text").toString(), QStringLiteral("Play On…"));
+        QVERIFY(entry->isEnabled());
+        QTest::keyClick(ui.window, Qt::Key_Escape);
+        QTRY_VERIFY(!menuVisible());
+        QVERIFY(syncPlayJoined(ui));
+        QTRY_VERIFY(root->property("groupRouting").toBool());
+        entry = openMenu();
+        QVERIFY(entry);
+        QTRY_VERIFY(!entry->isEnabled());
+        QTest::keyClick(ui.window, Qt::Key_Escape);
+        QTRY_VERIFY(!menuVisible());
+        QVERIFY(stub.calls.isEmpty());
+    }
+
+    void theOsdOffersPlayOnForAnythingButALocalFile()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *page = openPlayer(ui, stub);
+        QVERIFY(page);
+        QQuickItem *button = nullptr;
+        QTRY_VERIFY((button = Ui::itemIn(page, QStringLiteral("osdPlayOnButton"))) != nullptr);
+        QTRY_VERIFY(button->isVisible());
+        QCOMPARE(button->property("text").toString(), QStringLiteral("Play On…"));
+        // Before Picture in Picture
+        QQuickItem *pictureInPicture =
+            Ui::itemIn(page, QStringLiteral("playerPictureInPictureButton"));
+        QVERIFY(pictureInPicture);
+        QTRY_VERIFY(sceneRect(button).right() <= sceneRect(pictureInPicture).left() + 1);
+        // A downloaded file plays here only
+        stub.localPlayback = true;
+        Q_EMIT stub.changed();
+        QTRY_VERIFY(!button->isVisible());
+        stub.localPlayback = false;
+        Q_EMIT stub.changed();
+        QTRY_VERIFY(button->isVisible());
+        // A device without a volume has no speaker button; one with a volume keeps it
+        QQuickItem *mute = Ui::itemIn(page, QStringLiteral("playerMuteButton"));
+        QVERIFY(mute);
+        QVERIFY(mute->isVisible());
+        stub.casting = true;
+        stub.castTargetName = QStringLiteral("Living room");
+        Q_EMIT stub.changed();
+        QTRY_VERIFY(!mute->isVisible());
+        QVERIFY(button->isVisible());
+        stub.castHasVolume = true;
+        Q_EMIT stub.changed();
+        QTRY_VERIFY(mute->isVisible());
+        // What the bar disables the context menu disables too
+        QObject *clipMenu = ui.popup(QStringLiteral("playerContextMoreClipMenu"));
+        QObject *subtitlesMenu = ui.popup(QStringLiteral("playerContextSubtitlesMenu"));
+        QVERIFY(clipMenu && subtitlesMenu);
+        QVERIFY(!clipMenu->property("enabled").toBool());
+        QVERIFY(!subtitlesMenu->property("enabled").toBool());
+        stub.casting = false;
+        Q_EMIT stub.changed();
+        QTRY_VERIFY(clipMenu->property("enabled").toBool());
+        QTRY_VERIFY(subtitlesMenu->property("enabled").toBool());
+        // In a SyncPlay group the group decides what plays: the button stays, disabled
+        QVERIFY(syncPlayJoined(ui));
+        QTRY_VERIFY(!button->isEnabled());
+        QVERIFY(button->isVisible());
+        // Left, it is the user's again, and a click opens the dialog
+        ui.syncPlay.leaveGroup();
+        QTRY_VERIFY(button->isEnabled());
+        ui.clickCenter(button);
+        QObject *dialog = ui.popup(QStringLiteral("castDialog"));
+        QVERIFY(dialog);
+        QTRY_VERIFY(dialog->property("opened").toBool());
+    }
+
+    void theErrorOverlayOffersContinueHereAfterACastFailure()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *page = openPlayer(ui, stub);
+        QVERIFY(page);
+        QQuickItem *button = Ui::itemIn(page, QStringLiteral("playerContinueHereButton"));
+        QVERIFY(button);
+        QVERIFY(!button->isVisible());
+        stub.active = false;
+        stub.errorText = QStringLiteral("The device stopped responding.");
+        stub.canContinueHere = true;
+        Q_EMIT stub.changed();
+        QTRY_VERIFY(button->isVisible() && button->width() > 0);
+        QCOMPARE(button->property("text").toString(), QStringLiteral("Continue Here"));
+        QVERIFY(button->property("highlighted").toBool());
+        stub.calls.clear();
+        // The row lays its buttons out a frame after they show
+        QQuickItem *close = Ui::itemIn(page, QStringLiteral("playerCloseAfterErrorButton"));
+        QVERIFY(close);
+        QTRY_VERIFY(close->isVisible() && !sceneRect(button).intersects(sceneRect(close)));
+        ui.clickCenter(button);
+        QTRY_VERIFY(stub.calls.contains(QStringLiteral("castTo local")));
+        stub.canContinueHere = false;
+        Q_EMIT stub.changed();
+        QTRY_VERIFY(!button->isVisible());
+    }
+
+    void theCastDialogListsThisComputerFirstAndShowsNamesLiterally()
+    {
+        PlayerStub stub;
+        CastStub cast;
+        cast.model.setTargets(
+            {{QStringLiteral("uuid:tv"), QStringLiteral("<b>Living</b> room"),
+              QStringLiteral("<i>Acme</i> TV")},
+             {QStringLiteral("uuid:bar"), QStringLiteral("Bar & <u>Grill</u>"), QString()}});
+        stub.cast = &cast;
+        stub.casting = true;
+        stub.castTargetId = QStringLiteral("uuid:bar");
+        stub.castTargetName = QStringLiteral("Bar & <u>Grill</u>");
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QObject *root = ui.engine.rootObjects().constFirst();
+        QVERIFY(root->setProperty("player", QVariant::fromValue<QObject *>(&stub)));
+        QVERIFY(QMetaObject::invokeMethod(root, "castCurrent"));
+        QObject *dialog = ui.popup(QStringLiteral("castDialog"));
+        QVERIFY(dialog);
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QTRY_COMPARE(cast.searches, 1);
+        QQuickItem *list = nullptr;
+        QTRY_VERIFY((list = ui.item(QStringLiteral("castTargets"))) != nullptr);
+        QTRY_COMPARE(list->property("count").toInt(), 2);
+        // This Computer stays above the devices while one plays: it is the way back
+        QQuickItem *thisComputer = ui.item(QStringLiteral("castThisComputer"));
+        QVERIFY(thisComputer && thisComputer->isVisible());
+        QVERIFY(sceneRect(thisComputer).bottom() <= sceneRect(list).top() + 1);
+        QCOMPARE(thisComputer->property("text").toString(), QStringLiteral("This Computer"));
+        QVERIFY(!thisComputer->property("checked").toBool());
+        // The devices, their names as the markup characters they are
+        QTRY_COMPARE(castDeviceRows(list).size(), 2);
+        const QList<QQuickItem *> rows = castDeviceRows(list);
+        QCOMPARE(rows.at(0)->property("text").toString(), QStringLiteral("<b>Living</b> room"));
+        QCOMPARE(rows.at(1)->property("text").toString(), QStringLiteral("Bar & <u>Grill</u>"));
+        int found = 0;
+        QVERIFY(ui.notPlainText(QStringLiteral("<b>Living</b>"), &found).isEmpty());
+        QVERIFY(found >= 1);
+        found = 0;
+        QVERIFY(ui.notPlainText(QStringLiteral("<i>Acme</i> TV"), &found).isEmpty());
+        QVERIFY(found >= 1);
+        // The one that plays now is checked
+        QVERIFY(!rows.at(0)->property("checked").toBool());
+        QVERIFY(rows.at(1)->property("checked").toBool());
+        stub.castTargetId.clear();
+        Q_EMIT stub.changed();
+        QTRY_VERIFY(thisComputer->property("checked").toBool());
+        QVERIFY(!rows.at(1)->property("checked").toBool());
+        // The error of the search shows in a box
+        QQuickItem *error = ui.item(QStringLiteral("castError"));
+        QVERIFY(error);
+        QVERIFY(!error->isVisible());
+        cast.error = QStringLiteral("The network search failed");
+        Q_EMIT cast.changed();
+        QTRY_VERIFY(error->isVisible());
+        // Without an item (the OSD) a pick moves the playing video
+        stub.calls.clear();
+        QVERIFY(QMetaObject::invokeMethod(rows.at(0), "clicked"));
+        QTRY_VERIFY(!dialog->property("opened").toBool());
+        QCOMPARE(stub.calls, QStringList{QStringLiteral("castTo uuid:tv")});
+        QTRY_VERIFY(cast.stops >= 1);
+    }
+
+    void playOnWithAnItemPlaysItThereAndNotesARefusal()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QObject *root = ui.engine.rootObjects().constFirst();
+        QVERIFY(root->setProperty("player", QVariant::fromValue<QObject *>(&stub)));
+        const auto chooseThisComputer = [&] {
+            QObject *dialog = ui.popup(QStringLiteral("castDialog"));
+            QVERIFY(dialog);
+            QTRY_VERIFY(dialog->property("opened").toBool());
+            QQuickItem *row = nullptr;
+            QTRY_VERIFY((row = ui.item(QStringLiteral("castThisComputer"))) != nullptr
+                        && row->isVisible());
+            QVERIFY(QMetaObject::invokeMethod(row, "clicked"));
+            QTRY_VERIFY(!dialog->property("opened").toBool());
+        };
+        // With an item, This Computer plays that item here
+        QVERIFY(QMetaObject::invokeMethod(root, "playOn", Q_ARG(QVariant, kMovieId),
+                                          Q_ARG(QVariant, 12345)));
+        chooseThisComputer();
+        QVERIFY(stub.calls.contains(QStringLiteral("playItemOn local %1 12345").arg(kMovieId)));
+        QTRY_VERIFY(ui.item(QStringLiteral("playerPage")) != nullptr);
+        // A refusal says so
+        stub.castRefused = true;
+        QVERIFY(QMetaObject::invokeMethod(root, "castCurrent"));
+        chooseThisComputer();
+        QVERIFY(stub.calls.contains(QStringLiteral("castTo local")));
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Could not start playback"), true));
+        // A device that stops on its own: named in a notification, and its markup is not read
+        Q_EMIT stub.castStoppedElsewhere(QStringLiteral("<b>TV</b>"));
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Playback was stopped on ‹b>TV‹/b>"), true));
+    }
+
+    void theMiniPlayerSaysWhereACastPlays()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *mini = openMiniPlayer(ui, stub);
+        QVERIFY(mini);
+        QQuickItem *view = Ui::itemIn(mini, QStringLiteral("miniPlayerCastView"));
+        QVERIFY(view);
+        QVERIFY(!view->isVisible());
+        stub.casting = true;
+        stub.castTargetName = QStringLiteral("<b>Living</b> room");
+        Q_EMIT stub.changed();
+        QTRY_VERIFY(view->isVisible());
+        int found = 0;
+        QVERIFY(ui.notPlainText(QStringLiteral("Playing on <b>Living</b> room"), &found).isEmpty());
+        QCOMPARE(found, 1);
     }
 
     void upFromTheGridFirstRowReachesTheControlAbove()
@@ -9972,12 +10503,12 @@ class TestUiPages : public QObject {
             texts << actions.at(i)->property("text").toString();
         }
         QCOMPARE(
-            names.mid(0, 7),
-            (QStringList{QStringLiteral("playNextAction"), QStringLiteral("addToQueueAction"),
-                         QStringLiteral("addToPlaylistAction"), QStringLiteral("downloadAction"),
-                         QStringLiteral("automaticDownloadsAction"),
-                         QStringLiteral("stopDownloadsAction"),
-                         QStringLiteral("toggleFavoriteAction")}));
+            names.mid(0, 8),
+            (QStringList{
+                QStringLiteral("playOnAction"), QStringLiteral("playNextAction"),
+                QStringLiteral("addToQueueAction"), QStringLiteral("addToPlaylistAction"),
+                QStringLiteral("downloadAction"), QStringLiteral("automaticDownloadsAction"),
+                QStringLiteral("stopDownloadsAction"), QStringLiteral("toggleFavoriteAction")}));
         // Refresh is the main menu's, for every page
         QVERIFY(!texts.contains(QStringLiteral("Refresh")));
     }
@@ -10443,8 +10974,7 @@ class TestUiPages : public QObject {
         QVERIFY(QMetaObject::invokeMethod(action, "trigger"));
         // An animation brings it to the very start, the top margin included, then the first card is the current one
         QTRY_VERIFY(grid->property("atYBeginning").toBool());
-        QTRY_COMPARE(grid->property("contentY").toReal(),
-                     grid->property("originY").toReal() - grid->property("topMargin").toReal());
+        QTRY_COMPARE(grid->property("contentY").toReal(), grid->property("originY").toReal());
         QTRY_COMPARE(grid->property("currentIndex").toInt(), 0);
         QTRY_VERIFY(!button->isEnabled());
         // The keys go to the grid, not away with the button that turned off
@@ -14161,6 +14691,53 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(!ui.item(QStringLiteral("playerOsd"))->isVisible());
     }
 
+    void playerSleepMenuOffersTheEndModes()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *page = openPlayer(ui, stub);
+        QVERIFY(page);
+        QObject *sleep = page->findChild<QObject *>(QStringLiteral("playerSleepMenu"));
+        QVERIFY(sleep);
+        const auto entry = [sleep](const QString &text) -> QQuickItem * {
+            for (int i = 0; i < sleep->property("count").toInt(); ++i) {
+                QQuickItem *item = nullptr;
+                QMetaObject::invokeMethod(sleep, "itemAt", Q_RETURN_ARG(QQuickItem *, item),
+                                          Q_ARG(int, i));
+                if (item && item->property("text").toString() == text)
+                    return item;
+            }
+            return nullptr;
+        };
+        QQuickItem *endOfItem = entry(QStringLiteral("End of Current Item"));
+        QQuickItem *endOfQueue = entry(QStringLiteral("End of Queue"));
+        QQuickItem *off = entry(QStringLiteral("Off"));
+        QVERIFY(endOfItem && endOfQueue && off);
+        QVERIFY(endOfItem->property("checkable").toBool());
+        QVERIFY(endOfQueue->property("checkable").toBool());
+
+        QVERIFY(QMetaObject::invokeMethod(endOfItem, "click"));
+        QTRY_VERIFY(stub.calls.contains(QStringLiteral("setSleepAtEndOfItem true")));
+        QVERIFY(stub.sleepAtEndOfItem);
+        QVERIFY(!stub.sleepAtEndOfQueue);
+        QTRY_COMPARE(sleep->property("title").toString(),
+                     QStringLiteral("Sleep: End of Current Item"));
+
+        QVERIFY(QMetaObject::invokeMethod(endOfQueue, "click"));
+        QTRY_VERIFY(stub.calls.contains(QStringLiteral("setSleepAtEndOfQueue true")));
+        QVERIFY(stub.sleepAtEndOfQueue);
+        QVERIFY(!stub.sleepAtEndOfItem);
+        QTRY_COMPARE(sleep->property("title").toString(), QStringLiteral("Sleep: End of Queue"));
+
+        QVERIFY(QMetaObject::invokeMethod(off, "click"));
+        QTRY_VERIFY(stub.calls.contains(QStringLiteral("setSleepTimer 0")));
+        QVERIFY(!stub.sleepAtEndOfQueue);
+        QTRY_COMPARE(sleep->property("title").toString(), QStringLiteral("Sleep Timer"));
+    }
+
     void playerTimelineRowHoldsTheElapsedTimeTheSliderAndTheTotalOrRemainingTime()
     {
         PlayerStub stub;
@@ -16308,28 +16885,12 @@ class TestUiPages : public QObject {
             if (entry && entry->isVisible() && !entry->inherits("QQuickMenuSeparator"))
                 entries << entry->property("text").toString();
         }
-        QCOMPARE(entries, QStringList({QStringLiteral("Pause"),
-                                       QStringLiteral("Previous"),
-                                       QStringLiteral("Next"),
-                                       QStringLiteral("Audio"),
-                                       QStringLiteral("Subtitles"),
-                                       QStringLiteral("Full Screen Mode"),
-                                       QStringLiteral("Show Mini Player"),
-                                       QStringLiteral("Picture in Picture"),
-                                       QStringLiteral("Shuffle"),
-                                       QStringLiteral("Repeat"),
-                                       QStringLiteral("Playback Speed"),
-                                       QStringLiteral("Aspect Ratio"),
-                                       QStringLiteral("Quality"),
-                                       QStringLiteral("Chapters"),
-                                       QStringLiteral("AV Sync"),
-                                       QStringLiteral("Sleep Timer"),
-                                       QStringLiteral("Forget Series Choices"),
-                                       QStringLiteral("Now Playing Queue"),
-                                       QStringLiteral("Screenshot"),
-                                       QStringLiteral("Clip"),
-                                       QStringLiteral("Playback Info"),
-                                       QStringLiteral("Keep Controls Visible")}));
+        QCOMPARE(
+            entries,
+            QStringList({QStringLiteral("Pause"), QStringLiteral("Previous"),
+                         QStringLiteral("Next"), QStringLiteral("Audio"),
+                         QStringLiteral("Subtitles"), QStringLiteral("Full Screen Mode"),
+                         QStringLiteral("More Actions"), QStringLiteral("Keep Controls Visible")}));
         // The track submenus list what the bars' menus list
         for (const auto &[bar, context] :
              {std::pair{QStringLiteral("playerAudioMenu"),
@@ -16365,6 +16926,8 @@ class TestUiPages : public QObject {
             QVERIFY(QMetaObject::invokeMethod(menu, "open"));
             QTRY_VERIFY(menu->property("opened").toBool());
             QObject *entry = menu->findChild<QObject *>(QString::fromLatin1(name));
+            if (!entry)
+                entry = page->findChild<QObject *>(QString::fromLatin1(name));
             QVERIFY2(entry, name);
             QVERIFY(QMetaObject::invokeMethod(entry, "click"));
             QTRY_VERIFY(!menu->property("visible").toBool());
@@ -16373,7 +16936,7 @@ class TestUiPages : public QObject {
         if (QTest::currentTestFailed())
             return;
         QTRY_COMPARE(stub.calls.count(QStringLiteral("togglePause")), 1);
-        choose("playerContextPlaybackInfoItem");
+        choose("playerContextMorePlaybackInfoItem");
         if (QTest::currentTestFailed())
             return;
         QTRY_VERIFY(overlay->isVisible());

@@ -36,7 +36,8 @@ bool PlaybackSession::opened()
         return false;
     }
     // A stream was opened: an online route now has a server session to close. Set before the transition so the observer already sees it
-    m_onlineSessionStarted = (m_route == Route::Direct || m_route == Route::Transcoded);
+    m_onlineSessionStarted =
+        (m_route == Route::Direct || m_route == Route::Transcoded || m_route == Route::Cast);
     transition(State::Playing);
     return true;
 }
@@ -126,7 +127,7 @@ void PlaybackSession::transition(State to)
 
 bool PlaybackSession::shouldReportToJellyfin() const
 {
-    // A remote stop remains eligible after Failed -> Stopping, but opening failures cannot report a phantom server session. Offline/cast never publish *local mpv* progress or a local stop. The adapter still owns network retries and must not confuse eligibility with delivery success
+    // A remote stop remains eligible after Failed -> Stopping, but opening failures cannot report a phantom server session. Offline never publishes local progress or a local stop; Cast reports the renderer's state under the same eligibility. The adapter still owns network retries and must not confuse eligibility with delivery success
     return m_onlineSessionStarted
            && (m_state == State::Playing || m_state == State::Paused || m_state == State::Buffering
                || m_state == State::Stopping);

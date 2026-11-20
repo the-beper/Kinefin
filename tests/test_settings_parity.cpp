@@ -168,6 +168,46 @@ class TestSettingsParity : public QObject {
         }
     }
 
+    void subtitleValueListsMatchUpstream()
+    {
+        const auto optionsOf = [](const QString &key) {
+            QStringList values;
+            if (const auto *definition = Kinefin::findSetting(QStringLiteral("subtitles"), key)) {
+                for (const auto &option : definition->options)
+                    values << option.value.toString();
+            }
+            return values;
+        };
+        const QStringList colors{QStringLiteral(""),        QStringLiteral("#000000"),
+                                 QStringLiteral("#FFFFFF"), QStringLiteral("#EEEEEE"),
+                                 QStringLiteral("#CCCCCC"), QStringLiteral("#FBF93E"),
+                                 QStringLiteral("#FFFFCC"), QStringLiteral("#EEEDB8")};
+        QCOMPARE(optionsOf(QStringLiteral("color")), colors);
+        QCOMPARE(optionsOf(QStringLiteral("border_color")), colors);
+        QCOMPARE(optionsOf(QStringLiteral("background_color")), colors);
+        const QStringList placements{QStringLiteral(""),
+                                     QStringLiteral("left,bottom"),
+                                     QStringLiteral("right,bottom"),
+                                     QStringLiteral("center,bottom"),
+                                     QStringLiteral("left,top"),
+                                     QStringLiteral("right,top"),
+                                     QStringLiteral("center,top")};
+        QCOMPARE(optionsOf(QStringLiteral("placement")), placements);
+        const QStringList transparencies{QStringLiteral(""),   QStringLiteral("FF"),
+                                         QStringLiteral("C0"), QStringLiteral("80"),
+                                         QStringLiteral("40"), QStringLiteral("00")};
+        QCOMPARE(optionsOf(QStringLiteral("background_transparency")), transparencies);
+        const QStringList styleOverrides{QStringLiteral(""),      QStringLiteral("yes"),
+                                         QStringLiteral("no"),    QStringLiteral("force"),
+                                         QStringLiteral("scale"), QStringLiteral("strip")};
+        QCOMPARE(optionsOf(QStringLiteral("ass_style_override")), styleOverrides);
+        const QStringList fonts{QStringLiteral(""),           QStringLiteral("serif"),
+                                QStringLiteral("sans-serif"), QStringLiteral("script"),
+                                QStringLiteral("monospace"),  QStringLiteral("display"),
+                                QStringLiteral("cursive"),    QStringLiteral("fantasy")};
+        QCOMPARE(optionsOf(QStringLiteral("font")), fonts);
+    }
+
     void sectionsAndKeysAreUnique()
     {
         QSet<QString> seen;

@@ -24,6 +24,8 @@ class PlaybackReporter final : public QObject {
     struct PlayerState {
         // 100 ns ticks; at the end of the file, the duration. Empty while the player does not know (no stream yet, unloaded, before the resume seek): the reporter then repeats the last known value and skips a Progress it has none for, because the server stores a reported 0 as the resume point
         std::optional<qint64> positionTicks{};
+        // The route the state came from, when it is not the session's own (a cast whose source transcodes)
+        std::optional<PlaybackSource::Method> method{};
         bool canSeek = true;
         std::optional<int> audioStreamIndex{};
         std::optional<int> subtitleStreamIndex{};

@@ -196,6 +196,8 @@ class LibraryItemsModel final : public PagedItemsModel {
     void setCardLayout(bool layout);
     // Clears every filter section, the pending tags and ratings included (the view then no longer waits for a facet list), not the sort or the search term
     Q_INVOKABLE void clearFilters();
+    // Replaces every filter section and drops the pending tags and ratings in the same step: for a caller that starts from another view, like a genre rail's Show All
+    Q_INVOKABLE void replaceFilters(const QVariantMap &filters);
     // Held back while a saved tag or rating is pending: asks the failed facet source again instead of the list (nothing is sent before it resolves)
     void retry() override;
     // Asks for the list again from its first page, keeping the query and the view; nothing while it is closed

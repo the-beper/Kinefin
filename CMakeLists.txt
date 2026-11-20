@@ -217,10 +217,16 @@ target_link_libraries(kinefin_integration PUBLIC kinefin_player Qt6::DBus Qt6::G
 
 # Cast-out building blocks: SSDP search, UPnP descriptions, SOAP, DIDL and the renderer device profile; Qt Core and Network only
 add_library(kinefin_cast STATIC
+    src/cast/CastController.cpp
+    src/cast/CastController.h
+    src/cast/CastTargetsModel.cpp
+    src/cast/CastTargetsModel.h
     src/cast/CastText.cpp
     src/cast/CastText.h
     src/cast/Didl.cpp
     src/cast/Didl.h
+    src/cast/DlnaRenderer.cpp
+    src/cast/DlnaRenderer.h
     src/cast/RendererProfile.cpp
     src/cast/RendererProfile.h
     src/cast/Soap.cpp
@@ -233,10 +239,12 @@ add_library(kinefin_cast STATIC
     src/cast/XmlTree.h
 )
 target_include_directories(kinefin_cast PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_link_libraries(kinefin_cast PUBLIC Qt6::Core Qt6::Network)
+target_compile_definitions(kinefin_cast PRIVATE TRANSLATION_DOMAIN="kinefin")
+target_link_libraries(kinefin_cast PUBLIC Qt6::Core Qt6::Network KF6::I18n)
+target_link_libraries(kinefin_player PUBLIC kinefin_cast)
 
 # The QML module lives in a static library of its own so that the UI tests can import it like the application does
-foreach(page Main PlayerPage OsdButton MiniPlayer PictureInPictureWindow PlaybackInfoOverlay ShellHeader AboutDialog ShortcutsDialog RemoteSessionsDialog SyncPlayDialog MediaInfoDialog HomePage LibraryTile LibraryPage ResumeItemsPage MediaCard CardMenu CardRow EpisodeRow ItemDetailsPage SearchPage QueuePage FilterDialog GenreRailsView GenreRailsPage LibraryContent ItemListRow ItemRowGrid LoginPage UserPickerPage MessageBox ServersPage SettingsPage SettingRow UserPreferencesForm UserPreferencesSaveBar FavoritesPage FavoritesGroupPage TopFade MediaListRow PlaylistsPage PlaylistPage PlaylistDialogs AddToPlaylistDialog PageToolbar PageBackButton FadeInOnShow PageTitle DownloadsPage RuleDialog SubtitleSearchDialog)
+foreach(page Main PlayerPage OsdButton MiniPlayer PictureInPictureWindow PlaybackInfoOverlay ShellHeader AboutDialog ShortcutsDialog RemoteSessionsDialog SyncPlayDialog MediaInfoDialog CastDialog HomePage LibraryTile LibraryPage ResumeItemsPage MediaCard CardMenu CardRow EpisodeRow ItemDetailsPage SearchPage QueuePage FilterDialog GenreRailsView GenreRailsPage LibraryContent ItemListRow ItemRowGrid LoginPage UserPickerPage MessageBox ServersPage SettingsPage SettingRow UserPreferencesForm UserPreferencesSaveBar FavoritesPage FavoritesGroupPage TopFade MediaListRow PlaylistsPage PlaylistPage PlaylistDialogs AddToPlaylistDialog PageToolbar PageBackButton FadeInOnShow PageTitle DownloadsPage RuleDialog SubtitleSearchDialog)
     set_source_files_properties(src/qml/${page}.qml PROPERTIES QT_RESOURCE_ALIAS ${page}.qml)
 endforeach()
 # The images the pages draw themselves, beside the QML files they belong to
@@ -269,6 +277,7 @@ qt_add_qml_module(kinefin_ui
         src/qml/RemoteSessionsDialog.qml
         src/qml/SyncPlayDialog.qml
         src/qml/MediaInfoDialog.qml
+        src/qml/CastDialog.qml
         src/qml/HomePage.qml
         src/qml/LibraryTile.qml
         src/qml/LibraryPage.qml
@@ -523,6 +532,10 @@ if(BUILD_TESTING)
     add_executable(test_cast_renderer_profile tests/test_cast_renderer_profile.cpp)
     target_link_libraries(test_cast_renderer_profile PRIVATE kinefin_cast Qt6::Test)
     add_test(NAME cast_renderer_profile COMMAND test_cast_renderer_profile)
+
+    add_executable(test_cast_renderer tests/test_cast_renderer.cpp)
+    target_link_libraries(test_cast_renderer PRIVATE kinefin_cast Qt6::Test Qt6::Network)
+    add_test(NAME cast_renderer COMMAND test_cast_renderer)
 
     add_executable(test_screensaver_inhibitor tests/test_screensaver_inhibitor.cpp)
     target_compile_definitions(test_screensaver_inhibitor PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")

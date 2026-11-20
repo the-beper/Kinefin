@@ -100,9 +100,9 @@ void PlaybackReporter::send(PlaybackReport::Kind kind)
     report.itemId = QString::fromStdString(identity.itemId);
     report.mediaSourceId = QString::fromStdString(identity.mediaSourceId);
     report.playSessionId = QString::fromStdString(identity.playSessionId);
-    report.method = m_session.route() == PlaybackSession::Route::Transcoded
-                        ? PlaybackSource::Method::Transcode
-                        : PlaybackSource::Method::Direct;
+    report.method = player.method.value_or(m_session.route() == PlaybackSession::Route::Transcoded
+                                               ? PlaybackSource::Method::Transcode
+                                               : PlaybackSource::Method::Direct);
     report.positionTicks = std::max<qint64>(0, m_lastPosition.value_or(0));
     report.canSeek = player.canSeek;
     report.isPaused = m_session.state() == State::Paused;

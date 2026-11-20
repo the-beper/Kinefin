@@ -525,6 +525,11 @@ class TestCastDescription : public QObject {
         QVERIFY(!isSameOrigin(base, QUrl(QStringLiteral("http://192.168.1.20:49153/a"))));
         QVERIFY(!isSameOrigin(base, QUrl(QStringLiteral("http://192.168.1.21:49152/a"))));
         QVERIFY(!isSameOrigin(base, QUrl(QStringLiteral("https://192.168.1.20:49152/a"))));
+        // Each scheme has its own default port
+        QVERIFY(isSameOrigin(QUrl(QStringLiteral("https://192.168.1.20/a")),
+                             QUrl(QStringLiteral("https://192.168.1.20:443/b"))));
+        QVERIFY(!isSameOrigin(QUrl(QStringLiteral("https://192.168.1.20/a")),
+                              QUrl(QStringLiteral("https://192.168.1.20:80/b"))));
         QVERIFY(!isSameOrigin(base, QUrl(QStringLiteral("http://tv.local:49152/a"))));
         QVERIFY(!isSameOrigin(QUrl(), QUrl()));
         QVERIFY(isSameOrigin(QUrl(QStringLiteral("http://[fe80::1]:80/a")),

@@ -116,6 +116,32 @@ Item {
         id: slot
         objectName: "miniPlayerVideoSlot"
         anchors.fill: parent
+        // A cast has no picture here: the device plays it, and this says where
+        ColumnLayout {
+            objectName: "miniPlayerCastView"
+            anchors.centerIn: parent
+            width: parent.width - mini.margin * 2
+            spacing: Kirigami.Units.smallSpacing
+            visible: !!mini.player?.casting
+            Kirigami.Theme.colorSet: Kirigami.Theme.Complementary
+            Kirigami.Theme.inherit: false
+            Kirigami.Icon {
+                Layout.alignment: Qt.AlignHCenter
+                implicitWidth: Kirigami.Units.iconSizes.medium
+                implicitHeight: Kirigami.Units.iconSizes.medium
+                source: "video-television"
+            }
+            Controls.Label {
+                Layout.fillWidth: true
+                horizontalAlignment: Text.AlignHCenter
+                text: i18nc("@info:status %1 is a device name", "Playing on %1", mini.player?.castTargetName ?? "")
+                textFormat: Text.PlainText
+                wrapMode: Text.Wrap
+                maximumLineCount: 2
+                elide: Text.ElideRight
+                color: Kirigami.Theme.textColor
+            }
+        }
         // On the video, beside the controls: a press on a button never reaches it, and a tap does not take the keyboard from the page. A click expands the player; a touch tap that finds the controls hidden only shows them
         TapHandler {
             objectName: "miniPlayerTap"

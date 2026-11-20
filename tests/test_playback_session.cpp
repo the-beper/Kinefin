@@ -109,16 +109,21 @@ class TestPlaybackSession : public QObject {
         QCOMPARE(seen.size(), 2);
         QCOMPARE(seen.value(1), (QPair<State, State>{State::Opening, State::Idle}));
     }
-    void offlineAndCastNeverReport()
+    void offlineNeverReportsAndCastDoes()
     {
-        for (auto route : {PlaybackSession::Route::Offline, PlaybackSession::Route::Cast}) {
-            PlaybackSession session;
-            QVERIFY(session.open({"item", "source", ""}, route));
-            QVERIFY(session.opened());
-            QVERIFY(!session.shouldReportToJellyfin());
-            QVERIFY(session.stop());
-            QVERIFY(!session.shouldReportToJellyfin());
-        }
+        PlaybackSession offline;
+        QVERIFY(offline.open({"item", "source", ""}, PlaybackSession::Route::Offline));
+        QVERIFY(offline.opened());
+        QVERIFY(!offline.shouldReportToJellyfin());
+        QVERIFY(offline.stop());
+
+        PlaybackSession cast;
+        QVERIFY(cast.open({"item", "source", "session"}, PlaybackSession::Route::Cast));
+        QVERIFY(cast.opened());
+        QVERIFY(cast.shouldReportToJellyfin());
+        QVERIFY(cast.stop());
+        QVERIFY(cast.shouldReportToJellyfin());
+        QVERIFY(cast.stopped());
     }
     void failureRequiresExplicitCleanup()
     {

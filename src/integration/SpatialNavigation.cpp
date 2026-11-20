@@ -67,6 +67,37 @@ QRectF entryEdge(const QRectF &viewport, NavDirection direction)
     return viewport;
 }
 
+// An item view without a current row in view (its delegates still arriving a few per frame, or none chosen): its first row in reading order stands for it, else the square at its start, so a move never starts from the whole width of a long row and a header button at its far end
+QRectF leadingRect(QQuickItem *view, const QRectF &scene)
+{
+    const bool horizontal = view->property("orientation").toInt() == Qt::Horizontal;
+    const bool mirrored = view->property("effectiveLayoutDirection").toInt() == Qt::RightToLeft;
+    // Smaller is nearer the start: along the row for a horizontal list, by line and then along it otherwise
+    const auto startOf = [&](const QRectF &rect) {
+        const double along = mirrored ? -rect.right() : rect.left();
+        return horizontal ? std::pair{along, 0.0} : std::pair{rect.top(), along};
+    };
+    QQuickItem *content = itemProperty(view, "contentItem");
+    QQuickItem *header = itemProperty(view, "headerItem");
+    QQuickItem *footer = itemProperty(view, "footerItem");
+    QQuickItem *highlight = itemProperty(view, "highlightItem");
+    QRectF first;
+    for (QQuickItem *child : content ? content->childItems() : QList<QQuickItem *>{}) {
+        if (child == header || child == footer || child == highlight || !child->isVisible()
+            || child->width() < 1 || child->height() < 1)
+            continue;
+        const QRectF rect = sceneRect(child).intersected(scene);
+        if (!rect.isEmpty() && (first.isNull() || startOf(rect) < startOf(first)))
+            first = rect;
+    }
+    if (!first.isNull())
+        return first;
+    const double side = std::min(scene.width(), scene.height());
+    if (!horizontal)
+        return {scene.left(), scene.top(), scene.width(), side};
+    return {mirrored ? scene.right() - side : scene.left(), scene.top(), side, scene.height()};
+}
+
 QRectF sourceRect(QQuickItem *focus, NavDirection direction)
 {
     const QRectF scene = sceneRect(focus);
@@ -79,6 +110,7 @@ QRectF sourceRect(QQuickItem *focus, NavDirection direction)
             if (!row.isEmpty())
                 return row;
         }
+        return leadingRect(focus, scene);
     }
     return scene;
 }

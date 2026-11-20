@@ -6,6 +6,7 @@
 #include <QTemporaryDir>
 #include <QUrl>
 #include "api/JellyfinClient.h"
+#include "cast/CastController.h"
 #include "models/ItemDetails.h"
 #include "player/BitrateFallback.h"
 #include "player/ClipExporter.h"
@@ -26,6 +27,7 @@
 #include <QTimer>
 #include <QVariantList>
 #include <QVariantMap>
+#include <algorithm>
 #include <optional>
 
 class MpvAbstractItem;
@@ -78,6 +80,16 @@ class PlayerController final : public QObject {
     Q_PROPERTY(bool loading READ loading NOTIFY changed)
     // A file played from the downloads folder: no server session, no reporting, no server-only chrome
     Q_PROPERTY(bool localPlayback READ localPlayback NOTIFY localPlaybackChanged)
+    // The DLNA renderers the Play On picker lists, and the one that plays
+    Q_PROPERTY(Kinefin::CastController *cast READ castController CONSTANT)
+    Q_PROPERTY(bool casting READ casting NOTIFY changed)
+    // The renderer chosen for this playback (its UDN), empty when it plays here
+    Q_PROPERTY(QString castTargetId READ castTargetId NOTIFY changed)
+    Q_PROPERTY(QString castTargetName READ castTargetName NOTIFY changed)
+    Q_PROPERTY(bool castCanPause READ castCanPause NOTIFY changed)
+    Q_PROPERTY(bool castHasVolume READ castHasVolume NOTIFY changed)
+    // A cast that failed left its item here: Continue Here plays it on this computer from where the device stopped
+    Q_PROPERTY(bool canContinueHere READ canContinueHere NOTIFY changed)
     // OpenSubtitles through the server plugin: hidden without the policy, one search at a time
     Q_PROPERTY(bool canManageSubtitles READ canManageSubtitles NOTIFY changed)
     Q_PROPERTY(QVariantList remoteSubtitles READ remoteSubtitles NOTIFY remoteSubtitlesChanged)
@@ -113,6 +125,8 @@ class PlayerController final : public QObject {
     Q_PROPERTY(QString screenshotPath READ screenshotPath NOTIFY changed)
     Q_PROPERTY(QString skipLabel READ skipLabel NOTIFY changed)
     Q_PROPERTY(int sleepRemainingMinutes READ sleepRemainingMinutes NOTIFY changed)
+    Q_PROPERTY(bool sleepAtEndOfItem READ sleepAtEndOfItem NOTIFY changed)
+    Q_PROPERTY(bool sleepAtEndOfQueue READ sleepAtEndOfQueue NOTIFY changed)
     Q_PROPERTY(QString aspectMode READ aspectMode NOTIFY changed)
     // The night-mode filter of the audio chain, remembered per profile: the OSD's check and the Settings switch are one setting
     Q_PROPERTY(bool nightMode READ nightMode NOTIFY changed)
@@ -164,6 +178,13 @@ class PlayerController final : public QObject {
         return m_loading || m_awaitingGroup || m_session.state() == PlaybackSession::State::Opening;
     }
     bool localPlayback() const { return m_localPlayback; }
+    CastController *castController() const { return m_cast; }
+    bool casting() const { return m_casting; }
+    QString castTargetId() const { return castTarget() ? m_castTarget : QString(); }
+    QString castTargetName() const { return m_castName; }
+    bool castCanPause() const { return m_casting && m_cast->canPause(); }
+    bool castHasVolume() const { return m_casting && m_cast->hasVolume(); }
+    bool canContinueHere() const { return m_castFailed && !m_itemId.isEmpty(); }
     bool canManageSubtitles() const;
     QVariantList remoteSubtitles() const { return m_remoteSubtitles; }
     bool remoteSubtitleSearching() const { return m_remoteSubtitleSearching; }
@@ -177,12 +198,18 @@ class PlayerController final : public QObject {
     QString subtitle() const { return m_subtitle; }
     QString errorText() const { return m_errorText; }
     bool canRetry() const { return m_canRetry; }
-    qint64 positionTicks() const { return m_engine.positionTicks(); }
-    qint64 durationTicks() const { return m_engine.durationTicks(); }
-    bool canSeek() const { return m_engine.canSeek(); }
-    double rate() const { return m_engine.playbackRate(); }
-    int volume() const { return m_volume; }
-    bool muted() const { return m_muted; }
+    qint64 positionTicks() const
+    {
+        return m_casting ? m_castPositionMs * 10'000 : m_engine.positionTicks();
+    }
+    qint64 durationTicks() const
+    {
+        return m_casting ? m_castDurationMs * 10'000 : m_engine.durationTicks();
+    }
+    bool canSeek() const { return m_casting ? m_cast->canSeek() : m_engine.canSeek(); }
+    double rate() const { return m_casting ? 1.0 : m_engine.playbackRate(); }
+    int volume() const { return m_casting ? std::max(0, m_cast->volume()) : m_volume; }
+    bool muted() const { return m_casting ? m_cast->muted() : m_muted; }
     double audioDelay() const { return m_audioDelay; }
     double subtitleDelay() const { return m_subtitleDelay; }
     // A group's own while one takes the player's actions
@@ -231,6 +258,8 @@ class PlayerController final : public QObject {
         return !m_itemSeriesId.isEmpty() && m_seriesPreferences.contains(m_itemSeriesId);
     }
     int sleepRemainingMinutes() const;
+    bool sleepAtEndOfItem() const { return m_sleepAtEndOfItem; }
+    bool sleepAtEndOfQueue() const { return m_sleepAtEndOfQueue; }
     Status status() const;
     // The token-free URL of the current item's primary image (512 px), empty until the server named its tag
     QUrl artworkUrl() const;
@@ -243,6 +272,11 @@ class PlayerController final : public QObject {
     void videoRendererChanged(MpvAbstractItem *item);
 
     Q_INVOKABLE bool playItem(const QString &id, qint64 resumeTicks = 0);
+    // Hands the current playback to a renderer at the current position; `local` brings a cast back here at the renderer's position, or a failed cast's item from where it stopped
+    Q_INVOKABLE bool castTo(const QString &udn);
+    // Starts `id` on a renderer, or here for `local` (a cast stops first)
+    Q_INVOKABLE bool playItemOn(const QString &udn, const QString &id, qint64 resumeTicks = 0);
+    Q_INVOKABLE void stopCasting();
     // A subtitle file of a download, checked to be one of its own
     struct LocalSubtitle {
         QString path;
@@ -279,7 +313,11 @@ class PlayerController final : public QObject {
     Q_INVOKABLE bool selectSubtitleStreamIndex(int index);
     Q_INVOKABLE void adjustAudioDelay(double seconds);
     Q_INVOKABLE void adjustSubtitleDelay(double seconds);
-    Q_INVOKABLE void setSleepTimer(int minutes); // 0 disables
+    Q_INVOKABLE void setSleepTimer(int minutes); // 0 disables every mode
+    // Stop when the item playing now ends, before the queue or the next episode starts
+    Q_INVOKABLE void setSleepAtEndOfItem(bool enabled);
+    // Stop when the queue reaches its end (before a repeat wraps); a lone item ends like End of Current Item
+    Q_INVOKABLE void setSleepAtEndOfQueue(bool enabled);
     Q_INVOKABLE void screenshot();
     // The clip marks at the current position; both are cleared by another item and by a stop
     Q_INVOKABLE void markClipStart();
@@ -407,6 +445,8 @@ class PlayerController final : public QObject {
     void seriesChoicesChanged();
     void previewChanged();
     void finished();
+    // The renderer stopped on its own or another controller took it: the player closes, the shell says where it stopped
+    void castStoppedElsewhere(const QString &deviceName);
     // A mark was set: the shell shows where
     void clipMarkChanged(const QString &text);
     // A clip or GIF reached the granted file (`fileName` only, `gif` for the wording), or did not: noSpace names the disk message
@@ -470,6 +510,20 @@ class PlayerController final : public QObject {
     void dropSeriesPlaylist();
     void onEnd(const QString &reason);
     void onState(PlaybackSession::State from, PlaybackSession::State to);
+    bool castTarget() const;
+    void startCast(const PlaybackSource &source);
+    void onCastPlaying();
+    void onCastPaused();
+    void onCastBuffering();
+    void onCastEnded();
+    void onCastStopped();
+    void onCastFailed(DlnaRenderer::Failure failure);
+    // Closes the cast's server session (Stopped at the renderer's position) and, with `stopRenderer`, stops the renderer too; the target stays
+    void closeCast(bool stopRenderer);
+    void clearCastTarget();
+    void castFailed(const QString &message);
+    void onCastPosition();
+    void onCastVolume();
     // `pick` false answers whether a step exists without drawing the random index of shuffle
     int nextIndex(int direction, bool pick = true) const;
     // Whether the end of this item moves on in the playlist: the saved queue always does, the episodes of a series with the user's autoplay preference or an explicit repeat mode
@@ -538,10 +592,25 @@ class PlayerController final : public QObject {
     PlaybackSession m_session;
     PlaybackEngine m_engine;
     PlaybackReporter m_reporter;
+    CastController *m_cast = nullptr;
+    bool m_casting = false;
+    // The renderer refused the direct play of this item: it is asked once more as a transcode
+    bool m_castTranscodeOnly = false;
+    bool m_castFailed = false;
+    // A run of seeks on a transcode reloads it once, at the last target
+    QTimer m_castSeek;
+    qint64 m_castSeekTarget = 0;
+    QString m_castTarget;
+    QString m_castName;
+    qint64 m_castPositionMs = 0;
+    qint64 m_castDurationMs = 0;
+    qint64 m_itemRuntimeTicks = 0;
     PlayerSettings m_mpvSettings;
     PlaybackSession::ObserverId m_observerId = 0;
     QPointer<MpvAbstractItem> m_video;
     QTimer m_sleep;
+    bool m_sleepAtEndOfItem = false;
+    bool m_sleepAtEndOfQueue = false;
     QTimer m_clock;
     // One report after a run of seeks, however many there were
     QTimer m_seekReport;

@@ -1106,6 +1106,10 @@ Kirigami.ApplicationWindow {
             if (owner && owner.itemId === itemId)
                 window.connection.downloads.updateLocalProgress(owner.serverId, owner.userId, itemId, ticks, played);
         }
+        // The device stopped on its own or another controller took it: the player has closed
+        function onCastStoppedElsewhere(deviceName) {
+            window.showPassiveNotification(i18nc("@info %1 is a device name", "Playback was stopped on %1", window.plainNotificationText(deviceName)));
+        }
     }
 
     Connections {
@@ -1129,9 +1133,11 @@ Kirigami.ApplicationWindow {
 
         connection: window.connection
         playAvailable: !!window.player
+        playOnAvailable: !window.groupRouting
         // A playlist opens its own page, everything else its details
         onOpenRequested: targetId => cardMenu.itemType === "Playlist" ? window.openPlaylist(targetId, window.pageStack.currentItem) : window.openItem(targetId, window.pageStack.currentItem)
         onPlayRequested: targetId => window.playItem(targetId)
+        onPlayOnRequested: (targetId, ticks) => window.playOn(targetId, ticks)
         onResumeRequested: (targetId, ticks) => window.playItem(targetId, ticks)
         // A refused send means a write for the item already runs: its answer updates the card
         onFavoriteRequested: (targetId, favorite) => window.connection.setFavorite(targetId, favorite)
@@ -1464,6 +1470,50 @@ Kirigami.ApplicationWindow {
         id: playlistDialogs
         connection: window.connection
         shell: window
+    }
+
+    // Play On… of a video: with an item (the card menu, the details page) every choice plays that item there, This Computer included; without one (the OSD) the playing video moves to the choice
+    CastDialog {
+        id: castDialog
+        player: window.player
+        onTargetChosen: (udn, name) => {
+            if (!window.player)
+                return;
+            let started = false;
+            if (castDialog.itemId.length > 0) {
+                started = window.player.playItemOn(udn, castDialog.itemId, castDialog.startTicks);
+                if (started && !groupRouting && !showPlayerPage()) {
+                    window.player.stop();
+                    started = false;
+                }
+            } else {
+                started = window.player.castTo(udn);
+            }
+            if (!started)
+                window.showPassiveNotification(udn === "local" ? i18n("Could not start playback") : i18nc("@info %1 is a device name", "Could not start playback on %1: open Play On again to search for it", window.plainNotificationText(name)));
+        }
+    }
+
+    // The notification label reads its text as HTML when it holds a tag or an escaped one in its first line, and a device names itself: its name must not be markup there
+    function plainNotificationText(text) {
+        return text.replace(/</g, "\u2039").replace(/&(?=lt;)/gi, "&\u200b");
+    }
+
+    function playOn(itemId, ticks) {
+        if (!signedIn || !window.player || groupRouting)
+            return;
+        castDialog.itemId = itemId;
+        castDialog.startTicks = ticks || 0;
+        castDialog.open();
+    }
+
+    // The OSD's Play On…: the playing video moves to the chosen device, or back to this computer
+    function castCurrent() {
+        if (!window.player || groupRouting)
+            return;
+        castDialog.itemId = "";
+        castDialog.startTicks = 0;
+        castDialog.open();
     }
 
     // Add to Playlist… of a video, from its card menu or its details page

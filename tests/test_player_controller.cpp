@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // The player controller without a renderer: the engine is not attached, so an item stays loading and nothing is negotiated, but the item's own request, the playlist of a series and the end-of-file decision all run against the fake server; the tests of a repeat after a real end start the engine on its own (vo=null, ao=null) to give it the position and the duration of a played file
 #include "FakeJellyfin.h"
+#include "FakeRenderer.h"
 #include "WavClip.h"
 
 #include "models/PlayQueue.h"
@@ -62,6 +63,36 @@ QJsonObject episodeObject(const QString &id, const QString &name, int season, in
 QByteArray toBody(const QJsonObject &object)
 {
     return QJsonDocument(object).toJson(QJsonDocument::Compact);
+}
+
+Kinefin::RendererInfo fakeRendererInfo(const FakeRenderer &fake)
+{
+    Kinefin::RendererInfo info;
+    info.udn = QStringLiteral("uuid:test-renderer");
+    info.name = QStringLiteral("Fake Renderer");
+    info.model = QStringLiteral("Test TV");
+    info.address = QHostAddress::LocalHost;
+    info.location = QUrl(fake.descriptionUrl());
+    info.avTransport.serviceType = QStringLiteral("urn:schemas-upnp-org:service:AVTransport:1");
+    info.avTransport.controlUrl = QUrl(fake.baseUrl() + QStringLiteral("/AVTransport/control"));
+    info.connectionManager.serviceType =
+        QStringLiteral("urn:schemas-upnp-org:service:ConnectionManager:1");
+    info.connectionManager.controlUrl =
+        QUrl(fake.baseUrl() + QStringLiteral("/ConnectionManager/control"));
+    info.renderingControl.serviceType =
+        QStringLiteral("urn:schemas-upnp-org:service:RenderingControl:1");
+    info.renderingControl.controlUrl =
+        QUrl(fake.baseUrl() + QStringLiteral("/RenderingControl/control"));
+    info.actions = {QStringLiteral("SetAVTransportURI"),
+                    QStringLiteral("Play"),
+                    QStringLiteral("Pause"),
+                    QStringLiteral("Stop"),
+                    QStringLiteral("Seek"),
+                    QStringLiteral("GetTransportInfo"),
+                    QStringLiteral("GetPositionInfo")};
+    info.seekModes = {QStringLiteral("REL_TIME")};
+    info.sinkMimeTypes = {QStringLiteral("video/x-matroska"), QStringLiteral("video/mp4")};
+    return info;
 }
 
 // A media segment as the client hands it on, in seconds
@@ -158,6 +189,34 @@ struct Chain {
     PlayerController controller;
     bool ok = false;
 };
+
+// The Stopped reports the server received
+int stoppedReports(const Chain &chain)
+{
+    return int(std::count_if(chain.server.reportLog.cbegin(), chain.server.reportLog.cend(),
+                             [](const FakeJellyfin::ReportLog &entry) {
+                                 return entry.route.endsWith("/Sessions/Playing/Stopped");
+                             }));
+}
+
+// The movie playing on the fake renderer, which the controller knows without a search
+bool castMovie(Chain &chain, FakeRenderer &fake)
+{
+    if (!fake.listen())
+        return false;
+    chain.controller.castController()->addRenderer(fakeRendererInfo(fake));
+    if (!chain.controller.playItemOn(QStringLiteral("uuid:test-renderer"), kMovie, 0))
+        return false;
+    // Played on the renderer: the server heard the Start of the cast
+    return QTest::qWaitFor([&chain, &fake] {
+        return chain.controller.casting() && !chain.controller.loading()
+               && fake.transport == QLatin1StringView("PLAYING")
+               && std::any_of(chain.server.reportLog.cbegin(), chain.server.reportLog.cend(),
+                              [](const FakeJellyfin::ReportLog &entry) {
+                                  return entry.route.endsWith("/Sessions/Playing");
+                              });
+    });
+}
 } // namespace
 
 class TestPlayerController : public QObject {
@@ -1124,6 +1183,221 @@ class TestPlayerController : public QObject {
         chain.server.listingStatus.remove(QStringLiteral("Episodes"));
         QVERIFY(chain.controller.playItem(episodeId(3), 0));
         QTRY_VERIFY(chain.controller.hasNext());
+    }
+
+    void sleepAtEndOfItemStopsBeforeTheNextEpisode()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        chain.serveEpisodeThree();
+        Kinefin::PlaybackEngine *engine = chain.engine();
+        QVERIFY(engine);
+        QSignalSpy finished(&chain.controller, &PlayerController::finished);
+        chain.controller.setNextEpisodeAutoPlay(true);
+        QVERIFY(chain.controller.playItem(episodeId(3), 0));
+        QTRY_VERIFY(chain.controller.hasNext());
+        Q_EMIT chain.client.playbackInfoFailed(episodeId(3), 500, QString());
+        QVERIFY(!chain.controller.loading());
+        chain.controller.setSleepAtEndOfItem(true);
+        QVERIFY(chain.controller.sleepAtEndOfItem());
+        QVERIFY(!chain.controller.sleepAtEndOfQueue());
+        Q_EMIT engine->streamEnded(QStringLiteral("eof"));
+        QCOMPARE(finished.size(), 1);
+        QVERIFY(chain.controller.itemId().isEmpty());
+        QVERIFY(!chain.controller.sleepAtEndOfItem());
+    }
+
+    void sleepAtEndOfQueueStopsAfterTheLastEpisode()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        chain.serveEpisodeThree();
+        Kinefin::PlaybackEngine *engine = chain.engine();
+        QVERIFY(engine);
+        QSignalSpy finished(&chain.controller, &PlayerController::finished);
+        chain.controller.setNextEpisodeAutoPlay(true);
+        QVERIFY(chain.controller.playItem(episodeId(3), 0));
+        QTRY_VERIFY(chain.controller.hasNext());
+        chain.controller.setSleepAtEndOfQueue(true);
+        QVERIFY(!chain.controller.sleepAtEndOfItem());
+        QVERIFY(chain.controller.sleepAtEndOfQueue());
+
+        // The queue moves on to the next two episodes
+        for (const QString &id : {episodeId(3), episodeId(4)}) {
+            if (id == episodeId(4))
+                QTRY_VERIFY(chain.controller.hasNext());
+            Q_EMIT chain.client.playbackInfoFailed(id, 500, QString());
+            QVERIFY(!chain.controller.loading());
+            Q_EMIT engine->streamEnded(QStringLiteral("eof"));
+        }
+        QCOMPARE(finished.size(), 0);
+        QCOMPARE(chain.controller.itemId(), episodeId(5));
+        QVERIFY(chain.controller.sleepAtEndOfQueue());
+
+        // The last episode ends the playback, and the timer with it
+        Q_EMIT chain.client.playbackInfoFailed(episodeId(5), 500, QString());
+        QVERIFY(!chain.controller.loading());
+        Q_EMIT engine->streamEnded(QStringLiteral("eof"));
+        QCOMPARE(finished.size(), 1);
+        QVERIFY(chain.controller.itemId().isEmpty());
+        QVERIFY(!chain.controller.sleepAtEndOfQueue());
+    }
+
+    void aMoviePlaysOnTheRendererAndComesBack()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        FakeRenderer fake;
+        QVERIFY(fake.listen());
+        chain.controller.castController()->addRenderer(fakeRendererInfo(fake));
+        QVERIFY(chain.controller.playItemOn(QStringLiteral("uuid:test-renderer"), kMovie, 0));
+        QTRY_VERIFY(chain.controller.casting());
+        QTRY_VERIFY(chain.controller.active());
+        QTRY_VERIFY(fake.actions.contains(QStringLiteral("Play")));
+        QVERIFY(fake.actions.contains(QStringLiteral("SetAVTransportURI")));
+        QCOMPARE(chain.controller.castTargetName(), QStringLiteral("Fake Renderer"));
+        for (const QByteArray &head : fake.headers)
+            QVERIFY(!head.toLower().contains("authorization"));
+        QTRY_COMPARE(chain.controller.status(), PlayerController::Status::Playing);
+        QTRY_VERIFY(!chain.controller.loading());
+
+        QSignalSpy pausedSignal(chain.controller.castController(),
+                                &Kinefin::CastController::paused);
+        chain.controller.pause();
+        QTRY_COMPARE(fake.transport, QStringLiteral("PAUSED_PLAYBACK"));
+        QTRY_COMPARE(pausedSignal.size(), 1);
+        QVERIFY2(chain.controller.paused(),
+                 qPrintable(QString::number(int(chain.controller.status()))));
+        chain.controller.resume();
+        QTRY_COMPARE(fake.transport, QStringLiteral("PLAYING"));
+
+        chain.controller.seek(30 * kSecond);
+        QTRY_VERIFY(fake.actions.contains(QStringLiteral("Seek")));
+        QTRY_COMPARE(fake.position, 30);
+
+        chain.controller.stopCasting();
+        QVERIFY(!chain.controller.casting());
+        QVERIFY(!chain.controller.active());
+        // The direct play was probed once with a range and no credential before the renderer got it
+        QCOMPARE(chain.server.streamRoutes.size(), 1);
+        QVERIFY(chain.server.streamAuthorizations.constFirst().isEmpty());
+        QTRY_COMPARE(stoppedReports(chain), 1);
+    }
+
+    void theEndOnTheRendererClosesTheSessionAndForgetsTheDevice()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        FakeRenderer fake;
+        QVERIFY(castMovie(chain, fake));
+        QSignalSpy finished(&chain.controller, &PlayerController::finished);
+        fake.position = 95;
+        QTRY_VERIFY(chain.controller.positionTicks() >= 95 * kSecond);
+        fake.transport = QStringLiteral("STOPPED");
+        QTRY_COMPARE(finished.size(), 1);
+        QVERIFY(!chain.controller.casting());
+        QVERIFY(chain.controller.castTargetId().isEmpty());
+        QTRY_COMPARE(stoppedReports(chain), 1);
+        // The next Play is a local one: the device was for that playback only
+        const qsizetype loads = fake.actions.count(QStringLiteral("SetAVTransportURI"));
+        QVERIFY(chain.controller.playItem(kMovie, 0));
+        QTest::qWait(300);
+        QCOMPARE(fake.actions.count(QStringLiteral("SetAVTransportURI")), loads);
+        QVERIFY(!chain.controller.casting());
+    }
+
+    void aDirectPlayTheRendererRefusesIsAskedAgainAsATranscode()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        FakeRenderer fake;
+        fake.faultsOnce = {QStringLiteral("SetAVTransportURI")};
+        fake.faultCode = 714;
+        QVERIFY(castMovie(chain, fake));
+        QCOMPARE(chain.server.playbackInfoRequests, 2);
+        const QJsonObject profile = QJsonDocument::fromJson(chain.server.lastPlaybackInfoBody)
+                                        .object()
+                                        .value(QStringLiteral("DeviceProfile"))
+                                        .toObject();
+        QVERIFY(profile.value(QStringLiteral("DirectPlayProfiles")).toArray().isEmpty());
+        QCOMPARE(fake.actions.count(QStringLiteral("SetAVTransportURI")), 2);
+        // The refused attempt never played: one Start, no Stopped for it
+        QCOMPARE(stoppedReports(chain), 0);
+    }
+
+    void thisComputerTakesTheCastBackAtItsPosition()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        FakeRenderer fake;
+        QVERIFY(castMovie(chain, fake));
+        fake.position = 42;
+        QTRY_VERIFY(chain.controller.positionTicks() >= 42 * kSecond);
+        QVERIFY(chain.controller.castTo(QStringLiteral("local")));
+        QVERIFY(!chain.controller.casting());
+        QVERIFY(chain.controller.castTargetId().isEmpty());
+        QCOMPARE(chain.controller.itemId(), kMovie);
+        // The renderer stops, the cast's session ends, and the item waits for the local player
+        QTRY_COMPARE(fake.transport, QStringLiteral("STOPPED"));
+        QTRY_COMPARE(stoppedReports(chain), 1);
+        QVERIFY(chain.controller.loading());
+    }
+
+    void aDeviceThatStopsRespondingLeavesTheItemToContinueHere()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        FakeRenderer fake;
+        QVERIFY(castMovie(chain, fake));
+        fake.failPolls = true;
+        QTRY_VERIFY(chain.controller.canContinueHere());
+        QVERIFY(!chain.controller.errorText().isEmpty());
+        QVERIFY(!chain.controller.casting());
+        QCOMPARE(chain.controller.itemId(), kMovie);
+        QTRY_COMPARE(stoppedReports(chain), 1);
+        QVERIFY(chain.server.reportLog.constLast().body.contains("\"Failed\":true"));
+        QVERIFY(chain.controller.castTo(QStringLiteral("local")));
+        QVERIFY(!chain.controller.canContinueHere());
+        QVERIFY(chain.controller.errorText().isEmpty());
+        QVERIFY(chain.controller.loading());
+    }
+
+    void aTrackTakenElsewhereClosesThePlayerWithANotice()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        FakeRenderer fake;
+        QVERIFY(castMovie(chain, fake));
+        QSignalSpy elsewhere(&chain.controller, &PlayerController::castStoppedElsewhere);
+        QSignalSpy finished(&chain.controller, &PlayerController::finished);
+        fake.reportedTrackUri = QStringLiteral("http://192.0.2.7/other.mp4");
+        QTRY_COMPARE(elsewhere.size(), 1);
+        QCOMPARE(elsewhere.constFirst().constFirst().toString(), QStringLiteral("Fake Renderer"));
+        QCOMPARE(finished.size(), 1);
+        QVERIFY(!chain.controller.casting());
+        QTRY_COMPARE(stoppedReports(chain), 1);
+    }
+
+    void aMinutesTimerAndTheEndModesReplaceEachOther()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        chain.controller.setSleepTimer(15);
+        QVERIFY(chain.controller.sleepRemainingMinutes() >= 15);
+        QVERIFY(chain.controller.sleepRemainingMinutes() <= 16);
+        chain.controller.setSleepAtEndOfItem(true);
+        QVERIFY(chain.controller.sleepAtEndOfItem());
+        QCOMPARE(chain.controller.sleepRemainingMinutes(), 0);
+        chain.controller.setSleepTimer(30);
+        QVERIFY(chain.controller.sleepRemainingMinutes() >= 30);
+        QVERIFY(chain.controller.sleepRemainingMinutes() <= 31);
+        QVERIFY(!chain.controller.sleepAtEndOfItem());
+        chain.controller.setSleepAtEndOfQueue(true);
+        QVERIFY(chain.controller.sleepAtEndOfQueue());
+        QCOMPARE(chain.controller.sleepRemainingMinutes(), 0);
+        chain.controller.setSleepTimer(0);
+        QVERIFY(!chain.controller.sleepAtEndOfQueue());
+        QCOMPARE(chain.controller.sleepRemainingMinutes(), 0);
     }
 
     void repeatOneRepeatsAnEpisodeWithoutAutoplay()

@@ -33,15 +33,17 @@ int main()
     assert(!session.shouldReportToJellyfin());
     assert(session.identity().itemId.empty());
 
-    for (const auto route : {PlaybackSession::Route::Offline, PlaybackSession::Route::Cast}) {
-        assert(session.open({"item", "source", ""}, route));
-        assert(session.opened());
-        assert(!session.shouldReportToJellyfin());
-        assert(session.pause());
-        assert(!session.shouldReportToJellyfin());
-        assert(session.stop());
-        assert(session.stopped());
-    }
+    assert(session.open({"item", "source", ""}, PlaybackSession::Route::Offline));
+    assert(session.opened());
+    assert(!session.shouldReportToJellyfin());
+    assert(session.stop());
+    assert(session.stopped());
+    assert(session.open({"item", "source", "session"}, PlaybackSession::Route::Cast));
+    assert(session.opened());
+    assert(session.shouldReportToJellyfin());
+    assert(session.stop());
+    assert(session.shouldReportToJellyfin());
+    assert(session.stopped());
     assert(session.open({"item", "source", "session"}, PlaybackSession::Route::Transcoded));
     assert(session.failed());
     // Failure during opening has no active server session, but it is stoppable

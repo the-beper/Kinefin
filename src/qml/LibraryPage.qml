@@ -79,9 +79,9 @@ Kirigami.Page {
             subtabs.reload();
     }
 
-    // Show All of a genre rail: the main list, from that genre alone (one edit that replaces every filter section)
+    // Show All of a genre rail: the main list, from that genre alone (one edit that replaces every filter section and drops a pending saved tag or rating)
     function showGenre(genreId) {
-        model.filters = { genreIds: [genreId] };
+        model.replaceFilters({ genreIds: [genreId] });
         if (hasSubtabs)
             subtabs.select("main");
     }

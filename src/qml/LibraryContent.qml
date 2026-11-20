@@ -20,6 +20,9 @@ Item {
 
     // Set once the content is built: a change of `listModel` before that is only its first binding (an onChanged handler fires for it), which must not scroll away from a position the page restores
     property bool ready: false
+    // A card is current from the start so Return and the arrows have a place to go, but its highlight waits for the first move of the user: entering a section selects nothing
+    property bool userMoved: false
+    property bool settingCurrent: false
     Component.onCompleted: {
         ready = true;
         viewKept = viewKept || firstPageIn;
@@ -58,7 +61,9 @@ Item {
             return;
         const position = pendingPosition;
         pendingPosition = null;
+        settingCurrent = true;
         view.currentIndex = Math.min(position.currentIndex, view.count - 1);
+        settingCurrent = false;
         // The page may reset the scroll while it is created: the position goes in after that
         Qt.callLater(() => {
             if (content.view)
@@ -66,9 +71,24 @@ Item {
         });
     }
 
+    // The focus the page gives the view keeps the highlight hidden, the user's own Tab or Backtab into it shows the current item
+    property bool pageFocusing: false
+    function giveViewFocus() {
+        pageFocusing = !view.activeFocus;
+        view.forceActiveFocus(Qt.TabFocusReason);
+    }
+    function viewFocusChanged() {
+        if (!view?.activeFocus)
+            return;
+        if (pageFocusing)
+            pageFocusing = false;
+        else
+            userMoved = true;
+    }
+
     function focusView() {
         if (view) {
-            view.forceActiveFocus(Qt.TabFocusReason);
+            giveViewFocus();
             return;
         }
         focusPending = true;
@@ -96,7 +116,7 @@ Item {
             return;
         applyPendingPosition();
         if (focusPending && !focusLeftPage())
-            view.forceActiveFocus(Qt.TabFocusReason);
+            giveViewFocus();
         focusPending = false;
         focusBefore = null;
     }
@@ -113,10 +133,12 @@ Item {
         topFling.stop();
         if (!view)
             return;
+        settingCurrent = true;
         view.currentIndex = 0;
+        settingCurrent = false;
+        userMoved = false;
         view.positionViewAtBeginning();
-        // The first row at the top edge leaves the top margin hidden: the start is above it
-        view.contentY = view.originY - view.topMargin;
+        view.contentY = view.originY;
     }
 
     Connections {
@@ -143,6 +165,7 @@ Item {
         // The user takes the view over
         function onMovementStarted() {
             topFling.stop();
+            content.userMoved = true;
         }
     }
 
@@ -151,7 +174,7 @@ Item {
         if (!view)
             return;
         view.cancelFlick();
-        const top = view.originY - view.topMargin;
+        const top = view.originY;
         if (view.contentY - top > view.height * 2)
             view.contentY = top + view.height * 2;
         topFling.from = view.contentY;
@@ -166,8 +189,12 @@ Item {
         duration: Kirigami.Units.veryLongDuration
         easing.type: Easing.OutCubic
         onFinished: {
-            if (content.view)
+            if (content.view) {
+                content.settingCurrent = true;
                 content.view.currentIndex = 0;
+                content.settingCurrent = false;
+                content.userMoved = true;
+            }
         }
     }
 
@@ -231,7 +258,6 @@ Item {
 
             clip: true
             leftMargin: gutter
-            topMargin: gutter
             boundsBehavior: Flickable.StopAtBounds
             model: content.listModel
             cellWidth: Math.floor(usableWidth / columns)
@@ -248,11 +274,12 @@ Item {
                 objectName: "libraryGridScrollBar"
             }
 
-            Keys.onReturnPressed: content.openCurrent()
-            Keys.onEnterPressed: content.openCurrent()
-            Keys.onSpacePressed: content.openCurrent()
-            Keys.onMenuPressed: content.openCurrentMenu()
-            Keys.onPressed: event => content.handleKey(event)
+            onActiveFocusChanged: content.viewFocusChanged()
+            Keys.onReturnPressed: { content.userMoved = true; content.openCurrent(); }
+            Keys.onEnterPressed: { content.userMoved = true; content.openCurrent(); }
+            Keys.onSpacePressed: { content.userMoved = true; content.openCurrent(); }
+            Keys.onMenuPressed: { content.userMoved = true; content.openCurrentMenu(); }
+            Keys.onPressed: event => { content.userMoved = true; content.handleKey(event); }
 
             delegate: MediaCard {
                 required property string seriesName
@@ -263,7 +290,8 @@ Item {
                 height: grid.cellHeight - grid.gutter
                 // The grid is the one tab stop, the arrow keys move inside it
                 focusPolicy: Qt.NoFocus
-                highlighted: GridView.isCurrentItem && grid.activeFocus
+                focusVisible: content.userMoved
+                highlighted: GridView.isCurrentItem && grid.activeFocus && content.userMoved
                 imageAspect: content.aspect
                 fitImage: content.listModel.imageType === "Disc" || content.listModel.imageType === "Logo"
                 showTitle: content.listModel.showTitle
@@ -305,17 +333,19 @@ Item {
 
             Controls.ScrollBar.vertical: Controls.ScrollBar {}
 
-            Keys.onReturnPressed: content.openCurrent()
-            Keys.onEnterPressed: content.openCurrent()
-            Keys.onSpacePressed: content.openCurrent()
-            Keys.onMenuPressed: content.openCurrentMenu()
-            Keys.onPressed: event => content.handleKey(event)
+            onActiveFocusChanged: content.viewFocusChanged()
+            Keys.onReturnPressed: { content.userMoved = true; content.openCurrent(); }
+            Keys.onEnterPressed: { content.userMoved = true; content.openCurrent(); }
+            Keys.onSpacePressed: { content.userMoved = true; content.openCurrent(); }
+            Keys.onMenuPressed: { content.userMoved = true; content.openCurrentMenu(); }
+            Keys.onPressed: event => { content.userMoved = true; content.handleKey(event); }
 
             delegate: ItemListRow {
                 width: ListView.view ? ListView.view.width : implicitWidth
                 // The list is the one tab stop, the arrow keys move inside it
                 focusPolicy: Qt.NoFocus
-                highlighted: ListView.isCurrentItem && list.activeFocus
+                focusVisible: content.userMoved
+                highlighted: ListView.isCurrentItem && list.activeFocus && content.userMoved
                 onClicked: content.ownerPage.Window.window.openItem(itemId, content.ownerPage)
             }
         }

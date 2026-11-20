@@ -124,7 +124,9 @@ QStringList boundedStrings(const XmlNode *parent, QStringView childName, QString
 
 bool isSameOrigin(const QUrl &a, const QUrl &b)
 {
-    if (a.scheme() != b.scheme() || a.port(80) != b.port(80))
+    // The scheme's own default port: https://h and https://h:80 are not the same origin
+    const int defaultPort = a.scheme() == QLatin1String("https") ? 443 : 80;
+    if (a.scheme() != b.scheme() || a.port(defaultPort) != b.port(defaultPort))
         return false;
     QHostAddress hostA;
     QHostAddress hostB;

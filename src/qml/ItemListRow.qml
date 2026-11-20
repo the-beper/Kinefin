@@ -11,6 +11,8 @@ Controls.ItemDelegate {
     objectName: "listRow_" + itemId
     // A placeholder row has nothing to open and does not answer the pointer or the keys
     enabled: loaded
+    // The focus ring waits for a user move in a view that starts with a current row (the library lists)
+    property bool focusVisible: true
 
     required property int index
     required property string itemId
@@ -97,6 +99,14 @@ Controls.ItemDelegate {
     Accessible.name: countsLine.length > 0 ? name + ", " + countsLine : (episodeSpoken.length > 0 ? name + ", " + episodeSpoken : (year > 0 ? name + " (" + year + ")" : name))
     Accessible.description: description
 
+    background: Rectangle {
+        readonly property bool ring: row.highlighted || (row.visualFocus && row.focusVisible)
+        color: row.hovered ? Qt.alpha(Kirigami.Theme.highlightColor, 0.15) : "transparent"
+        radius: Kirigami.Units.cornerRadius
+        border.width: ring ? 2 : 0
+        border.color: Kirigami.Theme.highlightColor
+    }
+
     contentItem: RowLayout {
         spacing: Kirigami.Units.largeSpacing
 
@@ -104,6 +114,7 @@ Controls.ItemDelegate {
             Layout.preferredWidth: Kirigami.Units.gridUnit * 3
             Layout.preferredHeight: Kirigami.Units.gridUnit * 4.5
             color: Kirigami.Theme.alternateBackgroundColor
+            radius: Kirigami.Units.cornerRadius
             clip: true
 
             Kirigami.Icon {

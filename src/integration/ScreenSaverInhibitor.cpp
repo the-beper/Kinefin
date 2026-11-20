@@ -41,7 +41,9 @@ ScreenSaverInhibitor::~ScreenSaverInhibitor()
 
 void ScreenSaverInhibitor::update()
 {
-    const bool wanted = m_player.status() == PlayerController::Status::Playing;
+    // A cast plays on another screen: this one may turn off
+    const bool wanted =
+        m_player.status() == PlayerController::Status::Playing && !m_player.casting();
     if (!wanted) {
         m_failed = false;
         release();

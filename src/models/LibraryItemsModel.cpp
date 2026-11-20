@@ -737,6 +737,19 @@ void LibraryItemsModel::setFilterValues(const QVariantMap &values)
     setFilterState(filtersFromVariant(values));
 }
 
+void LibraryItemsModel::replaceFilters(const QVariantMap &values)
+{
+    const bool droppedPending = assignPending({}, {});
+    if (!assignFilters(filtersFromVariant(values))) {
+        if (droppedPending && isOpen())
+            restartList();
+        return;
+    }
+    if (isOpen())
+        restartList();
+    Q_EMIT viewStateEdited();
+}
+
 bool LibraryItemsModel::filtersFit(const QVariantMap &filters) const
 {
     return queryCharsOf(cleanedFilters(filtersFromVariant(filters))) <= MaxItemsQueryChars;

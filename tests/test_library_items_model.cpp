@@ -1155,6 +1155,31 @@ class TestLibraryItemsModel : public QObject {
         QCOMPARE(resolving.size(), 2);
     }
 
+    void replacingFiltersDropsPendingSelections()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        LibraryItemsModel::ViewState initial;
+        initial.pendingTagHashes = {digestOf("restored-master")};
+        initial.pendingRatingHashes = {digestOf("PG-13")};
+        QVERIFY(f.model.open(kMoviesLibrary, QStringLiteral("movies"), QStringLiteral("Movies"),
+                             initial));
+        QVERIFY(f.model.resolvingFacets());
+        QSignalSpy edits(&f.model, &LibraryItemsModel::viewStateEdited);
+        f.model.replaceFilters({{QStringLiteral("genreIds"), QStringList{kSciFi}}});
+        QVERIFY(!f.model.resolvingFacets());
+        QVERIFY(f.model.pendingTagHashes().isEmpty());
+        QVERIFY(f.model.pendingRatingHashes().isEmpty());
+        QCOMPARE(f.model.filterState().genreIds, QStringList{kSciFi});
+        QCOMPARE(edits.size(), 1);
+        QTRY_COMPARE(f.model.status(), LibraryItemsModel::Ready);
+        QCOMPARE(f.server.itemsRoutes.size(), 1);
+        const QByteArray route = f.server.itemsRoutes.constFirst();
+        QCOMPARE(wireValue(route, "genreIds"), kSciFi);
+        QVERIFY(!hasWire(route, "tags"));
+        QVERIFY(!hasWire(route, "officialRatings"));
+    }
+
     void aRenamedTagIsDroppedWithoutAnEdit()
     {
         Fixture f;

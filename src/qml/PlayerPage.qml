@@ -79,7 +79,7 @@ Kirigami.Page {
     // The lock keeps the bars up until it is opened again
     property bool osdLocked: false
     // What else keeps the bars up whatever the timer says: the lock, a pause, the pointer on a bar, a drag of the timeline
-    readonly property bool barsHeld: osdLocked || page.player.paused || pointerOnBars || timeline.pressed
+    readonly property bool barsHeld: osdLocked || page.player.paused || page.player.casting || pointerOnBars || timeline.pressed
     // The pointer in the window over a bar, its controls or its shade, read from the one hover of the page: it follows every move and ends when the pointer leaves the window
     readonly property bool pointerOnBars: pointer.hovered && osd.visible && (pointer.point.position.y < topBar.height || pointer.point.position.y > page.height - bottomBar.height)
     // Once nothing holds them, the bars get their full time again before they go
@@ -282,6 +282,36 @@ Kirigami.Page {
         objectName: "playerVideoSlot"
         anchors.fill: parent
     }
+    // A cast has no picture here: the device plays it, and this says where
+    ColumnLayout {
+        objectName: "playerCastView"
+        anchors.centerIn: parent
+        width: Math.min(parent.width - Kirigami.Units.gridUnit * 2, Kirigami.Units.gridUnit * 24)
+        spacing: Kirigami.Units.largeSpacing
+        visible: page.player.casting
+        Kirigami.Theme.colorSet: Kirigami.Theme.Complementary
+        Kirigami.Theme.inherit: false
+        Kirigami.Icon {
+            Layout.alignment: Qt.AlignHCenter
+            implicitWidth: Kirigami.Units.iconSizes.huge
+            implicitHeight: Kirigami.Units.iconSizes.huge
+            source: "video-television"
+        }
+        Controls.Label {
+            Layout.fillWidth: true
+            horizontalAlignment: Text.AlignHCenter
+            text: i18nc("@info:status %1 is a device name", "Playing on %1", page.player.castTargetName)
+            textFormat: Text.PlainText
+            wrapMode: Text.Wrap
+            color: Kirigami.Theme.textColor
+        }
+        Controls.Button {
+            Layout.alignment: Qt.AlignHCenter
+            text: i18nc("@action:button", "Stop Casting")
+            icon.name: "media-playback-stop"
+            onClicked: page.player.stopCasting()
+        }
+    }
     // Only a move of the pointer wakes the bars: the scene repeats the last hover position on every frame that changes something under it. The pointer hides with the bars
     HoverHandler {
         id: pointer
@@ -428,11 +458,20 @@ Kirigami.Page {
             Controls.Button {
                 objectName: "playerRetryButton"
                 visible: !!page.player.errorText && !!page.player.canRetry
-                // The primary action of the overlay when there is one
-                highlighted: true
+                // The primary action of the overlay when there is one, unless the item can go on here
+                highlighted: !page.player.canContinueHere
                 text: i18nc("@action:button", "Try Again")
                 icon.name: "view-refresh"
                 onClicked: page.player.retryPlayback()
+            }
+            // A device failed: the item goes on here from where it stopped
+            Controls.Button {
+                objectName: "playerContinueHereButton"
+                visible: page.player.canContinueHere
+                highlighted: true
+                text: i18nc("@action:button", "Continue Here")
+                icon.name: "computer"
+                onClicked: page.player.castTo("local")
             }
             Controls.Button {
                 objectName: "playerCloseAfterErrorButton"
@@ -976,6 +1015,8 @@ Kirigami.Page {
                     OsdButton {
                         id: muteButton
                         objectName: "playerMuteButton"
+                        // A device whose volume cannot be set has no volume to show
+                        visible: !page.player.casting || page.player.castHasVolume
                         icon.name: page.player.muted || page.player.volume === 0 ? "audio-volume-muted" : page.player.volume < 34 ? "audio-volume-low" : page.player.volume < 67 ? "audio-volume-medium" : "audio-volume-high"
                         text: page.player.muted ? i18n("Unmute") : i18n("Mute")
                         Accessible.description: i18nc("@info volume level", "Volume %1%", page.player.volume)
@@ -1005,7 +1046,7 @@ Kirigami.Page {
                         id: audioButton
                         objectName: "playerAudioButton"
                         display: page.narrow ? Controls.AbstractButton.IconOnly : Controls.AbstractButton.TextBesideIcon
-                        enabled: page.player.audioTracks.length > 0
+                        enabled: page.player.audioTracks.length > 0 && !page.player.casting
                         // The menu role draws the style's menu arrow beside the label
                         Accessible.role: Accessible.ButtonMenu
                         icon.name: "audio-headphones"
@@ -1019,13 +1060,30 @@ Kirigami.Page {
                         Accessible.role: Accessible.ButtonMenu
                         icon.name: "media-view-subtitles-symbolic"
                         text: i18nc("@action:button subtitle tracks", "Subtitles")
+                        enabled: !page.player.casting
                         onClicked: page.openMenu(subtitlesMenu, subtitlesButton)
+                    }
+                    // A video that plays here moves to a device; a cast already has its own way back in the same dialog
+                    OsdButton {
+                        id: playOnButton
+                        objectName: "osdPlayOnButton"
+                        readonly property bool blockedByGroup: page.groupFollowing
+                        display: page.narrow ? Controls.AbstractButton.IconOnly : Controls.AbstractButton.TextBesideIcon
+                        visible: !page.player.localPlayback
+                        enabled: !blockedByGroup
+                        icon.name: "video-television"
+                        text: i18nc("@action:button", "Play On…")
+                        Accessible.description: blockedByGroup ? Controls.ToolTip.text : ""
+                        Controls.ToolTip.text: blockedByGroup ? i18nc("@info:tooltip", "Not available while following a SyncPlay group") : text
+                        Controls.ToolTip.visible: (hovered || visualFocus) && (display === Controls.AbstractButton.IconOnly || blockedByGroup)
+                        onClicked: page.Window.window.castCurrent()
                     }
                     // The mini player has no button of its own beside this one, which looked too alike: it is the first entry of More Actions, and Back leads to it as well
                     OsdButton {
                         objectName: "playerPictureInPictureButton"
                         icon.name: "window-duplicate"
                         text: i18nc("@action:button", "Picture in Picture")
+                        enabled: !page.player.casting
                         onClicked: page.pictureInPicture()
                     }
                     OsdButton {
@@ -1134,116 +1192,109 @@ Kirigami.Page {
             Controls.MenuSeparator {}
         ]
     }
-    // The right click on the video: the controls of the bars and every entry of More Actions, built from the same components as the menus above so they never drift apart
-    MoreMenu {
+    // The right click on the video: the controls of the bars, then the longer More Actions list as one submenu so the menu stays short
+    Controls.Menu {
         id: contextMenu
         objectName: "playerContextMenu"
-        namePrefix: "playerContext"
         onAboutToHide: page.popupGone()
         onClosed: page.popupClosed()
-        leading: [
-            // The buttons the page shows over the video are reachable by Tab only: the entries come while their button shows, so the Menu key and a pad's West button reach them
-            Controls.MenuItem {
-                objectName: "playerContextSkipItem"
-                visible: skipButton.shown
-                height: visible ? implicitHeight : 0
-                icon.name: "media-skip-forward"
-                text: skipButton.shownLabel
-                onTriggered: { page.player.skipSegment(); page.wakeChrome(); }
-            },
-            Controls.MenuItem {
-                objectName: "playerContextRetryItem"
-                visible: !!page.player.errorText && !!page.player.canRetry
-                height: visible ? implicitHeight : 0
-                icon.name: "view-refresh"
-                text: i18nc("@action:inmenu", "Try Again")
-                onTriggered: page.player.retryPlayback()
-            },
-            Controls.MenuItem {
-                objectName: "playerContextCloseItem"
-                visible: !!page.player.errorText
-                height: visible ? implicitHeight : 0
-                icon.name: "window-close"
-                text: i18nc("@action:inmenu", "Close Player")
-                onTriggered: page.closePlayer()
-            },
-            Controls.MenuItem {
-                objectName: "playerContextCancelClipItem"
-                visible: page.player.clipSaving
-                height: visible ? implicitHeight : 0
-                icon.name: "dialog-cancel"
-                text: page.player.clipSavingGif ? i18nc("@action:inmenu", "Cancel Saving the GIF") : i18nc("@action:inmenu", "Cancel Saving the Clip")
-                onTriggered: page.player.cancelClip()
-            },
-            Controls.MenuItem {
-                objectName: "playerContextSyncPlayItem"
-                visible: page.grouped
-                height: visible ? implicitHeight : 0
-                icon.name: "system-users"
-                text: i18nc("@action:inmenu", "Show SyncPlay Group")
-                onTriggered: page.Window.window?.openSyncPlay()
-            },
-            Controls.MenuSeparator {
-                visible: skipButton.shown || !!page.player.errorText || page.player.clipSaving || page.grouped
-                height: visible ? implicitHeight : 0
-            },
-            Controls.MenuItem {
-                objectName: "playerContextPauseItem"
-                text: page.pauseText
-                icon.name: page.pauseIcon
-                enabled: page.canTogglePause
-                onTriggered: page.togglePlayback()
-            },
-            Controls.MenuItem {
-                objectName: "playerContextPreviousItem"
-                // A menu keeps its entries in place: an entry with nothing to do is disabled, not hidden
-                enabled: page.player.hasPrevious
-                icon.name: "media-skip-backward"
-                text: i18n("Previous")
-                onTriggered: page.skipPrevious()
-            },
-            Controls.MenuItem {
-                objectName: "playerContextNextItem"
-                enabled: page.player.hasNext
-                icon.name: "media-skip-forward"
-                text: i18n("Next")
-                onTriggered: page.skipNext()
-            },
-            Controls.MenuSeparator {},
-            AudioMenu {
-                objectName: "playerContextAudioMenu"
-                namePrefix: "playerContext"
-                enabled: page.player.audioTracks.length > 0
-                title: i18nc("@action:button audio tracks", "Audio")
-                icon.name: "audio-headphones"
-            },
-            SubtitlesMenu {
-                objectName: "playerContextSubtitlesMenu"
-                namePrefix: "playerContext"
-                title: i18nc("@action:button subtitle tracks", "Subtitles")
-                icon.name: "media-view-subtitles-symbolic"
-            },
-            Controls.MenuSeparator {},
-            Controls.MenuItem {
-                objectName: "playerContextFullScreenItem"
-                icon.name: page.fullScreen ? "view-restore" : "view-fullscreen"
-                text: page.fullScreenText
-                onTriggered: page.toggleFullScreen()
-            },
-            Controls.MenuItem {
-                objectName: "playerContextMiniItem"
-                icon.name: "window-minimize-pip"
-                text: i18nc("@action:button", "Show Mini Player")
-                onTriggered: page.leavePlayer()
-            },
-            Controls.MenuItem {
-                objectName: "playerContextPictureInPictureItem"
-                icon.name: "window-duplicate"
-                text: i18nc("@action:button", "Picture in Picture")
-                onTriggered: page.pictureInPicture()
-            },
-            Controls.MenuSeparator {}
-        ]
+
+        // The buttons the page shows over the video are reachable by Tab only: the entries come while their button shows, so the Menu key and a pad's West button reach them
+        Controls.MenuItem {
+            objectName: "playerContextSkipItem"
+            visible: skipButton.shown
+            height: visible ? implicitHeight : 0
+            icon.name: "media-skip-forward"
+            text: skipButton.shownLabel
+            onTriggered: { page.player.skipSegment(); page.wakeChrome(); }
+        }
+        Controls.MenuItem {
+            objectName: "playerContextRetryItem"
+            visible: !!page.player.errorText && !!page.player.canRetry
+            height: visible ? implicitHeight : 0
+            icon.name: "view-refresh"
+            text: i18nc("@action:inmenu", "Try Again")
+            onTriggered: page.player.retryPlayback()
+        }
+        Controls.MenuItem {
+            objectName: "playerContextCloseItem"
+            visible: !!page.player.errorText
+            height: visible ? implicitHeight : 0
+            icon.name: "window-close"
+            text: i18nc("@action:inmenu", "Close Player")
+            onTriggered: page.closePlayer()
+        }
+        Controls.MenuItem {
+            objectName: "playerContextCancelClipItem"
+            visible: page.player.clipSaving
+            height: visible ? implicitHeight : 0
+            icon.name: "dialog-cancel"
+            text: page.player.clipSavingGif ? i18nc("@action:inmenu", "Cancel Saving the GIF") : i18nc("@action:inmenu", "Cancel Saving the Clip")
+            onTriggered: page.player.cancelClip()
+        }
+        Controls.MenuItem {
+            objectName: "playerContextSyncPlayItem"
+            visible: page.grouped
+            height: visible ? implicitHeight : 0
+            icon.name: "system-users"
+            text: i18nc("@action:inmenu", "Show SyncPlay Group")
+            onTriggered: page.Window.window?.openSyncPlay()
+        }
+        Controls.MenuSeparator {
+            visible: skipButton.shown || !!page.player.errorText || page.player.clipSaving || page.grouped
+            height: visible ? implicitHeight : 0
+        }
+        Controls.MenuItem {
+            objectName: "playerContextPauseItem"
+            text: page.pauseText
+            icon.name: page.pauseIcon
+            enabled: page.canTogglePause
+            onTriggered: page.togglePlayback()
+        }
+        Controls.MenuItem {
+            objectName: "playerContextPreviousItem"
+            // A menu keeps its entries in place: an entry with nothing to do is disabled, not hidden
+            enabled: page.player.hasPrevious
+            icon.name: "media-skip-backward"
+            text: i18n("Previous")
+            onTriggered: page.skipPrevious()
+        }
+        Controls.MenuItem {
+            objectName: "playerContextNextItem"
+            enabled: page.player.hasNext
+            icon.name: "media-skip-forward"
+            text: i18n("Next")
+            onTriggered: page.skipNext()
+        }
+        Controls.MenuSeparator {}
+        AudioMenu {
+            objectName: "playerContextAudioMenu"
+            namePrefix: "playerContext"
+            enabled: page.player.audioTracks.length > 0 && !page.player.casting
+            title: i18nc("@action:button audio tracks", "Audio")
+            icon.name: "audio-headphones"
+        }
+        SubtitlesMenu {
+            objectName: "playerContextSubtitlesMenu"
+            namePrefix: "playerContext"
+            enabled: !page.player.casting
+            title: i18nc("@action:button subtitle tracks", "Subtitles")
+            icon.name: "media-view-subtitles-symbolic"
+        }
+        Controls.MenuSeparator {}
+        Controls.MenuItem {
+            objectName: "playerContextFullScreenItem"
+            icon.name: page.fullScreen ? "view-restore" : "view-fullscreen"
+            text: page.fullScreenText
+            onTriggered: page.toggleFullScreen()
+        }
+        MoreMenu {
+            id: contextMoreMenu
+            objectName: "playerContextMoreMenu"
+            namePrefix: "playerContextMore"
+            title: i18n("More Actions")
+            icon.name: "overflow-menu"
+        }
         Controls.MenuSeparator {}
         Controls.MenuItem {
             objectName: "playerContextLockItem"
@@ -1510,6 +1561,7 @@ Kirigami.Page {
             text: i18n("Search Online Subtitles…")
             icon.name: "search"
             visible: page.player.canManageSubtitles && !page.player.localPlayback
+            enabled: !page.player.casting
             onTriggered: subtitleSearchDialog.open()
         }
         Controls.MenuSeparator { visible: page.player.externalSubtitles.length > 0 }
@@ -1587,8 +1639,8 @@ Kirigami.Page {
         Controls.Menu {
             id: speedMenu
             objectName: moreRoot.namePrefix + "SpeedMenu"
-            // A group plays at its own pace
-            enabled: !page.groupFollowing
+            // A group plays at its own pace, and a cast has no local rate
+            enabled: !page.groupFollowing && !page.player.casting
             title: i18n("Playback Speed")
             icon.name: "speedometer"
             Instantiator {
@@ -1610,6 +1662,7 @@ Kirigami.Page {
             objectName: moreRoot.namePrefix + "AspectMenu"
             title: i18nc("@title:menu", "Aspect Ratio")
             icon.name: "zoom-fit-best"
+            enabled: !page.player.casting
             AspectItem { namePrefix: moreRoot.namePrefix; mode: "normal"; text: i18nc("@item:inmenu aspect ratio", "Auto") }
             AspectItem { namePrefix: moreRoot.namePrefix; mode: "zoom"; text: i18nc("@item:inmenu aspect ratio", "Zoom") }
             AspectItem { namePrefix: moreRoot.namePrefix; mode: "stretch"; text: i18nc("@item:inmenu aspect ratio", "Stretch") }
@@ -1624,7 +1677,7 @@ Kirigami.Page {
             objectName: moreRoot.namePrefix + "QualityMenu"
             title: i18n("Quality")
             icon.name: "speedometer"
-            enabled: page.player.qualityAvailable && !page.player.qualitySwitching
+            enabled: page.player.qualityAvailable && !page.player.qualitySwitching && !page.player.casting
             Instantiator {
                 model: page.player.qualitySteps
                 delegate: PlainMenuItem {
@@ -1674,16 +1727,43 @@ Kirigami.Page {
         }
         Controls.Menu {
             id: sleepMenu
-            title: page.player.sleepRemainingMinutes > 0 ? i18n("Sleep: %1 min", page.player.sleepRemainingMinutes) : i18n("Sleep Timer")
+            objectName: "playerSleepMenu"
+            title: page.player.sleepAtEndOfItem ? i18n("Sleep: End of Current Item")
+                 : page.player.sleepAtEndOfQueue ? i18n("Sleep: End of Queue")
+                 : page.player.sleepRemainingMinutes > 0 ? i18n("Sleep: %1 min", page.player.sleepRemainingMinutes)
+                 : i18n("Sleep Timer")
             icon.name: "chronometer"
+            Controls.MenuItem {
+                text: i18n("Off")
+                checkable: true
+                autoExclusive: true
+                checked: !page.player.sleepAtEndOfItem && !page.player.sleepAtEndOfQueue && page.player.sleepRemainingMinutes === 0
+                onTriggered: page.player.setSleepTimer(0)
+            }
+            Controls.MenuItem {
+                text: i18n("End of Current Item")
+                checkable: true
+                autoExclusive: true
+                checked: page.player.sleepAtEndOfItem
+                onTriggered: page.player.setSleepAtEndOfItem(true)
+            }
+            Controls.MenuItem {
+                text: i18n("End of Queue")
+                checkable: true
+                autoExclusive: true
+                checked: page.player.sleepAtEndOfQueue
+                onTriggered: page.player.setSleepAtEndOfQueue(true)
+            }
+            Controls.MenuSeparator {}
             Instantiator {
-                model: [0, 15, 30, 45, 60, 90, 120]
+                model: [15, 30, 45, 60, 90, 120]
                 delegate: Controls.MenuItem {
                     required property int modelData
-                    text: modelData === 0 ? i18n("Off") : i18n("%1 minutes", modelData)
+                    text: i18np("%1 minute", "%1 minutes", modelData)
                     onTriggered: page.player.setSleepTimer(modelData)
                 }
-                onObjectAdded: (index, object) => sleepMenu.insertItem(index, object)
+                // After the fixed entries and the separator
+                onObjectAdded: (index, object) => sleepMenu.addItem(object)
                 onObjectRemoved: (index, object) => sleepMenu.removeItem(object)
             }
         }
@@ -1707,6 +1787,7 @@ Kirigami.Page {
             text: i18n("Screenshot")
             // The full-colour camera-photo of breeze has path data Qt's SVG renderer truncates, with a warning on every draw
             icon.name: "camera-photo-symbolic"
+            enabled: !page.player.casting
             onTriggered: {
                 page.player.screenshot();
                 page.wakeChrome();
@@ -1718,6 +1799,7 @@ Kirigami.Page {
             objectName: moreRoot.namePrefix + "ClipMenu"
             title: i18n("Clip")
             icon.name: "media-record"
+            enabled: !page.player.casting
             Controls.MenuItem {
                 objectName: moreRoot.namePrefix + "ClipStart"
                 text: i18n("Set Start")

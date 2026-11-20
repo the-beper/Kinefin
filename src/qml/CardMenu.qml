@@ -43,7 +43,11 @@ Controls.Menu {
     signal openRequested(string targetId)
     // A popup is not an Item, so the window that plays is passed in by the owner
     property bool playAvailable: false
+    // False while following a SyncPlay group: the group decides what plays, so no device can take an item of its own
+    property bool playOnAvailable: true
     signal playRequested(string targetId)
+    // Play On…: the target picker, then the same item at its resume point
+    signal playOnRequested(string targetId, real ticks)
     signal resumeRequested(string targetId, real ticks)
     signal favoriteRequested(string targetId, bool favorite)
     signal downloadRequested(string targetId)
@@ -91,6 +95,17 @@ Controls.Menu {
         height: visible ? implicitHeight : 0
         enabled: menu.playAvailable
         onTriggered: menu.playRequested(menu.itemId)
+    }
+    Controls.MenuItem {
+        objectName: "cardMenuPlayOn"
+        text: i18nc("@action:inmenu", "Play On…")
+        icon.name: "video-television"
+        visible: menu.playable
+        height: visible ? implicitHeight : 0
+        enabled: menu.playAvailable && menu.playOnAvailable
+        Controls.ToolTip.visible: hovered && !menu.playOnAvailable
+        Controls.ToolTip.text: i18nc("@info:tooltip", "Not available while following a SyncPlay group")
+        onTriggered: menu.playOnRequested(menu.itemId, menu.resumeTicks > 0 ? menu.resumeTicks : 0)
     }
     Controls.MenuItem {
         objectName: "cardMenuPlayNext"

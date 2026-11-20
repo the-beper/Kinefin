@@ -68,6 +68,9 @@ struct SourceSelection {
 // Item and media source ids are interpolated into URLs: only [A-Za-z0-9-], 1 to 64 characters
 [[nodiscard]] bool isValidJellyfinId(QStringView id);
 
+// Whether the URL holds the access token anywhere, encoded or decoded
+[[nodiscard]] bool carriesToken(const QUrl &url, QByteArrayView accessToken);
+
 // Picks the source of a `PlaybackInfoResponse` (parity §3, "Media-source selection"): the first source that direct-plays, else the first one with a safe `TranscodingUrl`. `serverBase` is the authenticated server URL (its path is kept, a server may live under a prefix); `accessToken` is only used to refuse any URL that would still carry it
 [[nodiscard]] SourceSelection selectPlaybackSource(const QJsonObject &response,
                                                    const QString &itemId, const QUrl &serverBase,

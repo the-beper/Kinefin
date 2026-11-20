@@ -51,6 +51,8 @@ Controls.ItemDelegate {
     property bool cardLayout: true
     // False for a card whose item has no card menu (a network)
     property bool hasMenu: true
+    // The focus ring waits for a user move in a view that starts with a current card (the library grids)
+    property bool focusVisible: true
 
     readonly property real posterAspect: imageAspect > 0 ? imageAspect : (landscape ? 9 / 16 : 3 / 2)
     readonly property string countsLine: seasonCount > 0 && episodeCount > 0 ? i18nc("seasons and episodes of a series", "%1 · %2", i18np("%1 season", "%1 seasons", seasonCount), i18np("%1 episode", "%1 episodes", episodeCount)) : ""
@@ -163,6 +165,15 @@ Controls.ItemDelegate {
     Accessible.name: countsLine.length > 0 ? name + ", " + countsLine : (spokenSubtitle.length > 0 ? name + ", " + spokenSubtitle : (year > 0 ? name + " (" + year + ")" : name))
     Accessible.description: description
 
+    // The default delegate background paints the focus ring as a filled highlight; here the ring is only a border, and only once the user moves
+    background: Rectangle {
+        readonly property bool ring: card.highlighted || (card.visualFocus && card.focusVisible)
+        color: card.hovered ? Qt.alpha(Kirigami.Theme.highlightColor, 0.15) : "transparent"
+        radius: Kirigami.Units.cornerRadius
+        border.width: ring ? 2 : 0
+        border.color: Kirigami.Theme.highlightColor
+    }
+
     contentItem: ColumnLayout {
         spacing: 0
 
@@ -172,6 +183,7 @@ Controls.ItemDelegate {
             Layout.preferredHeight: width * card.posterAspect
             Layout.bottomMargin: Kirigami.Units.smallSpacing
             color: Kirigami.Theme.alternateBackgroundColor
+            radius: Kirigami.Units.cornerRadius
             clip: true
 
             Kirigami.Icon {

@@ -4,6 +4,7 @@
 
 #include "api/DeviceProfile.h"
 #include "api/JellyfinClient.h"
+#include "cast/RendererProfile.h"
 #include "downloads/ExportNames.h"
 #include "models/ItemSummary.h"
 #include "models/PlayQueue.h"
@@ -17,6 +18,7 @@
 #include <QBuffer>
 #include <QDateTime>
 #include <QDir>
+#include <QEventLoop>
 #include <QFile>
 #include <QFileInfo>
 #include <QImageReader>
@@ -29,6 +31,7 @@
 #include <QStandardPaths>
 #include <QStorageInfo>
 #include <QUrl>
+#include <QUrlQuery>
 
 #include <utility>
 
@@ -38,6 +41,22 @@
 namespace Kinefin {
 namespace {
 constexpr qint64 TicksPerSecond = 10'000'000;
+
+// A transcode asked from another start: the server begins its job at StartTimeTicks, and the rest of the query stays as the server wrote it
+QUrl withStartTicks(QUrl url, qint64 ticks)
+{
+    QUrlQuery query(url);
+    const auto items = query.queryItems(QUrl::FullyEncoded);
+    QUrlQuery kept;
+    for (const auto &[name, value] : items) {
+        if (name.compare(QLatin1String("StartTimeTicks"), Qt::CaseInsensitive) != 0)
+            kept.addQueryItem(name, value);
+    }
+    kept.addQueryItem(QStringLiteral("StartTimeTicks"),
+                      QString::number(std::max<qint64>(0, ticks)));
+    url.setQuery(kept.query(QUrl::FullyEncoded), QUrl::StrictMode);
+    return url;
+}
 constexpr int MaxRememberedItems = 1000;
 // An item that played for less wall-clock time than this since it loaded is not repeated
 constexpr qint64 MinimumPlayedMs = 2000;
@@ -230,15 +249,26 @@ PlayerController::PlayerController(JellyfinClient &client, PlayQueue &queue,
           m_session, client,
           [this] {
               PlaybackReporter::PlayerState state;
-              state.positionTicks = m_engine.knownPositionTicks();
-              state.canSeek = m_engine.canSeek();
-              state.audioStreamIndex = m_selectedAudioIndex;
-              // Subtitles the user turned off are -1, as jellyfin-web reports them
-              state.subtitleStreamIndex = m_selectedSubtitleIndex ? m_selectedSubtitleIndex
-                                          : m_subtitlesOff        ? std::optional<int>(-1)
-                                                                  : std::nullopt;
-              state.volume = m_volume;
-              state.muted = m_muted;
+              state.positionTicks = m_casting ? std::optional<qint64>(m_castPositionMs * 10'000)
+                                              : m_engine.knownPositionTicks();
+              if (m_casting)
+                  state.method = m_source.method;
+              state.canSeek = m_casting ? m_cast->canSeek() : m_engine.canSeek();
+              if (m_casting) {
+                  // The renderer picks its own tracks; its volume counts once it answered
+                  if (m_cast->hasVolume() && m_cast->volume() >= 0) {
+                      state.volume = m_cast->volume();
+                      state.muted = m_cast->muted();
+                  }
+              } else {
+                  state.audioStreamIndex = m_selectedAudioIndex;
+                  // Subtitles the user turned off are -1, as jellyfin-web reports them
+                  state.subtitleStreamIndex = m_selectedSubtitleIndex ? m_selectedSubtitleIndex
+                                              : m_subtitlesOff        ? std::optional<int>(-1)
+                                                                      : std::nullopt;
+                  state.volume = m_volume;
+                  state.muted = m_muted;
+              }
               // The episodes of a series played alone are not a queue the server hears of
               if (!m_playlistEphemeral)
                   state.nowPlayingQueue = m_playlist;
@@ -255,6 +285,23 @@ PlayerController::PlayerController(JellyfinClient &client, PlayQueue &queue,
       m_mpvSettings(settings, m_engine, this)
 {
     m_profileDataDir = profileDataDirectory(profileId);
+    m_cast = new CastController(this);
+    m_castSeek.setSingleShot(true);
+    m_castSeek.setInterval(400);
+    connect(&m_castSeek, &QTimer::timeout, this, [this] {
+        if (m_casting && m_source.method == PlaybackSource::Method::Transcode)
+            m_cast->reload(withStartTicks(m_source.url, m_castSeekTarget),
+                           m_castSeekTarget / 10'000);
+    });
+    connect(m_cast, &CastController::playing, this, &PlayerController::onCastPlaying);
+    connect(m_cast, &CastController::paused, this, &PlayerController::onCastPaused);
+    connect(m_cast, &CastController::buffering, this, &PlayerController::onCastBuffering);
+    connect(m_cast, &CastController::ended, this, &PlayerController::onCastEnded);
+    connect(m_cast, &CastController::stopped, this, &PlayerController::onCastStopped);
+    connect(m_cast, &CastController::failed, this, &PlayerController::onCastFailed);
+    connect(m_cast, &CastController::positionChanged, this, &PlayerController::onCastPosition);
+    connect(m_cast, &CastController::volumeChanged, this, &PlayerController::onCastVolume);
+    connect(m_cast, &CastController::targetsChanged, this, &PlayerController::changed);
     m_observerId = m_session.addObserver(
         [this](PlaybackSession::State from, PlaybackSession::State to) { onState(from, to); });
     connect(&client, &JellyfinClient::playbackInfoReady, this, &PlayerController::onSource);
@@ -622,6 +669,17 @@ PlayerController::~PlayerController()
 {
     m_session.removeObserver(m_observerId);
     onAccountLeaving();
+    // A renderer's Stop still on its way leaves before its network manager goes: a quit stops the TV too, within a bounded wait
+    if (m_cast->active()) {
+        QEventLoop wait;
+        QTimer deadline;
+        deadline.setSingleShot(true);
+        connect(m_cast, &CastController::stopped, &wait, &QEventLoop::quit);
+        connect(m_cast, &CastController::failed, &wait, &QEventLoop::quit);
+        connect(&deadline, &QTimer::timeout, &wait, &QEventLoop::quit);
+        deadline.start(2000);
+        wait.exec(QEventLoop::ExcludeUserInputEvents);
+    }
 }
 
 bool PlayerController::attachVideo(MpvAbstractItem *item, MpvController *controller)
@@ -644,6 +702,13 @@ void PlayerController::detachVideo(MpvAbstractItem *item)
 {
     if (!item || item != m_video)
         return;
+    if (m_casting) {
+        m_engine.detach(item, false);
+        disconnect(item, &QQuickItem::windowChanged, this, nullptr);
+        m_mpvSettings.setWindow(nullptr);
+        m_video = nullptr;
+        return;
+    }
     // This is also the window-close path: the renderer must go before its
     // handle's worker thread. Stopped is queued once by the state observer.
     m_stopping = true;
@@ -682,6 +747,9 @@ void PlayerController::onAccountLeaving()
     }
     persistQueueCursor();
     m_stopping = true;
+    closeCast(true);
+    clearCastTarget();
+    m_castFailed = false;
     m_awaitingGroup = false;
     m_groupAdvance.stop();
     m_client.cancelPlaybackInfo();
@@ -729,6 +797,134 @@ bool PlayerController::playItem(const QString &id, qint64 resumeTicks)
     return true;
 }
 
+bool PlayerController::castTarget() const
+{
+    return !m_castTarget.isEmpty() && m_castTarget != QLatin1String("local");
+}
+
+bool PlayerController::castTo(const QString &udn)
+{
+    if (grouped())
+        return false;
+    if (udn.isEmpty() || udn == QLatin1String("local")) {
+        // This Computer: a cast comes back at the renderer's position, a failed one from where the device got to
+        if (m_castFailed && !m_itemId.isEmpty()) {
+            m_castFailed = false;
+            return startItem(m_itemId, m_resumeTicks);
+        }
+        const bool wasCasting = m_casting;
+        const bool negotiating = !m_casting && m_loading && castTarget() && !m_itemId.isEmpty();
+        const qint64 position = positionTicks();
+        clearCastTarget();
+        // The source on its way was asked for the renderer: this computer asks again
+        if (negotiating)
+            return startItem(m_itemId, m_resumeTicks);
+        if (!wasCasting || m_itemId.isEmpty()) {
+            Q_EMIT changed();
+            return true;
+        }
+        closeCast(true);
+        return startItem(m_itemId, std::max<qint64>(0, position));
+    }
+    // A downloaded file has no server stream a renderer could fetch
+    if (!m_cast->infoFor(udn) || m_localPlayback)
+        return false;
+    if (castTarget() && udn == m_castTarget && (m_casting || m_loading))
+        return true;
+    const qint64 position = positionTicks();
+    // The streams chosen here go along: the renderer gets the same audio and the subtitle burnt in
+    bool otherAudio = false;
+    if (!m_casting && !m_itemId.isEmpty()) {
+        m_requestedStreams.audioStreamIndex = m_selectedAudioIndex;
+        m_requestedStreams.subtitleStreamIndex = m_selectedSubtitleIndex ? m_selectedSubtitleIndex
+                                                 : m_subtitlesOff
+                                                     ? std::optional<int>(-1)
+                                                     : m_requestedStreams.subtitleStreamIndex;
+        const StreamSummary *track = pickStream(m_source.media.source, u"Audio");
+        otherAudio = m_selectedAudioIndex && track && track->index != *m_selectedAudioIndex;
+    }
+    // A failed cast's position is where the device got to
+    const qint64 start = m_castFailed ? m_resumeTicks : position;
+    closeCast(true);
+    m_castTarget = udn;
+    m_castName = m_cast->nameFor(udn);
+    // A renderer plays a direct file's default audio: another track needs the server to pick it
+    m_castTranscodeOnly = otherAudio;
+    m_castFailed = false;
+    if (m_itemId.isEmpty()) {
+        Q_EMIT changed();
+        return true;
+    }
+    return startItem(m_itemId, std::max<qint64>(0, start));
+}
+
+bool PlayerController::playItemOn(const QString &udn, const QString &id, qint64 resumeTicks)
+{
+    if (!isValidJellyfinId(id) || resumeTicks < 0 || grouped())
+        return false;
+    if (udn.isEmpty() || udn == QLatin1String("local")) {
+        // playItem keeps the queue's cursor where the cast got to, then startItem closes the cast
+        clearCastTarget();
+        return playItem(id, resumeTicks);
+    }
+    if (!m_cast->infoFor(udn))
+        return false;
+    m_castTarget = udn;
+    m_castName = m_cast->nameFor(udn);
+    m_castTranscodeOnly = false;
+    m_castFailed = false;
+    if (playItem(id, resumeTicks))
+        return true;
+    clearCastTarget();
+    return false;
+}
+
+void PlayerController::closeCast(bool stopRenderer)
+{
+    m_castSeek.stop();
+    if (!m_casting)
+        return;
+    // Still casting while the session closes: the Stopped carries the renderer's position and method
+    if (m_session.state() != PlaybackSession::State::Idle) {
+        m_session.stop();
+        m_session.stopped();
+    }
+    if (stopRenderer)
+        m_cast->stop();
+    m_casting = false;
+}
+
+void PlayerController::clearCastTarget()
+{
+    m_castTarget.clear();
+    m_castName.clear();
+    m_castTranscodeOnly = false;
+}
+
+void PlayerController::castFailed(const QString &message)
+{
+    // The item stays with its error: Continue Here plays it on this computer from where the device got to, Close Player ends it
+    if (m_casting) {
+        m_resumeTicks = std::max<qint64>(0, m_castPositionMs) * 10'000;
+        if (m_session.state() != PlaybackSession::State::Idle) {
+            m_session.failed();
+            m_session.stop();
+            m_session.stopped();
+        }
+        m_casting = false;
+    }
+    m_loading = false;
+    clearCastTarget();
+    m_castFailed = true;
+    m_errorText = message;
+    Q_EMIT changed();
+}
+
+void PlayerController::stopCasting()
+{
+    stopLocally();
+}
+
 bool PlayerController::openGroupItem(const QString &id, qint64 startTicks)
 {
     if (!isValidJellyfinId(id) || m_client.userId().isEmpty() || startTicks < 0
@@ -747,6 +943,7 @@ bool PlayerController::startItem(const QString &id, qint64 resumeTicks, bool gro
 {
     if (!isValidJellyfinId(id) || resumeTicks < 0 || m_client.userId().isEmpty())
         return false;
+    m_castFailed = false;
     // A server item that replaces a local file: the local one stores where it stopped before its flag goes
     reportLocalPosition(false);
     m_pendingLocal = {};
@@ -756,8 +953,11 @@ bool PlayerController::startItem(const QString &id, qint64 resumeTicks, bool gro
         Q_EMIT localPlaybackChanged();
     }
     const bool sameItem = id == m_itemId;
-    if (!sameItem)
+    if (!sameItem) {
         m_subtitlesOff = false;
+        m_itemRuntimeTicks = 0;
+        m_castTranscodeOnly = false;
+    }
     // Another item starts at full quality; the same one again (a reopen, Repeat One) keeps a lowered bit rate
     dropFallback();
     m_canRetry = false;
@@ -784,6 +984,11 @@ bool PlayerController::startItem(const QString &id, qint64 resumeTicks, bool gro
     // Preserve the prior item's cursor before the new id replaces it.
     if (!m_itemId.isEmpty() && !sameItem)
         persistQueueCursor();
+    // A new item on a cast closes the old item's server session while its method and position are still known, and stops the renderer, so a new item that fails cannot leave the old one playing there
+    closeCast(true);
+    // A group plays its items here, at its own pace
+    if (grouped)
+        clearCastTarget();
     // A different item cannot be opened until the old mpv end-file arrived.
     // The pending id survives that stop and is negotiated exactly once.
     m_client.cancelPlaybackInfo();
@@ -1191,8 +1396,29 @@ void PlayerController::requestPending()
         openLocal();
         return;
     }
-    if (!m_loading || !m_engine.isInitialized() || m_itemId.isEmpty()
-        || m_session.state() != PlaybackSession::State::Idle)
+    if (!m_loading || m_itemId.isEmpty() || m_session.state() != PlaybackSession::State::Idle)
+        return;
+    if (castTarget()) {
+        const RendererInfo *info = m_cast->infoFor(m_castTarget);
+        if (!info) {
+            castFailed(
+                i18n("The device is no longer available: search for it again from Play On."));
+            return;
+        }
+        const bool burnIn = m_selectedSubtitleId != 0
+                            || (m_requestedStreams.subtitleStreamIndex
+                                && *m_requestedStreams.subtitleStreamIndex >= 0);
+        const QJsonObject profile =
+            rendererDeviceProfile(info->sinkMimeTypes, burnIn, m_castTranscodeOnly);
+        if (!m_client.requestPlaybackInfo(m_itemId, m_resumeTicks, profile, UnlimitedBitrate,
+                                          m_requestedStreams)) {
+            m_loading = false;
+            m_errorText = i18n("Unable to request playback from the server.");
+            Q_EMIT changed();
+        }
+        return;
+    }
+    if (!m_engine.isInitialized())
         return;
     m_mpvSettings.apply();
     if (m_groupItem) {
@@ -1227,7 +1453,7 @@ bool PlayerController::fallbackApplies() const
     return m_manualCap == 0
            && m_settings.value(QStringLiteral("video"), QStringLiteral("adaptive_bitrate")).toBool()
            && !m_localPlayback && m_source.method != PlaybackSource::Method::Local && !m_groupItem
-           && !grouped() && !m_itemId.isEmpty();
+           && !grouped() && !m_itemId.isEmpty() && !m_casting && !castTarget();
 }
 
 bool PlayerController::fallbackEligible() const
@@ -1533,6 +1759,10 @@ void PlayerController::onSource(const PlaybackSource &source)
     }
     if (m_stopping || source.itemId != m_itemId)
         return;
+    if (castTarget()) {
+        startCast(source);
+        return;
+    }
     if (!m_engine.isInitialized() || m_session.state() != PlaybackSession::State::Idle)
         return;
     m_loading = false;
@@ -1564,11 +1794,199 @@ void PlayerController::onSource(const PlaybackSource &source)
     Q_EMIT changed();
 }
 
+void PlayerController::startCast(const PlaybackSource &source)
+{
+    const RendererInfo *info = m_cast->infoFor(m_castTarget);
+    if (!info || m_session.state() != PlaybackSession::State::Idle) {
+        castFailed(i18n("The device is no longer available: search for it again from Play On."));
+        return;
+    }
+    const QString name = m_cast->nameFor(m_castTarget);
+    // Checked again here: the renderer gets nothing that would let it act as the user
+    const QString query = source.url.query();
+    if (carriesToken(source.url, m_client.accessToken().toUtf8())
+        || query.contains(QLatin1String("api_key"), Qt::CaseInsensitive)
+        || query.contains(QLatin1String("apikey"), Qt::CaseInsensitive)) {
+        castFailed(i18n(
+            "The server's stream link would give the device your sign-in, so it was not sent."));
+        return;
+    }
+    const QString container = source.method == PlaybackSource::Method::Transcode
+                                  ? QStringLiteral("ts")
+                                  : source.media.source.container;
+    const QString mime = rendererMime(container, info->sinkMimeTypes);
+    if (mime.isEmpty()) {
+        castFailed(i18nc("@info %1 is a device name", "%1 cannot play this kind of video.", name));
+        return;
+    }
+    m_loading = false;
+    m_source = source;
+    m_subtitleOptions.clear();
+    m_externalSubtitles.clear();
+    m_audioTracks.clear();
+    m_subtitleTracks.clear();
+    Q_EMIT tracksChanged();
+    m_castDurationMs = m_itemRuntimeTicks > 0 ? m_itemRuntimeTicks / 10'000 : 0;
+    m_castPositionMs = m_resumeTicks / 10'000;
+    PlaybackSession::Identity identity{source.itemId.toStdString(),
+                                       source.mediaSourceId.toStdString(),
+                                       source.playSessionId.toStdString()};
+    if (!m_session.open(identity, PlaybackSession::Route::Cast)) {
+        castFailed(i18n("The playback session could not be opened."));
+        return;
+    }
+    m_casting = true;
+    // The item's own reply may come after Playback Info: the renderer then lists the media source's name
+    const QString title = m_title.isEmpty() ? source.media.source.name : m_title;
+    // The renderer counts a transcode's position from its start: the start is put in the URL, whatever the server wrote there
+    const QUrl url = source.method == PlaybackSource::Method::Transcode
+                         ? withStartTicks(source.url, m_resumeTicks)
+                         : source.url;
+    if (!m_cast->load(m_castTarget, url, mime, title, m_castPositionMs, m_castDurationMs,
+                      m_client.serverUrl(), source.method == PlaybackSource::Method::Direct)) {
+        castFailed(i18nc("@info %1 is a device name",
+                         "%1 could not play this video: check that it can reach the server.",
+                         name));
+        return;
+    }
+    m_castName = name;
+    updateChapters();
+    Q_EMIT changed();
+}
+
+void PlayerController::onCastPlaying()
+{
+    if (!m_casting)
+        return;
+    // The transitions report by themselves: Start on the first PLAYING, Progress on a resume
+    switch (m_session.state()) {
+    case PlaybackSession::State::Opening:
+        if (m_session.opened())
+            m_playedClock.start();
+        break;
+    case PlaybackSession::State::Paused:
+        m_session.resume();
+        break;
+    case PlaybackSession::State::Buffering:
+        m_session.bufferRecovered();
+        break;
+    default:
+        break;
+    }
+    Q_EMIT changed();
+}
+
+void PlayerController::onCastPaused()
+{
+    if (!m_casting)
+        return;
+    // A renderer can come up paused: the session opens (Start) before it pauses
+    if (m_session.state() == PlaybackSession::State::Opening && m_session.opened())
+        m_playedClock.start();
+    m_session.pause();
+    Q_EMIT changed();
+}
+
+void PlayerController::onCastBuffering()
+{
+    if (!m_casting)
+        return;
+    m_session.buffering();
+    Q_EMIT changed();
+}
+
+void PlayerController::onCastEnded()
+{
+    if (!m_casting)
+        return;
+    // The end reports the duration, as a local end within the end window does; still casting, so the Stopped and the repeat check read the renderer
+    if (m_castDurationMs > 0)
+        m_castPositionMs = m_castDurationMs;
+    if (m_session.state() != PlaybackSession::State::Idle) {
+        m_session.stop();
+        m_session.stopped();
+    }
+    onEnd(QStringLiteral("eof"));
+}
+
+void PlayerController::onCastStopped()
+{
+    if (!m_casting)
+        return;
+    const QString name = m_castName;
+    if (m_session.state() != PlaybackSession::State::Idle) {
+        m_session.stop();
+        m_session.stopped();
+    }
+    clearCastTarget();
+    onEnd(QStringLiteral("stop"));
+    Q_EMIT castStoppedElsewhere(name);
+}
+
+void PlayerController::onCastFailed(DlnaRenderer::Failure failure)
+{
+    if (!m_casting)
+        return;
+    const QString name = m_castName;
+    // A direct play the renderer refused before it ever played is asked once more as a transcode
+    if (failure == DlnaRenderer::Failure::Refused
+        && m_session.state() == PlaybackSession::State::Opening
+        && m_source.method == PlaybackSource::Method::Direct && !m_castTranscodeOnly) {
+        closeCast(false);
+        m_castTranscodeOnly = true;
+        startItem(m_itemId, m_resumeTicks);
+        return;
+    }
+    switch (failure) {
+    case DlnaRenderer::Failure::Refused:
+        castFailed(i18nc("@info %1 is a device name",
+                         "%1 could not play this video: check that it can reach the server.",
+                         name));
+        break;
+    case DlnaRenderer::Failure::NotResponding:
+        castFailed(i18nc("@info %1 is a device name",
+                         "%1 stopped responding: check that it is on and on this network.", name));
+        break;
+    case DlnaRenderer::Failure::ServerRefused:
+        castFailed(i18n("The server does not let other devices play its videos without a sign-in, "
+                        "so this video cannot be cast."));
+        break;
+    }
+}
+
+void PlayerController::onCastPosition()
+{
+    if (!m_casting)
+        return;
+    if (const auto position = m_cast->positionMs())
+        m_castPositionMs = *position;
+    if (const auto duration = m_cast->durationMs(); duration && *duration > 0)
+        m_castDurationMs = *duration;
+    updateChapters();
+    updateSkip();
+    Q_EMIT changed();
+}
+
+void PlayerController::onCastVolume()
+{
+    if (!m_casting)
+        return;
+    Q_EMIT changed();
+}
+
 void PlayerController::onPlaybackItem(const QString &id, const QJsonObject &item)
 {
     // A reply for an item that is no longer the current one must not name or lay out this one, nor a server reply a local file of the same item
     if (id != m_itemId || !active() || m_localPlayback)
         return;
+    const double runtime = item.value(QStringLiteral("RunTimeTicks")).toDouble(-1);
+    m_itemRuntimeTicks =
+        runtime > 0 && runtime <= 24.0 * 3600 * TicksPerSecond ? qint64(runtime) : 0;
+    // The renderer's own duration of a transcode is not trusted: the item's runtime replaces it once it is known
+    if (m_casting && m_itemRuntimeTicks > 0) {
+        m_castDurationMs = m_itemRuntimeTicks / 10'000;
+        m_cast->setDurationMs(m_castDurationMs);
+    }
     const ItemSummary summary = parseItemSummary(item);
     if (summary.valid) {
         const bool episode =
@@ -1663,7 +2081,9 @@ int PlayerController::pendingAdvance(bool pick) const
 
 void PlayerController::updateUpNext()
 {
-    const std::optional<qint64> position = m_engine.knownPositionTicks();
+    // No Up Next card while casting: the end advances by the autoplay rules
+    const std::optional<qint64> position =
+        m_casting ? std::optional<qint64>{} : m_engine.knownPositionTicks();
     const qint64 duration = durationTicks();
     std::optional<UpNextWindow> window;
     if (!m_itemId.isEmpty() && !m_loading && position && pendingAdvance(false) >= 0)
@@ -1892,6 +2312,9 @@ void PlayerController::onEnd(const QString &reason)
     }
     // A local file has no queue, no repeat of a server item and no reporting: it just ends
     if (m_localPlayback && !m_pendingLocal.pending) {
+        m_sleep.stop();
+        m_sleepAtEndOfItem = false;
+        m_sleepAtEndOfQueue = false;
         // A file that never loaded keeps the resume point it had; one that failed midway keeps where it got to
         reportLocalPosition(reason == QLatin1String("eof"));
         m_queue.setCurrentPlaybackItemId({});
@@ -1908,16 +2331,27 @@ void PlayerController::onEnd(const QString &reason)
         return;
     }
     const bool ended = reason == QLatin1String("eof") && !m_stopping;
+    // The sleep timer's end modes stop here: before the queue, the next episode or a repeat would start
+    const bool sleepNow =
+        ended && (m_sleepAtEndOfItem || (m_sleepAtEndOfQueue && pendingAdvance(false) < 0));
+    if (sleepNow) {
+        m_sleep.stop();
+        m_sleepAtEndOfItem = false;
+        m_sleepAtEndOfQueue = false;
+    }
     // Cancel on the Up Next card ends this playback here, without the advance or the replay of a repeat; a repeat mode chosen after it that replays the item wins
     const bool cancelled = m_upNextCancelled && pendingAdvance(false) >= 0;
     const bool playedLongEnough =
         m_playedClock.isValid() && m_playedClock.elapsed() >= MinimumPlayedMs;
     m_playedClock.invalidate();
-    if (ended && !cancelled && advancesAtEnd() && next())
+    if (ended && !cancelled && !sleepNow && advancesAtEnd() && next())
         return;
     // An item with nothing to advance to plays again when either repeat mode is on, after a real end: a stream that stops at once or far from its end does not loop
     const QString again = m_itemId;
-    if (ended && !cancelled && m_repeat != 0 && m_engine.nearEnd() && playedLongEnough
+    const bool nearEnd = m_casting
+                             ? m_castDurationMs > 0 && m_castPositionMs >= m_castDurationMs - 5000
+                             : m_engine.nearEnd();
+    if (ended && !cancelled && !sleepNow && m_repeat != 0 && nearEnd && playedLongEnough
         && (m_playlist.isEmpty() || m_playlistEphemeral) && startItem(again, 0))
         return;
     // The end of the queue forgets where it was; a Cancel keeps it, the queue has more to play
@@ -1958,6 +2392,12 @@ void PlayerController::clearCurrent()
     m_manualCap = 0;
     m_qualitySwitching = false;
     dropSeriesPlaylist();
+    m_casting = false;
+    clearCastTarget();
+    m_castFailed = false;
+    m_castPositionMs = 0;
+    m_castDurationMs = 0;
+    m_itemRuntimeTicks = 0;
     m_itemId.clear();
     m_title.clear();
     m_subtitle.clear();
@@ -2001,7 +2441,9 @@ void PlayerController::pause()
 {
     if (grouped())
         m_group->requestPause();
-    else {
+    else if (m_casting) {
+        m_cast->pause();
+    } else {
         m_engine.pause();
         reportLocalPosition(false);
     }
@@ -2010,6 +2452,8 @@ void PlayerController::resume()
 {
     if (grouped())
         m_group->requestUnpause();
+    else if (m_casting)
+        m_cast->resume();
     else
         m_engine.resume();
 }
@@ -2079,7 +2523,14 @@ void PlayerController::stopLocally()
     m_client.cancelPlaybackInfo();
     m_loading = false;
     m_sleep.stop();
-    if (m_session.state() == PlaybackSession::State::Idle) {
+    m_sleepAtEndOfItem = false;
+    m_sleepAtEndOfQueue = false;
+    if (m_casting) {
+        closeCast(true);
+        m_queue.setCurrentPlaybackItemId({});
+        clearCurrent();
+        Q_EMIT finished();
+    } else if (m_session.state() == PlaybackSession::State::Idle) {
         m_queue.setCurrentPlaybackItemId({});
         clearCurrent();
         Q_EMIT finished();
@@ -2194,6 +2645,27 @@ void PlayerController::seek(qint64 ticks)
 }
 void PlayerController::seekLocally(qint64 ticks)
 {
+    if (m_casting) {
+        if (!m_cast->canSeek() || m_loading || ticks < 0)
+            return;
+        const qint64 target = durationTicks() > 0 ? std::min(ticks, durationTicks()) : ticks;
+        keepIntrosAt(target);
+        // A transcode seeks as the server's own DLNA control does: the same stream asked from another start, under the same play session; a run of seeks reloads it once, at the last target
+        bool moved = true;
+        if (m_source.method == PlaybackSource::Method::Transcode) {
+            m_castSeekTarget = target;
+            m_castSeek.start();
+        } else {
+            moved = m_cast->seek(target / 10'000);
+        }
+        if (moved) {
+            m_castPositionMs = target / 10'000;
+            Q_EMIT seeked(target);
+            m_seekReport.start();
+            Q_EMIT changed();
+        }
+        return;
+    }
     if (!m_engine.canSeek() || !active() || m_loading || ticks < 0)
         return;
     const qint64 target =
@@ -2217,7 +2689,9 @@ void PlayerController::seekRelative(int seconds)
 }
 void PlayerController::setRate(double value)
 {
-    if (grouped() || !std::isfinite(value) || value < MinimumRate || value > MaximumRate)
+    // A group plays at its own pace, and a renderer has no speed of ours
+    if (grouped() || m_casting || !std::isfinite(value) || value < MinimumRate
+        || value > MaximumRate)
         return;
     m_engine.setRate(value);
     m_rateDecided = true;
@@ -2233,7 +2707,16 @@ void PlayerController::setRate(double value)
 }
 void PlayerController::setVolume(int level)
 {
-    if (!m_engine.isInitialized() || level < 0 || level > 100)
+    if (level < 0 || level > 100)
+        return;
+    if (m_casting) {
+        if (m_cast->setVolume(level)) {
+            Q_EMIT changed();
+            m_reporter.reportNow();
+        }
+        return;
+    }
+    if (!m_engine.isInitialized())
         return;
     m_volume = level;
     m_engine.setMpvProperty(QStringLiteral("volume"), level);
@@ -2242,6 +2725,13 @@ void PlayerController::setVolume(int level)
 }
 void PlayerController::toggleMute()
 {
+    if (m_casting) {
+        if (m_cast->setMuted(!m_cast->muted())) {
+            Q_EMIT changed();
+            m_reporter.reportNow();
+        }
+        return;
+    }
     if (!m_engine.isInitialized())
         return;
     m_muted = !m_muted;
@@ -2615,10 +3105,34 @@ void PlayerController::setSleepTimer(int minutes)
 {
     if (minutes < 0 || minutes > 240)
         return;
+    m_sleepAtEndOfItem = false;
+    m_sleepAtEndOfQueue = false;
     if (minutes == 0)
         m_sleep.stop();
     else
         m_sleep.start(minutes * 60 * 1000);
+    Q_EMIT changed();
+}
+void PlayerController::setSleepAtEndOfItem(bool enabled)
+{
+    if (enabled == m_sleepAtEndOfItem)
+        return;
+    m_sleepAtEndOfItem = enabled;
+    if (enabled) {
+        m_sleep.stop();
+        m_sleepAtEndOfQueue = false;
+    }
+    Q_EMIT changed();
+}
+void PlayerController::setSleepAtEndOfQueue(bool enabled)
+{
+    if (enabled == m_sleepAtEndOfQueue)
+        return;
+    m_sleepAtEndOfQueue = enabled;
+    if (enabled) {
+        m_sleep.stop();
+        m_sleepAtEndOfItem = false;
+    }
     Q_EMIT changed();
 }
 int PlayerController::sleepRemainingMinutes() const
@@ -3208,7 +3722,9 @@ void PlayerController::persistQueueCursor()
         return;
     const QString key =
         m_client.serverId().toLower() + QLatin1Char('/') + m_client.userId().toLower();
-    const auto position = m_loading ? std::optional<qint64>{} : m_engine.knownPositionTicks();
+    const auto position = m_loading   ? std::optional<qint64>{}
+                          : m_casting ? std::optional<qint64>(positionTicks())
+                                      : m_engine.knownPositionTicks();
     // A pending media source has no mpv position. Do not erase an earlier
     // resume point while buffering its next source.
     qint64 ticks = position.value_or(m_resumeTicks);

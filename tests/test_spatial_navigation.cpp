@@ -427,6 +427,40 @@ ApplicationWindow {
         QCOMPARE(scene.focused(), QStringLiteral("below"));
     }
 
+    void aRowWithoutACurrentCardLeavesFromItsStart()
+    {
+        // The geometry of Home: a library tile above the first row's start, the row's See All above its far end
+        Scene scene;
+        QVERIFY(scene.load(R"(
+ApplicationWindow {
+    width: 1000; height: 600; visible: true
+    Page {
+        anchors.fill: parent
+        Button { objectName: "tile"; x: 18; y: 86; width: 288; height: 169 }
+        Button { objectName: "seeAll"; x: 888; y: 284; width: 80; height: 25 }
+        ListView {
+            objectName: "row"
+            x: 14; y: 313; width: 958; height: 200; clip: true
+            orientation: ListView.Horizontal
+            model: 5; currentIndex: -1
+            activeFocusOnTab: true; keyNavigationEnabled: true
+            delegate: ItemDelegate { width: 252; height: 200; focusPolicy: Qt.NoFocus }
+        }
+    }
+})"));
+        QQuickItem *row = scene.item("row");
+        QVERIFY(row);
+        // The cards of a Home row arrive a few per frame: the focus can reach the row before its current card does
+        QVERIFY(scene.focus("row"));
+        QVERIFY(scene.press("up"));
+        QCOMPARE(scene.focused(), QStringLiteral("tile"));
+        // With no card built at all, the start of the row stands for it
+        row->setProperty("model", 0);
+        QVERIFY(scene.focus("row"));
+        QVERIFY(scene.press("up"));
+        QCOMPARE(scene.focused(), QStringLiteral("tile"));
+    }
+
     void aClosedComboBoxGivesUpDownToNavigation()
     {
         Scene scene;
