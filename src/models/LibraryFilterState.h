@@ -79,25 +79,25 @@ struct LibraryFilterState {
     }
 };
 
-// The sort keys a scope offers, as `sortBy` wire tokens in the order of the picker: 10 for movies, 8 for series, 7 for episodes, 5 for collections. The first is the default
+// The sort keys a scope offers, as `sortBy` wire tokens in the order of the picker: movies, series and collections have the lists of jellyfin-web 12.4 (10, 8 and 5 keys; its name sort also tie-breaks by ProductionYear, which Kinefin does not send), episodes have their own 7. The first is the default
 inline QStringList librarySortKeys(LibraryScope scope)
 {
     switch (scope) {
     case LibraryScope::Movies:
-        return {QStringLiteral("SortName"),        QStringLiteral("DateCreated"),
-                QStringLiteral("PremiereDate"),    QStringLiteral("ProductionYear"),
+        return {QStringLiteral("SortName"),        QStringLiteral("Random"),
                 QStringLiteral("CommunityRating"), QStringLiteral("CriticRating"),
-                QStringLiteral("Runtime"),         QStringLiteral("DatePlayed"),
-                QStringLiteral("PlayCount"),       QStringLiteral("Random")};
+                QStringLiteral("DateCreated"),     QStringLiteral("DatePlayed"),
+                QStringLiteral("OfficialRating"),  QStringLiteral("PlayCount"),
+                QStringLiteral("PremiereDate"),    QStringLiteral("Runtime")};
     case LibraryScope::Series:
         return {QStringLiteral("SortName"),
+                QStringLiteral("Random"),
+                QStringLiteral("CommunityRating"),
                 QStringLiteral("DateCreated"),
                 QStringLiteral("DateLastContentAdded"),
-                QStringLiteral("PremiereDate"),
-                QStringLiteral("CommunityRating"),
-                QStringLiteral("DatePlayed"),
-                QStringLiteral("PlayCount"),
-                QStringLiteral("Random")};
+                QStringLiteral("SeriesDatePlayed"),
+                QStringLiteral("OfficialRating"),
+                QStringLiteral("PremiereDate")};
     case LibraryScope::Episodes:
         return {QStringLiteral("AiredEpisodeOrder"),
                 QStringLiteral("PremiereDate"),
@@ -107,9 +107,9 @@ inline QStringList librarySortKeys(LibraryScope scope)
                 QStringLiteral("DatePlayed"),
                 QStringLiteral("Random")};
     case LibraryScope::Collections:
-        return {QStringLiteral("SortName"), QStringLiteral("DateCreated"),
-                QStringLiteral("PremiereDate"), QStringLiteral("CommunityRating"),
-                QStringLiteral("Random")};
+        return {QStringLiteral("SortName"), QStringLiteral("CommunityRating"),
+                QStringLiteral("DateCreated"), QStringLiteral("OfficialRating"),
+                QStringLiteral("PremiereDate")};
     }
     return {};
 }
@@ -207,8 +207,11 @@ inline std::optional<ItemQuery> composeLibraryQuery(const ItemQuery &base, Libra
     return query;
 }
 
-// The most option values of one legacy facet taken from the server
+// The most option values of one legacy facet (ratings, years) taken from the server
 constexpr int MaxFacetOptions = 300;
+
+// The most tags kept in memory from the server's answer (2225 on a real movie library): the memory cap, not what the filter dialog lists at once, which is FilterOptionsModel::MaxShownTags until a search narrows it
+constexpr int MaxTagOptions = 5000;
 
 // The selectable values of `GET /Items/Filters`: official ratings (text) and production years
 struct LegacyFacets {

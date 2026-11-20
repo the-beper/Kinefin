@@ -65,16 +65,47 @@ Kirigami.ScrollablePage {
         }
 
         Flow {
+            id: librariesFlow
             objectName: "homeLibraries"
             Layout.fillWidth: true
             visible: page.showLibraries
             spacing: Kirigami.Units.largeSpacing
             Repeater {
+                id: librariesRepeater
                 // No tile is built while the section is off, so no image is fetched for it
                 model: page.showLibraries ? page.connection.homeLibraries : []
                 delegate: LibraryTile {
                     id: tile
                     required property var modelData
+                    required property int index
+                    activeFocusOnTab: true
+                    onActiveFocusChanged: {
+                        if (activeFocus)
+                            Spatial.reveal(tile);
+                    }
+                    // A catch-all: the card's own control does not take the arrows for the tile; Up and Down leave for whatever lies above or below by screen position
+                    Keys.onPressed: event => {
+                        if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter
+                                || event.key === Qt.Key_Space) {
+                            // A held key opens the library once
+                            if (!event.isAutoRepeat)
+                                tile.clicked();
+                            event.accepted = true;
+                        } else if (event.key === Qt.Key_Up || event.key === Qt.Key_Down) {
+                            event.accepted = Spatial.move(tile, event.key);
+                        } else if (event.key === Qt.Key_Left || event.key === Qt.Key_Right) {
+                            // A right-to-left Flow lays the tiles out from the right edge; a disabled tile is passed over
+                            const step = (event.key === Qt.Key_Right) === (librariesFlow.effectiveLayoutDirection === Qt.LeftToRight) ? 1 : -1;
+                            for (let i = index + step; i >= 0 && i < librariesRepeater.count; i += step) {
+                                const next = librariesRepeater.itemAt(i);
+                                if (next && next.visible && next.enabled) {
+                                    next.forceActiveFocus(step > 0 ? Qt.TabFocusReason : Qt.BacktabFocusReason);
+                                    event.accepted = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
                     // From the page's column, not from the Flow: a Flow child sized by the Flow's own width never settles under the software renderer
                     width: Math.min(Kirigami.Units.gridUnit * 16, homeColumn.width)
                     library: tile.modelData
@@ -92,11 +123,11 @@ Kirigami.ScrollablePage {
         }
 
         Repeater {
+            id: rowsRepeater
             model: page.connection.homeRows
             delegate: ColumnLayout {
                 id: row
                 objectName: "homeRow_" + index
-
                 required property int index
                 required property int kind
                 required property string libraryId

@@ -4,6 +4,7 @@
 # extracted with xgettext and compared against the committed catalogs.
 src/app/ConnectionController.cpp
 src/player/PlayerController.cpp
+src/integration/GamepadInput.cpp
 src/integration/KRunnerProvider.cpp
 src/integration/ScreenSaverInhibitor.cpp
 src/main.cpp

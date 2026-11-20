@@ -352,6 +352,15 @@ bool userCanManageSubtitles(const QJsonObject &user)
     return flag.isBool() && flag.toBool();
 }
 
+// `Policy.EnableVideoPlaybackTranscoding` of a UserDto: false when absent or not a bool
+bool userCanTranscode(const QJsonObject &user)
+{
+    const QJsonValue flag = user.value(QStringLiteral("Policy"))
+                                .toObject()
+                                .value(QStringLiteral("EnableVideoPlaybackTranscoding"));
+    return flag.isBool() && flag.toBool();
+}
+
 // `Policy.SyncPlayAccess` of a UserDto: one of the three values the server knows, else empty
 QString userSyncPlayAccess(const QJsonObject &user)
 {
@@ -740,6 +749,7 @@ void JellyfinClient::finishAuthentication(QNetworkReply *finished)
     m_isAdministrator = userIsAdministrator(user);
     m_canDownload = userCanDownload(user);
     m_canManageSubtitles = userCanManageSubtitles(user);
+    m_canTranscode = userCanTranscode(user);
     m_syncPlayAccess = userSyncPlayAccess(user);
     m_state = State::Authenticated;
     Q_EMIT loginSucceeded(m_userId);
@@ -807,8 +817,9 @@ void addLibraryFilterParameters(QUrlQuery &wire, const ItemQuery &query)
     if (!query.seriesStatus.isEmpty())
         wire.addQueryItem(QStringLiteral("seriesStatus"),
                           query.seriesStatus.join(QLatin1Char(',')));
+    // Ids are joined with commas: 12.4 ignores a '|' between ids and returns the whole scope (live, 2026-11-19), while tags and ratings take '|'
     if (!query.studioIds.isEmpty())
-        wire.addQueryItem(QStringLiteral("studioIds"), query.studioIds.join(QLatin1Char('|')));
+        wire.addQueryItem(QStringLiteral("studioIds"), query.studioIds.join(QLatin1Char(',')));
     if (!query.tags.isEmpty())
         wire.addQueryItem(QStringLiteral("tags"), encodedText(query.tags.join(QLatin1Char('|'))));
     if (!query.officialRatings.isEmpty())
@@ -843,7 +854,7 @@ QUrlQuery listingQuery(const ItemQuery &query, const QString &userId)
         if (!query.mediaTypes.isEmpty())
             wire.addQueryItem(QStringLiteral("mediaTypes"), query.mediaTypes);
         if (!query.genreIds.isEmpty())
-            wire.addQueryItem(QStringLiteral("genreIds"), query.genreIds.join(QLatin1Char('|')));
+            wire.addQueryItem(QStringLiteral("genreIds"), query.genreIds.join(QLatin1Char(',')));
         addLibraryFilterParameters(wire, query);
         if (!query.searchTerm.isEmpty())
             // Encoded here, once: QUrlQuery keeps a %XX of its input as it is, so a typed "%25" must already be "%2525"
@@ -1925,7 +1936,8 @@ bool JellyfinClient::searchRemoteSubtitles(const QString &itemId, const QString 
     return true;
 }
 
-bool JellyfinClient::downloadRemoteSubtitle(const QString &itemId, const QString &subtitleId)
+bool JellyfinClient::downloadRemoteSubtitle(const QString &itemId, const QString &subtitleId,
+                                            const QString &language)
 {
     const auto safeId = [](const QString &id) {
         // A path segment of dots alone would be a dot segment of the route
@@ -1942,23 +1954,108 @@ bool JellyfinClient::downloadRemoteSubtitle(const QString &itemId, const QString
     if (!isAuthenticated() || !canManageSubtitles() || !isValidJellyfinId(itemId)
         || !safeId(subtitleId))
         return false;
-    const QUrl url = endpoint(QStringLiteral("/Items/") + itemId
-                              + QStringLiteral("/RemoteSearch/Subtitles/") + subtitleId);
-    QNetworkRequest request = requestFor(url, true);
-    request.setTransferTimeout(RemoteSubtitleTimeoutMs);
-    QNetworkReply *reply = postEmpty(m_network, request);
-    attach(reply, m_generation, [this, itemId, subtitleId](QNetworkReply *finished) {
+    const quint64 serial = ++m_subtitleSaveSerial;
+    // The count before the download is what a saved file adds one to; an item that cannot be read leaves the 2xx as the only answer
+    countExternalSubtitles(itemId, [this, itemId, subtitleId, serial,
+                                    language](std::optional<ExternalSubtitles> before) {
+        if (serial != m_subtitleSaveSerial)
+            return;
+        const QUrl url = endpoint(QStringLiteral("/Items/") + itemId
+                                  + QStringLiteral("/RemoteSearch/Subtitles/") + subtitleId);
+        QNetworkRequest request = requestFor(url, true);
+        request.setTransferTimeout(RemoteSubtitleTimeoutMs);
+        QNetworkReply *reply = postEmpty(m_network, request);
+        attach(reply, m_generation,
+               [this, itemId, subtitleId, serial, before, language](QNetworkReply *finished) {
+                   // A newer download took over: this one's answer is nobody's
+                   if (serial != m_subtitleSaveSerial)
+                       return;
+                   const int status =
+                       finished->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+                   if (status == 401) {
+                       invalidateSession();
+                       return;
+                   }
+                   if (finished->error() != QNetworkReply::NoError
+                       || (status != 200 && status != 204)) {
+                       Q_EMIT remoteSubtitleDownloadFailed(itemId, subtitleId, status);
+                       return;
+                   }
+                   if (!before) {
+                       Q_EMIT remoteSubtitleDownloaded(itemId, subtitleId);
+                       return;
+                   }
+                   waitForSavedSubtitle(itemId, subtitleId, serial, *before, language, 1);
+               });
+    });
+    return true;
+}
+
+void JellyfinClient::setRemoteSubtitleSaveTiming(int intervalMs, int attempts)
+{
+    m_subtitleSavePollMs = std::max(1, intervalMs);
+    m_subtitleSaveAttempts = std::max(1, attempts);
+}
+
+void JellyfinClient::countExternalSubtitles(
+    const QString &itemId, const std::function<void(std::optional<ExternalSubtitles>)> &done)
+{
+    QUrl url = endpoint(QStringLiteral("/Users/") + m_userId + QStringLiteral("/Items/") + itemId);
+    QUrlQuery query;
+    query.addQueryItem(QStringLiteral("fields"), QStringLiteral("MediaStreams"));
+    url.setQuery(query);
+    QNetworkReply *reply = m_network.get(requestFor(url, true));
+    attach(reply, m_generation, [this, done](QNetworkReply *finished) {
         const int status = finished->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         if (status == 401) {
             invalidateSession();
             return;
         }
-        if (finished->error() == QNetworkReply::NoError && (status == 200 || status == 204))
-            Q_EMIT remoteSubtitleDownloaded(itemId, subtitleId);
-        else
-            Q_EMIT remoteSubtitleDownloadFailed(itemId, subtitleId, status);
+        QJsonObject item;
+        if (status != 200 || finished->error() != QNetworkReply::NoError
+            || !parseObject(finished, &item)) {
+            done(std::nullopt);
+            return;
+        }
+        ExternalSubtitles found;
+        for (const QJsonValue &value : item.value(QStringLiteral("MediaStreams")).toArray()) {
+            const QJsonObject stream = value.toObject();
+            if (stream.value(QStringLiteral("Type")).toString() == QLatin1String("Subtitle")
+                && stream.value(QStringLiteral("IsExternal")).toBool()) {
+                ++found.count;
+                found.languages << stream.value(QStringLiteral("Language")).toString().toLower();
+            }
+        }
+        done(found);
     });
-    return true;
+}
+
+void JellyfinClient::waitForSavedSubtitle(const QString &itemId, const QString &subtitleId,
+                                          quint64 serial, const ExternalSubtitles &before,
+                                          const QString &language, int attempt)
+{
+    const quint64 generation = m_generation;
+    QTimer::singleShot(
+        m_subtitleSavePollMs, this,
+        [this, itemId, subtitleId, serial, before, language, attempt, generation] {
+            if (serial != m_subtitleSaveSerial || generation != m_generation || !isAuthenticated())
+                return;
+            countExternalSubtitles(itemId, [this, itemId, subtitleId, serial, before, language,
+                                            attempt](std::optional<ExternalSubtitles> now) {
+                if (serial != m_subtitleSaveSerial)
+                    return;
+                if (now && now->count > before.count) {
+                    Q_EMIT remoteSubtitleDownloaded(itemId, subtitleId);
+                } else if (attempt < m_subtitleSaveAttempts) {
+                    waitForSavedSubtitle(itemId, subtitleId, serial, before, language, attempt + 1);
+                } else if (!language.isEmpty() && before.languages.contains(language.toLower())) {
+                    // The server names a downloaded file after the video and its language: one more in a language the item has replaces that file, and the count stays (inferred from 12.4's naming)
+                    Q_EMIT remoteSubtitleDownloaded(itemId, subtitleId);
+                } else {
+                    Q_EMIT remoteSubtitleNotSaved(itemId, subtitleId);
+                }
+            });
+        });
 }
 
 QUrl JellyfinClient::imageUrl(const QString &itemId, const QString &imageType, int maxWidth,
@@ -2078,6 +2175,8 @@ bool JellyfinClient::fetchUserViews()
     QUrl url = endpoint(QStringLiteral("/UserViews"));
     QUrlQuery query;
     query.addQueryItem(QStringLiteral("userId"), m_userId);
+    // Without it 12.4 leaves out the libraries the user hid from Home (MyMediaExcludes): they are still libraries, only the Home tiles drop them, on the client
+    query.addQueryItem(QStringLiteral("includeHidden"), QStringLiteral("true"));
     url.setQuery(query);
     QNetworkReply *reply = m_network.get(requestFor(url, true));
     attach(reply, m_generation, [this](QNetworkReply *finished) {
@@ -2172,7 +2271,9 @@ bool JellyfinClient::fetchMediaSegments(const QString &itemId)
     const quint64 serial = ++m_segmentsSerial;
     QUrl url = endpoint(QStringLiteral("/MediaSegments/") + itemId);
     QUrlQuery query;
-    query.addQueryItem(QStringLiteral("includeSegmentTypes"), QStringLiteral("Intro,Recap,Outro"));
+    // One parameter per type: 12.4 answers 400 to the comma-joined list (live, 2026-11-19)
+    for (const char *type : {"Intro", "Recap", "Outro"})
+        query.addQueryItem(QStringLiteral("includeSegmentTypes"), QString::fromLatin1(type));
     url.setQuery(query);
     QNetworkReply *reply = m_network.get(requestFor(url, true));
     attach(reply, m_generation, [this, itemId, serial](QNetworkReply *finished) {
@@ -2528,6 +2629,7 @@ bool JellyfinClient::verifySession()
         m_isAdministrator = userIsAdministrator(me);
         m_canDownload = userCanDownload(me);
         m_canManageSubtitles = userCanManageSubtitles(me);
+        m_canTranscode = userCanTranscode(me);
         m_syncPlayAccess = userSyncPlayAccess(me);
         Q_EMIT userProfileRefreshed(m_userId, m_userName, m_userImageTag);
     });
@@ -2827,6 +2929,7 @@ void JellyfinClient::clearToken()
     m_isAdministrator = false;
     m_canDownload = false;
     m_canManageSubtitles = false;
+    m_canTranscode = false;
     m_syncPlayAccess.clear();
     if (hadToken)
         Q_EMIT credentialsCleared();
@@ -2932,6 +3035,11 @@ QString JellyfinClient::userImageTag() const
 bool JellyfinClient::isAdministrator() const
 {
     return m_isAdministrator;
+}
+
+bool JellyfinClient::canTranscode() const
+{
+    return m_state == State::Authenticated && m_canTranscode;
 }
 
 bool JellyfinClient::canManageSubtitles() const

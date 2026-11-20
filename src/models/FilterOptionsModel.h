@@ -11,7 +11,7 @@
 #include <vector>
 
 namespace Kinefin {
-// The values a library can be filtered by, from two sources that load and fail on their own. `GET /Items/Filters2` gives the genres (the rows of the list model: a genre id, the hex id that goes on the wire in `genreIds`, and its name) and the tags (plain texts, no ids); `GET /Items/Filters` (the legacy endpoint) gives the official ratings and the production years, and a server without it only hides those two sections (`legacyStatus` Unavailable) without touching the other facets. Everything here is server text: render it as plain text, never as a control's text. A facet is available once its source answered with at least one valid value; invalid ids, empty or unfit names and duplicates are dropped, names are capped and every facet holds at most `MaxOptions` (genres) or `MaxFacetOptions` (the others) values. Tag and rating texts live in memory only. Each instance owns one channel, given at construction and used in the `Filters` and `FiltersLegacy` families: never share it with another consumer, and only this channel's answers and failures count. The model empties itself when the client loses its credentials
+// The values a library can be filtered by, from two sources that load and fail on their own. `GET /Items/Filters2` gives the genres (the rows of the list model: a genre id, the hex id that goes on the wire in `genreIds`, and its name) and the tags (plain texts, no ids); `GET /Items/Filters` (the legacy endpoint) gives the official ratings and the production years, and a server without it only hides those two sections (`legacyStatus` Unavailable) without touching the other facets. Everything here is server text: render it as plain text, never as a control's text. A facet is available once its source answered with at least one valid value; invalid ids, empty or unfit names and duplicates are dropped, names are capped and every facet holds at most `MaxOptions` (genres), `MaxTagOptions` (tags) or `MaxFacetOptions` (ratings and years) values. Tag and rating texts live in memory only. Each instance owns one channel, given at construction and used in the `Filters` and `FiltersLegacy` families: never share it with another consumer, and only this channel's answers and failures count. The model empties itself when the client loses its credentials
 class FilterOptionsModel final : public QAbstractListModel {
     Q_OBJECT
     // The genre and tag source
@@ -23,6 +23,7 @@ class FilterOptionsModel final : public QAbstractListModel {
     Q_PROPERTY(bool ratingsAvailable READ ratingsAvailable NOTIFY optionsChanged)
     Q_PROPERTY(bool yearsAvailable READ yearsAvailable NOTIFY optionsChanged)
     Q_PROPERTY(QStringList tags READ tags NOTIFY optionsChanged)
+    Q_PROPERTY(int tagCount READ tagCount NOTIFY optionsChanged)
     Q_PROPERTY(QStringList officialRatings READ officialRatings NOTIFY optionsChanged)
     Q_PROPERTY(QList<int> years READ years NOTIFY optionsChanged)
 
@@ -34,6 +35,8 @@ class FilterOptionsModel final : public QAbstractListModel {
 
     static constexpr int MaxOptions = 500;
     static constexpr int MaxNameLength = 128;
+    // The tags the filter dialog lists while no search narrows them
+    static constexpr int MaxShownTags = 300;
 
     // A genre name from the server: cut to MaxNameLength without splitting a surrogate pair, then trimmed
     static QString cappedName(const QString &name);
@@ -57,6 +60,9 @@ class FilterOptionsModel final : public QAbstractListModel {
     bool yearsAvailable() const { return m_legacyStatus == Ready && !m_years.isEmpty(); }
     bool contains(const QString &genreId) const;
     QStringList tags() const { return m_tags; }
+    int tagCount() const { return int(m_tags.size()); }
+    // The positions in tags() to list for `search`: the tags that hold the trimmed text (case-insensitive), or the first MaxShownTags when it is empty, plus the tags in `keep`, in the server's order
+    Q_INVOKABLE QList<int> tagRows(const QString &search, const QStringList &keep) const;
     QStringList officialRatings() const { return m_officialRatings; }
     QList<int> years() const { return m_years; }
 

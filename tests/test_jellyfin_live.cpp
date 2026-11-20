@@ -19,6 +19,7 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QPointer>
 #include <QRegularExpression>
 #include <QScopeGuard>
 #include <QSignalSpy>
@@ -1258,6 +1259,8 @@ class FixtureProxy : public QObject {
         m_pacer.setInterval(1000 / PacerTicksPerSecond);
         connect(&m_pacer, &QTimer::timeout, this, &FixtureProxy::pace);
     }
+    // The members go before the sockets the listener and this object own: a socket closing then would run `retire` on a destroyed m_downOf, so the sockets lose their slots first
+    ~FixtureProxy() override { cut(); }
 
     bool start(const QUrl &upstream, const QByteArray &prefix = {})
     {
@@ -1395,14 +1398,28 @@ class FixtureProxy : public QObject {
                 QObject::connect(down, &QAbstractSocket::bytesWritten, down,
                                  [this, up, down] { pump(up, down); });
             // Either side's close tears both down together: the survivor must never hold a dangling peer. removeOne compares pointers only, so a half-destroyed pair is still safe to unregister
-            const auto retire = [this, down, up] {
-                down->close();
-                up->close();
-                down->deleteLater();
-                up->deleteLater();
-                m_sockets.removeOne(down);
-                m_sockets.removeOne(up);
-                m_downOf.remove(up);
+            const auto retire = [this, down = QPointer<QTcpSocket>(down),
+                                 up = QPointer<QTcpSocket>(up)] {
+                // A server that answers and closes (ffmpeg asks for Connection: close) leaves its answer in `up` while a throttle holds it: the client gets that tail before the pair closes, and its socket closes only once it wrote it
+                if (up && down && up->bytesAvailable() > 0
+                    && down->state() == QAbstractSocket::ConnectedState)
+                    relay(up, down, -1);
+                m_sockets.removeOne(down.data());
+                m_sockets.removeOne(up.data());
+                m_downOf.remove(up.data());
+                if (up) {
+                    up->close();
+                    up->deleteLater();
+                }
+                if (!down)
+                    return;
+                if (down->bytesToWrite() > 0 && down->state() == QAbstractSocket::ConnectedState) {
+                    connect(down, &QAbstractSocket::disconnected, down, &QObject::deleteLater);
+                    down->disconnectFromHost();
+                } else {
+                    down->close();
+                    down->deleteLater();
+                }
             };
             QObject::connect(down, &QAbstractSocket::disconnected, this, retire);
             QObject::connect(up, &QAbstractSocket::disconnected, this, retire);
@@ -1596,6 +1613,11 @@ void TestJellyfinLive::playerFallsBackOnAThrottledLink()
     QVERIFY2(middle > 600 * second, "the film is shorter than 20 minutes");
     // Without a renderer mpv plays the audio only and reads the video past on the wire, so the cache holds minutes of audio in 10 MiB: a cache of 1 MiB, filled again by that seek, runs dry in seconds
     engine->setMpvProperty(QStringLiteral("demuxer-max-bytes"), QStringLiteral("1MiB"));
+    // mpv's own log for a run that needs the reason of an end-file error; it holds stream URLs with their key, so it is read redacted
+    if (const QString log = qEnvironmentVariable("KINEFIN_LIVE_MPV_LOG"); !log.isEmpty()) {
+        engine->setMpvProperty(QStringLiteral("log-file"), log);
+        engine->setMpvProperty(QStringLiteral("msg-level"), QStringLiteral("all=v"));
+    }
     controller.seek(middle);
     QTRY_VERIFY_WITH_TIMEOUT(controller.positionTicks() > middle && playing(), 60000);
     QTest::qWait(25000);

@@ -104,6 +104,7 @@ class FakeJellyfin {
         policy.insert(QStringLiteral("IsAdministrator"), administratorValue(account));
         policy.insert(QStringLiteral("EnableContentDownloading"), canDownloadValue());
         policy.insert(QStringLiteral("EnableSubtitleManagement"), canManageSubtitlesValue());
+        policy.insert(QStringLiteral("EnableVideoPlaybackTranscoding"), canTranscode);
         if (!syncPlayAccess.isEmpty())
             policy.insert(QStringLiteral("SyncPlayAccess"), syncPlayAccess);
         policedUser.insert(QStringLiteral("Policy"), policy);
@@ -158,13 +159,16 @@ class FakeJellyfin {
     {
         return canManageSubtitlesRaw ? *canManageSubtitlesRaw : QJsonValue(canManageSubtitles);
     }
+    // `Policy.EnableVideoPlaybackTranscoding` of every user: what the Quality submenu needs
+    bool canTranscode = true;
     // `Policy.SyncPlayAccess` of every user (the login reply and /Users/Me); empty leaves the field out
     QString syncPlayAccess;
     QJsonObject policyOf(const FakeUser *user) const
     {
         QJsonObject policy{{QStringLiteral("IsAdministrator"), administratorValue(user)},
                            {QStringLiteral("EnableContentDownloading"), canDownloadValue()},
-                           {QStringLiteral("EnableSubtitleManagement"), canManageSubtitlesValue()}};
+                           {QStringLiteral("EnableSubtitleManagement"), canManageSubtitlesValue()},
+                           {QStringLiteral("EnableVideoPlaybackTranscoding"), canTranscode}};
         if (!syncPlayAccess.isEmpty())
             policy.insert(QStringLiteral("SyncPlayAccess"), syncPlayAccess);
         return policy;
@@ -261,6 +265,11 @@ class FakeJellyfin {
     int remoteSubtitleDownloadStatus = 204;
     QList<QByteArray> remoteSubtitleSearches;
     QList<QByteArray> remoteSubtitleDownloads;
+    // The item's external subtitle streams as `fields=MediaStreams` lists them; -1 serves no such route (the item cannot be read). A 2xx download adds one, unless the server could not save it, and only after that many reads, as 12.4's queued refresh does
+    int externalSubtitleStreams = -1;
+    bool remoteSubtitleSaves = true;
+    int remoteSubtitleVisibleAfterReads = 0;
+    int mediaStreamsReads = 0;
     struct HeldDownload {
         QTcpSocket *socket = nullptr;
         int status = 0;
@@ -287,6 +296,7 @@ class FakeJellyfin {
     // Every plain HTTP request that was parsed, whatever the route (a refused image request must leave this at 0)
     int requestCount = 0;
     QByteArray lastViewsAuth;
+    QByteArray lastViewsRoute;
     QByteArray lastLoginAuth;
     // PlaybackInfo: the fixture to answer with, or a status / raw body override
     QString playbackInfoFixture = QStringLiteral("playbackinfo_direct");
@@ -655,6 +665,8 @@ class FakeJellyfin {
     }
 
   private:
+    bool m_subtitleSavePending = false;
+    int m_subtitleReadsUntilVisible = 0;
     struct HeldPlaylistWrite {
         QPointer<QTcpSocket> socket;
         int status = 204;
@@ -774,6 +786,10 @@ class FakeJellyfin {
         }
         if (method == "POST") {
             remoteSubtitleDownloads.append(parts.last());
+            if (remoteSubtitleDownloadStatus / 100 == 2 && remoteSubtitleSaves) {
+                m_subtitleSavePending = true;
+                m_subtitleReadsUntilVisible = remoteSubtitleVisibleAfterReads;
+            }
             respond(socket, remoteSubtitleDownloadStatus, {});
             return true;
         }
@@ -1669,6 +1685,12 @@ class FakeJellyfin {
         if (method == "GET" && route.contains("/MediaSegments/")) {
             ++mediaSegmentsRequests;
             mediaSegmentsAuth = authorization;
+            // As 12.4 does: a comma-joined list of segment types is a 400, one parameter per type is not
+            if (route.contains("includeSegmentTypes=Intro%2C")
+                || route.contains("includeSegmentTypes=Intro,")) {
+                respond(socket, 400, QByteArray());
+                return;
+            }
             respond(socket, mediaSegmentsStatus,
                     mediaSegmentsStatus == 200 ? mediaSegmentsBody : QByteArray());
             return;
@@ -1688,6 +1710,28 @@ class FakeJellyfin {
             trickplayTileAuth = authorization;
             respond(socket, trickplayTileStatus,
                     trickplayTileStatus == 200 ? trickplayTileBody : QByteArray());
+            return;
+        }
+        if (method == "GET" && route.contains("/Users/") && route.contains("/Items/")
+            && route.contains("fields=MediaStreams") && externalSubtitleStreams >= 0) {
+            ++mediaStreamsReads;
+            if (m_subtitleSavePending && m_subtitleReadsUntilVisible-- <= 0) {
+                m_subtitleSavePending = false;
+                ++externalSubtitleStreams;
+            }
+            QJsonArray streams{QJsonObject{{QStringLiteral("Type"), QStringLiteral("Video")},
+                                           {QStringLiteral("Index"), 0}},
+                               QJsonObject{{QStringLiteral("Type"), QStringLiteral("Subtitle")},
+                                           {QStringLiteral("Index"), 1},
+                                           {QStringLiteral("IsExternal"), false}}};
+            for (int index = 0; index < externalSubtitleStreams; ++index)
+                streams.append(QJsonObject{{QStringLiteral("Type"), QStringLiteral("Subtitle")},
+                                           {QStringLiteral("Index"), 2 + index},
+                                           {QStringLiteral("IsExternal"), true}});
+            respondBytes(socket, 200,
+                         QJsonDocument(QJsonObject{{QStringLiteral("MediaStreams"), streams}})
+                             .toJson(QJsonDocument::Compact),
+                         "Content-Type: application/json\r\n");
             return;
         }
         if (method == "GET" && route.contains("/Users/") && route.contains("/Items/")
@@ -1721,6 +1765,7 @@ class FakeJellyfin {
         if (method == "GET" && route.contains("/UserViews?")) {
             ++viewRequests;
             lastViewsAuth = authorization;
+            lastViewsRoute = route;
             if (holdViews)
                 return;
             if (redirectViewsOffHost) {

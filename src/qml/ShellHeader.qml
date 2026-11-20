@@ -118,6 +118,11 @@ Item {
         searchField.forceActiveFocus(Qt.TabFocusReason);
     }
 
+    // A gamepad's Start opens the main menu where its button stands
+    function openMainMenu() {
+        mainMenu.open();
+    }
+
     // Move between the root tabs in their visible order, wrapping (a library type may be absent). Detail pages belong to their root tab; using the shortcut returns to the selected tab, just like clicking its header button
     function switchRelativeTab(step) {
         if (!signedIn)
@@ -1025,5 +1030,6 @@ Item {
         id: shortcutsDialog
         objectName: "shortcutsDialog"
         tabActions: root.tabActions
+        gamepad: root.shell.gamepad ?? null
     }
 }

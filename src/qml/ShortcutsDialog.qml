@@ -11,7 +11,10 @@ Kirigami.Dialog {
 
     // The tab actions of the shell: Ctrl+N is the position among the visible tabs, so the rows follow the same list
     property var tabActions: []
+    // The SDL3 gamepads of the shell; null in shell tests and when SDL is off
+    property var gamepad: null
     readonly property var tabRows: tabActions.filter(action => action.visible).map((action, index) => ["Ctrl+" + (index + 1), action.text])
+    readonly property var faceLabels: gamepad && gamepad.connectedCount > 0 ? gamepad.faceLabels : ["A", "B", "X", "Y"]
 
     readonly property var rows: [
         ["Ctrl+Q", i18nc("@item:intable shortcut action", "Quit Kinefin")],
@@ -45,7 +48,7 @@ Kirigami.Dialog {
         ["-", i18nc("@item:intable shortcut action", "Volume Down")],
         ["F", i18nc("@item:intable shortcut action", "Toggle Full Screen")],
         ["F11", i18nc("@item:intable shortcut action", "Toggle Full Screen")],
-        ["Escape", i18nc("@item:intable shortcut action", "Cancel Up Next, Leave Full Screen or Go Back")],
+        ["Escape", i18nc("@item:intable shortcut action", "Cancel Up Next, Leave Full Screen, or Go Back")],
         ["Return", i18nc("@item:intable shortcut action", "Play the Up Next Item Now")],
         ["Left", i18nc("@item:intable shortcut action", "Skip Back 10 Seconds")],
         ["Right", i18nc("@item:intable shortcut action", "Skip Forward 10 Seconds")],
@@ -55,6 +58,31 @@ Kirigami.Dialog {
         ["PgUp", i18nc("@item:intable shortcut action", "Next Chapter")],
         ["I", i18nc("@item:intable shortcut action", "Set the Clip Start")],
         ["O", i18nc("@item:intable shortcut action", "Set the Clip End")]
+    ]
+    // The pad's labels are its own (A, B, X, Y or Cross, Circle, Square, Triangle); the dialog shows these groups only while a pad is connected
+    readonly property var gamepadRows: [
+        [i18nc("@item:intable game controller button", "D-pad or Left Stick"), i18nc("@item:intable game controller control", "Move the Focus")],
+        [faceLabels[0], i18nc("@item:intable game controller control", "Open or Activate")],
+        [faceLabels[1], i18nc("@item:intable shortcut action", "Go Back")],
+        [faceLabels[2], i18nc("@item:intable shortcut action", "Open Item Menu")],
+        [faceLabels[3], i18nc("@item:intable shortcut action", "Play or Pause")],
+        [i18nc("@item:intable game controller button", "Start"), i18nc("@item:intable game controller control", "Open the Main Menu")],
+        [i18nc("@item:intable game controller button", "Select"), i18nc("@item:intable shortcut action", "Expand Player")],
+        [i18nc("@item:intable game controller button", "Shoulder Buttons"), i18nc("@item:intable game controller control", "Previous or Next Tab")],
+        [i18nc("@item:intable game controller button", "Triggers"), i18nc("@item:intable game controller control", "Previous or Next Chapter")],
+        [i18nc("@item:intable game controller button", "Right Stick"), i18nc("@item:intable shortcut action", "Volume Up or Down")]
+    ]
+    readonly property var gamepadPlayerRows: [
+        [i18nc("@item:intable game controller button", "D-pad or Left Stick"), i18nc("@item:intable game controller control", "Skip 10 Seconds or 1 Minute")],
+        [faceLabels[0], i18nc("@item:intable game controller control", "Play or Pause, or Start Up Next")],
+        [faceLabels[1], i18nc("@item:intable shortcut action", "Cancel Up Next, Leave Full Screen, or Go Back")],
+        [faceLabels[2], i18nc("@item:intable shortcut action", "Open the Player Menu")],
+        [faceLabels[3], i18nc("@item:intable shortcut action", "Play or Pause")],
+        [i18nc("@item:intable game controller button", "Start"), i18nc("@item:intable shortcut action", "Toggle Full Screen")],
+        [i18nc("@item:intable game controller button", "Select"), i18nc("@item:intable shortcut action", "Expand Player")],
+        [i18nc("@item:intable game controller button", "Shoulder Buttons"), i18nc("@item:intable game controller control", "Previous or Next Item")],
+        [i18nc("@item:intable game controller button", "Triggers"), i18nc("@item:intable game controller control", "Previous or Next Chapter")],
+        [i18nc("@item:intable game controller button", "Right Stick"), i18nc("@item:intable shortcut action", "Volume Up or Down")]
     ]
 
     // The keys of a combination and the "+" between them; a "+" on its own or at the end ("Ctrl++") is a key
@@ -147,6 +175,26 @@ Kirigami.Dialog {
             }
             Repeater {
                 model: dialog.playerRows
+                delegate: shortcutRow
+            }
+            Kirigami.Heading {
+                level: 4
+                Layout.topMargin: Kirigami.Units.largeSpacing
+                visible: dialog.gamepad && dialog.gamepad.connectedCount > 0
+                text: i18nc("@title:group game controller buttons", "Game Controller")
+            }
+            Repeater {
+                model: dialog.gamepad && dialog.gamepad.connectedCount > 0 ? dialog.gamepadRows : []
+                delegate: shortcutRow
+            }
+            Kirigami.Heading {
+                level: 4
+                Layout.topMargin: Kirigami.Units.largeSpacing
+                visible: dialog.gamepad && dialog.gamepad.connectedCount > 0
+                text: i18nc("@title:group game controller buttons", "Game Controller in the Player")
+            }
+            Repeater {
+                model: dialog.gamepad && dialog.gamepad.connectedCount > 0 ? dialog.gamepadPlayerRows : []
                 delegate: shortcutRow
             }
         }

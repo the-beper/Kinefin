@@ -20,6 +20,8 @@ Kirigami.ApplicationWindow {
     readonly property bool groupRouting: groupJoined && syncPlay.following && !syncPlay.offline
     // The remote-control socket, provided by the executable; null in shell tests
     property var remoteInput: null
+    // SDL3 gamepads, provided by the executable; null in shell tests and when SDL is off
+    property var gamepad: null
     // "fullscreen" or "windowed" when a command line flag decides this run; empty to follow the setting. Changing the setting from the Settings page ends the override
     property string startupWindowMode: ""
     // "settings" or "about": the Settings page or the About dialog to open right after the shell loads (the smoke test uses it to render what needs no server)
@@ -260,6 +262,27 @@ Kirigami.ApplicationWindow {
             break;
         case "home":
             goHome();
+            break;
+        case "previoustab":
+        case "nexttab":
+            if (playbackMode === "full")
+                playerAction(name === "previoustab" ? "previous" : "next");
+            else
+                shellHeader.switchRelativeTab(name === "previoustab" ? -1 : 1);
+            break;
+        case "previouschapter":
+        case "nextchapter":
+            if (playbackMode !== "none" && player)
+                player.stepChapter(name === "nextchapter" ? 1 : -1);
+            break;
+        case "mainmenu":
+            if (playbackMode === "full")
+                playerAction("togglefullscreen");
+            else if (!popupOpen())
+                shellHeader.openMainMenu();
+            break;
+        case "expandplayer":
+            expandPlayer();
             break;
         default:
             playerAction(name);
@@ -763,9 +786,15 @@ Kirigami.ApplicationWindow {
         function onQualityUnavailable() {
             window.showPassiveNotification(i18n("No lower quality available. Playback continues at the current quality"));
         }
+        function onQualityChangeFailed() {
+            window.showPassiveNotification(i18n("This quality is not available: playback goes on at the current one"));
+        }
         // A clip or GIF saved while the user is anywhere in the app
         function onClipSaved(fileName, gif) {
             window.showPassiveNotification(gif ? i18n("GIF saved: %1", fileName) : i18n("Clip saved: %1", fileName));
+        }
+        function onClipMarkChanged(text) {
+            window.showPassiveNotification(text);
         }
         function onClipSaveFailed(noSpace) {
             window.showPassiveNotification(noSpace ? i18n("The clip could not be saved: not enough free disk space") : i18n("The clip could not be saved"));
@@ -1550,6 +1579,10 @@ Kirigami.ApplicationWindow {
         function onSubtitleStreamRequested(index) {
             if (window.playbackMode !== "none")
                 window.player?.selectSubtitleStreamIndex(index);
+        }
+        function onQualityRequested(bitsPerSecond) {
+            if (window.playbackMode !== "none")
+                window.player?.setQualityBitrate(bitsPerSecond);
         }
         function onRepeatModeRequested(mode) {
             window.player?.setRepeatMode(mode);

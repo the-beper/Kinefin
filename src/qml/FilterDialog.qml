@@ -5,7 +5,7 @@ import QtQuick.Controls as Controls
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 
-// The filters of a library list: one list of sections (status, features, video quality and type, series status, episodes, genres, tags, ratings, years), each shown only when the open scope offers it and its values are known. The choices are a draft that Apply writes to `library.filters` in one go; the genres, tags, ratings and years come from the server and are shown as plain text
+// The filters of a library list: one list of sections (status, features, video quality and type, series status, episodes, genres, tags, ratings, years), each shown only when the open scope offers it and its values are known. The choices are a draft that Apply writes to `library.filters` in one go; the genres, tags, ratings and years come from the server and are shown as plain text. The tags section is one row with a search field and a list of its own: a server can have thousands of tags, so the list shows the first ones and the search finds the rest
 Kirigami.Dialog {
     id: dialog
     objectName: "filterDialog"
@@ -21,6 +21,11 @@ Kirigami.Dialog {
     property int optionsRevision: 0
     readonly property bool draftIsEmpty: isEmptyFilters(draft)
     readonly property var entries: buildEntries()
+    // The search of the tags section and the tags the draft held when it last changed: a checked tag stays listed and checked whatever the search says, and a tag taken off stays until the next search so that the row does not vanish under the pointer
+    property string tagSearch: ""
+    property var keptTags: []
+    readonly property var tagRows: buildTagRows()
+    readonly property string tagsNote: buildTagsNote()
 
     title: i18n("Filters")
     padding: 0
@@ -293,7 +298,7 @@ Kirigami.Dialog {
             }
             if (options.tagsAvailable) {
                 heading(i18nc("@title:group section of the filter dialog", "Tags"));
-                options.tags.forEach((tag, at) => option("tags", tag, "tags_" + at));
+                rows.push({ kind: "tags", key: "tags" });
             }
         }
         const legacy = options.legacyStatus;
@@ -313,13 +318,53 @@ Kirigami.Dialog {
         return rows;
     }
 
+    // The tag options of the tags section: `FilterOptionsModel.tagRows` picks the places of the server's list to show, the row keys keep those places so that a row keeps its name through a search
+    function buildTagRows() {
+        optionsRevision;
+        const tags = options.tags;
+        const rows = [];
+        options.tagRows(tagSearch, keptTags).forEach(at => rows.push({ kind: "option", facet: "tags", value: tags[at], label: tags[at], key: "tags_" + at }));
+        return rows;
+    }
+
+    // The line under the tag list: how many tags the first rows leave out, or that the search found none
+    function buildTagsNote() {
+        optionsRevision;
+        if (tagSearch.trim() !== "")
+            return tagRows.length === 0 ? i18n("No tags match the search") : "";
+        const hidden = options.tagCount - tagRows.length;
+        return hidden > 0 ? i18np("%1 more tag: use the search to find it", "%1 more tags: use the search to find them", hidden) : "";
+    }
+
+    onTagSearchChanged: keptTags = draft.tags.slice()
+
     // The next row that is an option, from the current one in the direction of `step`
+    // The next row the arrows stop on: an option, or the tags section, which the arrows enter and leave like the options around it
     function nextOption(from, step) {
         for (let i = from + step; i >= 0 && i < entries.length; i += step) {
-            if (entries[i].kind === "option")
+            if (entries[i].kind === "option" || entries[i].kind === "tags")
                 return i;
         }
         return from;
+    }
+    function moveInList(step) {
+        const next = nextOption(list.currentIndex, step);
+        if (next === list.currentIndex)
+            return;
+        list.currentIndex = next;
+        if (entries[next].kind === "tags") {
+            list.positionViewAtIndex(next, ListView.Contain);
+            list.currentItem?.item?.enter(step < 0);
+        }
+    }
+    // From the tags section back to the options above or below it
+    function leaveTags(tagsIndex, step) {
+        const next = nextOption(tagsIndex, step);
+        if (next === tagsIndex)
+            return false;
+        list.currentIndex = next;
+        list.forceActiveFocus(step < 0 ? Qt.BacktabFocusReason : Qt.TabFocusReason);
+        return true;
     }
 
     Connections {
@@ -331,6 +376,8 @@ Kirigami.Dialog {
 
     onAboutToShow: {
         draft = copyOf(library.filters);
+        tagSearch = "";
+        keptTags = draft.tags.slice();
         list.model = Qt.binding(() => dialog.entries);
     }
     onClosed: list.model = []
@@ -362,8 +409,8 @@ Kirigami.Dialog {
             if (entry?.kind === "option")
                 dialog.toggle(entry);
         }
-        Keys.onUpPressed: list.currentIndex = dialog.nextOption(list.currentIndex, -1)
-        Keys.onDownPressed: list.currentIndex = dialog.nextOption(list.currentIndex, 1)
+        Keys.onUpPressed: dialog.moveInList(-1)
+        Keys.onDownPressed: dialog.moveInList(1)
         Keys.onReturnPressed: toggleCurrent()
         Keys.onEnterPressed: toggleCurrent()
         Keys.onSpacePressed: toggleCurrent()
@@ -375,7 +422,25 @@ Kirigami.Dialog {
             required property int index
 
             width: ListView.view ? ListView.view.width : implicitWidth
-            sourceComponent: row.modelData.kind === "heading" ? headingComponent : (row.modelData.kind === "state" ? stateComponent : optionComponent)
+            // What the option rows of the list and of the tags section share: the entry, whether it is the current one and what a click does
+            readonly property var entry: modelData
+            readonly property bool current: ListView.isCurrentItem && list.activeFocus
+            function activate() {
+                list.currentIndex = index;
+                dialog.toggle(modelData);
+            }
+
+            sourceComponent: {
+                switch (row.modelData.kind) {
+                case "heading":
+                    return headingComponent;
+                case "state":
+                    return stateComponent;
+                case "tags":
+                    return tagsComponent;
+                }
+                return optionComponent;
+            }
 
             Component {
                 id: headingComponent
@@ -421,29 +486,28 @@ Kirigami.Dialog {
                 }
             }
 
+            // The row of an option, in the list or in the tags section: its Loader (the parent) has the `entry`, whether it is `current` and what `activate()` does
             Component {
                 id: optionComponent
 
                 Controls.ItemDelegate {
                     id: option
-                    objectName: "filterOption_" + row.modelData.key
+                    objectName: "filterOption_" + host.entry.key
 
-                    readonly property bool selected: dialog.isSelected(row.modelData)
+                    readonly property var host: parent
+                    readonly property bool selected: dialog.isSelected(host.entry)
                     // A value that would make the query too long for the server
-                    readonly property bool blocked: !selected && !dialog.canAdd(row.modelData)
+                    readonly property bool blocked: !selected && !dialog.canAdd(host.entry)
                     readonly property string hint: blocked ? i18nc("@info hint on a filter value that cannot be added", "Too many filters selected: remove one to add this") : ""
 
                     enabled: !blocked
                     focusPolicy: Qt.NoFocus
-                    highlighted: row.ListView.isCurrentItem && list.activeFocus
-                    onClicked: {
-                        list.currentIndex = row.index;
-                        dialog.toggle(row.modelData);
-                    }
+                    highlighted: host.current
+                    onClicked: host.activate()
 
                     // The label is server text for genres, tags and ratings: the control has no text of its own, so no mnemonic or markup applies
                     Accessible.role: Accessible.CheckBox
-                    Accessible.name: row.modelData.label
+                    Accessible.name: host.entry.label
                     Accessible.checkable: true
                     Accessible.checked: selected
                     Accessible.description: hint
@@ -456,27 +520,135 @@ Kirigami.Dialog {
                             checked: option.selected
                             Accessible.ignored: true
                             // Only a user click edits the draft: a changed selection also updates `checked`, which emits toggled and must not invert the selection again
-                            onClicked: {
-                                list.currentIndex = row.index;
-                                dialog.toggle(row.modelData);
-                            }
+                            onClicked: option.host.activate()
                         }
 
                         Controls.Label {
                             Layout.fillWidth: true
                             elide: Text.ElideRight
                             textFormat: Text.PlainText
-                            text: row.modelData.label
+                            text: host.entry.label
                         }
 
                         Controls.Label {
                             visible: option.blocked
-                            Layout.maximumWidth: row.width / 2
+                            Layout.maximumWidth: option.width / 2
                             elide: Text.ElideRight
                             color: Kirigami.Theme.disabledTextColor
                             textFormat: Text.PlainText
                             text: option.hint
                         }
+                    }
+                }
+            }
+
+            Component {
+                id: tagsComponent
+
+                ColumnLayout {
+                    spacing: Kirigami.Units.smallSpacing
+
+                    // Down from the option above lands on the field, Up from the option below on the last tag
+                    function enter(fromBelow) {
+                        if (fromBelow && tagList.count > 0) {
+                            tagList.currentIndex = tagList.count - 1;
+                            tagList.forceActiveFocus(Qt.BacktabFocusReason);
+                        } else {
+                            tagField.forceActiveFocus(Qt.TabFocusReason);
+                        }
+                    }
+
+                    Kirigami.SearchField {
+                        id: tagField
+                        objectName: "filterTagSearch"
+                        Layout.fillWidth: true
+                        Layout.leftMargin: Kirigami.Units.largeSpacing
+                        Layout.rightMargin: Kirigami.Units.largeSpacing
+                        // The shell owns Ctrl+F: the field's own sequence would make it ambiguous
+                        focusSequences: []
+                        maximumLength: 128
+                        autoAccept: false
+                        placeholderText: i18nc("@info:placeholder", "Search tags")
+                        Accessible.name: i18nc("@info:placeholder", "Search tags")
+                        text: dialog.tagSearch
+                        onTextChanged: {
+                            if (text !== dialog.tagSearch)
+                                dialog.tagSearch = text;
+                        }
+                        Keys.onDownPressed: {
+                            if (tagList.count > 0)
+                                tagList.forceActiveFocus(Qt.TabFocusReason);
+                            else
+                                dialog.leaveTags(row.index, 1);
+                        }
+                        Keys.onUpPressed: dialog.leaveTags(row.index, -1)
+                    }
+
+                    ListView {
+                        id: tagList
+                        objectName: "filterTagList"
+
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: Math.min(contentHeight, Kirigami.Units.gridUnit * 12)
+                        clip: true
+                        boundsBehavior: Flickable.StopAtBounds
+                        activeFocusOnTab: true
+                        currentIndex: 0
+                        model: dialog.tagRows
+                        Accessible.role: Accessible.List
+                        Accessible.name: i18nc("@info accessible name of the list of tags in the filter dialog", "Tag List")
+
+                        Controls.ScrollBar.vertical: Controls.ScrollBar {}
+
+                        function toggleCurrent() {
+                            const entry = dialog.tagRows[tagList.currentIndex];
+                            if (entry)
+                                dialog.toggle(entry);
+                        }
+                        Keys.onUpPressed: {
+                            if (tagList.currentIndex > 0)
+                                tagList.currentIndex--;
+                            else
+                                tagField.forceActiveFocus(Qt.BacktabFocusReason);
+                        }
+                        Keys.onDownPressed: {
+                            if (tagList.currentIndex < tagList.count - 1)
+                                tagList.currentIndex++;
+                            else
+                                dialog.leaveTags(row.index, 1);
+                        }
+                        Keys.onReturnPressed: toggleCurrent()
+                        Keys.onEnterPressed: toggleCurrent()
+                        Keys.onSpacePressed: toggleCurrent()
+
+                        delegate: Loader {
+                            id: tagRow
+
+                            required property var modelData
+                            required property int index
+
+                            readonly property var entry: modelData
+                            readonly property bool current: ListView.isCurrentItem && tagList.activeFocus
+                            function activate() {
+                                tagList.currentIndex = index;
+                                dialog.toggle(modelData);
+                            }
+
+                            width: ListView.view ? ListView.view.width : implicitWidth
+                            sourceComponent: optionComponent
+                        }
+                    }
+
+                    Controls.Label {
+                        objectName: "filterTagsNote"
+                        Layout.fillWidth: true
+                        Layout.leftMargin: Kirigami.Units.largeSpacing
+                        Layout.rightMargin: Kirigami.Units.largeSpacing
+                        visible: text !== ""
+                        wrapMode: Text.Wrap
+                        color: Kirigami.Theme.disabledTextColor
+                        textFormat: Text.PlainText
+                        text: dialog.tagsNote
                     }
                 }
             }

@@ -107,7 +107,14 @@ Kirigami.Page {
     property double popupClosedAt: 0
     function popupGone() {
         popupClosedAt = Date.now();
+        // The page takes the keys again, so Space plays or pauses instead of pressing the button that opened the menu
+        page.forceActiveFocus(Qt.PopupFocusReason);
         wakeChrome();
+    }
+    // Once a popup is fully closed, after Qt put the focus where it wants: the page takes it again unless another popup is open
+    function popupClosed() {
+        if (!page.Window.window?.popupOpen?.())
+            page.forceActiveFocus(Qt.PopupFocusReason);
     }
     // The volume slider pops up centred above the speaker button
     function showVolume() {
@@ -852,6 +859,29 @@ Kirigami.Page {
                             }
                         }
                         Accessible.name: i18n("Playback position")
+                        // The start and the end of the marked range, even alone: the band needs both
+                        Rectangle {
+                            objectName: "playerClipStartMark"
+                            readonly property real fraction: page.player.durationTicks > 0 && page.player.clipStartTicks >= 0 ? Math.min(1, page.player.clipStartTicks / page.player.durationTicks) : 0
+                            visible: page.player.clipStartTicks >= 0
+                            x: timeline.leftPadding + timeline.handle.width / 2 + (timeline.mirrored ? 1 - fraction : fraction) * (timeline.availableWidth - timeline.handle.width)
+                            y: Math.round(timeline.topPadding + (timeline.availableHeight - height) / 2)
+                            width: 2
+                            height: timeline.availableHeight
+                            color: Kirigami.Theme.highlightColor
+                            Accessible.ignored: true
+                        }
+                        Rectangle {
+                            objectName: "playerClipEndMark"
+                            readonly property real fraction: page.player.durationTicks > 0 && page.player.clipEndTicks >= 0 ? Math.min(1, page.player.clipEndTicks / page.player.durationTicks) : 0
+                            visible: page.player.clipEndTicks >= 0
+                            x: timeline.leftPadding + timeline.handle.width / 2 + (timeline.mirrored ? 1 - fraction : fraction) * (timeline.availableWidth - timeline.handle.width)
+                            y: Math.round(timeline.topPadding + (timeline.availableHeight - height) / 2)
+                            width: 2
+                            height: timeline.availableHeight
+                            color: Kirigami.Theme.highlightColor
+                            Accessible.ignored: true
+                        }
                         // The marked clip range, a translucent band under the chapter marks
                         Rectangle {
                             objectName: "playerClipBand"
@@ -1049,6 +1079,7 @@ Kirigami.Page {
         id: audioMenu
         objectName: "playerAudioMenu"
         onAboutToHide: page.popupGone()
+        onClosed: page.popupClosed()
     }
     SubtitleSearchDialog {
         id: subtitleSearchDialog
@@ -1074,6 +1105,9 @@ Kirigami.Page {
         function onRemoteSubtitleDownloadFailed(subtitleId, httpStatus) {
             page.Window.window?.showPassiveNotification(i18n("The subtitle could not be downloaded: check the connection and try again"));
         }
+        function onRemoteSubtitleNotSaved(subtitleId) {
+            page.Window.window?.showPassiveNotification(i18n("The server could not save the subtitle: its administrator can check where the library stores subtitles"));
+        }
         function onNightModePassthroughDisabled() {
             page.Window.window?.showPassiveNotification(i18n("Night mode is on: passthrough is off until it is turned off"));
         }
@@ -1083,11 +1117,13 @@ Kirigami.Page {
         id: subtitlesMenu
         objectName: "playerSubtitlesMenu"
         onAboutToHide: page.popupGone()
+        onClosed: page.popupClosed()
     }
     MoreMenu {
         id: moreMenu
         objectName: "playerMoreMenu"
         onAboutToHide: page.popupGone()
+        onClosed: page.popupClosed()
         leading: [
             Controls.MenuItem {
                 objectName: "playerMoreMiniItem"
@@ -1104,7 +1140,53 @@ Kirigami.Page {
         objectName: "playerContextMenu"
         namePrefix: "playerContext"
         onAboutToHide: page.popupGone()
+        onClosed: page.popupClosed()
         leading: [
+            // The buttons the page shows over the video are reachable by Tab only: the entries come while their button shows, so the Menu key and a pad's West button reach them
+            Controls.MenuItem {
+                objectName: "playerContextSkipItem"
+                visible: skipButton.shown
+                height: visible ? implicitHeight : 0
+                icon.name: "media-skip-forward"
+                text: skipButton.shownLabel
+                onTriggered: { page.player.skipSegment(); page.wakeChrome(); }
+            },
+            Controls.MenuItem {
+                objectName: "playerContextRetryItem"
+                visible: !!page.player.errorText && !!page.player.canRetry
+                height: visible ? implicitHeight : 0
+                icon.name: "view-refresh"
+                text: i18nc("@action:inmenu", "Try Again")
+                onTriggered: page.player.retryPlayback()
+            },
+            Controls.MenuItem {
+                objectName: "playerContextCloseItem"
+                visible: !!page.player.errorText
+                height: visible ? implicitHeight : 0
+                icon.name: "window-close"
+                text: i18nc("@action:inmenu", "Close Player")
+                onTriggered: page.closePlayer()
+            },
+            Controls.MenuItem {
+                objectName: "playerContextCancelClipItem"
+                visible: page.player.clipSaving
+                height: visible ? implicitHeight : 0
+                icon.name: "dialog-cancel"
+                text: page.player.clipSavingGif ? i18nc("@action:inmenu", "Cancel Saving the GIF") : i18nc("@action:inmenu", "Cancel Saving the Clip")
+                onTriggered: page.player.cancelClip()
+            },
+            Controls.MenuItem {
+                objectName: "playerContextSyncPlayItem"
+                visible: page.grouped
+                height: visible ? implicitHeight : 0
+                icon.name: "system-users"
+                text: i18nc("@action:inmenu", "Show SyncPlay Group")
+                onTriggered: page.Window.window?.openSyncPlay()
+            },
+            Controls.MenuSeparator {
+                visible: skipButton.shown || !!page.player.errorText || page.player.clipSaving || page.grouped
+                height: visible ? implicitHeight : 0
+            },
             Controls.MenuItem {
                 objectName: "playerContextPauseItem"
                 text: page.pauseText
@@ -1273,6 +1355,7 @@ Kirigami.Page {
         }
         // The hide timer gives way while the panel is open: it starts again when the panel goes
         onAboutToHide: page.popupGone()
+        onClosed: page.popupClosed()
         ColumnLayout {
             anchors.fill: parent
             Controls.Label { text: i18n("Now Playing Queue"); font.bold: true }
@@ -1535,6 +1618,26 @@ Kirigami.Page {
             AspectItem { namePrefix: moreRoot.namePrefix; mode: "force_16_9_if_4_3"; text: i18nc("@item:inmenu aspect ratio", "Widescreen for 4:3 Video") }
             AspectItem { namePrefix: moreRoot.namePrefix; mode: "noscaling"; text: i18nc("@item:inmenu aspect ratio", "Original Size") }
         }
+        // A server max bit rate for this playback; disabled for local files, groups and without the transcode policy
+        Controls.Menu {
+            id: qualityMenu
+            objectName: moreRoot.namePrefix + "QualityMenu"
+            title: i18n("Quality")
+            icon.name: "speedometer"
+            enabled: page.player.qualityAvailable && !page.player.qualitySwitching
+            Instantiator {
+                model: page.player.qualitySteps
+                delegate: PlainMenuItem {
+                    plainText: modelData.text
+                    checkable: true
+                    autoExclusive: true
+                    checked: modelData.checked
+                    onTriggered: page.player.setQuality(modelData.cap)
+                }
+                onObjectAdded: (index, object) => qualityMenu.insertItem(index, object)
+                onObjectRemoved: (index, object) => qualityMenu.removeItem(object)
+            }
+        }
         // Disabled rather than hidden when the item has none
         Controls.Menu {
             id: chaptersMenu
@@ -1628,10 +1731,22 @@ Kirigami.Page {
                 onTriggered: page.player.markClipEnd()
             }
             Controls.MenuSeparator {}
-            // The range in words, or why neither Save entry can be used
+            // The marks in words, then the reason neither Save entry can be used
             Controls.MenuItem {
                 objectName: moreRoot.namePrefix + "ClipLine"
                 text: page.player.clipLine
+                visible: text.length > 0
+                enabled: false
+            }
+            Controls.MenuItem {
+                objectName: moreRoot.namePrefix + "ClipReason"
+                text: page.player.clipReason
+                visible: text.length > 0
+                enabled: false
+            }
+            Controls.MenuItem {
+                objectName: moreRoot.namePrefix + "ClipLengthReason"
+                text: page.player.clipLengthReason
                 visible: text.length > 0
                 enabled: false
             }

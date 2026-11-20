@@ -190,7 +190,7 @@ class TestKRunner : public QObject {
         QCOMPARE(matches.size(), 6);
         QCOMPARE(matches.at(0).id, kMovie);
         QCOMPARE(matches.at(0).text, QStringLiteral("Arcturus"));
-        QCOMPARE(matches.at(0).iconName, QStringLiteral("video-x-generic"));
+        QCOMPARE(matches.at(0).iconName, QStringLiteral("video-symbolic"));
         QCOMPARE(matches.at(0).categoryRelevance, 30);
         QCOMPARE(matches.at(0).properties.value(QStringLiteral("subtext")).toString(),
                  QStringLiteral("Movie, 2012"));
@@ -204,6 +204,7 @@ class TestKRunner : public QObject {
                  QStringLiteral("Series, 2021"));
         QCOMPARE(matches.at(2).properties.value(QStringLiteral("actions")).toStringList(),
                  QStringList{});
+        QCOMPARE(matches.at(3).text, QStringLiteral("Weightless — Abyss Station"));
         QCOMPARE(matches.at(3).properties.value(QStringLiteral("subtext")).toString(),
                  QStringLiteral("Abyss Station, S2:E6"));
         QCOMPARE(matches.at(4).properties.value(QStringLiteral("subtext")).toString(),

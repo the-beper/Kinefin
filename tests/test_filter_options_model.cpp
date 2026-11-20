@@ -315,7 +315,8 @@ class TestFilterOptionsModel : public QObject {
         f.options.load(kLibrary, QStringLiteral("Movie"));
         QTRY_COMPARE(f.options.status(), FilterOptionsModel::Ready);
         QTRY_COMPARE(f.options.legacyStatus(), FilterOptionsModel::Ready);
-        QCOMPARE(f.options.tags().size(), Kinefin::MaxFacetOptions);
+        // Every tag is kept (up to the memory cap), the ratings and years stay at the facet cap
+        QCOMPARE(f.options.tags().size(), 400);
         QCOMPARE(f.options.officialRatings().size(), Kinefin::MaxFacetOptions);
         QCOMPARE(f.options.years().size(), Kinefin::MaxFacetOptions);
 
@@ -339,6 +340,68 @@ class TestFilterOptionsModel : public QObject {
                      QStringList({QStringLiteral("good"), QStringLiteral("<b>x</b>")}));
         QTRY_COMPARE(f.options.officialRatings(), QStringList({QStringLiteral("PG")}));
         QCOMPARE(f.options.years(), QList<int>({2020, 2019}));
+    }
+
+    void tagsAreKeptUpToTheMemoryCap()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        QJsonArray tags;
+        for (int i = 0; i < Kinefin::MaxTagOptions + 50; ++i)
+            tags.append(QStringLiteral("tag %1").arg(i));
+        f.server.listingRawBody.insert(
+            QStringLiteral("Filters"),
+            QJsonDocument(QJsonObject{{QStringLiteral("Tags"), tags}}).toJson());
+        f.options.load(kLibrary, QStringLiteral("Movie"));
+        QTRY_COMPARE(f.options.status(), FilterOptionsModel::Ready);
+        QCOMPARE(f.options.tags().size(), Kinefin::MaxTagOptions);
+        QCOMPARE(f.options.tagCount(), Kinefin::MaxTagOptions);
+        // The server's order is kept, the ones past the cap are the ones that go
+        QCOMPARE(f.options.tags().constFirst(), QStringLiteral("tag 0"));
+        QCOMPARE(f.options.tags().constLast(),
+                 QStringLiteral("tag %1").arg(Kinefin::MaxTagOptions - 1));
+    }
+
+    void tagRowsListTheFirstTagsAndASearchFindsTheOthers()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        QJsonArray tags;
+        for (int i = 0; i < 2225; ++i)
+            tags.append(QStringLiteral("Tag %1").arg(i, 4, 10, QLatin1Char('0')));
+        tags.append(QStringLiteral("Noir Classics"));
+        f.server.listingRawBody.insert(
+            QStringLiteral("Filters"),
+            QJsonDocument(QJsonObject{{QStringLiteral("Tags"), tags}}).toJson());
+        f.options.load(kLibrary, QStringLiteral("Movie"));
+        QTRY_COMPARE(f.options.status(), FilterOptionsModel::Ready);
+        QCOMPARE(f.options.tagCount(), 2226);
+
+        // No search: the first 300, in the server's order
+        QList<int> rows = f.options.tagRows(QString(), {});
+        QCOMPARE(rows.size(), FilterOptionsModel::MaxShownTags);
+        QCOMPARE(rows.constFirst(), 0);
+        QCOMPARE(rows.constLast(), FilterOptionsModel::MaxShownTags - 1);
+        QCOMPARE(f.options.tagRows(QStringLiteral("  \t"), {}), rows);
+
+        // A search finds the tags past the first 300, whatever the case, and trims its text
+        rows = f.options.tagRows(QStringLiteral("  noIR clas "), {});
+        QCOMPARE(rows, QList<int>({2225}));
+        rows = f.options.tagRows(QStringLiteral("tag 2200"), {});
+        QCOMPARE(rows, QList<int>({2200}));
+        // A search that matches more than 300 lists them all
+        QCOMPARE(f.options.tagRows(QStringLiteral("tag 1"), {}).size(), 1000);
+        QVERIFY(f.options.tagRows(QStringLiteral("nothing like it"), {}).isEmpty());
+
+        // A tag to keep stays listed whether or not the search matches it, once, in the server's order
+        rows = f.options.tagRows(QStringLiteral("noir"), {QStringLiteral("Tag 0005")});
+        QCOMPARE(rows, QList<int>({5, 2225}));
+        rows = f.options.tagRows(QStringLiteral("tag 0005"), {QStringLiteral("Tag 0005")});
+        QCOMPARE(rows, QList<int>({5}));
+        // Without a search a kept tag past the first 300 comes after them
+        rows = f.options.tagRows(QString(), {QStringLiteral("Tag 1500"), QStringLiteral("gone")});
+        QCOMPARE(rows.size(), FilterOptionsModel::MaxShownTags + 1);
+        QCOMPARE(rows.constLast(), 1500);
     }
 
     void anotherChannelsLegacyAnswersAreIgnored()

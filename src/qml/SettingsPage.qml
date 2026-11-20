@@ -113,25 +113,15 @@ Kirigami.Page {
         entryRepeater.itemAt(entries.findIndex(entry => entry.section === activeSection))?.forceActiveFocus(Qt.TabFocusReason);
     }
 
-    // Tab through a long form scrolls the view to the row that takes the keyboard
+    // Tab or an arrow through a long form scrolls the view to the row that takes the focus
     function revealFocus() {
-        const flickable = scroller;
         const target = page.Window.window?.activeFocusItem;
-        if (!target || !flickable?.contentItem)
-            return;
-        let inside = false;
-        for (let item = target; item && !inside; item = item.parent)
-            inside = item === flickable.contentItem;
-        if (!inside)
-            return;
-        const top = target.mapToItem(flickable.contentItem, 0, 0).y;
-        const bottom = top + target.height;
-        const margin = Kirigami.Units.largeSpacing;
-        const last = Math.max(0, flickable.contentHeight - flickable.height);
-        if (top < flickable.contentY + margin)
-            flickable.contentY = Math.max(0, top - margin);
-        else if (bottom > flickable.contentY + flickable.height - margin)
-            flickable.contentY = Math.min(last, bottom - flickable.height + margin);
+        for (let item = target; item; item = item.parent) {
+            if (item === page) {
+                Spatial.reveal(target);
+                return;
+            }
+        }
     }
 
     onBackRequested: event => {

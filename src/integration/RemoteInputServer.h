@@ -17,6 +17,7 @@
 #include <sys/types.h>
 
 class QLocalSocket;
+class QQuickItem;
 
 namespace Kinefin {
 // `$XDG_RUNTIME_DIR/app/io.github.the_beper.Kinefin/kinefin-<id>`; empty when XDG_RUNTIME_DIR is unset or relative, the id is invalid (validProfileId) or the path does not fit sun_path (107 bytes)
@@ -44,8 +45,8 @@ class RemoteInputServer final : public QObject {
     // False, with one warning, when there is no path, the folder cannot be made private, a live server owns the path, something that is not a socket sits there, or listening fails
     bool listen();
 
-    // Plays a keycode as a frame of this socket does; false for a keycode outside the table
-    bool dispatchKeycode(const QString &keycode);
+    // Plays a keycode as a frame of this socket does; false for a keycode outside the table. Keys go to the focused Kinefin window (the picture-in-picture window included) or else to the main one; `autoRepeat` marks a held direction's repeat
+    bool dispatchKeycode(const QString &keycode, bool autoRepeat = false);
     // A keycode from another Jellyfin session, which may be another user: as dispatchKeycode(), except that the navigation keys are dropped while the window's focus is in a text field or inside a popup (a remote must not submit what the user types or confirm a dialog the user has open), and at most MaxNetworkKeysPerSecond pass
     bool dispatchNetworkKeycode(const QString &keycode);
     static constexpr int MaxNetworkKeysPerSecond = 20;
@@ -67,7 +68,12 @@ class RemoteInputServer final : public QObject {
     void acceptConnections();
     void readFrom(QLocalSocket *socket);
     bool handleLine(QLocalSocket *socket, QByteArrayView line);
-    bool sendKey(Qt::Key key, const QString &text = {});
+    bool sendKey(Qt::Key key, const QString &text = {}, bool autoRepeat = false);
+    QWindow *userWindow() const;
+    bool focusTakesText() const;
+    // The six navigation keys: an arrow a control does not use moves the focus by screen position, a Select nobody takes presses the focused control as Space does (SpatialNavigation.h)
+    bool dispatchNavigation(Qt::Key key, const QString &text, bool autoRepeat);
+    void pressSpace(QQuickItem *target, bool autoRepeat);
     bool networkNavigationAllowed() const;
     void dropClient(QLocalSocket *socket, const char *reason = nullptr);
 

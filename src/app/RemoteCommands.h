@@ -34,6 +34,8 @@ class RemoteCommands : public QObject {
     // The server's stream index of the media source; -1 turns subtitles off
     void audioStreamRequested(int index);
     void subtitleStreamRequested(int index);
+    // The maximum bit rate another session asked for, as it sent it; the player maps it to Automatic or the nearest step
+    void qualityRequested(qint64 bitsPerSecond);
     // 0 off, 1 all, 2 the current item
     void repeatModeRequested(int mode);
     void shuffleRequested(bool shuffled);

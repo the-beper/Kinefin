@@ -385,29 +385,14 @@ Kirigami.Page {
                             text: i18n("Name")
                         }
                         SortAction {
-                            token: "DateCreated"
-                            list: page.listModel
-                            text: i18n("Date Added")
-                        }
-                        SortAction {
-                            token: "DateLastContentAdded"
-                            list: page.listModel
-                            text: i18n("Date Episode Added")
-                        }
-                        SortAction {
-                            token: "PremiereDate"
-                            list: page.listModel
-                            text: i18n("Release Date")
-                        }
-                        SortAction {
-                            token: "ProductionYear"
-                            list: page.listModel
-                            text: i18n("Year")
-                        }
-                        SortAction {
                             token: "AiredEpisodeOrder"
                             list: page.listModel
                             text: i18n("Episode Order")
+                        }
+                        SortAction {
+                            token: "Random"
+                            list: page.listModel
+                            text: i18n("Random")
                         }
                         SortAction {
                             token: "CommunityRating"
@@ -420,9 +405,14 @@ Kirigami.Page {
                             text: i18n("Critic Rating")
                         }
                         SortAction {
-                            token: "Runtime"
+                            token: "DateCreated"
                             list: page.listModel
-                            text: i18n("Runtime")
+                            text: i18n("Date Added")
+                        }
+                        SortAction {
+                            token: "DateLastContentAdded"
+                            list: page.listModel
+                            text: i18n("Date Episode Added")
                         }
                         SortAction {
                             token: "DatePlayed"
@@ -430,14 +420,29 @@ Kirigami.Page {
                             text: i18n("Date Played")
                         }
                         SortAction {
+                            token: "SeriesDatePlayed"
+                            list: page.listModel
+                            text: i18n("Date Played")
+                        }
+                        SortAction {
+                            token: "OfficialRating"
+                            list: page.listModel
+                            text: i18n("Parental Rating")
+                        }
+                        SortAction {
                             token: "PlayCount"
                             list: page.listModel
                             text: i18n("Play Count")
                         }
                         SortAction {
-                            token: "Random"
+                            token: "PremiereDate"
                             list: page.listModel
-                            text: i18n("Random")
+                            text: i18n("Release Date")
+                        }
+                        SortAction {
+                            token: "Runtime"
+                            list: page.listModel
+                            text: i18n("Runtime")
                         }
                         Kirigami.Action {
                             separator: true

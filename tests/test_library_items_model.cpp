@@ -422,9 +422,10 @@ class TestLibraryItemsModel : public QObject {
         QCOMPARE(filtered.size(), 1);
         QTRY_COMPARE(f.model.status(), LibraryItemsModel::Ready);
         const QString route = QString::fromUtf8(f.server.itemsRoutes.constLast());
+        // Commas between ids: the server ignores a '|' there and returns the whole library
         QVERIFY2(
-            route.contains(QStringLiteral("genreIds=") + kSciFi + QStringLiteral("%7C") + kMystery)
-                || route.contains(QStringLiteral("genreIds=") + kSciFi + QLatin1Char('|')
+            route.contains(QStringLiteral("genreIds=") + kSciFi + QStringLiteral("%2C") + kMystery)
+                || route.contains(QStringLiteral("genreIds=") + kSciFi + QLatin1Char(',')
                                   + kMystery),
             qPrintable(route));
         QVERIFY(route.contains(QStringLiteral("filters=IsUnplayed")));
@@ -879,7 +880,7 @@ class TestLibraryItemsModel : public QObject {
         QCOMPARE(wireValue(route, "is4K"), QStringLiteral("true"));
         QCOMPARE(wireValue(route, "is3D"), QStringLiteral("true"));
         QCOMPARE(wireValue(route, "videoTypes"), QStringLiteral("BluRay,Dvd"));
-        QCOMPARE(wireValue(route, "genreIds"), QString(kSciFi + QLatin1Char('|') + kMystery));
+        QCOMPARE(wireValue(route, "genreIds"), QString(kSciFi + QLatin1Char(',') + kMystery));
         QCOMPARE(wireValue(route, "tags"), QStringLiteral("restored-master"));
         QCOMPARE(wireValue(route, "officialRatings"), QStringLiteral("PG-13"));
         QCOMPARE(wireValue(route, "years"), QStringLiteral("2019,2024"));
@@ -1341,6 +1342,29 @@ class TestLibraryItemsModel : public QObject {
         QCOMPARE(f.model.pendingRatingHashes().size(), Kinefin::MaxFilterValues);
     }
 
+    void aStoredSortKeyThatTheScopeNoLongerOffersFallsBackToTheDefault()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        // The sort lists follow jellyfin-web: ProductionYear is in none, PlayCount and DatePlayed are not offered for series, Random not for collections
+        const auto opened = [&](const char *collectionType, const char *stored) {
+            LibraryItemsModel::ViewState initial;
+            initial.sortBy = LibraryItemsModel::sortByFromStored(QString::fromLatin1(stored));
+            initial.descending = true;
+            if (!f.model.open(QString(), QString::fromLatin1(collectionType), QStringLiteral("L"),
+                              initial))
+                return QString();
+            return f.model.sortBy();
+        };
+        QCOMPARE(opened("movies", "ProductionYear"), QStringLiteral("SortName"));
+        QCOMPARE(opened("movies", "PlayCount"), QStringLiteral("PlayCount"));
+        QCOMPARE(opened("tvshows", "PlayCount"), QStringLiteral("SortName"));
+        QCOMPARE(opened("tvshows", "DatePlayed"), QStringLiteral("SortName"));
+        QCOMPARE(opened("tvshows", "SeriesDatePlayed"), QStringLiteral("SeriesDatePlayed"));
+        QCOMPARE(opened("boxsets", "Random"), QStringLiteral("SortName"));
+        QCOMPARE(opened("boxsets", "OfficialRating"), QStringLiteral("OfficialRating"));
+    }
+
     void everyScopeOffersItsOwnSortKeys()
     {
         Fixture f;
@@ -1494,8 +1518,10 @@ class TestLibraryItemsModel : public QObject {
         QCOMPARE(mapped("ReleaseDate"), QStringLiteral("PremiereDate"));
         for (const char *wire :
              {"SortName", "Runtime", "CommunityRating", "DatePlayed", "PlayCount", "Random",
-              "DateLastContentAdded", "AiredEpisodeOrder"})
+              "DateLastContentAdded", "AiredEpisodeOrder", "OfficialRating", "SeriesDatePlayed"})
             QCOMPARE(mapped(wire), QString::fromLatin1(wire));
+        // A key no list offers any more is the default
+        QCOMPARE(mapped("ProductionYear"), QStringLiteral("SortName"));
         QCOMPARE(mapped("bogus"), QStringLiteral("SortName"));
         QCOMPARE(mapped(""), QStringLiteral("SortName"));
     }

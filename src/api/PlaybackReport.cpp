@@ -73,6 +73,7 @@ const QStringList &supportedGeneralCommands()
                                       QStringLiteral("SetVolume"),
                                       QStringLiteral("SetAudioStreamIndex"),
                                       QStringLiteral("SetSubtitleStreamIndex"),
+                                      QStringLiteral("SetMaxStreamingBitrate"),
                                       QStringLiteral("ToggleFullscreen"),
                                       QStringLiteral("SetRepeatMode"),
                                       QStringLiteral("SetShuffleQueue"),

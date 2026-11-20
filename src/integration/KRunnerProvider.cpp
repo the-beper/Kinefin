@@ -44,11 +44,13 @@ void registerKRunnerTypes()
 
 QString iconFor(const QString &type)
 {
-    if (type == QLatin1String("Series") || type == QLatin1String("Episode"))
-        return QStringLiteral("video-television");
+    // Breeze's video-x-generic is a fixed grey filmstrip while video-symbolic is the same shape in the text colour; series, seasons and episodes share the TV icon, and the subtext names the kind
     if (type == QLatin1String("BoxSet"))
         return QStringLiteral("folder-videos");
-    return QStringLiteral("video-x-generic");
+    if (type == QLatin1String("Series") || type == QLatin1String("Season")
+        || type == QLatin1String("Episode"))
+        return QStringLiteral("video-television");
+    return QStringLiteral("video-symbolic");
 }
 
 QString subtextFor(const ItemSummary &item)
@@ -131,7 +133,11 @@ QList<KRunnerMatch> krunnerMatches(const QList<ItemSummary> &items, const QStrin
         const bool prefix = name.startsWith(term, Qt::CaseInsensitive);
         KRunnerMatch match;
         match.id = item.id;
-        match.text = krunnerText(item.name);
+        // milou shows the subtext only on the current row: an episode names its series in the text
+        match.text = item.type == QLatin1String("Episode") && !item.seriesName.isEmpty()
+                         ? krunnerText(i18nc("@item:inmenu episode and the series it belongs to",
+                                             "%1 — %2", item.name, item.seriesName))
+                         : krunnerText(item.name);
         match.iconName = iconFor(item.type);
         match.categoryRelevance = exact ? kModerateRelevance : kLowRelevance;
         match.relevance = exact ? 1.0 : prefix ? 0.9 : std::max(0.1, 0.8 - 0.02 * rank);

@@ -85,6 +85,21 @@ void FilterOptionsModel::clear()
         Q_EMIT optionsChanged();
 }
 
+QList<int> FilterOptionsModel::tagRows(const QString &search, const QStringList &keep) const
+{
+    const QString needle = search.trimmed();
+    const QSet<QString> kept(keep.cbegin(), keep.cend());
+    QList<int> rows;
+    for (int at = 0; at < m_tags.size(); ++at) {
+        const QString &tag = m_tags.at(at);
+        const bool listed =
+            needle.isEmpty() ? at < MaxShownTags : tag.contains(needle, Qt::CaseInsensitive);
+        if (listed || kept.contains(tag))
+            rows.append(at);
+    }
+    return rows;
+}
+
 bool FilterOptionsModel::contains(const QString &genreId) const
 {
     for (const Option &option : m_options) {
@@ -117,14 +132,17 @@ void FilterOptionsModel::onFiltersReady(const QJsonObject &filters, int channel)
     }
     // A tag is a text the query can carry: the rest (too long, a pipe, control characters) could never be selected
     QStringList tags;
+    QSet<QString> seenTags;
     const QJsonValue tagValues = filters.value(QStringLiteral("Tags"));
     if (tagValues.isArray()) {
         for (const QJsonValue &entry : tagValues.toArray()) {
-            if (tags.size() == MaxFacetOptions)
+            if (tags.size() == MaxTagOptions)
                 break;
             const QString tag = entry.toString();
-            if (entry.isString() && isValidFilterText(tag) && !tags.contains(tag))
+            if (entry.isString() && isValidFilterText(tag) && !seenTags.contains(tag)) {
+                seenTags.insert(tag);
                 tags.append(tag);
+            }
         }
     }
     beginResetModel();

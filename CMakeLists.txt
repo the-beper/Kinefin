@@ -16,6 +16,8 @@ include(KDECompilerSettings NO_POLICY_SCOPE)
 
 find_package(Qt6 6.6 REQUIRED COMPONENTS Core Gui Widgets Quick Qml QuickControls2 DBus Network WebSockets)
 find_package(KF6 6.8 REQUIRED COMPONENTS Config CoreAddons I18n DBusAddons Wallet)
+# The KDE runtime 6.11 ships SDL 3.2; the gamepad input needs nothing but the library
+find_package(SDL3 3.2 REQUIRED CONFIG)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 qt_standard_project_setup(REQUIRES 6.6)
 set(KINEFIN_MPVQT_URL "https://download.kde.org/stable/mpvqt/mpvqt-1.2.1.tar.xz"
@@ -191,6 +193,12 @@ endif()
 
 # The desktop around the app: MPRIS and the screensaver inhibition on the session bus, the remote-control socket
 add_library(kinefin_integration STATIC
+    src/app/InputFilter.cpp
+    src/app/InputFilter.h
+    src/integration/GamepadInput.cpp
+    src/integration/GamepadInput.h
+    src/integration/GamepadMapper.cpp
+    src/integration/GamepadMapper.h
     src/integration/KRunnerProvider.cpp
     src/integration/KRunnerProvider.h
     src/integration/Mpris.cpp
@@ -201,9 +209,31 @@ add_library(kinefin_integration STATIC
     src/integration/RemoteInputServer.h
     src/integration/ScreenSaverInhibitor.cpp
     src/integration/ScreenSaverInhibitor.h
+    src/integration/SpatialNavigation.cpp
+    src/integration/SpatialNavigation.h
 )
 target_compile_definitions(kinefin_integration PRIVATE TRANSLATION_DOMAIN="kinefin")
-target_link_libraries(kinefin_integration PUBLIC kinefin_player Qt6::DBus Qt6::Gui Qt6::Network KF6::I18n)
+target_link_libraries(kinefin_integration PUBLIC kinefin_player Qt6::DBus Qt6::Gui Qt6::Network Qt6::Quick KF6::I18n SDL3::SDL3)
+
+# Cast-out building blocks: SSDP search, UPnP descriptions, SOAP, DIDL and the renderer device profile; Qt Core and Network only
+add_library(kinefin_cast STATIC
+    src/cast/CastText.cpp
+    src/cast/CastText.h
+    src/cast/Didl.cpp
+    src/cast/Didl.h
+    src/cast/RendererProfile.cpp
+    src/cast/RendererProfile.h
+    src/cast/Soap.cpp
+    src/cast/Soap.h
+    src/cast/Ssdp.cpp
+    src/cast/Ssdp.h
+    src/cast/UpnpDescription.cpp
+    src/cast/UpnpDescription.h
+    src/cast/XmlTree.cpp
+    src/cast/XmlTree.h
+)
+target_include_directories(kinefin_cast PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(kinefin_cast PUBLIC Qt6::Core Qt6::Network)
 
 # The QML module lives in a static library of its own so that the UI tests can import it like the application does
 foreach(page Main PlayerPage OsdButton MiniPlayer PictureInPictureWindow PlaybackInfoOverlay ShellHeader AboutDialog ShortcutsDialog RemoteSessionsDialog SyncPlayDialog MediaInfoDialog HomePage LibraryTile LibraryPage ResumeItemsPage MediaCard CardMenu CardRow EpisodeRow ItemDetailsPage SearchPage QueuePage FilterDialog GenreRailsView GenreRailsPage LibraryContent ItemListRow ItemRowGrid LoginPage UserPickerPage MessageBox ServersPage SettingsPage SettingRow UserPreferencesForm UserPreferencesSaveBar FavoritesPage FavoritesGroupPage TopFade MediaListRow PlaylistsPage PlaylistPage PlaylistDialogs AddToPlaylistDialog PageToolbar PageBackButton FadeInOnShow PageTitle DownloadsPage RuleDialog SubtitleSearchDialog)
@@ -291,11 +321,12 @@ qt_add_qml_module(kinefin_ui
         src/app/PipSurface.h
         src/app/RemoteCommands.cpp
         src/app/RemoteCommands.h
+        src/app/SpatialQml.h
 )
 target_include_directories(kinefin_ui PUBLIC src/app)
 target_compile_definitions(kinefin_ui PRIVATE TRANSLATION_DOMAIN="kinefin")
 target_link_libraries(kinefin_ui PUBLIC
-    kinefin_core kinefin_player MpvQt::MpvQt
+    kinefin_core kinefin_player kinefin_integration MpvQt::MpvQt
     Qt6::Gui Qt6::Quick Qt6::Qml Qt6::QuickControls2
     KF6::I18n KF6::I18nQml
 )
@@ -463,6 +494,36 @@ if(BUILD_TESTING)
     target_link_libraries(test_clip_exporter PRIVATE kinefin_player Qt6::Test)
     add_test(NAME clip_exporter COMMAND test_clip_exporter)
 
+    add_executable(test_input_filter tests/test_input_filter.cpp)
+    target_link_libraries(test_input_filter PRIVATE kinefin_integration Qt6::Test Qt6::Gui)
+    add_test(NAME input_filter COMMAND test_input_filter)
+    set_tests_properties(input_filter PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+    add_executable(test_gamepad_mapper tests/test_gamepad_mapper.cpp)
+    target_link_libraries(test_gamepad_mapper PRIVATE kinefin_integration Qt6::Test)
+    add_test(NAME gamepad_mapper COMMAND test_gamepad_mapper)
+
+    add_executable(test_gamepad_input tests/test_gamepad_input.cpp)
+    target_link_libraries(test_gamepad_input PRIVATE kinefin_integration Qt6::Test Qt6::Gui)
+    add_test(NAME gamepad_input COMMAND test_gamepad_input)
+    set_tests_properties(gamepad_input PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+    add_executable(test_cast_ssdp tests/test_cast_ssdp.cpp)
+    target_link_libraries(test_cast_ssdp PRIVATE kinefin_cast Qt6::Test Qt6::Network)
+    add_test(NAME cast_ssdp COMMAND test_cast_ssdp)
+
+    add_executable(test_cast_description tests/test_cast_description.cpp)
+    target_link_libraries(test_cast_description PRIVATE kinefin_cast Qt6::Test)
+    add_test(NAME cast_description COMMAND test_cast_description)
+
+    add_executable(test_cast_soap tests/test_cast_soap.cpp)
+    target_link_libraries(test_cast_soap PRIVATE kinefin_cast Qt6::Test)
+    add_test(NAME cast_soap COMMAND test_cast_soap)
+
+    add_executable(test_cast_renderer_profile tests/test_cast_renderer_profile.cpp)
+    target_link_libraries(test_cast_renderer_profile PRIVATE kinefin_cast Qt6::Test)
+    add_test(NAME cast_renderer_profile COMMAND test_cast_renderer_profile)
+
     add_executable(test_screensaver_inhibitor tests/test_screensaver_inhibitor.cpp)
     target_compile_definitions(test_screensaver_inhibitor PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(test_screensaver_inhibitor PRIVATE kinefin_integration kinefin_core Qt6::Test Qt6::Network Qt6::DBus)
@@ -472,6 +533,11 @@ if(BUILD_TESTING)
     target_link_libraries(test_remote_input PRIVATE kinefin_integration kinefin_core Qt6::Test Qt6::Gui Qt6::Network)
     add_test(NAME remote_input COMMAND test_remote_input)
     set_tests_properties(remote_input PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+    add_executable(test_spatial_navigation tests/test_spatial_navigation.cpp)
+    target_link_libraries(test_spatial_navigation PRIVATE kinefin_integration Qt6::Test Qt6::Gui Qt6::Quick Qt6::Qml)
+    add_test(NAME spatial_navigation COMMAND test_spatial_navigation)
+    set_tests_properties(spatial_navigation PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
     add_executable(test_jellyfin_socket tests/test_jellyfin_socket.cpp)
     target_compile_definitions(test_jellyfin_socket PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")

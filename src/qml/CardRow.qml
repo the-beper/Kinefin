@@ -43,6 +43,7 @@ Item {
     function focusList(reason) {
         if (list) {
             list.forceActiveFocus(reason);
+            Spatial.reveal(root);
             return;
         }
         // A row without cards has no list coming: nothing waits for it
@@ -81,36 +82,6 @@ Item {
         focusBefore = null;
     }
 
-    // The next row of cards above or below along the focus chain, which also lists containers and other controls; no row there, no move
-    function focusNeighbour(forward) {
-        if (!list)
-            return;
-        let item = list;
-        // The chain returns to this list; the bound only guards a chain that never does
-        for (let step = 0; step < 1000; ++step) {
-            item = item.nextItemInFocusChain(forward);
-            if (!item || item === list)
-                return;
-            // The chain wraps around: a row above is not the answer to Down
-            if (item.visible && item.enabled && item.isCardRowList === true && (item.mapToItem(null, 0, 0).y - list.mapToItem(null, 0, 0).y) * (forward ? 1 : -1) > 0) {
-                item.forceActiveFocus(forward ? Qt.TabFocusReason : Qt.BacktabFocusReason);
-                item.cardRow.scrollIntoView();
-                return;
-            }
-        }
-    }
-
-    // The page scrolls so the whole row shows
-    function scrollIntoView() {
-        const flick = root.pageFlickable;
-        const top = root.mapToItem(flick.contentItem, 0, 0).y;
-        const margin = Kirigami.Units.largeSpacing;
-        if (top < flick.contentY)
-            flick.contentY = Math.max(flick.originY, top - margin);
-        else if (top + root.height > flick.contentY + flick.height)
-            flick.contentY = Math.min(flick.originY + flick.contentHeight - flick.height, top + root.height - flick.height + margin);
-    }
-
     // The focus frame of a card reaches a little past it, and the list clips: the list keeps that room inside it at both ends and reaches out by as much, so the cards stay where they were
     readonly property real frameRoom: Kirigami.Units.smallSpacing
 
@@ -135,11 +106,8 @@ Item {
             rightMargin: root.edgeMargin + root.frameRoom
             clip: true
             boundsBehavior: Flickable.StopAtBounds
-            readonly property bool isCardRowList: true
             // A drag or a flick takes the row over from the arrows
             onMovementStarted: pageScroll.stop()
-            // The row this list belongs to, for the moves between rows
-            readonly property Item cardRow: root
             activeFocusOnTab: true
             keyNavigationEnabled: true
             currentIndex: 0
@@ -148,18 +116,22 @@ Item {
             Accessible.role: Accessible.List
             Accessible.name: root.accessibleName
 
-            // Up and Down move between the rows, Left and Right inside one
-            Keys.onUpPressed: {
-                if (root.externalVerticalNavigation)
+            // Up and Down leave the row for whatever lies above or below it on the screen (a button of the row's header, the next row, a library tile, the header tabs); a held key does not leave, and with nothing that way the key stays unaccepted
+            Keys.onUpPressed: event => {
+                if (root.externalVerticalNavigation) {
                     root.upRequested();
-                else
-                    root.focusNeighbour(false);
+                    event.accepted = true;
+                } else {
+                    event.accepted = event.isAutoRepeat || Spatial.move(cards, Qt.Key_Up);
+                }
             }
-            Keys.onDownPressed: {
-                if (root.externalVerticalNavigation)
+            Keys.onDownPressed: event => {
+                if (root.externalVerticalNavigation) {
                     root.downRequested();
-                else
-                    root.focusNeighbour(true);
+                    event.accepted = true;
+                } else {
+                    event.accepted = event.isAutoRepeat || Spatial.move(cards, Qt.Key_Down);
+                }
             }
 
             // The cards are not tab stops: the list is, and it activates the current card

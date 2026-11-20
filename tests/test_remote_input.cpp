@@ -42,6 +42,14 @@ class QQuickPopupItem : public QObject {
     Q_OBJECT
 };
 
+// A page's plain Flickable and a ListView as plain focus objects: the server looks at items only in a Qt Quick window
+class QQuickFlickable : public QObject {
+    Q_OBJECT
+};
+class QQuickItemView : public QQuickFlickable {
+    Q_OBJECT
+};
+
 // A focused item: a text field when it takes input methods, and its visual parent as Qt Quick's items expose it
 class FocusItem : public QObject {
     Q_OBJECT
@@ -66,7 +74,10 @@ class KeyWindow : public QWindow {
   public:
     QList<int> presses;
     QList<int> releases;
+    QList<bool> repeats;
     bool acceptEscape = true;
+    bool acceptArrows = true;
+    bool acceptReturn = true;
     QObject *focus = nullptr;
 
     QObject *focusObject() const override { return focus ? focus : QWindow::focusObject(); }
@@ -75,7 +86,16 @@ class KeyWindow : public QWindow {
     void keyPressEvent(QKeyEvent *event) override
     {
         presses.append(event->key());
-        event->setAccepted(event->key() != Qt::Key_Escape || acceptEscape);
+        repeats.append(event->isAutoRepeat());
+        bool accepted = true;
+        if (event->key() == Qt::Key_Escape)
+            accepted = acceptEscape;
+        else if (event->key() == Qt::Key_Up || event->key() == Qt::Key_Down
+                 || event->key() == Qt::Key_Left || event->key() == Qt::Key_Right)
+            accepted = acceptArrows;
+        else if (event->key() == Qt::Key_Return)
+            accepted = acceptReturn;
+        event->setAccepted(accepted);
     }
     void keyReleaseEvent(QKeyEvent *event) override { releases.append(event->key()); }
 };
@@ -366,9 +386,11 @@ class TestRemoteInput : public QObject {
         key("right", Qt::Key_Right);
         key("select", Qt::Key_Return);
         key("back", Qt::Key_Escape);
+        key("menu", Qt::Key_Menu);
         for (const char *name :
              {"home", "playpause", "play", "pause", "stop", "next", "previous", "fastforward",
-              "rewind", "volumeup", "volumedown", "togglemute", "togglefullscreen"})
+              "rewind", "volumeup", "volumedown", "togglemute", "togglefullscreen", "previoustab",
+              "nexttab", "previouschapter", "nextchapter", "mainmenu", "expandplayer"})
             action(name, name);
         action("host:fullscreen", "togglefullscreen");
     }
@@ -393,6 +415,86 @@ class TestRemoteInput : public QObject {
             QTRY_COMPARE(m_actions, QStringList{action});
             QVERIFY(window.presses.isEmpty());
         }
+    }
+
+    // The move of the focus by screen position needs a Qt Quick window and is tested in test_spatial_navigation; here an arrow nobody takes stays one press, with no Tab or Backtab behind it
+    void anArrowNobodyTakesIsNotRetried()
+    {
+        KeyWindow window;
+        window.acceptArrows = false;
+        auto server = startServer(&window);
+        QVERIFY(server);
+        for (const char *keycode : {"down", "up", "right", "left"})
+            QVERIFY2(server->dispatchKeycode(QString::fromLatin1(keycode)), keycode);
+        QCOMPARE(window.presses,
+                 (QList<int>{Qt::Key_Down, Qt::Key_Up, Qt::Key_Right, Qt::Key_Left}));
+        QCOMPARE(window.releases, window.presses);
+    }
+
+    void aFocusOutsideQtQuickGetsTheKeysAsTheyAre()
+    {
+        KeyWindow window;
+        auto server = startServer(&window);
+        QVERIFY(server);
+        // Whatever class the focus object has, there is no Qt Quick item to look at: the keys go to the window unchanged
+        QQuickItemView list;
+        QQuickFlickable page;
+        for (QObject *focus : {static_cast<QObject *>(&list), static_cast<QObject *>(&page)}) {
+            window.focus = focus;
+            window.presses.clear();
+            for (const char *keycode : {"left", "right", "up", "down", "select"})
+                QVERIFY2(server->dispatchKeycode(QString::fromLatin1(keycode)), keycode);
+            QCOMPARE(window.presses, (QList<int>{Qt::Key_Left, Qt::Key_Right, Qt::Key_Up,
+                                                 Qt::Key_Down, Qt::Key_Return}));
+        }
+    }
+
+    void selectFallsBackToSpace()
+    {
+        KeyWindow window;
+        window.acceptReturn = false;
+        auto server = startServer(&window);
+        QVERIFY(server);
+        QVERIFY(server->dispatchKeycode(QStringLiteral("select")));
+        QCOMPARE(window.presses, (QList<int>{Qt::Key_Return, Qt::Key_Space}));
+    }
+
+    void noFallbackInATextField()
+    {
+        KeyWindow window;
+        window.acceptArrows = false;
+        window.acceptReturn = false;
+        FocusItem field;
+        field.textField = true;
+        window.focus = &field;
+        auto server = startServer(&window);
+        QVERIFY(server);
+        QVERIFY(server->dispatchKeycode(QStringLiteral("down")));
+        QCOMPARE(window.presses, QList<int>{Qt::Key_Down});
+        window.presses.clear();
+        QVERIFY(server->dispatchKeycode(QStringLiteral("select")));
+        QCOMPARE(window.presses, QList<int>{Qt::Key_Return});
+    }
+
+    void theAutoRepeatFlagReachesTheReceiver()
+    {
+        KeyWindow window;
+        auto server = startServer(&window);
+        QVERIFY(server);
+        QVERIFY(server->dispatchKeycode(QStringLiteral("select"), true));
+        QCOMPARE(window.repeats, QList<bool>{true});
+    }
+
+    void theNetworkCannotSendTheNewKeycodes()
+    {
+        KeyWindow window;
+        auto server = startServer(&window);
+        QVERIFY(server);
+        for (const char *keycode : {"menu", "previoustab", "nexttab", "previouschapter",
+                                    "nextchapter", "mainmenu", "expandplayer"})
+            QVERIFY2(!server->dispatchNetworkKeycode(QString::fromLatin1(keycode)), keycode);
+        QVERIFY(window.presses.isEmpty());
+        QVERIFY(m_actions.isEmpty());
     }
 
     void backFallsBackWhenEscapeIsIgnored()

@@ -3,16 +3,21 @@
 #include "integration/RemoteInputServer.h"
 
 #include "integration/Mpris.h"
+#include "integration/SpatialNavigation.h"
 #include "settings/ProfilePaths.h"
 
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QGuiApplication>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QKeyEvent>
 #include <QLocalSocket>
+#include <QPointer>
+#include <QQuickItem>
+#include <QQuickWindow>
 #include <QWindow>
 #include <algorithm>
 #include <cerrno>
@@ -44,7 +49,72 @@ struct NavigationKey {
 constexpr NavigationKey kNavigationKeys[] = {
     {"up"_L1, Qt::Key_Up, ""_L1},           {"down"_L1, Qt::Key_Down, ""_L1},
     {"left"_L1, Qt::Key_Left, ""_L1},       {"right"_L1, Qt::Key_Right, ""_L1},
-    {"select"_L1, Qt::Key_Return, "\r"_L1},
+    {"select"_L1, Qt::Key_Return, "\r"_L1}, {"menu"_L1, Qt::Key_Menu, ""_L1},
+};
+
+std::optional<NavDirection> directionOf(Qt::Key key)
+{
+    switch (key) {
+    case Qt::Key_Up:
+        return NavDirection::Up;
+    case Qt::Key_Down:
+        return NavDirection::Down;
+    case Qt::Key_Left:
+        return NavDirection::Left;
+    case Qt::Key_Right:
+        return NavDirection::Right;
+    default:
+        return std::nullopt;
+    }
+}
+
+// An ancestor of the focus that would use a key on its own: an item view that does not hold the focus in its current row, a scroll view or a flickable, a page (a scrollable page forwards its keys to its flickable from there)
+bool stopsKey(const QQuickItem *ancestor, const QQuickItem *focus)
+{
+    if (isItemView(ancestor)) {
+        const auto *current = ancestor->property("currentItem").value<QQuickItem *>();
+        return !(current && (current == focus || current->isAncestorOf(focus)));
+    }
+    return ancestor->inherits("QQuickFlickable") || ancestor->inherits("QQuickScrollView")
+           || ancestor->inherits("QQuickPage");
+}
+
+// Stops the press of a key at the first ancestor of the focus that stopsKey() names, so a list or a page behind a control cannot move its own row or scroll for a key the control did not use. While it lives the key is delivered as usual; a press accepted before the stop was used by the control, one that reaches the stop is held back there
+class AncestorKeyGuard final : public QObject {
+  public:
+    AncestorKeyGuard(QQuickItem *focus, int key) : m_key(key)
+    {
+        for (QQuickItem *item = focus->parentItem(); item; item = item->parentItem()) {
+            if (stopsKey(item, focus)) {
+                item->installEventFilter(this);
+                m_filtered.append(item);
+            }
+        }
+    }
+    ~AncestorKeyGuard() override
+    {
+        for (const QPointer<QQuickItem> &item : std::as_const(m_filtered)) {
+            if (item)
+                item->removeEventFilter(this);
+        }
+    }
+
+    QQuickItem *stoppedAt() const { return m_stoppedAt; }
+
+  protected:
+    bool eventFilter(QObject *watched, QEvent *event) override
+    {
+        if (m_stoppedAt || event->type() != QEvent::KeyPress
+            || static_cast<QKeyEvent *>(event)->key() != m_key)
+            return false;
+        m_stoppedAt = qobject_cast<QQuickItem *>(watched);
+        return true;
+    }
+
+  private:
+    int m_key;
+    QList<QPointer<QQuickItem>> m_filtered;
+    QPointer<QQuickItem> m_stoppedAt;
 };
 
 constexpr QLatin1StringView kCommands[] = {
@@ -61,6 +131,12 @@ constexpr QLatin1StringView kCommands[] = {
     "volumedown"_L1,
     "togglemute"_L1,
     "togglefullscreen"_L1,
+    "previoustab"_L1,
+    "nexttab"_L1,
+    "previouschapter"_L1,
+    "nextchapter"_L1,
+    "mainmenu"_L1,
+    "expandplayer"_L1,
 };
 
 struct HostCommand {
@@ -349,17 +425,15 @@ bool RemoteInputServer::handleLine(QLocalSocket *socket, QByteArrayView line)
     return m_clients.contains(socket);
 }
 
-bool RemoteInputServer::dispatchKeycode(const QString &code)
+bool RemoteInputServer::dispatchKeycode(const QString &code, bool autoRepeat)
 {
     const auto *navigation = std::ranges::find_if(
         kNavigationKeys, [&code](const NavigationKey &entry) { return code == entry.code; });
-    if (navigation != std::end(kNavigationKeys)) {
-        sendKey(navigation->key, QString(navigation->text));
-        return true;
-    }
+    if (navigation != std::end(kNavigationKeys))
+        return dispatchNavigation(navigation->key, QString(navigation->text), autoRepeat);
     if (code == "back"_L1) {
         // Escape first, so a popup or a focused control closes itself; the shell's own back runs when nothing took it
-        if (!sendKey(Qt::Key_Escape, QStringLiteral("\x1b")))
+        if (!sendKey(Qt::Key_Escape, QStringLiteral("\x1b"), autoRepeat))
             Q_EMIT actionRequested(QStringLiteral("back"));
         return true;
     }
@@ -379,6 +453,13 @@ bool RemoteInputServer::dispatchKeycode(const QString &code)
 
 bool RemoteInputServer::dispatchNetworkKeycode(const QString &code)
 {
+    // A gamepad-only set: another Jellyfin session must not open menus, switch tabs or step chapters
+    static constexpr QLatin1StringView kGamepadOnly[] = {
+        "menu"_L1,        "previoustab"_L1, "nexttab"_L1,     "previouschapter"_L1,
+        "nextchapter"_L1, "mainmenu"_L1,    "expandplayer"_L1};
+    if (std::ranges::any_of(kGamepadOnly,
+                            [&code](QLatin1StringView entry) { return code == entry; }))
+        return false;
     if (!m_networkSecond.isValid() || m_networkSecond.elapsed() >= 1000) {
         m_networkSecond.start();
         m_networkKeys = 0;
@@ -394,12 +475,10 @@ bool RemoteInputServer::dispatchNetworkKeycode(const QString &code)
 
 bool RemoteInputServer::networkNavigationAllowed() const
 {
-    QObject *focus = m_window ? m_window->focusObject() : nullptr;
+    QObject *focus = userWindow() ? userWindow()->focusObject() : nullptr;
     if (!focus)
         return true;
-    QInputMethodQueryEvent query(Qt::ImEnabled);
-    QCoreApplication::sendEvent(focus, &query);
-    if (query.value(Qt::ImEnabled).toBool())
+    if (focusTakesText())
         return false;
     // Up the visual parents of a Qt Quick item (its "parent" property): one inside a popup sits under the popup's item and the window's overlay
     for (QObject *item = focus; item; item = item->property("parent").value<QObject *>()) {
@@ -409,17 +488,165 @@ bool RemoteInputServer::networkNavigationAllowed() const
     return true;
 }
 
-bool RemoteInputServer::sendKey(Qt::Key key, const QString &text)
+bool RemoteInputServer::focusTakesText() const
 {
-    if (!m_window)
+    QWindow *window = userWindow();
+    QObject *focus = window ? window->focusObject() : nullptr;
+    if (!focus)
         return false;
-    QKeyEvent press(QEvent::KeyPress, key, Qt::NoModifier, text);
+    QInputMethodQueryEvent query(Qt::ImEnabled);
+    QCoreApplication::sendEvent(focus, &query);
+    return query.value(Qt::ImEnabled).toBool();
+}
+
+bool RemoteInputServer::dispatchNavigation(Qt::Key key, const QString &text, bool autoRepeat)
+{
+    const QPointer<QWindow> window = userWindow();
+    auto *quick = qobject_cast<QQuickWindow *>(window.data());
+    const QPointer<QQuickItem> focus = quick ? quick->activeFocusItem() : nullptr;
+    // A spin box or a combo box that is not editable is no text field, whatever its text item answers to an input query
+    QQuickItem *control = focus ? valueControlOf(focus) : nullptr;
+    const bool takesText =
+        focusTakesText() && !(control && !control->property("editable").toBool());
+
+    if (!focus) {
+        // Nothing of Qt Quick to look at: the key goes to the window as it is, and a Select nobody takes presses Space; a text field gets no stray space
+        const bool accepted = sendKey(key, text, autoRepeat);
+        if (!accepted && !takesText && key == Qt::Key_Return)
+            sendKey(Qt::Key_Space, QStringLiteral(" "), autoRepeat);
+        return true;
+    }
+    if (key == Qt::Key_Menu) {
+        sendKey(key, text, autoRepeat);
+        return true;
+    }
+
+    const std::optional<NavDirection> direction = directionOf(key);
+    const bool vertical =
+        direction && (*direction == NavDirection::Up || *direction == NavDirection::Down);
+    // A text field takes its keys as they are: the cursor keeps Left and Right in a single-line field, a text area keeps every arrow, and Select is for the field's own handler; only Up and Down leave a single-line field
+    if (takesText && !(vertical && isSingleLineField(focus))) {
+        sendKey(key, text, autoRepeat);
+        return true;
+    }
+    if (direction) {
+        // A closed combo box or a spin box would change its value on Up and Down: they move the focus instead, and Left and Right step a spin box
+        if (control) {
+            if (vertical) {
+                moveFocusSpatially(focus, *direction);
+                return true;
+            }
+            if (!isComboBox(control) && !takesText) {
+                const bool increase = (key == Qt::Key_Right)
+                                      == (QGuiApplication::layoutDirection() == Qt::LeftToRight);
+                sendKey(increase ? Qt::Key_Up : Qt::Key_Down, {}, autoRepeat);
+                return true;
+            }
+        }
+    }
+
+    // A closed combo box accepts Return and does nothing with it: Select opens it as Space does
+    if (!direction && key == Qt::Key_Return && control && isComboBox(control)) {
+        const auto *popup = control->property("popup").value<QObject *>();
+        if (!popup || !popup->property("visible").toBool()) {
+            pressSpace(control, autoRepeat);
+            return true;
+        }
+    }
+    // A focused scroll view or flickable would scroll on the arrow: the arrow enters its contents first, and only with nothing that way does it scroll
+    if (direction && !autoRepeat && isScrollContainer(focus)
+        && moveFocusSpatially(focus, *direction))
+        return true;
+
+    QKeyEvent press(QEvent::KeyPress, key, Qt::NoModifier, text, autoRepeat);
     // Accepted only by a receiver that took the key
     press.setAccepted(false);
-    QCoreApplication::sendEvent(m_window, &press);
-    if (m_window) {
-        QKeyEvent release(QEvent::KeyRelease, key, Qt::NoModifier, text);
-        QCoreApplication::sendEvent(m_window, &release);
+    QPointer<QQuickItem> stopped;
+    {
+        AncestorKeyGuard guard(focus, key);
+        QCoreApplication::sendEvent(window, &press);
+        stopped = guard.stoppedAt();
+    }
+    const auto release = [&] {
+        if (userWindow() != window)
+            return;
+        QKeyEvent up(QEvent::KeyRelease, key, Qt::NoModifier, text, autoRepeat);
+        QCoreApplication::sendEvent(window, &up);
+    };
+    if (press.isAccepted() && !stopped) {
+        release();
+        return true;
+    }
+
+    if (!direction) {
+        // A Select nobody used presses the focused control as Space does, and only that control: a list or page behind it must not take the Space; a scroll view enters its page instead
+        if (focus) {
+            if (isScrollContainer(focus))
+                moveFocusSpatially(focus, NavDirection::Down);
+            else
+                pressSpace(focus, autoRepeat);
+        }
+        release();
+        return true;
+    }
+
+    // A held arrow never leaves an item view, so it stops at the end of a grid
+    const bool mayLeave = !(autoRepeat && focus && insideItemView(focus));
+    if (mayLeave && focus && moveFocusSpatially(focus, *direction)) {
+        release();
+        return true;
+    }
+    // Nothing that way: the key goes on from where it was held back, so a page that scrolls or seeks still does
+    QPointer<QQuickItem> item = stopped;
+    while (item) {
+        press.accept();
+        QCoreApplication::sendEvent(item, &press);
+        if (press.isAccepted() || !item)
+            break;
+        item = item->parentItem();
+    }
+    release();
+    return true;
+}
+
+void RemoteInputServer::pressSpace(QQuickItem *target, bool autoRepeat)
+{
+    const QPointer<QQuickItem> item = target;
+    QKeyEvent press(QEvent::KeyPress, Qt::Key_Space, Qt::NoModifier, QStringLiteral(" "),
+                    autoRepeat);
+    press.setAccepted(false);
+    QCoreApplication::sendEvent(item, &press);
+    if (!item)
+        return;
+    QKeyEvent release(QEvent::KeyRelease, Qt::Key_Space, Qt::NoModifier, QStringLiteral(" "),
+                      autoRepeat);
+    QCoreApplication::sendEvent(item, &release);
+}
+
+QWindow *RemoteInputServer::userWindow() const
+{
+    // Another Kinefin window has the focus (picture in picture): keys go where the user is, not to the main window behind; any other focus window is not ours and must not take them
+    if (QWindow *focused = QGuiApplication::focusWindow();
+        focused == m_window
+        || (focused && focused->objectName() == QLatin1String("pictureInPictureWindow")))
+        return focused;
+    return m_window;
+}
+
+bool RemoteInputServer::sendKey(Qt::Key key, const QString &text, bool autoRepeat)
+{
+    QWindow *window = userWindow();
+    if (!window)
+        return false;
+    // The window routes the key to its focus item, as a real one is; sending it to the item directly skips the QML key propagation the pages rely on
+    QObject *target = window;
+    QKeyEvent press(QEvent::KeyPress, key, Qt::NoModifier, text, autoRepeat);
+    // Accepted only by a receiver that took the key
+    press.setAccepted(false);
+    QCoreApplication::sendEvent(target, &press);
+    if (userWindow() == window) {
+        QKeyEvent release(QEvent::KeyRelease, key, Qt::NoModifier, text, autoRepeat);
+        QCoreApplication::sendEvent(target, &release);
     }
     return press.isAccepted();
 }

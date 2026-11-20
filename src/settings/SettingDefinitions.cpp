@@ -114,8 +114,7 @@ QList<SettingDefinition> buildDefinitions()
          {},
          0,
          0,
-         // Hidden while nothing reads it: gamepad input makes it gate the repeat, and shows it again
-         true,
+         false,
          false,
          kli18n("Enable Input Repeat"),
          kli18n("Application")},

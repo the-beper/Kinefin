@@ -76,9 +76,9 @@ struct ItemQuery {
     bool cardImages = false;
     // With `cardImages`, one more image type whose tag is wanted: "Banner", "Disc" or "Logo" (the card's Primary, Backdrop and Thumb tags are always asked for); empty asks for nothing more
     QString cardImageType;
-    // Genre ids (hex ids from /Genres or Items/Filters2, never names): an item matches any of them. Written pipe-delimited, at most MaxGenreIds
+    // Genre ids (hex ids from /Genres or Items/Filters2, never names): an item matches any of them. Written comma-delimited (the server ignores a pipe between ids), at most MaxGenreIds
     QStringList genreIds;
-    // The server-side filters of a library grid (see LibraryFilterState.h for the composer): sections combine with AND, the values of one list with OR. A flag or optional that is false/unset sends nothing; `isHd` false is the SD choice. Written only for a listing, never for an ids= resolution. `videoTypes` ("BluRay", "Dvd"), `seriesStatus` ("Continuing", "Ended", "Unreleased") and `years` (1 to 9999) are comma-separated on the wire; `tags` (text from Items/Filters2), `officialRatings` (text from Items/Filters; each isValidFilterText) and `studioIds` (hex ids) are pipe-delimited; every list holds at most MaxFilterValues. `parentIndexNumber` 0 selects the specials, -1 sends none
+    // The server-side filters of a library grid (see LibraryFilterState.h for the composer): sections combine with AND, the values of one list with OR. A flag or optional that is false/unset sends nothing; `isHd` false is the SD choice. Written only for a listing, never for an ids= resolution. `videoTypes` ("BluRay", "Dvd"), `seriesStatus` ("Continuing", "Ended", "Unreleased"), `years` (1 to 9999) and `studioIds` (hex ids) are comma-separated on the wire; `tags` (text from Items/Filters2) and `officialRatings` (text from Items/Filters; each isValidFilterText) are pipe-delimited; every list holds at most MaxFilterValues. `parentIndexNumber` 0 selects the specials, -1 sends none
     bool hasSubtitles = false;
     bool hasTrailer = false;
     bool hasSpecialFeature = false;
@@ -191,7 +191,13 @@ class JellyfinClient final : public QObject {
     bool setItemPlayed(const QString &itemId, bool played);
     // Remote subtitle search and download through the server's provider plugin (`RemoteSearch/Subtitles`); false without the policy, an invalid id/language or a session. A 401 expires the session and emits no remote*Failed signal, because the shell signs out and closes the player
     bool searchRemoteSubtitles(const QString &itemId, const QString &language);
-    bool downloadRemoteSubtitle(const QString &itemId, const QString &subtitleId);
+    // The server answers the download before its refresh lists the file, and with 204 even when it could not save it: remoteSubtitleDownloaded comes once the item has one more external subtitle stream than before, remoteSubtitleNotSaved when none showed within the wait
+    bool downloadRemoteSubtitle(const QString &itemId, const QString &subtitleId,
+                                const QString &language = {});
+    // Tests shorten the wait for the saved file (the defaults are RemoteSubtitleSavePollMs and RemoteSubtitleSaveAttempts)
+    void setRemoteSubtitleSaveTiming(int intervalMs, int attempts);
+    static constexpr int RemoteSubtitleSavePollMs = 1000;
+    static constexpr int RemoteSubtitleSaveAttempts = 10;
     // The entries of one playlist (`GET /Playlists/{id}/Items`), paged: each item carries its `PlaylistItemId` (copies of one item share one), `playlistEntriesReady` carries the page and the `TotalRecordCount`. `startIndex` is 0 or more, `limit` 1 or more and is cut to MaxPlaylistPageSize. Same channel rules as fetchItems; failures arrive as listingFailed("PlaylistEntries")
     bool fetchPlaylistEntries(const QString &playlistId, int startIndex, int limit,
                               int channel = 0);
@@ -301,6 +307,8 @@ class JellyfinClient final : public QObject {
     bool canDownload() const;
     // `Policy.EnableSubtitleManagement` of the signed-in user, false while unknown or without a session: the OpenSubtitles entry is hidden
     bool canManageSubtitles() const;
+    // `Policy.EnableVideoPlaybackTranscoding` of the signed-in user, false while unknown or without a session: the Quality submenu is disabled
+    bool canTranscode() const;
     // `Policy.SyncPlayAccess` as the server last reported it (login reply, then `/Users/Me`): "CreateAndJoinGroups", "JoinGroups" or "None"; empty when unknown and unless authenticated
     QString syncPlayAccess() const;
     QString deviceId() const;
@@ -360,6 +368,7 @@ class JellyfinClient final : public QObject {
     void remoteSubtitleDownloaded(const QString &itemId, const QString &subtitleId);
     void remoteSubtitleDownloadFailed(const QString &itemId, const QString &subtitleId,
                                       int httpStatus);
+    void remoteSubtitleNotSaved(const QString &itemId, const QString &subtitleId);
     void resumeItemsReady(const QJsonArray &items, int totalRecordCount, int channel);
     void latestItemsReady(const QJsonArray &items, int channel);
     void nextUpReady(const QJsonArray &items, int totalRecordCount, int channel);
@@ -409,6 +418,16 @@ class JellyfinClient final : public QObject {
 
     void startProbe(const QUrl &endpoint, quint64 generation, int redirectCount);
     void invalidateSession();
+    // The item's external subtitle streams (`MediaStreams` of /Users/{id}/Items/{item}): how many, and their languages; nullopt when the item could not be read
+    struct ExternalSubtitles {
+        int count = 0;
+        QStringList languages;
+    };
+    void countExternalSubtitles(const QString &itemId,
+                                const std::function<void(std::optional<ExternalSubtitles>)> &done);
+    void waitForSavedSubtitle(const QString &itemId, const QString &subtitleId, quint64 serial,
+                              const ExternalSubtitles &before, const QString &language,
+                              int attempt);
     void finishAuthentication(QNetworkReply *reply);
     void exchangeQuickConnectSecret();
     void clearQuickConnectSecret();
@@ -459,6 +478,7 @@ class JellyfinClient final : public QObject {
     bool m_isAdministrator = false;
     bool m_canDownload = false;
     bool m_canManageSubtitles = false;
+    bool m_canTranscode = false;
     QString m_syncPlayAccess;
     QByteArray m_token;
     QByteArray m_quickConnectSecret;
@@ -477,6 +497,10 @@ class JellyfinClient final : public QObject {
     quint64 m_segmentsSerial = 0;
     quint64 m_subtitleSerial = 0;
     quint64 m_playbackItemSerial = 0;
+    // The download in flight and its wait for the saved file; a newer download or another session ends it
+    quint64 m_subtitleSaveSerial = 0;
+    int m_subtitleSavePollMs = RemoteSubtitleSavePollMs;
+    int m_subtitleSaveAttempts = RemoteSubtitleSaveAttempts;
     quint64 m_trickplayTileSerial = 0;
     quint64 m_syncPlayGroupsSerial = 0;
     quint64 m_utcTimeSerial = 0;

@@ -120,8 +120,17 @@ class PlayerController final : public QObject {
     Q_PROPERTY(qint64 clipStartTicks READ clipStartTicks NOTIFY changed)
     Q_PROPERTY(qint64 clipEndTicks READ clipEndTicks NOTIFY changed)
     Q_PROPERTY(QString clipLine READ clipLine NOTIFY changed)
+    // Why neither Save entry can be used with the current range, empty when they can (route, HDR, length, encoder)
+    Q_PROPERTY(QString clipReason READ clipReason NOTIFY changed)
+    // The length limit the marked range exceeds, empty when it fits (the GIF limit under 60 s, the video one above)
+    Q_PROPERTY(QString clipLengthReason READ clipLengthReason NOTIFY changed)
     Q_PROPERTY(bool clipVideoEnabled READ clipVideoEnabled NOTIFY changed)
     Q_PROPERTY(bool clipGifEnabled READ clipGifEnabled NOTIFY changed)
+    // The Quality submenu: Automatic (0) or a pinned bit rate, disabled for local files, groups and without the transcode policy
+    Q_PROPERTY(qint64 manualQualityCap READ manualQualityCap NOTIFY changed)
+    Q_PROPERTY(bool qualityAvailable READ qualityAvailable NOTIFY changed)
+    Q_PROPERTY(bool qualitySwitching READ qualitySwitching NOTIFY changed)
+    Q_PROPERTY(QVariantList qualitySteps READ qualitySteps NOTIFY changed)
     Q_PROPERTY(bool clipSaving READ clipSaving NOTIFY clipStateChanged)
     Q_PROPERTY(bool clipSavingGif READ clipSavingGif NOTIFY clipStateChanged)
     Q_PROPERTY(double clipProgress READ clipProgress NOTIFY clipStateChanged)
@@ -200,10 +209,16 @@ class PlayerController final : public QObject {
     qint64 clipStartTicks() const { return m_clipStart; }
     qint64 clipEndTicks() const { return m_clipEnd; }
     QString clipLine() const;
+    QString clipReason() const;
+    QString clipLengthReason() const;
     bool clipVideoEnabled() const { return !m_clipExporter.running() && clipReady(false, nullptr); }
     bool clipGifEnabled() const { return !m_clipExporter.running() && clipReady(true, nullptr); }
     bool clipSaving() const { return m_clipExporter.running(); }
     bool clipSavingGif() const { return m_clipGif; }
+    qint64 manualQualityCap() const { return m_manualCap; }
+    bool qualityAvailable() const;
+    bool qualitySwitching() const { return m_qualitySwitching; }
+    QVariantList qualitySteps() const;
     double clipProgress() const { return m_clipProgress; }
     QVariantList chapters() const { return m_chapterList; }
     // The chapter playing now, -1 before the first or without chapters
@@ -277,6 +292,10 @@ class PlayerController final : public QObject {
     // Encodes the marked range into the file the portal granted; false, with no notification, when the marks or the route refuse it
     Q_INVOKABLE bool saveClip(bool gif, const QUrl &destination);
     Q_INVOKABLE void cancelClip();
+    // Pins the playback's maximum bit rate (0 is Automatic) and asks the server for that stream at the current position
+    Q_INVOKABLE void setQuality(qint64 cap);
+    // A remote Bitrate: 0, or at least the file's own bit rate, is Automatic; else the highest ladder step not above it (the lowest below the ladder)
+    Q_INVOKABLE void setQualityBitrate(qint64 bitsPerSecond);
     Q_INVOKABLE void skipSegment();
     Q_INVOKABLE bool downloadSubtitle(int index);
     // A server external text subtitle not loaded yet, downloaded and shown as the second one
@@ -292,6 +311,8 @@ class PlayerController final : public QObject {
     Q_INVOKABLE bool retryPlayback();
     // The timing of the starvation rule, for the tests
     void setFallbackTiming(const BitrateFallback::Timing &timing) { m_fallback.setTiming(timing); }
+    // The stream switch watchdog, for the tests
+    void setSwitchTimeout(int milliseconds) { m_switchTimeout.setInterval(milliseconds); }
     // One of the `video.aspect` values except `custom`: applied at once to this playback only, the setting is not written
     Q_INVOKABLE void setAspectMode(const QString &mode);
     // Turns the night-mode filter on or off, through the profile's setting; the chain is rebuilt at once
@@ -367,8 +388,12 @@ class PlayerController final : public QObject {
     void remoteSubtitlesChanged();
     void remoteSubtitleDownloaded(const QString &subtitleId);
     void remoteSubtitleDownloadFailed(const QString &subtitleId, int httpStatus);
+    // The server answered the download but listed no new subtitle file in time (it could not save it)
+    void remoteSubtitleNotSaved(const QString &subtitleId);
     // The stream kept starving and plays on at a lower bit rate (bit/s, a step of the fallback ladder)
     void qualityLowered(qint64 bitsPerSecond);
+    // A requested quality the server refused, or a stream that did not open: playback goes on
+    void qualityChangeFailed();
     // The stream kept starving and the request for a lower one failed or was refused: playback goes on as it was
     void qualityUnavailable();
     // Night mode was turned on while a passthrough codec is selected: the codec is decoded instead, so the chain can act
@@ -382,6 +407,8 @@ class PlayerController final : public QObject {
     void seriesChoicesChanged();
     void previewChanged();
     void finished();
+    // A mark was set: the shell shows where
+    void clipMarkChanged(const QString &text);
     // A clip or GIF reached the granted file (`fileName` only, `gif` for the wording), or did not: noSpace names the disk message
     void clipSaved(const QString &fileName, bool gif);
     void clipSaveFailed(bool noSpace);
@@ -418,6 +445,14 @@ class PlayerController final : public QObject {
     void acceptFallback(const PlaybackSource &source);
     bool fallbackApplies() const;
     bool fallbackEligible() const;
+    // The cap the next request asks: the manual pin when set, else the fallback's
+    qint64 effectiveCap() const;
+    // Asks PlaybackInfo at `cap`: the fallback's step or the user's choice, which ignores the fallback's gates and may go up
+    bool requestStreamChange(qint64 cap, bool manual);
+    // The new stream did not open: the item stays with Try Again at the cap before the switch
+    void failStreamSwitch();
+    // The switched stream plays on from its resume point: the watchdog stops
+    void settleSwitch();
     std::optional<qint64> currentStreamBitrate() const;
     JellyfinClient::StreamChoice currentStreams() const;
     void dropFallback();
@@ -628,6 +663,7 @@ class PlayerController final : public QObject {
         qint64 cap = 0;
         JellyfinClient::StreamChoice streams;
         bool active = false;
+        bool manual = false;
     } m_fallbackRequest;
     std::optional<PlaybackSource> m_preparedSource;
     // The file opening is the lowered stream: its load completes the step, its failure offers Try Again
@@ -636,6 +672,10 @@ class PlayerController final : public QObject {
     JellyfinClient::StreamChoice m_requestedStreams;
     // The cap before the step that failed, and where it failed: what Try Again opens again
     qint64 m_capBeforeStep = UnlimitedBitrate;
+    // The user's pinned maximum bit rate (0 Automatic), the pin a manual switch replaces and the switch it waits for
+    qint64 m_manualCap = 0;
+    qint64 m_manualCapBeforeSwitch = 0;
+    bool m_qualitySwitching = false;
     qint64 m_retryTicks = 0;
     bool m_canRetry = false;
     // The item of the subtitle download in flight, empty when none runs
@@ -643,6 +683,14 @@ class PlayerController final : public QObject {
     QString m_remoteSubtitleError;
     // The reopen after a subtitle download keeps a paused video paused
     bool m_reopenPaused = false;
+    // A stream switch that never loads, or never plays on from its resume seek: the watchdog offers Try Again at the previous cap
+    QTimer m_switchTimeout;
+    bool m_switchTimedOut = false;
+    bool m_switchManual = false;
+    // After the switched stream loaded: the position it must play on from, -1 when no switch waits for it
+    qint64 m_switchSettleTicks = -1;
+    // The failure Try Again answers was a manual switch: the fallback keeps its budget
+    bool m_failedSwitchManual = false;
     struct PendingLocal {
         QString path;
         QString itemId;

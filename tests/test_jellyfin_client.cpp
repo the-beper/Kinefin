@@ -150,6 +150,8 @@ class TestJellyfinClient : public QObject {
         QCOMPARE(server.viewRequests, 1);
         QVERIFY(!server.lastLoginAuth.contains("Token="));
         QVERIFY(server.lastViewsAuth.contains("Token="));
+        // The libraries hidden from Home are libraries too: 12.4 leaves them out without the flag
+        QVERIFY(server.lastViewsRoute.contains("includeHidden=true"));
         QCOMPARE(failures.size(), 0);
         client.disconnectFromServer();
         QVERIFY(!client.isAuthenticated());
@@ -1552,7 +1554,7 @@ class TestJellyfinClient : public QObject {
         QCOMPARE(seasons.size(), 0);
     }
 
-    void genreIdsRideThePipeDelimitedAndBadOnesAreRefused()
+    void genreIdsRideCommaDelimitedAndBadOnesAreRefused()
     {
         FakeJellyfin server;
         QVERIFY(server.listen());
@@ -1568,7 +1570,7 @@ class TestJellyfinClient : public QObject {
         const QUrlQuery wire = FakeJellyfin::capturedListingQuery(
             server.lastListingRoute.value(QStringLiteral("Items")));
         QCOMPARE(wire.queryItemValue(QStringLiteral("genreIds"), QUrl::FullyDecoded),
-                 sciFi + QLatin1Char('|') + mystery);
+                 sciFi + QLatin1Char(',') + mystery);
         const auto run = [&](const QStringList &ids) {
             const int before = server.listingRequests;
             Kinefin::ItemQuery bad;
@@ -1997,10 +1999,10 @@ class TestJellyfinClient : public QObject {
         const auto decoded = [&wire](const char *name) {
             return wire.queryItemValue(QLatin1String(name), QUrl::FullyDecoded);
         };
-        // Different sections are different parameters (AND), the values of a list are one parameter (OR)
+        // Different sections are different parameters (AND), the values of a list are one parameter (OR); ids take commas, texts pipes
         QCOMPARE(
             decoded("genreIds"),
-            QStringLiteral("aa00000000000000000000000000ff01|bb00000000000000000000000000ff02"));
+            QStringLiteral("aa00000000000000000000000000ff01,bb00000000000000000000000000ff02"));
         QCOMPARE(decoded("tags"), QStringLiteral("C++|100% pure|a,b|café"));
         QCOMPARE(decoded("officialRatings"), QStringLiteral("PG-13|R"));
         QCOMPARE(decoded("years"), QStringLiteral("2023,2024"));
@@ -2091,19 +2093,38 @@ class TestJellyfinClient : public QObject {
     void librarySortKeysPerTabAndRandomIsOnePage()
     {
         using namespace Kinefin;
-        QCOMPARE(librarySortKeys(LibraryScope::Movies).size(), 10);
-        QCOMPARE(librarySortKeys(LibraryScope::Series).size(), 8);
+        // Movies, series and collections have the lists of jellyfin-web 12.4, in its order
+        QCOMPARE(librarySortKeys(LibraryScope::Movies),
+                 (QStringList{QStringLiteral("SortName"), QStringLiteral("Random"),
+                              QStringLiteral("CommunityRating"), QStringLiteral("CriticRating"),
+                              QStringLiteral("DateCreated"), QStringLiteral("DatePlayed"),
+                              QStringLiteral("OfficialRating"), QStringLiteral("PlayCount"),
+                              QStringLiteral("PremiereDate"), QStringLiteral("Runtime")}));
+        QCOMPARE(
+            librarySortKeys(LibraryScope::Series),
+            (QStringList{QStringLiteral("SortName"), QStringLiteral("Random"),
+                         QStringLiteral("CommunityRating"), QStringLiteral("DateCreated"),
+                         QStringLiteral("DateLastContentAdded"), QStringLiteral("SeriesDatePlayed"),
+                         QStringLiteral("OfficialRating"), QStringLiteral("PremiereDate")}));
+        QCOMPARE(librarySortKeys(LibraryScope::Collections),
+                 (QStringList{QStringLiteral("SortName"), QStringLiteral("CommunityRating"),
+                              QStringLiteral("DateCreated"), QStringLiteral("OfficialRating"),
+                              QStringLiteral("PremiereDate")}));
         QCOMPARE(librarySortKeys(LibraryScope::Episodes).size(), 7);
-        QCOMPARE(librarySortKeys(LibraryScope::Collections).size(), 5);
-        QCOMPARE(librarySortKeys(LibraryScope::Movies).constFirst(), QStringLiteral("SortName"));
         QCOMPARE(librarySortKeys(LibraryScope::Episodes).constFirst(),
                  QStringLiteral("AiredEpisodeOrder"));
         for (const LibraryScope scope : {LibraryScope::Movies, LibraryScope::Series,
                                          LibraryScope::Episodes, LibraryScope::Collections}) {
             const QStringList keys = librarySortKeys(scope);
             QCOMPARE(QSet<QString>(keys.cbegin(), keys.cend()).size(), keys.size());
-            QVERIFY(keys.contains(QStringLiteral("Random")));
+            QCOMPARE(keys.contains(QStringLiteral("Random")), scope != LibraryScope::Collections);
         }
+        // The keys jellyfin-web does not list are gone, and a Random page is refused where it is not offered
+        QVERIFY(!librarySortKeys(LibraryScope::Movies).contains(QStringLiteral("ProductionYear")));
+        QVERIFY(!librarySortKeys(LibraryScope::Series).contains(QStringLiteral("DatePlayed")));
+        QVERIFY(!librarySortKeys(LibraryScope::Series).contains(QStringLiteral("PlayCount")));
+        QVERIFY(
+            !composeLibraryQuery({}, LibraryScope::Collections, {}, {QStringLiteral("Random")}));
         // A key of another tab is not offered
         QVERIFY(
             !composeLibraryQuery({}, LibraryScope::Series, {}, {QStringLiteral("CriticRating")}));
@@ -3100,6 +3121,56 @@ class TestJellyfinClient : public QObject {
         QVERIFY(login(client, server));
         QVERIFY(!client.canManageSubtitles());
         client.disconnectFromServer();
+    }
+
+    // 12.4 lists a downloaded file only after its queued refresh: the client waits for the item to show it before saying it is there
+    void aDownloadedSubtitleIsAnnouncedOnceTheServerListsIt()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        server.externalSubtitleStreams = 0;
+        server.remoteSubtitleVisibleAfterReads = 2;
+        Kinefin::JellyfinClient client;
+        client.setRemoteSubtitleSaveTiming(20, 10);
+        QVERIFY(login(client, server));
+        QSignalSpy downloaded(&client, &Kinefin::JellyfinClient::remoteSubtitleDownloaded);
+        QSignalSpy notSaved(&client, &Kinefin::JellyfinClient::remoteSubtitleNotSaved);
+        QVERIFY(client.downloadRemoteSubtitle(kPlayItem, QStringLiteral("abc123")));
+        QTRY_COMPARE(downloaded.size(), 1);
+        QCOMPARE(downloaded.first().at(0).toString(), kPlayItem);
+        QCOMPARE(notSaved.size(), 0);
+        // One read before the download, then the polls until the third read after it shows the file
+        QCOMPARE(server.mediaStreamsReads, 4);
+        QCOMPARE(server.externalSubtitleStreams, 1);
+    }
+
+    // A 204 for a file the server could not save (a read-only media folder) ends in remoteSubtitleNotSaved, once the wait is over
+    void aSubtitleTheServerDidNotSaveIsReported()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        server.externalSubtitleStreams = 0;
+        server.remoteSubtitleSaves = false;
+        Kinefin::JellyfinClient client;
+        client.setRemoteSubtitleSaveTiming(20, 3);
+        QVERIFY(login(client, server));
+        QSignalSpy downloaded(&client, &Kinefin::JellyfinClient::remoteSubtitleDownloaded);
+        QSignalSpy notSaved(&client, &Kinefin::JellyfinClient::remoteSubtitleNotSaved);
+        QVERIFY(client.downloadRemoteSubtitle(kPlayItem, QStringLiteral("abc123")));
+        QTRY_COMPARE(notSaved.size(), 1);
+        QCOMPARE(notSaved.first().at(1).toString(), QStringLiteral("abc123"));
+        QCOMPARE(downloaded.size(), 0);
+        QCOMPARE(server.mediaStreamsReads, 4);
+        // A newer download ends the wait of the one before: only the newer one answers
+        server.remoteSubtitleSaves = true;
+        server.remoteSubtitleVisibleAfterReads = 1;
+        QVERIFY(client.downloadRemoteSubtitle(kPlayItem, QStringLiteral("old111")));
+        QVERIFY(client.downloadRemoteSubtitle(kPlayItem, QStringLiteral("new222")));
+        QTRY_COMPARE(downloaded.size(), 1);
+        QCOMPARE(downloaded.first().at(1).toString(), QStringLiteral("new222"));
+        QTest::qWait(200);
+        QCOMPARE(downloaded.size(), 1);
+        QCOMPARE(notSaved.size(), 1);
     }
 
     void remoteSubtitleFailuresAreReported()

@@ -100,6 +100,9 @@ void RemoteCommands::handleGeneralCommand(const QString &name, const QVariantMap
     } else if (name == QLatin1String("SetSubtitleStreamIndex")) {
         if (intArgument(arguments, QStringLiteral("Index"), -1, 1024, &value))
             Q_EMIT subtitleStreamRequested(value);
+    } else if (name == QLatin1String("SetMaxStreamingBitrate")) {
+        if (intArgument(arguments, QStringLiteral("Bitrate"), 0, 1'000'000'000, &value))
+            Q_EMIT qualityRequested(value);
     } else if (name == QLatin1String("SetRepeatMode")) {
         static const QStringList modes{QStringLiteral("RepeatNone"), QStringLiteral("RepeatAll"),
                                        QStringLiteral("RepeatOne")};

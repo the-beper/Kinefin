@@ -1186,7 +1186,7 @@ class TestConnectionController : public QObject {
             QVERIFY(subtabs->selectNetwork(studio));
             QVERIFY(subtabs->activeList());
             QCOMPARE(subtabs->scopeKey(), QStringLiteral("tvshows/network:") + studio);
-            subtabs->activeList()->setSortBy(QStringLiteral("PlayCount"));
+            subtabs->activeList()->setSortBy(QStringLiteral("SeriesDatePlayed"));
         } // the pending write goes out with the controller
         QFile file(browseFile());
         QVERIFY(file.open(QIODevice::ReadOnly));

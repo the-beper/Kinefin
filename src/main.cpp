@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/ConnectionController.h"
 #include "app/ImageNetworkFactory.h"
+#include "app/InputFilter.h"
 #include "app/Logging.h"
 #include "app/ProfileCommands.h"
+#include "integration/GamepadInput.h"
 #include "integration/KRunnerProvider.h"
 #include "integration/LinkRouter.h"
 #include "integration/Mpris.h"
@@ -335,6 +337,38 @@ int main(int argc, char *argv[])
     // Held by the QML shell, so declared before the engine
     Kinefin::RemoteInputServer remoteInput(Kinefin::remoteSocketPath(profileId),
                                            QStringLiteral(KINEFIN_VERSION));
+    // SDL gamepads feed the same keycodes as the socket and the keyboard; the filter gates keyboard autorepeat
+    Kinefin::GamepadInput gamepad;
+    Kinefin::InputFilter inputFilter;
+    gamepad.setRepeatEnabled(
+        settings.value(QStringLiteral("main"), QStringLiteral("enableInputRepeat")).toBool());
+    inputFilter.setRepeatEnabled(
+        settings.value(QStringLiteral("main"), QStringLiteral("enableInputRepeat")).toBool());
+    inputFilter.setMouseBlocked(
+        settings.value(QStringLiteral("main"), QStringLiteral("disablemouse")).toBool());
+    qApp->installEventFilter(&inputFilter);
+    QObject::connect(&gamepad, &Kinefin::GamepadInput::keycodeRequested, &remoteInput,
+                     [&remoteInput](const QString &keycode, bool autoRepeat) {
+                         remoteInput.dispatchKeycode(keycode, autoRepeat);
+                     });
+    QObject::connect(
+        &settings, &Kinefin::ClientSettings::valueChanged, &app,
+        [&settings, &gamepad, &inputFilter](const QString &section, const QString &key) {
+            if (section != QLatin1String("main"))
+                return;
+            if (key == QLatin1String("sdlEnabled")) {
+                if (settings.value(section, key).toBool())
+                    gamepad.start();
+                else
+                    gamepad.stop();
+            } else if (key == QLatin1String("enableInputRepeat")) {
+                const bool enabled = settings.value(section, key).toBool();
+                gamepad.setRepeatEnabled(enabled);
+                inputFilter.setRepeatEnabled(enabled);
+            } else if (key == QLatin1String("disablemouse")) {
+                inputFilter.setMouseBlocked(settings.value(section, key).toBool());
+            }
+        });
     QQmlApplicationEngine engine;
     engine.setNetworkAccessManagerFactory(&imageFactory);
     // "fullscreen" or "windowed" when a flag decides this run; empty to follow the setting
@@ -348,6 +382,7 @@ int main(int argc, char *argv[])
          {QStringLiteral("player"), QVariant::fromValue(&player)},
          {QStringLiteral("syncPlay"), QVariant::fromValue(&syncPlay)},
          {QStringLiteral("remoteInput"), QVariant::fromValue(&remoteInput)},
+         {QStringLiteral("gamepad"), QVariant::fromValue(&gamepad)},
          {QStringLiteral("startupWindowMode"), windowMode},
          {QStringLiteral("startupPage"), qEnvironmentVariable("KINEFIN_START_PAGE")},
          // About names a development Flatpak after its build time; the version stays KINEFIN_VERSION everywhere else
@@ -405,6 +440,9 @@ int main(int argc, char *argv[])
     // Navigation keys from a remote reach the window like a keyboard's; no socket is a warning, never a failure
     remoteInput.setWindow(window);
     remoteInput.listen();
+    // Only now is there a window for the activity gate; the setting still decides whether SDL opens anything
+    if (settings.value(QStringLiteral("main"), QStringLiteral("sdlEnabled")).toBool())
+        gamepad.start();
     // Another Jellyfin session's keys and player commands take the same path
     QObject::connect(connection.remoteCommands(), &Kinefin::RemoteCommands::keycodeRequested,
                      &remoteInput, &Kinefin::RemoteInputServer::dispatchNetworkKeycode);

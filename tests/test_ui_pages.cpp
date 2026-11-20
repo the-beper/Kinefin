@@ -1750,15 +1750,19 @@ bool revealFilterEntry(const Ui &ui, const QString &facet, const QVariant &value
     const QVariantList entries = dialog->property("entries").toList();
     for (qsizetype i = 0; i < entries.size(); ++i) {
         const QVariantMap row = entries.at(i).toMap();
-        const bool match =
-            facet.isEmpty() ? row.value(QStringLiteral("kind")).toString() == QLatin1String("state")
-                            : row.value(QStringLiteral("facet")).toString() == facet
-                                  && row.value(QStringLiteral("value")) == value;
+        const QString kind = row.value(QStringLiteral("kind")).toString();
+        // The tag options sit in the list of the tags row, which is the one row to scroll to
+        const bool match = facet.isEmpty() ? kind == QLatin1String("state")
+                           : facet == QLatin1String("tags")
+                               ? kind == QLatin1String("tags")
+                               : row.value(QStringLiteral("facet")).toString() == facet
+                                     && row.value(QStringLiteral("value")) == value;
         if (!match)
             continue;
-        const qreal contentHeight = list->property("contentHeight").toReal();
-        const qreal top = contentHeight * qreal(qMax(qsizetype(0), i - 2)) / qreal(entries.size());
-        list->setProperty("contentY", qBound(0.0, top, qMax(0.0, contentHeight - list->height())));
+        // The list places the row itself: the rows differ in height (the tags section is a list of its own), so a share of the content height can leave the row under the dialog's edge, where a click lands outside and closes it
+        constexpr int ListViewCenter = 1;
+        QMetaObject::invokeMethod(list, "positionViewAtIndex", Q_ARG(int, int(i)),
+                                  Q_ARG(int, ListViewCenter));
         return true;
     }
     return false;
@@ -1938,6 +1942,20 @@ class QuickPlayStub : public QObject {
 };
 
 // What the player page reads and calls, without mpv (the video item takes only the real controller and stays empty): the calls are recorded by name and argument
+// The SDL3 gamepads of the shell, as far as the shortcuts dialog and the commands read them
+class GamepadStub : public QObject {
+    Q_OBJECT
+    Q_PROPERTY(int connectedCount MEMBER connectedCount NOTIFY changed)
+    Q_PROPERTY(QStringList faceLabels MEMBER faceLabels NOTIFY changed)
+  public:
+    int connectedCount = 0;
+    QStringList faceLabels = {QStringLiteral("Cross"), QStringLiteral("Circle"),
+                              QStringLiteral("Square"), QStringLiteral("Triangle")};
+
+  Q_SIGNALS:
+    void changed();
+};
+
 class PlayerStub : public QObject {
     Q_OBJECT
     Q_PROPERTY(bool active MEMBER active NOTIFY changed)
@@ -1971,6 +1989,8 @@ class PlayerStub : public QObject {
     Q_PROPERTY(QString aspectMode MEMBER aspectMode NOTIFY changed)
     Q_PROPERTY(bool nightMode MEMBER nightMode NOTIFY changed)
     Q_PROPERTY(QString clipLine MEMBER clipLine NOTIFY changed)
+    Q_PROPERTY(QString clipReason MEMBER clipReason NOTIFY changed)
+    Q_PROPERTY(QString clipLengthReason MEMBER clipLengthReason NOTIFY changed)
     Q_PROPERTY(bool clipVideoEnabled MEMBER clipVideoEnabled NOTIFY changed)
     Q_PROPERTY(bool clipGifEnabled MEMBER clipGifEnabled NOTIFY changed)
     Q_PROPERTY(bool clipSaving MEMBER clipSaving NOTIFY changed)
@@ -1978,6 +1998,10 @@ class PlayerStub : public QObject {
     Q_PROPERTY(double clipProgress MEMBER clipProgress NOTIFY changed)
     Q_PROPERTY(qint64 clipStartTicks MEMBER clipStartTicks NOTIFY changed)
     Q_PROPERTY(qint64 clipEndTicks MEMBER clipEndTicks NOTIFY changed)
+    Q_PROPERTY(qint64 manualQualityCap MEMBER manualQualityCap NOTIFY changed)
+    Q_PROPERTY(bool qualityAvailable MEMBER qualityAvailable NOTIFY changed)
+    Q_PROPERTY(bool qualitySwitching MEMBER qualitySwitching NOTIFY changed)
+    Q_PROPERTY(QVariantList qualitySteps MEMBER qualitySteps NOTIFY changed)
     Q_PROPERTY(QVariantList chapters MEMBER chapters NOTIFY chaptersChanged)
     Q_PROPERTY(int currentChapter MEMBER currentChapter NOTIFY changed)
     Q_PROPERTY(bool upNextShown MEMBER upNextShown NOTIFY changed)
@@ -2101,6 +2125,16 @@ class PlayerStub : public QObject {
         Q_EMIT changed();
     }
     Q_INVOKABLE void cancelClip() { record(QStringLiteral("cancelClip")); }
+    Q_INVOKABLE void setQuality(qint64 cap)
+    {
+        record(QStringLiteral("setQuality"), cap);
+        manualQualityCap = cap;
+        Q_EMIT changed();
+    }
+    Q_INVOKABLE void setQualityBitrate(qint64 bitsPerSecond)
+    {
+        record(QStringLiteral("setQualityBitrate"), bitsPerSecond);
+    }
     Q_INVOKABLE void saveClip(bool gif, const QUrl &destination)
     {
         record(QStringLiteral("saveClip"), gif ? QStringLiteral("gif") : QStringLiteral("video"));
@@ -2202,6 +2236,8 @@ class PlayerStub : public QObject {
     QString aspectMode = QStringLiteral("normal");
     bool nightMode = false;
     QString clipLine;
+    QString clipReason;
+    QString clipLengthReason;
     bool clipVideoEnabled = false;
     bool clipGifEnabled = false;
     bool clipSaving = false;
@@ -2209,6 +2245,10 @@ class PlayerStub : public QObject {
     double clipProgress = 0;
     qint64 clipStartTicks = -1;
     qint64 clipEndTicks = -1;
+    qint64 manualQualityCap = 0;
+    bool qualityAvailable = false;
+    bool qualitySwitching = false;
+    QVariantList qualitySteps;
     QVariantMap info;
     QVariantList chapters;
     int currentChapter = -1;
@@ -2226,10 +2266,13 @@ class PlayerStub : public QObject {
     void remoteSubtitlesChanged();
     void remoteSubtitleDownloaded(const QString &subtitleId);
     void remoteSubtitleDownloadFailed(const QString &subtitleId, int httpStatus);
+    void remoteSubtitleNotSaved(const QString &subtitleId);
     void qualityLowered(qint64 bitsPerSecond);
     // The clip notifications of Main.qml; the stub never emits them, but the shell's Connections must match
     void clipSaved(const QString &fileName, bool gif);
     void clipSaveFailed(bool noSpace);
+    void qualityChangeFailed();
+    void clipMarkChanged(const QString &text);
     void qualityUnavailable();
     void finished();
 
@@ -2563,6 +2606,100 @@ QQuickItem *openDetails(Ui &ui, const QString &id)
         },
         10000);
     return ready ? page : nullptr;
+}
+
+// True when the item is, or sits inside, a popup (a dialog, a menu)
+bool inPopupItem(const QQuickItem *item)
+{
+    for (const QQuickItem *parent = item; parent; parent = parent->parentItem()) {
+        if (parent->inherits("QQuickPopupItem"))
+            return true;
+    }
+    return false;
+}
+
+// The names of the items, the class name for one without
+QStringList namesOf(const QList<QQuickItem *> &items)
+{
+    QStringList names;
+    for (const QQuickItem *item : items)
+        names << (item->objectName().isEmpty()
+                      ? QString::fromLatin1(item->metaObject()->className())
+                      : item->objectName());
+    return names;
+}
+
+// The focus as a pad sees it: a row of a list or grid stands for its view, whose delegates come and go as it scrolls (a header or footer control is itself)
+QQuickItem *padFocus(QQuickWindow *window)
+{
+    QQuickItem *focus = window->activeFocusItem();
+    for (QQuickItem *item = focus; item; item = item->parentItem()) {
+        if (item == focus || !item->inherits("QQuickItemView"))
+            continue;
+        const auto *header = item->property("headerItem").value<QQuickItem *>();
+        const auto *footer = item->property("footerItem").value<QQuickItem *>();
+        if ((header && header->isAncestorOf(focus)) || (footer && footer->isAncestorOf(focus)))
+            return focus;
+        return item;
+    }
+    return focus;
+}
+
+// What a pad reaches from the focus by the four directions alone: every newly reached target is tried in turn and the focus goes back to it each time. A list is tried with its current row at the start and at the end, and its row is put back after; a spin box is left out of Left and Right, which step it. Targets are guarded: a page can drop an item the walk reached
+QList<QQuickItem *> padReach(Ui &ui, Kinefin::RemoteInputServer &input, int limit = 60)
+{
+    QList<QPointer<QQuickItem>> reached;
+    QQuickItem *start = padFocus(ui.window);
+    if (!start)
+        return {};
+    reached << start;
+    const auto known = [&reached](const QQuickItem *item) {
+        return std::any_of(reached.cbegin(), reached.cend(),
+                           [item](const QPointer<QQuickItem> &entry) { return entry == item; });
+    };
+    for (qsizetype next = 0; next < reached.size() && reached.size() < limit; ++next) {
+        const QPointer<QQuickItem> item = reached.at(next);
+        if (!item)
+            continue;
+        const bool view = item->inherits("QQuickItemView");
+        const int count = view ? item->property("count").toInt() : 0;
+        const int original = view ? item->property("currentIndex").toInt() : -1;
+        QList<int> rows{original};
+        if (view && count > 1)
+            rows << count - 1;
+        for (const int row : std::as_const(rows)) {
+            for (const char *keycode : {"up", "down", "left", "right"}) {
+                if (!item)
+                    break;
+                const bool sideways =
+                    qstrcmp(keycode, "left") == 0 || qstrcmp(keycode, "right") == 0;
+                if (sideways && item->inherits("QQuickSpinBox"))
+                    continue;
+                if (view && row != original) {
+                    QMetaObject::invokeMethod(item, "positionViewAtEnd");
+                    item->setProperty("currentIndex", row);
+                }
+                // A view takes the focus on its current row, as the pad gives it
+                auto *current =
+                    view ? item->property("currentItem").value<QQuickItem *>() : nullptr;
+                (current ? current : item.data())->forceActiveFocus(Qt::TabFocusReason);
+                input.dispatchKeycode(QString::fromLatin1(keycode));
+                QCoreApplication::processEvents();
+                if (QQuickItem *now = padFocus(ui.window); now && !known(now))
+                    reached << now;
+            }
+        }
+        if (view && item) {
+            item->setProperty("currentIndex", original);
+            QMetaObject::invokeMethod(item, "positionViewAtBeginning");
+        }
+    }
+    QList<QQuickItem *> alive;
+    for (const QPointer<QQuickItem> &entry : std::as_const(reached)) {
+        if (entry)
+            alive << entry;
+    }
+    return alive;
 }
 
 // Triggers the page's Media Info action and returns the dialog once it is open, or null
@@ -4493,7 +4630,7 @@ class TestUiPages : public QObject {
         // A tag row is named by its place in the list, not by its text
         QString rowName;
         QTRY_VERIFY([&] {
-            for (const QVariant &entry : dialog->property("entries").toList()) {
+            for (const QVariant &entry : dialog->property("tagRows").toList()) {
                 const QVariantMap row = entry.toMap();
                 if (row.value(QStringLiteral("facet")).toString() == QLatin1String("tags")
                     && row.value(QStringLiteral("value")).toString() == tag)
@@ -4551,6 +4688,88 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(!ui.showsText(hint));
         QVERIFY(toggleOption(ui, QStringLiteral("tags"), tag));
         QTRY_VERIFY(rowShown() && option->property("selected").toBool());
+    }
+
+    void theTagsSectionListsTheFirstTagsAndItsSearchFindsTheOthers()
+    {
+        Ui ui(m_home->path());
+        QJsonArray tags;
+        for (int i = 0; i < 350; ++i)
+            tags.append(QStringLiteral("tag %1").arg(i, 3, 10, QLatin1Char('0')));
+        ui.server.listingRawBody.insert(
+            QStringLiteral("Filters"),
+            QJsonDocument(QJsonObject{{QStringLiteral("Genres"),
+                                       QJsonArray{QJsonObject{
+                                           {QStringLiteral("Id"), kSciFi},
+                                           {QStringLiteral("Name"), QStringLiteral("Sci-Fi")}}}},
+                                      {QStringLiteral("Tags"), tags}})
+                .toJson(QJsonDocument::Compact));
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        auto *movies = ui.controller.movies();
+        QTRY_VERIFY(movies->filterOptions()->tagsAvailable());
+        // The model keeps every tag, the dialog lists the first 300 and says how many it leaves out
+        QCOMPARE(movies->filterOptions()->tagCount(), 350);
+        QVERIFY(openFilterDialog(ui));
+        QObject *dialog = ui.popup(QStringLiteral("filterDialog"));
+        QVERIFY(dialog);
+        const auto rows = [&] { return dialog->property("tagRows").toList(); };
+        const auto note = [&] { return dialog->property("tagsNote").toString(); };
+        const auto draftTags = [&] {
+            return dialog->property("draft").toMap().value(QStringLiteral("tags")).toStringList();
+        };
+        QCOMPARE(rows().size(), 300);
+        QCOMPARE(note(), QStringLiteral("50 more tags: use the search to find them"));
+
+        // The field has a name for assistive technology; the first tag rows and the note are plain text
+        QQuickItem *field = nullptr;
+        const auto fieldShown = [&] {
+            revealFilterEntry(ui, QStringLiteral("tags"));
+            return (field = shownItem(ui, QStringLiteral("filterTagSearch"))) != nullptr;
+        };
+        QTRY_VERIFY(fieldShown());
+        QCOMPARE(accessibleNameOf(field), QStringLiteral("Search tags"));
+        QTRY_VERIFY(shownItem(ui, QStringLiteral("filterOption_tags_0")) != nullptr);
+        const QQuickItem *noteLabel = shownItem(ui, QStringLiteral("filterTagsNote"));
+        QVERIFY(noteLabel);
+        QCOMPARE(noteLabel->property("textFormat").toInt(), int(Qt::PlainText));
+        for (QQuickItem *label : ui.itemsWithText(QStringLiteral("tag 000"))) {
+            QVERIFY2(label->inherits("QQuickText"), qPrintable(Ui::describe(label)));
+            QCOMPARE(label->property("textFormat").toInt(), int(Qt::PlainText));
+        }
+
+        // The search is case-insensitive and reaches the tags beyond the first 300
+        QVERIFY(field->setProperty("text", QStringLiteral("TAG 33")));
+        QTRY_COMPARE(rows().size(), 10);
+        QCOMPARE(rows().constFirst().toMap().value(QStringLiteral("value")).toString(),
+                 QStringLiteral("tag 330"));
+        QCOMPARE(rows().constFirst().toMap().value(QStringLiteral("key")).toString(),
+                 QStringLiteral("tags_330"));
+        QVERIFY(note().isEmpty());
+        QTRY_VERIFY(fieldShown() && shownItem(ui, QStringLiteral("filterOption_tags_330")));
+        QTRY_VERIFY(!ui.item(QStringLiteral("filterOption_tags_0")));
+
+        // A checked tag stays listed and checked when a search no longer matches it
+        QVERIFY(toggleOption(ui, QStringLiteral("tags"), QStringLiteral("tag 335")));
+        QCOMPARE(draftTags(), QStringList{QStringLiteral("tag 335")});
+        QVERIFY(field->setProperty("text", QStringLiteral("nothing like it")));
+        QTRY_COMPARE(rows().size(), 1);
+        QCOMPARE(rows().constFirst().toMap().value(QStringLiteral("value")).toString(),
+                 QStringLiteral("tag 335"));
+        QCOMPARE(draftTags(), QStringList{QStringLiteral("tag 335")});
+        QVERIFY(note().isEmpty());
+
+        // Unchecked and searched again, nothing is left and the note says so
+        QVERIFY(toggleOption(ui, QStringLiteral("tags"), QStringLiteral("tag 335")));
+        QVERIFY(draftTags().isEmpty());
+        QVERIFY(field->setProperty("text", QStringLiteral("still nothing")));
+        QTRY_COMPARE(rows().size(), 0);
+        QCOMPARE(note(), QStringLiteral("No tags match the search"));
+
+        // Without a search the first 300 are back
+        QVERIFY(field->setProperty("text", QString()));
+        QTRY_COMPARE(rows().size(), 300);
+        QCOMPARE(note(), QStringLiteral("50 more tags: use the search to find them"));
     }
 
     void aQueryTooLongForTheServerOffersClearFiltersInTheFailureBox()
@@ -4631,9 +4850,10 @@ class TestUiPages : public QObject {
         for (const QString &token :
              {QStringLiteral("SortName"), QStringLiteral("DateCreated"),
               QStringLiteral("DateLastContentAdded"), QStringLiteral("PremiereDate"),
-              QStringLiteral("ProductionYear"), QStringLiteral("AiredEpisodeOrder"),
+              QStringLiteral("OfficialRating"), QStringLiteral("AiredEpisodeOrder"),
               QStringLiteral("CommunityRating"), QStringLiteral("CriticRating"),
-              QStringLiteral("Runtime"), QStringLiteral("DatePlayed"), QStringLiteral("PlayCount"),
+              QStringLiteral("Runtime"), QStringLiteral("DatePlayed"),
+              QStringLiteral("SeriesDatePlayed"), QStringLiteral("PlayCount"),
               QStringLiteral("Random")}) {
             QObject *action = ui.popup(QStringLiteral("sortKey_") + token);
             QVERIFY2(action, qPrintable(token));
@@ -7143,7 +7363,7 @@ class TestUiPages : public QObject {
               QStringLiteral("Settings"), QStringLiteral("Show Keyboard Shortcuts"),
               QStringLiteral("Player"), QStringLiteral("Play or Pause"),
               QStringLiteral("Mute or Unmute"),
-              QStringLiteral("Cancel Up Next, Leave Full Screen or Go Back"),
+              QStringLiteral("Cancel Up Next, Leave Full Screen, or Go Back"),
               QStringLiteral("Skip Forward 1 Minute"), QStringLiteral("Previous Chapter"),
               QStringLiteral("Next Chapter")})
             QTRY_VERIFY2(ui.showsText(action), qPrintable(action));
@@ -8704,6 +8924,58 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(row->hasActiveFocus());
     }
 
+    void aPadArrowLeavesTheScrollViewForTheFirstBlock()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        // Rows load asynchronously: the first arrow comes once the blocks are there
+        QTRY_VERIFY(ui.item(QStringLiteral("homeRowList_0")));
+        QQuickItem *focus = ui.window->activeFocusItem();
+        QVERIFY(focus);
+        QVERIFY2(focus->inherits("QQuickScrollView"), focus->metaObject()->className());
+        // The socket and the pad share the dispatcher: a Down on the page's scroll view moves into the content
+        Kinefin::RemoteInputServer input(QString(), QStringLiteral("test"));
+        input.setWindow(ui.window);
+        const auto focusedRow = [&ui]() -> QString {
+            for (QQuickItem *item = ui.window->activeFocusItem(); item; item = item->parentItem()) {
+                if (item->objectName().startsWith(QLatin1String("homeRowList_")))
+                    return item->objectName();
+            }
+            return {};
+        };
+        QVERIFY(input.dispatchKeycode(QStringLiteral("down")));
+        // The first block is the library tiles, which come above the rows
+        QTRY_VERIFY(ui.window->activeFocusItem()
+                    && ui.window->activeFocusItem()->objectName().startsWith(
+                        QLatin1String("libraryCard_")));
+        // Down from a tile enters the rows below: a card of the row takes the focus
+        QVERIFY(input.dispatchKeycode(QStringLiteral("down")));
+        QTRY_VERIFY(!focusedRow().isEmpty());
+        const QString firstRow = focusedRow();
+        // Inside a row the list keeps the arrows: Right moves its current card, the focus stays in the row
+        QQuickItem *list = ui.item(firstRow);
+        QVERIFY(list);
+        if (list->property("count").toInt() > 1) {
+            QCOMPARE(list->property("currentIndex").toInt(), 0);
+            QVERIFY(input.dispatchKeycode(QStringLiteral("right")));
+            QTRY_COMPARE(list->property("currentIndex").toInt(), 1);
+            QCOMPARE(focusedRow(), firstRow);
+            QVERIFY(input.dispatchKeycode(QStringLiteral("left")));
+            QTRY_COMPARE(list->property("currentIndex").toInt(), 0);
+            QCOMPARE(focusedRow(), firstRow);
+        }
+        // Up from the first row goes back to the tiles above it
+        QVERIFY(input.dispatchKeycode(QStringLiteral("up")));
+        QTRY_VERIFY(ui.window->activeFocusItem()
+                    && ui.window->activeFocusItem()->objectName().startsWith(
+                        QLatin1String("libraryCard_")));
+        QVERIFY(input.dispatchKeycode(QStringLiteral("down")));
+        QTRY_COMPARE(focusedRow(), firstRow);
+        QVERIFY(input.dispatchKeycode(QStringLiteral("down")));
+        QTRY_VERIFY(!focusedRow().isEmpty() && focusedRow() != firstRow);
+    }
+
     void downKeepsTheFocusedRowInView()
     {
         Ui ui(m_home->path());
@@ -8762,7 +9034,7 @@ class TestUiPages : public QObject {
                     ->property("contentY")
                     .toReal()
                 > 0);
-        // Up goes back, and Down from the last row stays where it is
+        // Up goes back, and Down from the last row stays where it is: the library tiles are above the rows
         QTest::keyClick(ui.window, Qt::Key_Up);
         QTRY_VERIFY(lists.at(lists.size() - 2)->hasActiveFocus());
         QTest::keyClick(ui.window, Qt::Key_Down);
@@ -8770,6 +9042,470 @@ class TestUiPages : public QObject {
         QTest::keyClick(ui.window, Qt::Key_Down);
         QTest::qWait(200);
         QVERIFY(lists.constLast()->hasActiveFocus());
+    }
+
+    // A season page has the episodes list as its flickable and the whole page as the list's header: a pad's Down on a header control used to move the list's current row and leave the focus where it was
+    void aPadArrowInTheSeasonHeaderMovesTheFocusNotTheEpisodeRow()
+    {
+        Ui ui(m_home->path());
+        ui.serveShow();
+        ui.server.generatedEpisodeTotal = 12;
+        QVERIFY(ui.load());
+        ui.window->setProperty("requestedItemId", kSeasonId);
+        QVERIFY(ui.signIn());
+        QQuickItem *list = nullptr;
+        QTRY_VERIFY((list = ui.item(QStringLiteral("episodesList"))) != nullptr);
+        QTRY_VERIFY(list->property("count").toInt() > 1);
+        QQuickItem *page = ui.item(QStringLiteral("itemDetailsPage"));
+        QVERIFY(page);
+        QQuickItem *control = nullptr;
+        for (const char *name :
+             {"detailsPlay", "detailsPlayNarrow", "seriesLink", "seasonLink", "overviewToggle"}) {
+            QQuickItem *candidate = Ui::itemIn(page, QString::fromLatin1(name));
+            if (candidate && candidate->isVisible() && candidate->isEnabled()
+                && candidate->activeFocusOnTab()) {
+                control = candidate;
+                break;
+            }
+        }
+        QVERIFY(control);
+        control->forceActiveFocus(Qt::TabFocusReason);
+        QTRY_VERIFY(control->hasActiveFocus());
+        const int row = list->property("currentIndex").toInt();
+        Kinefin::RemoteInputServer input(QString(), QStringLiteral("test"));
+        input.setWindow(ui.window);
+        QVERIFY(input.dispatchKeycode(QStringLiteral("down")));
+        QCOMPARE(list->property("currentIndex").toInt(), row);
+        QVERIFY(ui.window->activeFocusItem() != control);
+        QVERIFY(input.dispatchKeycode(QStringLiteral("down")));
+        if (list->hasActiveFocus()) {
+            // The presses reached the rows, on the row the list had: there the arrows are the list's own
+            QCOMPARE(list->property("currentIndex").toInt(),
+                     qMin(row + 1, list->property("count").toInt() - 1));
+        } else {
+            // Still in the header: the second press does not move the rows either
+            QCOMPARE(list->property("currentIndex").toInt(), row);
+        }
+    }
+
+    // The Settings combo boxes apply a value at once: a pad's Down on a closed one used to step it
+    void aPadDownPassesAClosedSettingsComboBox()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("settingsSection")));
+        QQuickItem *view = ui.item(QStringLiteral("settingsContentView"));
+        QVERIFY(view);
+        // The page slides in disabled and unsized: its controls take the focus once it settled
+        QTRY_VERIFY(view->isEnabled() && view->width() > 0);
+        QQuickItem *combo = nullptr;
+        for (QQuickItem *candidate : allItems(view)) {
+            if (candidate->inherits("QQuickComboBox") && candidate->isVisible()
+                && (!combo
+                    || candidate->mapToScene(QPointF(0, 0)).y()
+                           < combo->mapToScene(QPointF(0, 0)).y()))
+                combo = candidate;
+        }
+        QVERIFY(combo);
+        const QVariant device =
+            ui.settings.value(QStringLiteral("audio"), QStringLiteral("devicetype"));
+        const QVariant channels =
+            ui.settings.value(QStringLiteral("audio"), QStringLiteral("channels"));
+        const int index = combo->property("currentIndex").toInt();
+        combo->forceActiveFocus(Qt::TabFocusReason);
+        QTRY_VERIFY(combo->hasActiveFocus());
+        Kinefin::RemoteInputServer input(QString(), QStringLiteral("test"));
+        input.setWindow(ui.window);
+        QVERIFY(input.dispatchKeycode(QStringLiteral("down")));
+        QVERIFY(ui.window->activeFocusItem() != combo);
+        QCOMPARE(combo->property("currentIndex").toInt(), index);
+        QCOMPARE(ui.settings.value(QStringLiteral("audio"), QStringLiteral("devicetype")), device);
+        QCOMPARE(ui.settings.value(QStringLiteral("audio"), QStringLiteral("channels")), channels);
+    }
+
+    void padReachesEveryHomeControl()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        // Enough Continue Watching cards for the last one to sit under the row's See All
+        ui.server.generatedResumeTotal = 30;
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(1000));
+        QVERIFY(buildState(ui, QStringLiteral("home")));
+        QTRY_VERIFY(ui.item(QStringLiteral("homeRowList_0")) != nullptr);
+        QTRY_VERIFY(listBuilt(ui.item(QStringLiteral("homeRowList_0"))));
+        QTRY_VERIFY(ui.layoutProblems().isEmpty());
+        Kinefin::RemoteInputServer input(QString(), QStringLiteral("test"));
+        input.setWindow(ui.window);
+        const QList<QQuickItem *> reached = padReach(ui, input);
+        const QStringList names = namesOf(reached);
+        const auto reaches = [&](const QString &name) { return names.contains(name); };
+        QVERIFY2(std::any_of(names.cbegin(), names.cend(),
+                             [](const QString &name) {
+                                 return name.startsWith(QLatin1String("libraryCard_"));
+                             }),
+                 qPrintable(names.join(QLatin1Char(' '))));
+        QVERIFY2(reaches(QStringLiteral("homeRowList_0")),
+                 qPrintable(names.join(QLatin1Char(' '))));
+        QVERIFY2(reaches(QStringLiteral("homeRowSeeAll_0")),
+                 qPrintable(names.join(QLatin1Char(' '))));
+        // The header's tabs, above the page
+        QVERIFY2(std::any_of(reached.cbegin(), reached.cend(),
+                             [&ui](const QQuickItem *item) {
+                                 return ui.shellHeader()->isAncestorOf(item);
+                             }),
+                 qPrintable(names.join(QLatin1Char(' '))));
+    }
+
+    void upUnderSeeAllReachesSeeAll()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        ui.server.generatedResumeTotal = 30;
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(1000));
+        QVERIFY(buildState(ui, QStringLiteral("home")));
+        QQuickItem *list = nullptr;
+        QTRY_VERIFY((list = ui.item(QStringLiteral("homeRowList_0"))) != nullptr);
+        QTRY_VERIFY(listBuilt(list));
+        QTRY_VERIFY(ui.layoutProblems().isEmpty());
+        QQuickItem *seeAll = ui.item(QStringLiteral("homeRowSeeAll_0"));
+        QVERIFY(seeAll && seeAll->isVisible());
+        // The card under the middle of the button becomes the row's current card; the middle may fall in the gap between two cards, and under load the cards at the edge come a little later
+        const auto cardUnderSeeAll = [list, seeAll] {
+            const QPointF middle =
+                list->mapFromScene(seeAll->mapToScene(QPointF(seeAll->width() / 2, 0)));
+            for (const double aside : {0.0, -8.0, 8.0, -16.0, 16.0, -32.0, 32.0}) {
+                int index = -1;
+                QMetaObject::invokeMethod(
+                    list, "indexAt", Q_RETURN_ARG(int, index),
+                    Q_ARG(double, list->property("contentX").toDouble() + middle.x() + aside),
+                    Q_ARG(double, 10.0));
+                if (index >= 0)
+                    return index;
+            }
+            return -1;
+        };
+        int under = -1;
+        QTRY_VERIFY((under = cardUnderSeeAll()) >= 0);
+        QVERIFY(list->setProperty("currentIndex", under));
+        QVERIFY(QMetaObject::invokeMethod(list, "forceActiveFocus",
+                                          Q_ARG(Qt::FocusReason, Qt::TabFocusReason)));
+        QTRY_VERIFY(list->hasActiveFocus());
+        Kinefin::RemoteInputServer input(QString(), QStringLiteral("test"));
+        input.setWindow(ui.window);
+        QVERIFY(input.dispatchKeycode(QStringLiteral("up")));
+        QCOMPARE(ui.window->activeFocusItem(), seeAll);
+        // And Down returns to the row: the focus sits on its current card, inside the list
+        QVERIFY(input.dispatchKeycode(QStringLiteral("down")));
+        QVERIFY(list->hasActiveFocus());
+        QCOMPARE(list->property("currentIndex").toInt(), under);
+    }
+
+    void downFromAHeaderTabEntersThePage()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(1000));
+        QVERIFY(buildState(ui, QStringLiteral("home")));
+        QQuickItem *home = ui.item(QStringLiteral("homePage"));
+        QVERIFY(home);
+        const QList<QQuickItem *> tabs = ui.tabButtons();
+        QVERIFY(!tabs.isEmpty());
+        tabs.constFirst()->forceActiveFocus(Qt::TabFocusReason);
+        QTRY_VERIFY(tabs.constFirst()->hasActiveFocus());
+        Kinefin::RemoteInputServer input(QString(), QStringLiteral("test"));
+        input.setWindow(ui.window);
+        QVERIFY(input.dispatchKeycode(QStringLiteral("down")));
+        QTRY_VERIFY(ui.window->activeFocusItem()
+                    && home->isAncestorOf(ui.window->activeFocusItem()));
+    }
+
+    void upFromTheGridFirstRowReachesTheControlAbove()
+    {
+        Ui ui(m_home->path());
+        ui.server.generatedItemTotal = 30;
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        QQuickItem *grid = ui.item(QStringLiteral("libraryGrid"));
+        QVERIFY(grid);
+        QTRY_VERIFY(grid->hasActiveFocus());
+        QCOMPARE(grid->property("currentIndex").toInt(), 0);
+        Kinefin::RemoteInputServer input(QString(), QStringLiteral("test"));
+        input.setWindow(ui.window);
+        QVERIFY(input.dispatchKeycode(QStringLiteral("up")));
+        QQuickItem *now = ui.window->activeFocusItem();
+        QVERIFY(now && now != grid);
+        const QRectF rect = now->mapRectToScene(QRectF(0, 0, now->width(), now->height()));
+        QVERIFY2(rect.center().y() < grid->mapToScene(QPointF(0, 0)).y(),
+                 qPrintable(namesOf({now}).join(QLatin1Char(' '))));
+        // Down returns to the grid, with its row
+        QVERIFY(input.dispatchKeycode(QStringLiteral("down")));
+        QTRY_VERIFY(grid->hasActiveFocus());
+        QCOMPARE(grid->property("currentIndex").toInt(), 0);
+    }
+
+    void padReachesEveryLibraryControl()
+    {
+        Ui ui(m_home->path());
+        ui.server.generatedItemTotal = 30;
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        QQuickItem *grid = ui.item(QStringLiteral("libraryGrid"));
+        QVERIFY(grid);
+        QTRY_VERIFY(grid->hasActiveFocus());
+        QTRY_VERIFY(ui.layoutProblems().isEmpty());
+        Kinefin::RemoteInputServer input(QString(), QStringLiteral("test"));
+        input.setWindow(ui.window);
+        const QList<QQuickItem *> reached = padReach(ui, input);
+        const QStringList names = namesOf(reached);
+        QVERIFY2(reached.contains(grid), qPrintable(names.join(QLatin1Char(' '))));
+        // The page's named controls that Tab reaches: the arrows reach them too
+        QQuickItem *page = ui.item(QStringLiteral("libraryPage"));
+        QVERIFY(page);
+        for (QQuickItem *item : allItems(page)) {
+            const QString name = item->objectName();
+            if (!item->isVisible() || !item->isEnabled() || !item->activeFocusOnTab()
+                || !(name == QLatin1String("librarySelector")
+                     || name == QLatin1String("librarySearchField")
+                     || name == QLatin1String("clearFiltersButton")
+                     || name == QLatin1String("returnToTopButton")
+                     || name.startsWith(QLatin1String("filterChipRemove_"))
+                     || name.startsWith(QLatin1String("subtab_"))))
+                continue;
+            QVERIFY2(reached.contains(item),
+                     qPrintable(name + QLatin1String(" not reached, reached: ")
+                                + names.join(QLatin1Char(' '))));
+        }
+    }
+
+    void padReachesEverySeasonPageControl()
+    {
+        Ui ui(m_home->path());
+        ui.serveShow();
+        ui.server.generatedEpisodeTotal = 12;
+        QVERIFY(ui.load());
+        ui.window->setProperty("requestedItemId", kSeasonId);
+        QVERIFY(ui.signIn());
+        QQuickItem *list = nullptr;
+        QTRY_VERIFY((list = ui.item(QStringLiteral("episodesList"))) != nullptr);
+        QTRY_VERIFY(list->property("count").toInt() > 1);
+        QQuickItem *page = ui.item(QStringLiteral("itemDetailsPage"));
+        QVERIFY(page);
+        QTRY_VERIFY(ui.layoutProblems().isEmpty());
+        list->forceActiveFocus(Qt::TabFocusReason);
+        QTRY_VERIFY(list->hasActiveFocus());
+        Kinefin::RemoteInputServer input(QString(), QStringLiteral("test"));
+        input.setWindow(ui.window);
+        const QList<QQuickItem *> reached = padReach(ui, input);
+        const QStringList names = namesOf(reached);
+        // The page's own controls: the links, Play and Show More, whichever of them this window shows
+        for (const char *name :
+             {"seriesLink", "seasonLink", "detailsPlay", "detailsPlayNarrow", "overviewToggle"}) {
+            QQuickItem *control = Ui::itemIn(page, QString::fromLatin1(name));
+            if (!control || !control->isVisible() || !control->isEnabled()
+                || !control->activeFocusOnTab())
+                continue;
+            QVERIFY2(reached.contains(control),
+                     qPrintable(QString::fromLatin1(name) + QLatin1String(" not reached, reached: ")
+                                + names.join(QLatin1Char(' '))));
+        }
+        QVERIFY(reached.contains(list));
+        // The walk puts the list's row back where it was
+        QCOMPARE(list->property("currentIndex").toInt(), 0);
+    }
+
+    void padReachesEverySettingsControl()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("settingsSection")));
+        QQuickItem *page = ui.item(QStringLiteral("settingsPage"));
+        QVERIFY(page);
+        QTRY_VERIFY(ui.item(QStringLiteral("settingsGroupCard_1")) != nullptr);
+        // The values before: every combo box, spin box and switch of the content
+        QQuickItem *view = ui.item(QStringLiteral("settingsContentView"));
+        QVERIFY(view);
+        // The page slides in disabled and unsized: its controls take the focus once it settled
+        QTRY_VERIFY(view->isEnabled() && view->width() > 0);
+        const auto snapshot = [&] {
+            QStringList values;
+            for (QQuickItem *item : allItems(view)) {
+                if (item->inherits("QQuickComboBox") || item->inherits("QQuickSpinBox"))
+                    values << item->property("currentIndex").toString() + QLatin1Char('/')
+                                  + item->property("value").toString();
+                else if (QString::fromLatin1(item->metaObject()->className())
+                             .contains(QLatin1String("FormSwitchDelegate")))
+                    values << item->property("checked").toString();
+            }
+            return values;
+        };
+        const QStringList before = snapshot();
+        QVERIFY(!before.isEmpty());
+        QQuickItem *first = nullptr;
+        for (QQuickItem *candidate : allItems(view)) {
+            if (candidate->inherits("QQuickComboBox") && candidate->isVisible()
+                && (!first
+                    || candidate->mapToScene(QPointF(0, 0)).y()
+                           < first->mapToScene(QPointF(0, 0)).y()))
+                first = candidate;
+        }
+        QVERIFY(first);
+        first->forceActiveFocus(Qt::TabFocusReason);
+        QTRY_VERIFY(first->hasActiveFocus());
+        Kinefin::RemoteInputServer input(QString(), QStringLiteral("test"));
+        input.setWindow(ui.window);
+        const QList<QQuickItem *> reached = padReach(ui, input);
+        const QStringList names = namesOf(reached);
+        // Every combo box of the section is reached, and no value changed on the way
+        for (QQuickItem *item : allItems(view)) {
+            if (item->inherits("QQuickComboBox") && item->isVisible() && item->isEnabled()
+                && item->activeFocusOnTab())
+                QVERIFY2(reached.contains(item), qPrintable(names.join(QLatin1Char(' '))));
+        }
+        QCOMPARE(snapshot(), before);
+    }
+
+    void padStaysInsideADialog()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("home")));
+        QVERIFY(
+            QMetaObject::invokeMethod(ui.shellAction(QStringLiteral("signOutAction")), "trigger"));
+        QObject *dialog = ui.popup(QStringLiteral("signOutDialog"));
+        QVERIFY(dialog);
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QTRY_VERIFY(ui.window->activeFocusItem() && inPopupItem(ui.window->activeFocusItem()));
+        Kinefin::RemoteInputServer input(QString(), QStringLiteral("test"));
+        input.setWindow(ui.window);
+        const QList<QQuickItem *> reached = padReach(ui, input);
+        for (const QQuickItem *item : reached)
+            QVERIFY2(inPopupItem(item),
+                     qPrintable(namesOf({const_cast<QQuickItem *>(item)}).join(QLatin1Char(' '))));
+        // The page behind stayed where it was
+        QVERIFY(dialog->property("opened").toBool());
+    }
+
+    void noPadFocusOnAHiddenPage()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(1000));
+        QVERIFY(buildState(ui, QStringLiteral("home")));
+        const QPointer<QQuickItem> home = ui.item(QStringLiteral("homePage"));
+        QVERIFY(home);
+        QQuickItem *page = openDetails(ui, kMovieId);
+        QVERIFY(page);
+        // The Home page stays in the stack under the details page
+        QVERIFY(home);
+        QTRY_VERIFY(ui.window->activeFocusItem() != nullptr);
+        Kinefin::RemoteInputServer input(QString(), QStringLiteral("test"));
+        input.setWindow(ui.window);
+        const QList<QQuickItem *> reached = padReach(ui, input);
+        QVERIFY(reached.size() > 1);
+        for (QQuickItem *item : reached)
+            QVERIFY2(item != home && !home->isAncestorOf(item),
+                     qPrintable(namesOf({item}).join(QLatin1Char(' '))));
+    }
+
+    void padInThePlayer()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *page = openPlayer(ui, stub);
+        QVERIFY(page);
+        Kinefin::RemoteInputServer input(QString(), QStringLiteral("test"));
+        input.setWindow(ui.window);
+        // The page keeps the arrows for the seeks, and the focus
+        for (const auto &[keycode, call] :
+             {std::pair{"right", "seekRelative 10"}, std::pair{"left", "seekRelative -10"},
+              std::pair{"up", "seekRelative 60"}, std::pair{"down", "seekRelative -60"}}) {
+            stub.calls.clear();
+            QVERIFY(input.dispatchKeycode(QString::fromLatin1(keycode)));
+            QTRY_VERIFY2(stub.calls.contains(QString::fromLatin1(call)), keycode);
+            QCOMPARE(ui.window->activeFocusItem(), page);
+        }
+        // Select plays or pauses: Return is the Up Next card's only
+        stub.calls.clear();
+        QVERIFY(input.dispatchKeycode(QStringLiteral("select")));
+        QTRY_VERIFY(stub.calls.contains(QStringLiteral("togglePause")));
+        QCOMPARE(ui.window->activeFocusItem(), page);
+        // Menu opens the context menu
+        QObject *menu = ui.popup(QStringLiteral("playerContextMenu"));
+        QVERIFY(menu);
+        QVERIFY(input.dispatchKeycode(QStringLiteral("menu")));
+        QTRY_VERIFY(menu->property("opened").toBool());
+        QVERIFY(Ui::closeMenu(menu));
+    }
+
+    // The buttons the page shows over the video are Tab-only: the context menu, which Menu and a pad's West button open, lists them while they show
+    void playerContextMenuListsTheButtonsOverTheVideo()
+    {
+        PlayerStub stub;
+        stub.skipLabel = QStringLiteral("Skip Intro");
+        stub.clipSaving = true;
+        stub.errorText = QStringLiteral("The video could not be opened");
+        stub.canRetry = true;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *page = openPlayer(ui, stub);
+        QVERIFY(page);
+        QObject *menu = ui.popup(QStringLiteral("playerContextMenu"));
+        QVERIFY(menu);
+        Kinefin::RemoteInputServer input(QString(), QStringLiteral("test"));
+        input.setWindow(ui.window);
+        QVERIFY(input.dispatchKeycode(QStringLiteral("menu")));
+        QTRY_VERIFY(menu->property("opened").toBool());
+        const auto entry = [menu](const char *name) {
+            return menu->findChild<QQuickItem *>(QString::fromLatin1(name));
+        };
+        for (const char *name : {"playerContextSkipItem", "playerContextRetryItem",
+                                 "playerContextCloseItem", "playerContextCancelClipItem"}) {
+            QVERIFY2(entry(name), name);
+            QVERIFY2(entry(name)->isVisible(), name);
+        }
+        // Not in a SyncPlay group: no entry for it
+        QVERIFY(entry("playerContextSyncPlayItem"));
+        QVERIFY(!entry("playerContextSyncPlayItem")->isVisible());
+        QCOMPARE(entry("playerContextSkipItem")->property("text").toString(),
+                 QStringLiteral("Skip Intro"));
+        QCOMPARE(entry("playerContextRetryItem")->property("text").toString(),
+                 QStringLiteral("Try Again"));
+        QCOMPARE(entry("playerContextCloseItem")->property("text").toString(),
+                 QStringLiteral("Close Player"));
+        QCOMPARE(entry("playerContextCancelClipItem")->property("text").toString(),
+                 QStringLiteral("Cancel Saving the Clip"));
+        stub.clipSavingGif = true;
+        Q_EMIT stub.changed();
+        QTRY_COMPARE(entry("playerContextCancelClipItem")->property("text").toString(),
+                     QStringLiteral("Cancel Saving the GIF"));
+        // Each does what its button does
+        for (const auto &[name, call] : {std::pair{"playerContextSkipItem", "skipSegment"},
+                                         std::pair{"playerContextRetryItem", "retryPlayback"},
+                                         std::pair{"playerContextCancelClipItem", "cancelClip"}}) {
+            QVERIFY(QMetaObject::invokeMethod(menu, "open"));
+            QTRY_VERIFY(menu->property("opened").toBool());
+            QVERIFY(QMetaObject::invokeMethod(entry(name), "click"));
+            QTRY_VERIFY2(stub.calls.contains(QString::fromLatin1(call)), call);
+            QTRY_VERIFY(!menu->property("visible").toBool());
+        }
+        // Nothing to show, no entry
+        stub.skipLabel.clear();
+        stub.errorText.clear();
+        stub.clipSaving = false;
+        Q_EMIT stub.changed();
+        QTRY_VERIFY(!entry("playerContextSkipItem")->isVisible());
+        QTRY_VERIFY(!entry("playerContextRetryItem")->isVisible());
+        QTRY_VERIFY(!entry("playerContextCloseItem")->isVisible());
+        QTRY_VERIFY(!entry("playerContextCancelClipItem")->isVisible());
     }
 
     void reopeningTheOpenLibraryKeepsItsPage()
@@ -13699,8 +14435,8 @@ class TestUiPages : public QObject {
         };
         const int chaptersRow = submenuEntry(menu);
         QVERIFY(chaptersRow > 0);
-        QCOMPARE(chaptersRow,
-                 submenuEntry(more->findChild<QObject *>(QStringLiteral("playerAspectMenu"))) + 1);
+        QVERIFY(chaptersRow
+                > submenuEntry(more->findChild<QObject *>(QStringLiteral("playerAspectMenu"))));
         QVERIFY(entryAt(more, chaptersRow)->isEnabled());
         QTRY_COMPARE(menu->property("count").toInt(), 4);
         const QStringList texts{
@@ -14002,6 +14738,112 @@ class TestUiPages : public QObject {
         QVERIFY(stub.calls.contains(QStringLiteral("cancelClip")));
     }
 
+    void gameControllerGroupsShowOnlyWithAPad()
+    {
+        PlayerStub stub;
+        GamepadStub gamepad;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QObject *root = ui.engine.rootObjects().constFirst();
+        root->setProperty("gamepad", QVariant::fromValue<QObject *>(&gamepad));
+        QObject *dialog = ui.popup(QStringLiteral("shortcutsDialog"));
+        QVERIFY(dialog);
+        QVERIFY(QMetaObject::invokeMethod(dialog, "open"));
+        QTRY_VERIFY(dialog->property("visible").toBool());
+        const auto texts = [dialog](bool visibleOnly) {
+            QStringList found;
+            for (QQuickItem *item : dialog->findChildren<QQuickItem *>()) {
+                const QString text = item->property("text").toString();
+                if ((!visibleOnly || item->isVisible()) && !text.isEmpty())
+                    found.append(text);
+            }
+            return found;
+        };
+        QVERIFY(!texts(true).contains(QStringLiteral("Game Controller")));
+        gamepad.connectedCount = 1;
+        Q_EMIT gamepad.changed();
+        QTRY_VERIFY(texts(true).contains(QStringLiteral("Game Controller")));
+        QVERIFY(texts(true).contains(QStringLiteral("Game Controller in the Player")));
+        // The pad's own printed labels reach the dialog; the mapping itself is tested with the virtual pad
+        QVERIFY(QMetaObject::invokeMethod(dialog, "close"));
+        QTRY_VERIFY(!dialog->property("visible").toBool());
+    }
+
+    void gamepadCommandsReachThePlayer()
+    {
+        PlayerStub stub;
+        stub.hasNext = true;
+        stub.hasPrevious = true;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(openPlayer(ui, stub));
+        QObject *root = ui.engine.rootObjects().constFirst();
+        // The shoulders step the player's items while the full player is in front
+        QVERIFY(QMetaObject::invokeMethod(root, "remoteAction",
+                                          Q_ARG(QVariant, QStringLiteral("nexttab"))));
+        QVERIFY(stub.calls.contains(QStringLiteral("next")));
+        QVERIFY(QMetaObject::invokeMethod(root, "remoteAction",
+                                          Q_ARG(QVariant, QStringLiteral("previoustab"))));
+        QVERIFY(stub.calls.contains(QStringLiteral("previous")));
+        // The triggers step chapters in every playback mode
+        QVERIFY(QMetaObject::invokeMethod(root, "remoteAction",
+                                          Q_ARG(QVariant, QStringLiteral("nextchapter"))));
+        QVERIFY(stub.calls.contains(QStringLiteral("stepChapter 1")));
+        QVERIFY(QMetaObject::invokeMethod(root, "remoteAction",
+                                          Q_ARG(QVariant, QStringLiteral("previouschapter"))));
+        QVERIFY(stub.calls.contains(QStringLiteral("stepChapter -1")));
+    }
+
+    void qualityMenuListsTheSteps()
+    {
+        PlayerStub stub;
+        stub.qualityAvailable = true;
+        stub.qualitySteps = {QVariantMap{{QStringLiteral("cap"), 0},
+                                         {QStringLiteral("text"), QStringLiteral("Automatic")},
+                                         {QStringLiteral("checked"), true}},
+                             QVariantMap{{QStringLiteral("cap"), 8'000'000},
+                                         {QStringLiteral("text"), QStringLiteral("8 Mbps")},
+                                         {QStringLiteral("checked"), false}}};
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(openPlayer(ui, stub));
+        QObject *more = ui.popup(QStringLiteral("playerMoreMenu"));
+        QObject *quality = ui.popup(QStringLiteral("playerQualityMenu"));
+        QVERIFY(more && quality);
+        QVERIFY(QMetaObject::invokeMethod(more, "open"));
+        QTRY_VERIFY(more->property("opened").toBool());
+        QQuickItem *entry = nullptr;
+        for (QQuickItem *item : ui.menuItems(QStringLiteral("playerMoreMenu"))) {
+            if (item->property("subMenu").value<QObject *>() == quality) {
+                entry = item;
+                break;
+            }
+        }
+        QVERIFY(entry);
+        QVERIFY(QMetaObject::invokeMethod(entry, "click"));
+        QTRY_VERIFY(quality->property("opened").toBool());
+        QStringList names;
+        for (QQuickItem *item : ui.menuItems(QStringLiteral("playerQualityMenu"))) {
+            if (item->isVisible())
+                names << item->property("plainText").toString();
+        }
+        QCOMPARE(names, (QStringList{QStringLiteral("Automatic"), QStringLiteral("8 Mbps")}));
+        for (QQuickItem *item : ui.menuItems(QStringLiteral("playerQualityMenu"))) {
+            if (item->isVisible()
+                && item->property("plainText").toString() == QLatin1String("8 Mbps"))
+                QVERIFY(QMetaObject::invokeMethod(item, "triggered"));
+        }
+        QVERIFY(stub.calls.contains(QStringLiteral("setQuality 8000000")));
+        QVERIFY(Ui::closeMenu(more));
+        QTest::qWait(100);
+    }
+
     void playRequestedItemPlaysOrOpensTheDetails()
     {
         PlayerStub stub;
@@ -14111,7 +14953,7 @@ class TestUiPages : public QObject {
         PlayerStub stub;
         const QString hostile =
             QStringLiteral("<b>Abyss</b> & <img src=\"http://evil.invalid/x.png\">");
-        stub.skipLabel = QStringLiteral("Skip outro");
+        stub.skipLabel = QStringLiteral("Skip Outro");
         stub.upNext = {{QStringLiteral("title"), hostile},
                        {QStringLiteral("subtitle"), QString(QStringLiteral("S2:E7 — ") + hostile)},
                        {QStringLiteral("imageUrl"), QUrl()}};
@@ -15478,6 +16320,7 @@ class TestUiPages : public QObject {
                                        QStringLiteral("Repeat"),
                                        QStringLiteral("Playback Speed"),
                                        QStringLiteral("Aspect Ratio"),
+                                       QStringLiteral("Quality"),
                                        QStringLiteral("Chapters"),
                                        QStringLiteral("AV Sync"),
                                        QStringLiteral("Sleep Timer"),

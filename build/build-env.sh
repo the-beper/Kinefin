@@ -12,8 +12,7 @@ tty=; [ -t 0 ] && tty=-t
 
 [ "$#" -eq 0 ] && set -- bash
 set -- "$image" "$@"
-# The live harness's account goes in by name only: its values never stand on a command line, where any local user's ps would read them
-for name in KINEFIN_LIVE_BASE_URL KINEFIN_LIVE_USER KINEFIN_LIVE_PASSWORD KINEFIN_LIVE_ADMIN_USER KINEFIN_LIVE_ADMIN_PASSWORD; do
+for name in KINEFIN_LIVE_BASE_URL KINEFIN_LIVE_USER KINEFIN_LIVE_PASSWORD KINEFIN_LIVE_ADMIN_USER KINEFIN_LIVE_ADMIN_PASSWORD KINEFIN_LIVE_MPV_LOG QT_LOGGING_RULES; do
     eval "present=\${$name+x}"
     if [ -n "$present" ]; then set -- "--env=$name" "$@"; fi
 done

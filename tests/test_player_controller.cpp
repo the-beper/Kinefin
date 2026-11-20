@@ -17,6 +17,7 @@
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QtTest/QtTest>
+#include <optional>
 
 using Kinefin::PlayerController;
 using Kinefin::TrackChoice;
@@ -312,6 +313,33 @@ class TestPlayerController : public QObject {
         QCOMPARE(chain.server.remoteSubtitleDownloads.size(), 1);
         QVERIFY(chain.controller.downloadRemoteSubtitle(QStringLiteral("def456")));
         QTRY_COMPARE(downloaded.size(), 2);
+    }
+
+    // A subtitle the server did not save: the player says so and does not reopen the item for nothing
+    void aSubtitleTheServerDidNotSaveLeavesPlaybackAlone()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        chain.server.externalSubtitleStreams = 0;
+        chain.server.remoteSubtitleSaves = false;
+        chain.client.setRemoteSubtitleSaveTiming(20, 3);
+        QVERIFY(startsStarving(chain));
+        stall(chain, false);
+        const int requests = chain.server.playbackInfoRequests;
+        QSignalSpy downloaded(&chain.controller, &PlayerController::remoteSubtitleDownloaded);
+        QSignalSpy notSaved(&chain.controller, &PlayerController::remoteSubtitleNotSaved);
+        QVERIFY(chain.controller.downloadRemoteSubtitle(QStringLiteral("abc123")));
+        QTRY_COMPARE(notSaved.size(), 1);
+        QCOMPARE(notSaved.first().at(0).toString(), QStringLiteral("abc123"));
+        QCOMPARE(downloaded.size(), 0);
+        QTest::qWait(300);
+        QCOMPARE(chain.server.playbackInfoRequests, requests);
+        QVERIFY(!chain.controller.loading());
+        // The next download may start: the one before is over, and a saved one reopens the item
+        chain.server.remoteSubtitleSaves = true;
+        QVERIFY(chain.controller.downloadRemoteSubtitle(QStringLiteral("def456")));
+        QTRY_COMPARE(downloaded.size(), 1);
+        QTRY_COMPARE(chain.server.playbackInfoRequests, requests + 1);
     }
 
     void aMovieKeepsNoSeriesChoice()
@@ -871,7 +899,7 @@ class TestPlayerController : public QObject {
             kMovie, QJsonArray{segment(QStringLiteral("Intro"), 15, 20)});
         QTest::qWait(300);
         QVERIFY(chain.controller.positionTicks() < 19 * kSecond);
-        QCOMPARE(chain.controller.skipLabel(), QStringLiteral("Skip intro"));
+        QCOMPARE(chain.controller.skipLabel(), QStringLiteral("Skip Intro"));
     }
 
     void introsStayWithoutTheSetting()
@@ -887,7 +915,7 @@ class TestPlayerController : public QObject {
         QTRY_VERIFY(chain.controller.positionTicks() > 0);
         QTest::qWait(500);
         QVERIFY(chain.controller.positionTicks() < 4 * kSecond);
-        QCOMPARE(chain.controller.skipLabel(), QStringLiteral("Skip intro"));
+        QCOMPARE(chain.controller.skipLabel(), QStringLiteral("Skip Intro"));
     }
 
     void upNextSeeksArmAndCancelTheCard()
@@ -1916,8 +1944,9 @@ class TestPlayerController : public QObject {
         chain.controller.markClipEnd();
         QVERIFY(!chain.controller.clipVideoEnabled());
         QVERIFY(!chain.controller.clipGifEnabled());
-        QCOMPARE(chain.controller.clipLine(),
+        QCOMPARE(chain.controller.clipLengthReason(),
                  QStringLiteral("A video clip lasts at most 60 seconds"));
+        QVERIFY(chain.controller.clipLine().contains(QStringLiteral("(70 s)")));
         chain.controller.clearClip();
         QCOMPARE(chain.controller.clipLine(), QStringLiteral("Set a start and an end"));
     }
@@ -1941,7 +1970,7 @@ class TestPlayerController : public QObject {
         chain.controller.markClipStart();
         chain.playsAt(5.0, 30);
         chain.controller.markClipEnd();
-        QCOMPARE(chain.controller.clipLine(),
+        QCOMPARE(chain.controller.clipReason(),
                  QStringLiteral("Clips cannot be saved while the server transcodes"));
         QVERIFY(!chain.controller.clipVideoEnabled());
         QVERIFY(!chain.controller.clipGifEnabled());
@@ -1971,9 +2000,276 @@ class TestPlayerController : public QObject {
         chain.controller.markClipStart();
         chain.playsAt(5.0, 30);
         chain.controller.markClipEnd();
-        QCOMPARE(chain.controller.clipLine(),
+        QCOMPARE(chain.controller.clipReason(),
                  QStringLiteral("Clips cannot be saved from HDR video"));
         QVERIFY(!chain.controller.clipVideoEnabled());
+    }
+
+    void aManualQualityStepPinsAndReopens()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        QVERIFY(startsStarving(chain));
+        // No stall while the user picks: the step is the user's, not the fallback's
+        stall(chain, false);
+        QVERIFY(chain.controller.qualityAvailable());
+        const QVariantList steps = chain.controller.qualitySteps();
+        QVERIFY(steps.size() > 1);
+        QVERIFY(steps.constFirst().toMap().value(QStringLiteral("checked")).toBool());
+        QCOMPARE(steps.constFirst().toMap().value(QStringLiteral("cap")).toLongLong(), 0);
+        // The user's own picks are no slow connection: no lowered-quality notice, up or down
+        QSignalSpy lowered(&chain.controller, &PlayerController::qualityLowered);
+        chain.controller.setQuality(8'000'000);
+        QVERIFY(chain.controller.qualitySwitching());
+        QTRY_COMPARE(chain.server.playbackInfoRequests, 1);
+        QCOMPARE(QJsonDocument::fromJson(chain.server.lastPlaybackInfoBody)
+                     .object()
+                     .value(QStringLiteral("MaxStreamingBitrate"))
+                     .toInteger(),
+                 qint64(8'000'000));
+        Kinefin::PlaybackSource next = lowerSource(chain, 8'000'000);
+        Q_EMIT chain.client.playbackInfoReady(next);
+        QTRY_VERIFY(!chain.controller.qualitySwitching());
+        QCOMPARE(chain.controller.manualQualityCap(), qint64(8'000'000));
+        // The reopen has the new source once it stops loading; canSeek alone may still be the old stream's
+        QTRY_VERIFY(!chain.controller.loading());
+        QTRY_VERIFY(chain.controller.canSeek());
+        // The steps follow the file, not the transcode that plays: the pin is checked and the steps above it stay on offer
+        const auto stepChecked = [&chain](qint64 cap) -> std::optional<bool> {
+            for (const QVariant &step : chain.controller.qualitySteps()) {
+                const QVariantMap map = step.toMap();
+                if (map.value(QStringLiteral("cap")).toLongLong() == cap)
+                    return map.value(QStringLiteral("checked")).toBool();
+            }
+            return std::nullopt;
+        };
+        QCOMPARE(stepChecked(8'000'000), std::optional<bool>(true));
+        QCOMPARE(stepChecked(15'000'000), std::optional<bool>(false));
+        QCOMPARE(stepChecked(20'000'000), std::optional<bool>());
+        QTRY_VERIFY(!chain.engine()->seeking());
+        // Automatic asks for the file again, without the pin
+        QSignalSpy changeFailed(&chain.controller, &PlayerController::qualityChangeFailed);
+        chain.controller.setQuality(0);
+        QCOMPARE(changeFailed.count(), 0);
+        QVERIFY(chain.controller.qualitySwitching());
+        QTRY_COMPARE(chain.server.playbackInfoRequests, 2);
+        QCOMPARE(QJsonDocument::fromJson(chain.server.lastPlaybackInfoBody)
+                     .object()
+                     .value(QStringLiteral("MaxStreamingBitrate"))
+                     .toInteger(),
+                 qint64(1'000'000'000));
+        // The server sends the file itself again: the pin goes with it
+        Kinefin::PlaybackSource direct = lowerSource(chain, 0);
+        direct.playSessionId = QStringLiteral("s2");
+        direct.method = Kinefin::PlaybackSource::Method::Direct;
+        direct.media.targetBitrate = 0;
+        direct.url = QUrl(TestWav::writeWavClip(chain.dir, 28));
+        QVERIFY(!direct.url.isEmpty());
+        Q_EMIT chain.client.playbackInfoReady(direct);
+        QTRY_VERIFY(!chain.controller.qualitySwitching());
+        QTRY_COMPARE(chain.controller.manualQualityCap(), qint64(0));
+        const QVariantList after = chain.controller.qualitySteps();
+        QVERIFY(after.constFirst().toMap().value(QStringLiteral("checked")).toBool());
+        QTRY_VERIFY(chain.controller.canSeek());
+        QCOMPARE(lowered.size(), 0);
+    }
+
+    // A pick made while paused reopens the new stream paused
+    void aManualQualityStepWhilePausedStaysPaused()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        QVERIFY(startsStarving(chain));
+        stall(chain, false);
+        chain.controller.pause();
+        QTRY_VERIFY(chain.controller.paused());
+        chain.controller.setQuality(8'000'000);
+        QTRY_COMPARE(chain.server.playbackInfoRequests, 1);
+        chain.server.reportLog.clear();
+        Q_EMIT chain.client.playbackInfoReady(lowerSource(chain, 8'000'000));
+        QTRY_VERIFY(!chain.controller.qualitySwitching());
+        // The reopen ran: the new session started, and the file stands paused
+        QTRY_VERIFY(std::any_of(
+            chain.server.reportLog.cbegin(), chain.server.reportLog.cend(),
+            [](const auto &report) { return report.route.endsWith("/Sessions/Playing"); }));
+        QTRY_VERIFY(chain.controller.canSeek());
+        QTest::qWait(300);
+        QVERIFY(chain.controller.paused());
+        QCOMPARE(chain.controller.manualQualityCap(), qint64(8'000'000));
+    }
+
+    // Another item started while the pick is asked: its answer never comes, and the menu takes picks again
+    void anotherItemEndsTheQualitySwitch()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        QVERIFY(startsStarving(chain));
+        stall(chain, false);
+        chain.controller.setQuality(8'000'000);
+        QVERIFY(chain.controller.qualitySwitching());
+        QTRY_COMPARE(chain.server.playbackInfoRequests, 1);
+        QVERIFY(chain.controller.playItem(kOtherMovie, 0));
+        QVERIFY(!chain.controller.qualitySwitching());
+    }
+
+    // The pin goes on to the next item at its cap, but with that item's own streams: the old media source and tracks stay behind
+    void aPinFollowsTheNextItemWithItsOwnStreams()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        QVERIFY(startsStarving(chain));
+        stall(chain, false);
+        chain.controller.setQuality(8'000'000);
+        QTRY_COMPARE(chain.server.playbackInfoRequests, 1);
+        QVERIFY(QJsonDocument::fromJson(chain.server.lastPlaybackInfoBody)
+                    .object()
+                    .contains(QStringLiteral("MediaSourceId")));
+        Q_EMIT chain.client.playbackInfoReady(lowerSource(chain, 8'000'000));
+        QTRY_VERIFY(!chain.controller.qualitySwitching());
+        QTRY_VERIFY(!chain.controller.loading());
+        QCOMPARE(chain.controller.manualQualityCap(), qint64(8'000'000));
+        chain.server.holdPlaybackInfo = false;
+        QVERIFY(chain.controller.playItem(kOtherMovie, 0));
+        QTRY_COMPARE(chain.server.playbackInfoRequests, 2);
+        const QJsonObject next =
+            QJsonDocument::fromJson(chain.server.lastPlaybackInfoBody).object();
+        QCOMPARE(next.value(QStringLiteral("MaxStreamingBitrate")).toInteger(), 8'000'000);
+        QVERIFY(!next.contains(QStringLiteral("MediaSourceId")));
+        QVERIFY(!next.contains(QStringLiteral("AudioStreamIndex")));
+    }
+
+    // A stall while the user's pick is on its way asks nothing of its own: the pick is not overtaken and its answer still counts
+    void aFallbackStepWaitsForThePick()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        QVERIFY(startsStarving(chain));
+        // The stream keeps starving while the user picks
+        chain.controller.setQuality(8'000'000);
+        QVERIFY(chain.controller.qualitySwitching());
+        QTRY_COMPARE(chain.server.playbackInfoRequests, 1);
+        QTest::qWait(800);
+        QCOMPARE(chain.server.playbackInfoRequests, 1);
+        QVERIFY(chain.controller.qualitySwitching());
+        Q_EMIT chain.client.playbackInfoReady(lowerSource(chain, 8'000'000));
+        QTRY_VERIFY(!chain.controller.qualitySwitching());
+        QCOMPARE(chain.controller.manualQualityCap(), qint64(8'000'000));
+    }
+
+    // The server answers the pick with the file that already plays: the pin is recorded, nothing reopens
+    void aPickAnsweredWithTheSameFileOnlyPins()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        QVERIFY(startsStarving(chain));
+        stall(chain, false);
+        chain.controller.setQuality(8'000'000);
+        QTRY_COMPARE(chain.server.playbackInfoRequests, 1);
+        // Another play session, so another URL, for the same media source played directly
+        Kinefin::PlaybackSource same = lowerSource(chain, 0);
+        same.method = Kinefin::PlaybackSource::Method::Direct;
+        chain.server.reportLog.clear();
+        Q_EMIT chain.client.playbackInfoReady(same);
+        QTRY_VERIFY(!chain.controller.qualitySwitching());
+        QCOMPARE(chain.controller.manualQualityCap(), qint64(8'000'000));
+        QTest::qWait(400);
+        QVERIFY(std::none_of(chain.server.reportLog.cbegin(), chain.server.reportLog.cend(),
+                             [](const auto &report) { return report.route.endsWith("/Stopped"); }));
+        QVERIFY(chain.controller.active());
+    }
+
+    // A remote's Bitrate maps to a ladder step, and one at or above the file's own rate is Automatic
+    void aRemoteBitrateMapsToTheLadderOrAutomatic()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        QVERIFY(startsStarving(chain));
+        stall(chain, false);
+        chain.controller.setQualityBitrate(9'500'000);
+        QTRY_COMPARE(chain.server.playbackInfoRequests, 1);
+        QCOMPARE(QJsonDocument::fromJson(chain.server.lastPlaybackInfoBody)
+                     .object()
+                     .value(QStringLiteral("MaxStreamingBitrate"))
+                     .toInteger(),
+                 qint64(8'000'000));
+        Q_EMIT chain.client.playbackInfoReady(lowerSource(chain, 8'000'000));
+        QTRY_VERIFY(!chain.controller.qualitySwitching());
+        QCOMPARE(chain.controller.manualQualityCap(), qint64(8'000'000));
+        QTRY_VERIFY(!chain.controller.loading());
+        QTRY_VERIFY(chain.controller.canSeek());
+        QTRY_VERIFY(!chain.engine()->seeking());
+        chain.controller.setQualityBitrate(kSourceBitrate);
+        QTRY_COMPARE(chain.server.playbackInfoRequests, 2);
+        QCOMPARE(QJsonDocument::fromJson(chain.server.lastPlaybackInfoBody)
+                     .object()
+                     .value(QStringLiteral("MaxStreamingBitrate"))
+                     .toInteger(),
+                 qint64(1'000'000'000));
+    }
+
+    // A picked stream that does not open: the pin before it comes back, Try Again asks at that cap, and the fallback still works afterwards
+    void aFailedManualStepRestoresThePin()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        QVERIFY(startsStarving(chain));
+        stall(chain, false);
+        chain.controller.setQuality(8'000'000);
+        QTRY_COMPARE(chain.server.playbackInfoRequests, 1);
+        Kinefin::PlaybackSource broken = lowerSource(chain, 8'000'000);
+        broken.url = QUrl::fromLocalFile(chain.dir.filePath(QStringLiteral("missing.wav")));
+        Q_EMIT chain.client.playbackInfoReady(broken);
+        QTRY_VERIFY(chain.controller.canRetry());
+        QCOMPARE(chain.controller.errorText(),
+                 QStringLiteral("The selected quality could not be opened. Try again at the "
+                                "previous quality."));
+        QCOMPARE(chain.controller.manualQualityCap(), qint64(0));
+        QVERIFY(chain.controller.retryPlayback());
+        QTRY_COMPARE(chain.server.playbackInfoRequests, 2);
+        QCOMPARE(QJsonDocument::fromJson(chain.server.lastPlaybackInfoBody)
+                     .object()
+                     .value(QStringLiteral("MaxStreamingBitrate"))
+                     .toInteger(),
+                 qint64(1'000'000'000));
+        // The file plays again and starves: the fallback was not used up by the user's pick
+        Kinefin::PlaybackSource direct = lowerSource(chain, 0);
+        direct.playSessionId = QStringLiteral("s3");
+        direct.method = Kinefin::PlaybackSource::Method::Direct;
+        direct.media.targetBitrate = 0;
+        Q_EMIT chain.client.playbackInfoReady(direct);
+        QTRY_VERIFY(chain.controller.canSeek());
+        QTRY_VERIFY(!chain.engine()->seeking());
+        QTRY_VERIFY(chain.controller.positionTicks() > 2'000'000);
+        stall(chain, true);
+        QTRY_COMPARE(chain.server.playbackInfoRequests, 3);
+        QCOMPARE(QJsonDocument::fromJson(chain.server.lastPlaybackInfoBody)
+                     .object()
+                     .value(QStringLiteral("MaxStreamingBitrate"))
+                     .toInteger(),
+                 qint64(10'000'000));
+    }
+
+    // A picked stream that does not play on within the watchdog (it may never load, or stall after the resume seek) is treated as one that did not open
+    void aManualStepThatNeverPlaysOnOffersTryAgain()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        QVERIFY(startsStarving(chain));
+        stall(chain, false);
+        // Shorter than the second of playing on that completes a switch
+        chain.controller.setSwitchTimeout(300);
+        QSignalSpy finished(&chain.controller, &PlayerController::finished);
+        chain.controller.setQuality(8'000'000);
+        QTRY_COMPARE(chain.server.playbackInfoRequests, 1);
+        Q_EMIT chain.client.playbackInfoReady(lowerSource(chain, 8'000'000));
+        QTRY_VERIFY(chain.controller.canRetry());
+        QCOMPARE(chain.controller.errorText(),
+                 QStringLiteral("The selected quality could not be opened. Try again at the "
+                                "previous quality."));
+        QCOMPARE(chain.controller.manualQualityCap(), qint64(0));
+        QCOMPARE(chain.controller.itemId(), kMovie);
+        QTest::qWait(300);
+        QCOMPARE(finished.size(), 0);
     }
 
   private:
