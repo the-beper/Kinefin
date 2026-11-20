@@ -1889,6 +1889,9 @@ Kirigami.ApplicationWindow {
             shellHeader.showAboutDialog();
         } else if (startupPage === "settings") {
             pageStack.push(Qt.resolvedUrl("SettingsPage.qml"), { settings: settings, connection: connection });
+        } else if (startupPage === "login" || startupPage === "home") {
+            // The pages of a session, shown without one: the smoke test loads them in the real binary
+            pageStack.push(Qt.resolvedUrl(startupPage === "login" ? "LoginPage.qml" : "HomePage.qml"), { connection: connection });
         }
     }
 

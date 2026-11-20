@@ -42,9 +42,11 @@ Kirigami.ScrollablePage {
             favorites.reload();
     }
 
-    // The first row of cards, or the grid, takes the keys
+    // The first row of cards in view, or the grid, takes the keys: after a long scroll the first group is not built any more, and the page keeps its place
     function focusPrimary() {
-        groupsList.itemAtIndex(0)?.focusPrimary(Qt.TabFocusReason);
+        const index = Math.max(0, groupsList.indexAt(groupsList.width / 2, groupsList.contentY + groupsList.topMargin + 1));
+        groupsList.positionViewAtIndex(index, ListView.Contain);
+        groupsList.itemAtIndex(index)?.focusPrimary(Qt.TabFocusReason);
     }
 
     // The scan ended: the cards take the keys unless the user went elsewhere meanwhile (the header box, or a card already focused). The list itself holding the focus is what the page gives it while it is created, not a choice
@@ -246,8 +248,8 @@ Kirigami.ScrollablePage {
         spacing: Kirigami.Units.largeSpacing
         topMargin: Kirigami.Units.largeSpacing
         bottomMargin: Kirigami.Units.largeSpacing
-        // Every group is built at once; DelegateModel still warns about a cancelled index in aLostSessionEmptiesTheFavorites under the desktop style, harmless because the page is empty and closed (the view resets while a group is being created asynchronously)
-        cacheBuffer: 1000000
+        // Groups a couple of screens away are built ahead, not all of them: Year or Genre grouping can make hundreds of rows. A wheel scroll past that drops the group the focus was in, as any list does, and the focus goes to the list
+        cacheBuffer: Kirigami.Units.gridUnit * 80
 
         // Moves the focus to the group above or below `from`: that row may not exist yet, so the view scrolls to it first
         function focusGroup(from, step) {

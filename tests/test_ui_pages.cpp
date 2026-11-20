@@ -92,7 +92,7 @@ const QStringList kKnownNoise = {
     QStringLiteral("This plugin does not support raise()"),
     // KIconTheme looks for the compiled breeze-icons resource the first time the desktop style draws an icon; inferred: the Fedora build image has no such resource file and the icons come from /usr/share/icons/breeze
     QStringLiteral("Icon theme \"breeze-internal\" not found"),
-    // A list view resets while one of its delegates is still being created asynchronously (seen under the desktop style in the Favorites tests); the two indices depend on timing, and the page is empty or closed by then
+    // Qt's own: a list view whose model resets while a delegate is still being created asynchronously cancels that index against the new, empty count ("index out range 13 0"); seen in the message box, search and Favorites tests, harmless since the view drops the delegate either way
     QStringLiteral("DelegateModel::cancel: index out range"),
     // Qt's accounting of an incubation cancelled at teardown, reported after the assertions of the test: it does not reflect the behaviour of the app; deliberately not in tests/shell_smoke.py, which runs the real app
     QStringLiteral("items in the process of being created at engine destruction."),
@@ -13557,6 +13557,49 @@ class TestUiPages : public QObject {
         QCOMPARE(ui.controller.favorites()->count(), 0);
         QCOMPARE(ui.controller.favorites()->status(), Kinefin::FavoritesModel::Idle);
         QCOMPARE(ui.controller.favoriteGroups()->count(), 0);
+    }
+
+    // More groups than the list builds ahead: after a scroll to the end the first group is gone, and the keys land on a row of cards in view without jumping back to the top
+    void theFavoritesKeysLandInViewAfterALongScroll()
+    {
+        Ui ui(m_home->path());
+        auto data = std::make_shared<FavoritesData>();
+        QJsonArray movies;
+        for (int n = 1; n <= 40; ++n)
+            movies.append(favoriteJson(n, QStringLiteral("Movie"),
+                                       QStringLiteral("Movie %1").arg(n), 1960 + n));
+        data->byLibrary[kMovies] = movies;
+        data->byLibrary[kSeries] = QJsonArray();
+        serveFavorites(ui, data);
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("home")));
+        QQuickItem *page = openFavorites(ui);
+        QVERIFY(page);
+        QVERIFY(QMetaObject::invokeMethod(groupByAction(page, QStringLiteral("Year")), "trigger"));
+        QQuickItem *list = ui.item(QStringLiteral("favoritesGroups"));
+        QVERIFY(list);
+        QTRY_COMPARE(list->property("count").toInt(), 40);
+        QVERIFY(QMetaObject::invokeMethod(list, "positionViewAtEnd"));
+        const auto groupAt = [list](int index) {
+            QQuickItem *item = nullptr;
+            QMetaObject::invokeMethod(list, "itemAtIndex", Q_RETURN_ARG(QQuickItem *, item),
+                                      Q_ARG(int, index));
+            return item;
+        };
+        QTRY_VERIFY(groupAt(0) == nullptr);
+        const qreal scrolled = list->property("contentY").toReal();
+        QVERIFY(QMetaObject::invokeMethod(page, "focusPrimary"));
+        QTRY_VERIFY([&] {
+            QQuickItem *focused = ui.window->activeFocusItem();
+            if (!focused || focused == list)
+                return false;
+            for (QQuickItem *item = focused; item; item = item->parentItem()) {
+                if (item == list)
+                    return true;
+            }
+            return false;
+        }());
+        QVERIFY(list->property("contentY").toReal() > scrolled / 2);
     }
 
     void favoriteNamesAreShownAsPlainText()

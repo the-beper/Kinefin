@@ -24,9 +24,9 @@ KNOWN_NOISE += ("QUnifiedTimer::stopAnimationDriver: driver is not running",)
 KNOWN_NOISE += ("This plugin does not support raise()",)
 
 
-# KINEFIN_START_PAGE opens Settings as a page or About as a popup;
+# KINEFIN_START_PAGE opens Settings as a page, About as a popup, or the sign-in and Home pages without a session;
 # None is the plain Servers page.
-PAGES = (None, "settings", "about")
+PAGES = (None, "settings", "about", "login", "home")
 
 
 def run(binary: str, page: str | None) -> int:

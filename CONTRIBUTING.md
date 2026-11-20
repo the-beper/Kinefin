@@ -61,7 +61,7 @@ build/build-env.sh build/check.sh
 
 `python3 scripts/po.py status` alone shows the pending translations per language (zero is required).
 
-`tests/shell_smoke.py` starts the binary offscreen three times (Servers, then Settings and About through the `KINEFIN_START_PAGE` start-up hook) and fails on any QML problem. `tests/test_kwallet_host.cpp` runs against the session's real KWallet and is skipped unless `KINEFIN_TEST_KWALLET=1`; the command is in the plan's "KWallet host checks". Run it before proposing a commit. Shell scripts (`build/`, `scripts/`, `po/`) are shellcheck-clean (`--severity=warning`); C++ code follows the Qt-like style of `.clang-format` (LLVM base with explicit knobs: the image's clang-format has no `Qt` preset) (`clang-format -i <files>` before proposing — the image gate fails on drift; `.editorconfig` governs the non-C++ text files).
+`tests/shell_smoke.py` starts the binary offscreen five times (Servers, then Settings, About, the sign-in page and Home through the `KINEFIN_START_PAGE` start-up hook; the sign-in page and Home open without a session) and fails on any QML problem. `tests/test_kwallet_host.cpp` runs against the session's real KWallet and is skipped unless `KINEFIN_TEST_KWALLET=1`; the command is in the plan's "KWallet host checks". Run it before proposing a commit. Shell scripts (`build/`, `scripts/`, `po/`) are shellcheck-clean (`--severity=warning`); C++ code follows the Qt-like style of `.clang-format` (LLVM base with explicit knobs: the image's clang-format has no `Qt` preset) (`clang-format -i <files>` before proposing — the image gate fails on drift; `.editorconfig` governs the non-C++ text files).
 
 ## Flatpak
 
