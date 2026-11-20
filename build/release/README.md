@@ -2,7 +2,7 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 # Release version preparation
 
-For the complete P9 release-channel decision and the remaining manual release
+For the complete release-channel decision of the first release and the remaining manual release
 gates, see [FIRST_RELEASE.md](FIRST_RELEASE.md). The checked-in preflight
 script runs all source-only checks together without publishing:
 
@@ -29,7 +29,7 @@ AppStream release, and malformed input abort without modifying either file.
 Review and commit both `CMakeLists.txt` and
 `data/io.github.the_beper.Kinefin.metainfo.xml` together. After the release
 gates pass and the commit is on `main`, tag that exact commit as `vX.Y.Z`; the
-release workflow checks the tag against the CMake version. Other P9 gates
+release workflow checks the tag against the CMake version. Other first-release gates
 (Flatpak build-image digest, runtime pins, artwork, manual checks) remain
 separate and are **not** handled by this script.
 
@@ -363,7 +363,7 @@ resolve its published tag to an actual commit before updating the pinned SHA.
 
 ## Release artwork and application identity
 
-Kinefin's final P9 icon is maintained as a 48px-grid scalable SVG source,
+Kinefin's final icon is maintained as a 48px-grid scalable SVG source,
 with committed 128px and 256px PNG exports for Flatpak/AppStream. Re-export
 both rasters after any SVG edit (Inkscape command-line example):
 

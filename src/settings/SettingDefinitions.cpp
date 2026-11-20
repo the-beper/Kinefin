@@ -346,7 +346,7 @@ QList<SettingDefinition> buildDefinitions()
          false,
          kli18n("Default Playback Speed"),
          kli18n("Playback")},
-        // Parity §2.3: a Kinefin addition, read by the player when a segment starts
+        // A Kinefin addition, read by the player when a segment starts
         {QStringLiteral("video"),
          QStringLiteral("skip_intros"),
          T::Bool,
@@ -512,7 +512,7 @@ QList<SettingDefinition> buildDefinitions()
          false,
          kli18n("Always Force Transcode"),
          kli18n("Transcoding")},
-        // Kinefin addition (parity §2.3): a stream that keeps starving is asked again at a lower bit rate
+        // Kinefin addition: a stream that keeps starving is asked again at a lower bit rate
         {QStringLiteral("video"),
          QStringLiteral("adaptive_bitrate"),
          T::Bool,
@@ -700,7 +700,7 @@ QList<SettingDefinition> buildDefinitions()
          true,
          kli18n("Manual MPV Configuration"),
          KLazyLocalizedString()},
-        // Parity §2.7: Kinefin additions; the id holds a literal dot
+        // Kinefin additions; the id holds a literal dot
         {QStringLiteral("library"),
          QStringLiteral("home.libraries"),
          T::Bool,
@@ -734,7 +734,7 @@ QList<SettingDefinition> buildDefinitions()
          false,
          kli18n("Show New Badge on Recently Added Items"),
          kli18n("Cards")},
-        // Parity §2.7: Kinefin additions, one switch per library sub-tab; the id holds literal dots
+        // Kinefin additions, one switch per library sub-tab; the id holds literal dots
         {QStringLiteral("library"),
          QStringLiteral("tabs.movies.suggestions"),
          T::Bool,
@@ -856,7 +856,7 @@ QList<SettingDefinition> buildDefinitions()
          false,
          kli18n("Episodes"),
          kli18n("Show Tabs in Shows")},
-        // Parity §2.6: window geometry, "x,y,width,height"
+        // Window geometry, "x,y,width,height"
         {QStringLiteral("state"),
          QStringLiteral("geometry"),
          T::String,
@@ -868,7 +868,7 @@ QList<SettingDefinition> buildDefinitions()
          false,
          KLazyLocalizedString(),
          KLazyLocalizedString()},
-        // Kinefin's downloads (parity §10): the page and the engine read them, no upstream setting exists
+        // Kinefin's downloads: the page and the engine read them, no upstream setting exists
         {QStringLiteral("downloads"),
          QStringLiteral("parallel"),
          T::Int,

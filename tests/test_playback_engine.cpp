@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Kinefin contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Offline engine tests: the mpv mapping runs on a real mpv (offscreen, vo=null/ao=null) over a generated WAV clip (16-bit mono PCM, a sine). No network, no window, no media files in the repo; the only deliberately broken case is a path that does not exist. The live reproduction of INT-02..06 stays in test_jellyfin_live.cpp, on the real Jellyfin-streamed media URLs
+// Offline engine tests: the mpv mapping runs on a real mpv (offscreen, vo=null/ao=null) over a generated WAV clip (16-bit mono PCM, a sine). No network, no window, no media files in the repo; the only deliberately broken case is a path that does not exist. The live reproduction of the direct-play, transcode, progress and connection-cut rounds stays in test_jellyfin_live.cpp, on the real Jellyfin-streamed media URLs
 #include "FakeJellyfin.h"
 #include "WavClip.h"
 

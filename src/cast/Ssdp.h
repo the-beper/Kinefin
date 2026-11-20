@@ -19,15 +19,15 @@
 
 namespace Kinefin {
 
-// An SSDP datagram is read only up to this size (design: Security, SSDP datagram 4 KiB); a larger one is dropped
+// An SSDP datagram is read only up to this size (4 KiB); a larger one is dropped
 inline constexpr int kMaxSsdpDatagramBytes = 4096;
-// Devices one search reports (design: Security, 32 devices)
+// Devices one search reports (32 devices)
 inline constexpr int kMaxSsdpDevices = 32;
 // Datagrams one search window reads before it drops the rest; bounds a flood from a hostile host on the network
 inline constexpr int kMaxSsdpDatagramsPerSearch = 256;
-// The longest max-age honoured, in seconds (design: Discovery and descriptions, at most 1800 s), and what a response without one gets
+// The longest max-age honoured, in seconds (at most 1800 s), and what a response without one gets
 inline constexpr int kSsdpMaxAgeCapSeconds = 1800;
-// M-SEARCH parameters (design: Components, MX 2, sent at 0 s and 1 s, TTL 2, a 5 s window)
+// M-SEARCH parameters (MX 2, sent at 0 s and 1 s, TTL 2, a 5 s window)
 inline constexpr int kSsdpMx = 2;
 inline constexpr int kSsdpMulticastTtl = 2;
 inline constexpr int kSsdpRepeatMs = 1000;
@@ -38,7 +38,7 @@ inline constexpr QLatin1StringView kMediaRendererSearchTarget{
 
 using AddressPolicy = bool (*)(const QHostAddress &);
 
-// The address policy of renderers and of everything they answer (design: Security, Sender address): RFC 1918, 169.254.0.0/16 except the cloud metadata address 169.254.169.254, IPv6 unique local (fc00::/7, except the AWS metadata address fd00:ec2::254) and link-local (fe80::/10). IPv4-mapped IPv6 is judged as the IPv4 address. Never loopback, multicast, unspecified or public
+// The address policy of renderers and of everything they answer: RFC 1918, 169.254.0.0/16 except the cloud metadata address 169.254.169.254, IPv6 unique local (fc00::/7, except the AWS metadata address fd00:ec2::254) and link-local (fe80::/10). IPv4-mapped IPv6 is judged as the IPv4 address. Never loopback, multicast, unspecified or public
 bool isAllowedRendererAddress(const QHostAddress &address);
 // The address lies in the subnet of one of these interface addresses (an SSDP sender is spoofable: only a neighbour on a local link is believed)
 bool isInAnySubnet(const QHostAddress &address, const QList<QNetworkAddressEntry> &entries);

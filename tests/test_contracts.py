@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-FileCopyrightText: 2026 Kinefin contributors
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Design-phase fixture conformance and in-process REST preflight checks."""
+"""Fixture conformance and in-process REST preflight checks."""
 from __future__ import annotations
 import json
 from pathlib import Path

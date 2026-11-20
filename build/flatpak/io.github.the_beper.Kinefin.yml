@@ -6,7 +6,6 @@ command: kinefin
 # A standalone .flatpak bundle carries no separate locale extension: keep every catalog in /app/share/locale so the installed app is translated
 separate-locales: false
 finish-args:
-  # Wayland only: the desktop session is Wayland on every target platform (Fedora GNOME is Wayland-only since 43, Plasma dropped its X11 session upstream in 6.8; there is no fallback-x11 socket on purpose, see docs/feature-parity.md §11).
   - --socket=wayland
   # Audio passthrough/normalization/explicit device output through PipeWire/Pulse.
   - --socket=pulseaudio
@@ -18,15 +17,15 @@ finish-args:
   - --own-name=org.mpris.MediaPlayer2.Kinefin.*
   # Inhibit the screensaver while playing, and release it otherwise (org.freedesktop.ScreenSaver).
   - --talk-name=org.freedesktop.ScreenSaver
-  # P7 download policy observes the read-only Metered property. No NM control actions.
+  # The download policy observes the read-only Metered property. No NM control actions
   - --system-talk-name=org.freedesktop.NetworkManager
   # The access tokens live in the user's KWallet (KWalletTokenStore): the daemon is the only way to them from the sandbox, and there is no plaintext fallback.
   - --talk-name=org.kde.kwalletd6
   # Portals: the browser links (server web UI, externallinks) and the folder picker of the download export (a per-folder Document-portal grant, never a --filesystem=home).
-  # TODO (P10b, docs/cast-research.md): --system-talk-name=org.freedesktop.Avahi lands here only
+  # TODO: --system-talk-name=org.freedesktop.Avahi lands here only
   # when the Google Cast stage needs mDNS discovery (DLNA stage discovers via SSDP, no grant needed).
   - --talk-name=org.freedesktop.portal.Desktop
-# xdg-download is not needed: downloads live inside the sandbox and reach a host folder only through a portal grant (§10 of the parity doc).
+# xdg-download is not needed: downloads live inside the sandbox and reach a host folder only through a portal grant
 
 cleanup:
   - /include
@@ -139,7 +138,7 @@ modules:
         tag: v6.11.3
         commit: e78335eae2209180832d4c63f750bfd2c835e0c3
 
-  # The Settings page uses FormCard (docs/architecture.md, KDE HIG exceptions); org.kde.Platform does not ship kirigami-addons. The version matches the one in the build image (build/Containerfile), where qmllint and the smoke test run.
+  # The Settings page uses FormCard; org.kde.Platform does not ship kirigami-addons. The version matches the one in the build image (build/Containerfile), where qmllint and the smoke test run.
   - name: kirigami-addons
     buildsystem: cmake-ninja
     config-opts:

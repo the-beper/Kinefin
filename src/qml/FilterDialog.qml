@@ -29,7 +29,8 @@ Kirigami.Dialog {
 
     title: i18n("Filters")
     padding: 0
-    standardButtons: Kirigami.Dialog.Close
+    // Closing drops the choices not applied: Cancel says so
+    standardButtons: Kirigami.Dialog.Cancel
     customFooterActions: [
         Kirigami.Action {
             objectName: "filterClearAction"
@@ -404,8 +405,9 @@ Kirigami.Dialog {
         }
         Keys.onUpPressed: dialog.moveInList(-1)
         Keys.onDownPressed: dialog.moveInList(1)
-        Keys.onReturnPressed: toggleCurrent()
-        Keys.onEnterPressed: toggleCurrent()
+        // Space switches the option, Return applies the dialog as its default action
+        Keys.onReturnPressed: dialog.apply()
+        Keys.onEnterPressed: dialog.apply()
         Keys.onSpacePressed: toggleCurrent()
 
         delegate: Loader {
@@ -610,8 +612,8 @@ Kirigami.Dialog {
                             else
                                 dialog.leaveTags(row.index, 1);
                         }
-                        Keys.onReturnPressed: toggleCurrent()
-                        Keys.onEnterPressed: toggleCurrent()
+                        Keys.onReturnPressed: dialog.apply()
+                        Keys.onEnterPressed: dialog.apply()
                         Keys.onSpacePressed: toggleCurrent()
 
                         delegate: Loader {

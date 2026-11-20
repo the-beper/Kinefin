@@ -4,7 +4,7 @@ import QtQuick
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 
-// The whole Continue Watching list, the "See All" page of the Home row
+// The whole Continue Watching list, the "Show All" page of the Home row
 Kirigami.ScrollablePage {
     id: page
     objectName: "resumeItemsPage"

@@ -18,6 +18,8 @@
 #include <QTimer>
 #include <QVariantMap>
 
+#include <optional>
+
 namespace Kinefin {
 class JellyfinClient;
 
@@ -50,17 +52,18 @@ QString krunnerText(const QString &text);
 // subtext; playable items also carry their action. The caller drops nothing but an invalid entry
 QList<KRunnerMatch> krunnerMatches(const QList<ItemSummary> &items, const QString &term);
 
-// The `org.kde.krunner1` runner of Kinefin, exported at `/runner` under
-// `io.github.the_beper.Kinefin.Runner`: KRunner's queries become one combined Items request on
-// channel 6144, its Run reaches the shell through openRequested and playRequested
+// The `org.kde.krunner1` runner of Kinefin, exported at `/runner` under `io.github.the_beper.Kinefin.Runner`: KRunner's queries become two Items requests, titles on channel 6144 and episodes on 6145 (one combined request let episodes crowd a common word's titles out), its Run reaches the shell through openRequested and playRequested
 class KRunnerProvider final : public QObject, protected QDBusContext {
     Q_OBJECT
   public:
     static constexpr int Channel = 6144;
+    static constexpr int EpisodeChannel = 6145;
     static constexpr int MinTermLength = 3;
     static constexpr int DebounceMs = 300;
     static constexpr int ReplyTimeoutMs = 3000;
-    static constexpr int MaxResults = 10;
+    static constexpr int MaxTitles = 7;
+    static constexpr int MaxEpisodes = 3;
+    // Server requests in the window, two per term (titles and episodes)
     static constexpr int RequestBudget = 60;
     static constexpr int MaxCachedTerms = 16;
     static constexpr int MaxOfferedIds = 50;
@@ -103,6 +106,8 @@ class KRunnerProvider final : public QObject, protected QDBusContext {
     void startRequest();
     void onItemsReady(const QJsonArray &items, int channel);
     void onListingFailed(const QString &family, int channel);
+    // Both answers are in: the titles first, then the episodes
+    void finishIfComplete();
     void answerPending(const QList<KRunnerMatch> &matches);
     void cancelPending();
     void releaseChannel();
@@ -121,6 +126,10 @@ class KRunnerProvider final : public QObject, protected QDBusContext {
     QDBusMessage m_pending;
     QString m_pendingTerm;
     bool m_pendingActive = false;
+    // The two answers of the pending term; a failed one counts as empty, and the result is not cached
+    std::optional<QJsonArray> m_titles;
+    std::optional<QJsonArray> m_episodes;
+    bool m_partFailed = false;
     QHash<QString, CachedTerm> m_cache;
     QStringList m_cacheOrder;
     QHash<QString, Offered> m_offered;

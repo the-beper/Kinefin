@@ -94,7 +94,25 @@ struct Chain {
           provider(client, bus)
     {
         ok = server.listen() && (!signIn || login(client, server)) && provider.registerOnBus();
-        server.listingRawBody.insert(QStringLiteral("Items"), searchBody());
+        // The runner asks titles and episodes apart: each request gets the kinds it names
+        server.itemsResponder = [](const QByteArray &route) {
+            const QStringList types =
+                FakeJellyfin::capturedListingQuery(route)
+                    .queryItemValue(QStringLiteral("includeItemTypes"), QUrl::FullyDecoded)
+                    .split(QLatin1Char(','));
+            QJsonArray kept;
+            for (const QJsonValue &item : QJsonDocument::fromJson(searchBody())
+                                              .object()
+                                              .value(QStringLiteral("Items"))
+                                              .toArray()) {
+                if (types.contains(item.toObject().value(QStringLiteral("Type")).toString()))
+                    kept.append(item);
+            }
+            return std::pair<int, QByteArray>{
+                200, QJsonDocument(QJsonObject{{QStringLiteral("Items"), kept},
+                                               {QStringLiteral("TotalRecordCount"), kept.size()}})
+                         .toJson(QJsonDocument::Compact)};
+        };
     }
     Disconnect disconnect;
     FakeJellyfin server;
@@ -204,31 +222,40 @@ class TestKRunner : public QObject {
                  QStringLiteral("Series, 2021"));
         QCOMPARE(matches.at(2).properties.value(QStringLiteral("actions")).toStringList(),
                  QStringList{});
-        QCOMPARE(matches.at(3).text, QStringLiteral("Weightless — Abyss Station"));
         QCOMPARE(matches.at(3).properties.value(QStringLiteral("subtext")).toString(),
-                 QStringLiteral("Abyss Station, S2:E6"));
-        QCOMPARE(matches.at(4).properties.value(QStringLiteral("subtext")).toString(),
                  QStringLiteral("Collection"));
-        QCOMPARE(matches.at(4).iconName, QStringLiteral("folder-videos"));
+        QCOMPARE(matches.at(3).iconName, QStringLiteral("folder-videos"));
+        // The episodes come after the titles
+        QCOMPARE(matches.at(5).text, QStringLiteral("Weightless — Abyss Station"));
+        QCOMPARE(matches.at(5).properties.value(QStringLiteral("subtext")).toString(),
+                 QStringLiteral("Abyss Station, S2:E6"));
         // Server text: no tag survives, no control, 200 code points at most
-        const QString hostile = matches.at(5).text;
+        const QString hostile = matches.at(4).text;
         QVERIFY(!hostile.contains(QLatin1Char('<')));
         QVERIFY(hostile.startsWith(QStringLiteral("\uFF1Cb>Bold")));
         QVERIFY(!hostile.contains(QChar(0x07)));
         QCOMPARE(hostile.size(), 200);
         QVERIFY(!hostile.back().isHighSurrogate());
-        // The one request carries the term and the four kinds
-        const QByteArray route = chain.server.lastListingRoute.value(QStringLiteral("Items"));
-        QVERIFY(route.contains("searchTerm=arct"));
-        QVERIFY(route.contains("includeItemTypes=Movie,Series,BoxSet,Episode")
-                || route.contains("includeItemTypes=Movie%2CSeries%2CBoxSet%2CEpisode"));
-        QCOMPARE(chain.server.listingRequests, 1);
+        // Two requests carry the term: the titles, at most 7, and the episodes, at most 3
+        const QList<QByteArray> routes = chain.server.listingRoutes.value(QStringLiteral("Items"));
+        QCOMPARE(routes.size(), 2);
+        QStringList asked;
+        for (const QByteArray &route : routes) {
+            const QUrlQuery query = FakeJellyfin::capturedListingQuery(route);
+            QCOMPARE(query.queryItemValue(QStringLiteral("searchTerm")), QStringLiteral("arct"));
+            asked << query.queryItemValue(QStringLiteral("includeItemTypes"), QUrl::FullyDecoded)
+                         + QLatin1Char('/') + query.queryItemValue(QStringLiteral("limit"));
+        }
+        asked.sort();
+        QCOMPARE(asked, (QStringList{QStringLiteral("Episode/3"),
+                                     QStringLiteral("Movie,Series,BoxSet/7")}));
+        QCOMPARE(chain.server.listingRequests, 2);
         // The exact title ranks first, in KRunner's own category (a new term asks the server once)
         const QList<KRunnerMatch> exact =
             matchesOf(call(QStringLiteral("Match"), {QStringLiteral("Arcturus")}));
         QCOMPARE(exact.first().categoryRelevance, 50);
         QCOMPARE(exact.first().relevance, 1.0);
-        QCOMPARE(chain.server.listingRequests, 2);
+        QCOMPARE(chain.server.listingRequests, 4);
     }
 
     void quickQueriesMakeOneRequestAndTheCacheAnswers()
@@ -239,10 +266,10 @@ class TestKRunner : public QObject {
         QDBusPendingCall second = startCall(QStringLiteral("Match"), {QStringLiteral("arct")});
         QVERIFY(matchesOf(waitFor(first)).isEmpty());
         QCOMPARE(matchesOf(waitFor(second)).size(), 6);
-        QCOMPARE(chain.server.listingRequests, 1);
+        QCOMPARE(chain.server.listingRequests, 2);
         // The same term again comes from the cache
         QCOMPARE(matchesOf(call(QStringLiteral("Match"), {QStringLiteral("arct")})).size(), 6);
-        QCOMPARE(chain.server.listingRequests, 1);
+        QCOMPARE(chain.server.listingRequests, 2);
     }
 
     void runRunsOnlyOfferedIds()
@@ -314,7 +341,7 @@ class TestKRunner : public QObject {
         QCOMPARE(open.count(), 1);
         // The cache went with the session: the next query asks again
         QVERIFY(matchesOf(call(QStringLiteral("Match"), {QStringLiteral("arct")})).size() == 6);
-        QCOMPARE(chain.server.listingRequests, 2);
+        QCOMPARE(chain.server.listingRequests, 4);
     }
 
     void credentialsClearedForgetsEverything()
@@ -329,20 +356,75 @@ class TestKRunner : public QObject {
         QCOMPARE(open.count(), 0);
         // And no query reaches the server
         QVERIFY(matchesOf(call(QStringLiteral("Match"), {QStringLiteral("arct")})).isEmpty());
-        QCOMPARE(chain.server.listingRequests, 1);
+        QCOMPARE(chain.server.listingRequests, 2);
     }
 
     void timeoutAnswersEmptyAndReleasesTheChannel()
     {
         Chain chain;
         QVERIFY(chain.ok);
-        chain.server.holdFirstListings = 1;
+        chain.server.holdFirstListings = 2;
         QVERIFY(matchesOf(call(QStringLiteral("Match"), {QStringLiteral("arct")})).isEmpty());
-        QCOMPARE(chain.server.listingRequests, 1);
-        chain.server.releaseHeld();
-        // The channel is free for the next query
-        QVERIFY(matchesOf(call(QStringLiteral("Match"), {QStringLiteral("arct")})).size() == 6);
         QCOMPARE(chain.server.listingRequests, 2);
+        chain.server.releaseHeld();
+        // Both channels are free for the next query
+        QVERIFY(matchesOf(call(QStringLiteral("Match"), {QStringLiteral("arct")})).size() == 6);
+        QCOMPARE(chain.server.listingRequests, 4);
+    }
+
+    // One half answered in time: the timeout answers with it, uncached, so the term asks again
+    void aTimedOutHalfAnswersTheOtherUncached()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        chain.server.holdFirstListings = 1;
+        const qsizetype half =
+            matchesOf(call(QStringLiteral("Match"), {QStringLiteral("arct")})).size();
+        // The titles (five) or the episode, whichever the server held
+        QVERIFY2(half == 5 || half == 1, qPrintable(QString::number(half)));
+        chain.server.releaseHeld();
+        QCOMPARE(matchesOf(call(QStringLiteral("Match"), {QStringLiteral("arct")})).size(), 6);
+        QCOMPARE(chain.server.listingRequests, 4);
+    }
+
+    // A failed half answers the other one, uncached
+    void aFailedHalfAnswersTheOtherUncached()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        const auto split = chain.server.itemsResponder;
+        chain.server.itemsResponder = [split](const QByteArray &route) {
+            if (FakeJellyfin::capturedListingQuery(route).queryItemValue(
+                    QStringLiteral("includeItemTypes"))
+                == QLatin1String("Episode"))
+                return std::pair<int, QByteArray>{500, {}};
+            return split(route);
+        };
+        const QList<KRunnerMatch> matches =
+            matchesOf(call(QStringLiteral("Match"), {QStringLiteral("arct")}));
+        QCOMPARE(matches.size(), 5);
+        for (const KRunnerMatch &match : matches)
+            QVERIFY(match.id != kEpisode);
+        QCOMPARE(chain.server.listingRequests, 2);
+        QCOMPARE(matchesOf(call(QStringLiteral("Match"), {QStringLiteral("arct")})).size(), 5);
+        QCOMPARE(chain.server.listingRequests, 4);
+    }
+
+    // A new term while the first one's requests are on their way: the first is answered empty, its late replies are dropped, and the new term gets and caches its own results
+    void aNewTermSupersedesThePendingOne()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        chain.server.holdFirstListings = 2;
+        QDBusPendingCall first = startCall(QStringLiteral("Match"), {QStringLiteral("arct")});
+        QTRY_COMPARE(chain.server.listingRequests, 2);
+        QDBusPendingCall second = startCall(QStringLiteral("Match"), {QStringLiteral("hollow")});
+        QVERIFY(matchesOf(waitFor(first)).isEmpty());
+        chain.server.releaseHeld();
+        QCOMPARE(matchesOf(waitFor(second)).size(), 6);
+        QCOMPARE(chain.server.listingRequests, 4);
+        QCOMPARE(matchesOf(call(QStringLiteral("Match"), {QStringLiteral("hollow")})).size(), 6);
+        QCOMPARE(chain.server.listingRequests, 4);
     }
 };
 

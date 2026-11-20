@@ -17,7 +17,7 @@ Q_LOGGING_CATEGORY(playerLog, "kinefin.player.engine")
 
 namespace Kinefin {
 
-// One tick is 100 ns (server time base, parity §9); mpv reports seconds
+// One tick is 100 ns (server time base); mpv reports seconds
 static qint64 secondsToTicks(double seconds)
 {
     return seconds <= 0.0 ? 0 : static_cast<qint64>(std::llround(seconds * 1e7));
@@ -539,7 +539,7 @@ void PlaybackEngine::onEndFile(const QString &reason)
     case PlaybackSession::State::Playing:
     case PlaybackSession::State::Paused:
     case PlaybackSession::State::Buffering:
-        // Only an error is a failure: a natural end and a stop not driven by stop() (an external mpv command) are the ordinary one-Stop path (parity §9)
+        // Only an error is a failure: a natural end and a stop not driven by stop() (an external mpv command) are the ordinary one-Stop path
         if (reason == QLatin1String("error")) {
             m_session.failed();
             break;

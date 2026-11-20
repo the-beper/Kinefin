@@ -9,12 +9,13 @@
 using Kinefin::SettingDefinition;
 
 namespace {
-struct ParityRow {
+struct ReferenceRow {
+    QString line;
     QString section;
     QString key;
     QString defaultText;
-    bool defined = false; // ✅ or ◇ in the Kinefin column
-    bool hidden = false;  // ◇
+    bool hidden = false;   // in the table of the settings without a control
+    bool complete = false; // the key and the default are both in code font
 };
 
 QStringList backticked(const QString &cell)
@@ -26,37 +27,50 @@ QStringList backticked(const QString &cell)
     return tokens;
 }
 
-// The §2.1-§2.5 tables of the parity document. §2.4 and §2.5 have no "Upstream UI" column and every row is implemented
-QList<ParityRow> parityRows(const QString &text)
+QString unquoted(QString text)
 {
-    QList<ParityRow> rows;
+    if (text.startsWith(QLatin1Char('"')))
+        text = text.mid(1, text.size() - 2);
+    return text;
+}
+
+// The tables of docs/settings.md: one per Settings category, headed "## Title (`section`)" with the key and the default in code font, then the settings without a control as `section.key`
+QList<ReferenceRow> referenceRows(const QString &text)
+{
+    QList<ReferenceRow> rows;
     QString section;
-    bool inSettings = false;
+    bool withoutControl = false;
+    static const QRegularExpression heading(QStringLiteral("^## .*\\(`(\\w+)`\\)$"));
     for (const QString &line : text.split(QLatin1Char('\n'))) {
-        static const QRegularExpression heading(QStringLiteral("^### 2\\.[1-5] `(\\w+)`"));
-        if (line.startsWith(QLatin1String("## ")) || line.startsWith(QLatin1String("### 2.6")))
-            inSettings = false;
-        if (const auto match = heading.match(line); match.hasMatch()) {
-            section = match.captured(1);
-            inSettings = true;
+        if (line.startsWith(QLatin1String("## "))) {
+            const auto match = heading.match(line);
+            section = match.hasMatch() ? match.captured(1) : QString();
+            withoutControl = line == QLatin1String("## Settings without a control");
             continue;
         }
-        if (!inSettings || !line.startsWith(QLatin1String("| `")))
+        if (section.isEmpty() && !withoutControl)
+            continue;
+        if (!line.startsWith(QLatin1String("| ")) || line.startsWith(QLatin1String("| ---"))
+            || line.startsWith(QLatin1String("| Setting |"))
+            || line.startsWith(QLatin1String("| Key |")))
             continue;
         const QStringList cells = line.split(QLatin1Char('|'), Qt::SkipEmptyParts);
-        const bool fullTable =
-            section != QLatin1String("subtitles") && section != QLatin1String("other");
-        const QString status = fullTable ? cells.value(3) : QStringLiteral("✅");
-        const QStringList ids = backticked(cells.value(0));
-        if (ids.isEmpty() || ids.first().contains(QLatin1Char('{')) || ids.size() > 1)
-            continue; // a multi-id row (`webMode` / `layout`) is never a defined setting
-        const QString defaultCell = cells.value(1);
-        QString defaultText = backticked(defaultCell).value(0);
-        if (defaultText.startsWith(QLatin1Char('"')))
-            defaultText = defaultText.mid(1, defaultText.size() - 2);
-        rows.append({section, ids.first(), defaultText,
-                     status.contains(QStringLiteral("✅")) || status.contains(QStringLiteral("◇")),
-                     status.contains(QStringLiteral("◇"))});
+        const qsizetype keyCell = withoutControl ? 0 : 1;
+        const QStringList key = backticked(cells.value(keyCell));
+        const QStringList defaultValue = backticked(cells.value(keyCell + 1));
+        ReferenceRow row{.line = line,
+                         .section = section,
+                         .key = key.value(0),
+                         .defaultText = unquoted(defaultValue.value(0)),
+                         .hidden = withoutControl,
+                         .complete = !key.isEmpty() && !defaultValue.isEmpty()};
+        if (withoutControl) {
+            const qsizetype dot = row.key.indexOf(QLatin1Char('.'));
+            row.complete = row.complete && dot > 0;
+            row.section = row.key.left(dot);
+            row.key = row.key.mid(dot + 1);
+        }
+        rows.append(row);
     }
     return rows;
 }
@@ -74,37 +88,48 @@ QString defaultText(const SettingDefinition &definition)
 class TestSettingsParity : public QObject {
     Q_OBJECT
   private Q_SLOTS:
-    void tableMatchesTheParityDocument()
+    // Every setting the program defines is in the settings reference, with its default, and nothing else is
+    void theSettingsReferenceMatchesTheCode()
     {
-        QFile file(QStringLiteral(KINEFIN_SOURCE_DIR "/docs/feature-parity.md"));
-        if (!file.open(QIODevice::ReadOnly))
-            QSKIP("docs/feature-parity.md is not part of this checkout");
-        const QList<ParityRow> rows = parityRows(QString::fromUtf8(file.readAll()));
-        QVERIFY(rows.size() > 50);
-
-        int defined = 0;
-        for (const ParityRow &row : rows) {
-            const auto *definition = Kinefin::findSetting(row.section, row.key);
-            if (!row.defined) {
-                QVERIFY2(!definition,
-                         qPrintable(row.section + QLatin1Char('.') + row.key
-                                    + QStringLiteral(" is dropped in the parity doc but defined")));
-                continue;
-            }
-            ++defined;
+        QFile file(QStringLiteral(KINEFIN_SOURCE_DIR "/docs/settings.md"));
+        QVERIFY2(file.open(QIODevice::ReadOnly), qPrintable(file.fileName()));
+        const QList<ReferenceRow> rows = referenceRows(QString::fromUtf8(file.readAll()));
+        QSet<QString> listed;
+        for (const ReferenceRow &row : rows) {
+            QVERIFY2(row.complete,
+                     qPrintable(row.line + QStringLiteral(" has no key or default in code font")));
             const QString name = row.section + QLatin1Char('.') + row.key;
-            QVERIFY2(definition,
-                     qPrintable(name + QStringLiteral(" is in the parity doc but not defined")));
-            QCOMPARE(definition->hidden, row.hidden);
-            QCOMPARE(defaultText(*definition), row.defaultText);
-            QVERIFY2(definition->hidden || !definition->label.isEmpty(),
+            const auto *definition = Kinefin::findSetting(row.section, row.key);
+            QVERIFY2(
+                definition,
+                qPrintable(name + QStringLiteral(" is in the settings reference but not defined")));
+            QVERIFY2(
+                definition->hidden == row.hidden,
+                qPrintable(name + QStringLiteral(" has a control in one and none in the other")));
+            QVERIFY2(defaultText(*definition) == row.defaultText,
+                     qPrintable(name + QStringLiteral(" defaults to ") + defaultText(*definition)
+                                + QStringLiteral(", the reference says ") + row.defaultText));
+            QVERIFY2(!listed.contains(name), qPrintable(name + QStringLiteral(" is listed twice")));
+            listed.insert(name);
+        }
+        for (const SettingDefinition &definition : Kinefin::settingDefinitions()) {
+            const QString name = definition.section + QLatin1Char('.') + definition.key;
+            QVERIFY2(
+                listed.contains(name),
+                qPrintable(
+                    name + QStringLiteral(" is defined but missing from the settings reference")));
+            QVERIFY2(definition.hidden || !definition.label.isEmpty(),
                      qPrintable(name + QStringLiteral(" is visible but has no label")));
         }
-        // The tables of §2.1-§2.5 plus the one §2.6 key the program uses, `state.geometry`
+    }
+
+    // The settings that are Kinefin's own keep their keys, types and defaults
+    void theAdditionsKeepTheirDefaults()
+    {
+        // The window geometry the program keeps, never shown
         const auto *geometry =
             Kinefin::findSetting(QStringLiteral("state"), QStringLiteral("geometry"));
         QVERIFY(geometry && geometry->hidden && geometry->defaultValue == QStringLiteral(""));
-        // §2.7 is not parsed: the Kinefin additions are listed here
         const auto *newBadge =
             Kinefin::findSetting(QStringLiteral("library"), QStringLiteral("newBadge"));
         QVERIFY(newBadge && !newBadge->hidden && newBadge->defaultValue == true);
@@ -117,7 +142,7 @@ class TestSettingsParity : public QObject {
         QCOMPARE(homeFavorites->type, SettingDefinition::Type::Bool);
         QCOMPARE(QString::fromUtf8(homeFavorites->group.untranslatedText()),
                  QString::fromUtf8(homeLibraries->group.untranslatedText()));
-        // The downloads of parity §10: parallel transfers and the unmetered-only rule, both visible
+        // The downloads: parallel transfers and the unmetered-only rule, both visible
         const auto *parallelDownloads =
             Kinefin::findSetting(QStringLiteral("downloads"), QStringLiteral("parallel"));
         QVERIFY(parallelDownloads && !parallelDownloads->hidden
@@ -155,7 +180,6 @@ class TestSettingsParity : public QObject {
                      qPrintable(key));
             QCOMPARE(subTab->defaultValue, QVariant(enabledByDefault.contains(key)));
         }
-        QCOMPARE(Kinefin::settingDefinitions().size(), defined + 8 + subTabs.size());
     }
 
     void everyDefaultIsValid()

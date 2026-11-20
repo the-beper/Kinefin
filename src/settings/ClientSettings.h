@@ -18,7 +18,7 @@ struct DeviceProfileOptions;
 struct SettingDefinition;
 class SettingsSectionModel;
 
-// The client settings of one profile (parity §2), stored in a KConfig file whose groups are the parity sections. Only values that differ from the default are written, and nothing is written until the first change. Every read and write goes through `SettingDefinition`: an unknown key, a hidden key, a value of the wrong type or outside a closed list is refused on write and replaced by the default on read
+// The client settings of one profile, stored in a KConfig file whose groups are upstream's sections. Only values that differ from the default are written, and nothing is written until the first change. Every read and write goes through `SettingDefinition`: an unknown key, a hidden key, a value of the wrong type or outside a closed list is refused on write and replaced by the default on read
 class ClientSettings final : public QObject {
     Q_OBJECT
     // The stored `main.ignoreSSLErrors` or the `--ignore-certificate-errors` flag of this run: invalid TLS certificates of the server are accepted
@@ -50,7 +50,7 @@ class ClientSettings final : public QObject {
     // The group headings of a section in table order; a section that is one card has one empty heading
     Q_INVOKABLE QStringList sectionGroups(const QString &section) const;
 
-    // The window geometry of the last session (`state.geometry`, parity §2.6): a hidden key with its own accessors because the settings page never shows it. Empty when nothing usable is stored
+    // The window geometry of the last session (`state.geometry`): a hidden key with its own accessors because the settings page never shows it. Empty when nothing usable is stored
     Q_INVOKABLE QRect windowGeometry() const;
     Q_INVOKABLE void setWindowGeometry(const QRect &geometry);
 

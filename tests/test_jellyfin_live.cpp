@@ -36,7 +36,7 @@
 #include <QWebSocketProtocol>
 #include <QtTest>
 
-// Opt-in live checks against a real Jellyfin server: the websocket-contract.md live steps and the reporting live checks. Every slot SKIPs unless the environment provides the server, so `ctest` under check.sh runs this file as a plain skip everywhere else. Bring: KINEFIN_LIVE_BASE_URL (e.g. http://192.168.1.251:8096), KINEFIN_LIVE_USER, KINEFIN_LIVE_PASSWORD. The sessionsRoleVisibility slot additionally takes, when an admin account may be used for the comparison: KINEFIN_LIVE_ADMIN_USER/PASSWORD. The access token never leaves the process: prints carry names, ids, routes, statuses and raw frames only, and every login uses its own throw-away device id
+// Opt-in live checks against a real Jellyfin server: the websocket live steps and the reporting live checks. Every slot SKIPs unless the environment provides the server, so `ctest` under check.sh runs this file as a plain skip everywhere else. Bring: KINEFIN_LIVE_BASE_URL (e.g. http://192.168.1.251:8096), KINEFIN_LIVE_USER, KINEFIN_LIVE_PASSWORD. The sessionsRoleVisibility slot additionally takes, when an admin account may be used for the comparison: KINEFIN_LIVE_ADMIN_USER/PASSWORD. The access token never leaves the process: prints carry names, ids, routes, statuses and raw frames only, and every login uses its own throw-away device id
 class TestJellyfinLive : public QObject {
     Q_OBJECT
 
@@ -57,46 +57,46 @@ class TestJellyfinLive : public QObject {
     // REST round trip plus the session identity. ~2 s
     void authAndSessionSmoke();
 
-    // Live checks 1+2 (~75 s): the QWebSocket handshake with the component's own request, the exact ForceKeepAlive the server opens with, the client's KeepAlive answer, and a hold past the 60 s close deadline
+    // ~75 s: the QWebSocket handshake with the component's own request, the exact ForceKeepAlive the server opens with, the client's KeepAlive answer, and a hold past the 60 s close deadline
     void handshakeAndKeepAliveCycle();
 
     // The component's full heartbeat cycle (~210 s): authenticated once, then 200 s of pure waiting with the socket confident the whole time
     void componentSurvivesThreeMinutes();
 
-    // Live check 3 (~70 s): during 61 s of client silence the server announces ForceKeepAlive again, between 45 and 60 s
+    // ~70 s: during 61 s of client silence the server announces ForceKeepAlive again, between 45 and 60 s
     void forceKeepAliveOnSilence();
 
-    // Live check 9 (~25 s): with the SessionsStart interest out, Sessions frames arrive (or are proven not to). Either outcome is recorded verbatim for the design to act on
+    // ~25 s: with the SessionsStart interest out, Sessions frames arrive (or are proven not to). Either outcome is recorded verbatim
     void sessionsWhileSubscribed();
 
-    // Live checks 8+7 (~25 s): a genuine second session of the same user drives Play, a Playstate and a GeneralCommand at this device's session; the components route them
+    // ~25 s: a genuine second session of the same user drives Play, a Playstate and a GeneralCommand at this device's session; the components route them
     void commandsFromSecondSession();
 
     // The raw byte form of the remote-control frames: a direct WebSocket with a capture socket, the controller drives it from a separate device. ~20 s
     void rawCommandShapes();
 
-    // Live checks 6+7: the frames a scan wake-up and a user-data change look like on the wire (this user must hold the LibraryScan task trigger; the marking is undone at the end)
+    // The frames a scan wake-up and a user-data change look like on the wire (this user must hold the LibraryScan task trigger; the marking is undone at the end)
     void rawScanAndUserDataShapes();
 
-    // Live check 4's observed 12.4 equivalent: the token logout (POST /Sessions/Logout, 204) ends the authenticated socket; a fresh handshake with the dead token is refused and /Users/Me answers 401. The server-side admin device deletion was not reachable (404)
+    // On 12.4 the token logout (POST /Sessions/Logout, 204) ends the authenticated socket; a fresh handshake with the dead token is refused and /Users/Me answers 401. The server-side admin device deletion was not reachable (404)
     void tokenLogoutClosesEverything();
 
-    // Reporting live checks r1-r3 (~10 s): the pure report bodies the client builder produces, posted by hand and the server's real answers observed, including a duplicate Stopped
+    // Reporting, ~10 s: the pure report bodies the client builder produces, posted by hand and the server's real answers observed, including a duplicate Stopped
     void reportsAnswer204();
 
-    // Reporting live check r4 (~10 s): a Failed Stopped leaves the user's play state untouched
+    // Reporting, ~10 s: a Failed Stopped leaves the user's play state untouched
     void failedStopsLeaveUserDataAlone();
 
-    // Reporting live checks r5+r2 (~25 s): a 4K HDR item forced through the HLS negotiation, a Transcode marker in the live session record, and a Stopped that ends the server job
+    // Reporting, ~25 s: a 4K HDR item forced through the HLS negotiation, a Transcode marker in the live session record, and a Stopped that ends the server job
     void hlsTranscodeLifecycle();
 
-    // Engine live gate INT-02 (~40 s): a direct-playable movie under the parity profile, the engine plays the real stream, the server session record carries it, pause/resume/seek/stop run, and the Stopped clears the play
+    // Engine, ~40 s: a direct-playable movie under the default profile, the engine plays the real stream, the server session record carries it, pause/resume/seek/stop run, and the Stopped clears the play
     void engineDirectPlayLifecycle();
 
-    // Engine live gate INT-03 (~45 s): an HDR item forced to transcode, mpv plays the negotiated HLS stream, and the Stopped tears the server job down
+    // Engine, ~45 s: an HDR item forced to transcode, mpv plays the negotiated HLS stream, and the Stopped tears the server job down
     void engineTranscodeLifecycle();
 
-    // Engine live gate INT-04 (~60 s): >20 s of held-pause reporting, then stop; the server's user-data record keeps the continue point
+    // Engine, ~60 s: >20 s of held-pause reporting, then stop; the server's user-data record keeps the continue point
     void engineProgressAdvancesUserData();
 
     // Clip export from a transcode (~60 s): a movie capped into a transcode plays 25 s, the last 20 s are marked as an A-B range, `ab-loop-align-cache` and `ab-loop-dump-cache` write what mpv holds, and the time the two commands block the player and the distance of the aligned start from the mark are the facts; the dump is then encoded by ClipExporter from the mark on
@@ -105,13 +105,13 @@ class TestJellyfinLive : public QObject {
     // Clip of a transcode through the player (~90 s): a real PlayerController plays a movie, a quality step makes the server transcode it, the marks take 6 s just played, the clip is encoded from mpv's cache into the granted file, and the profile's clips folder is left empty
     void transcodeClipThroughThePlayer();
 
-    // Engine live gate INT-06 (~50 s): a byte-forwarding local proxy carries client and stream; cutting it mid-play gives exactly one Failed->Stopping->Idle path, no second play identity, and re-authentication on the real base recovers
+    // Engine, ~50 s: a byte-forwarding local proxy carries client and stream; cutting it mid-play gives exactly one Failed->Stopping->Idle path, no second play identity, and re-authentication on the real base recovers
     void engineInterruptionSeversAndRecovers();
 
     // Adaptive bitrate fallback (~2-4 min): a real PlayerController plays a direct-playable movie of at least 5 Mbit/s through a local proxy, the proxy is throttled to 40 % of the file's bitrate, and the controller must lower the quality on its own: a transcode at a lower bitrate, one Stopped then one Start, Playing again near the same position, and a Stopped that clears the server's play
     void playerFallsBackOnAThrottledLink();
 
-    // Engine live gate INT-05 (~40 s): local-logout scope (a server-driven expiry needs an admin action this harness cannot reach). The engine keeps playing through a cleared credential, the stop needs no server, and no new playback identity forms
+    // Engine, ~40 s: local-logout scope (a server-driven expiry needs an admin action this harness cannot reach). The engine keeps playing through a cleared credential, the stop needs no server, and no new playback identity forms
     void engineSurvivesALocalLogout();
 
     // BaseUrl handshake round (~15 s): the client's whole loop (probe, login, WebSocket handshake, one report) through a forwarder that serves the server under a path prefix, standing in for upstream's `<host>/jellyfin` deployments
@@ -755,7 +755,7 @@ void TestJellyfinLive::hlsTranscodeLifecycle()
     Kinefin::JellyfinClient client;
     QVERIFY(authenticate(client));
 
-    // 1. Find a movie the parity §3 default profile must transcode (a 4K HDR/DoVi source)
+    // 1. Find a movie the default profile must transcode (a 4K HDR/DoVi source)
     const QJsonObject items = getJson(
         client, QStringLiteral(
                     "/Items?IncludeItemTypes=Movie&Recursive=true&Limit=20&Fields=MediaSources"));
@@ -783,7 +783,7 @@ void TestJellyfinLive::hlsTranscodeLifecycle()
     }
     QVERIFY2(!hdrItem.isEmpty(), "no 4K HDR/DoVi movie for the HLS cycle");
 
-    // PlaybackInfo through the real client, with `force transcode HDR` set (parity §2/§3): a stock profile direct-plays HDR, the setting is the documented forcing
+    // PlaybackInfo through the real client, with `force transcode HDR` set: a stock profile direct-plays HDR, the setting is the documented forcing
     Kinefin::DeviceProfileOptions options;
     options.forceTranscodeHdr = true;
     QSignalSpy ready(&client, &Kinefin::JellyfinClient::playbackInfoReady);
@@ -792,7 +792,7 @@ void TestJellyfinLive::hlsTranscodeLifecycle()
     const Kinefin::PlaybackSource source = ready.first().first().value<Kinefin::PlaybackSource>();
     QCOMPARE(source.itemId, hdrItem);
     QCOMPARE(source.method, Kinefin::PlaybackSource::Method::Transcode);
-    // The token stays out of the URL (api-notes): verify the ApiKey count in the live query
+    // The token stays out of the URL: verify the ApiKey count in the live query
     int apiKeys = 0;
     const QList<QPair<QString, QString>> query = QUrlQuery(source.url).queryItems();
     for (const auto &pair : query)
@@ -952,7 +952,7 @@ void TestJellyfinLive::tokenLogoutClosesEverything()
 
 /* ----- engine live gate rounds; every slot runs a real mpv ----- */
 
-// The first movie among the library's 20 whose PlaybackInfo negotiation under the parity default profile answers a *direct* source. PlaybackInfo runs one request at a time; a failed request just books a live fact and the loop moves on
+// The first movie among the library's 20 whose PlaybackInfo negotiation under the default profile answers a *direct* source. PlaybackInfo runs one request at a time; a failed request just books a live fact and the loop moves on
 bool TestJellyfinLive::findDirectPlayable(Kinefin::JellyfinClient &client, QString *itemId,
                                           Kinefin::PlaybackSource *source, qint64 minBitrate)
 {
@@ -1016,7 +1016,7 @@ QString TestJellyfinLive::hdrItemId(Kinefin::JellyfinClient &client)
     return {};
 }
 
-// The token must never ride the media URL (api-notes.md, Media URLs)
+// The token must never ride the media URL
 void TestJellyfinLive::assertTokenFreeMediaUrl(const QUrl &url)
 {
     for (const auto &pair : QUrlQuery(url).queryItems())
@@ -1067,8 +1067,8 @@ void TestJellyfinLive::engineDirectPlayLifecycle()
              "no direct-playable movie in the first 20");
     QCOMPARE(source.itemId, itemId);
     assertTokenFreeMediaUrl(source.url);
-    qInfo() << LIVE_FACT << "INT-02 chosen media source" << source.mediaSourceId << "play session"
-            << source.playSessionId << "media path" << source.url.path();
+    qInfo() << LIVE_FACT << "direct-play round: chosen media source" << source.mediaSourceId
+            << "play session" << source.playSessionId << "media path" << source.url.path();
 
     // Canonical chain: the engine, then the reporter on its session. The container is offscreen; the null outputs are the proven fixture route
     Kinefin::PlaybackSession session;
@@ -1144,7 +1144,8 @@ void TestJellyfinLive::engineTranscodeLifecycle()
     QCOMPARE(source.itemId, hdrId);
     QCOMPARE(source.method, Kinefin::PlaybackSource::Method::Transcode);
     assertTokenFreeMediaUrl(source.url);
-    qInfo() << LIVE_FACT << "INT-03 negotiated route:" << source.url.scheme() << source.url.path();
+    qInfo() << LIVE_FACT << "transcode round: negotiated route:" << source.url.scheme()
+            << source.url.path();
 
     Kinefin::PlaybackSession session;
     auto *engine = new Kinefin::PlaybackEngine(client, session, this);
@@ -1352,7 +1353,7 @@ void TestJellyfinLive::engineProgressAdvancesUserData()
     QVERIFY2(findDirectPlayable(client, &itemId, &source),
              "no direct-playable movie in the first 20");
     const QJsonObject before = itemUserData(client, userId, itemId);
-    qInfo() << LIVE_FACT << "INT-04 user data before the round: playbackPositionTicks"
+    qInfo() << LIVE_FACT << "progress round: user data before the round: playbackPositionTicks"
             << before.value(QStringLiteral("PlaybackPositionTicks")).toInt() << "played"
             << before.value(QStringLiteral("Played")).toBool(false);
 
@@ -1403,8 +1404,9 @@ void TestJellyfinLive::engineProgressAdvancesUserData()
     const QJsonObject after = itemUserData(client, userId, itemId);
     const qint64 beforeTicks = before.value(QStringLiteral("PlaybackPositionTicks")).toInt(-1);
     const qint64 afterTicks = after.value(QStringLiteral("PlaybackPositionTicks")).toInt(-1);
-    qInfo() << LIVE_FACT << "INT-04 continue point after the engine's own stop:" << beforeTicks
-            << "->" << afterTicks;
+    qInfo() << LIVE_FACT
+            << "progress round: continue point after the engine's own stop:" << beforeTicks << "->"
+            << afterTicks;
     if (afterTicks <= beforeTicks) {
         // Is the position too small to persist, or does 12.4 not write the continue point from reports at all? Decisive probe: the same Stopped body with a large position, posted by hand through the r-round helper
         Kinefin::PlaybackReport manualStop;
@@ -1425,7 +1427,7 @@ void TestJellyfinLive::engineProgressAdvancesUserData()
     client.disconnectFromServer();
 }
 
-/* The local byte forwarder behind INT-06 and the subpath BaseUrl round: the client and player both speak to it, it speaks to the real server. With an empty prefix the forwarded bytes leave untouched (cut() drops every connection, both directions). With a prefix it rewrites request line paths DOWN→UP, so a subpath BaseUrl (`<host>/jellyfin` deployments) behaves like the proxy-less case. setDownstreamRate paces the server-to-client bytes (a throttled link) and reports() lists the playback Start and Stopped requests that went upstream */
+/* The local byte forwarder behind the connection-cut round and the subpath BaseUrl round: the client and player both speak to it, it speaks to the real server. With an empty prefix the forwarded bytes leave untouched (cut() drops every connection, both directions). With a prefix it rewrites request line paths DOWN→UP, so a subpath BaseUrl (`<host>/jellyfin` deployments) behaves like the proxy-less case. setDownstreamRate paces the server-to-client bytes (a throttled link) and reports() lists the playback Start and Stopped requests that went upstream */
 class FixtureProxy : public QObject {
     Q_OBJECT
 
@@ -1651,7 +1653,7 @@ void TestJellyfinLive::engineInterruptionSeversAndRecovers()
     QUrl through = m_base;
     through.setHost(QStringLiteral("127.0.0.1"));
     through.setPort(int(proxy.port()));
-    qInfo() << LIVE_FACT << "INT-06 forwarder on" << through.toString();
+    qInfo() << LIVE_FACT << "connection-cut round: forwarder on" << through.toString();
 
     // The playing side lives entirely behind the proxy; loopback auth needs no opt-in
     Kinefin::JellyfinClient proxyClient;
@@ -2001,7 +2003,7 @@ void TestJellyfinLive::subPathBaseUrlRound()
     client.disconnectFromServer();
 }
 
-/* ----- endpoint-matrix live rounds ----- */
+/* ----- endpoint live rounds ----- */
 
 void TestJellyfinLive::authHeaderWireEcho()
 {

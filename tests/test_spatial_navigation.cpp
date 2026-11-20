@@ -429,7 +429,7 @@ ApplicationWindow {
 
     void aRowWithoutACurrentCardLeavesFromItsStart()
     {
-        // The geometry of Home: a library tile above the first row's start, the row's See All above its far end
+        // The geometry of Home: a library tile above the first row's start, the row's Show All above its far end
         Scene scene;
         QVERIFY(scene.load(R"(
 ApplicationWindow {

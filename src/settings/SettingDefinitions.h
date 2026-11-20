@@ -8,7 +8,7 @@
 #include <KLazyLocalizedString>
 
 namespace Kinefin {
-// One client setting of parity §2: the section and key are upstream's (`audio` / `passthrough.dts-hd`), the default and the closed value list are its own. The table is the only place that lists them; tests/test_settings_parity.cpp compares it with the parity document
+// One client setting: the section and key are upstream's (`audio` / `passthrough.dts-hd`), the default and the closed value list are its own. The table is the only place that lists them; tests/test_settings_parity.cpp checks it against docs/settings.md
 struct SettingDefinition {
     enum class Type { Bool, Int, Double, String };
     struct Option {
@@ -24,7 +24,7 @@ struct SettingDefinition {
     QList<Option> options;
     double min = 0;
     double max = 0;
-    // Hidden (parity ◇: upstream's choice, or a setting nothing reads yet): stored, never shown or settable from the UI
+    // Hidden (upstream's choice, or a setting nothing reads yet): stored, never shown or settable from the UI
     bool hidden = false;
     // A string with line breaks, e.g. `other_conf`
     bool multiline = false;

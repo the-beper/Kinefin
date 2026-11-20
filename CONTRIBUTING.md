@@ -1,6 +1,6 @@
 # Contributing to Kinefin
 
-A scaffold-forward project of one developer. These are the real rules; the layout table is the map.
+This page covers building, checking, packaging and the working rules. The [architecture overview](docs/architecture.md) maps the source code.
 
 ## Repository layout
 
@@ -13,16 +13,10 @@ A scaffold-forward project of one developer. These are the real rules; the layou
 | `build/release/` | Version bump, Flatpak source/runtime/permission/Action gates, Flathub manifest generator, artifact verification, attestation checks, release publisher and first-release checklist |
 | `data/` | Desktop file, AppStream metainfo and icons (`icons/hicolor`: the scalable SVG source and the 128/256 px PNG renders) |
 | `po/` | Gettext: `LINGUAS`, `POTFILES.in`, `extract.sh`, per-language catalogs |
-| `src/api/` | Jellyfin REST client (auth, discovery, device profile, media sources, reporting) |
-| `src/downloads/` | Not started: download queue, tracked-series auto rules, portal export (feature doc: parity §10) |
-| `src/app/` | `ConnectionController`: the one object the QML pages talk to (servers, sign-in, Quick Connect, session restore); profile commands and logging; `ClientSettingsQml.h`, which exposes the settings object to QML, and `MpvVideoItem`, the mpvqt video renderer item |
-| `src/player/` | Playback session state machine, server reporting (`PlaybackReporter`), the mpv engine (`PlaybackEngine`), `PlayerController` (what `PlayerPage.qml` talks to: queue and series stepping, tracks, segments, sleep timer, screenshots), `PlayerSettings` and trickplay |
-| `src/integration/` | Validated `jellyfin://item/<id>` routing and registered desktop protocol, the update check, MPRIS (with artwork), the screensaver inhibit and the remote-control socket; SDL3 gamepads and optional CEC come after the first release |
-| `src/settings/` | Profile index and identity, server credentials, KConfig client settings (`SettingDefinitions`, `ClientSettings`, `SettingsSectionModel`) |
-| `src/models/` | API-backed listing, details, search, genre and Remote sessions models; `PlayQueue` persists the video up-next list per owner in `queues/<serverId>_<userId>.json` and supports one-level undo |
-| `src/imagecache/` | Image origin lock and the restricted network access (allowed image URLs only, disk cache with a cap); the subtitle cache is not started |
-| `src/qml/` | All Kirigami pages and their components, built as the static QML module `kinefin_ui` (linked by the `kinefin` executable and by `test_ui_pages`) |
-| `tests/`, `scripts/testing/` | Unit tests, test scripts, and `tests/fixtures/` (the realistic server-response corpus the P2 fake server replays; its README rules shape changes) |
+| `docs/` | The user guide, the settings reference and the architecture overview |
+| `src/`, `tests/` | The application and its tests, mapped in the [architecture overview](docs/architecture.md); `tests/fixtures/` is the server-response corpus the fake server replays |
+| `third_party/` | The vendored mpvqt renderer and KWin's picture-in-picture protocol |
+| `scripts/testing/` | The portable checks and the read-only API probe |
 | `scripts/po.py` | Status, listing and writing of the gettext catalogs (`po/*.po`) |
 
 ## Building
@@ -39,7 +33,7 @@ The UI tests (`test_ui_pages`) run as the shards `ui_pages_0` to `ui_pages_5`, w
 
 `build/check.sh` uses ccache automatically when the image has it (cache in `/buildtmp/ccache`, the same build volume); CI keeps that directory between runs with `actions/cache`.
 
-The build tree defaults to `/buildtmp/check` (a named podman volume build-env.sh mounts — incremental between runs). Keep CMake build trees outside the checkout: the `dist/` tree is scanned by the REUSE gate, which would otherwise have to cover the fetched third-party mpvqt sources. `dist/` is not in git. To run the built app in the container you are on your own — playback needs a real session; do that on the host once it can be host-built, or inside the container for offscreen-only experiments.
+The build tree defaults to `/buildtmp/check` (a named podman volume that build-env.sh mounts, incremental between runs). Keep CMake build trees outside the checkout: the `dist/` tree is scanned by the REUSE gate, which would otherwise have to cover the fetched third-party mpvqt sources. `dist/` is not in git. To run the built app in the container you are on your own: playback needs a real session; do that on the host once it can be host-built, or inside the container for offscreen-only experiments.
 
 mpvqt 1.2.1 is fetched by the root `CMakeLists.txt` (`FetchContent`, SHA256 pinned); the Flatpak manifest pins the same tarball and points `KINEFIN_MPVQT_URL` at it, so the two pins must move together. Its renderer is replaced by the copy in `third_party/mpvqt/` (the patch step of `FetchContent`); a new mpvqt version needs that copy diffed against its own renderer first.
 
@@ -61,7 +55,13 @@ build/build-env.sh build/check.sh
 
 `python3 scripts/po.py status` alone shows the pending translations per language (zero is required).
 
-`tests/shell_smoke.py` starts the binary offscreen five times (Servers, then Settings, About, the sign-in page and Home through the `KINEFIN_START_PAGE` start-up hook; the sign-in page and Home open without a session) and fails on any QML problem. `tests/test_kwallet_host.cpp` runs against the session's real KWallet and is skipped unless `KINEFIN_TEST_KWALLET=1`; the command is in the plan's "KWallet host checks". Run it before proposing a commit. Shell scripts (`build/`, `scripts/`, `po/`) are shellcheck-clean (`--severity=warning`); C++ code follows the Qt-like style of `.clang-format` (LLVM base with explicit knobs: the image's clang-format has no `Qt` preset) (`clang-format -i <files>` before proposing — the image gate fails on drift; `.editorconfig` governs the non-C++ text files).
+`tests/shell_smoke.py` starts the binary offscreen five times (Servers, then Settings, About, the sign-in page and Home through the `KINEFIN_START_PAGE` start-up hook; the sign-in page and Home open without a session) and fails on any QML problem. Run it before proposing a commit. Shell scripts (`build/`, `scripts/`, `po/`) are shellcheck-clean (`--severity=warning`); C++ code follows the Qt-like style of `.clang-format` (LLVM base with explicit knobs: the image's clang-format has no `Qt` preset). Run `clang-format -i <files>` before proposing, because the image gate fails on drift. `.editorconfig` governs the non-C++ text files.
+
+`tests/test_kwallet_host.cpp` runs against the session's real KWallet and is skipped unless `KINEFIN_TEST_KWALLET=1`. Run it against the session bus from the build container, after a build in `/buildtmp/dev`:
+
+```sh
+podman run --rm --userns=keep-id --network=host --security-opt label=disable -e QT_QPA_PLATFORM=offscreen -e KINEFIN_TEST_KWALLET=1 -e DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus" -v "$XDG_RUNTIME_DIR/bus:$XDG_RUNTIME_DIR/bus" -v "$PWD:$PWD" -w "$PWD" -v kinefin-buildtmp:/buildtmp localhost/kinefin-build:fedora45 /buildtmp/dev/bin/test_kwallet_host
+```
 
 ## Flatpak
 
@@ -80,7 +80,7 @@ Strings are `i18n()` calls (QML: plain `i18n()` injected with `KLocalization::se
 
 ## Releasing
 
-**Source preparation is implemented; P9 acceptance is not closed.** Do not tag or publish before the required v1 features, real Jellyfin/Plasma rounds and packaging gates pass. The authoritative instructions are [release tooling](build/release/README.md) and the [first-release checklist](build/release/FIRST_RELEASE.md).
+Source preparation is implemented; first-release acceptance is not closed. Do not tag or publish before the required v1 features, real Jellyfin/Plasma rounds and packaging gates pass. The authoritative instructions are [release tooling](build/release/README.md) and the [first-release checklist](build/release/FIRST_RELEASE.md).
 
 1. Run `python3 -I build/release/preflight.py` for the offline source gates, then `build/build-env.sh build/check.sh` for the native/container checks.
 2. When v1 acceptance is complete, prepare the version with `build/release/version-bump.sh --dry-run --date YYYY-MM-DD X.Y.Z` and `build/release/version-bump.sh --date YYYY-MM-DD X.Y.Z`; review and commit CMake and AppStream together.
@@ -92,12 +92,13 @@ Source checks and the 128px/256px icon are present, but they do not replace a bu
 
 ## How to work here
 
-- Follow the [KDE HIG](https://develop.kde.org/hig/); deliberate exceptions are recorded in the project notes in the same change.
-- Anything that touches behaviour against Jellyfin Desktop updates the parity notes in the same change — including a setting dropped or renamed (it gets a row saying so; silent omissions are bugs).
-- Every new source file starts with its SPDX header (the KDE REUSE convention): `SPDX-FileCopyrightText: 2026 <author>` + `SPDX-License-Identifier: GPL-3.0-or-later`; the metainfo metadata keeps CC0 and the docs stay plain for now — `REUSE.toml` covers the snapshot, `LICENSES/` provides license texts, and `reuse lint` is mandatory in the build image. Verify exceptions and file-level headers when adding third-party files.
+- Follow the [KDE HIG](https://develop.kde.org/hig/); a deliberate exception states its reason in the change.
+- Client settings keep Jellyfin Desktop's names, defaults and values wherever they map to mpv. A setting added, renamed or dropped updates the [settings reference](docs/settings.md) in the same change; `test_settings_parity` fails otherwise.
+- A change users or contributors can see updates the [user guide](docs/user-guide.md) or the [architecture overview](docs/architecture.md) in the same change.
+- Every new source file starts with its SPDX header (the KDE REUSE convention): `SPDX-FileCopyrightText: 2026 <author>` + `SPDX-License-Identifier: GPL-3.0-or-later`; the metainfo metadata keeps CC0 and the docs carry no header: `REUSE.toml` covers them, `LICENSES/` provides license texts, and `reuse lint` is mandatory in the build image. Verify exceptions and file-level headers when adding third-party files.
 - Keep shell scripts POSIX sh (the build runs plain `/bin/sh` inside Fedora images) and oksh/fish out of CI.
-- Treat remote metadata (item names, cast text, images) as untrusted input everywhere; see the architecture's "Remote data" rule. Never log or leak the access token.
+- Treat remote metadata (item names, cast text, images) as untrusted input everywhere; see the invariants in the [architecture overview](docs/architecture.md#invariants). Never log or leak the access token.
 
 ## Validation scope of this snapshot
 
-P0 portable checks (including a real C++20 state-machine compile) run with `scripts/testing/run_portable_checks.sh`; the native Qt/KF6 tests require the build container. The `build/release/` unit tests exercise release logic with local fixtures; signed attestation retrieval, a real tag build and host/Flatpak tests still require external systems. A fake Jellyfin server can be exercised with `python3 scripts/testing/probe_jellyfin.py --fixture`; live-server read-only API probes require explicitly supplied environment variables (see the script). Playback and session reporting still require dedicated host tests.
+Portable checks (including a real C++20 state-machine compile) run with `scripts/testing/run_portable_checks.sh`; the native Qt/KF6 tests require the build container. The `build/release/` unit tests exercise release logic with local fixtures; signed attestation retrieval, a real tag build and host/Flatpak tests still require external systems. A fake Jellyfin server can be exercised with `python3 scripts/testing/probe_jellyfin.py --fixture`; live-server read-only API probes require explicitly supplied environment variables (see the script). Playback and session reporting still require dedicated host tests.

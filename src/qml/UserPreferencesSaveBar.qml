@@ -17,6 +17,14 @@ Controls.ToolBar {
     visible: prefs.loaded
     position: Controls.ToolBar.Footer
 
+    // Ctrl+S saves while the bar shows, as its Save button does
+    Shortcut {
+        objectName: "prefsSaveShortcut"
+        sequences: [StandardKey.Save]
+        enabled: bar.visible && bar.prefs.canSave
+        onActivated: bar.prefs.save()
+    }
+
     contentItem: RowLayout {
         spacing: Kirigami.Units.largeSpacing
 

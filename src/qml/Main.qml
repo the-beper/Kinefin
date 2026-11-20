@@ -1412,7 +1412,7 @@ Kirigami.ApplicationWindow {
         tabMotionQueued = false;
     }
 
-    // See All of a Recently Added row: the type tab opens from the top on the library's items by date added, newest first, and the sort saved for the tab stays as it was
+    // Show All of a Recently Added row: the type tab opens from the top on the library's items by date added, newest first, and the sort saved for the tab stays as it was
     function openRecentlyAdded(name, libraryId) {
         if (!signedIn || !isTypeTab(name))
             return;
@@ -1426,7 +1426,7 @@ Kirigami.ApplicationWindow {
             connection.resumeItems.close();
     }
 
-    // See All of Continue Watching goes above Home: a page already open is brought back as it is
+    // Show All of Continue Watching goes above Home: a page already open is brought back as it is
     function openResumeItems() {
         if (!signedIn)
             return;

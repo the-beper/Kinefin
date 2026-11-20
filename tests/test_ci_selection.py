@@ -60,6 +60,12 @@ class ChangeSelection(unittest.TestCase):
         self.git("commit", "-qm", "docs")
         self.assertIn("code=false packaging=false", self.selection())
 
+    def test_settings_reference_change_requires_checks(self) -> None:
+        self.write("docs/settings.md", "| Setting | Key |\n")
+        self.git("add", ".")
+        self.git("commit", "-qm", "settings reference")
+        self.assertIn("code=true packaging=false", self.selection())
+
     def test_new_python_test_requires_only_checks(self) -> None:
         self.write("tests/test_new.py", "# test\n")
         self.git("add", ".")

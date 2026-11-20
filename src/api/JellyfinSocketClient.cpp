@@ -26,7 +26,7 @@ constexpr qint64 kBackoffBaseMs = 1000;
 constexpr qint64 kBackoffCapMs = 60000;
 // A connection that lasted this long counts as stable, so its loss restarts the backoff ladder
 constexpr qint64 kStableUptimeMs = 30000;
-// Frame and message size limit, to revisit after a live library scan (websocket-contract.md)
+// Frame and message size limit, to revisit after a live library scan
 constexpr qint64 kMaxFrameBytes = qint64(4) * 1024 * 1024;
 constexpr int kMaxUserDataIds = 10000;
 constexpr int kMaxSessionObjects = 200;
@@ -35,7 +35,7 @@ constexpr int kMaxArgumentKeyChars = 64;
 constexpr int kMaxArgumentValueChars = 8192;
 
 const QString keepAliveMessage = QStringLiteral("{\"MessageType\":\"KeepAlive\"}");
-// Data format inferred: "page,count" (websocket-contract.md, live check 9)
+// Data format inferred: "page,count" (observed on a live server)
 const QString sessionsStartMessage =
     QStringLiteral("{\"MessageType\":\"SessionsStart\",\"Data\":\"0,1500\"}");
 const QString sessionsStopMessage = QStringLiteral("{\"MessageType\":\"SessionsStop\"}");
@@ -303,7 +303,7 @@ void JellyfinSocketClient::enterState(State next)
     qCInfo(socketLog) << "state" << stateName(m_state);
     if (auto *client = m_client.data()) {
         client->setMediaControlAnnounced(m_state == State::Authenticated);
-        // Every entry into Authenticated announces the capabilities again (live check 8 re-checks)
+        // Every entry into Authenticated announces the capabilities again (re-checked on a live server)
         if (m_state == State::Authenticated)
             client->reportCapabilities();
     }
@@ -392,7 +392,7 @@ void JellyfinSocketClient::onTextMessage(quint64 generation, const QString &text
 
     if (type == QLatin1String("ForceKeepAlive") || type == QLatin1String("KeepAlive")) {
         if (type == QLatin1String("ForceKeepAlive")) {
-            qint64 seconds = 60; // the observed default (websocket-contract.md)
+            qint64 seconds = 60; // the observed default
             if (!nonNegativeIntegral(dataValue, &seconds) || seconds < 10 || seconds > 3600)
                 seconds = 60;
             dispatchForceKeepAlive(seconds);

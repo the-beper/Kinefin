@@ -6,8 +6,7 @@ set -eu
 root=$(cd "$(dirname "$0")/../.." && pwd)
 image=localhost/kinefin-flatpak:fedora45
 
-# P0 requires a real CMake project: missing source must fail rather than silently
-# reporting success and skipping the artifact/smoke-test gates.
+# A real CMake project is required: missing source must fail rather than silently reporting success and skipping the artifact/smoke-test gates
 [ -f "$root/CMakeLists.txt" ] || { echo "missing required CMakeLists.txt" >&2; exit 1; }
 
 # TODO (first release): drop the build id. Until then About names a local build after its build time, taken once on the host (the container runs in UTC); CI and release builds (CI set) keep the version, and an id passed in, even empty, is kept

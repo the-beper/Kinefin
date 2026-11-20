@@ -11,7 +11,7 @@
 
 #include <optional>
 
-// The one owner of the SyncPlay wire format (Jellyfin 12.4, observed live: api-notes.md, SyncPlay): the frames and replies the server sends, parsed strictly (a value outside the rules drops the whole frame or entry), and the request bodies the client sends, checked by one validator before they leave
+// The one owner of the SyncPlay wire format (Jellyfin 12.4, observed live): the frames and replies the server sends, parsed strictly (a value outside the rules drops the whole frame or entry), and the request bodies the client sends, checked by one validator before they leave
 namespace Kinefin::SyncPlay {
 
 // The bounds of what the server may send: entries of a group queue, groups in a list, members of a group, characters of a group or user name, and 24 h in ticks for any position

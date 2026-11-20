@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-FileCopyrightText: 2026 Kinefin contributors
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Portable regression checks for release gates and design/code alignment."""
+"""Portable regression checks for release gates and code/documentation alignment."""
 from __future__ import annotations
 
 import importlib.util
@@ -17,6 +17,19 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def content(path: str) -> str:
     return (ROOT / path).read_text(encoding="utf-8")
+
+
+def heading_anchors(text: str) -> set[str]:
+    """The anchors GitHub gives the headings of a Markdown text: lowercase, punctuation dropped, spaces as hyphens, a counter on repeats."""
+    text = re.sub(r"^```.*?^```", "", text, flags=re.M | re.S)
+    anchors: set[str] = set()
+    seen: dict[str, int] = {}
+    for heading in re.findall(r"^#{1,6} (.+?)\s*$", text, flags=re.M):
+        slug = re.sub(r"[^\w\- ]", "", heading.lower()).replace(" ", "-")
+        count = seen.get(slug, 0)
+        seen[slug] = count + 1
+        anchors.add(slug if count == 0 else f"{slug}-{count}")
+    return anchors
 
 
 class PlanningConsistency(unittest.TestCase):
@@ -101,20 +114,18 @@ class PlanningConsistency(unittest.TestCase):
                                 f"{name} must be executable in a checkout; CI calls it directly")
 
     def test_documentation_local_links_are_resolvable(self) -> None:
-        """Regression against missing references in the root documentation."""
+        """Regression against missing files and headings behind the links of the root documentation and docs/."""
         broken = []
-        for document in ROOT.glob("*.md"):
+        for document in [*ROOT.glob("*.md"), *ROOT.glob("docs/*.md")]:
             for target in re.findall(r"(?<!!)\[[^\]]*\]\(([^)]+)\)", document.read_text(encoding="utf-8")):
-                relative = target.split("#", 1)[0]
-                if not relative or relative.startswith(("http:", "https:", "mailto:")):
+                if target.startswith(("http:", "https:", "mailto:")):
                     continue
-                resolved = document.parent / urllib.parse.unquote(relative)
-                if resolved.exists():
-                    continue
-                # docs/ is untracked: its links resolve only in a checkout that holds it
-                if not (ROOT / "docs").exists() and resolved.is_relative_to(ROOT / "docs"):
-                    continue
-                broken.append(f"{document.relative_to(ROOT)} -> {target}")
+                relative, _, fragment = target.partition("#")
+                resolved = document.parent / urllib.parse.unquote(relative) if relative else document
+                if not resolved.exists():
+                    broken.append(f"{document.relative_to(ROOT)} -> {target}")
+                elif fragment and resolved.suffix == ".md" and fragment not in heading_anchors(resolved.read_text(encoding="utf-8")):
+                    broken.append(f"{document.relative_to(ROOT)} -> {target}")
         self.assertEqual(broken, [])
 
     def test_package_checks_and_snapshot_facts(self) -> None:

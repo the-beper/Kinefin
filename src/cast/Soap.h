@@ -13,10 +13,10 @@
 
 namespace Kinefin {
 
-// A SOAP response is read only up to this size, GetProtocolInfo's up to the larger one (design: Security, 16 KiB, 64 KiB for GetProtocolInfo)
+// A SOAP response is read only up to this size, GetProtocolInfo's up to the larger one (16 KiB, 64 KiB for GetProtocolInfo)
 inline constexpr int kMaxSoapResponseBytes = 16 * 1024;
 inline constexpr int kMaxProtocolInfoResponseBytes = 64 * 1024;
-// A control request gives up after this long (design: Security, 3 s); the sending code enforces it
+// A control request gives up after this long (3 s); the sending code enforces it
 inline constexpr int kSoapTimeoutMs = 3000;
 // Longest error description kept from a fault
 inline constexpr int kMaxFaultDescriptionChars = 128;

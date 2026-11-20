@@ -10,7 +10,7 @@
 #include "api/MediaSourceSelection.h"
 
 namespace Kinefin {
-// One playback report as the player sees it; the wire shape is parity §9 (Start, Progress and Stopped bodies of `POST /Sessions/Playing...`)
+// One playback report as the player sees it; the wire shape of the Start, Progress and Stopped bodies of `POST /Sessions/Playing...`
 struct PlaybackReport {
     enum class Kind { Start, Progress, Stopped };
 
@@ -40,7 +40,7 @@ struct PlaybackReport {
     std::optional<bool> shuffle;
 };
 
-// The JSON body of the report, or nullopt for an invalid id or a negative position. Fields that this slice cannot fill correctly are omitted on purpose (parity §9): the server owns `Item` and `SessionId`, track indexes wait for the mpv track mapping
+// The JSON body of the report, or nullopt for an invalid id or a negative position. Fields the player cannot fill correctly are omitted on purpose: the server owns `Item` and `SessionId`, track indexes wait for the mpv track mapping
 [[nodiscard]] std::optional<QJsonObject> playbackReportBody(const PlaybackReport &report);
 
 // The `GeneralCommand` names the app honours from another session (the one list the capabilities announce and the remote command router accepts); `DisplayMessage` is left out on purpose, so no remote text reaches the screen

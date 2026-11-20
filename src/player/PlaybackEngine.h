@@ -27,13 +27,13 @@ class JellyfinClient;
 std::optional<qint64> videoTrackToRestore(const QVariantList &trackList,
                                           std::optional<qint64> previous);
 
-// The mpv side of the one PlaybackSession: it opens a negotiated `PlaybackSource` through MpvQt's `MpvController` and turns mpv lifecycle events into calls of the session's state machine. It owns no state logic: `PlaybackSession` stays the only place transitions are decided, and reporting keeps parity §9's cadence (`PlaybackReporter` observes the session; this class only feeds the probe through its accessors). The server URL never carries the access token: every open places the full `Authorization: MediaBrowser Token="…"` value as one mpv http-header-fields entry (the header mpv's ffmpeg path applies to every request of the stream, HLS segments included; verified against 12.4.0, api-notes.md). The property must be set through an mpv node array of one entry: libmpv 0.41 would slice the API string form on every comma of the header (verified offline)
+// The mpv side of the one PlaybackSession: it opens a negotiated `PlaybackSource` through MpvQt's `MpvController` and turns mpv lifecycle events into calls of the session's state machine. It owns no state logic: `PlaybackSession` stays the only place transitions are decided, and reporting keeps its own cadence (`PlaybackReporter` observes the session; this class only feeds the probe through its accessors). The server URL never carries the access token: every open places the full `Authorization: MediaBrowser Token="…"` value as one mpv http-header-fields entry (the header mpv's ffmpeg path applies to every request of the stream, HLS segments included; verified against 12.4.0). The property must be set through an mpv node array of one entry: libmpv 0.41 would slice the API string form on every comma of the header (verified offline)
 //
 // The event mapping (`--vo=null`/`--ao=null` in the test container works the same as the windowed route):
 //   `fileStarted`       → sends a stop() that arrived before the load began
 //   `fileLoaded`        → session.opened() (the stream started decoding; reporting Start)
 //   `endFile("stop")`   → session.stopped() when a stop() drive is outstanding, else session.stop() then stopped()
-//   `endFile("eof")`    → session.stop() then stopped(): a Stopped report that marks the item's end at the duration, parity §9
+//   `endFile("eof")`    → session.stop() then stopped(): a Stopped report that marks the item's end at the duration
 //   `endFile("error")`  → session.failed(), then the ordinary teardown: a failed open never reports a server session; a failed stream still gets its single best-effort Stopped report
 //   `paused-for-cache`  → session.buffering()/bufferRecovered() from mpv's cache stalls
 // Position, duration and playback rate are exposed both as accessors (the probe) and as QML-facing signals for the player window; rate ticks come straight from mpv's speed

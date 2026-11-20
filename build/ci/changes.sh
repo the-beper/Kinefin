@@ -6,9 +6,10 @@ code=false
 packaging=false
 images=false
 
-# Prose and templates never need a build.
+# Prose and templates never need a build, except the settings reference, which test_settings_parity reads
 is_doc() {
     case $1 in
+        docs/settings.md) return 1 ;;
         *.md | LICENSE | .github/ISSUE_TEMPLATE/* | .gitignore) return 0 ;;
     esac
     return 1

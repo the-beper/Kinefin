@@ -148,7 +148,7 @@ class TestDeviceProfile : public QObject {
         all.forceTranscodeHdr = all.forceTranscodeHi10p = all.forceTranscodeHevc = true;
         all.forceTranscodeAv1 = all.forceTranscode4k = true;
         const QJsonArray profiles = codecProfiles(all);
-        // Parity §3 order: dovi, hdr, hi10p, hevc, h265, av1, 4k
+        // The profile's order: dovi, hdr, hi10p, hevc, h265, av1, 4k
         QStringList sequence;
         int conditionCount = 0;
         for (const QJsonValue &profile : profiles) {

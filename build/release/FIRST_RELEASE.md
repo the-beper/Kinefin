@@ -1,6 +1,6 @@
 <!-- SPDX-FileCopyrightText: 2026 Kinefin contributors -->
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
-# P9 first release: final acceptance checklist
+# First release: final acceptance checklist
 
 The release channel decision is **Flathub as the eventual app repository**, with
 an independently downloadable Flatpak bundle on GitHub Releases. Kinefin does
@@ -12,13 +12,14 @@ This file is an **operational checklist**, not a claim of release verification.
 Do not tag a stable release or submit to Flathub until the live gates below
 have evidence. In particular, a green offline preflight does not compensate
 for unfinished native playback, missing host acceptance, or unverified runtime
-commits. The source phase and feature tables remain authoritative.
+commits.
 
 ## Before tagging (local + GitHub)
 
 - [ ] Implement and validate all v1 movie/TV features, including the player
-  wired to the UI. Close their parity rows with test evidence rather than
-  changing a `planned` label just to satisfy P9.
+  wired to the UI. Every feature described in `docs/user-guide.md` must work
+  and have test evidence; edit the guide rather than ship a description of
+  something that does not work yet.
 - [ ] Perform the real Jellyfin 12.4 and KDE Plasma Wayland host acceptance
   rounds, including KWallet, resume, remote control, playback reporting,
   subtitles, online/offline transitions and actual screen-reader/keyboard

@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Kinefin contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Hand-written server side of one WebSocket connection (the fallback of websocket-contract.md step 3: FakeJellyfin cannot hand already-buffered bytes to a QWebSocketServer, so the 101 handshake, unmasked server frames and the close-frame echo are written directly). One connection object per accepted upgrade attempt; client frames are always masked. A plain class on purpose: the fake recording is read after deterministic polling, and no test needs a signal
+// Hand-written server side of one WebSocket connection (FakeJellyfin cannot hand already-buffered bytes to a QWebSocketServer, so the 101 handshake, unmasked server frames and the close-frame echo are written directly). One connection object per accepted upgrade attempt; client frames are always masked. A plain class on purpose: the fake recording is read after deterministic polling, and no test needs a signal
 #pragma once
 
 #include <QCryptographicHash>

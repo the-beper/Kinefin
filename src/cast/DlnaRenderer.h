@@ -20,7 +20,7 @@ class QNetworkReply;
 
 namespace Kinefin {
 
-// One DLNA renderer: its own network manager without credentials, cookies, proxy or redirects, one SOAP action at a time with user commands ahead of polls, a 3 s timeout and a 1 s poll (design: Components, Control and state)
+// One DLNA renderer: its own network manager without credentials, cookies, proxy or redirects, one SOAP action at a time with user commands ahead of polls, a 3 s timeout and a 1 s poll
 class DlnaRenderer final : public QObject {
     Q_OBJECT
 

@@ -29,7 +29,7 @@ struct RemotePlayRequest {
     int startIndex = -1;
 };
 
-// One authenticated WebSocket per active identity (socket, event routing and missed-event wake-ups; the contract is websocket-contract.md). It owns no token: every attempt asks `JellyfinClient` for a fresh request, and it stops as soon as the client drops a credential. REST and the socket share the same server session; never parse playback state from frames, remote commands route to the coordinator, not to the reporter
+// One authenticated WebSocket per active identity (socket, event routing and missed-event wake-ups). It owns no token: every attempt asks `JellyfinClient` for a fresh request, and it stops as soon as the client drops a credential. REST and the socket share the same server session; never parse playback state from frames, remote commands route to the coordinator, not to the reporter
 class JellyfinSocketClient final : public QObject {
     Q_OBJECT
 
@@ -44,7 +44,7 @@ class JellyfinSocketClient final : public QObject {
 
     // Network back or an explicit user retry: the attempt counter resets and the next attempt opens at once, before the backoff timer. No-op unless the connection is currently between retries
     void reconnectNow();
-    // Whether this identity wants `Sessions` broadcasts; remembered and (re)sent after every entry into Authenticated, withdrawn with SessionsStop. Admin sockets only (live check 9: the server sends no `Sessions` frames to a non-admin), so regular users poll `GET /Sessions` instead
+    // Whether this identity wants `Sessions` broadcasts; remembered and (re)sent after every entry into Authenticated, withdrawn with SessionsStop. Admin sockets only (observed on a live server: the server sends no `Sessions` frames to a non-admin), so regular users poll `GET /Sessions` instead
     void setSessionsSubscription(bool subscribed);
 
     // The reconnect delay for `attempt` (ms) after `attempt` previous consecutive failures: ceiling `min(cap, base·2ⁿ)`, uniformly drawn in [ceiling/2, ceiling] by `unitRandom` in [0,1]. Pure and injectable for tests

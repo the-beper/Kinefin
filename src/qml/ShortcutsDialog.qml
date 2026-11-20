@@ -36,6 +36,7 @@ Kirigami.Dialog {
         ["Ctrl+Down", i18nc("@item:intable shortcut action", "Move Queue or Playlist Item Down")],
         ["Delete", i18nc("@item:intable shortcut action", "Remove Queue or Playlist Item")],
         ["F2", i18nc("@item:intable shortcut action", "Rename Playlist")],
+        ["Ctrl+S", i18nc("@item:intable shortcut action", "Save User Preferences")],
         ["Ctrl+,", i18nc("@item:intable shortcut action", "Settings")],
         ["Ctrl+Shift+P", i18nc("@item:intable shortcut action", "Expand Player")],
         ["Ctrl+Shift+/", i18nc("@item:intable shortcut action", "Show Keyboard Shortcuts")]

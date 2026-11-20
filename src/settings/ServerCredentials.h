@@ -8,7 +8,7 @@
 #include "settings/ProfilePaths.h"
 
 namespace Kinefin {
-// One user's session record on one server, without any secret: the access token lives in the TokenStore (KWallet), never in this file (api-notes.md, SECURITY.md). The record persists the identity a restart needs to reattach without a password: base URL, server id, user id and the per-profile device identity the token is bound to. `remembered` says a token is stored for the user (a file without the key reads as true); `askPassword` means the user never has a token stored and always signs in with the password
+// One user's session record on one server, without any secret: the access token lives in the TokenStore (KWallet), never in this file (SECURITY.md). The record persists the identity a restart needs to reattach without a password: base URL, server id, user id and the per-profile device identity the token is bound to. `remembered` says a token is stored for the user (a file without the key reads as true); `askPassword` means the user never has a token stored and always signs in with the password
 struct ServerCredential {
     QString serverId;
     QString url;

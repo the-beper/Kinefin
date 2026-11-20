@@ -3100,7 +3100,8 @@ class TestUiPages : public QObject {
         prefs->setMyMediaExcluded(kMovies, true);
         prefs->setLatestExcluded(kSeries, true);
         QTRY_VERIFY(ui.item(QStringLiteral("prefsSaveButton"))->isEnabled());
-        QVERIFY(QMetaObject::invokeMethod(ui.item(QStringLiteral("prefsSaveButton")), "click"));
+        // Ctrl+S saves as the button does
+        QTest::keyClick(ui.window, Qt::Key_S, Qt::ControlModifier);
         QTRY_COMPARE(remote.posts.size(), 1);
         QTRY_VERIFY(ui.item(QStringLiteral("libraryCard_") + kMovies) == nullptr);
         QCOMPARE(ui.itemsStartingWith(QStringLiteral("libraryCard_")).size(), 2);
@@ -4853,6 +4854,39 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(!movies->filtered());
     }
 
+    // In the option list Space switches the current option and Return applies the dialog
+    void theFilterDialogKeysSwitchWithSpaceAndApplyWithReturn()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        auto *movies = ui.controller.movies();
+        QVERIFY(!movies->filtered());
+        QVERIFY(openFilterDialog(ui));
+        QObject *dialog = ui.popup(QStringLiteral("filterDialog"));
+        QQuickItem *list = ui.item(QStringLiteral("filterOptionsList"));
+        QVERIFY(dialog && list);
+        QTRY_VERIFY(list->hasActiveFocus());
+        const QVariantMap entry = dialog->property("entries")
+                                      .toList()
+                                      .value(list->property("currentIndex").toInt())
+                                      .toMap();
+        QCOMPARE(entry.value(QStringLiteral("kind")).toString(), QStringLiteral("option"));
+        const auto selected = [&] {
+            QVariant result;
+            QMetaObject::invokeMethod(dialog, "isSelected", Q_RETURN_ARG(QVariant, result),
+                                      Q_ARG(QVariant, entry));
+            return result.toBool();
+        };
+        QVERIFY(!selected());
+        QTest::keyClick(ui.window, Qt::Key_Space);
+        QTRY_VERIFY(selected());
+        QVERIFY(dialog->property("opened").toBool());
+        QTest::keyClick(ui.window, Qt::Key_Return);
+        QTRY_VERIFY(!dialog->property("opened").toBool());
+        QTRY_VERIFY(movies->filtered());
+    }
+
     void aFilterValueThatWouldMakeTheQueryTooLongIsBlocked()
     {
         Ui ui(m_home->path());
@@ -5256,6 +5290,8 @@ class TestUiPages : public QObject {
         QVERIFY(QMetaObject::invokeMethod(list, "forceActiveFocus",
                                           Q_ARG(Qt::FocusReason, Qt::TabFocusReason)));
         QTRY_VERIFY(list->hasActiveFocus());
+        // Return opens the current row: on a loaded machine the row can exist while the list has not made it current yet
+        QTRY_VERIFY(list->property("currentItem").value<QQuickItem *>() != nullptr);
         QTest::keyClick(ui.window, Qt::Key_Return);
         QTRY_VERIFY(ui.item(QStringLiteral("itemDetailsPage")) != nullptr);
         QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("itemDetailsPage"));
@@ -9469,7 +9505,7 @@ class TestUiPages : public QObject {
     {
         Ui ui(m_home->path());
         ui.serveMovie();
-        // Enough Continue Watching cards for the last one to sit under the row's See All
+        // Enough Continue Watching cards for the last one to sit under the row's Show All
         ui.server.generatedResumeTotal = 30;
         QVERIFY(ui.load());
         QVERIFY(ui.opensWindowOfWidth(1000));
@@ -9734,6 +9770,19 @@ class TestUiPages : public QObject {
         stub.castHasVolume = true;
         Q_EMIT stub.changed();
         QTRY_VERIFY(mute->isVisible());
+        // Picture-in-Picture is off while casting, and the pointer over it shows why: a disabled button still gets hover (Qt 6.11)
+        QQuickItem *pip = Ui::itemIn(page, QStringLiteral("playerPictureInPictureButton"));
+        QVERIFY(pip);
+        QTRY_VERIFY(!pip->isEnabled());
+        QTest::mouseMove(ui.window,
+                         pip->mapToScene(QPointF(pip->width() / 2, pip->height() / 2)).toPoint());
+        const auto tooltipOf = [](QQuickItem *item, const char *name) {
+            return QQmlProperty(item, QStringLiteral("Controls.ToolTip.") + QLatin1String(name),
+                                qmlContext(item))
+                .read();
+        };
+        QTRY_VERIFY(tooltipOf(pip, "visible").toBool());
+        QCOMPARE(tooltipOf(pip, "text").toString(), QStringLiteral("Not available while casting"));
         // What the bar disables the context menu disables too
         QObject *clipMenu = ui.popup(QStringLiteral("playerContextMoreClipMenu"));
         QObject *subtitlesMenu = ui.popup(QStringLiteral("playerContextSubtitlesMenu"));
@@ -12016,11 +12065,11 @@ class TestUiPages : public QObject {
         ui.server.generatedResumeTotal = 30;
         QVERIFY(ui.load());
         QVERIFY(ui.signIn());
-        // The Next Up row has no See All, Continue Watching has
+        // The Next Up row has no Show All, Continue Watching has
         QQuickItem *button = nullptr;
         QTRY_VERIFY((button = ui.item(QStringLiteral("homeRowSeeAll_0"))) != nullptr
                     && button->isVisible());
-        QCOMPARE(button->property("text").toString(), QStringLiteral("See All"));
+        QCOMPARE(button->property("text").toString(), QStringLiteral("Show All"));
         QTRY_VERIFY(ui.item(QStringLiteral("homeRowSeeAll_1")) != nullptr);
         QVERIFY(!ui.item(QStringLiteral("homeRowSeeAll_1"))->isVisible());
         QVERIFY(QMetaObject::invokeMethod(button, "click"));
@@ -15133,7 +15182,7 @@ class TestUiPages : public QObject {
         QQuickItem *button = nullptr;
         QTRY_VERIFY((button = ui.item(QStringLiteral("homeRowSeeAll_2"))) != nullptr
                     && button->isVisible());
-        QCOMPARE(button->property("text").toString(), QStringLiteral("See All"));
+        QCOMPARE(button->property("text").toString(), QStringLiteral("Show All"));
         QVERIFY(QMetaObject::invokeMethod(button, "click"));
         QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("favoritesPage"));
         // The Favorites tab, not a page above Home

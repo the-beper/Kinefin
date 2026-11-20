@@ -12,11 +12,11 @@
 
 namespace Kinefin {
 
-// A description, an SCPD or a GetProtocolInfo document is read only up to this size (design: Security, 64 KiB)
+// A description, an SCPD or a GetProtocolInfo document is read only up to this size (64 KiB)
 inline constexpr int kMaxDescriptionBytes = 64 * 1024;
-// A description or SCPD fetch gives up after this long (design: Security, 5 s); the fetching code enforces it
+// A description or SCPD fetch gives up after this long (5 s); the fetching code enforces it
 inline constexpr int kDescriptionTimeoutMs = 5000;
-// Entries of one list (services, actions, allowed values, sink entries) and characters of one entry (design: Security, 256 entries of 256 characters); more entries are ignored, a longer entry is skipped
+// Entries of one list (services, actions, allowed values, sink entries) and characters of one entry (256 entries of 256 characters); more entries are ignored, a longer entry is skipped
 inline constexpr int kMaxListEntries = 256;
 inline constexpr int kMaxListEntryChars = 256;
 // Longest service URL, absolute or relative

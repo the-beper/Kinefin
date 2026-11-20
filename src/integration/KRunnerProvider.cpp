@@ -152,7 +152,7 @@ QList<KRunnerMatch> krunnerMatches(const QList<ItemSummary> &items, const QStrin
             match.properties.insert(QStringLiteral("actions"), QStringList{});
         matches.append(match);
         ++rank;
-        if (matches.size() >= KRunnerProvider::MaxResults)
+        if (matches.size() >= KRunnerProvider::MaxTitles + KRunnerProvider::MaxEpisodes)
             break;
     }
     return matches;
@@ -203,7 +203,17 @@ KRunnerProvider::KRunnerProvider(JellyfinClient &client, const QDBusConnection &
         if (!m_pendingActive)
             return;
         releaseChannel();
-        answerPending({});
+        // The half that came in time is answered, as a failed half would be, and not cached
+        if (!m_titles && !m_episodes) {
+            answerPending({});
+            return;
+        }
+        m_partFailed = true;
+        if (!m_titles)
+            m_titles = QJsonArray();
+        if (!m_episodes)
+            m_episodes = QJsonArray();
+        finishIfComplete();
     });
     connect(&m_client, &JellyfinClient::itemsReady, this,
             [this](const QJsonArray &items, int, int channel) { onItemsReady(items, channel); });
@@ -262,9 +272,13 @@ bool KRunnerProvider::registerOnBus()
 
 void KRunnerProvider::handleMatch(const QString &query, const QDBusMessage &message)
 {
-    // A newer query supersedes the one still waiting
-    if (m_pendingActive)
+    // A newer query supersedes the one still waiting, and its requests: a late answer must not stand for the new term
+    if (m_pendingActive) {
+        releaseChannel();
         answerPending({});
+    }
+    m_titles.reset();
+    m_episodes.reset();
     const QString term = SearchModel::normalized(query);
     QDBusMessage reply = message;
     reply.setDelayedReply(true);
@@ -292,28 +306,47 @@ void KRunnerProvider::startRequest()
         answerPending({});
         return;
     }
-    ItemQuery query;
-    query.searchTerm = m_pendingTerm;
-    query.includeItemTypes = QStringLiteral("Movie,Series,BoxSet,Episode");
-    query.recursive = true;
-    query.limit = MaxResults;
-    if (!m_client.fetchItems(query, Channel)) {
+    ItemQuery titles;
+    titles.searchTerm = m_pendingTerm;
+    titles.includeItemTypes = QStringLiteral("Movie,Series,BoxSet");
+    titles.recursive = true;
+    titles.limit = MaxTitles;
+    ItemQuery episodes = titles;
+    episodes.includeItemTypes = QStringLiteral("Episode");
+    episodes.limit = MaxEpisodes;
+    m_titles.reset();
+    m_episodes.reset();
+    m_partFailed = false;
+    if (!m_client.fetchItems(titles, Channel) || !m_client.fetchItems(episodes, EpisodeChannel)) {
+        releaseChannel();
         answerPending({});
         return;
     }
-    // The budget counts server requests, not refused calls
-    m_requestTimes.append(m_clock.elapsed());
+    // The budget counts server requests, not refused calls: one entry for each of the two
+    for (int request = 0; request < 2; ++request)
+        m_requestTimes.append(m_clock.elapsed());
     m_timeout.start();
 }
 
 void KRunnerProvider::onItemsReady(const QJsonArray &items, int channel)
 {
-    if (channel != Channel || !m_pendingActive)
+    if ((channel != Channel && channel != EpisodeChannel) || !m_pendingActive)
+        return;
+    (channel == Channel ? m_titles : m_episodes) = items;
+    finishIfComplete();
+}
+
+void KRunnerProvider::finishIfComplete()
+{
+    if (!m_pendingActive || !m_titles || !m_episodes)
         return;
     m_timeout.stop();
+    QJsonArray items = *m_titles;
+    for (const QJsonValue &value : std::as_const(*m_episodes))
+        items.append(value);
     QList<ItemSummary> summaries;
     QHash<QString, Offered> offered;
-    for (const QJsonValue &value : items) {
+    for (const QJsonValue &value : std::as_const(items)) {
         if (!value.isObject())
             continue;
         const ItemSummary item = parseItemSummary(value.toObject());
@@ -330,16 +363,20 @@ void KRunnerProvider::onItemsReady(const QJsonArray &items, int channel)
             kept.insert(match.id, *found);
     }
     offer(kept);
-    remember(m_pendingTerm, CachedTerm{matches, kept});
+    if (!m_partFailed)
+        remember(m_pendingTerm, CachedTerm{matches, kept});
     answerPending(matches);
 }
 
 void KRunnerProvider::onListingFailed(const QString &family, int channel)
 {
-    if (channel != Channel || family != QLatin1String("Items") || !m_pendingActive)
+    if ((channel != Channel && channel != EpisodeChannel) || family != QLatin1String("Items")
+        || !m_pendingActive)
         return;
-    releaseChannel();
-    answerPending({});
+    m_client.releaseListingChannel(channel);
+    m_partFailed = true;
+    (channel == Channel ? m_titles : m_episodes) = QJsonArray();
+    finishIfComplete();
 }
 
 void KRunnerProvider::handleRun(const QString &itemId, const QString &actionId)
@@ -417,6 +454,7 @@ void KRunnerProvider::releaseChannel()
 {
     m_timeout.stop();
     m_client.releaseListingChannel(Channel);
+    m_client.releaseListingChannel(EpisodeChannel);
 }
 
 bool KRunnerProvider::budgetSpent()

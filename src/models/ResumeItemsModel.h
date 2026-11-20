@@ -8,7 +8,7 @@
 #include "models/PagedItemsModel.h"
 
 namespace Kinefin {
-// Everything in Continue Watching as a paged list (see PagedItemsModel, with the card roles of CardRoles.h): the "See All" page of the Home row. It uses its own listing channel, so the Home row never sees its replies. `open()` loads the first page, `close()` empties the model and frees the channel, and the model also empties itself whenever the client loses its credentials
+// Everything in Continue Watching as a paged list (see PagedItemsModel, with the card roles of CardRoles.h): the "Show All" page of the Home row. It uses its own listing channel, so the Home row never sees its replies. `open()` loads the first page, `close()` empties the model and frees the channel, and the model also empties itself whenever the client loses its credentials
 class ResumeItemsModel final : public PagedItemsModel {
     Q_OBJECT
 

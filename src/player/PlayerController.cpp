@@ -3197,8 +3197,7 @@ void PlayerController::screenshot()
         Q_EMIT changed();
         return;
     }
-    // The path is within the profile's private data directory, writable even
-    // inside Flatpak. A portal export can be added independently in P7.
+    // The path is within the profile's private data directory, writable even inside Flatpak. A portal export can be added independently
     m_screenshotPath = file;
     Q_EMIT changed();
 }

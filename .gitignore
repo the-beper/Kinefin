@@ -6,10 +6,10 @@ __pycache__/
 .#*
 /.vscode/
 /po/kinefin.pot
-/temp/
+**/tmp/
 /.cache/
 **/*.patch
-/docs/
+**/*.tmp
 /build/flatpak/build-id
 /tests/fixtures/selfsigned_cert.pem
 /tests/fixtures/selfsigned_key.pem

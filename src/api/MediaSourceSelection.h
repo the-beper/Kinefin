@@ -15,7 +15,7 @@
 #include "models/ItemDetails.h"
 
 namespace Kinefin {
-// What the player needs to open one item: the chosen media source and a media URL under the server's own base URL. The URL never carries the access token: the caller sends it in an `Authorization` header (api-notes.md, Media URLs)
+// What the player needs to open one item: the chosen media source and a media URL under the server's own base URL. The URL never carries the access token: the caller sends it in an `Authorization` header
 struct ExternalSubtitle {
     int index = -1;
     QString language;
@@ -73,7 +73,7 @@ struct SourceSelection {
 // Whether the URL holds the access token anywhere, encoded or decoded
 [[nodiscard]] bool carriesToken(const QUrl &url, QByteArrayView accessToken);
 
-// Picks the source of a `PlaybackInfoResponse` (parity §3, "Media-source selection"): the first source that direct-plays, else the first one with a safe `TranscodingUrl`. `serverBase` is the authenticated server URL (its path is kept, a server may live under a prefix); `accessToken` is only used to refuse any URL that would still carry it
+// Picks the source of a `PlaybackInfoResponse`: the first source that direct-plays, else the first one with a safe `TranscodingUrl`. `serverBase` is the authenticated server URL (its path is kept, a server may live under a prefix); `accessToken` is only used to refuse any URL that would still carry it
 [[nodiscard]] SourceSelection selectPlaybackSource(const QJsonObject &response,
                                                    const QString &itemId, const QUrl &serverBase,
                                                    QByteArrayView accessToken);

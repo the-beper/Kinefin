@@ -12,11 +12,15 @@ build/build-env.sh build/check.sh
 
 ## KRunner
 
-While Kinefin is open and signed in, KRunner and Plasma's search fields built on it can find movies, series, episodes and collections on the signed-in server. The plugin is off by default: turn it on in System Settings, Search, Plasma Search. A query of three characters or more goes to that server as its `searchTerm` after a 300 ms pause; Return opens the item's details page, Play and Resume sit on the row. Nothing is sent while Kinefin is closed or signed out, or when the server is plain HTTP and not on this machine.
+While Kinefin is open and signed in, KRunner can find movies, series, episodes and collections on the server; the plugin is off by default, and the [user guide](docs/user-guide.md#search-from-krunner) explains how to turn it on and what it sends.
 
-## Project status and release preparation
+## Documentation
 
-The [implementation plan](docs/plan.md) and [feature delivery table](docs/feature-status.md) distinguish implemented code from features verified on a Jellyfin server and KDE Plasma desktop. The first-release tooling and remaining acceptance requirements are documented in [P9 first-release checklist](build/release/FIRST_RELEASE.md); see also [release tooling](build/release/README.md). A passing offline preflight is **not** permission to publish a release.
+The [user guide](docs/user-guide.md) explains how to use Kinefin, the [settings reference](docs/settings.md) lists every setting with its default, and the [architecture overview](docs/architecture.md) is where contributors start.
+
+## Release preparation
+
+The first-release tooling and remaining acceptance requirements are documented in the [first-release checklist](build/release/FIRST_RELEASE.md); see also [release tooling](build/release/README.md). A passing offline preflight is not permission to publish a release.
 
 ```sh
 python3 -I build/release/preflight.py

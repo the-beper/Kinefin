@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-FileCopyrightText: 2026 Kinefin contributors
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Read-only P2 API preflight: fixture fake-server by default, optional live server.
+"""Read-only API preflight: fixture fake-server by default, optional live server.
 
 Does not launch mpv or claim end-to-end playback. Deliberately does not write
 Sessions/Playing, Progress, Stopped or watched-state to a live Jellyfin server.
@@ -102,9 +102,9 @@ class Probe:
                   "mpv_playback_checked": False}
         if movies:
             item_id = movies[0]["Id"]
-            # A minimal media-type probe only. Full device-profile parity is P2.
+            # A minimal media-type probe only. Full device-profile parity is out of scope
             info = self.json("POST", f"/Items/{item_id}/PlaybackInfo?" + urlencode({"userId": user_id}),
-                             {"DeviceProfile": {"Name": "Kinefin P2 shape probe",
+                             {"DeviceProfile": {"Name": "Kinefin shape probe",
                                                 "DirectPlayProfiles": [{"Container": "mkv,mp4,webm", "Type": "Video"}],
                                                 "TranscodingProfiles": [],
                                                 "SubtitleProfiles": []}})

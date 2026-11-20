@@ -186,9 +186,9 @@ Kirigami.ScrollablePage {
                     Controls.Button {
                         objectName: "homeRowSeeAll_" + row.index
                         visible: row.hasSeeAll && row.status === HomeRowsModel.Ready
-                        text: i18n("See All")
+                        text: i18n("Show All")
                         icon.name: "go-next"
-                        Accessible.name: i18n("See All in %1", row.title)
+                        Accessible.name: i18n("Show All in %1", row.title)
                         onClicked: row.seeAll()
                     }
                 }

@@ -11,7 +11,7 @@
 
 namespace Kinefin {
 
-// Deepest element nesting accepted in a document a renderer sent (design: Security, depth 32)
+// Deepest element nesting accepted in a document a renderer sent (depth 32)
 inline constexpr int kMaxXmlDepth = 32;
 // Most elements in one document; the size limits already bound it, this stops a document made of empty elements from building a large tree
 inline constexpr int kMaxXmlNodes = 4096;
