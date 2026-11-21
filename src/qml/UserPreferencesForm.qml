@@ -567,7 +567,7 @@ ColumnLayout {
         }
         FormCard.FormCard {
             FormCard.FormSectionText {
-                text: page.isMalformed("MyMediaExcludes") ? page.malformedNote() : i18n("Checked libraries get no tile on Home. Hiding a library here does not remove access to it: it stays available in Movies, Shows, Favorites and Search")
+                text: page.isMalformed("MyMediaExcludes") ? page.malformedNote() : i18n("Checked libraries get no tile and no Recently Added row on Home. Hiding a library here does not remove access to it: it stays available in Movies, Shows, Favorites and Search")
             }
             Repeater {
                 model: page.prefs.libraries
@@ -578,7 +578,7 @@ ColumnLayout {
 
                     objectName: "prefMyMediaExclude_" + modelData.id
                     text: modelData.name
-                    accessibleLabel: i18nc("@option:check %1 is a library name", "Hide %1 from the Home tiles", modelData.name)
+                    accessibleLabel: i18nc("@option:check %1 is a library name", "Hide %1 from the Home tiles and Recently Added rows", modelData.name)
                     enabled: !page.isMalformed("MyMediaExcludes")
                     checked: page.listsId(page.prefs.myMediaExcludes, modelData.id)
                     onToggled: page.prefs.setMyMediaExcluded(modelData.id, checked)

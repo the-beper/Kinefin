@@ -3116,11 +3116,11 @@ class TestConnectionController : public QObject {
         QCOMPARE(idsOf(controller->libraries()), (QStringList{kMoviesA, kMoviesB, kShows}));
         // The listed order first (the hidden one dropped), the library the order does not name after them
         QCOMPARE(idsOf(controller->homeLibraries()), (QStringList{kShows, kMoviesA}));
-        // Server order, only the Recently Added rows lose a library
-        QCOMPARE(idsOf(controller->recentLibraries()), (QStringList{kMoviesB, kShows}));
+        // Server order; a library either exclude list names loses its Recently Added row
+        QCOMPARE(idsOf(controller->recentLibraries()), (QStringList{kShows}));
         QCOMPARE(idsOf(controller->movieLibraries()), (QStringList{kMoviesA, kMoviesB}));
-        QTRY_COMPARE(recentRowIds(controller->homeRows()), (QStringList{kMoviesB, kShows}));
-        QTRY_COMPARE(server.listingRoutes.value(QStringLiteral("Latest")).size(), 2);
+        QTRY_COMPARE(recentRowIds(controller->homeRows()), (QStringList{kShows}));
+        QTRY_COMPARE(server.listingRoutes.value(QStringLiteral("Latest")).size(), 1);
         QVERIFY(latestAsksUnplayedOnly(server.listingRoutes.value(QStringLiteral("Latest"))));
 
         // The libraries change: the projection follows them
@@ -3172,8 +3172,8 @@ class TestConnectionController : public QObject {
                                {QStringLiteral("LatestItemsExcludes"), QJsonArray{kMoviesB}}});
         controller->reloadLibraries();
         QTRY_COMPARE(idsOf(controller->homeLibraries()), (QStringList{kMoviesB, kShows}));
-        QCOMPARE(idsOf(controller->recentLibraries()), (QStringList{kMoviesA, kShows}));
-        QTRY_COMPARE(recentRowIds(controller->homeRows()), (QStringList{kMoviesA, kShows}));
+        QCOMPARE(idsOf(controller->recentLibraries()), (QStringList{kShows}));
+        QTRY_COMPARE(recentRowIds(controller->homeRows()), (QStringList{kShows}));
         QTest::qWait(200);
         QVERIFY(server.lastListingRoute.value(QStringLiteral("Latest")).contains("isPlayed=false"));
         QVERIFY(controller->errorText().isEmpty());
@@ -3200,8 +3200,8 @@ class TestConnectionController : public QObject {
         QVERIFY(waitForState(*controller, ConnectionController::NeedsLogin));
         QVERIFY(signInUser(*controller, QStringLiteral("Anna"), 1));
         QTRY_COMPARE(controller->homeLibraries().size(), 2);
-        QCOMPARE(idsOf(controller->recentLibraries()), (QStringList{kMoviesA, kMoviesB}));
-        QTRY_COMPARE(recentRowIds(controller->homeRows()), (QStringList{kMoviesA, kMoviesB}));
+        QCOMPARE(idsOf(controller->recentLibraries()), (QStringList{kMoviesB}));
+        QTRY_COMPARE(recentRowIds(controller->homeRows()), (QStringList{kMoviesB}));
 
         controller->switchUser();
         QVERIFY(controller->homeLibraries().isEmpty());
@@ -3246,9 +3246,9 @@ class TestConnectionController : public QObject {
         prefs->save();
         QTRY_COMPARE(saved.size(), 1);
         QCOMPARE(idsOf(controller->homeLibraries()), (QStringList{kMoviesB, kShows}));
-        QCOMPARE(idsOf(controller->recentLibraries()), (QStringList{kMoviesA, kMoviesB}));
-        QTRY_COMPARE(recentRowIds(controller->homeRows()), (QStringList{kMoviesA, kMoviesB}));
-        QTRY_COMPARE(server.listingRoutes.value(QStringLiteral("Latest")).size(), 5);
+        QCOMPARE(idsOf(controller->recentLibraries()), (QStringList{kMoviesB}));
+        QTRY_COMPARE(recentRowIds(controller->homeRows()), (QStringList{kMoviesB}));
+        QTRY_COMPARE(server.listingRoutes.value(QStringLiteral("Latest")).size(), 4);
         QVERIFY(latestAsksNoPlayedFilter(server.listingRoutes.value(QStringLiteral("Latest")), 3));
     }
 

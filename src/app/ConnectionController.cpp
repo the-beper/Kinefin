@@ -1511,7 +1511,9 @@ QVariantList ConnectionController::recentLibraries() const
         return {};
     QVariantList recent = m_libraries;
     if (m_hasPreferences) {
-        const QSet<QString> hidden = keySet(m_preferences.latestItemsExcludes);
+        // jellyfin-web builds these rows from /UserViews, which already drops MyMediaExcludes, so a library hidden from Home loses its row too
+        QSet<QString> hidden = keySet(m_preferences.myMediaExcludes);
+        hidden.unite(keySet(m_preferences.latestItemsExcludes));
         recent.removeIf(
             [&](const QVariant &library) { return hidden.contains(libraryKey(library)); });
     }

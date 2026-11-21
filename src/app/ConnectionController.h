@@ -93,7 +93,7 @@ class ConnectionController : public QObject {
     Q_PROPERTY(Kinefin::PlayQueue *queue READ queue CONSTANT)
     // The editor of the signed-in user's server-side preferences (the user preferences page); it follows the session and is fed the `libraries` ids and names
     Q_PROPERTY(Kinefin::UserConfigurationModel *userConfiguration READ userConfiguration CONSTANT)
-    // The Home projection of the user's configuration: `homeLibraries` are the tiles of the Home page (`libraries` ordered by OrderedViews, without MyMediaExcludes), `recentLibraries` the libraries whose Recently Added row shows (without LatestItemsExcludes). Both are empty until the session's configuration has been loaded or has failed to load (then they are `libraries` as they are), so a hidden library never shows for a moment; `libraries` itself is never filtered
+    // The Home projection of the user's configuration: `homeLibraries` are the tiles of the Home page (`libraries` ordered by OrderedViews, without MyMediaExcludes), `recentLibraries` the libraries whose Recently Added row shows (without MyMediaExcludes and LatestItemsExcludes). Both are empty until the session's configuration has been loaded or has failed to load (then they are `libraries` as they are), so a hidden library never shows for a moment; `libraries` itself is never filtered
     Q_PROPERTY(QVariantList homeLibraries READ homeLibraries NOTIFY homeProjectionChanged)
     Q_PROPERTY(QVariantList recentLibraries READ recentLibraries NOTIFY homeProjectionChanged)
     // The favorites of the signed-in user across `libraries` (the Favorites page), and the same snapshot split into groups; both follow the session and the library list
