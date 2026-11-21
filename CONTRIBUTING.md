@@ -29,7 +29,7 @@ build/build-env.sh cmake --build "${KINEFIN_BUILD_DIR:-/buildtmp/check}"
 build/build-env.sh ctest --test-dir "${KINEFIN_BUILD_DIR:-/buildtmp/check}" --output-on-failure -j 4
 ```
 
-The UI tests (`test_ui_pages`) run as the shards `ui_pages_0` to `ui_pages_5`, which CMake builds from the test class, so they run side by side under `-j` (each counts as two processors, so `-j4` runs two at a time); `ui_pages_shards` fails when a test function is in no shard. `KINEFIN_TEST_TIMEOUT_SCALE` (integer 1 to 10, default 1) multiplies every wait of `test_ui_pages`; CI sets it to 3. One UI test alone: `build/build-env.sh /buildtmp/check/bin/test_ui_pages <function>`.
+The UI tests (`test_ui_pages`) run as the shards `ui_pages_0` to `ui_pages_5`, which CMake builds from the test class, so they run side by side under `-j` (each counts as two processors, so `-j4` runs two at a time); `ui_pages_shards` fails when a test function is in no shard. `KINEFIN_TEST_TIMEOUT_SCALE` (integer 1 to 10, default 1) multiplies every wait of `test_ui_pages`; CI sets it to 3. One UI test alone: `build/build-env.sh /buildtmp/check/bin/test_ui_pages <function>`. Screenshots for a UI review: `KINEFIN_SHOTS=<directory inside the checkout> build/build-env.sh /buildtmp/check/bin/test_ui_pages visualTourWhenRequested` walks Home, a library, the details page (wide and narrow), the track list and the edit dialogs and saves one PNG per step; without the variable the test skips. The directory must be inside the checkout because the build container mounts only that.
 
 `build/check.sh` uses ccache automatically when the image has it (cache in `/buildtmp/ccache`, the same build volume); CI keeps that directory between runs with `actions/cache`.
 

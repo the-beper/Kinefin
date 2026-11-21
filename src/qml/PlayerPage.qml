@@ -125,6 +125,7 @@ Kirigami.Page {
     }
     function stepVolume(steps) {
         page.Window.window.stepVolume(steps);
+        volumeNoticeTimer.restart();
         page.wakeChrome();
     }
     // The player commands of the keyboard: the shell runs them, in every mode, and the page only wakes its bars
@@ -427,6 +428,26 @@ Kirigami.Page {
         Timer {
             id: noticeTimer
             interval: 4000
+        }
+    }
+    // The wheel changes the volume with the slider out of sight: a short percentage in the middle says where it stands
+    Controls.Label {
+        id: volumeNotice
+        objectName: "playerVolumeNotice"
+        anchors.centerIn: parent
+        visible: volumeNoticeTimer.running
+        color: "white"
+        text: i18nc("@info volume level", "Volume %1%", page.player.volume)
+        textFormat: Text.PlainText
+        background: Rectangle {
+            color: Qt.alpha("black", 0.6)
+            radius: Kirigami.Units.cornerRadius
+        }
+        padding: Kirigami.Units.largeSpacing
+        Accessible.ignored: true
+        Timer {
+            id: volumeNoticeTimer
+            interval: 1500
         }
     }
     Connections {

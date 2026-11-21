@@ -37,7 +37,7 @@
 - [Search from KRunner](#search-from-krunner)
 - [Use the keyboard or a gamepad](#use-the-keyboard-or-a-gamepad)
   - [Keyboard](#keyboard)
-  - [Gamepad](#gamepad)
+  - [Gamepad (experimental)](#gamepad-experimental)
 - [Troubleshooting](#troubleshooting)
   - [The server is not reachable](#the-server-is-not-reachable)
   - [Kinefin asks for the password again](#kinefin-asks-for-the-password-again)
@@ -240,6 +240,10 @@ Suggestions in **Shows** and Collections in both tabs ignore the library selecto
 ### Item details
 
 Selecting a card opens the details page: a hero with the backdrop, logo, a facts line (year, rating, runtime, end time) and **Play** or **Resume**. Under it come media badges (resolution, HDR, codecs, subtitle count), the overview, the credits, the cast and the related rows. The page toolbar has **Play Next**, **Add to Queue**, the favorite toggle, **Mark as Watched** or **Mark as Unwatched**, and **Media Info**. **Media Info** opens a dialog with the container, size, bit rate and streams of each source, and **Copy** puts the text on the clipboard.
+
+Before you play, choose the audio track and the subtitles (or **Off**) with **Audio** and **Subtitles** in the row under the facts, which appears only when there is a choice; **Play** and **Resume** use them. When the item has a resume point, **Play from Beginning** starts it from the first second. **Trailer** opens the item's first trailer in your browser. **Copy Stream URL** puts the URL of the first source on the clipboard, without a token. **Refresh Metadata** asks the server to fetch the item's metadata and images again.
+
+**Add to Collection…** on a movie or a show puts it into an existing collection or a new one. An administrator can change the item on the server. **Delete Media…** removes a movie, episode or video when the server allows it, after a confirmation; the server deletes the file and it cannot be recovered. **Edit Metadata…** changes the name, overview, year, official rating and genres. **Identify…** on a movie or a show searches the metadata providers and applies the match you pick. **Edit Images…** replaces or removes the primary image, the backdrop or the logo. **Edit Subtitles…** uploads an external subtitle file or deletes an external track. Clicking a cast member opens the movies, shows and episodes that person appears in.
 
 A series page lists seasons and one Next Up entry, a season page lists its episodes, and an episode page links to its series and season. A collection page lists its first 100 items. **Add to Playlist…** is on movie, episode and video pages.
 
@@ -512,13 +516,14 @@ The player keys are in [Control playback](#control-playback). Quit has no menu e
 
 **Enable Input Repeat** in **Settings**, **General**, controls whether a held key repeats.
 
-### Gamepad
+### Gamepad (experimental)
 
-Kinefin reads SDL3 gamepads and shows no notice when one connects or leaves. The D-pad and the left stick move the focus by position on screen. Button names follow the pad: the dialog shows A, B, X, Y or Cross, Circle, Square, Triangle.
+Kinefin reads SDL3 gamepads and shows no notice when one connects or leaves. The D-pad moves the focus by position on screen; the left stick scrolls without moving it, and in the full player it seeks like the D-pad. Button names follow the pad: the dialog shows A, B, X, Y or Cross, Circle, Square, Triangle.
 
 | Button | Browsing | In the player |
 | --- | --- | --- |
-| D-pad, left stick | Move the focus | Skip 10 seconds or 1 minute |
+| D-pad | Move the focus | Skip 10 seconds or 1 minute |
+| Left stick | Scroll | Skip 10 seconds or 1 minute |
 | South (A, Cross) | Open or activate | Play or pause, or start Up Next |
 | East (B, Circle) | Go back | Cancel Up Next, leave full screen, or go back |
 | West (X, Square) | Open the item menu | Open the player menu |
@@ -529,7 +534,7 @@ Kinefin reads SDL3 gamepads and shows no notice when one connects or leaves. The
 | Triggers | Previous or next chapter | Previous or next chapter |
 | Right stick | Volume up or down | Volume up or down |
 
-The pad only works while a Kinefin window has focus. To turn gamepad input off, set `sdlEnabled=false` in the `[main]` group of `kinefin.conf` while Kinefin is closed; Kinefin then never opens an input device. [Where Kinefin keeps its files](#where-kinefin-keeps-its-files) has the folder.
+The pad only works while a Kinefin window has focus. To turn gamepad input off, switch off **Gamepad (Experimental)** in **Settings**, **General**, or set `sdlEnabled=false` in the `[main]` group of `kinefin.conf` while Kinefin is closed; Kinefin then never opens an input device. The mapping is fixed: buttons cannot be remapped. [Where Kinefin keeps its files](#where-kinefin-keeps-its-files) has the folder.
 
 ## Troubleshooting
 

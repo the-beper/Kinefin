@@ -133,7 +133,9 @@ QVariantMap badge(const QString &kind, const QString &text)
 
 QVariantMap streamMap(const StreamSummary &stream)
 {
-    return {{QStringLiteral("codec"), stream.codec},
+    return {{QStringLiteral("index"), stream.index},
+            {QStringLiteral("type"), stream.type},
+            {QStringLiteral("codec"), stream.codec},
             {QStringLiteral("language"), stream.language},
             {QStringLiteral("title"), stream.title},
             {QStringLiteral("width"), stream.width},
@@ -263,7 +265,8 @@ void ItemDetailsModel::reload()
                     QStringLiteral("People"),        QStringLiteral("Chapters"),
                     QStringLiteral("MediaSources"),  QStringLiteral("Taglines"),
                     QStringLiteral("OriginalTitle"), QStringLiteral("Studios"),
-                    QStringLiteral("CanDownload")};
+                    QStringLiteral("CanDownload"),   QStringLiteral("CanDelete"),
+                    QStringLiteral("RemoteTrailers")};
     m_reloadOverlapsFavoriteWrite = m_favoriteBusy;
     m_reloadOverlapsPlayedWrite = m_playedBusy;
     setStatus(Loading);
@@ -449,10 +452,21 @@ QVariantList ItemDetailsModel::people() const
         if (m_client && !person.id.isEmpty() && !person.primaryTag.isEmpty())
             image = m_client->imageUrl(person.id, QStringLiteral("Primary"), kPersonWidth,
                                        person.primaryTag);
-        result.append(QVariantMap{{QStringLiteral("name"), person.name},
+        result.append(QVariantMap{{QStringLiteral("id"), person.id},
+                                  {QStringLiteral("name"), person.name},
                                   {QStringLiteral("role"), person.role},
                                   {QStringLiteral("type"), person.type},
                                   {QStringLiteral("imageUrl"), image}});
+    }
+    return result;
+}
+
+QVariantList ItemDetailsModel::trailers() const
+{
+    QVariantList result;
+    for (const TrailerSummary &trailer : m_details.trailers) {
+        result.append(QVariantMap{{QStringLiteral("name"), trailer.name},
+                                  {QStringLiteral("url"), trailer.url}});
     }
     return result;
 }

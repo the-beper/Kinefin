@@ -281,6 +281,9 @@ class PlayerController final : public QObject {
     void videoRendererChanged(MpvAbstractItem *item);
 
     Q_INVOKABLE bool playItem(const QString &id, qint64 resumeTicks = 0);
+    // As playItem, with the audio and subtitle stream indexes chosen on the details page before playback: -1 leaves the choice to mpv or the server, a subtitle -1 turns subtitles off. The indexes are the server's (a direct play) and also go in the PlaybackInfo request (a transcode)
+    Q_INVOKABLE bool playItemWithStreams(const QString &id, qint64 resumeTicks,
+                                         int audioStreamIndex, int subtitleStreamIndex);
     // Hands the current playback to a renderer at the current position; `local` brings a cast back here at the renderer's position, or a failed cast's item from where it stopped
     Q_INVOKABLE bool castTo(const QString &udn);
     // Starts `id` on a renderer, or here for `local` (a cast stops first)
@@ -765,6 +768,16 @@ class PlayerController final : public QObject {
     bool m_switchingStream = false;
     qint64 m_requestedCap = UnlimitedBitrate;
     JellyfinClient::StreamChoice m_requestedStreams;
+    // The choice made on the details page, applied once the file's tracks are known (and sent with the PlaybackInfo request)
+    struct PendingStreams {
+        QString itemId;
+        int audio = -1;
+        int subtitle = -2;
+    };
+    std::optional<PendingStreams> m_pendingStreams;
+    // What the details page picked for the current item: a reopen at the unlimited cap asks for it again
+    std::optional<PendingStreams> m_detailsStreams;
+    void applyPendingStreams();
     // The cap before the step that failed, and where it failed: what Try Again opens again
     qint64 m_capBeforeStep = UnlimitedBitrate;
     // The user's pinned maximum bit rate (0 Automatic), the pin a manual switch replaces and the switch it waits for

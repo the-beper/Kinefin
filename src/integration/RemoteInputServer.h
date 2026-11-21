@@ -73,6 +73,8 @@ class RemoteInputServer final : public QObject {
     bool focusTakesText() const;
     // The six navigation keys: an arrow a control does not use moves the focus by screen position, a Select nobody takes presses the focused control as Space does (SpatialNavigation.h)
     bool dispatchNavigation(Qt::Key key, const QString &text, bool autoRepeat);
+    // The left stick's scroll keycodes: a wheel event over the focus, or the same arrow the D-pad sends on the full player page
+    bool dispatchScroll(Qt::Key key, bool autoRepeat);
     void pressSpace(QQuickItem *target, bool autoRepeat);
     bool networkNavigationAllowed() const;
     void dropClient(QLocalSocket *socket, const char *reason = nullptr);
@@ -86,6 +88,8 @@ class RemoteInputServer final : public QObject {
     int m_networkKeys = 0;
     QHash<QLocalSocket *, Client> m_clients;
     bool m_ownsPath = false;
+    // A press moved the focus into an item view: its repeats are dropped until the next fresh press, so holding the direction that entered a grid does not skip its first row
+    bool m_suppressRepeats = false;
     // The socket file this instance made: only that one is removed at exit
     dev_t m_device = 0;
     ino_t m_inode = 0;

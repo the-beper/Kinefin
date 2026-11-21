@@ -4,6 +4,7 @@
 
 #include "DownloadsController.h"
 #include "RemoteCommands.h"
+#include "models/CollectionsModel.h"
 #include "models/DownloadsModel.h"
 #include "models/FavoritesGroupsModel.h"
 #include "models/FavoritesModel.h"
@@ -15,6 +16,7 @@
 #include "models/ItemRowModel.h"
 #include "models/LibraryItemsModel.h"
 #include "models/LibrarySubtabController.h"
+#include "models/PersonItemsModel.h"
 #include "models/PlayQueue.h"
 #include "models/PlaylistEntriesModel.h"
 #include "models/PlaylistsController.h"
@@ -162,6 +164,20 @@ struct ResumeItemsModelForeign {
     Q_GADGET
     QML_FOREIGN(Kinefin::ResumeItemsModel)
     QML_NAMED_ELEMENT(ResumeItemsModel)
+    QML_UNCREATABLE("Created by the application")
+};
+
+struct PersonItemsModelForeign {
+    Q_GADGET
+    QML_FOREIGN(Kinefin::PersonItemsModel)
+    QML_NAMED_ELEMENT(PersonItemsModel)
+    QML_UNCREATABLE("Created by the application")
+};
+
+struct CollectionsModelForeign {
+    Q_GADGET
+    QML_FOREIGN(Kinefin::CollectionsModel)
+    QML_NAMED_ELEMENT(CollectionsModel)
     QML_UNCREATABLE("Created by the application")
 };
 

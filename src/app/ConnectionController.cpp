@@ -345,6 +345,38 @@ ConnectionController::ConnectionController(const QString &profileId, const QStri
         if (m_cardPlayedRequests.remove(QString(id).remove(QLatin1Char('-')).toLower()))
             Q_EMIT playedUpdateFailed(id);
     });
+    connect(&m_client, &JellyfinClient::itemRefreshFinished, this,
+            &ConnectionController::itemRefreshFinished);
+    connect(&m_client, &JellyfinClient::collectionCreated, this,
+            &ConnectionController::collectionCreated);
+    connect(&m_client, &JellyfinClient::collectionCreateFailed, this,
+            &ConnectionController::collectionCreateFailed);
+    connect(&m_client, &JellyfinClient::collectionItemsAdded, this,
+            &ConnectionController::collectionItemsAdded);
+    connect(&m_client, &JellyfinClient::collectionItemsAddFailed, this,
+            &ConnectionController::collectionItemsAddFailed);
+    connect(&m_client, &JellyfinClient::itemDeleted, this, &ConnectionController::itemDeleted);
+    connect(&m_client, &JellyfinClient::itemDeleteFailed, this,
+            &ConnectionController::itemDeleteFailed);
+    connect(&m_client, &JellyfinClient::itemUpdated, this, &ConnectionController::itemUpdated);
+    connect(&m_client, &JellyfinClient::itemUpdateFailed, this,
+            &ConnectionController::itemUpdateFailed);
+    connect(&m_client, &JellyfinClient::remoteSearchFinished, this,
+            &ConnectionController::remoteSearchFinished);
+    connect(&m_client, &JellyfinClient::remoteSearchFailed, this,
+            &ConnectionController::remoteSearchFailed);
+    connect(&m_client, &JellyfinClient::remoteSearchApplied, this,
+            &ConnectionController::remoteSearchApplied);
+    connect(&m_client, &JellyfinClient::remoteSearchApplyFailed, this,
+            &ConnectionController::remoteSearchApplyFailed);
+    connect(&m_client, &JellyfinClient::itemImageUpdated, this,
+            &ConnectionController::itemImageUpdated);
+    connect(&m_client, &JellyfinClient::itemImageUpdateFailed, this,
+            &ConnectionController::itemImageUpdateFailed);
+    connect(&m_client, &JellyfinClient::itemSubtitleUpdated, this,
+            &ConnectionController::itemSubtitleUpdated);
+    connect(&m_client, &JellyfinClient::itemSubtitleUpdateFailed, this,
+            &ConnectionController::itemSubtitleUpdateFailed);
     connect(&m_client, &JellyfinClient::credentialsCleared, this, [this] {
         m_cardFavoriteRequests.clear();
         m_cardPlayedRequests.clear();
@@ -1140,6 +1172,70 @@ bool ConnectionController::undoPlayed(const QString &itemId, qint64 positionTick
     if (sent)
         m_cardPlayedRequests.insert(QString(itemId).remove(QLatin1Char('-')).toLower());
     return sent;
+}
+
+QUrl ConnectionController::streamUrl(const QString &itemId, const QString &mediaSourceId) const
+{
+    return m_state == Authenticated ? m_client.streamUrl(itemId, mediaSourceId) : QUrl();
+}
+
+bool ConnectionController::refreshItem(const QString &itemId)
+{
+    return m_state == Authenticated && m_client.refreshItem(itemId);
+}
+
+bool ConnectionController::createCollection(const QString &name, const QString &itemId)
+{
+    return m_state == Authenticated && isValidJellyfinId(itemId)
+           && m_client.createCollection(name, QStringList{itemId});
+}
+
+bool ConnectionController::addToCollection(const QString &collectionId, const QString &itemId)
+{
+    return m_state == Authenticated && m_client.addToCollection(collectionId, itemId);
+}
+
+bool ConnectionController::deleteItem(const QString &itemId)
+{
+    return m_state == Authenticated && m_client.deleteItem(itemId);
+}
+
+bool ConnectionController::updateItem(const QString &itemId, const QVariantMap &fields)
+{
+    return m_state == Authenticated && m_client.updateItem(itemId, fields);
+}
+
+bool ConnectionController::remoteSearch(const QString &itemId, const QString &type,
+                                        const QString &name, int year)
+{
+    return m_state == Authenticated && m_client.remoteSearch(itemId, type, name, year);
+}
+
+bool ConnectionController::applyRemoteSearch(const QString &itemId, const QVariantMap &result)
+{
+    return m_state == Authenticated && m_client.applyRemoteSearch(itemId, result);
+}
+
+bool ConnectionController::uploadImage(const QString &itemId, const QString &imageType, int index,
+                                       const QUrl &fileUrl)
+{
+    return m_state == Authenticated && m_client.uploadImage(itemId, imageType, index, fileUrl);
+}
+
+bool ConnectionController::deleteImage(const QString &itemId, const QString &imageType, int index)
+{
+    return m_state == Authenticated && m_client.deleteImage(itemId, imageType, index);
+}
+
+bool ConnectionController::uploadSubtitle(const QString &itemId, const QUrl &fileUrl,
+                                          const QString &language, bool forced)
+{
+    return m_state == Authenticated && m_client.uploadSubtitle(itemId, fileUrl, language, forced);
+}
+
+bool ConnectionController::deleteSubtitle(const QString &itemId, int index)
+{
+    return m_state == Authenticated && m_client.deleteSubtitle(itemId, index);
 }
 
 bool ConnectionController::openFavorites()

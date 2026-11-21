@@ -45,6 +45,7 @@ class ItemDetailsModel final : public QObject {
     Q_PROPERTY(bool favorite READ favorite NOTIFY detailsChanged)
     // The item's own CanDownload, true unless the server denied it
     Q_PROPERTY(bool canDownload READ canDownload NOTIFY detailsChanged)
+    Q_PROPERTY(bool canDelete READ canDelete NOTIFY detailsChanged)
     Q_PROPERTY(bool favoriteBusy READ favoriteBusy NOTIFY favoriteWriteStateChanged)
     Q_PROPERTY(bool favoriteError READ favoriteError NOTIFY favoriteWriteStateChanged)
     Q_PROPERTY(bool playedBusy READ playedBusy NOTIFY playedWriteStateChanged)
@@ -63,11 +64,13 @@ class ItemDetailsModel final : public QObject {
     Q_PROPERTY(QUrl backdropUrl READ backdropUrl NOTIFY detailsChanged)
     Q_PROPERTY(QUrl logoUrl READ logoUrl NOTIFY detailsChanged)
     Q_PROPERTY(QUrl posterUrl READ posterUrl NOTIFY detailsChanged)
-    // Entries: name, role, type, imageUrl (empty without an image)
+    // Entries: name, role, type, id, imageUrl (empty without an image)
     Q_PROPERTY(QVariantList people READ people NOTIFY detailsChanged)
+    // Entries: name, url (https only), as the server sent them
+    Q_PROPERTY(QVariantList trailers READ trailers NOTIFY detailsChanged)
     // Entries: name, startTicks, time (h:mm:ss)
     Q_PROPERTY(QVariantList chapters READ chapters NOTIFY detailsChanged)
-    // Entries: id, name, container, size, bitrate, video, audio, subtitles (lists of stream maps: codec, language, title, width, height, channels, bitrate, isDefault, isForced, isExternal)
+    // Entries: id, name, container, size, bitrate, video, audio, subtitles (lists of stream maps: index, type, codec, language, title, width, height, channels, bitrate, isDefault, isForced, isExternal)
     Q_PROPERTY(QVariantList mediaSources READ mediaSources NOTIFY detailsChanged)
     Q_PROPERTY(Kinefin::ItemRowModel *similar READ similar CONSTANT)
     // What hangs below the item: the seasons and next episode of a series, the episodes of a season, the items of a collection
@@ -119,6 +122,7 @@ class ItemDetailsModel final : public QObject {
     bool played() const { return m_details.played; }
     bool favorite() const { return m_details.favorite; }
     bool canDownload() const { return m_details.canDownload; }
+    bool canDelete() const { return m_details.canDelete; }
     bool favoriteBusy() const { return m_favoriteBusy; }
     bool favoriteError() const { return m_favoriteError; }
     bool playedBusy() const { return m_playedBusy; }
@@ -138,6 +142,7 @@ class ItemDetailsModel final : public QObject {
     QUrl logoUrl() const;
     QUrl posterUrl() const;
     QVariantList people() const;
+    QVariantList trailers() const;
     QVariantList chapters() const;
     QVariantList mediaSources() const;
     ItemRowModel *similar() { return &m_similar; }

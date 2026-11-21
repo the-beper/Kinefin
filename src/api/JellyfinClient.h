@@ -34,6 +34,7 @@ bool isValidFilterText(const QString &text);
 
 // The most genre ids one query may carry
 constexpr int MaxGenreIds = 50;
+constexpr int MaxPersonIds = 20;
 
 // The most values of one multi-value filter (tags, official ratings, years, video types, series status, studio ids) one query may carry, and the longest text value
 constexpr int MaxFilterValues = 50;
@@ -78,6 +79,8 @@ struct ItemQuery {
     QString cardImageType;
     // Genre ids (hex ids from /Genres or Items/Filters2, never names): an item matches any of them. Written comma-delimited (the server ignores a pipe between ids), at most MaxGenreIds
     QStringList genreIds;
+    // Person ids (hex ids from a details page's People): the items that person appears in, comma-delimited, at most MaxPersonIds
+    QStringList personIds;
     // The server-side filters of a library grid (see LibraryFilterState.h for the composer): sections combine with AND, the values of one list with OR. A flag or optional that is false/unset sends nothing; `isHd` false is the SD choice. Written only for a listing, never for an ids= resolution. `videoTypes` ("BluRay", "Dvd"), `seriesStatus` ("Continuing", "Ended", "Unreleased"), `years` (1 to 9999) and `studioIds` (hex ids) are comma-separated on the wire; `tags` (text from Items/Filters2) and `officialRatings` (text from Items/Filters; each isValidFilterText) are pipe-delimited; every list holds at most MaxFilterValues. `parentIndexNumber` 0 selects the specials, -1 sends none
     bool hasSubtitles = false;
     bool hasTrailer = false;
@@ -220,6 +223,8 @@ class JellyfinClient final : public QObject {
     QUrl userImageUrl(const QString &userId, const QString &tag) const;
     // Whether `url` is one of the image URLs imageUrl() or userImageUrl() build for the server at `base`: same scheme, host and port, no credentials, and either the path `<base path>/Items/<id>/Images/<type>` with a valid id and type, or `<base path>/UserImage` with a query of only `userId` (valid id) and `tag` (valid). The one place that recognises what the builders produce, for the image fetcher's allowlist
     static bool isServerImageUrl(const QUrl &base, const QUrl &url);
+    // An artwork URL of a metadata provider (TMDB, TheTVDB, OMDb, Fanart.tv, Cover Art Archive): https, no credentials or fragment, a known domain or its subdomain. Used only for the Identify results, where the server hands out the provider's own image
+    static bool isProviderImageUrl(const QUrl &url);
     // The users the server lists on its sign-in screen (`GET /Users/Public`, no credentials, so it works in any state after the probe except while probing): publicUsersReady carries at most MaxPublicUsers validated entries (the others are dropped), publicUsersFailed a transport or protocol failure. A new call supersedes a pending one. Returns false, without a request, before the probe succeeded
     bool fetchPublicUsers();
     // SyncPlay, watching together (the wire format is SyncPlayProtocol.h). The group list (`GET /SyncPlay/List`): syncPlayGroupsReady carries the valid groups, syncPlayGroupsFailed the status (0 for a transport error, an unusable reply keeps its 200). A newer call supersedes a pending one silently. Returns false, without a request, when not authenticated
@@ -268,6 +273,28 @@ class JellyfinClient final : public QObject {
     QByteArray streamAuthorization() const;
     // The original file of an item (`GET /Items/{id}/Download`): the same token-free URL convention as the player, authenticated by streamAuthorization() and never by a query parameter. Empty unless authenticated or for an invalid id
     QUrl downloadUrl(const QString &itemId) const;
+    // The static stream of an item (`GET /Videos/{id}/stream?static=true&mediaSourceId=`), token-free like downloadUrl: usable only with streamAuthorization(). Empty unless authenticated or for an invalid item id; an invalid media source id is left out
+    QUrl streamUrl(const QString &itemId, const QString &mediaSourceId = QString()) const;
+    // Asks the server to refresh the item's metadata and images (`POST /Items/{id}/Refresh`, 204). One request in flight; the outcome is itemRefreshFinished. Returns false without a request when not authenticated, on an invalid id or while another refresh is pending
+    bool refreshItem(const QString &itemId);
+    // Creates a collection (`POST /Collections`) holding `itemIds` (may be empty) and adds an item to an existing one (`POST /Collections/{id}/Items?ids=`). One write in flight per collection (and one create at a time); the outcomes are collectionCreated/collectionCreateFailed and collectionItemsAdded/collectionItemsAddFailed
+    bool createCollection(const QString &name, const QStringList &itemIds);
+    bool addToCollection(const QString &collectionId, const QString &itemId);
+    // Deletes one media item (`DELETE /Items/{id}`) after reading it back and finding `CanDelete`: an administrator only, and never a playlist or a collection. One delete in flight; the outcome is itemDeleted/itemDeleteFailed
+    bool deleteItem(const QString &itemId);
+    // Updates the metadata fields Kinefin edits (`POST /Items/{id}` with a BaseItemDto): `Name`, `Overview`, `ProductionYear`, `OfficialRating`, `Genres`. Administrators only; unknown keys, invalid values and an empty map are refused. One update in flight per item; the outcome is itemUpdated/itemUpdateFailed
+    bool updateItem(const QString &itemId, const QVariantMap &fields);
+    // Identify: searches the metadata providers of one movie or series (`POST /Items/RemoteSearch/{Movie|Series}`) and applies the chosen RemoteSearchResult (`POST /Items/RemoteSearch/Apply/{itemId}?replaceAllImages=false`). Administrators only; results and provider ids are validated and capped. The outcomes are remoteSearchFinished/remoteSearchFailed and remoteSearchApplied/remoteSearchApplyFailed
+    bool remoteSearch(const QString &itemId, const QString &type, const QString &name, int year);
+    bool applyRemoteSearch(const QString &itemId, const QVariantMap &result);
+    // Edit Images: uploads a local JPEG, PNG or WebP (at most 20 MiB) to `Primary`, `Backdrop` (index 0 to 9), `Logo`, `Banner`, `Thumb`, `Disc` or `Art`, or deletes one. Administrators only; the file is validated by its signature and read once. The outcomes are itemImageUpdated/itemImageUpdateFailed
+    bool uploadImage(const QString &itemId, const QString &imageType, int index,
+                     const QUrl &fileUrl);
+    bool deleteImage(const QString &itemId, const QString &imageType, int index);
+    // Edit Subtitles: uploads a local srt, ass, ssa or vtt file (at most 2 MiB, UTF-8) as an external subtitle, or deletes one by its stream index. Administrators only; the outcomes are itemSubtitleUpdated/itemSubtitleUpdateFailed
+    bool uploadSubtitle(const QString &itemId, const QUrl &fileUrl, const QString &language,
+                        bool forced);
+    bool deleteSubtitle(const QString &itemId, int index);
     // The file of one external text subtitle stream (`GET /Videos/{itemId}/{mediaSourceId}/Subtitles/{index}/0/Stream.{extension}`): the same token-free convention as downloadUrl(). Empty unless authenticated, for an invalid id, an index outside 0 to 9999 or an extension other than srt, ass, ssa or vtt
     QUrl subtitleFileUrl(const QString &itemId, const QString &mediaSourceId, int index,
                          const QString &extension) const;
@@ -406,6 +433,32 @@ class JellyfinClient final : public QObject {
     void sessionPlaystateFailed(const QString &sessionId, const QString &command, int httpStatus);
     void itemFavoriteUpdated(const QString &itemId, bool favorite);
     void itemFavoriteUpdateFailed(const QString &itemId, bool favorite, int httpStatus);
+    // A metadata refresh of one item: `ok` for a 204, `httpStatus` 0 for a transport error
+    void itemRefreshFinished(const QString &itemId, bool ok, int httpStatus);
+    // A collection created (its id and the validated name) or an item added to one
+    void collectionCreated(const QString &collectionId, const QString &name);
+    void collectionCreateFailed(int httpStatus);
+    void collectionItemsAdded(const QString &collectionId, const QString &itemId);
+    void collectionItemsAddFailed(const QString &collectionId, const QString &itemId,
+                                  int httpStatus);
+    // A media delete the server confirmed, or one it refused
+    void itemDeleted(const QString &itemId);
+    void itemDeleteFailed(const QString &itemId, int httpStatus);
+    // A metadata write the server confirmed, or one it refused
+    void itemUpdated(const QString &itemId);
+    void itemUpdateFailed(const QString &itemId, int httpStatus);
+    // Identify: the search results (name, year, provider, providerIds) or the outcome of the apply
+    void remoteSearchFinished(const QString &itemId, const QVariantList &results);
+    void remoteSearchFailed(const QString &itemId, int httpStatus);
+    void remoteSearchApplied(const QString &itemId);
+    void remoteSearchApplyFailed(const QString &itemId, int httpStatus);
+    // An image written or deleted, or a refusal
+    void itemImageUpdated(const QString &itemId, const QString &imageType, int index);
+    void itemImageUpdateFailed(const QString &itemId, const QString &imageType, int index,
+                               int httpStatus);
+    // An external subtitle written or deleted, or a refusal
+    void itemSubtitleUpdated(const QString &itemId);
+    void itemSubtitleUpdateFailed(const QString &itemId, int httpStatus);
     void itemPlayedUpdated(const QString &itemId, bool played);
     void itemPlayedUpdateFailed(const QString &itemId, bool played, int httpStatus);
     // The saved position of an item the server confirmed, with its watched share (0 to 100)
@@ -476,6 +529,14 @@ class JellyfinClient final : public QObject {
     QSet<QNetworkReply *> m_pending;
     QSet<QString> m_favoritePending;
     QSet<QString> m_playedPending;
+    QString m_refreshItemId;
+    QSet<QString> m_collectionWrites;
+    QString m_deletePending;
+    QSet<QString> m_updatePending;
+    QSet<QString> m_remoteSearchPending;
+    QSet<QString> m_remoteSearchApplyPending;
+    QSet<QString> m_imagePending;
+    QSet<QString> m_subtitlePending;
     QSet<QString> m_playlistPending;
     QUrl m_base;
     QString m_serverId;

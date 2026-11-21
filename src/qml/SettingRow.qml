@@ -57,6 +57,8 @@ Loader {
                     return i18n("Writes a .nfo and a poster next to each exported file");
                 case "night_mode":
                     return i18n("Quiet dialogue louder and loud scenes quieter. Audio passthrough is off while it is on");
+                case "sdlEnabled":
+                    return i18n("Experimental: the mapping is fixed to the standard layout and cannot be changed");
                 case "exportOnCompletion":
                     return i18n("Disabled until a persistent folder is granted on this system");
                 }

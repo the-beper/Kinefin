@@ -485,6 +485,16 @@ Controls.ItemDelegate {
                     }
                 }
             }
+
+            // The poster covers a border drawn on this rectangle: the contour is a transparent overlay on top
+            Rectangle {
+                anchors.fill: parent
+                color: "transparent"
+                radius: Kirigami.Units.cornerRadius
+                border.width: 1
+                border.color: Qt.alpha(Kirigami.Theme.textColor, 0.3)
+                Accessible.ignored: true
+            }
         }
 
         RowLayout {

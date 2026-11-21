@@ -78,7 +78,6 @@ Kirigami.ApplicationWindow {
     property var remotePending: []
 
     property bool fullscreenSetting: settings.value("main", "fullscreen")
-    property bool alwaysOnTopSetting: settings.value("main", "alwaysOnTop")
     property string fullscreenOutput: settings.value("main", "forceFSScreen")
     property bool newBadgeEnabled: settings.value("library", "newBadge")
     property bool homeLibrariesEnabled: settings.value("library", "home.libraries")
@@ -91,7 +90,7 @@ Kirigami.ApplicationWindow {
     height: 640
     visible: true
     title: "Kinefin"
-    flags: alwaysOnTopSetting ? (Qt.Window | Qt.WindowStaysOnTopHint) : Qt.Window
+    flags: Qt.Window
 
     // Every page turns Kirigami's title row off and puts its own row under the header (PageToolbar, the style of the Movies and Shows tabs); the global style stays pinned to ToolBar so that it never follows the stack depth: Auto would resolve to the Breadcrumb header on mobile in narrow mode, and a style that follows the depth resizes the columns while a page slides out (Kirigami then reads the resize as a layout pass, stops the exit slide without finishing it, and the page it was removing is never destroyed)
     pageStack.globalToolBar.style: Kirigami.ApplicationHeaderStyle.ToolBar
@@ -391,7 +390,6 @@ Kirigami.ApplicationWindow {
             window.fullscreenSetting = window.settings.value("main", "fullscreen");
             if (key === "fullscreen")
                 window.startupWindowMode = "";
-            window.alwaysOnTopSetting = window.settings.value("main", "alwaysOnTop");
             window.fullscreenOutput = window.settings.value("main", "forceFSScreen");
         }
         function onSaveFailed() {
@@ -857,6 +855,17 @@ Kirigami.ApplicationWindow {
         return true;
     }
 
+    // A details page's Play with its before-playback track choices
+    function playItemWithStreams(itemId, resumeTicks, audioStreamIndex, subtitleStreamIndex) {
+        if (!window.signedIn || !window.player
+                || !window.player.playItemWithStreams(itemId, resumeTicks || 0, audioStreamIndex, subtitleStreamIndex))
+            return false;
+        if (groupRouting)
+            return true;
+        if (!showPlayerPage()) { window.player.stop(); return false; }
+        return true;
+    }
+
     // A KRunner Play: signed out the item opens after sign-in; a play the player refuses opens its details page
     function playRequestedItem(itemId, resumeTicks) {
         if (playItem(itemId, resumeTicks || 0))
@@ -939,6 +948,26 @@ Kirigami.ApplicationWindow {
             }
         }
         openItem(itemId, fromPage);
+    }
+
+    // The media of one person: one page at a time, another person updates it in place
+    function openPerson(personId, personName, fromPage) {
+        if (connection.state !== ConnectionController.Authenticated || !personId)
+            return;
+        for (let i = pageStack.depth - 1; i >= 0; --i) {
+            const candidate = pageStack.get(i);
+            if (candidate?.objectName === "personPage") {
+                candidate.personName = personName;
+                connection.personItems.open(personId);
+                popTo(candidate);
+                candidate.resetView();
+                return;
+            }
+        }
+        if (!connection.personItems.open(personId))
+            return;
+        popTo(fromPage);
+        pageStack.push(Qt.resolvedUrl("PersonPage.qml"), { connection: connection, personName: personName });
     }
 
     // The stack position of the search page up to the one in front, -1 when it is not there
@@ -1481,6 +1510,12 @@ Kirigami.ApplicationWindow {
         shell: window
     }
 
+    CollectionDialogs {
+        id: collectionDialogs
+        connection: window.connection
+        shell: window
+    }
+
     // Cast… of a video: with an item (the card menu, the details page) every choice plays that item there, This Computer included; without one (the OSD) the playing video moves to the choice
     CastDialog {
         id: castDialog
@@ -1529,6 +1564,11 @@ Kirigami.ApplicationWindow {
     function addToPlaylist(itemId) {
         if (signedIn)
             playlistDialogs.addTo(itemId);
+    }
+    // Add to Collection… of a movie or a show
+    function addToCollection(itemId, itemName) {
+        if (signedIn)
+            collectionDialogs.addTo(itemId, itemName);
     }
     // New Playlist… of the Playlists page: an empty playlist
     function newPlaylist() {

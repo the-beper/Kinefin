@@ -118,6 +118,10 @@ add_library(kinefin_core STATIC
     src/models/PagedItemsModel.h
     src/models/ResumeItemsModel.cpp
     src/models/ResumeItemsModel.h
+    src/models/PersonItemsModel.cpp
+    src/models/PersonItemsModel.h
+    src/models/CollectionsModel.cpp
+    src/models/CollectionsModel.h
     src/models/RemoteSessionsModel.cpp
     src/models/RemoteSessionsModel.h
     src/models/ItemSummary.h
@@ -246,7 +250,7 @@ target_link_libraries(kinefin_cast PUBLIC Qt6::Core Qt6::Network KF6::I18n)
 target_link_libraries(kinefin_player PUBLIC kinefin_cast)
 
 # The QML module lives in a static library of its own so that the UI tests can import it like the application does
-foreach(page Main PlayerPage OsdButton MiniPlayer PictureInPictureWindow PlaybackInfoOverlay ShellHeader AboutDialog ShortcutsDialog RemoteSessionsDialog SyncPlayDialog MediaInfoDialog CastDialog CastTargetRow HomePage LibraryTile LibraryPage ResumeItemsPage MediaCard CardMenu CardRow EpisodeRow ItemDetailsPage SearchPage QueuePage FilterDialog GenreRailsView GenreRailsPage LibraryContent ItemListRow ItemRowGrid LoginPage UserPickerPage MessageBox ServersPage SettingsPage SettingRow UserPreferencesForm UserPreferencesSaveBar FavoritesPage FavoritesGroupPage TopFade MediaListRow PlaylistsPage PlaylistPage PlaylistDialogs AddToPlaylistDialog PageToolbar PageBackButton FadeInOnShow PageTitle DownloadsPage RuleDialog SubtitleSearchDialog)
+foreach(page Main PlayerPage OsdButton MiniPlayer PictureInPictureWindow PlaybackInfoOverlay ShellHeader AboutDialog ShortcutsDialog RemoteSessionsDialog SyncPlayDialog MediaInfoDialog CastDialog CastTargetRow HomePage LibraryTile LibraryPage ResumeItemsPage PersonPage MediaCard CardMenu CardRow EpisodeRow ItemDetailsPage SearchPage QueuePage FilterDialog GenreRailsView GenreRailsPage LibraryContent ItemListRow ItemRowGrid LoginPage UserPickerPage MessageBox ServersPage SettingsPage SettingRow UserPreferencesForm UserPreferencesSaveBar FavoritesPage FavoritesGroupPage TopFade MediaListRow PlaylistsPage PlaylistPage PlaylistDialogs AddToPlaylistDialog AddToCollectionDialog CollectionDialogs EditMetadataDialog IdentifyDialog EditImagesDialog EditSubtitlesDialog PageToolbar PageBackButton FadeInOnShow PageTitle DownloadsPage RuleDialog SubtitleSearchDialog)
     set_source_files_properties(src/qml/${page}.qml PROPERTIES QT_RESOURCE_ALIAS ${page}.qml)
 endforeach()
 # The images the pages draw themselves, beside the QML files they belong to
@@ -285,6 +289,13 @@ qt_add_qml_module(kinefin_ui
         src/qml/LibraryTile.qml
         src/qml/LibraryPage.qml
         src/qml/ResumeItemsPage.qml
+        src/qml/PersonPage.qml
+        src/qml/AddToCollectionDialog.qml
+        src/qml/CollectionDialogs.qml
+        src/qml/EditMetadataDialog.qml
+        src/qml/IdentifyDialog.qml
+        src/qml/EditImagesDialog.qml
+        src/qml/EditSubtitlesDialog.qml
         src/qml/MediaCard.qml
         src/qml/CardMenu.qml
         src/qml/CardRow.qml

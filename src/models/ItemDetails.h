@@ -17,6 +17,12 @@ struct PersonSummary {
     QString primaryTag;
 };
 
+// A remote trailer: an https URL only, never with credentials, and its name
+struct TrailerSummary {
+    QString name;
+    QString url;
+};
+
 struct ChapterSummary {
     QString name;
     qint64 startTicks = 0;
@@ -72,6 +78,7 @@ struct ItemDetails {
     static constexpr int MaxGenres = 20;
     static constexpr int MaxStudios = 8;
     static constexpr int MaxPeople = 100;
+    static constexpr int MaxTrailers = 8;
     static constexpr int MaxChapters = 200;
     static constexpr int MaxSources = 8;
     static constexpr int MaxStreams = 64;
@@ -102,6 +109,8 @@ struct ItemDetails {
     bool favorite = false;
     // The item's CanDownload when the server sent one; absent or unreadable leaves it true, so the policy decides
     bool canDownload = true;
+    // `CanDelete` from the server; false unless it says so, so no delete is ever sent blindly
+    bool canDelete = false;
     qreal playedPercentage = 0;
     int unplayedCount = -1;
     qint64 resumePositionTicks = 0;
@@ -118,6 +127,7 @@ struct ItemDetails {
     QString logoItemId;
     QString logoTag;
     QList<PersonSummary> people;
+    QList<TrailerSummary> trailers;
     QList<ChapterSummary> chapters;
     QList<SourceSummary> sources;
 };

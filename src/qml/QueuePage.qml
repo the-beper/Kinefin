@@ -103,7 +103,7 @@ Kirigami.ScrollablePage {
             onTriggered: page.undoLastEdit()
         },
         Kirigami.Action {
-            text: i18n("Clear Queue")
+            text: i18n("Clear Queue…")
             icon.name: "edit-clear-all"
             enabled: page.queue.count > 0 && !page.queue.busy
             onTriggered: clearQueueDialog.open()

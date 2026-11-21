@@ -73,17 +73,21 @@ QString GamepadMapper::keycodeFor(Control control)
     case Control::RightTrigger:
         return QStringLiteral("nextchapter");
     case Control::DpadUp:
-    case Control::LeftStickUp:
         return QStringLiteral("up");
     case Control::DpadDown:
-    case Control::LeftStickDown:
         return QStringLiteral("down");
     case Control::DpadLeft:
-    case Control::LeftStickLeft:
         return QStringLiteral("left");
     case Control::DpadRight:
-    case Control::LeftStickRight:
         return QStringLiteral("right");
+    case Control::LeftStickUp:
+        return QStringLiteral("scrollup");
+    case Control::LeftStickDown:
+        return QStringLiteral("scrolldown");
+    case Control::LeftStickLeft:
+        return QStringLiteral("scrollleft");
+    case Control::LeftStickRight:
+        return QStringLiteral("scrollright");
     case Control::RightStickUp:
         return QStringLiteral("volumeup");
     case Control::RightStickDown:

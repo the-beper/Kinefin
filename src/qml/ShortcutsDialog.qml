@@ -62,7 +62,8 @@ Kirigami.Dialog {
     ]
     // The pad's labels are its own (A, B, X, Y or Cross, Circle, Square, Triangle); the dialog shows these groups only while a pad is connected
     readonly property var gamepadRows: [
-        [i18nc("@item:intable game controller button", "D-pad or Left Stick"), i18nc("@item:intable game controller control", "Move the Focus")],
+        [i18nc("@item:intable game controller button", "D-pad"), i18nc("@item:intable game controller control", "Move the Focus")],
+        [i18nc("@item:intable game controller button", "Left Stick"), i18nc("@item:intable game controller control", "Scroll")],
         [faceLabels[0], i18nc("@item:intable game controller control", "Open or Activate")],
         [faceLabels[1], i18nc("@item:intable shortcut action", "Go Back")],
         [faceLabels[2], i18nc("@item:intable shortcut action", "Open Item Menu")],

@@ -18,6 +18,7 @@
 #include <QPointer>
 #include <QQuickItem>
 #include <QQuickWindow>
+#include <QWheelEvent>
 #include <QWindow>
 #include <algorithm>
 #include <cerrno>
@@ -77,6 +78,16 @@ bool stopsKey(const QQuickItem *ancestor, const QQuickItem *focus)
     }
     return ancestor->inherits("QQuickFlickable") || ancestor->inherits("QQuickScrollView")
            || ancestor->inherits("QQuickPage");
+}
+
+// The list or grid the item sits in, if any
+QQuickItem *itemViewAncestor(QQuickItem *item)
+{
+    for (; item; item = item->parentItem()) {
+        if (isItemView(item))
+            return item;
+    }
+    return nullptr;
 }
 
 // Stops the press of a key at the first ancestor of the focus that stopsKey() names, so a list or a page behind a control cannot move its own row or scroll for a key the control did not use. While it lives the key is delivered as usual; a press accepted before the stop was used by the control, one that reaches the stop is held back there
@@ -146,6 +157,18 @@ struct HostCommand {
 
 constexpr HostCommand kHostCommands[] = {
     {"host:fullscreen"_L1, "togglefullscreen"_L1},
+};
+
+struct ScrollKey {
+    QLatin1StringView code;
+    Qt::Key key;
+};
+
+constexpr ScrollKey kScrollKeys[] = {
+    {"scrollup"_L1, Qt::Key_Up},
+    {"scrolldown"_L1, Qt::Key_Down},
+    {"scrollleft"_L1, Qt::Key_Left},
+    {"scrollright"_L1, Qt::Key_Right},
 };
 
 bool peerIsCurrentUser(const QLocalSocket *socket)
@@ -437,6 +460,10 @@ bool RemoteInputServer::dispatchKeycode(const QString &code, bool autoRepeat)
             Q_EMIT actionRequested(QStringLiteral("back"));
         return true;
     }
+    if (const auto *scroll = std::ranges::find_if(
+            kScrollKeys, [&code](const ScrollKey &entry) { return code == entry.code; });
+        scroll != std::end(kScrollKeys))
+        return dispatchScroll(scroll->key, autoRepeat);
     if (std::ranges::any_of(kCommands,
                             [&code](QLatin1StringView command) { return code == command; })) {
         Q_EMIT actionRequested(code);
@@ -466,8 +493,11 @@ bool RemoteInputServer::dispatchNetworkKeycode(const QString &code)
     }
     if (++m_networkKeys > MaxNetworkKeysPerSecond)
         return false;
-    const bool navigation = std::ranges::any_of(
-        kNavigationKeys, [&code](const NavigationKey &entry) { return code == entry.code; });
+    const bool navigation =
+        std::ranges::any_of(kNavigationKeys,
+                            [&code](const NavigationKey &entry) { return code == entry.code; })
+        || std::ranges::any_of(kScrollKeys,
+                               [&code](const ScrollKey &entry) { return code == entry.code; });
     if (navigation && !networkNavigationAllowed())
         return false;
     return dispatchKeycode(code);
@@ -501,9 +531,23 @@ bool RemoteInputServer::focusTakesText() const
 
 bool RemoteInputServer::dispatchNavigation(Qt::Key key, const QString &text, bool autoRepeat)
 {
+    // The repeats of the press that entered an item view would move away from the row it reached: they wait for a fresh press
+    if (autoRepeat && m_suppressRepeats)
+        return true;
+    if (!autoRepeat)
+        m_suppressRepeats = false;
     const QPointer<QWindow> window = userWindow();
     auto *quick = qobject_cast<QQuickWindow *>(window.data());
     const QPointer<QQuickItem> focus = quick ? quick->activeFocusItem() : nullptr;
+    // A move that enters a list or grid from outside holds back the repeats of the same press, so the row it reaches stays
+    const auto moveFocus = [this, focus, quick, autoRepeat](NavDirection direction) {
+        QQuickItem *const before = focus.data();
+        const bool moved = moveFocusSpatially(before, direction);
+        if (moved && !autoRepeat && !itemViewAncestor(before) && quick
+            && itemViewAncestor(quick->activeFocusItem()))
+            m_suppressRepeats = true;
+        return moved;
+    };
     // A spin box or a combo box that is not editable is no text field, whatever its text item answers to an input query
     QQuickItem *control = focus ? valueControlOf(focus) : nullptr;
     const bool takesText =
@@ -533,7 +577,7 @@ bool RemoteInputServer::dispatchNavigation(Qt::Key key, const QString &text, boo
         // A closed combo box or a spin box would change its value on Up and Down: they move the focus instead, and Left and Right step a spin box
         if (control) {
             if (vertical) {
-                moveFocusSpatially(focus, *direction);
+                moveFocus(*direction);
                 return true;
             }
             if (!isComboBox(control) && !takesText) {
@@ -554,8 +598,7 @@ bool RemoteInputServer::dispatchNavigation(Qt::Key key, const QString &text, boo
         }
     }
     // A focused scroll view or flickable would scroll on the arrow: the arrow enters its contents first, and only with nothing that way does it scroll
-    if (direction && !autoRepeat && isScrollContainer(focus)
-        && moveFocusSpatially(focus, *direction))
+    if (direction && !autoRepeat && isScrollContainer(focus) && moveFocus(*direction))
         return true;
 
     QKeyEvent press(QEvent::KeyPress, key, Qt::NoModifier, text, autoRepeat);
@@ -592,7 +635,7 @@ bool RemoteInputServer::dispatchNavigation(Qt::Key key, const QString &text, boo
 
     // A held arrow never leaves an item view, so it stops at the end of a grid
     const bool mayLeave = !(autoRepeat && focus && insideItemView(focus));
-    if (mayLeave && focus && moveFocusSpatially(focus, *direction)) {
+    if (mayLeave && focus && moveFocus(*direction)) {
         release();
         return true;
     }
@@ -606,6 +649,31 @@ bool RemoteInputServer::dispatchNavigation(Qt::Key key, const QString &text, boo
         item = item->parentItem();
     }
     release();
+    return true;
+}
+
+bool RemoteInputServer::dispatchScroll(Qt::Key key, bool autoRepeat)
+{
+    QWindow *window = userWindow();
+    auto *quick = qobject_cast<QQuickWindow *>(window);
+    const QPointer<QQuickItem> focus = quick ? quick->activeFocusItem() : nullptr;
+    if (!window || !focus)
+        return true;
+    // The full player page keeps the arrows the left stick used to send: they seek as the D-pad does
+    for (QQuickItem *item = focus; item; item = item->parentItem()) {
+        if (item->objectName() == QLatin1String("playerPage")) {
+            sendKey(key, {}, autoRepeat);
+            return true;
+        }
+    }
+    const QPoint angle = key == Qt::Key_Up     ? QPoint(0, 120)
+                         : key == Qt::Key_Down ? QPoint(0, -120)
+                         : key == Qt::Key_Left ? QPoint(120, 0)
+                                               : QPoint(-120, 0);
+    const QPointF local = focus->mapToScene(QPointF(focus->width() / 2, focus->height() / 2));
+    QWheelEvent wheel(local, window->mapToGlobal(local.toPoint()), QPoint(), angle, Qt::NoButton,
+                      Qt::NoModifier, Qt::NoScrollPhase, false);
+    QCoreApplication::sendEvent(window, &wheel);
     return true;
 }
 

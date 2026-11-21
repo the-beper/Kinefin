@@ -94,7 +94,7 @@ Kirigami.ScrollablePage {
         icon.name: "media-playback-start"
         visible: page.details.playable
         enabled: page.details.status === ItemDetailsModel.Ready && !!page.Window.window?.player
-        onTriggered: page.Window.window.playItem(page.details.itemId, page.details.canResume ? page.details.resumePositionTicks : 0)
+        onTriggered: page.Window.window.playItemWithStreams(page.details.itemId, page.details.canResume ? page.details.resumePositionTicks : 0, page.audioStreamIndex, page.subtitleStreamIndex)
     }
     readonly property Kirigami.Action playOnAction: Kirigami.Action {
         objectName: "playOnAction"
@@ -104,6 +104,94 @@ Kirigami.ScrollablePage {
         enabled: !!page.Window.window?.player && !page.Window.window?.groupRouting
         tooltip: page.Window.window?.groupRouting ? i18nc("@info:tooltip", "Not available while following a SyncPlay group") : ""
         onTriggered: page.Window.window.playOn(page.details.itemId, page.details.canResume ? page.details.resumePositionTicks : 0)
+    }
+    // Restart: a movie or an episode in progress starts over from the first second
+    readonly property Kirigami.Action playFromBeginningAction: Kirigami.Action {
+        objectName: "playFromBeginningAction"
+        text: i18n("Play from Beginning")
+        icon.name: "media-skip-backward"
+        visible: page.details.status === ItemDetailsModel.Ready && page.details.playable && page.details.canResume
+        enabled: page.playAction.enabled
+        onTriggered: page.Window.window.playItemWithStreams(page.details.itemId, 0, page.audioStreamIndex, page.subtitleStreamIndex)
+    }
+    // The first remote trailer the server offers, in the browser: only https URLs are kept by the parser
+    readonly property Kirigami.Action trailerAction: Kirigami.Action {
+        objectName: "trailerAction"
+        text: i18n("Trailer")
+        icon.name: "document-open-remote"
+        visible: page.details.status === ItemDetailsModel.Ready && page.details.trailers.length > 0
+        onTriggered: {
+            if (page.details.trailers.length === 0)
+                return;
+            if (!Qt.openUrlExternally(page.details.trailers[0].url))
+                page.Window.window.showPassiveNotification(i18n("Could not open the trailer in the browser"));
+        }
+    }
+    // The token-free static stream URL of the first source, for an external player; the Authorization header carries the token
+    readonly property Kirigami.Action copyStreamUrlAction: Kirigami.Action {
+        objectName: "copyStreamUrlAction"
+        text: i18n("Copy Stream URL")
+        icon.name: "edit-copy"
+        visible: page.details.status === ItemDetailsModel.Ready && page.details.mediaSources.length > 0
+        onTriggered: {
+            const source = page.details.mediaSources.length > 0 ? page.details.mediaSources[0] : null;
+            const url = source ? page.connection.streamUrl(page.details.itemId, source.id) : "";
+            if (url.toString().length === 0)
+                return;
+            clipboard.text = url.toString();
+            clipboard.selectAll();
+            clipboard.copy();
+            page.Window.window.showPassiveNotification(i18n("Stream URL copied to the clipboard"));
+        }
+    }
+    readonly property Kirigami.Action refreshMetadataAction: Kirigami.Action {
+        objectName: "refreshMetadataAction"
+        text: i18n("Refresh Metadata")
+        icon.name: "view-refresh"
+        visible: page.details.status === ItemDetailsModel.Ready
+                 && page.connection.currentUserIsAdministrator
+        onTriggered: {
+            if (page.connection.refreshItem(page.details.itemId))
+                page.Window.window.showPassiveNotification(i18n("Metadata refresh requested"));
+            else
+                page.Window.window.showPassiveNotification(i18n("Could not request a metadata refresh"));
+        }
+    }
+    readonly property Kirigami.Action editMetadataAction: Kirigami.Action {
+        objectName: "editMetadataAction"
+        text: i18n("Edit Metadata…")
+        icon.name: "document-edit"
+        visible: page.details.status === ItemDetailsModel.Ready
+                 && page.connection.currentUserIsAdministrator
+                 && ["Movie", "Series", "Episode", "Season"].indexOf(page.details.type) >= 0
+        onTriggered: editMetadataDialog.open()
+    }
+    readonly property Kirigami.Action identifyAction: Kirigami.Action {
+        objectName: "identifyAction"
+        text: i18n("Identify…")
+        icon.name: "edit-find"
+        visible: page.details.status === ItemDetailsModel.Ready
+                 && page.connection.currentUserIsAdministrator
+                 && (page.details.type === "Movie" || page.details.type === "Series")
+        onTriggered: identifyDialog.open()
+    }
+    readonly property Kirigami.Action editImagesAction: Kirigami.Action {
+        objectName: "editImagesAction"
+        text: i18n("Edit Images…")
+        icon.name: "edit-image"
+        visible: page.details.status === ItemDetailsModel.Ready
+                 && page.connection.currentUserIsAdministrator
+                 && ["Movie", "Series", "Episode", "Season"].indexOf(page.details.type) >= 0
+        onTriggered: editImagesDialog.open()
+    }
+    readonly property Kirigami.Action editSubtitlesAction: Kirigami.Action {
+        objectName: "editSubtitlesAction"
+        text: i18n("Edit Subtitles…")
+        icon.name: "media-view-subtitles-symbolic"
+        visible: page.details.status === ItemDetailsModel.Ready
+                 && page.connection.currentUserIsAdministrator
+                 && ["Movie", "Episode", "Video"].indexOf(page.details.type) >= 0
+        onTriggered: editSubtitlesDialog.open()
     }
     readonly property Kirigami.Action playNextAction: Kirigami.Action {
         objectName: "playNextAction"
@@ -128,6 +216,24 @@ Kirigami.ScrollablePage {
         icon.name: "media-playlist-append"
         visible: page.details.status === ItemDetailsModel.Ready && page.details.playable
         onTriggered: page.Window.window.addToPlaylist(page.details.itemId)
+    }
+    // A movie or a whole series joins a collection; episodes belong to their series
+    readonly property Kirigami.Action addToCollectionAction: Kirigami.Action {
+        objectName: "addToCollectionAction"
+        text: i18n("Add to Collection…")
+        icon.name: "folder-new"
+        visible: page.details.status === ItemDetailsModel.Ready && (page.details.type === "Movie" || page.details.type === "Series")
+        onTriggered: page.Window.window.addToCollection(page.details.itemId, page.details.name)
+    }
+    // A destructive write: administrators only, and only when the server itself says CanDelete
+    readonly property Kirigami.Action deleteMediaAction: Kirigami.Action {
+        objectName: "deleteMediaAction"
+        text: i18n("Delete Media…")
+        icon.name: "edit-delete"
+        visible: page.details.status === ItemDetailsModel.Ready && page.details.canDelete
+                 && page.connection.currentUserIsAdministrator
+                 && ["Movie", "Episode", "Video"].indexOf(page.details.type) >= 0
+        onTriggered: deleteDialog.open()
     }
     // The download record of this item for the signed-in user; the engine owns it, the page only names the action
     readonly property int downloadsRevision: page.connection.downloads.revision
@@ -155,10 +261,8 @@ Kirigami.ScrollablePage {
     // Automatic downloads of a series or a season; the rule store has one rule per series
     readonly property int rulesRevision: page.connection.downloads.rulesRevision
     readonly property string ruleSeriesId: page.details.type === "Series" ? page.details.itemId : page.details.seriesId
-    readonly property var seriesRule: {
-        rulesRevision; // the binding follows the rule store
-        return ruleSeriesId.length > 0 ? page.connection.downloads.seriesRule(ruleSeriesId) : ({});
-    }
+    readonly property var seriesRule: rulesRevision >= 0 && ruleSeriesId.length > 0
+                                      ? page.connection.downloads.seriesRule(ruleSeriesId) : ({})
     readonly property Kirigami.Action automaticDownloadsAction: Kirigami.Action {
         objectName: "automaticDownloadsAction"
         text: page.seriesRule.kind ? i18n("Edit Automatic Downloads…") : i18n("Automatic Downloads…")
@@ -217,8 +321,103 @@ Kirigami.ScrollablePage {
         }
     }
 
+    // The page opens on its primary action, so Up and Down start where the user acts; the list takes the focus until Play is ready
+    property bool playFocusPending: false
+    // The hero's buttons cannot be reached by id from here: they hand themselves over when they are created
+    property Item widePlayButton: null
+    property Item narrowPlayButton: null
+    onWidePlayButtonChanged: Qt.callLater(page.focusPendingPlay)
+    onNarrowPlayButtonChanged: Qt.callLater(page.focusPendingPlay)
+    function focusPlay() {
+        const button = widePlayButton?.visible ? widePlayButton : (narrowPlayButton?.visible ? narrowPlayButton : null);
+        if (!button || !button.enabled)
+            return false;
+        button.forceActiveFocus(Qt.TabFocusReason);
+        playFocusPending = false;
+        return true;
+    }
+    function focusPrimary() {
+        if (focusPlay())
+            return;
+        playFocusPending = true;
+        list.forceActiveFocus(Qt.TabFocusReason);
+    }
+    function focusPendingPlay() {
+        if (!playFocusPending || !isCurrentPage)
+            return;
+        const now = page.Window.activeFocusItem;
+        // The user moved the focus elsewhere while the details loaded: leave it there
+        if (now && now !== page && now !== list && now !== page.Window.window)
+            return;
+        focusPlay();
+    }
+    Connections {
+        target: page.details
+        function onStatusChanged() { Qt.callLater(page.focusPendingPlay); }
+    }
+    Connections {
+        target: page.playAction
+        function onEnabledChanged() { Qt.callLater(page.focusPendingPlay); }
+    }
+
     function runtimeText(minutes) {
         return minutes >= 60 ? i18n("%1 h %2 min", Math.floor(minutes / 60), minutes % 60) : i18n("%1 min", minutes);
+    }
+
+    // The tracks of the item's first media source, picked before playback; the indexes are the server's
+    readonly property var mediaSource: page.details.mediaSources.length > 0 ? page.details.mediaSources[0] : null
+    readonly property var audioTracks: page.mediaSource ? page.mediaSource.audio : []
+    readonly property var subtitleTracks: page.mediaSource ? page.mediaSource.subtitles : []
+    property int audioStreamIndex: -1
+    // -2 leaves the choice to mpv or the server, -1 turns subtitles off
+    property int subtitleStreamIndex: -2
+    Connections {
+        target: page.details
+        // A reload can replace the streams: a chosen index no longer listed goes back to the default
+        function onDetailsChanged() {
+            if (!page.audioChoices.some(choice => choice.index === page.audioStreamIndex))
+                page.audioStreamIndex = -1;
+            if (!page.subtitleChoices.some(choice => choice.index === page.subtitleStreamIndex))
+                page.subtitleStreamIndex = -2;
+        }
+    }
+
+    function trackLabel(track) {
+        const title = track.title.length > 0 ? track.title
+                    : track.language.length > 0 ? track.language
+                    : track.codec.length > 0 ? track.codec
+                    : i18n("Track %1", track.index);
+        const extra = [];
+        if (track.title.length > 0 && track.language.length > 0)
+            extra.push(track.language);
+        if (track.isForced)
+            extra.push(i18n("Forced"));
+        if (track.isExternal)
+            extra.push(i18n("External"));
+        return extra.length > 0 ? title + " (" + extra.join(", ") + ")" : title;
+    }
+    readonly property var audioChoices: {
+        const choices = [{ index: -1, label: i18n("Default") }];
+        for (const track of page.audioTracks) {
+            if (track.index >= 0)
+                choices.push({ index: track.index, label: page.trackLabel(track) });
+        }
+        return choices;
+    }
+    readonly property var subtitleChoices: {
+        const choices = [{ index: -2, label: i18n("Default") }, { index: -1, label: i18n("Off") }];
+        for (const track of page.subtitleTracks) {
+            if (track.index >= 0)
+                choices.push({ index: track.index, label: page.trackLabel(track) });
+        }
+        return choices;
+    }
+    function choiceIndex(choices, value) {
+        const index = choices.findIndex(choice => choice.index === value);
+        return index < 0 ? 0 : index;
+    }
+    function sameId(first, second) {
+        return first.toLowerCase().replace(/-/g, "") === second.toLowerCase().replace(/-/g, "");
     }
 
     // The local date of a "yyyy-MM-dd" string, null for anything else
@@ -263,7 +462,7 @@ Kirigami.ScrollablePage {
         }
     }
 
-    actions: [page.playOnAction, page.playNextAction, page.addToQueueAction, page.addToPlaylistAction, page.downloadAction, page.automaticDownloadsAction, page.stopDownloadsAction, page.favoriteAction, page.togglePlayedAction, page.mediaInfoAction]
+    actions: [page.playFromBeginningAction, page.trailerAction, page.copyStreamUrlAction, page.refreshMetadataAction, page.editMetadataAction, page.identifyAction, page.editImagesAction, page.editSubtitlesAction, page.playOnAction, page.playNextAction, page.addToQueueAction, page.addToPlaylistAction, page.addToCollectionAction, page.deleteMediaAction, page.downloadAction, page.automaticDownloadsAction, page.stopDownloadsAction, page.favoriteAction, page.togglePlayedAction, page.mediaInfoAction]
     // The row of the page carries the way back and the actions, as on the Movies and Shows tabs; the hero names the item
     globalToolBarStyle: Kirigami.ApplicationHeaderStyle.None
     // Without Kirigami's title row the page names itself to a screen reader
@@ -326,6 +525,199 @@ Kirigami.ScrollablePage {
         text: command.text
         icon.name: command.icon.name
         onClicked: command.trigger()
+    }
+
+    // The people of the item: the details page puts the row in its header, a season below its episodes
+    component CastCrewSection: ColumnLayout {
+        id: castCrew
+
+        property var people: []
+
+        Layout.fillWidth: true
+        visible: people.length > 0
+        spacing: Kirigami.Units.largeSpacing
+
+        Kirigami.Heading {
+            Layout.fillWidth: true
+            level: 2
+            text: i18n("Cast and Crew")
+        }
+
+        CardRow {
+            Layout.fillWidth: true
+            model: castCrew.people
+            cardHeight: page.personCardHeight
+            accessibleName: i18n("Cast and Crew")
+            pageFlickable: page.flickable
+
+            delegate: Controls.ItemDelegate {
+                id: person
+
+                required property var modelData
+
+                // The role of an actor, or the kind of crew when the server gives no role
+                readonly property string subtitle: modelData.role.length > 0 ? modelData.role : page.personKind(modelData.type)
+
+                width: page.personCardWidth
+                height: page.personCardHeight
+                // The list is the one tab stop of its row
+                focusPolicy: Qt.NoFocus
+                highlighted: ListView.isCurrentItem && ListView.view.activeFocus
+                padding: Kirigami.Units.smallSpacing
+                Accessible.name: subtitle.length > 0 ? modelData.name + ", " + subtitle : modelData.name
+                onClicked: page.Window.window.openPerson(modelData.id, modelData.name, page)
+
+                contentItem: ColumnLayout {
+                    spacing: 0
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        Layout.preferredHeight: width * 3 / 2
+                        Layout.bottomMargin: Kirigami.Units.smallSpacing
+                        radius: Kirigami.Units.cornerRadius
+                        color: Kirigami.Theme.alternateBackgroundColor
+
+                        Kirigami.Icon {
+                            anchors.centerIn: parent
+                            width: Kirigami.Units.iconSizes.huge
+                            height: width
+                            source: "user-identity"
+                            visible: photo.status !== Image.Ready
+                        }
+
+                        Kirigami.ShadowedImage {
+                            id: photo
+                            anchors.fill: parent
+                            radius: parent.radius
+                            asynchronous: true
+                            fillMode: Image.PreserveAspectCrop
+                            sourceSize.width: width * Screen.devicePixelRatio
+                            // Only URLs built by JellyfinClient::imageUrl belong here
+                            source: page.inView ? person.modelData.imageUrl : ""
+                            Accessible.ignored: true
+                        }
+                    }
+
+                    // Names and roles come from the server: plain text only
+                    Controls.Label {
+                        Layout.fillWidth: true
+                        elide: Text.ElideRight
+                        maximumLineCount: 1
+                        textFormat: Text.PlainText
+                        text: person.modelData.name
+                    }
+
+                    Controls.Label {
+                        Layout.fillWidth: true
+                        elide: Text.ElideRight
+                        maximumLineCount: 1
+                        opacity: 0.7
+                        textFormat: Text.PlainText
+                        text: person.subtitle
+                    }
+                }
+            }
+        }
+    }
+
+    // Qt Quick has no clipboard API: a hidden TextEdit selects its text and copies it
+    TextEdit {
+        id: clipboard
+        objectName: "detailsClipboard"
+        visible: false
+        textFormat: TextEdit.PlainText
+        Accessible.ignored: true
+    }
+
+    // A refresh that failed after the request was accepted: the action's notification already said it started
+    Connections {
+        target: page.connection
+        function onItemRefreshFinished(itemId, ok, status) {
+            if (!ok && itemId === page.details.itemId && page.Window.window)
+                page.Window.window.showPassiveNotification(i18n("The metadata refresh failed"));
+        }
+        function onItemDeleted(itemId) {
+            if (!page.sameId(itemId, page.details.itemId))
+                return;
+            page.Window.window.showPassiveNotification(i18n("Deleted"));
+            if (page.isCurrentPage)
+                page.Window.window.escapeBack();
+        }
+        function onItemDeleteFailed(itemId, status) {
+            if (!page.sameId(itemId, page.details.itemId))
+                return;
+            if (status === 403)
+                page.Window.window.showPassiveNotification(i18n("The server did not allow the deletion of this item"));
+            else
+                page.Window.window.showPassiveNotification(i18n("The item could not be deleted: check the connection to the server and try again"));
+        }
+        function onItemUpdated(itemId) {
+            if (!page.sameId(itemId, page.details.itemId))
+                return;
+            page.details.reload();
+            page.Window.window.showPassiveNotification(i18n("Metadata saved"));
+        }
+        function onItemUpdateFailed(itemId, status) {
+            if (page.sameId(itemId, page.details.itemId))
+                page.Window.window.showPassiveNotification(i18n("The metadata could not be saved: check the connection to the server and try again"));
+        }
+    }
+
+    EditMetadataDialog {
+        id: editMetadataDialog
+        connection: page.connection
+        details: page.details
+        shell: page.Window.window
+    }
+
+    IdentifyDialog {
+        id: identifyDialog
+        connection: page.connection
+        details: page.details
+        shell: page.Window.window
+    }
+
+    EditImagesDialog {
+        id: editImagesDialog
+        connection: page.connection
+        details: page.details
+        shell: page.Window.window
+    }
+
+    EditSubtitlesDialog {
+        id: editSubtitlesDialog
+        connection: page.connection
+        details: page.details
+        shell: page.Window.window
+    }
+
+    Kirigami.PromptDialog {
+        id: deleteDialog
+        objectName: "deleteMediaDialog"
+
+        function confirm() {
+            close();
+            if (!page.connection.deleteItem(page.details.itemId))
+                page.Window.window.showPassiveNotification(i18n("The item could not be deleted: wait for the changes on their way and try again"));
+        }
+
+        title: i18n("Delete Media")
+        standardButtons: Kirigami.Dialog.Cancel
+        customFooterActions: [
+            Kirigami.Action {
+                text: i18n("Delete")
+                icon.name: "edit-delete"
+                onTriggered: deleteDialog.confirm()
+            }
+        ]
+
+        Controls.Label {
+            Layout.fillWidth: true
+            wrapMode: Text.Wrap
+            textFormat: Text.PlainText
+            text: i18n("Delete this item from the server? The file is removed and cannot be recovered")
+        }
     }
 
     ListView {
@@ -484,30 +876,26 @@ Kirigami.ScrollablePage {
                                 id: scrim
 
                                 readonly property color fade: Kirigami.Theme.backgroundColor
+                                // Where the text block starts inside the scrim: the fade is measured from it, not from the image's bottom
+                                readonly property real textTop: Math.max(0, height - page.margin - heroText.implicitHeight)
 
                                 anchors {
                                     left: parent.left
                                     right: parent.right
                                     bottom: parent.bottom
                                 }
-                                // As little of the image as the text needs: an eased rise, opaque only at the image's last line so its edge leaves no seam
-                                height: Math.min(parent.height, hero.overlay ? heroText.implicitHeight + Kirigami.Units.gridUnit * 2 : Kirigami.Units.gridUnit * 2)
+                                // Over the image: three grid units of soft fade above the text, then the background behind the whole block
+                                height: hero.overlay
+                                        ? Math.min(parent.height, heroText.implicitHeight + page.margin + Kirigami.Units.gridUnit * 3)
+                                        : Kirigami.Units.gridUnit * 2
                                 gradient: Gradient {
                                     GradientStop {
                                         position: 0
                                         color: Qt.alpha(scrim.fade, 0)
                                     }
                                     GradientStop {
-                                        position: 0.3
-                                        color: Qt.alpha(scrim.fade, 0.12)
-                                    }
-                                    GradientStop {
-                                        position: 0.55
-                                        color: Qt.alpha(scrim.fade, 0.4)
-                                    }
-                                    GradientStop {
-                                        position: 0.8
-                                        color: Qt.alpha(scrim.fade, 0.75)
+                                        position: hero.overlay ? Math.min(1, scrim.textTop / scrim.height) : 0.5
+                                        color: Qt.alpha(scrim.fade, hero.overlay ? 0.85 : 0.5)
                                     }
                                     GradientStop {
                                         position: 1
@@ -784,22 +1172,126 @@ Kirigami.ScrollablePage {
                                 }
 
                                 ActionButton {
+                                    id: playWide
                                     objectName: "detailsPlay"
                                     visible: !hero.narrow && command.visible
                                     command: page.playAction
                                     highlighted: true
+                                    Component.onCompleted: page.widePlayButton = playWide
                                 }
                             }
                         }
                     }
 
-                    // The one button of the hero on a narrow window, the whole width under the facts: the other actions are in the page toolbar
+                    // The one button of the hero on a narrow window, above the track selectors: the other actions are in the page toolbar
                     ActionButton {
+                        id: playNarrow
                         objectName: "detailsPlayNarrow"
                         Layout.fillWidth: true
                         visible: hero.narrow && command.visible
                         command: page.playAction
                         highlighted: true
+                        Component.onCompleted: page.narrowPlayButton = playNarrow
+                    }
+
+                    // The tracks picked before playback: the server's indexes go in the PlaybackInfo request and select the track once the file loads
+                    Flow {
+                        id: streamSelectors
+                        Layout.fillWidth: true
+                        visible: page.audioChoices.length > 1 || page.subtitleChoices.length > 2
+                        spacing: Kirigami.Units.largeSpacing
+
+                        RowLayout {
+                            spacing: Kirigami.Units.smallSpacing
+
+                            Controls.Label {
+                                text: i18n("Audio")
+                                visible: page.audioChoices.length > 1
+                            }
+                            Controls.ComboBox {
+                                id: audioSelector
+                                objectName: "audioSelector"
+                                visible: page.audioChoices.length > 1
+                                enabled: !(page.Window.window?.groupRouting ?? false)
+                                model: page.audioChoices
+                                textRole: "label"
+                                Accessible.name: i18n("Audio track")
+                                onActivated: index => page.audioStreamIndex = page.audioChoices[index].index
+                                // Written by the Binding so a reload that drops the choice can move it back
+                                Binding {
+                                    target: audioSelector
+                                    property: "currentIndex"
+                                    value: page.choiceIndex(page.audioChoices, page.audioStreamIndex)
+                                    restoreMode: Binding.RestoreNone
+                                }
+                                // The style's own rows read server titles as mnemonic rich text: a plain label keeps them literal
+                                delegate: Controls.MenuItem {
+                                    id: audioChoice
+
+                                    required property int index
+                                    required property var modelData
+
+                                    objectName: "audioChoice_" + index
+                                    text: modelData.label
+                                    highlighted: audioSelector.highlightedIndex === index
+                                    Kirigami.MnemonicData.enabled: false
+                                    contentItem: Controls.Label {
+                                        text: audioChoice.text
+                                        textFormat: Text.PlainText
+                                        elide: Text.ElideRight
+                                        font: audioChoice.font
+                                        verticalAlignment: Text.AlignVCenter
+                                        color: audioChoice.highlighted || audioChoice.pressed ? Kirigami.Theme.highlightedTextColor : Kirigami.Theme.textColor
+                                    }
+                                }
+                            }
+                        }
+
+                        RowLayout {
+                            spacing: Kirigami.Units.smallSpacing
+
+                            Controls.Label {
+                                text: i18n("Subtitles")
+                                visible: page.subtitleChoices.length > 2
+                            }
+                            Controls.ComboBox {
+                                id: subtitleSelector
+                                objectName: "subtitleSelector"
+                                visible: page.subtitleChoices.length > 2
+                                enabled: !(page.Window.window?.groupRouting ?? false)
+                                model: page.subtitleChoices
+                                textRole: "label"
+                                Accessible.name: i18n("Subtitle track")
+                                onActivated: index => page.subtitleStreamIndex = page.subtitleChoices[index].index
+                                // Written by the Binding so a reload that drops the choice can move it back
+                                Binding {
+                                    target: subtitleSelector
+                                    property: "currentIndex"
+                                    value: page.choiceIndex(page.subtitleChoices, page.subtitleStreamIndex)
+                                    restoreMode: Binding.RestoreNone
+                                }
+                                // The style's own rows read server titles as mnemonic rich text: a plain label keeps them literal
+                                delegate: Controls.MenuItem {
+                                    id: subtitleChoice
+
+                                    required property int index
+                                    required property var modelData
+
+                                    objectName: "subtitleChoice_" + index
+                                    text: modelData.label
+                                    highlighted: subtitleSelector.highlightedIndex === index
+                                    Kirigami.MnemonicData.enabled: false
+                                    contentItem: Controls.Label {
+                                        text: subtitleChoice.text
+                                        textFormat: Text.PlainText
+                                        elide: Text.ElideRight
+                                        font: subtitleChoice.font
+                                        verticalAlignment: Text.AlignVCenter
+                                        color: subtitleChoice.highlighted || subtitleChoice.pressed ? Kirigami.Theme.highlightedTextColor : Kirigami.Theme.textColor
+                                    }
+                                }
+                            }
+                        }
                     }
 
                     Flow {
@@ -1143,88 +1635,9 @@ Kirigami.ScrollablePage {
                         }
                     }
 
-                    Kirigami.Heading {
+                    CastCrewSection {
                         Layout.fillWidth: true
-                        visible: page.details.people.length > 0
-                        level: 2
-                        text: i18n("Cast and Crew")
-                    }
-
-                    CardRow {
-                        visible: page.details.people.length > 0
-                        model: page.details.people
-                        cardHeight: page.personCardHeight
-                        accessibleName: i18n("Cast and Crew")
-                        pageFlickable: page.flickable
-
-                        delegate: Controls.ItemDelegate {
-                            id: person
-
-                            required property var modelData
-
-                            // The role of an actor, or the kind of crew when the server gives no role
-                            readonly property string subtitle: modelData.role.length > 0 ? modelData.role : page.personKind(modelData.type)
-
-                            width: page.personCardWidth
-                            height: page.personCardHeight
-                            // The list is the one tab stop of its row, and a person has nothing to open
-                            focusPolicy: Qt.NoFocus
-                            hoverEnabled: false
-                            highlighted: ListView.isCurrentItem && ListView.view.activeFocus
-                            padding: Kirigami.Units.smallSpacing
-                            Accessible.name: subtitle.length > 0 ? modelData.name + ", " + subtitle : modelData.name
-
-                            contentItem: ColumnLayout {
-                                spacing: 0
-
-                                Rectangle {
-                                    Layout.fillWidth: true
-                                    Layout.fillHeight: true
-                                    Layout.preferredHeight: width * 3 / 2
-                                    Layout.bottomMargin: Kirigami.Units.smallSpacing
-                                    radius: Kirigami.Units.cornerRadius
-                                    color: Kirigami.Theme.alternateBackgroundColor
-
-                                    Kirigami.Icon {
-                                        anchors.centerIn: parent
-                                        width: Kirigami.Units.iconSizes.huge
-                                        height: width
-                                        source: "user-identity"
-                                        visible: photo.status !== Image.Ready
-                                    }
-
-                                    Kirigami.ShadowedImage {
-                                        id: photo
-                                        anchors.fill: parent
-                                        radius: parent.radius
-                                        asynchronous: true
-                                        fillMode: Image.PreserveAspectCrop
-                                        sourceSize.width: width * Screen.devicePixelRatio
-                                        // Only URLs built by JellyfinClient::imageUrl belong here
-                                        source: page.inView ? person.modelData.imageUrl : ""
-                                        Accessible.ignored: true
-                                    }
-                                }
-
-                                // Names and roles come from the server: plain text only
-                                Controls.Label {
-                                    Layout.fillWidth: true
-                                    elide: Text.ElideRight
-                                    maximumLineCount: 1
-                                    textFormat: Text.PlainText
-                                    text: person.modelData.name
-                                }
-
-                                Controls.Label {
-                                    Layout.fillWidth: true
-                                    elide: Text.ElideRight
-                                    maximumLineCount: 1
-                                    opacity: 0.7
-                                    textFormat: Text.PlainText
-                                    text: person.subtitle
-                                }
-                            }
-                        }
+                        people: page.childModel.kind === ItemChildrenModel.Season ? [] : page.details.people
                     }
 
                     Kirigami.Heading {
@@ -1376,8 +1789,8 @@ Kirigami.ScrollablePage {
 
         footer: Item {
             width: list.width
-            // The warning has an action at its trailing end, where the mini player docks: it lifts the box above the dock
-            height: footerContent.implicitHeight + page.margin + (episodesWarning.visible ? (page.Window.window?.miniPlayerSpace ?? 0) : 0)
+            // The warning has an action at its trailing end, where the mini player docks: it lifts the box above the dock; the people of a season follow the episodes, with the page's bottom margin
+            height: footerContent.implicitHeight + page.margin + (footerCast.visible ? page.margin : 0) + (episodesWarning.visible ? (page.Window.window?.miniPlayerSpace ?? 0) : 0)
 
             ColumnLayout {
                 id: footerContent
@@ -1398,6 +1811,12 @@ Kirigami.ScrollablePage {
                             onTriggered: page.childModel.episodes.retry()
                         }
                     ]
+                }
+
+                CastCrewSection {
+                    id: footerCast
+                    Layout.fillWidth: true
+                    people: page.childModel.kind === ItemChildrenModel.Season ? page.details.people : []
                 }
             }
         }

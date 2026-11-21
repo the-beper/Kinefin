@@ -515,6 +515,48 @@ class TestItemDetailsModel : public QObject {
         QCOMPARE(bare.criticRating, -1.0);
     }
 
+    void parsesRemoteTrailers()
+    {
+        const QJsonObject item{
+            {QStringLiteral("Id"), kMovie},
+            {QStringLiteral("RemoteTrailers"),
+             QJsonArray{
+                 QJsonObject{{QStringLiteral("Name"), QStringLiteral("Official")},
+                             {QStringLiteral("Url"),
+                              QStringLiteral("https://www.youtube.com/watch?v=abc")}},
+                 QJsonObject{{QStringLiteral("Name"), QStringLiteral("Insecure")},
+                             {QStringLiteral("Url"), QStringLiteral("http://example.com/trailer")}},
+                 QJsonObject{{QStringLiteral("Name"), QStringLiteral("File")},
+                             {QStringLiteral("Url"), QStringLiteral("file:///etc/passwd")}},
+                 QJsonObject{{QStringLiteral("Name"), QStringLiteral("Credentials")},
+                             {QStringLiteral("Url"),
+                              QStringLiteral("https://user:pass@example.com/trailer")}},
+                 QJsonObject{{QStringLiteral("Name"), QStringLiteral("No URL")}}}}};
+        const Kinefin::ItemDetails parsed = Kinefin::parseItemDetails(item);
+        QVERIFY(parsed.valid);
+        QCOMPARE(parsed.trailers.size(), 1);
+        QCOMPARE(parsed.trailers.constFirst().name, QStringLiteral("Official"));
+        QCOMPARE(parsed.trailers.constFirst().url,
+                 QStringLiteral("https://www.youtube.com/watch?v=abc"));
+        const Kinefin::ItemDetails bare =
+            Kinefin::parseItemDetails(QJsonObject{{QStringLiteral("Id"), kMovie}});
+        QVERIFY(bare.trailers.isEmpty());
+    }
+
+    void parsesCanDelete()
+    {
+        const Kinefin::ItemDetails allowed = Kinefin::parseItemDetails(
+            QJsonObject{{QStringLiteral("Id"), kMovie}, {QStringLiteral("CanDelete"), true}});
+        QVERIFY(allowed.canDelete);
+        const Kinefin::ItemDetails absent =
+            Kinefin::parseItemDetails(QJsonObject{{QStringLiteral("Id"), kMovie}});
+        QVERIFY(!absent.canDelete);
+        // Only a bool says yes
+        const Kinefin::ItemDetails text = Kinefin::parseItemDetails(QJsonObject{
+            {QStringLiteral("Id"), kMovie}, {QStringLiteral("CanDelete"), QStringLiteral("true")}});
+        QVERIFY(!text.canDelete);
+    }
+
     void parsesTheDownloadFields()
     {
         const QJsonObject source{{QStringLiteral("Id"), kMovie},
@@ -634,7 +676,8 @@ class TestItemDetailsModel : public QObject {
              {QStringLiteral("Overview"), QStringLiteral("Genres"), QStringLiteral("People"),
               QStringLiteral("Chapters"), QStringLiteral("MediaSources"),
               QStringLiteral("Taglines"), QStringLiteral("OriginalTitle"),
-              QStringLiteral("Studios"), QStringLiteral("CanDownload")})
+              QStringLiteral("Studios"), QStringLiteral("CanDownload"), QStringLiteral("CanDelete"),
+              QStringLiteral("RemoteTrailers")})
             QVERIFY2(fields.contains(field), qPrintable(field));
         QVERIFY(!wire.hasQueryItem(QStringLiteral("parentId")));
         QVERIFY(!wire.hasQueryItem(QStringLiteral("limit")));

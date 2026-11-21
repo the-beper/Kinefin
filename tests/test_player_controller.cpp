@@ -1488,6 +1488,38 @@ class TestPlayerController : public QObject {
         QCOMPARE(chain.controller.itemId(), episodeId(3));
     }
 
+    void detailsStreamsAreKeptForAReopen()
+    {
+        if (!Kinefin::ClipExporter::hasEncoder(QStringLiteral("mpeg2video")))
+            QSKIP("no MPEG-2 encoder to make a transport stream");
+        Chain chain({}, QStringLiteral("detailsstreams"));
+        QVERIFY(chain.ok);
+        const QString stream = makeTransportStream(chain.dir, 5);
+        QVERIFY(!stream.isEmpty());
+        QVERIFY(chain.engine()->init({QStringLiteral("vo=null"), QStringLiteral("ao=null")}));
+        // The server's answer is held: the test gives the controller a local file instead
+        chain.server.holdPlaybackInfo = true;
+        QVERIFY(chain.controller.playItemWithStreams(kMovie, 0, 1, 2));
+        QTRY_COMPARE(chain.server.playbackInfoRequests, 1);
+        QVERIFY(chain.server.lastPlaybackInfoBody.contains("\"AudioStreamIndex\":1"));
+        QVERIFY(chain.server.lastPlaybackInfoBody.contains("\"SubtitleStreamIndex\":2"));
+        Kinefin::PlaybackSource source;
+        source.itemId = kMovie;
+        source.mediaSourceId = QStringLiteral("c1b2a3d4e5f6071829304a5b6c7d8e9f");
+        source.playSessionId = QStringLiteral("s1");
+        source.method = Kinefin::PlaybackSource::Method::Direct;
+        source.url = QUrl::fromLocalFile(stream);
+        Q_EMIT chain.client.playbackInfoReady(source);
+        // The file loads and the pending pick is applied and consumed
+        QTRY_VERIFY(chain.controller.canSeek());
+        chain.controller.setRepeatMode(2);
+        const int requests = chain.server.playbackInfoRequests;
+        // Repeat One replays the item at its natural end, and the reopen asks for the same audio and subtitle
+        QTRY_COMPARE_WITH_TIMEOUT(chain.server.playbackInfoRequests, requests + 1, 15000);
+        QVERIFY(chain.server.lastPlaybackInfoBody.contains("\"AudioStreamIndex\":1"));
+        QVERIFY(chain.server.lastPlaybackInfoBody.contains("\"SubtitleStreamIndex\":2"));
+    }
+
     void repeatPlaysALoneMovieAgainAfterARealEnd()
     {
         Chain chain;

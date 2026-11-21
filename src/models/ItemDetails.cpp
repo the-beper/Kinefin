@@ -9,6 +9,7 @@
 #include <QJsonArray>
 #include <QJsonValue>
 #include <QRegularExpression>
+#include <QUrl>
 
 #include <algorithm>
 
@@ -235,6 +236,7 @@ ItemDetails parseItemDetails(const QJsonObject &item)
     }
     // Absent or unreadable leaves the policy in charge
     details.canDownload = item.value(QStringLiteral("CanDownload")).toBool(true);
+    details.canDelete = item.value(QStringLiteral("CanDelete")).toBool(false);
 
     details.seriesName = text(item.value(QStringLiteral("SeriesName")), ItemDetails::MaxName);
     details.seriesId = validId(item.value(QStringLiteral("SeriesId")));
@@ -303,6 +305,26 @@ ItemDetails parseItemDetails(const QJsonObject &item)
     }
 
     details.chapters = parseChapters(item.value(QStringLiteral("Chapters")));
+
+    const QJsonValue trailers = item.value(QStringLiteral("RemoteTrailers"));
+    if (trailers.isArray()) {
+        for (const QJsonValue &entry : trailers.toArray()) {
+            if (details.trailers.size() == ItemDetails::MaxTrailers)
+                break;
+            if (!entry.isObject())
+                continue;
+            const QJsonObject trailer = entry.toObject();
+            const QUrl url(text(trailer.value(QStringLiteral("Url")), 2048));
+            if (!url.isValid() || url.scheme() != QLatin1String("https") || url.host().isEmpty()
+                || !url.userInfo().isEmpty())
+                continue;
+            TrailerSummary summary;
+            summary.name =
+                oneLine(text(trailer.value(QStringLiteral("Name")), ItemDetails::MaxShort));
+            summary.url = url.toString(QUrl::FullyEncoded);
+            details.trailers.append(summary);
+        }
+    }
 
     const QJsonValue sources = item.value(QStringLiteral("MediaSources"));
     if (sources.isArray()) {

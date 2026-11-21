@@ -21,9 +21,17 @@ Kirigami.AbstractCard {
     Controls.ToolTip.visible: (hovered || visualFocus) && image.status === Image.Ready
     Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
 
+    // The focus ring the keyboard and the pad show: the style's own highlight fills the card, which would hide the image
+    background: Rectangle {
+        readonly property bool ring: tile.visualFocus
+        color: tile.pressed ? Qt.alpha(Kirigami.Theme.highlightColor, 0.3) : (tile.hovered ? Qt.alpha(Kirigami.Theme.highlightColor, 0.15) : "transparent")
+        radius: Kirigami.Units.cornerRadius
+        border.width: ring ? 2 : 0
+        border.color: Kirigami.Theme.highlightColor
+    }
+
     contentItem: ColumnLayout {
         spacing: Kirigami.Units.smallSpacing
-
         Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: width * 9 / 16
@@ -67,6 +75,15 @@ Kirigami.AbstractCard {
                 sourceSize.width: width * Screen.devicePixelRatio
                 // Only URLs built by JellyfinClient::imageUrl belong here: the image fetcher allows nothing else, but a raw server string must never become a source
                 source: tile.library.imageUrl
+            }
+
+            // The image covers a border drawn on this rectangle: the contour is a transparent overlay on top
+            Rectangle {
+                anchors.fill: parent
+                color: "transparent"
+                border.width: 1
+                border.color: Qt.alpha(Kirigami.Theme.textColor, 0.3)
+                Accessible.ignored: true
             }
         }
 

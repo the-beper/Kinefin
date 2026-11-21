@@ -477,7 +477,32 @@ class FakeJellyfin {
     int generatedResumeTotal = -1;
     // When >= 0 the Episodes family is generated from startIndex/limit, like generatedItemTotal does for Items: this is the TotalRecordCount
     int generatedEpisodeTotal = -1;
-    QList<QByteArray> itemsRoutes; // every Items request in arrival order
+    QList<QByteArray> itemsRoutes;       // every Items request in arrival order
+    QList<QByteArray> refreshRequests;   // every POST /Items/{id}/Refresh route in arrival order
+    QList<QByteArray> collectionCreates; // every POST /Collections body in arrival order
+    QList<QByteArray> collectionAdds; // every POST /Collections/{id}/Items route in arrival order
+    QSet<QString>
+        deletableMedia; // ids whose GET /Items/{id} answers its itemsById entry and whose DELETE answers 204
+    QList<QByteArray> mediaDeletes;        // every DELETE /Items/{id} of a deletable media item
+    QList<QByteArray> itemUpdates;         // every POST /Items/{id} metadata body in arrival order
+    QList<QByteArray> remoteSearchBodies;  // every POST /Items/RemoteSearch/{Movie|Series} body
+    QList<QByteArray> remoteSearchApplies; // every POST /Items/RemoteSearch/Apply/{id} body
+    QList<QByteArray> imageUploads;        // route, content type and size of every image POST
+    QList<QByteArray> imageDeletes;        // every image DELETE route
+    QList<QByteArray> subtitleUploads;     // every POST /Videos/{id}/Subtitles body
+    QList<QByteArray> subtitleDeletes;     // every DELETE /Videos/{id}/Subtitles/{index} route
+    // The status of the newer write routes, a success unless a test says otherwise
+    int imageWriteStatus = 204;
+    int subtitleWriteStatus = 204;
+    int refreshStatus = 204;
+    int itemUpdateStatus = 204;
+    int collectionCreateStatus = 200;
+    int collectionAddStatus = 204;
+    int remoteSearchStatus = 200;
+    int remoteSearchApplyStatus = 204;
+    QByteArray remoteSearchResults = // the answer of a remote search unless a test overrides it
+        QByteArrayLiteral("[{\"Name\":\"Arcturus\",\"ProductionYear\":2012,"
+                          "\"SearchProviderName\":\"TMDB\",\"ProviderIds\":{\"Tmdb\":\"123\"}}]");
     // A test's own answer to an Items request, from its route: a status of 0 passes to the other answers
     std::function<std::pair<int, QByteArray>(const QByteArray &route)> itemsResponder;
     // Items by lower-case id, each a JSON object: when not empty, an Items request with `ids=` answers the entries it finds (an empty envelope when none), whatever the listing fixture says
@@ -526,7 +551,7 @@ class FakeJellyfin {
     QHash<QString, QString> typedItems;
     // GET /Items/{id}: a non-zero status, or a non-empty raw body, replaces the answer
     int playlistItemStatus = 0;
-    // The `CanDelete` GET /Items/{id} answers for a playlist (not sent for other items)
+    // The `CanDelete` GET /Items/{id} answers for a playlist (a media delete reads its own item too)
     bool playlistsDeletable = true;
     QByteArray playlistItemRawBody;
     // Writes are applied, then the connection is closed with no answer (a transport error for the client)
@@ -920,6 +945,22 @@ class FakeJellyfin {
                                 });
         if (at < 0 && !deleteItem && !getItem)
             return false;
+        if ((deleteItem || getItem) && !hasSessionToken(authorization)) {
+            respond(socket, 401, {});
+            return true;
+        }
+        const QString mediaId = lastPart.size() >= 32
+                                    ? QString::fromUtf8(lastPart).remove(QLatin1Char('-')).toLower()
+                                    : QString();
+        if (deleteItem && deletableMedia.contains(mediaId)) {
+            mediaDeletes.append(route);
+            respond(socket, 204, {});
+            return true;
+        }
+        if (getItem && deletableMedia.contains(mediaId)) {
+            respond(socket, 200, itemsById.value(mediaId));
+            return true;
+        }
         if (!hasSessionToken(authorization)) {
             respond(socket, 401, {});
             return true;
@@ -1560,6 +1601,98 @@ class FakeJellyfin {
             lastCapabilitiesBody = body;
             lastCapabilitiesAuth = authorization;
             respond(socket, 204, {});
+            return;
+        }
+        if (method == "POST" && route.contains("/Items/RemoteSearch/Apply/")) {
+            if (!hasSessionToken(authorization)) {
+                respond(socket, 401, {});
+                return;
+            }
+            remoteSearchApplies.append(body);
+            respond(socket, remoteSearchApplyStatus, {});
+            return;
+        }
+        if ((method == "POST" || method == "DELETE") && route.contains("/Items/")
+            && route.contains("/Images/")) {
+            if (!hasSessionToken(authorization)) {
+                respond(socket, 401, {});
+                return;
+            }
+            if (method == "POST")
+                imageUploads.append(route + '|' + contentType + '|'
+                                    + QByteArray::number(body.size()));
+            else
+                imageDeletes.append(route);
+            respond(socket, imageWriteStatus, {});
+            return;
+        }
+        if (method == "POST" && route.contains("/Videos/") && route.endsWith("/Subtitles")) {
+            if (!hasSessionToken(authorization)) {
+                respond(socket, 401, {});
+                return;
+            }
+            subtitleUploads.append(body);
+            respond(socket, subtitleWriteStatus, {});
+            return;
+        }
+        if (method == "DELETE" && route.contains("/Videos/") && route.contains("/Subtitles/")) {
+            if (!hasSessionToken(authorization)) {
+                respond(socket, 401, {});
+                return;
+            }
+            subtitleDeletes.append(route);
+            respond(socket, subtitleWriteStatus, {});
+            return;
+        }
+        if (method == "POST"
+            && (route.contains("/Items/RemoteSearch/Movie")
+                || route.contains("/Items/RemoteSearch/Series"))) {
+            if (!hasSessionToken(authorization)) {
+                respond(socket, 401, {});
+                return;
+            }
+            remoteSearchBodies.append(body);
+            respond(socket, remoteSearchStatus, remoteSearchResults);
+            return;
+        }
+        if (method == "POST" && route.contains("/Items/") && route.contains("/Refresh?")) {
+            if (!hasSessionToken(authorization)) {
+                respond(socket, 401, {});
+                return;
+            }
+            refreshRequests.append(route);
+            respond(socket, refreshStatus, {});
+            return;
+        }
+        if (method == "POST" && route.contains("/Items/")) {
+            const QByteArray tail = route.mid(route.indexOf("/Items/") + 7);
+            if (!tail.contains('/') && !tail.contains('?')) {
+                if (!hasSessionToken(authorization)) {
+                    respond(socket, 401, {});
+                    return;
+                }
+                itemUpdates.append(body);
+                respond(socket, itemUpdateStatus, {});
+                return;
+            }
+        }
+        if (method == "POST" && route.endsWith("/Collections")) {
+            if (!hasSessionToken(authorization)) {
+                respond(socket, 401, {});
+                return;
+            }
+            collectionCreates.append(body);
+            respond(socket, collectionCreateStatus,
+                    QByteArrayLiteral("{\"Id\":\"11112222333344445555666677778888\"}"));
+            return;
+        }
+        if (method == "POST" && route.contains("/Collections/") && route.contains("/Items?")) {
+            if (!hasSessionToken(authorization)) {
+                respond(socket, 401, {});
+                return;
+            }
+            collectionAdds.append(route);
+            respond(socket, collectionAddStatus, {});
             return;
         }
         if ((method == "POST" || method == "DELETE") && route.contains("/UserFavoriteItems/")) {

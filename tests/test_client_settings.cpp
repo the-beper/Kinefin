@@ -240,10 +240,12 @@ class TestClientSettings : public QObject {
         {
             ClientSettings settings(path());
             QSignalSpy failed(&settings, &ClientSettings::saveFailed);
-            QVERIFY(settings.setValue(QStringLiteral("main"), QStringLiteral("alwaysOnTop"), true));
+            QVERIFY(
+                settings.setValue(QStringLiteral("main"), QStringLiteral("ignoreSSLErrors"), true));
             QCOMPARE(failed.size(), 1);
             // The change lives in memory for this session
-            QCOMPARE(settings.value(QStringLiteral("main"), QStringLiteral("alwaysOnTop")), true);
+            QCOMPARE(settings.value(QStringLiteral("main"), QStringLiteral("ignoreSSLErrors")),
+                     true);
         }
         QCOMPARE(readAll(path()), newer);
         QDir(path() + QStringLiteral(".broken.new")).removeRecursively();
@@ -263,7 +265,7 @@ class TestClientSettings : public QObject {
         if (geteuid() == 0)
             QSKIP("root ignores file permissions");
         ClientSettings settings(path());
-        QVERIFY(settings.setValue(QStringLiteral("main"), QStringLiteral("alwaysOnTop"), true));
+        QVERIFY(settings.setValue(QStringLiteral("main"), QStringLiteral("ignoreSSLErrors"), true));
         QVERIFY(
             QFile::setPermissions(m_dir.path(), QFileDevice::ReadOwner | QFileDevice::ExeOwner));
         QSignalSpy failed(&settings, &ClientSettings::saveFailed);

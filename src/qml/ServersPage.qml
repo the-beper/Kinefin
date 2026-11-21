@@ -316,7 +316,7 @@ Kirigami.ScrollablePage {
                                 }
                                 Controls.Button {
                                     // The word of the confirmation it opens
-                                    text: i18n("Remove")
+                                    text: i18n("Remove…")
                                     icon.name: "edit-delete-remove"
                                     Accessible.name: i18n("Remove server %1", saved.modelData.url)
                                     onClicked: {

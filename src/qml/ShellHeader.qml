@@ -343,6 +343,7 @@ Item {
                         objectName: "tabIndicator"
                         visible: tab.checked
                         anchors.bottom: parent.bottom
+                        anchors.bottomMargin: 1
                         anchors.horizontalCenter: parent.horizontalCenter
                         width: Math.max(0, tab.availableWidth - Kirigami.Units.smallSpacing)
                         height: Math.max(2, Math.round(Kirigami.Units.smallSpacing * 0.75))
@@ -748,7 +749,7 @@ Item {
         id: signOutAction
         objectName: "signOutAction"
 
-        text: i18nc("@action:inmenu", "Sign Out")
+        text: i18nc("@action:inmenu", "Sign Out…")
         tooltip: i18nc("@info:tooltip", "Remove this user's saved session from this system")
         icon.name: "system-log-out"
         visible: root.signedIn
@@ -1056,5 +1057,14 @@ Item {
         objectName: "shortcutsDialog"
         tabActions: root.tabActions
         gamepad: root.shell.gamepad ?? null
+    }
+
+    // A hairline under the bar, as Dolphin and the other Breeze applications draw
+    Kirigami.Separator {
+        objectName: "shellHeaderSeparator"
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        Accessible.ignored: true
     }
 }

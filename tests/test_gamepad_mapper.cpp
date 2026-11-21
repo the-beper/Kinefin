@@ -68,7 +68,7 @@ class TestGamepadMapper : public QObject {
         QSignalSpy keys(&mapper, &GamepadMapper::keycodeRequested);
         mapper.axis(1, SDL_GAMEPAD_AXIS_LEFTX, 16000);
         QCOMPARE(keys.count(), 1);
-        QCOMPARE(keys.constFirst().constFirst().toString(), QStringLiteral("right"));
+        QCOMPARE(keys.constFirst().constFirst().toString(), QStringLiteral("scrollright"));
         // Above the rest band the direction stays held
         mapper.axis(1, SDL_GAMEPAD_AXIS_LEFTX, 9000);
         QCOMPARE(keys.count(), 1);
@@ -77,7 +77,7 @@ class TestGamepadMapper : public QObject {
         mapper.axis(1, SDL_GAMEPAD_AXIS_LEFTX, 7999);
         mapper.axis(1, SDL_GAMEPAD_AXIS_LEFTX, 16000);
         QCOMPARE(keys.count(), 2);
-        QCOMPARE(keys.last().constFirst().toString(), QStringLiteral("right"));
+        QCOMPARE(keys.last().constFirst().toString(), QStringLiteral("scrollright"));
     }
 
     void onlyTheDominantAxisCounts()
@@ -87,7 +87,7 @@ class TestGamepadMapper : public QObject {
         mapper.axis(1, SDL_GAMEPAD_AXIS_LEFTX, 9000);
         mapper.axis(1, SDL_GAMEPAD_AXIS_LEFTY, 16000);
         QCOMPARE(keys.count(), 1);
-        QCOMPARE(keys.constFirst().constFirst().toString(), QStringLiteral("down"));
+        QCOMPARE(keys.constFirst().constFirst().toString(), QStringLiteral("scrolldown"));
         // Left of the right stick holds the stick without a key
         mapper.axis(1, SDL_GAMEPAD_AXIS_RIGHTX, -16000);
         QCOMPARE(keys.count(), 1);

@@ -19,6 +19,13 @@ src/qml/CastDialog.qml
 src/qml/LibraryPage.qml
 src/qml/LibraryTile.qml
 src/qml/ResumeItemsPage.qml
+src/qml/PersonPage.qml
+src/qml/AddToCollectionDialog.qml
+src/qml/CollectionDialogs.qml
+src/qml/EditMetadataDialog.qml
+src/qml/IdentifyDialog.qml
+src/qml/EditImagesDialog.qml
+src/qml/EditSubtitlesDialog.qml
 src/qml/RemoteSessionsDialog.qml
 src/qml/SyncPlayDialog.qml
 src/qml/MediaInfoDialog.qml

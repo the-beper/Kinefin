@@ -37,10 +37,8 @@ Kirigami.ScrollablePage {
     }
 
     readonly property int rulesRevision: downloads.rulesRevision
-    readonly property var trackedRules: {
-        rulesRevision; // the binding follows the rule store
-        return downloads.seriesRules();
-    }
+    // The revision is part of the expression, so the binding follows the rule store
+    readonly property var trackedRules: rulesRevision >= 0 ? downloads.seriesRules() : []
 
     function ruleKindText(rule) {
         switch (rule.kind) {
@@ -469,9 +467,11 @@ Kirigami.ScrollablePage {
                         text: i18n("Tracked Series")
                     }
                     Repeater {
+                        objectName: "trackedRulesRepeater"
                         model: page.trackedRules
                         delegate: RowLayout {
                             required property var modelData
+                            required property int index
                             Layout.fillWidth: true
                             spacing: Kirigami.Units.largeSpacing
 
@@ -487,6 +487,7 @@ Kirigami.ScrollablePage {
                                 text: page.ruleKindText(modelData)
                             }
                             Controls.ToolButton {
+                                objectName: "stopSeriesRule_" + index
                                 text: i18n("Stop Automatic Downloads")
                                 icon.name: "edit-delete-remove"
                                 display: Controls.AbstractButton.IconOnly

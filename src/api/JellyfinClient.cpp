@@ -3,17 +3,23 @@
 #include "JellyfinClient.h"
 
 #include <QDate>
+#include <QFile>
+#include <QFileInfo>
 #include <QHostAddress>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonParseError>
+#include <QLoggingCategory>
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QRegularExpression>
 #include <QSslError>
+#include <QStringConverter>
 #include <QUrlQuery>
 
 #include <algorithm>
+
+Q_LOGGING_CATEGORY(apiLog, "kinefin.api")
 
 namespace Kinefin {
 namespace {
@@ -392,6 +398,13 @@ QNetworkReply *postEmpty(QNetworkAccessManager &network, QNetworkRequest request
     return network.post(request, QByteArray());
 }
 
+QNetworkReply *postJson(QNetworkAccessManager &network, QNetworkRequest request,
+                        const QJsonObject &body)
+{
+    request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    return network.post(request, QJsonDocument(body).toJson(QJsonDocument::Compact));
+}
+
 // A list of Jellyfin ids for a playlist call: at most MaxPlaylistWriteIds, each valid, and not empty unless `allowEmpty`
 bool validPlaylistIds(const QStringList &ids, bool allowEmpty)
 {
@@ -408,6 +421,54 @@ bool validPlaylistIds(const QStringList &ids, bool allowEmpty)
 QString playlistKey(const QString &playlistId)
 {
     return QString(playlistId).remove(QLatin1Char('-')).toLower();
+}
+
+// The provider ids of a RemoteSearchResult: a few identifier names, each a bounded value
+bool validProviderKey(const QString &key)
+{
+    static const QRegularExpression pattern(QStringLiteral("\\A[A-Za-z][A-Za-z0-9_]{0,63}\\z"));
+    return pattern.match(key).hasMatch();
+}
+
+bool validProviderIds(const QVariantMap &ids)
+{
+    if (ids.isEmpty() || ids.size() > 8)
+        return false;
+    for (auto it = ids.cbegin(); it != ids.cend(); ++it) {
+        if (!validProviderKey(it.key()) || !it.value().canConvert<QString>())
+            return false;
+        const QString value = it.value().toString();
+        if (value.isEmpty() || value.size() > 128)
+            return false;
+    }
+    return true;
+}
+
+constexpr qint64 MaxImageBytes = 20LL * 1024 * 1024;
+
+// The image types Jellyfin accepts here; a backdrop has an index, every other type none
+bool validImageTarget(const QString &type, int index)
+{
+    static const QStringList types{QStringLiteral("Primary"), QStringLiteral("Backdrop"),
+                                   QStringLiteral("Logo"),    QStringLiteral("Banner"),
+                                   QStringLiteral("Thumb"),   QStringLiteral("Disc"),
+                                   QStringLiteral("Art")};
+    if (!types.contains(type))
+        return false;
+    return type == QLatin1String("Backdrop") ? index >= 0 && index <= 9 : index == -1;
+}
+
+// The MIME type of the image data, told apart by its signature; empty when it is not a JPEG, PNG or WebP
+QString imageMimeType(const QByteArray &data)
+{
+    if (data.size() >= 3 && static_cast<uchar>(data.at(0)) == 0xff
+        && static_cast<uchar>(data.at(1)) == 0xd8 && static_cast<uchar>(data.at(2)) == 0xff)
+        return QStringLiteral("image/jpeg");
+    if (data.size() >= 8 && data.left(8) == QByteArray::fromHex("89504e470d0a1a0a"))
+        return QStringLiteral("image/png");
+    if (data.size() >= 12 && data.left(4) == "RIFF" && data.mid(8, 4) == "WEBP")
+        return QStringLiteral("image/webp");
+    return {};
 }
 
 // A create has no playlist yet: it takes one slot of its own, which no id can collide with
@@ -855,6 +916,8 @@ QUrlQuery listingQuery(const ItemQuery &query, const QString &userId)
             wire.addQueryItem(QStringLiteral("mediaTypes"), query.mediaTypes);
         if (!query.genreIds.isEmpty())
             wire.addQueryItem(QStringLiteral("genreIds"), query.genreIds.join(QLatin1Char(',')));
+        if (!query.personIds.isEmpty())
+            wire.addQueryItem(QStringLiteral("personIds"), query.personIds.join(QLatin1Char(',')));
         addLibraryFilterParameters(wire, query);
         if (!query.searchTerm.isEmpty())
             // Encoded here, once: QUrlQuery keeps a %XX of its input as it is, so a typed "%25" must already be "%2525"
@@ -982,6 +1045,12 @@ bool validListingQuery(const ItemQuery &query)
     if (query.genreIds.size() > MaxGenreIds)
         return false;
     for (const QString &id : query.genreIds) {
+        if (!isValidJellyfinId(id))
+            return false;
+    }
+    if (query.personIds.size() > MaxPersonIds)
+        return false;
+    for (const QString &id : query.personIds) {
         if (!isValidJellyfinId(id))
             return false;
     }
@@ -2182,6 +2251,23 @@ bool JellyfinClient::isServerImageUrl(const QUrl &base, const QUrl &url)
            && isValidImageTypeToken(parts.at(3));
 }
 
+bool JellyfinClient::isProviderImageUrl(const QUrl &url)
+{
+    if (!url.isValid() || url.scheme() != QLatin1String("https") || url.host().isEmpty()
+        || !url.userInfo().isEmpty() || url.hasFragment()
+        || (url.port(-1) != -1 && url.port(-1) != 443))
+        return false;
+    static const QStringList domains{QStringLiteral("tmdb.org"), QStringLiteral("thetvdb.com"),
+                                     QStringLiteral("omdbapi.com"), QStringLiteral("fanart.tv"),
+                                     QStringLiteral("coverartarchive.org")};
+    const QString host = url.host().toLower();
+    for (const QString &domain : domains) {
+        if (host == domain || host.endsWith(QLatin1Char('.') + domain))
+            return true;
+    }
+    return false;
+}
+
 bool JellyfinClient::fetchPublicUsers()
 {
     if (m_state == State::Disconnected || m_state == State::Probing)
@@ -2637,6 +2723,522 @@ QUrl JellyfinClient::downloadUrl(const QString &itemId) const
     return endpoint(QStringLiteral("/Items/") + itemId + QStringLiteral("/Download"));
 }
 
+QUrl JellyfinClient::streamUrl(const QString &itemId, const QString &mediaSourceId) const
+{
+    if (m_state != State::Authenticated || !isValidJellyfinId(itemId))
+        return {};
+    QUrl url = endpoint(QStringLiteral("/Videos/") + itemId + QStringLiteral("/stream"));
+    QUrlQuery query;
+    query.addQueryItem(QStringLiteral("static"), QStringLiteral("true"));
+    if (isValidJellyfinId(mediaSourceId))
+        query.addQueryItem(QStringLiteral("mediaSourceId"), mediaSourceId);
+    url.setQuery(query);
+    return url;
+}
+
+bool JellyfinClient::refreshItem(const QString &itemId)
+{
+    if (!isAuthenticated() || !isAdministrator() || !isValidJellyfinId(itemId))
+        return false;
+    const QString key = QString(itemId).remove(QLatin1Char('-')).toLower();
+    if (!m_refreshItemId.isEmpty())
+        return false;
+    m_refreshItemId = key;
+
+    QUrl url = endpoint(QStringLiteral("/Items/") + itemId + QStringLiteral("/Refresh"));
+    QUrlQuery query;
+    query.addQueryItem(QStringLiteral("metadataRefreshMode"), QStringLiteral("FullRefresh"));
+    query.addQueryItem(QStringLiteral("imageRefreshMode"), QStringLiteral("FullRefresh"));
+    query.addQueryItem(QStringLiteral("replaceAllMetadata"), QStringLiteral("false"));
+    query.addQueryItem(QStringLiteral("replaceAllImages"), QStringLiteral("false"));
+    url.setQuery(query);
+    const QNetworkRequest request = requestFor(url, true);
+    QNetworkReply *reply = postEmpty(m_network, request);
+    attach(reply, m_generation, [this, itemId](QNetworkReply *finished) {
+        m_refreshItemId.clear();
+        const int status = finished->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (status == 401) {
+            invalidateSession();
+            return;
+        }
+        Q_EMIT itemRefreshFinished(
+            itemId, status == 204 && finished->error() == QNetworkReply::NoError, status);
+    });
+    return true;
+}
+
+bool JellyfinClient::createCollection(const QString &name, const QStringList &itemIds)
+{
+    if (!isAuthenticated() || m_collectionWrites.contains(QStringLiteral("create")))
+        return false;
+    const QString clean = normalizedPlaylistName(name);
+    if (clean.isEmpty() || !validPlaylistIds(itemIds, true))
+        return false;
+    m_collectionWrites.insert(QStringLiteral("create"));
+    QJsonArray ids;
+    for (const QString &id : itemIds)
+        ids.append(id);
+    const QJsonObject body{{QStringLiteral("Name"), clean}, {QStringLiteral("Ids"), ids}};
+    const QNetworkRequest request = requestFor(endpoint(QStringLiteral("/Collections")), true);
+    QNetworkReply *reply = postJson(m_network, request, body);
+    attach(reply, m_generation, [this, clean](QNetworkReply *finished) {
+        m_collectionWrites.remove(QStringLiteral("create"));
+        const int status = finished->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (status == 401) {
+            invalidateSession();
+            return;
+        }
+        QJsonObject data;
+        QString id;
+        if (status == 200 && finished->error() == QNetworkReply::NoError
+            && parseObject(finished, &data)) {
+            const QString candidate = data.value(QStringLiteral("Id")).toString();
+            if (isValidJellyfinId(candidate))
+                id = candidate;
+        }
+        if (id.isEmpty())
+            Q_EMIT collectionCreateFailed(status);
+        else
+            Q_EMIT collectionCreated(id, clean);
+    });
+    return true;
+}
+
+bool JellyfinClient::addToCollection(const QString &collectionId, const QString &itemId)
+{
+    if (!isAuthenticated() || !isValidJellyfinId(collectionId) || !isValidJellyfinId(itemId))
+        return false;
+    const QString key =
+        QStringLiteral("add:") + QString(collectionId).remove(QLatin1Char('-')).toLower();
+    if (m_collectionWrites.contains(key))
+        return false;
+    m_collectionWrites.insert(key);
+    QUrl url = endpoint(QStringLiteral("/Collections/") + collectionId + QStringLiteral("/Items"));
+    QUrlQuery query;
+    query.addQueryItem(QStringLiteral("ids"), itemId);
+    url.setQuery(query);
+    const QNetworkRequest request = requestFor(url, true);
+    QNetworkReply *reply = postEmpty(m_network, request);
+    attach(reply, m_generation, [this, collectionId, itemId, key](QNetworkReply *finished) {
+        m_collectionWrites.remove(key);
+        const int status = finished->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (status == 401) {
+            invalidateSession();
+            return;
+        }
+        if (status == 204 && finished->error() == QNetworkReply::NoError)
+            Q_EMIT collectionItemsAdded(collectionId, itemId);
+        else
+            Q_EMIT collectionItemsAddFailed(collectionId, itemId, status);
+    });
+    return true;
+}
+
+bool JellyfinClient::deleteItem(const QString &itemId)
+{
+    if (!isAuthenticated() || !isAdministrator() || !isValidJellyfinId(itemId)
+        || !isValidJellyfinId(m_userId) || !m_deletePending.isEmpty())
+        return false;
+    const QString key = QString(itemId).remove(QLatin1Char('-')).toLower();
+    m_deletePending = key;
+    QUrl url = endpoint(QStringLiteral("/Items/") + itemId);
+    QUrlQuery query;
+    query.addQueryItem(QStringLiteral("userId"), m_userId);
+    query.addQueryItem(QStringLiteral("fields"), QStringLiteral("CanDelete"));
+    url.setQuery(query);
+    QNetworkReply *reply = m_network.get(requestFor(url, true));
+    attach(reply, m_generation, [this, itemId, key](QNetworkReply *finished) {
+        const int status = finished->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (status == 401) {
+            m_deletePending.clear();
+            invalidateSession();
+            return;
+        }
+        QJsonObject item;
+        const bool readable = status == 200 && finished->error() == QNetworkReply::NoError
+                              && parseObject(finished, &item)
+                              && QString(item.value(QStringLiteral("Id")).toString())
+                                         .remove(QLatin1Char('-'))
+                                         .toLower()
+                                     == key;
+        const QString type = item.value(QStringLiteral("Type")).toString();
+        const bool media = type == QLatin1String("Movie") || type == QLatin1String("Episode")
+                           || type == QLatin1String("Video");
+        if (!readable || !media || !item.value(QStringLiteral("CanDelete")).toBool(false)) {
+            m_deletePending.clear();
+            Q_EMIT itemDeleteFailed(itemId, readable ? 403 : status);
+            return;
+        }
+        const QNetworkRequest request =
+            requestFor(endpoint(QStringLiteral("/Items/") + itemId), true);
+        QNetworkReply *deleting = m_network.sendCustomRequest(request, QByteArrayLiteral("DELETE"));
+        attach(deleting, m_generation, [this, itemId](QNetworkReply *done) {
+            m_deletePending.clear();
+            const int deleteStatus =
+                done->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            if (deleteStatus == 401) {
+                invalidateSession();
+                return;
+            }
+            if (deleteStatus == 204 && done->error() == QNetworkReply::NoError)
+                Q_EMIT itemDeleted(itemId);
+            else
+                Q_EMIT itemDeleteFailed(itemId, deleteStatus);
+        });
+    });
+    return true;
+}
+
+bool JellyfinClient::updateItem(const QString &itemId, const QVariantMap &fields)
+{
+    if (!isAuthenticated() || !isAdministrator() || !isValidJellyfinId(itemId) || fields.isEmpty())
+        return false;
+    const QString key = QString(itemId).remove(QLatin1Char('-')).toLower();
+    if (m_updatePending.contains(key))
+        return false;
+    QJsonObject body;
+    for (auto it = fields.cbegin(); it != fields.cend(); ++it) {
+        const QString name = it.key();
+        if (name == QLatin1String("Name")) {
+            const QString text = it.value().toString().trimmed();
+            if (text.isEmpty() || text.size() > 512)
+                return false;
+            body.insert(name, text);
+        } else if (name == QLatin1String("Overview")) {
+            const QString text = it.value().toString();
+            if (text.size() > 16384)
+                return false;
+            body.insert(name, text);
+        } else if (name == QLatin1String("ProductionYear")) {
+            bool ok = false;
+            const int year = it.value().toInt(&ok);
+            if (!ok || year < 0 || year > 9999)
+                return false;
+            body.insert(name, year);
+        } else if (name == QLatin1String("OfficialRating")) {
+            const QString text = it.value().toString().trimmed();
+            if (text.size() > 64)
+                return false;
+            body.insert(name, text);
+        } else if (name == QLatin1String("Genres")) {
+            QJsonArray genres;
+            const QVariantList list = it.value().toList();
+            if (list.size() > 20)
+                return false;
+            for (const QVariant &entry : list) {
+                const QString text = entry.toString().trimmed();
+                if (text.isEmpty() || text.size() > 128)
+                    return false;
+                genres.append(text);
+            }
+            body.insert(name, genres);
+        } else {
+            return false;
+        }
+    }
+    if (body.isEmpty())
+        return false;
+    m_updatePending.insert(key);
+    const QNetworkRequest request = requestFor(endpoint(QStringLiteral("/Items/") + itemId), true);
+    QNetworkReply *reply = postJson(m_network, request, body);
+    attach(reply, m_generation, [this, itemId, key](QNetworkReply *finished) {
+        m_updatePending.remove(key);
+        const int status = finished->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (status == 401) {
+            invalidateSession();
+            return;
+        }
+        if (status == 204 && finished->error() == QNetworkReply::NoError)
+            Q_EMIT itemUpdated(itemId);
+        else
+            Q_EMIT itemUpdateFailed(itemId, status);
+    });
+    return true;
+}
+
+bool JellyfinClient::remoteSearch(const QString &itemId, const QString &type, const QString &name,
+                                  int year)
+{
+    if (!isAuthenticated() || !isAdministrator() || !isValidJellyfinId(itemId)
+        || (type != QLatin1String("Movie") && type != QLatin1String("Series"))
+        || name.trimmed().isEmpty() || name.size() > 512 || year < 0 || year > 9999)
+        return false;
+    const QString key = QString(itemId).remove(QLatin1Char('-')).toLower();
+    if (m_remoteSearchPending.contains(key))
+        return false;
+    m_remoteSearchPending.insert(key);
+    QJsonObject info{{QStringLiteral("Name"), name.trimmed()}};
+    if (year > 0)
+        info.insert(QStringLiteral("Year"), year);
+    const QJsonObject body{{QStringLiteral("SearchInfo"), info},
+                           {QStringLiteral("ItemId"), itemId},
+                           {QStringLiteral("IncludeDisabledProviders"), false}};
+    QNetworkRequest request =
+        requestFor(endpoint(QStringLiteral("/Items/RemoteSearch/") + type), true);
+    // The server asks the providers while the request waits: TMDB and the others can take longer than the default 15 s
+    request.setTransferTimeout(30'000);
+    QNetworkReply *reply = postJson(m_network, request, body);
+    attach(reply, m_generation, [this, itemId, key](QNetworkReply *finished) {
+        m_remoteSearchPending.remove(key);
+        const int status = finished->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (status == 401) {
+            invalidateSession();
+            return;
+        }
+        // A capped read: a hostile or broken server cannot make the client buffer an unbounded body
+        const QByteArray bytes = finished->read(MaxResponseBytes + 1);
+        // A server with no provider to ask can answer with no content: that is an empty search, not a failure
+        if (finished->error() == QNetworkReply::NoError
+            && (status == 204 || (status == 200 && bytes.isEmpty()))) {
+            Q_EMIT remoteSearchFinished(itemId, QVariantList{});
+            return;
+        }
+        QJsonParseError error;
+        const QJsonDocument document = QJsonDocument::fromJson(bytes, &error);
+        if (status != 200 || finished->error() != QNetworkReply::NoError
+            || bytes.size() > MaxResponseBytes || error.error != QJsonParseError::NoError
+            || !document.isArray()) {
+            qCWarning(apiLog) << "remote search failed with status" << status
+                              << finished->errorString();
+            Q_EMIT remoteSearchFailed(itemId, status);
+            return;
+        }
+        QVariantList results;
+        for (const QJsonValue &entry : document.array()) {
+            if (results.size() == 20)
+                break;
+            if (!entry.isObject())
+                continue;
+            const QJsonObject object = entry.toObject();
+            const QString name = object.value(QStringLiteral("Name")).toString().left(512);
+            if (name.isEmpty())
+                continue;
+            const QVariantMap ids =
+                object.value(QStringLiteral("ProviderIds")).toObject().toVariantMap();
+            if (!validProviderIds(ids))
+                continue;
+            int year = object.value(QStringLiteral("ProductionYear")).toInt(0);
+            if (year < 1 || year > 9999)
+                year = 0;
+            // The provider's own artwork, only when it is an https URL on a known provider domain
+            const QUrl imageUrl(object.value(QStringLiteral("ImageUrl")).toString());
+            results.append(QVariantMap{
+                {QStringLiteral("name"), name},
+                {QStringLiteral("year"), year},
+                {QStringLiteral("provider"),
+                 object.value(QStringLiteral("SearchProviderName")).toString().left(128)},
+                {QStringLiteral("providerIds"), ids},
+                {QStringLiteral("imageUrl"), isProviderImageUrl(imageUrl) ? imageUrl : QUrl()}});
+        }
+        Q_EMIT remoteSearchFinished(itemId, results);
+    });
+    return true;
+}
+
+bool JellyfinClient::applyRemoteSearch(const QString &itemId, const QVariantMap &result)
+{
+    if (!isAuthenticated() || !isAdministrator() || !isValidJellyfinId(itemId) || result.isEmpty())
+        return false;
+    const QString key = QString(itemId).remove(QLatin1Char('-')).toLower();
+    if (m_remoteSearchApplyPending.contains(key))
+        return false;
+    const QString name = result.value(QStringLiteral("name")).toString().trimmed();
+    const QVariantMap ids = result.value(QStringLiteral("providerIds")).toMap();
+    const int year = result.value(QStringLiteral("year")).toInt(0);
+    if (name.isEmpty() || name.size() > 512 || !validProviderIds(ids) || year < 0 || year > 9999)
+        return false;
+    QJsonObject providerIds;
+    for (auto it = ids.cbegin(); it != ids.cend(); ++it)
+        providerIds.insert(it.key(), it.value().toString());
+    QJsonObject body{{QStringLiteral("Name"), name},
+                     {QStringLiteral("ProviderIds"), providerIds},
+                     {QStringLiteral("SearchProviderName"),
+                      result.value(QStringLiteral("provider")).toString().left(128)}};
+    if (year > 0)
+        body.insert(QStringLiteral("ProductionYear"), year);
+    QUrl url = endpoint(QStringLiteral("/Items/RemoteSearch/Apply/") + itemId);
+    QUrlQuery query;
+    query.addQueryItem(QStringLiteral("replaceAllImages"), QStringLiteral("false"));
+    url.setQuery(query);
+    m_remoteSearchApplyPending.insert(key);
+    const QNetworkRequest request = requestFor(url, true);
+    QNetworkReply *reply = postJson(m_network, request, body);
+    attach(reply, m_generation, [this, itemId, key](QNetworkReply *finished) {
+        m_remoteSearchApplyPending.remove(key);
+        const int status = finished->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (status == 401) {
+            invalidateSession();
+            return;
+        }
+        if (status == 204 && finished->error() == QNetworkReply::NoError)
+            Q_EMIT remoteSearchApplied(itemId);
+        else {
+            qCWarning(apiLog) << "remote search apply failed with status" << status
+                              << finished->errorString();
+            Q_EMIT remoteSearchApplyFailed(itemId, status);
+        }
+    });
+    return true;
+}
+
+bool JellyfinClient::uploadImage(const QString &itemId, const QString &imageType, int index,
+                                 const QUrl &fileUrl)
+{
+    if (!isAuthenticated() || !isAdministrator() || !isValidJellyfinId(itemId)
+        || !validImageTarget(imageType, index) || !fileUrl.isLocalFile())
+        return false;
+    const QString key = QString(itemId).remove(QLatin1Char('-')).toLower() + QLatin1Char('|')
+                        + imageType + QLatin1Char('|') + QString::number(index);
+    if (m_imagePending.contains(key))
+        return false;
+    QFile file(fileUrl.toLocalFile());
+    if (!file.open(QIODevice::ReadOnly) || file.size() <= 0 || file.size() > MaxImageBytes)
+        return false;
+    const QByteArray data = file.read(MaxImageBytes + 1);
+    if (data.size() > MaxImageBytes)
+        return false;
+    const QString mime = imageMimeType(data);
+    if (mime.isEmpty())
+        return false;
+    QUrl url =
+        endpoint(QStringLiteral("/Items/") + itemId + QStringLiteral("/Images/") + imageType);
+    if (index >= 0)
+        url.setPath(url.path() + QLatin1Char('/') + QString::number(index));
+    QNetworkRequest request = requestFor(url, true);
+    request.setHeader(QNetworkRequest::ContentTypeHeader, mime);
+    m_imagePending.insert(key);
+    QNetworkReply *reply = m_network.post(request, data);
+    attach(reply, m_generation, [this, itemId, imageType, index, key](QNetworkReply *finished) {
+        m_imagePending.remove(key);
+        const int status = finished->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (status == 401) {
+            invalidateSession();
+            return;
+        }
+        if (status == 204 && finished->error() == QNetworkReply::NoError)
+            Q_EMIT itemImageUpdated(itemId, imageType, index);
+        else
+            Q_EMIT itemImageUpdateFailed(itemId, imageType, index, status);
+    });
+    return true;
+}
+
+bool JellyfinClient::deleteImage(const QString &itemId, const QString &imageType, int index)
+{
+    if (!isAuthenticated() || !isAdministrator() || !isValidJellyfinId(itemId)
+        || !validImageTarget(imageType, index))
+        return false;
+    const QString key = QString(itemId).remove(QLatin1Char('-')).toLower() + QLatin1Char('|')
+                        + imageType + QLatin1Char('|') + QString::number(index);
+    if (m_imagePending.contains(key))
+        return false;
+    QUrl url =
+        endpoint(QStringLiteral("/Items/") + itemId + QStringLiteral("/Images/") + imageType);
+    if (index >= 0)
+        url.setPath(url.path() + QLatin1Char('/') + QString::number(index));
+    m_imagePending.insert(key);
+    const QNetworkRequest request = requestFor(url, true);
+    QNetworkReply *reply = m_network.sendCustomRequest(request, QByteArrayLiteral("DELETE"));
+    attach(reply, m_generation, [this, itemId, imageType, index, key](QNetworkReply *finished) {
+        m_imagePending.remove(key);
+        const int status = finished->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (status == 401) {
+            invalidateSession();
+            return;
+        }
+        if (status == 204 && finished->error() == QNetworkReply::NoError)
+            Q_EMIT itemImageUpdated(itemId, imageType, index);
+        else
+            Q_EMIT itemImageUpdateFailed(itemId, imageType, index, status);
+    });
+    return true;
+}
+
+bool JellyfinClient::uploadSubtitle(const QString &itemId, const QUrl &fileUrl,
+                                    const QString &language, bool forced)
+{
+    if (!isAuthenticated() || !isAdministrator() || !isValidJellyfinId(itemId)
+        || !fileUrl.isLocalFile())
+        return false;
+    const QString key =
+        QString(itemId).remove(QLatin1Char('-')).toLower() + QStringLiteral("|subtitle");
+    if (m_subtitlePending.contains(key))
+        return false;
+    const QFileInfo info(fileUrl.toLocalFile());
+    static const QStringList formats{QStringLiteral("srt"), QStringLiteral("ass"),
+                                     QStringLiteral("ssa"), QStringLiteral("vtt")};
+    const QString format = info.suffix().toLower();
+    if (!info.isFile() || info.size() <= 0 || info.size() > 2LL * 1024 * 1024
+        || !formats.contains(format))
+        return false;
+    QFile file(info.absoluteFilePath());
+    if (!file.open(QIODevice::ReadOnly))
+        return false;
+    const QByteArray data = file.read(2LL * 1024 * 1024 + 1);
+    if (data.size() > 2LL * 1024 * 1024)
+        return false;
+    QStringDecoder decoder(QStringDecoder::Utf8);
+    decoder.decode(data);
+    if (decoder.hasError())
+        return false;
+    QString code = language.trimmed().toLower();
+    if (code.isEmpty())
+        code = QStringLiteral("und");
+    static const QRegularExpression languagePattern(QStringLiteral("\\A[A-Za-z]{2,3}\\z"));
+    if (!languagePattern.match(code).hasMatch())
+        return false;
+    const QJsonObject body{{QStringLiteral("Language"), code},
+                           {QStringLiteral("Format"), format},
+                           {QStringLiteral("IsForced"), forced},
+                           {QStringLiteral("Data"), QString::fromLatin1(data.toBase64())}};
+    m_subtitlePending.insert(key);
+    const QNetworkRequest request = requestFor(
+        endpoint(QStringLiteral("/Videos/") + itemId + QStringLiteral("/Subtitles")), true);
+    QNetworkReply *reply = postJson(m_network, request, body);
+    attach(reply, m_generation, [this, itemId, key](QNetworkReply *finished) {
+        m_subtitlePending.remove(key);
+        const int status = finished->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (status == 401) {
+            invalidateSession();
+            return;
+        }
+        if (status == 204 && finished->error() == QNetworkReply::NoError)
+            Q_EMIT itemSubtitleUpdated(itemId);
+        else
+            Q_EMIT itemSubtitleUpdateFailed(itemId, status);
+    });
+    return true;
+}
+
+bool JellyfinClient::deleteSubtitle(const QString &itemId, int index)
+{
+    if (!isAuthenticated() || !isAdministrator() || !isValidJellyfinId(itemId) || index < 0
+        || index > 9999)
+        return false;
+    const QString key = QString(itemId).remove(QLatin1Char('-')).toLower()
+                        + QStringLiteral("|subtitle|") + QString::number(index);
+    if (m_subtitlePending.contains(key))
+        return false;
+    m_subtitlePending.insert(key);
+    QUrl url = endpoint(QStringLiteral("/Videos/") + itemId + QStringLiteral("/Subtitles/")
+                        + QString::number(index));
+    const QNetworkRequest request = requestFor(url, true);
+    QNetworkReply *reply = m_network.sendCustomRequest(request, QByteArrayLiteral("DELETE"));
+    attach(reply, m_generation, [this, itemId, key](QNetworkReply *finished) {
+        m_subtitlePending.remove(key);
+        const int status = finished->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (status == 401) {
+            invalidateSession();
+            return;
+        }
+        if (status == 204 && finished->error() == QNetworkReply::NoError)
+            Q_EMIT itemSubtitleUpdated(itemId);
+        else
+            Q_EMIT itemSubtitleUpdateFailed(itemId, status);
+    });
+    return true;
+}
+
 QUrl JellyfinClient::subtitleFileUrl(const QString &itemId, const QString &mediaSourceId, int index,
                                      const QString &extension) const
 {
@@ -2973,6 +3575,14 @@ void JellyfinClient::abortPending()
     m_favoritePending.clear();
     m_playedPending.clear();
     m_playlistPending.clear();
+    m_refreshItemId.clear();
+    m_collectionWrites.clear();
+    m_deletePending.clear();
+    m_updatePending.clear();
+    m_remoteSearchPending.clear();
+    m_remoteSearchApplyPending.clear();
+    m_imagePending.clear();
+    m_subtitlePending.clear();
     // Reports die with the pending requests, quietly: the generation bump keeps their handlers from running. The same goes for a session re-check whose flag would otherwise stay set forever
     m_reportQueue.clear();
     m_reportBusy = false;

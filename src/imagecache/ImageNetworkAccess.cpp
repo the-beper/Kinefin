@@ -66,9 +66,11 @@ ImageNetworkAccess::ImageNetworkAccess(std::shared_ptr<ImageOrigin> origin,
                                        const QString &cacheDirectory, QObject *parent)
     : QNetworkAccessManager(parent), m_origin(std::move(origin))
 {
-    // Read at each error, so a change of the setting reaches the next request without a restart
+    // Read at each error, so a change of the setting reaches the next request without a restart; only the server's own images follow the switch, never a provider's artwork
     connect(this, &QNetworkAccessManager::sslErrors, this, [this](QNetworkReply *reply) {
-        if (m_origin && m_origin->ignoreCertificateErrors())
+        const QUrl base = m_origin ? m_origin->get() : QUrl();
+        if (m_origin && m_origin->ignoreCertificateErrors()
+            && JellyfinClient::isServerImageUrl(base, reply->request().url()))
             reply->ignoreSslErrors();
     });
     // No cookie jar is ever created: requests opt out of cookies below and the lazily created default jar stays unused
@@ -96,7 +98,9 @@ QNetworkReply *ImageNetworkAccess::createRequest(Operation operation,
         m_acceptanceSeen = m_origin->acceptanceEnded();
         clearConnectionCache();
     }
-    if (operation != GetOperation || !JellyfinClient::isServerImageUrl(base, request.url())) {
+    const bool allowed = JellyfinClient::isServerImageUrl(base, request.url())
+                         || (!base.isEmpty() && JellyfinClient::isProviderImageUrl(request.url()));
+    if (operation != GetOperation || !allowed) {
         // Without a server (signed out, or the session just ended) an image still in flight is expected to fail: only a request that does not belong to the active server is worth a warning
         if (base.isEmpty())
             qCDebug(imageCacheLog) << "Image request with no active server, refused";

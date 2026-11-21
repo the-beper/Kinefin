@@ -24,6 +24,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QGuiApplication>
+#include <QImage>
 #include <QJSValue>
 #include <QJsonArray>
 #include <QKeySequence>
@@ -96,6 +97,8 @@ const QStringList kKnownNoise = {
     QStringLiteral("DelegateModel::cancel: index out range"),
     // Qt's accounting of an incubation cancelled at teardown, reported after the assertions of the test: it does not reflect the behaviour of the app; deliberately not in tests/shell_smoke.py, which runs the real app
     QStringLiteral("items in the process of being created at engine destruction."),
+    // KDE's text fields ask Sonnet for a spell checker; the offscreen test image has no speller backend, which is not the app's behaviour
+    QStringLiteral("Sonnet: No speller backends available!"),
 };
 
 // True when the item cannot show markup: Qt Quick Text in plain format, or what the desktop style puts in a ComboBox instead (QStyle paints the text as it is, and the text field it keeps for editing never renders markup; neither has a text format)
@@ -1950,7 +1953,20 @@ class QuickPlayStub : public QObject {
         calls.push_back({id, resumeTicks});
         return false;
     }
+    struct StreamCall {
+        QString id;
+        qint64 resumeTicks;
+        int audio;
+        int subtitle;
+    };
+    Q_INVOKABLE bool playItemWithStreams(const QString &id, qint64 resumeTicks, int audio,
+                                         int subtitle)
+    {
+        streamCalls.push_back({id, resumeTicks, audio, subtitle});
+        return false;
+    }
     QList<Call> calls;
+    QList<StreamCall> streamCalls;
 };
 
 // What the player page reads and calls, without mpv (the video item takes only the real controller and stays empty): the calls are recorded by name and argument
@@ -3041,7 +3057,7 @@ class TestUiPages : public QObject {
         QVERIFY(!ui.showsText(QStringLiteral("No libraries to show")));
     }
 
-    // MyMediaExcludes hides a tile only, LatestItemsExcludes a Recently Added row only, OrderedViews orders the tiles that stay
+    // MyMediaExcludes hides a tile and its Recently Added row, LatestItemsExcludes a row only, OrderedViews orders the tiles that stay
     void homeTilesAndRowsFollowTheUserConfiguration()
     {
         Ui ui(m_home->path());
@@ -3065,8 +3081,8 @@ class TestUiPages : public QObject {
             return seriesAt.y() < musicAt.y() - 1
                    || (qAbs(seriesAt.y() - musicAt.y()) <= 1 && seriesAt.x() < musicAt.x());
         }());
-        // The rows: the tile of Series stays, its Recently Added row does not; Continue Watching and Next Up are untouched
-        QTRY_VERIFY(!ui.itemsWithText(QStringLiteral("Recently Added in Movies")).isEmpty());
+        // The rows: the tile of Series stays, its Recently Added row does not; Movies loses both, and the music library has no row of its own; Continue Watching and Next Up are untouched
+        QTRY_VERIFY(ui.itemsWithText(QStringLiteral("Recently Added in Movies")).isEmpty());
         QTRY_VERIFY(ui.showsText(QStringLiteral("Continue Watching")));
         QVERIFY(ui.showsText(QStringLiteral("Next Up")));
         QVERIFY(ui.itemsWithText(QStringLiteral("Recently Added in Series")).isEmpty());
@@ -3106,7 +3122,7 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(ui.item(QStringLiteral("libraryCard_") + kMovies) == nullptr);
         QCOMPARE(ui.itemsStartingWith(QStringLiteral("libraryCard_")).size(), 2);
         QTRY_VERIFY(ui.itemsWithText(QStringLiteral("Recently Added in Series")).isEmpty());
-        QVERIFY(!ui.itemsWithText(QStringLiteral("Recently Added in Movies")).isEmpty());
+        QTRY_VERIFY(ui.itemsWithText(QStringLiteral("Recently Added in Movies")).isEmpty());
         QCOMPARE(ui.controller.libraries().size(), 3);
         QVERIFY(ui.controller.hasType(QStringLiteral("movies")));
     }
@@ -4137,6 +4153,56 @@ class TestUiPages : public QObject {
         ui.controller.reloadLibraries();
         QTRY_COMPARE(ui.controller.state(), ConnectionController::NeedsLogin);
         QTRY_VERIFY(ui.item(QStringLiteral("itemDetailsPage")) == nullptr);
+    }
+
+    void aCastCardOpensThePersonPage()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QTRY_VERIFY(ui.item(QStringLiteral("libraryCard_") + kMovies) != nullptr);
+        QVERIFY(ui.openLibraryTile(kMovies));
+        QQuickItem *card = nullptr;
+        QTRY_VERIFY((card = Ui::itemIn(ui.item(QStringLiteral("libraryPage")),
+                                       QStringLiteral("mediaCard_") + kMovieId))
+                    != nullptr);
+        ui.clickCenter(card);
+        QTRY_VERIFY(ui.item(QStringLiteral("itemDetailsPage")) != nullptr);
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Cast and Crew")));
+        QQuickItem *page = ui.item(QStringLiteral("itemDetailsPage"));
+        QVERIFY(page);
+        QQuickItem *person = nullptr;
+        for (QQuickItem *candidate : allItems(page)) {
+            const QVariantMap data = candidate->property("modelData").toMap();
+            if (data.value(QStringLiteral("name")).toString() == QStringLiteral("Mira Vale")) {
+                person = candidate;
+                break;
+            }
+        }
+        QVERIFY(person);
+        QVERIFY(!person->property("modelData")
+                     .toMap()
+                     .value(QStringLiteral("id"))
+                     .toString()
+                     .isEmpty());
+        const int depth = ui.stackDepth();
+        QVERIFY(ui.revealAndClickUntil(page, person, [&] { return ui.stackDepth() == depth + 1; }));
+        QQuickItem *personPage = ui.item(QStringLiteral("personPage"));
+        QVERIFY(personPage);
+        QTRY_COMPARE(personPage->property("personName").toString(), QStringLiteral("Mira Vale"));
+        QQuickItem *grid = ui.item(QStringLiteral("personItemsGrid"));
+        QVERIFY(grid);
+        QTRY_VERIFY(grid->property("count").toInt() > 0);
+        // The page asks the server for the items with the person's id
+        QVERIFY(std::any_of(ui.server.itemsRoutes.cbegin(), ui.server.itemsRoutes.cend(),
+                            [](const QByteArray &route) {
+                                return route.contains("personIds=a1b2c3d4e5f60718293a4b5c6d7e8f01");
+                            }));
+        // Back returns to the details page
+        auto *stack = ui.window->property("pageStack").value<QObject *>();
+        QVERIFY(QMetaObject::invokeMethod(stack, "pop", Q_ARG(QVariant, QVariant())));
+        QTRY_COMPARE(ui.stackDepth(), depth);
     }
 
     void aSeriesPageListsItsSeasonsAndOpensOne()
@@ -8632,6 +8698,36 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(ui.controller.downloads()->seriesRule(kSeriesId).isEmpty());
     }
 
+    void aTrackedRuleIsRemovedFromTheDownloadsPage()
+    {
+        Ui ui(m_home->path());
+        ui.serveShow();
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        QVERIFY(ui.controller.downloads()->setSeriesRule(kSeriesId, QStringLiteral("Series"),
+                                                         QStringLiteral("nextN"), -1, 3));
+        QTRY_VERIFY(!ui.controller.downloads()->seriesRule(kSeriesId).isEmpty());
+        QVERIFY(ui.clickTab(QStringLiteral("Downloads")));
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("downloadsPage"));
+        QQuickItem *stop = nullptr;
+        QTRY_VERIFY((stop = ui.item(QStringLiteral("stopSeriesRule_0"))) != nullptr);
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Next 3 episodes")));
+        QSignalSpy revisions(ui.controller.downloads(),
+                             &Kinefin::DownloadsController::rulesRevisionChanged);
+        const int revision = ui.controller.downloads()->rulesRevision();
+        QVERIFY(QMetaObject::invokeMethod(stop, "click"));
+        QTRY_VERIFY(ui.controller.downloads()->seriesRule(kSeriesId).isEmpty());
+        QCOMPARE(revisions.size(), 1);
+        QCOMPARE(ui.controller.downloads()->rulesRevision(), revision + 1);
+        QQuickItem *page = ui.item(QStringLiteral("downloadsPage"));
+        QVERIFY(page);
+        QObject *repeater = page->findChild<QObject *>(QStringLiteral("trackedRulesRepeater"));
+        QVERIFY(repeater);
+        QTRY_COMPARE(page->property("trackedRules").toList().size(), 0);
+        QTRY_COMPARE(repeater->property("count").toInt(), 0);
+        QTRY_VERIFY(!ui.showsText(QStringLiteral("Next 3 episodes")));
+    }
+
     void reopeningTheRuleDialogShowsTheStoredKind()
     {
         Ui ui(m_home->path());
@@ -9660,6 +9756,28 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(!cardRingShown(card));
     }
 
+    void libraryTilesShowTheFocusRing()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *tile = nullptr;
+        QTRY_VERIFY((tile = ui.item(QStringLiteral("libraryCard_") + kMovies)) != nullptr);
+        QVERIFY(!cardRingShown(tile));
+        tile->forceActiveFocus(Qt::TabFocusReason);
+        QTRY_VERIFY(tile->hasActiveFocus());
+        QTRY_VERIFY(cardRingShown(tile));
+        // A pad's Right moves to the next tile, and the ring goes with the focus
+        Kinefin::RemoteInputServer input(QString(), QStringLiteral("test"));
+        input.setWindow(ui.window);
+        QVERIFY(input.dispatchKeycode(QStringLiteral("right")));
+        QQuickItem *next = nullptr;
+        QTRY_VERIFY((next = ui.window->activeFocusItem()) != nullptr && next != tile);
+        QVERIFY(next->objectName().startsWith(QStringLiteral("libraryCard_")));
+        QTRY_VERIFY(cardRingShown(next));
+        QTRY_VERIFY(!cardRingShown(tile));
+    }
+
     void tabbingBackIntoTheLibraryGridShowsTheCurrentCard()
     {
         Ui ui(m_home->path());
@@ -10108,6 +10226,583 @@ class TestUiPages : public QObject {
         QCOMPARE(grid->property("currentIndex").toInt(), 0);
     }
 
+    void padDownEntersTheGridAtItsFirstRow()
+    {
+        Ui ui(m_home->path());
+        ui.server.generatedItemTotal = 30;
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("moviesTwoLibraries")));
+        QQuickItem *grid = nullptr;
+        QTRY_VERIFY((grid = ui.item(QStringLiteral("libraryGrid"))) != nullptr);
+        QTRY_VERIFY(grid->hasActiveFocus());
+        Kinefin::RemoteInputServer input(QString(), QStringLiteral("test"));
+        input.setWindow(ui.window);
+        // Up leaves the grid for the toolbar above it, Down comes back
+        QVERIFY(input.dispatchKeycode(QStringLiteral("up")));
+        QTRY_VERIFY(!grid->hasActiveFocus());
+        QVERIFY(input.dispatchKeycode(QStringLiteral("down")));
+        QTRY_VERIFY(grid->hasActiveFocus());
+        const int columns = grid->property("columns").toInt();
+        QVERIFY(columns > 0);
+        QTRY_VERIFY(grid->property("count").toInt() > columns);
+        const int entered = grid->property("currentIndex").toInt();
+        QVERIFY2(entered < columns,
+                 qPrintable(QStringLiteral("currentIndex ") + QString::number(entered)
+                            + QStringLiteral(", columns ") + QString::number(columns)));
+        // The repeat of the press that entered the grid does not move away from the row it reached
+        QVERIFY(input.dispatchKeycode(QStringLiteral("down"), true));
+        QTRY_COMPARE(grid->property("currentIndex").toInt(), entered);
+        // A fresh press moves inside the grid
+        QVERIFY(input.dispatchKeycode(QStringLiteral("down")));
+        QTRY_VERIFY(grid->property("currentIndex").toInt() >= columns);
+    }
+
+    void padDownFromTheLibrarySelectorEntersTheFirstGridRow()
+    {
+        Ui ui(m_home->path());
+        ui.server.generatedItemTotal = 30;
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("moviesTwoLibraries")));
+        QQuickItem *grid = nullptr;
+        QTRY_VERIFY((grid = ui.item(QStringLiteral("libraryGrid"))) != nullptr);
+        QTRY_VERIFY(grid->property("count").toInt() > 0);
+        QQuickItem *selector = ui.item(QStringLiteral("librarySelector"));
+        QVERIFY(selector);
+        QTRY_VERIFY(selector->isVisible());
+        Kinefin::RemoteInputServer input(QString(), QStringLiteral("test"));
+        input.setWindow(ui.window);
+        selector->forceActiveFocus(Qt::TabFocusReason);
+        QTRY_VERIFY(selector->hasActiveFocus());
+        QVERIFY(input.dispatchKeycode(QStringLiteral("down")));
+        QTRY_VERIFY(grid->hasActiveFocus());
+        const int columns = grid->property("columns").toInt();
+        QVERIFY(columns > 0);
+        QVERIFY2(grid->property("currentIndex").toInt() < columns,
+                 qPrintable(QStringLiteral("currentIndex ")
+                            + QString::number(grid->property("currentIndex").toInt())
+                            + QStringLiteral(", columns ") + QString::number(columns)));
+    }
+
+    void theDetailsPageOffersRestartAndTrailer()
+    {
+        QuickPlayStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QJsonObject movie = QJsonDocument::fromJson(ui.server.itemsById.value(kMovieId)).object();
+        movie.insert(
+            QStringLiteral("RemoteTrailers"),
+            QJsonArray{QJsonObject{
+                {QStringLiteral("Name"), QStringLiteral("Official")},
+                {QStringLiteral("Url"), QStringLiteral("https://www.youtube.com/watch?v=abc")}}});
+        ui.server.itemsById.insert(kMovieId, QJsonDocument(movie).toJson(QJsonDocument::Compact));
+        QVERIFY(ui.load());
+        QObject *root = ui.engine.rootObjects().constFirst();
+        QVERIFY(root->setProperty("player", QVariant::fromValue<QObject *>(&stub)));
+        QVERIFY(ui.signIn());
+        QTRY_VERIFY(ui.item(QStringLiteral("libraryCard_") + kMovies) != nullptr);
+        QVERIFY(ui.openLibraryTile(kMovies));
+        QQuickItem *card = nullptr;
+        QTRY_VERIFY((card = Ui::itemIn(ui.item(QStringLiteral("libraryPage")),
+                                       QStringLiteral("mediaCard_") + kMovieId))
+                    != nullptr);
+        ui.clickCenter(card);
+        QTRY_VERIFY(ui.item(QStringLiteral("itemDetailsPage")) != nullptr);
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Cast and Crew")));
+        QQuickItem *page = ui.item(QStringLiteral("itemDetailsPage"));
+        QVERIFY(page);
+        // The fixture movie has a resume point: Restart starts it from the first second
+        QObject *restart = page->findChild<QObject *>(QStringLiteral("playFromBeginningAction"));
+        QVERIFY(restart);
+        QTRY_VERIFY(restart->property("visible").toBool());
+        QMetaObject::invokeMethod(restart, "trigger");
+        QTRY_VERIFY(!stub.streamCalls.isEmpty());
+        QCOMPARE(stub.streamCalls.constLast().id, kMovieId);
+        QCOMPARE(stub.streamCalls.constLast().resumeTicks, 0);
+        // The trailer from the server is an action of the page; only https URLs survive the parser
+        QObject *trailer = page->findChild<QObject *>(QStringLiteral("trailerAction"));
+        QVERIFY(trailer);
+        QTRY_VERIFY(trailer->property("visible").toBool());
+        QCOMPARE(trailer->property("text").toString(), QStringLiteral("Trailer"));
+    }
+
+    void theDetailsPageCopiesTheStreamUrlAndRefreshesMetadata()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QTRY_VERIFY(ui.item(QStringLiteral("libraryCard_") + kMovies) != nullptr);
+        QVERIFY(ui.openLibraryTile(kMovies));
+        QQuickItem *card = nullptr;
+        QTRY_VERIFY((card = Ui::itemIn(ui.item(QStringLiteral("libraryPage")),
+                                       QStringLiteral("mediaCard_") + kMovieId))
+                    != nullptr);
+        ui.clickCenter(card);
+        QTRY_VERIFY(ui.item(QStringLiteral("itemDetailsPage")) != nullptr);
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Cast and Crew")));
+        QQuickItem *page = ui.item(QStringLiteral("itemDetailsPage"));
+        QVERIFY(page);
+        QObject *copy = page->findChild<QObject *>(QStringLiteral("copyStreamUrlAction"));
+        QObject *refresh = page->findChild<QObject *>(QStringLiteral("refreshMetadataAction"));
+        QVERIFY(copy && refresh);
+        QTRY_VERIFY(copy->property("visible").toBool());
+        QGuiApplication::clipboard()->setText(QStringLiteral("before"));
+        QVERIFY(QMetaObject::invokeMethod(copy, "trigger"));
+        QTRY_VERIFY(QGuiApplication::clipboard()->text().contains(
+            QStringLiteral("/Videos/") + kMovieId + QStringLiteral("/stream?static=true")));
+        QVERIFY(!QGuiApplication::clipboard()->text().contains(QStringLiteral("api_key")));
+        // The refresh goes to the server with a full metadata and image refresh
+        QTRY_VERIFY(refresh->property("visible").toBool());
+        QVERIFY(QMetaObject::invokeMethod(refresh, "trigger"));
+        QTRY_VERIFY(!ui.server.refreshRequests.isEmpty());
+        QVERIFY(ui.server.refreshRequests.constLast().contains("metadataRefreshMode=FullRefresh"));
+        QVERIFY(ui.server.refreshRequests.constLast().contains("imageRefreshMode=FullRefresh"));
+    }
+
+    void theDetailsPageAddsAMovieToACollection()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QTRY_VERIFY(ui.item(QStringLiteral("libraryCard_") + kMovies) != nullptr);
+        QVERIFY(ui.openLibraryTile(kMovies));
+        QQuickItem *card = nullptr;
+        QTRY_VERIFY((card = Ui::itemIn(ui.item(QStringLiteral("libraryPage")),
+                                       QStringLiteral("mediaCard_") + kMovieId))
+                    != nullptr);
+        ui.clickCenter(card);
+        QTRY_VERIFY(ui.item(QStringLiteral("itemDetailsPage")) != nullptr);
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Cast and Crew")));
+        QQuickItem *page = ui.item(QStringLiteral("itemDetailsPage"));
+        QVERIFY(page);
+        // The collection picker reads the BoxSets: one here, delivered after the details page settled
+        const QJsonArray boxSets{
+            QJsonObject{{QStringLiteral("Id"), QStringLiteral("aaaabbbbccccddddeeeeffff00001111")},
+                        {QStringLiteral("Name"), QStringLiteral("Favorites")},
+                        {QStringLiteral("Type"), QStringLiteral("BoxSet")}}};
+        ui.server.listingRawBody.insert(
+            QStringLiteral("Items"),
+            QJsonDocument(QJsonObject{{QStringLiteral("Items"), boxSets},
+                                      {QStringLiteral("TotalRecordCount"), 1}})
+                .toJson(QJsonDocument::Compact));
+        QObject *add = page->findChild<QObject *>(QStringLiteral("addToCollectionAction"));
+        QVERIFY(add);
+        QTRY_VERIFY(add->property("visible").toBool());
+        QVERIFY(QMetaObject::invokeMethod(add, "trigger"));
+        QQuickItem *row = nullptr;
+        QTRY_VERIFY((row = ui.item(QStringLiteral("addToCollectionRow_0"))) != nullptr);
+        ui.clickCenter(row);
+        QTRY_VERIFY(!ui.server.collectionAdds.isEmpty());
+        QVERIFY(ui.server.collectionAdds.constLast().contains(kMovieId.toUtf8()));
+        // A new collection carries the movie in its Ids
+        QVERIFY(ui.controller.createCollection(QStringLiteral("My Collection"), kMovieId));
+        QTRY_VERIFY(!ui.server.collectionCreates.isEmpty());
+        QVERIFY(ui.server.collectionCreates.constLast().contains("My Collection"));
+        QVERIFY(ui.server.collectionCreates.constLast().contains(kMovieId.toUtf8()));
+    }
+
+    void theDetailsPageEditsMetadata()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QTRY_VERIFY(ui.item(QStringLiteral("libraryCard_") + kMovies) != nullptr);
+        QVERIFY(ui.openLibraryTile(kMovies));
+        QQuickItem *card = nullptr;
+        QTRY_VERIFY((card = Ui::itemIn(ui.item(QStringLiteral("libraryPage")),
+                                       QStringLiteral("mediaCard_") + kMovieId))
+                    != nullptr);
+        ui.clickCenter(card);
+        QTRY_VERIFY(ui.item(QStringLiteral("itemDetailsPage")) != nullptr);
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Cast and Crew")));
+        QQuickItem *page = ui.item(QStringLiteral("itemDetailsPage"));
+        QVERIFY(page);
+        QObject *edit = page->findChild<QObject *>(QStringLiteral("editMetadataAction"));
+        QVERIFY(edit);
+        QTRY_VERIFY(edit->property("visible").toBool());
+        // The write path itself, before the dialog
+        QSignalSpy updated(&ui.controller, &ConnectionController::itemUpdated);
+        QVERIFY(ui.controller.updateItem(
+            kMovieId, QVariantMap{{QStringLiteral("Name"), QStringLiteral("Probe")}}));
+        QTRY_COMPARE(updated.size(), 1);
+        QTRY_VERIFY(!ui.server.itemUpdates.isEmpty());
+        ui.server.itemUpdates.clear();
+        QVERIFY(QMetaObject::invokeMethod(edit, "trigger"));
+        QQuickItem *name = nullptr;
+        QTRY_VERIFY((name = ui.item(QStringLiteral("editMetadataName"))) != nullptr);
+        QQuickItem *year = ui.item(QStringLiteral("editMetadataYear"));
+        QVERIFY(year);
+        // The FormLayout sizes its row but not the field: the field's own implicit height is the six grid units it asks for
+        QQuickItem *overview = ui.item(QStringLiteral("editMetadataOverview"));
+        QVERIFY(overview);
+        QTRY_COMPARE(overview->height(), gridUnitOf(ui) * 6);
+        // A long overview scrolls inside the field instead of pushing Year down
+        overview->setProperty("text", QStringLiteral("A long overview line\n").repeated(40));
+        QTest::qWait(200);
+        QTRY_COMPARE(overview->height(), gridUnitOf(ui) * 6);
+        QVERIFY(year->mapToScene(QPointF(0, 0)).y()
+                >= overview->mapToScene(QPointF(0, overview->height())).y() - 1);
+        name->setProperty("text", QStringLiteral("Arcturus Restored"));
+        year->setProperty("value", 2013);
+        QObject *dialog = ui.popup(QStringLiteral("editMetadataDialog"));
+        QVERIFY(dialog);
+        QTRY_VERIFY(dialog->property("acceptable").toBool());
+        QVERIFY(QMetaObject::invokeMethod(dialog, "save"));
+        QTRY_VERIFY(!ui.server.itemUpdates.isEmpty());
+        const QByteArray body = ui.server.itemUpdates.constLast();
+        QVERIFY(body.contains("\"Name\":\"Arcturus Restored\""));
+        QVERIFY(body.contains("\"ProductionYear\":2013"));
+        // The dialog stays open until the server answers, then closes
+        QTRY_VERIFY(!dialog->property("opened").toBool());
+        // A refusal keeps it open with the typed text
+        QVERIFY(QMetaObject::invokeMethod(edit, "trigger"));
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QQuickItem *again = nullptr;
+        QTRY_VERIFY((again = ui.item(QStringLiteral("editMetadataName"))) != nullptr);
+        again->setProperty("text", QStringLiteral("Refused Name"));
+        ui.server.itemUpdateStatus = 403;
+        QSignalSpy updateFailed(&ui.controller, &ConnectionController::itemUpdateFailed);
+        QTRY_VERIFY(dialog->property("acceptable").toBool());
+        QVERIFY(QMetaObject::invokeMethod(dialog, "save"));
+        QTRY_COMPARE(updateFailed.size(), 1);
+        QVERIFY(dialog->property("opened").toBool());
+        QVERIFY(!dialog->property("saving").toBool());
+    }
+
+    void theDetailsPageIdentifiesAMovie()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QTRY_VERIFY(ui.item(QStringLiteral("libraryCard_") + kMovies) != nullptr);
+        QVERIFY(ui.openLibraryTile(kMovies));
+        QQuickItem *card = nullptr;
+        QTRY_VERIFY((card = Ui::itemIn(ui.item(QStringLiteral("libraryPage")),
+                                       QStringLiteral("mediaCard_") + kMovieId))
+                    != nullptr);
+        ui.clickCenter(card);
+        QTRY_VERIFY(ui.item(QStringLiteral("itemDetailsPage")) != nullptr);
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Cast and Crew")));
+        QQuickItem *page = ui.item(QStringLiteral("itemDetailsPage"));
+        QVERIFY(page);
+        QObject *identify = page->findChild<QObject *>(QStringLiteral("identifyAction"));
+        QVERIFY(identify);
+        QTRY_VERIFY(identify->property("visible").toBool());
+        QVERIFY(QMetaObject::invokeMethod(identify, "trigger"));
+        QQuickItem *row = nullptr;
+        QTRY_VERIFY((row = ui.item(QStringLiteral("identifyRow_0"))) != nullptr);
+        QTRY_VERIFY(!ui.server.remoteSearchBodies.isEmpty());
+        QVERIFY(ui.server.remoteSearchBodies.constLast().contains("Arcturus"));
+        QVERIFY(ui.server.remoteSearchBodies.constLast().contains("\"Year\":2012"));
+        // Return on the focused result list applies the current match from the keyboard
+        QQuickItem *results = ui.item(QStringLiteral("identifyResults"));
+        QVERIFY(results);
+        results->forceActiveFocus();
+        QTRY_VERIFY(results->hasActiveFocus());
+        QTest::keyClick(ui.window, Qt::Key_Return);
+        QTRY_VERIFY(!ui.server.remoteSearchApplies.isEmpty());
+        QVERIFY(ui.server.remoteSearchApplies.constLast().contains("\"Tmdb\":\"123\""));
+    }
+
+    void theDetailsPageEditsImages()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QTRY_VERIFY(ui.item(QStringLiteral("libraryCard_") + kMovies) != nullptr);
+        QVERIFY(ui.openLibraryTile(kMovies));
+        QQuickItem *card = nullptr;
+        QTRY_VERIFY((card = Ui::itemIn(ui.item(QStringLiteral("libraryPage")),
+                                       QStringLiteral("mediaCard_") + kMovieId))
+                    != nullptr);
+        ui.clickCenter(card);
+        QTRY_VERIFY(ui.item(QStringLiteral("itemDetailsPage")) != nullptr);
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Cast and Crew")));
+        QQuickItem *page = ui.item(QStringLiteral("itemDetailsPage"));
+        QVERIFY(page);
+        QObject *edit = page->findChild<QObject *>(QStringLiteral("editImagesAction"));
+        QVERIFY(edit);
+        QTRY_VERIFY(edit->property("visible").toBool());
+        QVERIFY(QMetaObject::invokeMethod(edit, "trigger"));
+        QVERIFY(ui.item(QStringLiteral("editImageUpload_Primary")));
+        // A tiny valid PNG goes through the signature check and the upload route
+        const QString path = m_home->filePath(QStringLiteral("image.png"));
+        QImage image(2, 2, QImage::Format_ARGB32);
+        image.fill(Qt::red);
+        QVERIFY(image.save(path));
+        QSignalSpy imageUpdated(&ui.controller, &ConnectionController::itemImageUpdated);
+        QVERIFY(ui.controller.uploadImage(kMovieId, QStringLiteral("Primary"), -1,
+                                          QUrl::fromLocalFile(path)));
+        QTRY_COMPARE(imageUpdated.size(), 1);
+        QTRY_VERIFY(!ui.server.imageUploads.isEmpty());
+        QVERIFY(ui.server.imageUploads.constLast().contains("/Images/Primary"));
+        QVERIFY(ui.server.imageUploads.constLast().contains("image/png"));
+        // Delete asks first: the prompt names the action, and only its Delete sends the request
+        QQuickItem *posterDelete = nullptr;
+        QTRY_VERIFY((posterDelete = ui.item(QStringLiteral("editImageDelete_Primary"))) != nullptr
+                    && posterDelete->isVisible());
+        ui.clickCenter(posterDelete);
+        QObject *deleteDialog = ui.popup(QStringLiteral("deleteImageDialog"));
+        QVERIFY(deleteDialog);
+        QTRY_VERIFY(deleteDialog->property("opened").toBool());
+        QVERIFY(ui.server.imageDeletes.isEmpty());
+        QObject *confirmDelete = ui.popup(QStringLiteral("confirmDeleteImage"));
+        QVERIFY(confirmDelete);
+        QVERIFY(QMetaObject::invokeMethod(confirmDelete, "trigger"));
+        QTRY_VERIFY(!ui.server.imageDeletes.isEmpty());
+        QVERIFY(ui.server.imageDeletes.constLast().contains("/Images/Primary"));
+    }
+
+    void theDetailsPageEditsSubtitles()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QTRY_VERIFY(ui.item(QStringLiteral("libraryCard_") + kMovies) != nullptr);
+        QVERIFY(ui.openLibraryTile(kMovies));
+        QQuickItem *card = nullptr;
+        QTRY_VERIFY((card = Ui::itemIn(ui.item(QStringLiteral("libraryPage")),
+                                       QStringLiteral("mediaCard_") + kMovieId))
+                    != nullptr);
+        ui.clickCenter(card);
+        QTRY_VERIFY(ui.item(QStringLiteral("itemDetailsPage")) != nullptr);
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Cast and Crew")));
+        QQuickItem *page = ui.item(QStringLiteral("itemDetailsPage"));
+        QVERIFY(page);
+        QObject *edit = page->findChild<QObject *>(QStringLiteral("editSubtitlesAction"));
+        QVERIFY(edit);
+        QTRY_VERIFY(edit->property("visible").toBool());
+        QVERIFY(QMetaObject::invokeMethod(edit, "trigger"));
+        // The upload goes through the UTF-8 and extension checks and carries base64 data
+        const QString path = m_home->filePath(QStringLiteral("subtitle.srt"));
+        QFile subtitle(path);
+        QVERIFY(subtitle.open(QIODevice::WriteOnly));
+        subtitle.write("1\n00:00:01,000 --> 00:00:02,000\nHello\n");
+        subtitle.close();
+        QSignalSpy subtitleUpdated(&ui.controller, &ConnectionController::itemSubtitleUpdated);
+        QVERIFY(ui.controller.uploadSubtitle(kMovieId, QUrl::fromLocalFile(path),
+                                             QStringLiteral("ita"), true));
+        QTRY_COMPARE(subtitleUpdated.size(), 1);
+        QTRY_VERIFY(!ui.server.subtitleUploads.isEmpty());
+        const QByteArray body = ui.server.subtitleUploads.constLast();
+        QVERIFY(body.contains("\"Language\":\"ita\""));
+        QVERIFY(body.contains("\"Format\":\"srt\""));
+        QVERIFY(body.contains("\"IsForced\":true"));
+        QVERIFY(body.contains("\"Data\":\""));
+        // Delete asks first: the prompt names the action, and only its Delete sends the request
+        QQuickItem *trackDelete = nullptr;
+        QTRY_VERIFY((trackDelete = ui.item(QStringLiteral("subtitleDelete_2"))) != nullptr
+                    && trackDelete->isVisible());
+        ui.clickCenter(trackDelete);
+        QObject *deleteDialog = ui.popup(QStringLiteral("deleteSubtitleDialog"));
+        QVERIFY(deleteDialog);
+        QTRY_VERIFY(deleteDialog->property("opened").toBool());
+        QVERIFY(ui.server.subtitleDeletes.isEmpty());
+        QObject *confirmDelete = ui.popup(QStringLiteral("confirmDeleteSubtitle"));
+        QVERIFY(confirmDelete);
+        QVERIFY(QMetaObject::invokeMethod(confirmDelete, "trigger"));
+        QTRY_VERIFY(!ui.server.subtitleDeletes.isEmpty());
+        QVERIFY(ui.server.subtitleDeletes.constLast().contains("/Subtitles/2"));
+    }
+
+    void theDetailsPageHidesAdministratorActions()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        ui.server.administrator = false;
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QTRY_VERIFY(ui.item(QStringLiteral("libraryCard_") + kMovies) != nullptr);
+        QVERIFY(ui.openLibraryTile(kMovies));
+        QQuickItem *card = nullptr;
+        QTRY_VERIFY((card = Ui::itemIn(ui.item(QStringLiteral("libraryPage")),
+                                       QStringLiteral("mediaCard_") + kMovieId))
+                    != nullptr);
+        ui.clickCenter(card);
+        QTRY_VERIFY(ui.item(QStringLiteral("itemDetailsPage")) != nullptr);
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Cast and Crew")));
+        QQuickItem *page = ui.item(QStringLiteral("itemDetailsPage"));
+        QVERIFY(page);
+        for (const char *name : {"refreshMetadataAction", "editMetadataAction", "identifyAction",
+                                 "editImagesAction", "editSubtitlesAction", "deleteMediaAction"}) {
+            QObject *action = page->findChild<QObject *>(QString::fromLatin1(name));
+            QVERIFY2(action, name);
+            QTRY_VERIFY2(!action->property("visible").toBool(), name);
+        }
+    }
+
+    void theDetailsPageDeletesMediaAfterTheServerAgrees()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        // Only a server that says CanDelete gets a DELETE; the item reply carries it
+        QJsonObject movie = QJsonDocument::fromJson(ui.server.itemsById.value(kMovieId)).object();
+        movie.insert(QStringLiteral("CanDelete"), true);
+        ui.server.itemsById.insert(kMovieId, QJsonDocument(movie).toJson(QJsonDocument::Compact));
+        ui.server.deletableMedia.insert(kMovieId);
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QTRY_VERIFY(ui.item(QStringLiteral("libraryCard_") + kMovies) != nullptr);
+        QVERIFY(ui.openLibraryTile(kMovies));
+        QQuickItem *card = nullptr;
+        QTRY_VERIFY((card = Ui::itemIn(ui.item(QStringLiteral("libraryPage")),
+                                       QStringLiteral("mediaCard_") + kMovieId))
+                    != nullptr);
+        ui.clickCenter(card);
+        QTRY_VERIFY(ui.item(QStringLiteral("itemDetailsPage")) != nullptr);
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Cast and Crew")));
+        QQuickItem *page = ui.item(QStringLiteral("itemDetailsPage"));
+        QVERIFY(page);
+        QObject *remove = page->findChild<QObject *>(QStringLiteral("deleteMediaAction"));
+        QVERIFY(remove);
+        QTRY_VERIFY(remove->property("visible").toBool());
+        const int depth = ui.stackDepth();
+        QVERIFY(QMetaObject::invokeMethod(remove, "trigger"));
+        QObject *dialog = ui.popup(QStringLiteral("deleteMediaDialog"));
+        QVERIFY(dialog);
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QVERIFY(QMetaObject::invokeMethod(dialog, "confirm"));
+        QTRY_VERIFY(!ui.server.mediaDeletes.isEmpty());
+        QTRY_COMPARE(ui.stackDepth(), depth - 1);
+    }
+
+    void theDetailsPagePicksTracksBeforePlayback()
+    {
+        QuickPlayStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QObject *root = ui.engine.rootObjects().constFirst();
+        QVERIFY(root->setProperty("player", QVariant::fromValue<QObject *>(&stub)));
+        QVERIFY(ui.signIn());
+        QTRY_VERIFY(ui.item(QStringLiteral("libraryCard_") + kMovies) != nullptr);
+        QVERIFY(ui.openLibraryTile(kMovies));
+        QQuickItem *card = nullptr;
+        QTRY_VERIFY((card = Ui::itemIn(ui.item(QStringLiteral("libraryPage")),
+                                       QStringLiteral("mediaCard_") + kMovieId))
+                    != nullptr);
+        ui.clickCenter(card);
+        QTRY_VERIFY(ui.item(QStringLiteral("itemDetailsPage")) != nullptr);
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Cast and Crew")));
+        QQuickItem *page = ui.item(QStringLiteral("itemDetailsPage"));
+        QVERIFY(page);
+        QQuickItem *audio = Ui::itemIn(page, QStringLiteral("audioSelector"));
+        QQuickItem *subtitles = Ui::itemIn(page, QStringLiteral("subtitleSelector"));
+        QVERIFY(audio);
+        QVERIFY(subtitles);
+        QTRY_VERIFY(audio->isVisible() && subtitles->isVisible());
+        // Default, then the fixture's audio track (server index 1)
+        QCOMPARE(audio->property("count").toInt(), 2);
+        QTRY_VERIFY(QMetaObject::invokeMethod(audio, "activated", Q_ARG(int, 1)));
+        // Default, Off, then the fixture's subtitle track (server index 2)
+        QCOMPARE(subtitles->property("count").toInt(), 3);
+        QTRY_VERIFY(QMetaObject::invokeMethod(subtitles, "activated", Q_ARG(int, 2)));
+        QObject *play = page->findChild<QObject *>(QStringLiteral("playAction"));
+        QVERIFY(play);
+        QTRY_VERIFY(play->property("enabled").toBool());
+        QVERIFY(QMetaObject::invokeMethod(play, "trigger"));
+        QTRY_VERIFY(!stub.streamCalls.isEmpty());
+        QCOMPARE(stub.streamCalls.constLast().id, kMovieId);
+        QCOMPARE(stub.streamCalls.constLast().audio, 1);
+        QCOMPARE(stub.streamCalls.constLast().subtitle, 2);
+        // The track list opens with plain rows, drawn by the style's delegate with a plain label
+        QObject *popup = audio->property("popup").value<QObject *>();
+        QVERIFY(popup);
+        QVERIFY(QMetaObject::invokeMethod(popup, "open"));
+        QTRY_VERIFY(ui.item(QStringLiteral("audioChoice_1")) != nullptr);
+    }
+
+    void padReachesTheDetailsPlayButton()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QObject *root = ui.engine.rootObjects().constFirst();
+        QVERIFY(root->setProperty("player", QVariant::fromValue<QObject *>(&stub)));
+        QVERIFY(ui.signIn());
+        QTRY_VERIFY(ui.item(QStringLiteral("libraryCard_") + kMovies) != nullptr);
+        QVERIFY(ui.openLibraryTile(kMovies));
+        QQuickItem *card = nullptr;
+        QTRY_VERIFY((card = Ui::itemIn(ui.item(QStringLiteral("libraryPage")),
+                                       QStringLiteral("mediaCard_") + kMovieId))
+                    != nullptr);
+        ui.clickCenter(card);
+        QTRY_VERIFY(ui.item(QStringLiteral("itemDetailsPage")) != nullptr);
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Cast and Crew")));
+        QQuickItem *page = ui.item(QStringLiteral("itemDetailsPage"));
+        QVERIFY(page);
+        QQuickItem *play = Ui::itemIn(page, QStringLiteral("detailsPlay"));
+        QVERIFY(play);
+        QTRY_VERIFY(play->isVisible() && play->isEnabled());
+        Kinefin::RemoteInputServer input(QString(), QStringLiteral("test"));
+        input.setWindow(ui.window);
+        const QList<QQuickItem *> reached = padReach(ui, input);
+        const QStringList names = namesOf(reached);
+        QVERIFY2(reached.contains(play), qPrintable(names.join(QLatin1Char(' '))));
+    }
+
+    void theDetailsPageOpensOnPlayAndUpDownReturnsToIt()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QObject *root = ui.engine.rootObjects().constFirst();
+        QVERIFY(root->setProperty("player", QVariant::fromValue<QObject *>(&stub)));
+        QVERIFY(ui.signIn());
+        QTRY_VERIFY(ui.item(QStringLiteral("libraryCard_") + kMovies) != nullptr);
+        QVERIFY(ui.openLibraryTile(kMovies));
+        QQuickItem *card = nullptr;
+        QTRY_VERIFY((card = Ui::itemIn(ui.item(QStringLiteral("libraryPage")),
+                                       QStringLiteral("mediaCard_") + kMovieId))
+                    != nullptr);
+        ui.clickCenter(card);
+        QTRY_VERIFY(ui.item(QStringLiteral("itemDetailsPage")) != nullptr);
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Cast and Crew")));
+        QQuickItem *page = ui.item(QStringLiteral("itemDetailsPage"));
+        QVERIFY(page);
+        QQuickItem *play = Ui::itemIn(page, QStringLiteral("detailsPlay"));
+        QVERIFY(play);
+        QTRY_VERIFY(play->isVisible() && play->isEnabled());
+        // The page opens on its primary action, not on a row below it
+        QTRY_VERIFY(play->hasActiveFocus());
+        QQuickItem *list = Ui::itemIn(page, QStringLiteral("episodesList"));
+        QVERIFY(list);
+        QTRY_COMPARE(list->property("contentY").toDouble(), list->property("originY").toDouble());
+        // Up leaves for the page row, Down comes back to the play button
+        Kinefin::RemoteInputServer input(QString(), QStringLiteral("test"));
+        input.setWindow(ui.window);
+        QVERIFY(input.dispatchKeycode(QStringLiteral("up")));
+        QTRY_VERIFY(!play->hasActiveFocus());
+        QVERIFY(input.dispatchKeycode(QStringLiteral("down")));
+        QTRY_VERIFY(play->hasActiveFocus());
+    }
+
+    void theLeftStickScrollsWithoutMovingTheFocus()
+    {
+        Ui ui(m_home->path());
+        ui.server.generatedItemTotal = 30;
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        QQuickItem *grid = ui.item(QStringLiteral("libraryGrid"));
+        QVERIFY(grid);
+        QTRY_VERIFY(grid->hasActiveFocus());
+        const int index = grid->property("currentIndex").toInt();
+        const qreal before = grid->property("contentY").toReal();
+        Kinefin::RemoteInputServer input(QString(), QStringLiteral("test"));
+        input.setWindow(ui.window);
+        for (int step = 0; step < 4; ++step)
+            QVERIFY(input.dispatchKeycode(QStringLiteral("scrolldown")));
+        QTRY_VERIFY(grid->property("contentY").toReal() > before);
+        QCOMPARE(grid->property("currentIndex").toInt(), index);
+    }
+
     void padReachesEveryLibraryControl()
     {
         Ui ui(m_home->path());
@@ -10433,7 +11128,7 @@ class TestUiPages : public QObject {
         const auto clear = [&ui] {
             QQmlListReference actions(ui.item(QStringLiteral("queuePage")), "actions");
             for (qsizetype i = 0; i < actions.count(); ++i) {
-                if (actions.at(i)->property("text").toString() == QStringLiteral("Clear Queue"))
+                if (actions.at(i)->property("text").toString() == QStringLiteral("Clear Queue…"))
                     return actions.at(i);
             }
             return static_cast<QObject *>(nullptr);
@@ -11034,13 +11729,17 @@ class TestUiPages : public QObject {
         QVERIFY(qAbs(play->mapToScene(QPointF(play->width(), 0)).x()
                      - heroText->mapToScene(QPointF(heroText->width(), 0)).x())
                 < 1);
-        QTRY_VERIFY(ui.layoutProblems().isEmpty());
+        QStringList wideProblems;
+        QTRY_VERIFY_WITH_TIMEOUT((wideProblems = ui.layoutProblems()).isEmpty(), 3000);
+        QVERIFY2(wideProblems.isEmpty(), qPrintable(wideProblems.join(QStringLiteral("; "))));
         // A Tab stop like the button it replaces
         QVERIFY(play->activeFocusOnTab());
         QVERIFY(ui.opensWindowOfWidth(500));
         QTRY_VERIFY(!play->isVisible() && narrowPlay->isVisible());
         QTRY_VERIFY(narrowPlay->width() > facts->width() / 2);
-        QTRY_VERIFY(ui.layoutProblems().isEmpty());
+        QTest::qWait(1000);
+        const QStringList narrowProblems = ui.layoutProblems();
+        QVERIFY2(narrowProblems.isEmpty(), qPrintable(narrowProblems.join(QStringLiteral("; "))));
         QVERIFY(narrowPlay->activeFocusOnTab());
         QStringList names;
         QStringList texts;
@@ -11050,14 +11749,94 @@ class TestUiPages : public QObject {
             texts << actions.at(i)->property("text").toString();
         }
         QCOMPARE(
-            names.mid(0, 8),
+            names.mid(0, 18),
             (QStringList{
+                QStringLiteral("playFromBeginningAction"), QStringLiteral("trailerAction"),
+                QStringLiteral("copyStreamUrlAction"), QStringLiteral("refreshMetadataAction"),
+                QStringLiteral("editMetadataAction"), QStringLiteral("identifyAction"),
+                QStringLiteral("editImagesAction"), QStringLiteral("editSubtitlesAction"),
                 QStringLiteral("playOnAction"), QStringLiteral("playNextAction"),
                 QStringLiteral("addToQueueAction"), QStringLiteral("addToPlaylistAction"),
+                QStringLiteral("addToCollectionAction"), QStringLiteral("deleteMediaAction"),
                 QStringLiteral("downloadAction"), QStringLiteral("automaticDownloadsAction"),
                 QStringLiteral("stopDownloadsAction"), QStringLiteral("toggleFavoriteAction")}));
         // Refresh is the main menu's, for every page
         QVERIFY(!texts.contains(QStringLiteral("Refresh")));
+    }
+
+    // KINEFIN_SHOTS=<directory inside the checkout>: walks Home, the library, the details page and its dialogs and saves a PNG at every step, for the HIG/UX reviews; unset, it skips
+    void visualTourWhenRequested()
+    {
+        const QString shots = qEnvironmentVariable("KINEFIN_SHOTS");
+        if (shots.isEmpty())
+            QSKIP("KINEFIN_SHOTS is not set");
+        QDir directory(shots);
+        QVERIFY(QDir().mkpath(directory.absolutePath()));
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(1400));
+        QVERIFY(ui.signIn());
+        int number = 0;
+        const auto shot = [&](const QString &name) {
+            QTest::qWait(400);
+            const QImage image = ui.window->grabWindow();
+            QVERIFY2(!image.isNull(), qPrintable(name));
+            QVERIFY2(
+                image.save(directory.filePath(
+                    QStringLiteral("%1-%2.png").arg(++number, 2, 10, QLatin1Char('0')).arg(name))),
+                qPrintable(name));
+        };
+        QTRY_VERIFY(ui.item(QStringLiteral("libraryCard_") + kMovies) != nullptr);
+        shot(QStringLiteral("home"));
+        QVERIFY(ui.openLibraryTile(kMovies));
+        QQuickItem *card = nullptr;
+        QTRY_VERIFY((card = Ui::itemIn(ui.item(QStringLiteral("libraryPage")),
+                                       QStringLiteral("mediaCard_") + kMovieId))
+                    != nullptr);
+        shot(QStringLiteral("library"));
+        ui.clickCenter(card);
+        QTRY_VERIFY(ui.item(QStringLiteral("itemDetailsPage")) != nullptr);
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Cast and Crew")));
+        QQuickItem *page = ui.item(QStringLiteral("itemDetailsPage"));
+        QVERIFY(page);
+        shot(QStringLiteral("details-wide"));
+        QVERIFY(ui.opensWindowOfWidth(500));
+        shot(QStringLiteral("details-narrow"));
+        QVERIFY(ui.opensWindowOfWidth(1400));
+        // The track list of the first source, open, as the styles draw it
+        QQuickItem *audio = Ui::itemIn(page, QStringLiteral("audioSelector"));
+        QVERIFY(audio);
+        QObject *popup = audio->property("popup").value<QObject *>();
+        QVERIFY(popup);
+        QVERIFY(QMetaObject::invokeMethod(popup, "open"));
+        QTRY_VERIFY(ui.item(QStringLiteral("audioChoice_1")) != nullptr);
+        shot(QStringLiteral("tracks"));
+        QVERIFY(QMetaObject::invokeMethod(popup, "close"));
+        // The edit and collection dialogs
+        const struct {
+            const char *action;
+            const char *dialog;
+            const char *name;
+        } dialogs[] = {
+            {"editMetadataAction", "editMetadataDialog", "edit-metadata"},
+            {"identifyAction", "identifyDialog", "identify"},
+            {"editImagesAction", "editImagesDialog", "edit-images"},
+            {"editSubtitlesAction", "editSubtitlesDialog", "edit-subtitles"},
+            {"addToCollectionAction", "addToCollectionDialog", "add-to-collection"},
+        };
+        for (const auto &entry : dialogs) {
+            QObject *action = page->findChild<QObject *>(QString::fromLatin1(entry.action));
+            QVERIFY2(action, entry.action);
+            QTRY_VERIFY2(action->property("visible").toBool(), entry.action);
+            QVERIFY(QMetaObject::invokeMethod(action, "trigger"));
+            QObject *dialog = ui.popup(QString::fromLatin1(entry.dialog));
+            QVERIFY2(dialog, entry.dialog);
+            QTRY_VERIFY2(dialog->property("opened").toBool(), entry.dialog);
+            shot(QString::fromLatin1(entry.name));
+            QVERIFY(QMetaObject::invokeMethod(dialog, "close"));
+            QTest::qWait(150);
+        }
     }
 
     void aFailedRestoreOffersRetryOnTheQueuePage()
@@ -11235,7 +12014,7 @@ class TestUiPages : public QObject {
         const auto clearAction = [&ui] {
             QQmlListReference actions(ui.item(QStringLiteral("queuePage")), "actions");
             for (qsizetype i = 0; i < actions.count(); ++i) {
-                if (actions.at(i)->property("text").toString() == QStringLiteral("Clear Queue"))
+                if (actions.at(i)->property("text").toString() == QStringLiteral("Clear Queue…"))
                     return actions.at(i);
             }
             return static_cast<QObject *>(nullptr);
@@ -11253,7 +12032,7 @@ class TestUiPages : public QObject {
         QCOMPARE(ui.currentDetails()->objectName(), QStringLiteral("queuePage"));
         QMetaObject::invokeMethod(clearAction(), "trigger");
         QTRY_VERIFY(dialog->property("opened").toBool());
-        // The dialog's own Clear Queue button sits below the page's toolbar action of the same name
+        // The dialog's own Clear Queue button sits below the toolbar action that opens it
         QQuickItem *confirm = nullptr;
         QTRY_VERIFY([&] {
             confirm = nullptr;
@@ -11556,7 +12335,7 @@ class TestUiPages : public QObject {
             for (QQuickItem *candidate : toolbar ? allItems(toolbar) : QList<QQuickItem *>{}) {
                 if (candidate->inherits("QQuickAbstractButton") && candidate->isVisible()
                     && candidate->width() > 0
-                    && candidate->property("text").toString() == QStringLiteral("Filters"))
+                    && candidate->property("text").toString() == QStringLiteral("Filters…"))
                     toolbarShown = true;
             }
             QQuickItem *grid = ui.item(QStringLiteral("libraryGrid"));
@@ -17232,6 +18011,11 @@ class TestUiPages : public QObject {
         const QPoint onVideo(ui.window->width() / 2, ui.window->height() / 2);
         wheel(onVideo, 120);
         QTRY_COMPARE(stub.volume, 55);
+        // The percentage shows for a while, also with the slider out of sight
+        QQuickItem *notice = ui.item(QStringLiteral("playerVolumeNotice"));
+        QVERIFY(notice);
+        QTRY_VERIFY(notice->isVisible());
+        QTRY_COMPARE(notice->property("text").toString(), QStringLiteral("Volume 55%"));
         wheel(onVideo, -60);
         QTest::qWait(50);
         QCOMPARE(stub.volume, 55);

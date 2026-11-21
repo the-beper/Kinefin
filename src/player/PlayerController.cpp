@@ -835,6 +835,22 @@ bool PlayerController::playItem(const QString &id, qint64 resumeTicks)
     return true;
 }
 
+bool PlayerController::playItemWithStreams(const QString &id, qint64 resumeTicks,
+                                           int audioStreamIndex, int subtitleStreamIndex)
+{
+    if (audioStreamIndex < -1 || audioStreamIndex > 1024 || subtitleStreamIndex < -2
+        || subtitleStreamIndex > 1024)
+        return false;
+    if (grouped())
+        return playItem(id, resumeTicks);
+    m_pendingStreams = PendingStreams{id, audioStreamIndex, subtitleStreamIndex};
+    if (!playItem(id, resumeTicks)) {
+        m_pendingStreams.reset();
+        return false;
+    }
+    return true;
+}
+
 bool PlayerController::castTarget() const
 {
     return !m_castTarget.isEmpty() && m_castTarget != QLatin1String("local");
@@ -1015,7 +1031,16 @@ bool PlayerController::startItem(const QString &id, qint64 resumeTicks, bool gro
         m_switchManual = false;
         // The streams a lowered request asked for are the old item's: another item picks its own
         m_requestedStreams = {};
+        m_detailsStreams.reset();
         m_requestedCap = UnlimitedBitrate;
+    }
+    if (m_pendingStreams && m_pendingStreams->itemId == id) {
+        if (m_pendingStreams->audio >= 0)
+            m_requestedStreams.audioStreamIndex = m_pendingStreams->audio;
+        if (m_pendingStreams->subtitle >= -1)
+            m_requestedStreams.subtitleStreamIndex = m_pendingStreams->subtitle;
+    } else if (m_pendingStreams) {
+        m_pendingStreams.reset();
     }
     if (grouped)
         m_manualCap = 0;
@@ -1287,6 +1312,7 @@ bool PlayerController::openLocal()
     m_switchManual = false;
     m_manualCap = 0;
     m_requestedStreams = {};
+    m_detailsStreams.reset();
     m_requestedCap = UnlimitedBitrate;
     m_canRetry = false;
     m_seriesPlaylistWanted = false;
@@ -1475,6 +1501,19 @@ void PlayerController::requestPending()
     m_requestedCap = effectiveCap();
     if (m_requestedCap >= UnlimitedBitrate)
         m_requestedStreams = {};
+    // A repeat or another reopen of the same item keeps the tracks the details page picked
+    if (m_detailsStreams && m_detailsStreams->itemId == m_itemId) {
+        if (m_detailsStreams->audio >= 0)
+            m_requestedStreams.audioStreamIndex = m_detailsStreams->audio;
+        if (m_detailsStreams->subtitle >= -1)
+            m_requestedStreams.subtitleStreamIndex = m_detailsStreams->subtitle;
+    }
+    if (m_pendingStreams && m_pendingStreams->itemId == m_itemId) {
+        if (m_pendingStreams->audio >= 0)
+            m_requestedStreams.audioStreamIndex = m_pendingStreams->audio;
+        if (m_pendingStreams->subtitle >= -1)
+            m_requestedStreams.subtitleStreamIndex = m_pendingStreams->subtitle;
+    }
     const QJsonObject profile = buildDeviceProfile(m_settings.deviceProfileOptions());
     if (!m_client.requestPlaybackInfo(m_itemId, m_resumeTicks, profile, m_requestedCap,
                                       m_requestedStreams)) {
@@ -2425,6 +2464,7 @@ void PlayerController::clearCurrent()
     m_canRetry = false;
     m_requestedCap = UnlimitedBitrate;
     m_requestedStreams = {};
+    m_detailsStreams.reset();
     m_manualCap = 0;
     m_qualitySwitching = false;
     dropSeriesPlaylist();
@@ -2555,6 +2595,7 @@ void PlayerController::stop()
 void PlayerController::stopLocally()
 {
     persistQueueCursor();
+    m_pendingStreams.reset();
     m_stopping = true;
     m_client.cancelPlaybackInfo();
     m_loading = false;
@@ -2967,11 +3008,28 @@ void PlayerController::refreshTracks()
         m_trackRestored = true;
         restoreTracks();
     }
+    // An empty track list is a list that has not arrived yet: the pick waits, as the restored one does
+    if (!tracks.isEmpty())
+        applyPendingStreams();
+}
+
+void PlayerController::applyPendingStreams()
+{
+    if (!m_pendingStreams || m_pendingStreams->itemId != m_itemId)
+        return;
+    const PendingStreams pending = *m_pendingStreams;
+    m_pendingStreams.reset();
+    if (pending.audio >= 0)
+        selectAudioStreamIndex(pending.audio);
+    if (pending.subtitle >= -1)
+        selectSubtitleStreamIndex(pending.subtitle);
+    m_detailsStreams = pending;
 }
 void PlayerController::selectAudioTrack(int id)
 {
     if (id < 1 || id > 1024 || !active())
         return;
+    m_detailsStreams.reset();
     m_engine.setMpvProperty(QStringLiteral("aid"), id);
     m_trackChosen = true;
     rememberTracks(id, m_selectedSubtitleId, m_secondarySubtitleId);
@@ -2986,6 +3044,7 @@ void PlayerController::selectSubtitleTrack(int id)
 {
     if (id < 0 || id > 1024 || !active())
         return;
+    m_detailsStreams.reset();
     // A choice made now wins over a download for the same slot still on its way
     if (!m_pendingSubtitleSecondary)
         dropPendingSubtitle();

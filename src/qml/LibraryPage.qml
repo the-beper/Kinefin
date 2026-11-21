@@ -366,7 +366,7 @@ Kirigami.Page {
                     },
                     Kirigami.Action {
                         objectName: "filtersAction"
-                        text: i18n("Filters")
+                        text: i18n("Filters…")
                         tooltip: text
                         icon.name: "view-filter"
                         visible: page.listModel !== null

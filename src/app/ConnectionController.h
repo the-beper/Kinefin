@@ -22,6 +22,7 @@
 #include "api/JellyfinClient.h"
 #include "api/JellyfinSocketClient.h"
 #include "imagecache/ImageOrigin.h"
+#include "models/CollectionsModel.h"
 #include "models/FavoritesGroupsModel.h"
 #include "models/FavoritesModel.h"
 #include "models/GenreRailsModel.h"
@@ -29,6 +30,7 @@
 #include "models/ItemDetailsModel.h"
 #include "models/LibraryItemsModel.h"
 #include "models/LibrarySubtabController.h"
+#include "models/PersonItemsModel.h"
 #include "models/PlayQueue.h"
 #include "models/PlaylistEntriesModel.h"
 #include "models/PlaylistsController.h"
@@ -89,6 +91,8 @@ class ConnectionController : public QObject {
     // The sub-tabs of the Movies and Shows pages and the data of the one showing; it follows openType (opened for the scope the tab opens, closed with the Home tab and the session) and drives `genreRails` while its Genres sub-tab shows
     Q_PROPERTY(Kinefin::LibrarySubtabController *subtabs READ subtabs CONSTANT)
     Q_PROPERTY(Kinefin::ResumeItemsModel *resumeItems READ resumeItems CONSTANT)
+    Q_PROPERTY(Kinefin::PersonItemsModel *personItems READ personItems CONSTANT)
+    Q_PROPERTY(Kinefin::CollectionsModel *collections READ collections CONSTANT)
     Q_PROPERTY(Kinefin::RemoteSessionsModel *remoteSessions READ remoteSessions CONSTANT)
     Q_PROPERTY(Kinefin::PlayQueue *queue READ queue CONSTANT)
     // The editor of the signed-in user's server-side preferences (the user preferences page); it follows the session and is fed the `libraries` ids and names
@@ -170,6 +174,8 @@ class ConnectionController : public QObject {
     GenreRailsModel *genreRails() { return &m_genreRails; }
     LibrarySubtabController *subtabs() { return &m_subtabs; }
     ResumeItemsModel *resumeItems() { return &m_resumeItems; }
+    PersonItemsModel *personItems() { return &m_personItems; }
+    CollectionsModel *collections() { return &m_collections; }
     RemoteSessionsModel *remoteSessions() { return &m_remoteSessions; }
     PlayQueue *queue() { return &m_queue; }
     JellyfinClient &playbackClient() { return m_client; }
@@ -255,6 +261,30 @@ class ConnectionController : public QObject {
     Q_INVOKABLE bool setFavorite(const QString &itemId, bool favorite);
     // Marks a video watched or unwatched for the signed-in user (the card menu and Continue Watching's button), as setFavorite does: the views follow `itemPlayedUpdated` of the client, and a failed answer to a request made here is signalled by `playedUpdateFailed`
     Q_INVOKABLE bool setPlayed(const QString &itemId, bool played);
+    // The token-free static stream URL of an item, for Copy Stream URL; empty when not signed in or for an invalid id
+    Q_INVOKABLE QUrl streamUrl(const QString &itemId,
+                               const QString &mediaSourceId = QString()) const;
+    // Asks the server to refresh the item's metadata and images; administrators only. False when the request cannot be sent or another refresh is pending. The outcome is `itemRefreshFinished`
+    Q_INVOKABLE bool refreshItem(const QString &itemId);
+    // Creates a collection holding one item, or adds the item to an existing one; the outcomes are collectionCreated/collectionCreateFailed and collectionItemsAdded/collectionItemsAddFailed
+    Q_INVOKABLE bool createCollection(const QString &name, const QString &itemId);
+    Q_INVOKABLE bool addToCollection(const QString &collectionId, const QString &itemId);
+    // Deletes a movie, episode or video after the server says CanDelete; administrators only. The outcome is itemDeleted/itemDeleteFailed
+    Q_INVOKABLE bool deleteItem(const QString &itemId);
+    // Updates Name, Overview, ProductionYear, OfficialRating and Genres; administrators only. The outcome is itemUpdated/itemUpdateFailed
+    Q_INVOKABLE bool updateItem(const QString &itemId, const QVariantMap &fields);
+    // Identify: searches Movie or Series providers and applies one result; administrators only. The outcomes are remoteSearchFinished/remoteSearchFailed and remoteSearchApplied/remoteSearchApplyFailed
+    Q_INVOKABLE bool remoteSearch(const QString &itemId, const QString &type, const QString &name,
+                                  int year);
+    Q_INVOKABLE bool applyRemoteSearch(const QString &itemId, const QVariantMap &result);
+    // Edit Images: uploads a local file to an image type (Backdrop index 0 to 9, the others -1) or deletes one; administrators only. The outcomes are itemImageUpdated/itemImageUpdateFailed
+    Q_INVOKABLE bool uploadImage(const QString &itemId, const QString &imageType, int index,
+                                 const QUrl &fileUrl);
+    Q_INVOKABLE bool deleteImage(const QString &itemId, const QString &imageType, int index);
+    // Edit Subtitles: uploads a local srt/ass/ssa/vtt (UTF-8, at most 2 MiB) or deletes an external subtitle by index; administrators only. The outcomes are itemSubtitleUpdated/itemSubtitleUpdateFailed
+    Q_INVOKABLE bool uploadSubtitle(const QString &itemId, const QUrl &fileUrl,
+                                    const QString &language, bool forced);
+    Q_INVOKABLE bool deleteSubtitle(const QString &itemId, int index);
     // The Undo of a Mark as Watched: back at the saved position `positionTicks` when the item had one, unwatched unless `played` (a rewatch the server kept as played); the same signals as setPlayed
     Q_INVOKABLE bool undoPlayed(const QString &itemId, qint64 positionTicks, bool played = false);
     // Asks the server for the libraries again (the Home page's retry)
@@ -275,6 +305,28 @@ class ConnectionController : public QObject {
     void playedUpdateFailed(const QString &itemId);
     // A watched-state write made through setPlayed or undoPlayed that the server confirmed
     void playedUpdated(const QString &itemId, bool played);
+    // A metadata refresh requested through refreshItem ended
+    void itemRefreshFinished(const QString &itemId, bool ok, int httpStatus);
+    // A collection created, or an item added to one
+    void collectionCreated(const QString &collectionId, const QString &name);
+    void collectionCreateFailed(int httpStatus);
+    void collectionItemsAdded(const QString &collectionId, const QString &itemId);
+    void collectionItemsAddFailed(const QString &collectionId, const QString &itemId,
+                                  int httpStatus);
+    // A media delete the server confirmed, or one it refused
+    void itemDeleted(const QString &itemId);
+    void itemDeleteFailed(const QString &itemId, int httpStatus);
+    void itemUpdated(const QString &itemId);
+    void itemUpdateFailed(const QString &itemId, int httpStatus);
+    void remoteSearchFinished(const QString &itemId, const QVariantList &results);
+    void remoteSearchFailed(const QString &itemId, int httpStatus);
+    void remoteSearchApplied(const QString &itemId);
+    void remoteSearchApplyFailed(const QString &itemId, int httpStatus);
+    void itemImageUpdated(const QString &itemId, const QString &imageType, int index);
+    void itemImageUpdateFailed(const QString &itemId, const QString &imageType, int index,
+                               int httpStatus);
+    void itemSubtitleUpdated(const QString &itemId);
+    void itemSubtitleUpdateFailed(const QString &itemId, int httpStatus);
     void stateChanged();
     void errorTextChanged();
     void serverUrlChanged();
@@ -383,6 +435,8 @@ class ConnectionController : public QObject {
     // After the client and the rails it drives (its destructor clears them)
     LibrarySubtabController m_subtabs{&m_client, &m_genreRails};
     ResumeItemsModel m_resumeItems{&m_client};
+    PersonItemsModel m_personItems{&m_client};
+    CollectionsModel m_collections{&m_client};
     RemoteSessionsModel m_remoteSessions{&m_client};
     // The collection type the rails were opened for: re-scoping another type leaves them alone
     QString m_genreRailsType;

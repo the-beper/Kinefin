@@ -12,7 +12,7 @@ tty=; [ -t 0 ] && tty=-t
 
 [ "$#" -eq 0 ] && set -- bash
 set -- "$image" "$@"
-for name in KINEFIN_LIVE_BASE_URL KINEFIN_LIVE_USER KINEFIN_LIVE_PASSWORD KINEFIN_LIVE_ADMIN_USER KINEFIN_LIVE_ADMIN_PASSWORD KINEFIN_LIVE_MPV_LOG QT_LOGGING_RULES; do
+for name in KINEFIN_LIVE_BASE_URL KINEFIN_LIVE_USER KINEFIN_LIVE_PASSWORD KINEFIN_LIVE_ADMIN_USER KINEFIN_LIVE_ADMIN_PASSWORD KINEFIN_LIVE_MPV_LOG KINEFIN_SHOTS QT_LOGGING_RULES; do
     eval "present=\${$name+x}"
     if [ -n "$present" ]; then set -- "--env=$name" "$@"; fi
 done

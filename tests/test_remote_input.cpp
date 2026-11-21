@@ -220,6 +220,8 @@ class TestRemoteInput : public QObject {
         window.focus = &field;
         QVERIFY(!server->dispatchNetworkKeycode(QStringLiteral("select")));
         QVERIFY(!server->dispatchNetworkKeycode(QStringLiteral("up")));
+        // A scroll would change a value or a dialog under the field
+        QVERIFY(!server->dispatchNetworkKeycode(QStringLiteral("scrolldown")));
         QCOMPARE(window.presses, QList<int>{Qt::Key_Down});
         // A button inside a popup: a remote Select would confirm the dialog
         QQuickPopupItem popup;

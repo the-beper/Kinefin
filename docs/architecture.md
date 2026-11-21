@@ -73,7 +73,7 @@ The directories build into static libraries (`kinefin_core`, `kinefin_player`, `
 These hold everywhere; a change that breaks one needs a reason good enough to change this page.
 
 - Server text is data, never markup. Item names, overviews and every other string from the server are shown as plain text: every QML label that shows one sets `textFormat: Text.PlainText`, and `test_ui_pages` fails otherwise.
-- Images come only from the server's own address. Only the image URL builders of `JellyfinClient` build an image URL, a raw server string is never an `Image` source, and `src/imagecache` is the one fetcher.
+- Images come only from the server's own address. Only the image URL builders of `JellyfinClient` build an image URL, a raw server string is never an `Image` source, and `src/imagecache` is the one fetcher. The Identify covers are the one exception: the provider's own artwork, only over https and only on the TMDB, TheTVDB, OMDb, Fanart.tv or Cover Art Archive domains, fetched with no Authorization header or cookies, no redirects and the same size cap.
 - The access token travels only in the `Authorization` header: never in a URL, a log line or a file.
 - Each listing consumer has its own channel number. A page that lists items passes its channel with each request and gets it back with the answer; the client keeps one request in flight per channel. Two consumers never share one, and a consumer that goes away releases its channel.
 - Models do not know about views: `kinefin_core`, which holds `src/models`, links neither QtGui nor QtQml.

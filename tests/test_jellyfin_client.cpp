@@ -18,6 +18,7 @@
 #include <QSignalSpy>
 #include <QTcpServer>
 #include <QTcpSocket>
+#include <QTemporaryDir>
 #include <QUrlQuery>
 #include <QtTest>
 
@@ -217,6 +218,149 @@ class TestJellyfinClient : public QObject {
         QTRY_COMPARE(failed.size(), 1);
         QCOMPARE(downloaded.size(), 0);
         QCOMPARE(server.subtitleDownloadRequests, count + 1);
+    }
+
+    void remoteSearchRejectsAnOversizedReply()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        // One byte over the response cap: the client must refuse before parsing it
+        server.remoteSearchResults = QByteArray(1'048'577, ' ');
+        server.remoteSearchResults[0] = '[';
+        server.remoteSearchResults[1'048'576] = ']';
+        QSignalSpy finished(&client, &Kinefin::JellyfinClient::remoteSearchFinished);
+        QSignalSpy failed(&client, &Kinefin::JellyfinClient::remoteSearchFailed);
+        QVERIFY(client.remoteSearch(kPlayItem, QStringLiteral("Movie"), QStringLiteral("Arcturus"),
+                                    2012));
+        QTRY_COMPARE(failed.size(), 1);
+        QCOMPARE(finished.size(), 0);
+    }
+
+    void newWritesReportRefusals()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        QTemporaryDir dir;
+        const QString image = dir.filePath(QStringLiteral("poster.png"));
+        QFile imageFile(image);
+        QVERIFY(imageFile.open(QIODevice::WriteOnly));
+        imageFile.write(QByteArray::fromHex("89504e470d0a1a0a00000000"));
+        imageFile.close();
+        QSignalSpy imageFailed(&client, &Kinefin::JellyfinClient::itemImageUpdateFailed);
+        server.imageWriteStatus = 403;
+        QVERIFY(client.uploadImage(kPlayItem, QStringLiteral("Primary"), -1,
+                                   QUrl::fromLocalFile(image)));
+        QTRY_COMPARE(imageFailed.size(), 1);
+        QCOMPARE(imageFailed.constFirst().at(3).toInt(), 403);
+
+        const QString subtitle = dir.filePath(QStringLiteral("track.srt"));
+        QFile subtitleFile(subtitle);
+        QVERIFY(subtitleFile.open(QIODevice::WriteOnly));
+        subtitleFile.write("1\n00:00:01,000 --> 00:00:02,000\nHello\n");
+        subtitleFile.close();
+        QSignalSpy subtitleFailed(&client, &Kinefin::JellyfinClient::itemSubtitleUpdateFailed);
+        server.subtitleWriteStatus = 403;
+        QVERIFY(client.uploadSubtitle(kPlayItem, QUrl::fromLocalFile(subtitle),
+                                      QStringLiteral("ita"), false));
+        QTRY_COMPARE(subtitleFailed.size(), 1);
+        QCOMPARE(subtitleFailed.constFirst().at(1).toInt(), 403);
+
+        QSignalSpy refreshed(&client, &Kinefin::JellyfinClient::itemRefreshFinished);
+        server.refreshStatus = 403;
+        QVERIFY(client.refreshItem(kPlayItem));
+        QTRY_COMPARE(refreshed.size(), 1);
+        QCOMPARE(refreshed.constFirst().at(1).toBool(), false);
+
+        QSignalSpy updateFailed(&client, &Kinefin::JellyfinClient::itemUpdateFailed);
+        server.itemUpdateStatus = 403;
+        QVERIFY(client.updateItem(
+            kPlayItem, QVariantMap{{QStringLiteral("Name"), QStringLiteral("Refused")}}));
+        QTRY_COMPARE(updateFailed.size(), 1);
+        QCOMPARE(updateFailed.constFirst().at(1).toInt(), 403);
+    }
+
+    void remoteSearchTreatsNoContentAsNoMatches()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        server.remoteSearchStatus = 204;
+        QSignalSpy finished(&client, &Kinefin::JellyfinClient::remoteSearchFinished);
+        QSignalSpy failed(&client, &Kinefin::JellyfinClient::remoteSearchFailed);
+        QVERIFY(client.remoteSearch(kPlayItem, QStringLiteral("Movie"), QStringLiteral("Arcturus"),
+                                    2012));
+        QTRY_COMPARE(finished.size(), 1);
+        QCOMPARE(finished.constFirst().at(1).toList().size(), 0);
+        QCOMPARE(failed.size(), 0);
+    }
+
+    void remoteSearchSkipsEntriesThatAreNotObjects()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        const QByteArray entries =
+            server.remoteSearchResults.mid(1, server.remoteSearchResults.size() - 2);
+        server.remoteSearchResults = QByteArrayLiteral("[null,") + entries + QByteArrayLiteral("]");
+        QSignalSpy finished(&client, &Kinefin::JellyfinClient::remoteSearchFinished);
+        QVERIFY(client.remoteSearch(kPlayItem, QStringLiteral("Movie"), QStringLiteral("Arcturus"),
+                                    2012));
+        QTRY_COMPARE(finished.size(), 1);
+        QCOMPARE(finished.constFirst().at(1).toList().size(), 1);
+    }
+
+    void providerArtworkUrlsAreNarrowlyAllowed()
+    {
+        const QList<QUrl> allowed = {
+            QUrl(QStringLiteral("https://image.tmdb.org/t/p/w300/x.jpg")),
+            QUrl(QStringLiteral("https://artwork.thetvdb.com/x.jpg")),
+            QUrl(QStringLiteral("https://img.omdbapi.com/?apikey=x&i=tt1")),
+            QUrl(QStringLiteral("https://assets.fanart.tv/x.jpg")),
+            QUrl(QStringLiteral("https://coverartarchive.org/x.jpg")),
+        };
+        for (const QUrl &url : allowed)
+            QVERIFY2(Kinefin::JellyfinClient::isProviderImageUrl(url), qPrintable(url.toString()));
+        const QList<QUrl> refused = {
+            QUrl(QStringLiteral("http://image.tmdb.org/x.jpg")),
+            QUrl(QStringLiteral("https://evil.invalid/x.jpg")),
+            QUrl(QStringLiteral("https://image.tmdb.org.evil.invalid/x.jpg")),
+            QUrl(QStringLiteral("https://user:pass@image.tmdb.org/x.jpg")),
+            QUrl(QStringLiteral("https://image.tmdb.org:8443/x.jpg")),
+            QUrl(QStringLiteral("https://image.tmdb.org/x.jpg#frag")),
+        };
+        for (const QUrl &url : refused)
+            QVERIFY2(!Kinefin::JellyfinClient::isProviderImageUrl(url), qPrintable(url.toString()));
+    }
+
+    void remoteSearchKeepsOnlyProviderArtwork()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        server.remoteSearchResults = QByteArrayLiteral(
+            "[{\"Name\":\"Good\",\"ProductionYear\":2012,\"SearchProviderName\":\"TMDB\","
+            "\"ProviderIds\":{\"Tmdb\":\"1\"},"
+            "\"ImageUrl\":\"https://image.tmdb.org/t/p/w300/x.jpg\"},"
+            "{\"Name\":\"Bad\",\"ProductionYear\":2012,\"SearchProviderName\":\"TMDB\","
+            "\"ProviderIds\":{\"Tmdb\":\"2\"},"
+            "\"ImageUrl\":\"https://evil.invalid/x.jpg\"}]");
+        QSignalSpy finished(&client, &Kinefin::JellyfinClient::remoteSearchFinished);
+        QVERIFY(client.remoteSearch(kPlayItem, QStringLiteral("Movie"), QStringLiteral("Arcturus"),
+                                    2012));
+        QTRY_COMPARE(finished.size(), 1);
+        const QVariantList results = finished.constFirst().at(1).toList();
+        QCOMPARE(results.size(), 2);
+        QVERIFY(results.at(0).toMap().value(QStringLiteral("imageUrl")).toUrl().isValid());
+        QCOMPARE(results.at(0).toMap().value(QStringLiteral("imageUrl")).toUrl().host(),
+                 QStringLiteral("image.tmdb.org"));
+        QVERIFY(!results.at(1).toMap().value(QStringLiteral("imageUrl")).toUrl().isValid());
     }
 
     void trickplayMetadataAndTileAreAuthenticated()

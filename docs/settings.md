@@ -22,11 +22,11 @@ In the tables, the Key column is the key as stored in the file and the Default c
 | Setting | Key | Default | Values | What it does |
 | --- | --- | --- | --- | --- |
 | Full Screen (Window) | `fullscreen` | `false` | On or off | Starts the window in full screen and switches it live when you change the setting. The command-line flags `--fullscreen` and `--windowed` override it for that run, until you change the setting. |
-| Always on Top (Window) | `alwaysOnTop` | `false` | On or off | Keeps the window above other windows. On Wayland the compositor may ignore the request. |
 | Force Full Screen Display (Window) | `forceFSScreen` | `""` | Name of a screen output, such as `DP-1`; empty for the current screen | Full screen goes to the output with this name when it exists. |
 | Check For Updates (Application) | `checkForUpdates` | `true` | On or off | Checks for a new Kinefin release after startup and shows **Check for Updates** in the About dialog for a manual check. Off hides that button too. |
+| Gamepad (Experimental) (Application) | `sdlEnabled` | `true` | On or off | Turns SDL3 gamepad input on or off. Off, Kinefin never initialises SDL and never opens a `/dev/input` device. |
 | Enable Input Repeat (Application) | `enableInputRepeat` | `true` | On or off | Repeats an action while you hold a gamepad direction or a keyboard key. Text fields keep their own key repeat, and the toggles in the player overlay never repeat. |
-| Ignore Certificate Errors (Application) | `ignoreSSLErrors` | `false` | On or off | Accepts invalid TLS certificates for all traffic to the Jellyfin server (API, WebSocket, images, mpv), never for the update check. Off, a certificate error stops the connection with a message naming this switch. A warning shows on the General page while it is on. The `--ignore-certificate-errors` flag forces it on for a run. |
+| Ignore Certificate Errors (Application) | `ignoreSSLErrors` | `false` | On or off | Accepts invalid TLS certificates for all traffic to the Jellyfin server (API, WebSocket, images, mpv), never for the update check or the metadata providers' covers. Off, a certificate error stops the connection with a message naming this switch. A warning shows on the General page while it is on. The `--ignore-certificate-errors` flag forces it on for a run. |
 | Auto-Detect Certificate Bundle (Application) | `autodetectCertBundle` | `true` | On or off | Points mpv at the first readable system certificate bundle. Off, mpv and FFmpeg use their own defaults. A `tls-ca-file` line in `mpv.conf` or in Manual MPV Configuration overrides it. |
 
 ## Audio (`audio`)
@@ -127,7 +127,6 @@ These settings have no control on the Settings page. Some are kept for compatibi
 | `main.disablemouse` | `false` | On or off | Ignores mouse input (clicks, movement, wheel) in the full player and the picture-in-picture window. The mini player and browsing are unaffected. |
 | `main.logLevel` | `debug` | `debug`, `info`, `warn`, `error`, `fatal`, `disable` | Sets the log verbosity. The `--log-level` flag wins for that run. |
 | `main.forceAlwaysFS` | `false` | On or off | Kept so that a configuration copied from Jellyfin Desktop stays valid; Kinefin does not use it. |
-| `main.sdlEnabled` | `true` | On or off | Turns SDL3 gamepad input on or off. Off, SDL is never initialised and no `/dev/input` device is opened. |
 | `main.useSystemVideoCodecs` | `false` | On or off | Kept so that a configuration copied from Jellyfin Desktop stays valid; Kinefin does not use it. |
 | `video.aspect` | `normal` | `normal`, `custom`, `zoom`, `force_4_3`, `force_16_9`, `force_16_9_if_4_3`, `stretch`, `noscaling` | Default picture aspect handling. `custom` leaves mpv untouched, `force_16_9_if_4_3` stretches only 4:3 video, `noscaling` plays at the original size. The Aspect Ratio menu in the player overrides it for the current item only. |
 | `video.audio_delay.normal` | `0` | A number, in milliseconds | Audio delay used when the screen refresh rate is not near 24, 25 or 50 Hz. |
