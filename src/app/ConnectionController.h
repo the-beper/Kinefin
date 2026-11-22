@@ -23,7 +23,6 @@
 #include "api/JellyfinSocketClient.h"
 #include "imagecache/ImageOrigin.h"
 #include "models/CollectionsModel.h"
-#include "models/FavoritesGroupsModel.h"
 #include "models/FavoritesModel.h"
 #include "models/GenreRailsModel.h"
 #include "models/HomeRowsModel.h"
@@ -105,7 +104,6 @@ class ConnectionController : public QObject {
     // The user's video playlists, and the entries of the one the Playlist page shows
     Q_PROPERTY(Kinefin::PlaylistsController *playlists READ playlists CONSTANT)
     Q_PROPERTY(Kinefin::PlaylistEntriesModel *playlistEntries READ playlistEntries CONSTANT)
-    Q_PROPERTY(Kinefin::FavoritesGroupsModel *favoriteGroups READ favoriteGroups CONSTANT)
     // What other Jellyfin sessions ask of this one over the WebSocket: the shell plays it
     Q_PROPERTY(Kinefin::RemoteCommands *remoteCommands READ remoteCommands CONSTANT)
     // The downloads of the profile: its model, the policy and the actions the Downloads page and the item pages take
@@ -185,7 +183,6 @@ class ConnectionController : public QObject {
     FavoritesModel *favorites() { return &m_favorites; }
     PlaylistsController *playlists() { return &m_playlists; }
     PlaylistEntriesModel *playlistEntries() { return &m_playlistEntries; }
-    FavoritesGroupsModel *favoriteGroups() { return &m_favoriteGroups; }
     RemoteCommands *remoteCommands() { return &m_remoteCommands; }
     DownloadsController *downloads() { return &m_downloads; }
     // For tests: the server's push channel this controller owns
@@ -445,7 +442,6 @@ class ConnectionController : public QObject {
     FavoritesModel m_favorites{&m_client};
     PlaylistsController m_playlists{&m_client};
     PlaylistEntriesModel m_playlistEntries{&m_client};
-    FavoritesGroupsModel m_favoriteGroups{&m_favorites};
     // The server's push channel: it starts with every sign-in or restored session, stops with the credentials, announces media control and carries the remote commands
     JellyfinSocketClient m_socket{&m_client};
     RemoteCommands m_remoteCommands;

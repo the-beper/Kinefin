@@ -87,11 +87,6 @@ class BrowseStateStore final : public QObject {
     void setView(const QString &serverId, const QString &userId, const QString &scopeKey,
                  const ViewState &state);
 
-    // How the Favorites page groups its items: `Type` (the default), `Library`, `Genre`, `Year` or `None`; an unknown value is ignored
-    QString favoritesGrouping(const QString &serverId, const QString &userId) const;
-    void setFavoritesGrouping(const QString &serverId, const QString &userId,
-                              const QString &grouping);
-
     // Drops everything stored for the server, every user's
     void forgetServer(const QString &serverId);
 
@@ -110,8 +105,6 @@ class BrowseStateStore final : public QObject {
     struct UserState {
         QHash<QString, QString> selection;
         QHash<QString, StoredView> views;
-        // Empty until set
-        QString favoritesGrouping;
     };
     using Users = QHash<QString, UserState>;
 

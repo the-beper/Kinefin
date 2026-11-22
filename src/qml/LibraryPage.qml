@@ -472,21 +472,27 @@ Kirigami.Page {
                         onTriggered: page.listModel.reshuffle()
                     },
                     Kirigami.Action {
-                        objectName: "viewModeAction"
-                        readonly property bool listMode: page.listModel !== null && page.listModel.viewMode === "list"
-                        text: listMode ? i18n("Grid View") : i18n("List View")
-                        tooltip: text
-                        icon.name: listMode ? "view-list-icons" : "view-list-details"
-                        visible: page.listModel !== null
-                        onTriggered: page.listModel.viewMode = listMode ? "grid" : "list"
-                    },
-                    Kirigami.Action {
                         objectName: "viewOptionsAction"
                         text: i18n("View Options")
                         tooltip: text
                         icon.name: "configure"
                         visible: page.listModel !== null
 
+                        ChoiceAction {
+                            objectName: "viewModeGridAction"
+                            text: i18n("Grid View")
+                            current: page.listModel !== null && page.listModel.viewMode !== "list"
+                            onChosen: if (page.listModel) page.listModel.viewMode = "grid"
+                        }
+                        ChoiceAction {
+                            objectName: "viewModeListAction"
+                            text: i18n("List View")
+                            current: page.listModel !== null && page.listModel.viewMode === "list"
+                            onChosen: if (page.listModel) page.listModel.viewMode = "list"
+                        }
+                        Kirigami.Action {
+                            separator: true
+                        }
                         ImageAction {
                             token: "Primary"
                             list: page.listModel

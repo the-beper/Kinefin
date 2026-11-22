@@ -6,7 +6,6 @@
 #include "RemoteCommands.h"
 #include "models/CollectionsModel.h"
 #include "models/DownloadsModel.h"
-#include "models/FavoritesGroupsModel.h"
 #include "models/FavoritesModel.h"
 #include "models/FilterOptionsModel.h"
 #include "models/GenreRailsModel.h"
@@ -220,13 +219,6 @@ struct RemoteCommandsForeign {
     Q_GADGET
     QML_FOREIGN(Kinefin::RemoteCommands)
     QML_NAMED_ELEMENT(RemoteCommands)
-    QML_UNCREATABLE("Created by the application")
-};
-
-struct FavoritesGroupsModelForeign {
-    Q_GADGET
-    QML_FOREIGN(Kinefin::FavoritesGroupsModel)
-    QML_NAMED_ELEMENT(FavoritesGroupsModel)
     QML_UNCREATABLE("Created by the application")
 };
 } // namespace Kinefin

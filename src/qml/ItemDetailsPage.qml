@@ -98,6 +98,7 @@ Kirigami.ScrollablePage {
     }
     readonly property Kirigami.Action playOnAction: Kirigami.Action {
         objectName: "playOnAction"
+        displayHint: Kirigami.DisplayHint.KeepVisible
         text: i18nc("@action:button", "Cast…")
         icon.name: "kinefin-cast"
         visible: page.details.status === ItemDetailsModel.Ready && page.details.playable
@@ -117,8 +118,9 @@ Kirigami.ScrollablePage {
     // The first remote trailer the server offers, in the browser: only https URLs are kept by the parser
     readonly property Kirigami.Action trailerAction: Kirigami.Action {
         objectName: "trailerAction"
+        displayHint: Kirigami.DisplayHint.AlwaysHide
         text: i18n("Trailer")
-        icon.name: "document-open-remote"
+        icon.name: "media-playback-start"
         visible: page.details.status === ItemDetailsModel.Ready && page.details.trailers.length > 0
         onTriggered: {
             if (page.details.trailers.length === 0)
@@ -195,6 +197,7 @@ Kirigami.ScrollablePage {
     }
     readonly property Kirigami.Action playNextAction: Kirigami.Action {
         objectName: "playNextAction"
+        displayHint: Kirigami.DisplayHint.AlwaysHide
         text: i18n("Play Next")
         icon.name: "media-skip-forward"
         visible: page.queueable
@@ -204,6 +207,7 @@ Kirigami.ScrollablePage {
     }
     readonly property Kirigami.Action addToQueueAction: Kirigami.Action {
         objectName: "addToQueueAction"
+        displayHint: Kirigami.DisplayHint.AlwaysHide
         text: i18n("Add to Queue")
         icon.name: "list-add"
         visible: page.queueable
@@ -212,7 +216,7 @@ Kirigami.ScrollablePage {
     }
     readonly property Kirigami.Action addToPlaylistAction: Kirigami.Action {
         objectName: "addToPlaylistAction"
-        text: i18n("Add to Playlist…")
+        text: i18nc("@action:inmenu in the Add to submenu", "Playlist…")
         icon.name: "media-playlist-append"
         visible: page.details.status === ItemDetailsModel.Ready && page.details.playable
         onTriggered: page.Window.window.addToPlaylist(page.details.itemId)
@@ -220,7 +224,7 @@ Kirigami.ScrollablePage {
     // A movie or a whole series joins a collection; episodes belong to their series
     readonly property Kirigami.Action addToCollectionAction: Kirigami.Action {
         objectName: "addToCollectionAction"
-        text: i18n("Add to Collection…")
+        text: i18nc("@action:inmenu in the Add to submenu", "Collection…")
         icon.name: "folder-new"
         visible: page.details.status === ItemDetailsModel.Ready && (page.details.type === "Movie" || page.details.type === "Series")
         onTriggered: page.Window.window.addToCollection(page.details.itemId, page.details.name)
@@ -228,6 +232,7 @@ Kirigami.ScrollablePage {
     // A destructive write: administrators only, and only when the server itself says CanDelete
     readonly property Kirigami.Action deleteMediaAction: Kirigami.Action {
         objectName: "deleteMediaAction"
+        displayHint: Kirigami.DisplayHint.AlwaysHide
         text: i18n("Delete Media…")
         icon.name: "edit-delete"
         visible: page.details.status === ItemDetailsModel.Ready && page.details.canDelete
@@ -246,6 +251,7 @@ Kirigami.ScrollablePage {
     readonly property bool downloadRemovable: ["paused", "error", "completed", "exported"].indexOf(downloadState) >= 0
     readonly property Kirigami.Action downloadAction: Kirigami.Action {
         objectName: "downloadAction"
+        displayHint: Kirigami.DisplayHint.KeepVisible
         text: page.downloadRemovable ? i18n("Delete Download…") : page.downloadCancellable ? i18n("Cancel Download") : i18n("Download")
         icon.name: page.downloadRemovable ? "edit-delete" : page.downloadCancellable ? "process-stop" : "folder-download"
         visible: page.downloadable
@@ -265,6 +271,7 @@ Kirigami.ScrollablePage {
                                       ? page.connection.downloads.seriesRule(ruleSeriesId) : ({})
     readonly property Kirigami.Action automaticDownloadsAction: Kirigami.Action {
         objectName: "automaticDownloadsAction"
+        displayHint: Kirigami.DisplayHint.AlwaysHide
         text: page.seriesRule.kind ? i18n("Edit Automatic Downloads…") : i18n("Automatic Downloads…")
         icon.name: "folder-download"
         visible: page.details.status === ItemDetailsModel.Ready
@@ -274,6 +281,7 @@ Kirigami.ScrollablePage {
     }
     readonly property Kirigami.Action stopDownloadsAction: Kirigami.Action {
         objectName: "stopDownloadsAction"
+        displayHint: Kirigami.DisplayHint.AlwaysHide
         text: i18n("Stop Automatic Downloads")
         icon.name: "edit-delete-remove"
         visible: page.automaticDownloadsAction.visible && page.seriesRule.kind !== undefined
@@ -291,6 +299,7 @@ Kirigami.ScrollablePage {
     }
     readonly property Kirigami.Action favoriteAction: Kirigami.Action {
         objectName: "toggleFavoriteAction"
+        displayHint: Kirigami.DisplayHint.KeepVisible
         text: page.details.favorite ? i18n("Remove from Favorites") : i18n("Add to Favorites")
         // The icon shows the state too: a narrow toolbar may show the icon alone
         icon.name: page.details.favorite ? "starred-symbolic" : "non-starred-symbolic"
@@ -300,6 +309,38 @@ Kirigami.ScrollablePage {
     }
 
     title: details.name
+    // The bar keeps the four frequent actions (Cast, Download, the favorite toggle, watched state); the ⋮ menu holds the rest, the related entries folded into submenus that show only while one of their entries does, and Delete Media last behind a separator that shows only when something stands above it
+    readonly property Kirigami.Action addToMenuAction: Kirigami.Action {
+        objectName: "addToMenuAction"
+        displayHint: Kirigami.DisplayHint.AlwaysHide
+        text: i18nc("@action:inmenu submenu of the details menu", "Add to")
+        icon.name: "bookmark-new-symbolic"
+        visible: page.addToPlaylistAction.visible || page.addToCollectionAction.visible
+        children: [page.addToPlaylistAction, page.addToCollectionAction]
+    }
+    readonly property Kirigami.Action serverEditMenuAction: Kirigami.Action {
+        objectName: "serverEditMenuAction"
+        displayHint: Kirigami.DisplayHint.AlwaysHide
+        text: i18nc("@action:inmenu submenu of the details menu", "Edit on Server")
+        icon.name: "document-edit"
+        visible: page.editMetadataAction.visible || page.identifyAction.visible || page.editImagesAction.visible || page.editSubtitlesAction.visible || page.refreshMetadataAction.visible
+        children: [page.editMetadataAction, page.identifyAction, page.editImagesAction, page.editSubtitlesAction, page.refreshMetadataAction]
+    }
+    readonly property Kirigami.Action utilitiesMenuAction: Kirigami.Action {
+        objectName: "utilitiesMenuAction"
+        displayHint: Kirigami.DisplayHint.AlwaysHide
+        text: i18nc("@action:inmenu submenu of the details menu", "Utilities")
+        icon.name: "tools-symbolic"
+        visible: page.copyStreamUrlAction.visible || page.mediaInfoAction.visible
+        children: [page.copyStreamUrlAction, page.mediaInfoAction]
+    }
+    readonly property bool overflowHasEntries: trailerAction.visible || playNextAction.visible || addToQueueAction.visible || automaticDownloadsAction.visible || stopDownloadsAction.visible || addToMenuAction.visible || serverEditMenuAction.visible || utilitiesMenuAction.visible
+    readonly property Kirigami.Action separatorDelete: Kirigami.Action {
+        objectName: "overflowSeparatorDelete"
+        separator: true
+        displayHint: Kirigami.DisplayHint.AlwaysHide
+        visible: page.deleteMediaAction.visible && page.overflowHasEntries
+    }
 
     // The kinds of crew the server names with its own words, for a person with no role
     function personKind(type) {
@@ -412,6 +453,10 @@ Kirigami.ScrollablePage {
         }
         return choices;
     }
+    // The longest name of a list of choices, to size the list that opens under a box that cuts it
+    function longestLabel(choices) {
+        return choices.reduce((longest, choice) => choice.label.length > longest.length ? choice.label : longest, "");
+    }
     function choiceIndex(choices, value) {
         const index = choices.findIndex(choice => choice.index === value);
         return index < 0 ? 0 : index;
@@ -442,6 +487,7 @@ Kirigami.ScrollablePage {
 
     readonly property Kirigami.Action togglePlayedAction: Kirigami.Action {
         objectName: "togglePlayedAction"
+        displayHint: Kirigami.DisplayHint.KeepVisible
         // A rewatch stopped halfway is in progress, not watched, as on its card
         text: page.details.played && !page.details.canResume ? i18n("Mark as Unwatched") : i18n("Mark as Watched")
         icon.name: page.details.played && !page.details.canResume ? "view-hidden" : "checkmark-symbolic"
@@ -462,7 +508,7 @@ Kirigami.ScrollablePage {
         }
     }
 
-    actions: [page.playFromBeginningAction, page.trailerAction, page.copyStreamUrlAction, page.refreshMetadataAction, page.editMetadataAction, page.identifyAction, page.editImagesAction, page.editSubtitlesAction, page.playOnAction, page.playNextAction, page.addToQueueAction, page.addToPlaylistAction, page.addToCollectionAction, page.deleteMediaAction, page.downloadAction, page.automaticDownloadsAction, page.stopDownloadsAction, page.favoriteAction, page.togglePlayedAction, page.mediaInfoAction]
+    actions: [page.playOnAction, page.downloadAction, page.favoriteAction, page.togglePlayedAction, page.trailerAction, page.playNextAction, page.addToQueueAction, page.automaticDownloadsAction, page.stopDownloadsAction, page.addToMenuAction, page.serverEditMenuAction, page.utilitiesMenuAction, page.separatorDelete, page.deleteMediaAction]
     // The row of the page carries the way back and the actions, as on the Movies and Shows tabs; the hero names the item
     globalToolBarStyle: Kirigami.ApplicationHeaderStyle.None
     // Without Kirigami's title row the page names itself to a screen reader
@@ -876,26 +922,53 @@ Kirigami.ScrollablePage {
                                 id: scrim
 
                                 readonly property color fade: Kirigami.Theme.backgroundColor
+                                // The fade above the text: up to ten grid units, less where the image has no more room above the text block
+                                readonly property real fadeLength: hero.overlay ? Math.max(Kirigami.Units.gridUnit * 3, Math.min(parent.height - heroText.implicitHeight - page.margin, Kirigami.Units.gridUnit * 10)) : Kirigami.Units.gridUnit * 4
                                 // Where the text block starts inside the scrim: the fade is measured from it, not from the image's bottom
                                 readonly property real textTop: Math.max(0, height - page.margin - heroText.implicitHeight)
+                                readonly property real fadeTop: hero.overlay ? Math.min(1, textTop / height) : 1
+                                // How opaque the fade is where it ends, at the top of the text block; under the text it goes on to the full colour
+                                readonly property real topAlpha: hero.overlay ? 0.85 : 1
 
                                 anchors {
                                     left: parent.left
                                     right: parent.right
                                     bottom: parent.bottom
                                 }
-                                // Over the image: three grid units of soft fade above the text, then the background behind the whole block
-                                height: hero.overlay
-                                        ? Math.min(parent.height, heroText.implicitHeight + page.margin + Kirigami.Units.gridUnit * 3)
-                                        : Kirigami.Units.gridUnit * 2
+                                height: hero.overlay ? Math.min(parent.height, heroText.implicitHeight + page.margin + fadeLength) : fadeLength
+                                // A smoothstep ramp (3t² - 2t³) sampled at t = 0, .15, .3, .45, .6, .75, .9, 1: it starts and ends level, so neither end of the fade shows as an edge
                                 gradient: Gradient {
                                     GradientStop {
                                         position: 0
                                         color: Qt.alpha(scrim.fade, 0)
                                     }
                                     GradientStop {
-                                        position: hero.overlay ? Math.min(1, scrim.textTop / scrim.height) : 0.5
-                                        color: Qt.alpha(scrim.fade, hero.overlay ? 0.85 : 0.5)
+                                        position: scrim.fadeTop * 0.15
+                                        color: Qt.alpha(scrim.fade, scrim.topAlpha * 0.06)
+                                    }
+                                    GradientStop {
+                                        position: scrim.fadeTop * 0.3
+                                        color: Qt.alpha(scrim.fade, scrim.topAlpha * 0.22)
+                                    }
+                                    GradientStop {
+                                        position: scrim.fadeTop * 0.45
+                                        color: Qt.alpha(scrim.fade, scrim.topAlpha * 0.43)
+                                    }
+                                    GradientStop {
+                                        position: scrim.fadeTop * 0.6
+                                        color: Qt.alpha(scrim.fade, scrim.topAlpha * 0.65)
+                                    }
+                                    GradientStop {
+                                        position: scrim.fadeTop * 0.75
+                                        color: Qt.alpha(scrim.fade, scrim.topAlpha * 0.84)
+                                    }
+                                    GradientStop {
+                                        position: scrim.fadeTop * 0.9
+                                        color: Qt.alpha(scrim.fade, scrim.topAlpha * 0.97)
+                                    }
+                                    GradientStop {
+                                        position: scrim.fadeTop
+                                        color: Qt.alpha(scrim.fade, scrim.topAlpha)
                                     }
                                     GradientStop {
                                         position: 1
@@ -1171,6 +1244,13 @@ Kirigami.ScrollablePage {
                                     }
                                 }
 
+                                // Beside the main action, on its left
+                                ActionButton {
+                                    objectName: "detailsPlayFromBeginning"
+                                    visible: !hero.narrow && command.visible
+                                    command: page.playFromBeginningAction
+                                }
+
                                 ActionButton {
                                     id: playWide
                                     objectName: "detailsPlay"
@@ -1183,15 +1263,30 @@ Kirigami.ScrollablePage {
                         }
                     }
 
-                    // The one button of the hero on a narrow window, above the track selectors: the other actions are in the page toolbar
-                    ActionButton {
-                        id: playNarrow
-                        objectName: "detailsPlayNarrow"
+                    // The buttons of the hero on a narrow window, above the track selectors, sharing the width: the other actions are in the page toolbar
+                    RowLayout {
                         Layout.fillWidth: true
-                        visible: hero.narrow && command.visible
-                        command: page.playAction
-                        highlighted: true
-                        Component.onCompleted: page.narrowPlayButton = playNarrow
+                        visible: hero.narrow && (page.playAction.visible || page.playFromBeginningAction.visible)
+                        spacing: Kirigami.Units.smallSpacing
+
+                        ActionButton {
+                            objectName: "detailsPlayFromBeginningNarrow"
+                            Layout.fillWidth: true
+                            Layout.preferredWidth: 0
+                            visible: command.visible
+                            command: page.playFromBeginningAction
+                        }
+
+                        ActionButton {
+                            id: playNarrow
+                            objectName: "detailsPlayNarrow"
+                            Layout.fillWidth: true
+                            Layout.preferredWidth: 0
+                            visible: command.visible
+                            command: page.playAction
+                            highlighted: true
+                            Component.onCompleted: page.narrowPlayButton = playNarrow
+                        }
                     }
 
                     // The tracks picked before playback: the server's indexes go in the PlaybackInfo request and select the track once the file loads
@@ -1200,19 +1295,34 @@ Kirigami.ScrollablePage {
                         Layout.fillWidth: true
                         visible: page.audioChoices.length > 1 || page.subtitleChoices.length > 2
                         spacing: Kirigami.Units.largeSpacing
+                        // The two boxes share one capped width so they line up; the full track names live in the wider popup
+                        readonly property real boxWidth: Math.min(Kirigami.Units.gridUnit * 13, Math.max(Kirigami.Units.gridUnit * 6, width - Kirigami.Units.gridUnit * 6))
+                        // Both labels take the width of the longer one, so the boxes start at the same x when the Flow wraps them onto two lines
+                        readonly property real labelWidth: Math.max(audioLabel.visible ? audioLabel.implicitWidth : 0, subtitleLabel.visible ? subtitleLabel.implicitWidth : 0)
 
                         RowLayout {
                             spacing: Kirigami.Units.smallSpacing
 
                             Controls.Label {
+                                id: audioLabel
                                 text: i18n("Audio")
                                 visible: page.audioChoices.length > 1
+                                Layout.preferredWidth: streamSelectors.labelWidth
+                            }
+                            TextMetrics {
+                                id: audioNameMetrics
+                                font: audioSelector.font
+                                text: page.longestLabel(page.audioChoices)
                             }
                             Controls.ComboBox {
                                 id: audioSelector
                                 objectName: "audioSelector"
                                 visible: page.audioChoices.length > 1
                                 enabled: !(page.Window.window?.groupRouting ?? false)
+                                Layout.preferredWidth: streamSelectors.boxWidth
+                                Layout.maximumWidth: streamSelectors.boxWidth
+                                // The list may go wider than the box, so long track names stay readable, and never wider than the page
+                                popup.width: Math.min(Math.max(audioSelector.width, audioNameMetrics.advanceWidth + Kirigami.Units.gridUnit * 3), page.width - Kirigami.Units.gridUnit * 2)
                                 model: page.audioChoices
                                 textRole: "label"
                                 Accessible.name: i18n("Audio track")
@@ -1251,14 +1361,25 @@ Kirigami.ScrollablePage {
                             spacing: Kirigami.Units.smallSpacing
 
                             Controls.Label {
+                                id: subtitleLabel
                                 text: i18n("Subtitles")
                                 visible: page.subtitleChoices.length > 2
+                                Layout.preferredWidth: streamSelectors.labelWidth
+                            }
+                            TextMetrics {
+                                id: subtitleNameMetrics
+                                font: subtitleSelector.font
+                                text: page.longestLabel(page.subtitleChoices)
                             }
                             Controls.ComboBox {
                                 id: subtitleSelector
                                 objectName: "subtitleSelector"
                                 visible: page.subtitleChoices.length > 2
                                 enabled: !(page.Window.window?.groupRouting ?? false)
+                                Layout.preferredWidth: streamSelectors.boxWidth
+                                Layout.maximumWidth: streamSelectors.boxWidth
+                                // The list may go wider than the box, so long track names stay readable, and never wider than the page
+                                popup.width: Math.min(Math.max(subtitleSelector.width, subtitleNameMetrics.advanceWidth + Kirigami.Units.gridUnit * 3), page.width - Kirigami.Units.gridUnit * 2)
                                 model: page.subtitleChoices
                                 textRole: "label"
                                 Accessible.name: i18n("Subtitle track")

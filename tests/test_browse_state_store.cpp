@@ -907,54 +907,29 @@ class TestBrowseStateStore : public QObject {
         QVERIFY(QFileInfo(f.path).size() <= BrowseStateStore::MaxFileBytes);
     }
 
-    void favoritesGroupingRoundTripAndBadValues()
+    // The Favorites page lost its grouping: a file that still carries the old key loads as before, and the key is gone with the next save
+    void theRetiredFavoritesGroupingIsDroppedOnTheNextSave()
     {
         Fixture f;
-        {
-            auto store = f.open();
-            QCOMPARE(store->favoritesGrouping(kServer, kUser), QStringLiteral("Type"));
-            // The default is not worth a file
-            store->setFavoritesGrouping(kServer, kUser, QStringLiteral("Type"));
-            store->flush();
-            QVERIFY(!QFileInfo::exists(f.path));
-            for (const QString &bad : {QString(), QStringLiteral("genre"), QStringLiteral("Bogus"),
-                                       QStringLiteral("Genre ")})
-                store->setFavoritesGrouping(kServer, kUser, bad);
-            QCOMPARE(store->favoritesGrouping(kServer, kUser), QStringLiteral("Type"));
-            store->setFavoritesGrouping(QStringLiteral("bad id"), kUser, QStringLiteral("Year"));
-            QCOMPARE(store->favoritesGrouping(QStringLiteral("bad id"), kUser),
-                     QStringLiteral("Type"));
-            store->setFavoritesGrouping(kServer, kUser, QStringLiteral("Genre"));
-            store->setFavoritesGrouping(kServer, kOtherUser, QStringLiteral("None"));
-            // A bad value keeps the previous one
-            store->setFavoritesGrouping(kServer, kUser, QStringLiteral("Nope"));
-            QCOMPARE(store->favoritesGrouping(kServer, kUser), QStringLiteral("Genre"));
-            store->flush();
-        }
-        {
-            // A user with nothing but the grouping is kept
-            auto store = f.open();
-            QCOMPARE(store->favoritesGrouping(kServer, kUser), QStringLiteral("Genre"));
-            QCOMPARE(store->favoritesGrouping(kServer, kOtherUser), QStringLiteral("None"));
-            QCOMPARE(store->favoritesGrouping(kOtherServer, kUser), QStringLiteral("Type"));
-            store->setView(kServer, kUser, QStringLiteral("movies"),
-                           state(QStringLiteral("Name"), false, QStringLiteral("All")));
-            store->setFavoritesGrouping(kServer, kUser, QStringLiteral("Library"));
-            store->flush();
-        }
-        auto store = f.open();
-        QCOMPARE(store->favoritesGrouping(kServer, kUser), QStringLiteral("Library"));
-        QVERIFY(store->view(kServer, kUser, QStringLiteral("movies")));
-        // An unknown value in the file is ignored and costs nothing else
         f.write(fileFor({{kMovies, kLibrary}}, {{QStringLiteral("movies"), goodView()}}, 2,
-                        {{QStringLiteral("favoritesGrouping"), QStringLiteral("Weekday")}}));
-        auto bad = f.open();
-        QCOMPARE(bad->favoritesGrouping(kServer, kUser), QStringLiteral("Type"));
-        QCOMPARE(bad->selection(kServer, kUser, kMovies), kLibrary);
-        QVERIFY(bad->view(kServer, kUser, QStringLiteral("movies")));
-        f.write(fileFor({}, {}, 2, {{QStringLiteral("favoritesGrouping"), 7}}));
-        auto number = f.open();
-        QCOMPARE(number->favoritesGrouping(kServer, kUser), QStringLiteral("Type"));
+                        {{QStringLiteral("favoritesGrouping"), QStringLiteral("Genre")}}));
+        {
+            auto store = f.open();
+            QCOMPARE(store->selection(kServer, kUser, kMovies), kLibrary);
+            QVERIFY(store->view(kServer, kUser, QStringLiteral("movies")));
+            store->setView(kServer, kUser, QStringLiteral("movies"),
+                           state(QStringLiteral("Name"), true, QStringLiteral("All")));
+            store->flush();
+        }
+        QFile file(f.path);
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        const QByteArray saved = file.readAll();
+        QVERIFY(!saved.contains("favoritesGrouping"));
+        // What was there stays: the selection and the view just saved
+        auto reopened = f.open();
+        QCOMPARE(reopened->selection(kServer, kUser, kMovies), kLibrary);
+        QVERIFY(holds(*reopened, kServer, kUser, QStringLiteral("movies"),
+                      state(QStringLiteral("Name"), true, QStringLiteral("All"))));
     }
 
     void saveFailedOncePerStreak()

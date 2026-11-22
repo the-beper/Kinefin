@@ -79,9 +79,6 @@ const std::array kEpisodeKinds{QLatin1String("All"), QLatin1String("Specials"),
 const std::array kViewModes{QLatin1String("grid"), QLatin1String("list")};
 const std::array kImageTypes{QLatin1String("Primary"), QLatin1String("Banner"),
                              QLatin1String("Disc"), QLatin1String("Logo"), QLatin1String("Thumb")};
-const std::array kFavoritesGroupings{QLatin1String("Type"), QLatin1String("Library"),
-                                     QLatin1String("Genre"), QLatin1String("Year"),
-                                     QLatin1String("None")};
 
 template <typename Tokens> bool oneOf(const Tokens &allowed, const QString &token)
 {
@@ -343,23 +340,6 @@ void BrowseStateStore::setView(const QString &serverId, const QString &userId,
     scheduleSave();
 }
 
-QString BrowseStateStore::favoritesGrouping(const QString &serverId, const QString &userId) const
-{
-    const UserState *user = userState(serverId, userId);
-    return user && !user->favoritesGrouping.isEmpty() ? user->favoritesGrouping
-                                                      : QStringLiteral("Type");
-}
-
-void BrowseStateStore::setFavoritesGrouping(const QString &serverId, const QString &userId,
-                                            const QString &grouping)
-{
-    if (!isValidJellyfinId(serverId) || !isValidJellyfinId(userId)
-        || !oneOf(kFavoritesGroupings, grouping) || favoritesGrouping(serverId, userId) == grouping)
-        return;
-    m_servers[serverId][userId].favoritesGrouping = grouping;
-    scheduleSave();
-}
-
 void BrowseStateStore::forgetServer(const QString &serverId)
 {
     if (!m_servers.remove(serverId))
@@ -402,7 +382,7 @@ bool BrowseStateStore::evictOldest()
     Users &users = m_servers[serverId];
     UserState &user = users[userId];
     user.views.remove(scope);
-    if (user.selection.isEmpty() && user.views.isEmpty() && user.favoritesGrouping.isEmpty())
+    if (user.selection.isEmpty() && user.views.isEmpty())
         users.remove(userId);
     if (users.isEmpty())
         m_servers.remove(serverId);
@@ -459,8 +439,6 @@ QByteArray BrowseStateStore::serialize() const
             }
             QJsonObject stored{{QStringLiteral("selection"), selection},
                                {QStringLiteral("views"), views}};
-            if (!user->favoritesGrouping.isEmpty())
-                stored.insert(QStringLiteral("favoritesGrouping"), user->favoritesGrouping);
             users.insert(user.key(), stored);
         }
         servers.insert(server.key(), QJsonObject{{QStringLiteral("users"), users}});
@@ -570,9 +548,6 @@ void BrowseStateStore::loadUsers(const QJsonObject &servers, int version, qint64
                     && (id.toString().isEmpty() || isValidJellyfinId(id.toString())))
                     user.selection.insert(type, id.toString());
             }
-            const QString grouping = stored.value(QStringLiteral("favoritesGrouping")).toString();
-            if (oneOf(kFavoritesGroupings, grouping))
-                user.favoritesGrouping = grouping;
             const QJsonObject views = stored.value(QStringLiteral("views")).toObject();
             for (const QString &scope : views.keys()) {
                 const QJsonObject entry = views.value(scope).toObject();
@@ -587,8 +562,7 @@ void BrowseStateStore::loadUsers(const QJsonObject &servers, int version, qint64
                 highest = std::max<qint64>(highest, seq.toInteger());
                 user.views.insert(scope, StoredView{*state, seq.toInteger()});
             }
-            if (!user.selection.isEmpty() || !user.views.isEmpty()
-                || !user.favoritesGrouping.isEmpty())
+            if (!user.selection.isEmpty() || !user.views.isEmpty())
                 m_servers[serverId].insert(userId, user);
         }
     }

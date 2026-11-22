@@ -119,13 +119,17 @@ Kirigami.Page {
     // The volume slider pops up centred above the speaker button
     function showVolume() {
         volumeCloser.stop();
+        // The slider says the level: a wheel notice still showing has nothing left to add
+        volumeNoticeTimer.stop();
         // A long press on a touch screen has no hover to hold the bars: they stay their full time from here
         page.wakeChrome();
         volumePopup.open();
     }
     function stepVolume(steps) {
         page.Window.window.stepVolume(steps);
-        volumeNoticeTimer.restart();
+        // The slider says the same level: the notice is only for when the wheel turns with the slider out of sight
+        if (!volumePopup.opened)
+            volumeNoticeTimer.restart();
         page.wakeChrome();
     }
     // The player commands of the keyboard: the shell runs them, in every mode, and the page only wakes its bars
@@ -447,7 +451,7 @@ Kirigami.Page {
         Accessible.ignored: true
         Timer {
             id: volumeNoticeTimer
-            interval: 1500
+            interval: 900
         }
     }
     Connections {
@@ -1668,7 +1672,8 @@ Kirigami.Page {
                     text: i18nc("@item:inmenu playback speed, %1 is the factor", "%1×", modelData)
                     checkable: true
                     autoExclusive: true
-                    checked: page.player.rate === modelData
+                    // mpv round-trips the speed as a double: a near-one value is the 1× step
+                    checked: Math.abs(page.player.rate - modelData) < 0.005
                     onTriggered: page.player.setRate(modelData)
                 }
                 onObjectAdded: (index, object) => speedMenu.insertItem(index, object)

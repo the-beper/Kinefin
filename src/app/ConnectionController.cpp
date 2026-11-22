@@ -384,16 +384,6 @@ ConnectionController::ConnectionController(const QString &profileId, const QStri
     // The favorites are scanned over the libraries the server lists, whatever the Home preferences hide; the model drops its snapshot when the list changes, and a lost session empties the list
     connect(this, &ConnectionController::librariesChanged, this,
             [this] { m_favorites.setLibraries(m_libraries); });
-    // The saved grouping belongs to the user who signs in, a restore included; a choice made on the page is saved for that user
-    connect(&m_client, &JellyfinClient::loginSucceeded, this, [this] {
-        m_favoriteGroups.applyGrouping(FavoritesGroupsModel::groupingFromToken(
-            m_browse.favoritesGrouping(m_client.serverId(), m_client.userId())));
-    });
-    connect(&m_favoriteGroups, &FavoritesGroupsModel::groupingEdited, this, [this] {
-        m_browse.setFavoritesGrouping(
-            m_client.serverId(), m_client.userId(),
-            FavoritesGroupsModel::groupingToken(m_favoriteGroups.grouping()));
-    });
     m_quickConnectTimer.setInterval(5000);
     connect(&m_quickConnectTimer, &QTimer::timeout, &m_client,
             [this] { m_client.pollQuickConnect(); });

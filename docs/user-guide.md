@@ -211,10 +211,11 @@ A section that does not apply to the current list is left out. **Clear Filters**
 
 Sort keys differ by list: movies have 10 (Name, Random, Community Rating, Critic Rating, Date Added, Date Played, Parental Rating, Play Count, Release Date, Runtime), series 8, episodes 7 and collections 5. **Ascending Order** and **Descending Order** set the direction. **Random** shows one page of 100 items, and **Reshuffle** asks for another.
 
-**Grid View** and **List View** switch the layout. **View Options** has:
+**View Options** has:
 
 | Option | Values |
 | --- | --- |
+| Layout | Grid View or List View |
 | Image type | Poster, Banner, Disc, Logo, Thumbnail |
 | Show Title, Show Year | On or off |
 | Card Layout | Off hides the text under each card |
@@ -239,13 +240,25 @@ Suggestions in **Shows** and Collections in both tabs ignore the library selecto
 
 ### Item details
 
-Selecting a card opens the details page: a hero with the backdrop, logo, a facts line (year, rating, runtime, end time) and **Play** or **Resume**. Under it come media badges (resolution, HDR, codecs, subtitle count), the overview, the credits, the cast and the related rows. The page toolbar has **Play Next**, **Add to Queue**, the favorite toggle, **Mark as Watched** or **Mark as Unwatched**, and **Media Info**. **Media Info** opens a dialog with the container, size, bit rate and streams of each source, and **Copy** puts the text on the clipboard.
+Selecting a card opens the details page: a hero with the backdrop, logo, a facts line (year, rating, runtime, end time) and **Play** or **Resume**. Under it come media badges (resolution, HDR, codecs, subtitle count), the overview, the credits, the cast and the related rows. The toolbar keeps **Cast…**, **Download**, the favorite toggle and **Mark as Watched** or **Mark as Unwatched**. The overflow menu (the **⋮** button) holds:
 
-Before you play, choose the audio track and the subtitles (or **Off**) with **Audio** and **Subtitles** in the row under the facts, which appears only when there is a choice; **Play** and **Resume** use them. When the item has a resume point, **Play from Beginning** starts it from the first second. **Trailer** opens the item's first trailer in your browser. **Copy Stream URL** puts the URL of the first source on the clipboard, without a token. **Refresh Metadata** asks the server to fetch the item's metadata and images again.
+| Entry | Contains | Shown |
+| --- | --- | --- |
+| **Trailer** | | When the server has one |
+| **Play Next**, **Add to Queue** | | Queueable items |
+| **Automatic Downloads…**, **Stop Automatic Downloads** | | Series and seasons; Stop only while a rule exists |
+| **Add to** | **Playlist…**, **Collection…** | |
+| **Edit on Server** | **Edit Metadata…**, **Identify…**, **Edit Images…**, **Edit Subtitles…**, **Refresh Metadata** | Administrators |
+| **Utilities** | **Copy Stream URL**, **Media Info** | |
+| **Delete Media…** | | Last entry, when the server allows deletion |
 
-**Add to Collection…** on a movie or a show puts it into an existing collection or a new one. An administrator can change the item on the server. **Delete Media…** removes a movie, episode or video when the server allows it, after a confirmation; the server deletes the file and it cannot be recovered. **Edit Metadata…** changes the name, overview, year, official rating and genres. **Identify…** on a movie or a show searches the metadata providers and applies the match you pick. **Edit Images…** replaces or removes the primary image, the backdrop or the logo. **Edit Subtitles…** uploads an external subtitle file or deletes an external track. Clicking a cast member opens the movies, shows and episodes that person appears in.
+**Media Info** opens a dialog with the container, size, bit rate and streams of each source, and **Copy** puts the text on the clipboard.
 
-A series page lists seasons and one Next Up entry, a season page lists its episodes, and an episode page links to its series and season. A collection page lists its first 100 items. **Add to Playlist…** is on movie, episode and video pages.
+Before you play, choose the audio track and the subtitles (or **Off**) with **Audio** and **Subtitles** in the row under the facts, which appears only when there is a choice; **Play** and **Resume** use them. When the item has a resume point, **Play from Beginning** appears left of **Resume** and starts from the first second. **Trailer** opens the item's first trailer in your browser. **Copy Stream URL** puts the URL of the first source on the clipboard, without a token. **Refresh Metadata** asks the server to fetch the item's metadata and images again.
+
+On a movie or show page, **Collection…** in the **Add to** submenu puts the item into an existing collection or a new one. An administrator can change the item on the server. **Delete Media…** removes a movie, episode or video when the server allows it, after a confirmation; the server deletes the file and it cannot be recovered. **Edit Metadata…** changes the name, overview, year, official rating and genres. **Identify…** on a movie or a show searches the metadata providers and applies the match you pick. **Edit Images…** replaces or removes the primary image, the backdrop or the logo. **Edit Subtitles…** uploads an external subtitle file or deletes an external track. Clicking a cast member opens the movies, shows and episodes that person appears in.
+
+A series page lists seasons and one Next Up entry, a season page lists its episodes, and an episode page links to its series and season. A collection page lists its first 100 items. **Playlist…** in the **Add to** submenu is on movie, episode and video pages.
 
 ### Search
 
@@ -253,13 +266,13 @@ Ctrl+F, or typing in the header box, opens the search page. It shows four groups
 
 ### Favorites
 
-The **Favorites** tab lists everything you marked as a favorite, across all movie, TV and collection libraries, up to 1000 items. A banner says when the list may be incomplete, with **Retry** after a failed library. You group the list by Type, Library, Genre, Year or None. This page is read-only: set favorites from a card menu or a details page.
+The **Favorites** tab lists everything you marked as a favorite, across all movie, TV and collection libraries, up to 1000 items. A banner says when the list may be incomplete, with **Retry** after a failed library. The cards form one grid, sorted by name. This page is read-only: set favorites from a card menu or a details page.
 
 ### Playlists
 
 The **Playlists** tab lists your video playlists. A playlist page shows its entries in order, with **Play** and **Shuffle** at the top. **Play** and **Shuffle** replace the queue with the playlist, and the Queue page's **Undo** takes that back.
 
-To add an item to a playlist, choose **Add to Playlist…** in a card menu or on a details page, then pick a playlist or **New Playlist…**. A video that is already in the playlist is not added twice.
+To add an item to a playlist, choose **Add to Playlist…** in a card menu, or **Playlist…** in the **Add to** submenu of a details page, then pick a playlist or **New Playlist…**. A video that is already in the playlist is not added twice.
 
 To edit a playlist:
 

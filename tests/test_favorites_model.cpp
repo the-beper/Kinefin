@@ -4,7 +4,6 @@
 #include "FakeJellyfin.h"
 
 #include "api/JellyfinClient.h"
-#include "models/FavoritesGroupsModel.h"
 #include "models/FavoritesModel.h"
 
 #include <QAbstractItemModelTester>
@@ -12,7 +11,6 @@
 #include <QSignalSpy>
 #include <QtTest/QtTest>
 
-using Kinefin::FavoritesGroupsModel;
 using Kinefin::FavoritesModel;
 
 namespace {
@@ -135,45 +133,12 @@ struct Fixture {
     FakeJellyfin server;
     Kinefin::JellyfinClient client;
     FavoritesModel model{&client};
-    FavoritesGroupsModel groups{&model};
     QHash<QString, QJsonArray> favorites;
     QHash<QString, int> failing;
     QHash<QString, int> declaredTotals;
     QSet<QString> repeating;
     bool ok = false;
 };
-
-// "key:count" of every group
-QStringList groupSummary(const FavoritesGroupsModel &groups)
-{
-    QStringList list;
-    for (int row = 0; row < groups.count(); ++row) {
-        const QModelIndex index = groups.index(row, 0);
-        list.append(QStringLiteral("%1:%2")
-                        .arg(groups.data(index, FavoritesGroupsModel::KeyRole).toString())
-                        .arg(groups.data(index, FavoritesGroupsModel::CountRole).toInt()));
-    }
-    return list;
-}
-
-int groupedTotal(const FavoritesGroupsModel &groups)
-{
-    int total = 0;
-    for (int row = 0; row < groups.count(); ++row)
-        total += groups.data(groups.index(row, 0), FavoritesGroupsModel::CountRole).toInt();
-    return total;
-}
-
-// The names of the cards of a group
-QStringList groupNames(const FavoritesGroupsModel &groups, int row)
-{
-    const auto *items = qobject_cast<QAbstractItemModel *>(
-        groups.data(groups.index(row, 0), FavoritesGroupsModel::ItemsRole).value<QObject *>());
-    QStringList names;
-    for (int i = 0; items && i < items->rowCount(); ++i)
-        names.append(items->data(items->index(i, 0), FavoritesModel::NameRole).toString());
-    return names;
-}
 
 // Eight favorites across three libraries: a repeated one, a genre in two spellings, items without genre or year
 void fillMixed(Fixture &f)
@@ -214,7 +179,6 @@ class TestFavoritesModel : public QObject {
         f.start({library(kMovies, QStringLiteral("Movies"))});
         QTRY_COMPARE(f.model.status(), FavoritesModel::Complete);
         QCOMPARE(f.model.count(), 1);
-        QCOMPARE(f.groups.count(), 1);
 
         f.favorites[kMovies] = QJsonArray{};
         QVERIFY(f.client.setItemFavorite(idOf(1), false));
@@ -222,7 +186,6 @@ class TestFavoritesModel : public QObject {
         QTRY_COMPARE(f.server.itemsRoutes.size(), 2); // exactly one rescan
         QTRY_COMPARE(f.model.status(), FavoritesModel::Complete);
         QTRY_COMPARE(f.model.count(), 0);
-        QCOMPARE(f.groups.count(), 0);
 
         f.model.close();
         f.favorites[kMovies] = movies(2, 1);
@@ -417,9 +380,16 @@ class TestFavoritesModel : public QObject {
         QTRY_COMPARE(f.model.status(), FavoritesModel::Capped);
         QCOMPARE(f.model.count(), 1000);
         QCOMPARE(f.server.itemsRoutes.size(), 10);
-        f.groups.applyGrouping(FavoritesGroupsModel::Library);
-        QCOMPARE(groupSummary(f.groups),
-                 (QStringList{kMovies + QStringLiteral(":500"), kKids + QStringLiteral(":500")}));
+        int inMovies = 0, inKids = 0;
+        for (int row = 0; row < f.model.count(); ++row) {
+            const QStringList libs = f.value(row, FavoritesModel::LibraryIdsRole).toStringList();
+            if (libs.contains(kMovies))
+                ++inMovies;
+            if (libs.contains(kKids))
+                ++inKids;
+        }
+        QCOMPARE(inMovies, 500);
+        QCOMPARE(inKids, 500);
     }
 
     void repeatedItemsCountOnce()
@@ -434,8 +404,6 @@ class TestFavoritesModel : public QObject {
         QCOMPARE(f.model.count(), 600);
         QCOMPARE(f.server.itemsRoutes.size(), 12);
         QCOMPARE(f.value(0, FavoritesModel::LibraryIdsRole).toStringList().size(), 2);
-        f.groups.applyGrouping(FavoritesGroupsModel::Library);
-        QCOMPARE(groupSummary(f.groups), (QStringList{QStringLiteral("more-libraries:600")}));
     }
 
     void aLibraryThatRepeatsItsPageStopsAtTheLimit()
@@ -700,7 +668,6 @@ class TestFavoritesModel : public QObject {
         QCOMPARE(f.model.status(), FavoritesModel::Idle);
         QCOMPARE(f.model.count(), 0);
         QCOMPARE(counts.size(), 1);
-        QCOMPARE(f.groups.count(), 0);
     }
 
     void expiredSessionEmptiesTheModel()
@@ -754,138 +721,6 @@ class TestFavoritesModel : public QObject {
             f.model.reload();
             QTRY_COMPARE(f.model.count(), 25);
         }
-    }
-
-    void groupsByTypeLibraryGenreYearOrNone()
-    {
-        Fixture f;
-        QVERIFY(f.ok);
-        fillMixed(f);
-        f.start(kMixedLibraries);
-        QTRY_COMPARE(f.model.status(), FavoritesModel::Complete);
-        const int sent = f.server.itemsRoutes.size();
-        QAbstractItemModelTester tester(&f.groups);
-
-        QCOMPARE(f.groups.grouping(), FavoritesGroupsModel::Type);
-        QCOMPARE(groupSummary(f.groups),
-                 (QStringList{QStringLiteral("Movie:5"), QStringLiteral("Series:1"),
-                              QStringLiteral("Season:1"), QStringLiteral("Episode:1")}));
-        QCOMPARE(f.groups.data(f.groups.index(0, 0), FavoritesGroupsModel::KindRole).toInt(),
-                 int(FavoritesGroupsModel::TypeGroup));
-        QVERIFY(f.groups.data(f.groups.index(0, 0), FavoritesGroupsModel::TitleRole)
-                    .toString()
-                    .isEmpty());
-        QCOMPARE(groupedTotal(f.groups), 8);
-
-        f.groups.setGrouping(FavoritesGroupsModel::Library);
-        QCOMPARE(groupSummary(f.groups),
-                 (QStringList{kMovies + QStringLiteral(":3"), kKids + QStringLiteral(":1"),
-                              kShows + QStringLiteral(":3"), QStringLiteral("more-libraries:1")}));
-        QCOMPARE(f.groups.data(f.groups.index(0, 0), FavoritesGroupsModel::TitleRole).toString(),
-                 QStringLiteral("Movies"));
-        QCOMPARE(f.groups.data(f.groups.index(3, 0), FavoritesGroupsModel::KindRole).toInt(),
-                 int(FavoritesGroupsModel::MoreLibrariesGroup));
-        QVERIFY(f.groups.data(f.groups.index(3, 0), FavoritesGroupsModel::TitleRole)
-                    .toString()
-                    .isEmpty());
-        QCOMPARE(groupNames(f.groups, 0),
-                 (QStringList{QStringLiteral("Alpha"), QStringLiteral("Bravo"),
-                              QStringLiteral("Charlie")}));
-        QCOMPARE(groupNames(f.groups, 3), (QStringList{QStringLiteral("Delta")}));
-        QCOMPARE(groupedTotal(f.groups), 8);
-
-        // One main genre per item, in two spellings one group, no genre last
-        f.groups.setGrouping(FavoritesGroupsModel::Genre);
-        QCOMPARE(groupSummary(f.groups),
-                 (QStringList{QStringLiteral("action:2"), QStringLiteral("comedy:2"),
-                              QStringLiteral("drama:2"), QStringLiteral("no-genre:2")}));
-        QCOMPARE(f.groups.data(f.groups.index(0, 0), FavoritesGroupsModel::TitleRole).toString(),
-                 QStringLiteral("Action"));
-        QCOMPARE(f.groups.data(f.groups.index(3, 0), FavoritesGroupsModel::KindRole).toInt(),
-                 int(FavoritesGroupsModel::NoGenreGroup));
-        QCOMPARE(groupedTotal(f.groups), 8);
-
-        f.groups.setGrouping(FavoritesGroupsModel::Year);
-        QCOMPARE(groupSummary(f.groups),
-                 (QStringList{QStringLiteral("2020:2"), QStringLiteral("2015:2"),
-                              QStringLiteral("2010:2"), QStringLiteral("1999:1"),
-                              QStringLiteral("no-year:1")}));
-        QCOMPARE(f.groups.data(f.groups.index(4, 0), FavoritesGroupsModel::KindRole).toInt(),
-                 int(FavoritesGroupsModel::NoYearGroup));
-        QCOMPARE(groupedTotal(f.groups), 8);
-
-        f.groups.setGrouping(FavoritesGroupsModel::None);
-        QCOMPARE(groupSummary(f.groups), (QStringList{QStringLiteral("all:8")}));
-        QCOMPARE(f.groups.data(f.groups.index(0, 0), FavoritesGroupsModel::KindRole).toInt(),
-                 int(FavoritesGroupsModel::AllGroup));
-        QCOMPARE(groupNames(f.groups, 0).size(), 8);
-
-        // Regrouping is client-side only
-        QCOMPARE(f.server.itemsRoutes.size(), sent);
-    }
-
-    void groupItemsModelSharesTheCardRoles()
-    {
-        Fixture f;
-        QVERIFY(f.ok);
-        fillMixed(f);
-        f.start(kMixedLibraries);
-        QTRY_COMPARE(f.model.status(), FavoritesModel::Complete);
-        const auto *items = qobject_cast<QAbstractItemModel *>(
-            f.groups.data(f.groups.index(0, 0), FavoritesGroupsModel::ItemsRole)
-                .value<QObject *>());
-        QVERIFY(items);
-        QCOMPARE(items->roleNames(), f.model.roleNames());
-        QCOMPARE(items->rowCount(), 5);
-        QVERIFY(!items->data(items->index(5, 0), FavoritesModel::NameRole).isValid());
-    }
-
-    void groupingChoiceSignalsAndTokens()
-    {
-        Fixture f;
-        QVERIFY(f.ok);
-        QSignalSpy changed(&f.groups, &FavoritesGroupsModel::groupingChanged);
-        QSignalSpy edited(&f.groups, &FavoritesGroupsModel::groupingEdited);
-        f.groups.setGrouping(FavoritesGroupsModel::Type);
-        QCOMPARE(changed.size(), 0);
-        f.groups.setGrouping(FavoritesGroupsModel::Library);
-        QCOMPARE(changed.size(), 1);
-        QCOMPARE(edited.size(), 1);
-        // The saved choice read at the start of a session is not an edit
-        f.groups.applyGrouping(FavoritesGroupsModel::Genre);
-        QCOMPARE(changed.size(), 2);
-        QCOMPARE(edited.size(), 1);
-        f.groups.setGrouping(FavoritesGroupsModel::Grouping(42));
-        QCOMPARE(f.groups.grouping(), FavoritesGroupsModel::Genre);
-        QCOMPARE(changed.size(), 2);
-
-        for (const auto grouping :
-             {FavoritesGroupsModel::Type, FavoritesGroupsModel::Library,
-              FavoritesGroupsModel::Genre, FavoritesGroupsModel::Year, FavoritesGroupsModel::None})
-            QCOMPARE(FavoritesGroupsModel::groupingFromToken(
-                         FavoritesGroupsModel::groupingToken(grouping)),
-                     grouping);
-        QCOMPARE(FavoritesGroupsModel::groupingToken(FavoritesGroupsModel::None),
-                 QStringLiteral("None"));
-        QCOMPARE(FavoritesGroupsModel::groupingFromToken(QStringLiteral("bogus")),
-                 FavoritesGroupsModel::Type);
-        QCOMPARE(FavoritesGroupsModel::groupingFromToken(QString()), FavoritesGroupsModel::Type);
-    }
-
-    void groupsFollowTheSnapshot()
-    {
-        Fixture f;
-        QVERIFY(f.ok);
-        fillMixed(f);
-        QSignalSpy counts(&f.groups, &FavoritesGroupsModel::countChanged);
-        f.start(kMixedLibraries);
-        // Nothing is grouped while the scan runs
-        QCOMPARE(f.groups.count(), 0);
-        QTRY_COMPARE(f.groups.count(), 4);
-        QVERIFY(counts.size() >= 1);
-        f.model.setLibraries({});
-        QCOMPARE(f.groups.count(), 0);
-        QCOMPARE(groupedTotal(f.groups), 0);
     }
 };
 

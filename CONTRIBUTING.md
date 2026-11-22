@@ -78,6 +78,13 @@ Strings are `i18n()` calls (QML: plain `i18n()` injected with `KLocalization::se
 
 `po/kinefin.pot` is generated: never edit it by hand.
 
+Action labels follow the KDE HIG ellipsis rule ([Text and labels](https://develop.kde.org/hig/text_and_labels/#ellipses)):
+
+- End a label with `…` (the U+2026 character, never three periods) when the action always requires additional user input before it completes, such as a dialog, a picker or a confirmation.
+- Leave it off when the action completes at once or only toggles state (`Mark as Watched`, `Download`, `Ask for Password`).
+- An entry that opens a popup submenu shows the menu arrow, not an ellipsis.
+- A dialog title repeats the action's wording without the ellipsis (`Delete Media…` opens `Delete Media`).
+
 ## Releasing
 
 Source preparation is implemented; first-release acceptance is not closed. Do not tag or publish before the required v1 features, real Jellyfin/Plasma rounds and packaging gates pass. The authoritative instructions are [release tooling](build/release/README.md) and the [first-release checklist](build/release/FIRST_RELEASE.md).
