@@ -85,6 +85,57 @@ void FilterOptionsModel::clear()
         Q_EMIT optionsChanged();
 }
 
+void FilterOptionsModel::setLocalValues(const QStringList &genres, const QStringList &ratings,
+                                        const QList<int> &years, const QStringList &tags)
+{
+    std::vector<Option> options;
+    QSet<QString> seenGenres;
+    for (const QString &genre : genres) {
+        if (int(options.size()) == MaxOptions)
+            break;
+        const QString name = cappedName(genre);
+        if (!name.isEmpty() && !seenGenres.contains(name.toLower())) {
+            seenGenres.insert(name.toLower());
+            options.push_back({name, name});
+        }
+    }
+    const auto validTexts = [](const QStringList &values, int limit) {
+        QStringList texts;
+        QSet<QString> seen;
+        for (const QString &text : values) {
+            if (texts.size() == limit)
+                break;
+            if (isValidFilterText(text) && !seen.contains(text)) {
+                seen.insert(text);
+                texts.append(text);
+            }
+        }
+        return texts;
+    };
+    QList<int> validYears;
+    for (const int year : years) {
+        if (validYears.size() == MaxFacetOptions)
+            break;
+        if (year >= 1 && year <= 9999 && !validYears.contains(year))
+            validYears.append(year);
+    }
+    beginResetModel();
+    m_options = std::move(options);
+    endResetModel();
+    m_tags = validTexts(tags, MaxTagOptions);
+    m_officialRatings = validTexts(ratings, MaxFacetOptions);
+    m_years = validYears;
+    setStatus(Ready);
+    setLegacyStatus(Ready);
+    Q_EMIT optionsChanged();
+}
+
+void FilterOptionsModel::setLocalLoading()
+{
+    setStatus(Loading);
+    setLegacyStatus(Loading);
+}
+
 QList<int> FilterOptionsModel::tagRows(const QString &search, const QStringList &keep) const
 {
     const QString needle = search.trimmed();

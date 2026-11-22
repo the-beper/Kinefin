@@ -41,6 +41,11 @@ Kirigami.Dialog {
         }
     ]
 
+    header: DialogTitleBar {
+        title: dialog.title
+        onCloseRequested: dialog.close()
+    }
+
     // The first Pause or Resume button of the rows, else the first button of the footer
     function focusPrimary() {
         focusing = true;

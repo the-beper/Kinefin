@@ -31,6 +31,8 @@ if [ ! -e /run/.containerenv ]; then
 fi
 
 cd "$root"
+# flatpak-builder runs `git init` for its sources: this names the initial branch and silences git's hint
+export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=init.defaultBranch GIT_CONFIG_VALUE_0=main
 # The version is the single source in the root CMakeLists.txt (project(kinefin VERSION X.Y.Z)).
 version=$(sed -n 's/^project(kinefin VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
 [ -n "$version" ] || { echo "version not found in CMakeLists.txt" >&2; exit 1; }

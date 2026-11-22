@@ -41,6 +41,11 @@ Kirigami.Dialog {
         }
     ]
 
+    header: DialogTitleBar {
+        title: dialog.title
+        onCloseRequested: dialog.close()
+    }
+
     // While devices are listed the search goes on beside the buttons; an empty list shows it in its own room
     footerLeadingComponent: RowLayout {
         spacing: Kirigami.Units.smallSpacing

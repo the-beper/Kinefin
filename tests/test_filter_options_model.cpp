@@ -452,6 +452,114 @@ class TestFilterOptionsModel : public QObject {
         QVERIFY(!f.options.tagsAvailable());
     }
 
+    void localValuesAreReadyWithoutARequestAndKeepTheCaps()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        QSignalSpy options(&f.options, &FilterOptionsModel::optionsChanged);
+        f.options.setLocalLoading();
+        QCOMPARE(f.options.status(), FilterOptionsModel::Loading);
+        QCOMPARE(f.options.legacyStatus(), FilterOptionsModel::Loading);
+        QVERIFY(!f.options.available());
+        QVERIFY(!f.options.ratingsAvailable());
+        QCOMPARE(options.size(), 0);
+
+        // Nothing to offer is still an answer: Ready, with no facet available
+        f.options.setLocalValues({}, {}, {}, {});
+        QCOMPARE(f.options.status(), FilterOptionsModel::Ready);
+        QCOMPARE(f.options.legacyStatus(), FilterOptionsModel::Ready);
+        QVERIFY(!f.options.available());
+        QVERIFY(!f.options.tagsAvailable());
+        QVERIFY(!f.options.ratingsAvailable());
+        QVERIFY(!f.options.yearsAvailable());
+        QCOMPARE(f.options.rowCount(), 0);
+
+        // The caps of the requests apply, in the order given: a name is cut and trimmed, the repeats (any case), the empty and the unfit are dropped
+        QStringList genres{QStringLiteral("Drama"), QStringLiteral("drama"), QString(),
+                           QStringLiteral("   "), QString(300, QLatin1Char('n'))};
+        QStringList ratings{QStringLiteral("R-0"), QStringLiteral("a|b"), QString(),
+                            QString(200, QLatin1Char('r')), QStringLiteral("R-0")};
+        QStringList tags{QStringLiteral("tag 0"), QStringLiteral("a|b"), QString(),
+                         QStringLiteral("tag 0")};
+        QList<int> years{0, 10000, -5, 1900};
+        for (int i = 1; i < 600; ++i)
+            genres.append(QStringLiteral("G%1").arg(i));
+        for (int i = 1; i < 400; ++i)
+            ratings.append(QStringLiteral("R-%1").arg(i));
+        for (int i = 1; i < Kinefin::MaxTagOptions + 50; ++i)
+            tags.append(QStringLiteral("tag %1").arg(i));
+        for (int i = 1; i < 400; ++i)
+            years.append(1900 + i);
+        years.append(1900);
+        f.options.setLocalValues(genres, ratings, years, tags);
+
+        QCOMPARE(f.options.status(), FilterOptionsModel::Ready);
+        QCOMPARE(f.options.legacyStatus(), FilterOptionsModel::Ready);
+        QVERIFY(f.options.available());
+        QVERIFY(f.options.tagsAvailable());
+        QVERIFY(f.options.ratingsAvailable());
+        QVERIFY(f.options.yearsAvailable());
+        QCOMPARE(options.size(), 2);
+        QCOMPARE(f.options.rowCount(), int(FilterOptionsModel::MaxOptions));
+        QCOMPARE(f.options.officialRatings().size(), Kinefin::MaxFacetOptions);
+        QCOMPARE(f.options.years().size(), Kinefin::MaxFacetOptions);
+        QCOMPARE(f.options.tags().size(), Kinefin::MaxTagOptions);
+        // A genre row's id is its name
+        for (int row = 0; row < f.options.rowCount(); ++row)
+            QCOMPARE(f.options.data(f.options.index(row), FilterOptionsModel::GenreIdRole),
+                     f.options.data(f.options.index(row), FilterOptionsModel::NameRole));
+        QCOMPARE(f.options.data(f.options.index(0), FilterOptionsModel::NameRole).toString(),
+                 QStringLiteral("Drama"));
+        QCOMPARE(f.options.data(f.options.index(1), FilterOptionsModel::NameRole).toString().size(),
+                 int(FilterOptionsModel::MaxNameLength));
+        QCOMPARE(f.options.data(f.options.index(2), FilterOptionsModel::NameRole).toString(),
+                 QStringLiteral("G1"));
+        QCOMPARE(f.options
+                     .data(f.options.index(FilterOptionsModel::MaxOptions - 1),
+                           FilterOptionsModel::NameRole)
+                     .toString(),
+                 QStringLiteral("G%1").arg(FilterOptionsModel::MaxOptions - 2));
+        QVERIFY(f.options.contains(QStringLiteral("DRAMA")));
+        QVERIFY(!f.options.contains(QStringLiteral("G%1").arg(FilterOptionsModel::MaxOptions - 1)));
+        QCOMPARE(f.options.officialRatings().constFirst(), QStringLiteral("R-0"));
+        QCOMPARE(f.options.officialRatings().at(1), QStringLiteral("R-1"));
+        QCOMPARE(f.options.years().constFirst(), 1900);
+        QCOMPARE(f.options.years().at(1), 1901);
+        QCOMPARE(f.options.years().constLast(), 1900 + Kinefin::MaxFacetOptions - 1);
+        QCOMPARE(f.options.tags().constFirst(), QStringLiteral("tag 0"));
+        QCOMPARE(f.options.tags().at(1), QStringLiteral("tag 1"));
+        QCOMPARE(f.options.tags().constLast(),
+                 QStringLiteral("tag %1").arg(Kinefin::MaxTagOptions - 1));
+
+        // No request went out: the first the server sees for each source is the one of another consumer, asked after the calls above
+        QSignalSpy filtersAnswered(&f.client, &Kinefin::JellyfinClient::filtersReady);
+        QSignalSpy legacyAnswered(&f.client, &Kinefin::JellyfinClient::legacyFiltersReady);
+        QVERIFY(f.client.fetchFilters(kLibrary, QStringLiteral("Movie"), 7));
+        QVERIFY(f.client.fetchLegacyFilters(kLibrary, QStringLiteral("Movie"), 7));
+        QTRY_COMPARE(filtersAnswered.size(), 1);
+        QTRY_COMPARE(legacyAnswered.size(), 1);
+        QCOMPARE(f.server.listingRoutes.value(QStringLiteral("Filters")).size(), 1);
+        QCOMPARE(f.server.listingRoutes.value(QStringLiteral("FiltersLegacy")).size(), 1);
+        // The answers of that other channel do not touch the local values
+        QCOMPARE(f.options.status(), FilterOptionsModel::Ready);
+        QCOMPARE(f.options.rowCount(), int(FilterOptionsModel::MaxOptions));
+
+        // Local values go like the others: clear() and a lost session empty them
+        f.options.clear();
+        QCOMPARE(f.options.status(), FilterOptionsModel::Idle);
+        QCOMPARE(f.options.rowCount(), 0);
+        f.options.setLocalValues({QStringLiteral("Drama")}, {QStringLiteral("PG")}, {2020},
+                                 {QStringLiteral("classic")});
+        QVERIFY(f.options.available());
+        f.client.disconnectFromServer();
+        QCOMPARE(f.options.status(), FilterOptionsModel::Idle);
+        QCOMPARE(f.options.legacyStatus(), FilterOptionsModel::Idle);
+        QCOMPARE(f.options.rowCount(), 0);
+        QVERIFY(f.options.tags().isEmpty());
+        QVERIFY(f.options.officialRatings().isEmpty());
+        QVERIFY(f.options.years().isEmpty());
+    }
+
     void aLostSessionEmptiesTheOptions()
     {
         Fixture f;

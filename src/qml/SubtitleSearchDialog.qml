@@ -39,6 +39,11 @@ Kirigami.Dialog {
     preferredWidth: Kirigami.Units.gridUnit * 34
     standardButtons: Kirigami.Dialog.Close
 
+    header: DialogTitleBar {
+        title: dialog.title
+        onCloseRequested: dialog.close()
+    }
+
     function errorText() {
         if (!dialog.player)
             return "";
@@ -92,6 +97,8 @@ Kirigami.Dialog {
                     Accessible.name: i18nc("@label:listbox", "Subtitle language")
                     model: dialog.languages
                     onActivated: dialog.search()
+                    // The list opens below the box and above it when there is no room below, never over it
+                    PopupPlacement { popup: languageBox.popup; anchor: languageBox }
                 }
                 Controls.Button {
                     objectName: "subtitleSearchButton"

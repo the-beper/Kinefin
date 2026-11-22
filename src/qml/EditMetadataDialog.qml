@@ -47,6 +47,11 @@ Kirigami.Dialog {
         }
     ]
 
+    header: DialogTitleBar {
+        title: dialog.title
+        onCloseRequested: dialog.close()
+    }
+
     function sameItem(itemId) {
         return itemId.toLowerCase().replace(/-/g, "") === dialog.details.itemId.toLowerCase().replace(/-/g, "");
     }

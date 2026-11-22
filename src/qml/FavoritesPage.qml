@@ -1,10 +1,11 @@
 // SPDX-FileCopyrightText: 2026 Kinefin contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
 import QtQuick
+import QtQuick.Controls as Controls
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 
-// The favorites of the signed-in user across the libraries, as one flat grid. The page only reads: nothing here marks or unmarks a favorite
+// The favorites of the signed-in user across the libraries, as one row of cards per media type, which the filters narrow (the Show All pages share them). The page only reads: nothing here marks or unmarks a favorite
 Kirigami.ScrollablePage {
     id: page
     objectName: "favoritesPage"
@@ -17,9 +18,40 @@ Kirigami.ScrollablePage {
     readonly property bool loading: favorites.status === FavoritesModel.Loading
     // The page starts the scan as it is created, so Idle here means the scan could not start
     readonly property bool idle: favorites.status === FavoritesModel.Idle
+    readonly property bool noLibraries: !loading && !idle && favorites.libraryCount === 0
+    // A failed library is no empty list: its banner shows instead
+    readonly property bool empty: !loading && !idle && favorites.libraryCount > 0 && favorites.count === 0 && !favorites.libraryFailed
+    // The filters leave no favorite of the snapshot: the rows are all hidden
+    readonly property bool noMatch: !loading && !idle && favorites.count > 0 && favorites.matchCount === 0
+
+    // The rows, top to bottom: the item type of the snapshot and the title of the row. A type without favorites has no row, one more media type is one more entry
+    readonly property var sections: [
+        {
+            type: "Movie",
+            title: i18nc("@title:group section of the favorites page", "Movies")
+        },
+        {
+            type: "Series",
+            title: i18nc("@title:group section of the favorites page", "Shows")
+        },
+        {
+            type: "Season",
+            title: i18nc("@title:group section of the favorites page", "Seasons")
+        },
+        {
+            type: "Episode",
+            title: i18nc("@title:group section of the favorites page", "Episodes")
+        },
+        {
+            type: "BoxSet",
+            title: i18nc("@title:group section of the favorites page", "Collections")
+        }
+    ]
+    // The cards of a row, as the Home rows; a type with more has Show All
+    readonly property int rowLimit: 24
 
     title: i18n("Favorites")
-    // No title bar, no toolbar: the page has no actions, and the Favorites tab of the header says which page this is
+    // No title bar, no toolbar: the filters are chosen on the Show All pages, and the Favorites tab of the header says which page this is
     globalToolBarStyle: Kirigami.ApplicationHeaderStyle.None
     // Without Kirigami's title row the page names itself to a screen reader
     Accessible.role: Accessible.Pane
@@ -37,19 +69,32 @@ Kirigami.ScrollablePage {
             favorites.reload();
     }
 
-    // The grid takes the keys: after a long scroll the current tile is not built any more, and the page keeps its place
+    // The first card of the first row takes the keys
     function focusPrimary() {
-        grid.focusPrimary(Qt.TabFocusReason);
+        for (let i = 0; i < rowsRepeater.count; ++i) {
+            const row = rowsRepeater.itemAt(i);
+            if (row?.hasCards) {
+                row.cards.focusList(Qt.TabFocusReason);
+                return;
+            }
+        }
     }
 
-    // The scan ended: the cards take the keys unless the user went elsewhere meanwhile (the header box, or a card already focused). The grid holding the focus while it is created is not a choice
+    // The scan ended: the first row takes the keys unless the user went elsewhere meanwhile (the header box, or a row already focused)
     function focusWhenLoaded() {
         if (!page.isCurrentPage || !page.shell || page.favorites.count === 0 || page.shell.header?.searchFieldHasFocus)
             return;
-        const focused = page.Window.window?.activeFocusItem;
-        if (focused && focused !== grid && page.shell.focusIsIn(grid))
+        // A row that lost its cards keeps the active focus while it is hidden: that focus is no choice of the user
+        if (page.shell.focusIsIn(rowsColumn) && page.Window.window?.activeFocusItem?.visible)
             return;
         page.focusPrimary();
+    }
+
+    // The filters can empty a row whose list holds the focus or take away the Clear Filters button of the placeholder, and a hidden item keeps the focus: the first card still showing takes it (a hidden item is no choice of the user)
+    function keepFocusInView() {
+        const focused = page.Window.window?.activeFocusItem;
+        if (page.isCurrentPage && page.shell && focused && !focused.visible)
+            page.focusPrimary();
     }
 
     Connections {
@@ -58,182 +103,189 @@ Kirigami.ScrollablePage {
             if (!page.loading)
                 Qt.callLater(page.focusWhenLoaded);
         }
+        function onFiltersChanged() {
+            Qt.callLater(page.keepFocusInView);
+        }
     }
 
-    // The card of a favorite: an episode shows its label under the series name
-    component FavoriteCard: MediaCard {
-        required property int seasonNumber
-        required property int episodeNumber
-        required property string episodeTitle
+    // The one filter of the Favorites pages lives in the model: the dialog of a Show All page edits it, the chips and the rows of this page and of every Show All page follow it. This dialog is never opened: the chips build their labels and take a filter off through it
+    FilterDialog {
+        id: filterDialog
 
-        // The grid is the one tab stop, the arrow keys move inside it
-        focusPolicy: Qt.NoFocus
-        loaded: true
-        subtitle: {
-            if (episodeNumber >= 0) {
-                const label = EpisodeLabel.label(seasonNumber, episodeNumber);
-                return episodeTitle.length > 0 ? i18nc("episode label and episode title", "%1 — %2", label, episodeTitle) : label;
-            }
-            return year > 0 ? String(year) : "";
-        }
-        spokenSubtitle: {
-            if (episodeNumber >= 0) {
-                const label = EpisodeLabel.spoken(seasonNumber, episodeNumber);
-                return episodeTitle.length > 0 ? i18nc("episode label and episode title", "%1 — %2", label, episodeTitle) : label;
-            }
-            return year > 0 ? String(year) : "";
-        }
+        list: page.favorites
+        favoritesFixed: true
+        genreIdsAreNames: true
+        // The focus goes back to the control that had it, which the filter may have hidden meanwhile
+        onClosed: Qt.callLater(page.keepFocusInView)
     }
 
     header: ColumnLayout {
         spacing: 0
 
-        // One box at a time: a failed library comes first, and its box says the list may be incomplete as well
-        MessageBox {
-            objectName: "favoritesCappedBanner"
-            Layout.margins: Kirigami.Units.largeSpacing
-            visible: page.favorites.capped && !page.favorites.libraryFailed
-            type: Kirigami.MessageType.Information
-            text: i18np("Showing %1 favorite: the list may be incomplete", "Showing %1 favorites: the list may be incomplete", page.favorites.count)
+        FilterChips {
+            dialog: filterDialog
+            list: page.favorites
+            clearShown: !page.noMatch
         }
 
-        MessageBox {
-            objectName: "favoritesPartialBanner"
-            Layout.margins: Kirigami.Units.largeSpacing
-            visible: page.favorites.libraryFailed
-            type: Kirigami.MessageType.Warning
-            text: i18n("Some libraries could not be read: the list may be incomplete")
-            actions: [
-                Kirigami.Action {
+        FavoritesBanners {
+            Layout.fillWidth: true
+            favorites: page.favorites
+        }
+    }
+
+    ColumnLayout {
+        id: rowsColumn
+        spacing: Kirigami.Units.largeSpacing
+
+        // The states of the page without rows, centred in the room the page has
+        Item {
+            Layout.fillWidth: true
+            Layout.preferredHeight: Math.max(Kirigami.Units.gridUnit * 8, (page.flickable ? page.flickable.height : page.availableHeight) - Kirigami.Units.gridUnit * 2)
+            visible: page.loading || page.idle || page.noLibraries || page.empty || page.noMatch
+
+            Kirigami.LoadingPlaceholder {
+                FadeInOnShow {}
+                objectName: "favoritesLoading"
+                anchors.centerIn: parent
+                width: parent.width - Kirigami.Units.gridUnit * 4
+                visible: page.loading
+                text: i18n("Loading favorites…")
+                explanation: page.favorites.libraryCount > 0 ? i18np("%1 favorite found, %2 of %3 libraries read", "%1 favorites found, %2 of %3 libraries read", page.favorites.loadedCount, page.favorites.librariesDone, page.favorites.libraryCount) : ""
+                determinate: page.favorites.libraryCount > 0
+                progressBar.value: page.favorites.libraryCount > 0 ? 100 * page.favorites.librariesDone / page.favorites.libraryCount : 0
+            }
+
+            Kirigami.PlaceholderMessage {
+                FadeInOnShow {}
+                objectName: "favoritesNotLoaded"
+                anchors.centerIn: parent
+                width: parent.width - Kirigami.Units.gridUnit * 4
+                visible: page.idle
+                icon.name: "dialog-warning"
+                text: i18n("Favorites could not be loaded")
+                explanation: i18n("The favorites could not be read from the server: try again")
+                helpfulAction: Kirigami.Action {
                     text: i18n("Retry")
                     icon.name: "view-refresh"
                     onTriggered: page.favorites.reload()
                 }
-            ]
-        }
-    }
-
-    GridView {
-        id: grid
-        objectName: "favoritesGrid"
-
-        // Poster tiles of about ten grid units, at least one to a row
-        readonly property int columns: Math.max(1, Math.floor(width / (Kirigami.Units.gridUnit * 10)))
-
-        // After a long scroll the current tile is far out of view: the keys start from the first tile in view, so the view does not jump back to the top
-        function focusPrimary(reason) {
-            const current = grid.currentItem;
-            if (!current || current.y + current.height <= grid.contentY || current.y >= grid.contentY + grid.height) {
-                const inView = grid.indexAt(grid.cellWidth / 2, grid.contentY + grid.cellHeight / 2);
-                if (inView >= 0)
-                    grid.currentIndex = inView;
             }
-            grid.forceActiveFocus(reason);
-        }
 
-        // The tiles are not tab stops: the grid is, and it opens the current item
-        function openCurrent() {
-            if (grid.currentItem?.enabled)
-                page.Window.window.openItem(grid.currentItem.itemId, page);
-        }
+            Kirigami.PlaceholderMessage {
+                FadeInOnShow {}
+                objectName: "favoritesNoLibraries"
+                anchors.centerIn: parent
+                width: parent.width - Kirigami.Units.gridUnit * 4
+                visible: page.noLibraries
+                icon.name: "folder-video"
+                text: i18n("No libraries to show")
+                explanation: i18n("Favorites come from your movie, TV show, and collection libraries")
+                helpfulAction: Kirigami.Action {
+                    text: i18n("Go to Home")
+                    icon.name: "go-home"
+                    onTriggered: page.shell.goHome()
+                }
+            }
 
-        // On the view, not in its content: the fade stays under the toolbar while the tiles scroll
-        TopFade {
-            objectName: "favoritesTopFade"
-            parent: grid
-            z: 1
-            atStart: grid.atYBeginning
-        }
+            Kirigami.PlaceholderMessage {
+                FadeInOnShow {}
+                objectName: "favoritesEmpty"
+                anchors.centerIn: parent
+                width: parent.width - Kirigami.Units.gridUnit * 4
+                visible: page.empty
+                icon.name: "favorite"
+                text: i18n("No favorites yet")
+                explanation: i18n("Movies, shows, and collections you mark as favorites on the server show up here")
+                helpfulAction: Kirigami.Action {
+                    text: i18n("Reload")
+                    icon.name: "view-refresh"
+                    onTriggered: page.favorites.reload()
+                }
+            }
 
-        Kirigami.LoadingPlaceholder {
-            FadeInOnShow {}
-            objectName: "favoritesLoading"
-            anchors.centerIn: parent
-            width: parent.width - Kirigami.Units.gridUnit * 4
-            visible: page.loading
-            text: i18n("Loading favorites…")
-            explanation: page.favorites.libraryCount > 0 ? i18np("%1 favorite found, %2 of %3 libraries read", "%1 favorites found, %2 of %3 libraries read", page.favorites.loadedCount, page.favorites.librariesDone, page.favorites.libraryCount) : ""
-            determinate: page.favorites.libraryCount > 0
-            progressBar.value: page.favorites.libraryCount > 0 ? 100 * page.favorites.librariesDone / page.favorites.libraryCount : 0
-        }
-
-        Kirigami.PlaceholderMessage {
-            FadeInOnShow {}
-            objectName: "favoritesNotLoaded"
-            anchors.centerIn: parent
-            width: parent.width - Kirigami.Units.gridUnit * 4
-            visible: page.idle
-            icon.name: "dialog-warning"
-            text: i18n("Favorites could not be loaded")
-            explanation: i18n("The favorites could not be read from the server: try again")
-            helpfulAction: Kirigami.Action {
-                text: i18n("Retry")
-                icon.name: "view-refresh"
-                onTriggered: page.favorites.reload()
+            Kirigami.PlaceholderMessage {
+                FadeInOnShow {}
+                objectName: "favoritesNoMatch"
+                anchors.centerIn: parent
+                width: parent.width - Kirigami.Units.gridUnit * 4
+                visible: page.noMatch
+                icon.name: "view-filter"
+                text: i18n("No favorites match the filters")
+                helpfulAction: Kirigami.Action {
+                    objectName: "favoritesClearFiltersAction"
+                    text: i18n("Clear Filters")
+                    icon.name: "edit-clear-all"
+                    onTriggered: page.favorites.clearFilters()
+                }
             }
         }
 
-        Kirigami.PlaceholderMessage {
-            FadeInOnShow {}
-            objectName: "favoritesNoLibraries"
-            anchors.centerIn: parent
-            width: parent.width - Kirigami.Units.gridUnit * 4
-            visible: !page.loading && !page.idle && page.favorites.libraryCount === 0
-            icon.name: "folder-video"
-            text: i18n("No libraries to show")
-            explanation: i18n("Favorites come from your movie, TV show, and collection libraries")
-            helpfulAction: Kirigami.Action {
-                text: i18n("Go to Home")
-                icon.name: "go-home"
-                onTriggered: page.shell.goHome()
+        Repeater {
+            id: rowsRepeater
+            model: page.sections
+            delegate: ColumnLayout {
+                id: row
+                required property var modelData
+
+                readonly property string type: modelData.type
+                readonly property string title: modelData.title
+                readonly property bool hasCards: items.count > 0
+                // The row's list of cards, for the keys
+                readonly property Item cards: cardRow
+                // The poster ratios match MediaCard: the height is the poster plus the two text lines
+                readonly property real cardWidth: Kirigami.Units.gridUnit * 8
+                readonly property real cardHeight: Math.round((cardWidth - Kirigami.Units.smallSpacing * 2) * 3 / 2) + Kirigami.Units.gridUnit * 3.5
+
+                objectName: "favoritesRow_" + type
+                Layout.fillWidth: true
+                visible: hasCards
+                spacing: Kirigami.Units.smallSpacing
+
+                FavoritesSectionModel {
+                    id: items
+                    source: page.favorites
+                    type: row.type
+                    limit: page.rowLimit
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+
+                    Kirigami.Heading {
+                        Layout.fillWidth: true
+                        level: 2
+                        textFormat: Text.PlainText
+                        elide: Text.ElideRight
+                        text: row.title
+                    }
+
+                    Controls.Button {
+                        objectName: "favoritesSeeAll_" + row.type
+                        visible: items.total > page.rowLimit
+                        text: i18n("Show All")
+                        icon.name: "go-next"
+                        Accessible.name: i18n("Show All in %1", row.title)
+                        onClicked: page.Window.window.openFavoritesSection(row.type, row.title, page)
+                    }
+                }
+
+                CardRow {
+                    id: cardRow
+                    listObjectName: "favoritesRowList_" + row.type
+                    model: items
+                    cardHeight: row.cardHeight
+                    accessibleName: row.title
+                    pageFlickable: page.flickable
+
+                    delegate: FavoriteCard {
+                        width: row.cardWidth
+                        height: row.cardHeight
+                        highlighted: ListView.isCurrentItem && ListView.view.activeFocus
+                        onClicked: page.Window.window.openItem(itemId, page)
+                    }
+                }
             }
-        }
-
-        // A failed library is no empty list: its banner shows instead
-        Kirigami.PlaceholderMessage {
-            FadeInOnShow {}
-            objectName: "favoritesEmpty"
-            anchors.centerIn: parent
-            width: parent.width - Kirigami.Units.gridUnit * 4
-            visible: !page.loading && !page.idle && page.favorites.libraryCount > 0 && page.favorites.count === 0 && !page.favorites.libraryFailed
-            icon.name: "favorite"
-            text: i18n("No favorites yet")
-            explanation: i18n("Movies, shows, and collections you mark as favorites on the server show up here")
-            helpfulAction: Kirigami.Action {
-                text: i18n("Reload")
-                icon.name: "view-refresh"
-                onTriggered: page.favorites.reload()
-            }
-        }
-
-        model: page.favorites
-        cellWidth: Math.floor(width / columns)
-        cellHeight: Math.round((cellWidth - Kirigami.Units.largeSpacing - Kirigami.Units.smallSpacing * 2) * 1.5) + Kirigami.Units.gridUnit * 3.5 + Kirigami.Units.largeSpacing
-        topMargin: Kirigami.Units.largeSpacing
-        bottomMargin: Kirigami.Units.largeSpacing
-        activeFocusOnTab: true
-        keyNavigationEnabled: true
-        currentIndex: 0
-        Accessible.role: Accessible.List
-        Accessible.name: page.title
-
-        Keys.onReturnPressed: openCurrent()
-        Keys.onEnterPressed: openCurrent()
-        Keys.onSpacePressed: openCurrent()
-        Keys.onMenuPressed: if (grid.currentItem?.enabled) grid.currentItem.openMenu(0, grid.currentItem.height)
-        Keys.onPressed: event => {
-            if (event.modifiers === Qt.ShiftModifier && event.key === Qt.Key_F10 && grid.currentItem?.enabled) {
-                grid.currentItem.openMenu(0, grid.currentItem.height);
-                event.accepted = true;
-            }
-        }
-
-        delegate: FavoriteCard {
-            objectName: "favoritesCard_" + index
-            width: grid.cellWidth - Kirigami.Units.largeSpacing
-            height: grid.cellHeight - Kirigami.Units.largeSpacing
-            highlighted: GridView.isCurrentItem && grid.activeFocus
-            onClicked: page.Window.window.openItem(itemId, page)
         }
     }
 }

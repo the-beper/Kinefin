@@ -67,6 +67,12 @@ Controls.Menu {
     signal renamePlaylistRequested(string targetId)
     signal deletePlaylistRequested(string targetId)
 
+    // From the More Actions button of a card: below the button, above it when there is no room below, never over it (the menu at the pointer or from the keyboard opens with `popup` at its point)
+    function openFor(button: Item): void {
+        placement.openFor(button);
+    }
+    PopupPlacement { id: placement; popup: menu }
+
     Controls.MenuItem {
         objectName: "cardMenuResume"
         text: menu.resumeTicks > 0 ? i18n("Resume") : i18n("Play")

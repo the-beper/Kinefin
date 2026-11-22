@@ -76,11 +76,15 @@ Controls.ItemDelegate {
     signal quickPlayRequested
     signal markWatchedRequested
 
-    // Opens the card menu of the window: at the given point of the card, below it when none
-    function openMenu(x, y) {
+    // Opens the card menu of the window: at the given point of the card, below it when none; from the card's menu button when one is given, below the button and never over it
+    function openMenu(x, y, button) {
         if (!card.hasMenu)
             return;
-        Window.window?.openCardMenu?.(card, itemId, type, seriesId, x ?? 0, y ?? card.height, card.quickPlayEnabled ? resumeTicks : -1, favorite, played);
+        const resume = card.quickPlayEnabled ? resumeTicks : -1;
+        if (button)
+            Window.window?.openCardMenuFrom?.(button, card, itemId, type, seriesId, resume, favorite, played);
+        else
+            Window.window?.openCardMenu?.(card, itemId, type, seriesId, x ?? 0, y ?? card.height, resume, favorite, played);
     }
 
     // The description lists only what applies to the item, and stays empty for a placeholder row
@@ -545,10 +549,7 @@ Controls.ItemDelegate {
                 Controls.ToolTip.text: i18n("More Actions")
                 Controls.ToolTip.visible: hovered
                 Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
-                onClicked: {
-                    const point = menuButton.mapToItem(card, 0, menuButton.height);
-                    card.openMenu(point.x, point.y);
-                }
+                onClicked: card.openMenu(0, 0, menuButton)
             }
         }
 

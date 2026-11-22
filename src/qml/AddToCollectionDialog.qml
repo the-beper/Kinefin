@@ -26,6 +26,11 @@ Kirigami.Dialog {
     standardButtons: Kirigami.Dialog.Cancel
     padding: 0
 
+    header: DialogTitleBar {
+        title: dialog.title
+        onCloseRequested: dialog.close()
+    }
+
     onOpened: {
         model.open();
         list.currentIndex = -1;

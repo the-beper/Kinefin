@@ -55,6 +55,11 @@ Kirigami.Dialog {
         }
     ]
 
+    header: DialogTitleBar {
+        title: dialog.title
+        onCloseRequested: dialog.close()
+    }
+
     // What a failure means for the user: the dialog's box and the shell's notification say the same
     function failureText(failure) {
         switch (failure) {
@@ -317,8 +322,10 @@ Kirigami.Dialog {
                                 QQC2.ToolTip.text: text
                                 QQC2.ToolTip.visible: hovered || visualFocus
                                 QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
-                                onClicked: rowMenu.popup(rowMore, 0, rowMore.height)
+                                onClicked: rowMenu.open()
 
+                                // Below the button, above it when there is no room below
+                                PopupPlacement { popup: rowMenu; anchor: rowMore }
                                 QQC2.Menu {
                                     id: rowMenu
                                     objectName: "syncPlayQueueMenu"

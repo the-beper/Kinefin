@@ -27,6 +27,11 @@ Kirigami.Dialog {
     standardButtons: Kirigami.Dialog.Cancel
     padding: 0
 
+    header: DialogTitleBar {
+        title: dialog.title
+        onCloseRequested: dialog.close()
+    }
+
     // Whether this opening counted the dialog among the readers of the list: a dialog closed while it still opens may close without having opened
     property bool counted: false
     onOpened: {

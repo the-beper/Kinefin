@@ -154,6 +154,8 @@ The header holds the tabs **Home**, **Downloads**, **Favorites** and **Playlists
 
 Escape and Alt+Left go back. The mouse back button does too. Ctrl+R reloads the page in front.
 
+A middle click on a page that scrolls starts autoscroll: a marker shows where you clicked, and moving the pointer away from it scrolls the page, faster the farther the pointer is. Moving the pointer back to the marker pauses the scroll. A click of any mouse button, Escape, the wheel or a change of page ends it, and the click or the Escape does nothing else: it opens no card and goes back no page. If you hold the middle button for more than a moment, or drag with it held, the scroll lasts only while it is down. A middle click on a text field pastes as usual and starts nothing.
+
 ### Home
 
 Home shows these rows:
@@ -192,9 +194,9 @@ The toolbar has the sub-tabs, **Filters**, **Sort** and the view options. Search
 
 To filter:
 
-1. Open **Filters**.
-2. Check the options you want. Options of one section are combined with OR, different sections with AND.
-3. Press **Apply**. **Clear** drops the choices not applied yet.
+1. Open **Filters**. The sections are listed on the left and the options of the selected section on the right, starting with Status.
+2. Select a section and check the options you want. The number next to a section says how many of its options are checked. Options of one section are combined with OR, different sections with AND.
+3. Press **Apply**. **Clear** unchecks every option in all sections, and **Cancel** drops the choices not applied yet.
 
 | Section | Options | Applies to |
 | --- | --- | --- |
@@ -204,10 +206,18 @@ To filter:
 | Video Type | Blu-ray, DVD | Movies and episodes |
 | Series Status | Continuing, Ended, Unreleased | Series |
 | Episodes | All, Specials, Missing, Unaired | Episodes |
-| Genres and Tags | Any number; tags have a search field | All |
-| Ratings and Years | Any number | All |
+| Genres | Any number, with a search field | All |
+| Tags | Any number, with a search field | All |
+| Ratings | Any number, with a search field | All |
+| Years | Any number, with a search field | All |
 
-A section that does not apply to the current list is left out. **Clear Filters** removes the filters of the current view only; search, sort and library stay. If a filter leaves nothing, the page says so and offers **Clear Filters**.
+Type in the search field above the options to narrow them. The options you have checked stay listed whatever you type. A server can have thousands of tags, so Tags lists the ones you have checked first, then the first 300 tags of the server, and a line under the list says how many it leaves out: search to find the others.
+
+A section that does not apply to the current list is left out. While the genres and tags (or the ratings and years) load or fail to load, one entry stands in for them with a busy or warning icon, and its pane has **Retry**. **Clear Filters** removes the filters of the current view only; search, sort and library stay. If a filter leaves nothing, the page says so and offers **Clear Filters**.
+
+In a window too narrow for both panes the dialog shows the section list alone. Selecting a section opens its options in its place, and **Back** or Esc returns to the list.
+
+On the keyboard the dialog opens on the section list: Up and Down change the section, Tab or Right moves to the search field (or to the options when the section has none), and Shift+Tab or Left goes back. In the options, Space checks or unchecks the current option and typing a letter starts the search. Return applies the filters from anywhere in the dialog. Esc clears a search first and otherwise closes the dialog without applying (in a narrow window it first acts as **Back**).
 
 Sort keys differ by list: movies have 10 (Name, Random, Community Rating, Critic Rating, Date Added, Date Played, Parental Rating, Play Count, Release Date, Runtime), series 8, episodes 7 and collections 5. **Ascending Order** and **Descending Order** set the direction. **Random** shows one page of 100 items, and **Reshuffle** asks for another.
 
@@ -240,25 +250,26 @@ Suggestions in **Shows** and Collections in both tabs ignore the library selecto
 
 ### Item details
 
-Selecting a card opens the details page: a hero with the backdrop, logo, a facts line (year, rating, runtime, end time) and **Play** or **Resume**. Under it come media badges (resolution, HDR, codecs, subtitle count), the overview, the credits, the cast and the related rows. The toolbar keeps **Cast…**, **Download**, the favorite toggle and **Mark as Watched** or **Mark as Unwatched**. The overflow menu (the **⋮** button) holds:
+Selecting a card opens the details page: a hero with the backdrop, logo, a facts line (year, rating, runtime, end time) and **Play** or **Resume**. Under it come media badges (resolution, HDR, codecs, subtitle count), the overview, the credits, the cast and the related rows. The toolbar keeps **Cast…**, **Download**, the favorite toggle, **Mark as Watched** or **Mark as Unwatched**, and **Show Media Info**. The overflow menu (the **⋮** button) holds:
 
 | Entry | Contains | Shown |
 | --- | --- | --- |
 | **Play Trailer** | | When the server has one |
 | **Play Next**, **Add to Queue** | | Queueable items |
+| **Add to Playlist…** | | Movies, episodes and videos |
+| **Add to Collection…** | | Movies and series |
 | **Automatic Downloads…**, **Stop Automatic Downloads** | | Series and seasons; Stop only while a rule exists |
-| **Add to** | **Playlist…**, **Collection…** | |
-| **Edit on Server** | **Edit Metadata…**, **Identify…**, **Edit Images…**, **Edit Subtitles…**, **Refresh Metadata** | Administrators |
-| **Utilities** | **Copy Stream URL**, **Show Media Info** | |
+| **Edit** | **Edit Metadata…**, **Identify…**, **Edit Images…**, **Edit Subtitles…**, **Refresh Metadata** | Administrators |
+| **Copy Stream URL** | | When the item has a source |
 | **Delete Media…** | | Last entry, when the server allows deletion |
 
-**Show Media Info** opens a dialog with the container, size, bit rate and streams of each source, and **Copy** puts the text on the clipboard.
+**Show Media Info**, a button in the toolbar of the page, opens a dialog with the container, size, bit rate and streams of each source, and **Copy** puts the text on the clipboard.
 
 Before you play, choose the audio track and the subtitles (or **Off**) with **Audio** and **Subtitles** in the row under the facts, which appears only when there is a choice; **Play** and **Resume** use them. When the item has a resume point, **Play from Beginning** appears left of **Resume** and starts from the first second. **Play Trailer** opens the item's first trailer in your browser. **Copy Stream URL** puts the URL of the first source on the clipboard, without a token. **Refresh Metadata** asks the server to fetch the item's metadata and images again.
 
-On a movie or show page, **Collection…** in the **Add to** submenu puts the item into an existing collection or a new one. An administrator can change the item on the server. **Delete Media…** removes a movie, episode or video when the server allows it, after a confirmation; the server deletes the file and it cannot be recovered. **Edit Metadata…** changes the name, overview, year, official rating and genres. **Identify…** on a movie or a show searches the metadata providers; select a match and press **Apply Match** to apply it. **Edit Images…** replaces or removes the primary image, the backdrop or the logo. **Edit Subtitles…** uploads an external subtitle file or deletes an external track. Clicking a cast member opens the movies, shows and episodes that person appears in.
+On a movie or show page, **Add to Collection…** puts the item into an existing collection or a new one. An administrator can change the item on the server. **Delete Media…** removes a movie, episode or video when the server allows it, after a confirmation; the server deletes the file and it cannot be recovered. **Edit Metadata…** changes the name, overview, year, official rating and genres. **Identify…** on a movie or a show searches the metadata providers; select a match and press **Apply Match** to apply it. **Edit Images…** replaces or removes the primary image, the backdrop or the logo. **Edit Subtitles…** uploads an external subtitle file or deletes an external track. Clicking a cast member opens the movies, shows and episodes that person appears in.
 
-A series page lists seasons and one Next Up entry, a season page lists its episodes, and an episode page links to its series and season. A collection page lists its first 100 items. **Playlist…** in the **Add to** submenu is on movie, episode and video pages.
+A series page lists seasons and one Next Up entry, a season page lists its episodes, and an episode page links to its series and season. A collection page lists its first 100 items. **Add to Playlist…** is on movie, episode and video pages.
 
 ### Search
 
@@ -266,7 +277,9 @@ Ctrl+F, or typing in the header box, opens the search page. It shows four groups
 
 ### Favorites
 
-The **Favorites** tab lists everything you marked as a favorite, across all movie, TV and collection libraries, up to 1000 items. A banner says when the list may be incomplete, with **Retry** after a failed library. The cards form one grid, sorted by name. This page is read-only: set favorites from a card menu or a details page.
+The **Favorites** tab lists everything you marked as a favorite, across all movie, TV and collection libraries, up to 1000 items. It has one row of cards for each kind of item, in this order: **Movies**, **Shows**, **Seasons**, **Episodes** and **Collections**. A kind you have no favorites of has no row. Each row shows up to 24 cards, sorted by name (a season or an episode is listed under its series, with its own name below), and scrolls sideways. A kind with more than 24 favorites has **Show All**, which opens a page with all of them in a grid; **Back** returns to the Favorites tab. A banner says when the list may be incomplete, with **Retry** after a failed library. **Ctrl+R** reads the favorites again, on either page. These pages are read-only: set favorites from a card menu or a details page.
+
+The **Show All** pages have **Filters…** in their toolbar, the dialog of [Movies and Shows](#movies-and-shows) with the sections the favorites can be filtered on: Status (Played, Unplayed, Resumable), Genres, Tags, Ratings and Years, listing the values found in the favorites Kinefin has read. Chips under the toolbar show the filters, each with a remove button, and **Clear Filters** removes them all. The Favorites tab has no **Filters…** of its own, but its rows follow the same set of filters and show the same chips. A row with no favorite left is hidden, and when nothing is left the page says so and offers **Clear Filters**. A Genres filter also hides the favorites that have no genre; seasons and episodes often have none. The filters are not saved: they are dropped when you sign out or quit.
 
 ### Playlists
 
@@ -312,7 +325,7 @@ The video fills the window. Bars with the controls appear when you move the poin
 
 The top bar has **Back** (leaves the player, playback continues in the mini player), the title and episode line, and **Cast** and **Picture-in-Picture** buttons. In a SyncPlay group a group button also shows there.
 
-The bottom bar has the timeline with a thumbnail preview while you drag, **Previous** and **Next** (when there is one), **Pause** or **Resume**, a speaker button with a volume slider, **Audio**, **Subtitles**, **Full Screen Mode** and **More Actions**. The time at the left of the timeline is the current position. The one at the right toggles total and remaining time. **Ends at** shows the clock time the item ends at the current speed. **Skip Intro**, **Skip Recap** or **Skip Outro** appears during a segment the server knows.
+The bottom bar has the timeline with a thumbnail preview while you drag, **Previous** and **Next** (when there is one), **Pause** or **Resume**, a speaker button with a volume slider, **Audio**, **Subtitles**, **Full Screen Mode** and **More Actions**. The time at the left of the timeline is the current position. The one at the right toggles total and remaining time. A box above the timeline shows the time under the pointer, and the chapter there when the item has chapters; it also shows while you drag. **Ends at** shows the clock time the item ends at the current speed. **Skip Intro**, **Skip Recap** or **Skip Outro** appears during a segment the server knows.
 
 A right click on the video, the Menu key or Shift+F10 open a context menu with the main actions. A single click on the video pauses or resumes, and a double click toggles full screen. The mouse wheel anywhere over the player changes the volume by 5.
 
@@ -335,7 +348,7 @@ A right click on the video, the Menu key or Shift+F10 open a context menu with t
 | --- | --- |
 | **Show Mini Player** | Docks the video and leaves the page |
 | **Shuffle**, **Repeat** | Off, All or Current Item; Shuffle needs a queue of two or more |
-| **Playback Speed** | 0.5x to 4x |
+| **Playback Speed** | 0.5x to 4x; a speed between the steps, such as the one set as the default in the settings, shows as an extra checked entry |
 | **Aspect Ratio** | Auto, Zoom, Stretch, 4:3, 16:9, Widescreen for 4:3 Video, Original Size; applies to this item only |
 | **AV Sync** | Audio delay |
 | **Quality** | See [Choose a quality](#choose-a-quality) |
@@ -391,7 +404,7 @@ To skip intros without pressing **Skip**, switch on **Skip Intros Automatically*
 
 ### Jump between chapters
 
-Chapters come from the server. Each one but the first is a mark on the timeline, and the drag preview shows the chapter name. The **Chapters** submenu of **More Actions** lists them with their time. PgUp and PgDown step between them. PgDown goes to the start of the current chapter when you are more than 3 seconds into it. Chapters have no images.
+Chapters come from the server. Each one but the first is a mark on the timeline, and the box over the timeline names the chapter under the pointer, as the drag preview does. The **Chapters** submenu of **More Actions** lists them with their time. PgUp and PgDown step between them. PgDown goes to the start of the current chapter when you are more than 3 seconds into it. Chapters have no images.
 
 ### Choose a quality
 

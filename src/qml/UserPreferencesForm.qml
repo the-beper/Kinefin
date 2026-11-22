@@ -179,6 +179,8 @@ ColumnLayout {
                 currentIndex: row.currentRow
                 Accessible.name: row.text
                 onActivated: index => row.picked(row.entries[index].code)
+                // The list opens below the box and above it when there is no room below, never over it
+                PopupPlacement { popup: box.popup; anchor: box }
 
                 // A new list puts the box back on its first entry without changing the value the binding computes (the code keeps the same position when the catalog arrives), so the choice is bound again
                 function followChoice() {

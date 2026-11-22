@@ -30,6 +30,11 @@ Kirigami.Dialog {
         }
     ]
 
+    header: DialogTitleBar {
+        title: dialog.title
+        onCloseRequested: dialog.close()
+    }
+
     // One line per stream: the server's own description when it gives one (it already names the language, codec, layout and flags), with the resolution a video's leaves out; otherwise the stream piece by piece
     function streamText(stream, kind) {
         const parts = [];

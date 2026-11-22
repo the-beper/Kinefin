@@ -137,11 +137,6 @@ Kirigami.Page {
         page.Window.window.playerAction(name);
         page.wakeChrome();
     }
-    // A menu of the bottom bar opens above its button, aligned to the button's far edge
-    function openMenu(menu, button) {
-        const corner = button.mapToItem(page, page.mirrored ? 0 : button.width, 0);
-        menu.popup(page.mirrored ? corner.x : corner.x - menu.implicitWidth, corner.y - menu.implicitHeight);
-    }
     // The commands and labels the bars and the context menu share
     readonly property bool canTogglePause: page.player.active && !page.player.loading
     readonly property string pauseText: page.player.paused ? i18n("Resume") : i18n("Pause")
@@ -713,7 +708,8 @@ Kirigami.Page {
         id: previewPanel
         anchors.bottom: parent.bottom
         anchors.horizontalCenter: parent.horizontalCenter
-        anchors.bottomMargin: bottomBar.height + Kirigami.Units.largeSpacing
+        // Over the time bubble too, where that rises above the bar's shade
+        anchors.bottomMargin: bottomBar.height + Kirigami.Units.largeSpacing + (seekBubble.visible ? Math.max(0, seekBubble.height + Kirigami.Units.smallSpacing * 2 - (bottomBar.height - controls.implicitHeight)) : 0)
         width: Kirigami.Units.gridUnit * 16
         height: previewImage.implicitHeight > 0 ? Kirigami.Units.gridUnit * 11 : 0
         radius: Kirigami.Units.smallSpacing
@@ -1016,6 +1012,71 @@ Kirigami.Page {
                                 }
                             }
                         }
+                        // The pointer over the bar: the bubble below follows it, and each move of it wakes the bars
+                        HoverHandler {
+                            id: seekHover
+                            objectName: "playerSeekHover"
+                            property point lastPosition: Qt.point(-1, -1)
+                            onPointChanged: {
+                                if (point.position.x === lastPosition.x && point.position.y === lastPosition.y)
+                                    return;
+                                lastPosition = point.position;
+                                page.wakeChrome();
+                            }
+                        }
+                        // The time under the pointer, and above it the chapter there when the item has chapters, in a box over the bar that stays inside the bar's width; while the handle is dragged it follows the handle
+                        Rectangle {
+                            id: seekBubble
+                            objectName: "playerSeekBubble"
+                            // The pointer's place on the groove from its start edge, whatever the direction of the layout
+                            readonly property real fraction: {
+                                const span = timeline.availableWidth - timeline.handle.width;
+                                if (span <= 0)
+                                    return 0;
+                                const along = Math.max(0, Math.min(1, (seekHover.point.position.x - timeline.leftPadding - timeline.handle.width / 2) / span));
+                                return timeline.mirrored ? 1 - along : along;
+                            }
+                            readonly property real seconds: timeline.pressed ? timeline.dragSeconds : timeline.from + (timeline.to - timeline.from) * fraction
+                            readonly property real middle: timeline.pressed ? timeline.handle.x + timeline.handle.width / 2 : seekHover.point.position.x
+                            readonly property real ticks: Math.floor(seconds * 10000000)
+                            readonly property int chapterIndex: page.player.chapterAt(ticks)
+                            readonly property string chapterName: chapterIndex >= 0 && chapterIndex < page.chapters.length ? page.chapters[chapterIndex].name : ""
+                            visible: timeline.pressed || (seekHover.hovered && timeline.enabled)
+                            x: Math.round(Math.max(0, Math.min(middle - width / 2, timeline.width - width)))
+                            y: -height - Kirigami.Units.smallSpacing
+                            width: bubbleColumn.implicitWidth + Kirigami.Units.largeSpacing * 2
+                            height: bubbleColumn.implicitHeight + Kirigami.Units.smallSpacing * 2
+                            radius: Kirigami.Units.cornerRadius
+                            color: Qt.alpha("black", 0.85)
+                            Accessible.ignored: true
+                            ColumnLayout {
+                                id: bubbleColumn
+                                anchors.centerIn: parent
+                                spacing: 0
+                                Controls.Label {
+                                    objectName: "playerSeekBubbleChapter"
+                                    Layout.alignment: Qt.AlignHCenter
+                                    Layout.maximumWidth: Kirigami.Units.gridUnit * 16
+                                    visible: text.length > 0
+                                    color: "white"
+                                    textFormat: Text.PlainText
+                                    maximumLineCount: 1
+                                    elide: Text.ElideRight
+                                    text: seekBubble.chapterName
+                                    Accessible.ignored: true
+                                }
+                                Kirigami.Heading {
+                                    objectName: "playerSeekBubbleTime"
+                                    Layout.alignment: Qt.AlignHCenter
+                                    level: 3
+                                    color: "white"
+                                    font.features: { "tnum": 1 }
+                                    textFormat: Text.PlainText
+                                    text: page.player.timeText(seekBubble.ticks)
+                                    Accessible.ignored: true
+                                }
+                            }
+                        }
                     }
                     Controls.ToolButton {
                         id: timeButton
@@ -1107,7 +1168,7 @@ Kirigami.Page {
                         Accessible.role: Accessible.ButtonMenu
                         icon.name: "audio-headphones"
                         text: i18nc("@action:button audio tracks", "Audio")
-                        onClicked: page.openMenu(audioMenu, audioButton)
+                        onClicked: audioMenu.open()
                     }
                     OsdButton {
                         id: subtitlesButton
@@ -1117,7 +1178,7 @@ Kirigami.Page {
                         icon.name: "media-view-subtitles-symbolic"
                         text: i18nc("@action:button subtitle tracks", "Subtitles")
                         enabled: !page.player.casting
-                        onClicked: page.openMenu(subtitlesMenu, subtitlesButton)
+                        onClicked: subtitlesMenu.open()
                     }
                     OsdButton {
                         objectName: "playerFullScreenButton"
@@ -1130,7 +1191,7 @@ Kirigami.Page {
                         objectName: "playerMoreButton"
                         icon.name: "overflow-menu"
                         text: i18nc("@action:button", "More Actions")
-                        onClicked: page.openMenu(moreMenu, moreButton)
+                        onClicked: moreMenu.open()
                     }
                 }
                 Controls.Label {
@@ -1165,6 +1226,10 @@ Kirigami.Page {
         }
         onCloseRequested: page.closePlaybackInfo()
     }
+    // Each menu of the bottom bar opens above its button and never over it (below it when there is no room above, cut to the room when there is none either)
+    PopupPlacement { popup: audioMenu; anchor: audioButton; preferAbove: true }
+    PopupPlacement { popup: subtitlesMenu; anchor: subtitlesButton; preferAbove: true }
+    PopupPlacement { popup: moreMenu; anchor: moreButton; preferAbove: true }
     // The menus of the bottom bar belong to the page, not to the bars: they keep the window's colours over the dark bars
     AudioMenu {
         id: audioMenu
@@ -1418,10 +1483,12 @@ Kirigami.Page {
         objectName: "nowPlayingPanel"
         modal: false
         focus: true
+        // Where the bottom bar's controls start: the panel sits above them, since More Actions (a button of the bar) opens it and it must not cover that button
+        readonly property real controlsTop: bottomBar.y + controls.y
         width: Math.min(page.width, Kirigami.Units.gridUnit * 27)
-        height: Math.min(page.height * 0.75, Kirigami.Units.gridUnit * 32)
+        height: Math.max(0, Math.min(page.height * 0.75, Kirigami.Units.gridUnit * 32, controlsTop - Kirigami.Units.smallSpacing))
         x: page.width - width
-        y: page.height - height
+        y: controlsTop - Kirigami.Units.smallSpacing - height
         closePolicy: Controls.Popup.CloseOnEscape | Controls.Popup.CloseOnPressOutside
         // Only the way out fades: an enter transition would hold `opened` back, which the page's Escape and hover rules read; the exit leaves the opacity at 0, so each show puts it back
         onAboutToShow: opacity = 1
@@ -1685,8 +1752,11 @@ Kirigami.Page {
             enabled: !page.groupFollowing && !page.player.casting
             title: i18n("Playback Speed")
             icon.name: "speedometer"
+            readonly property var steps: [0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4]
+            // The default speed setting takes any value from 0.5 to 4 and the player may be at one that is no step: it shows as an entry of its own, checked, in its place among the steps (a real property, so the entries are built again only when this value changes and not at every change of the player)
+            readonly property real customRate: speedMenu.steps.some(step => Math.abs(step - page.player.rate) < 0.005) ? 0 : page.player.rate
             Instantiator {
-                model: [0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4]
+                model: speedMenu.customRate > 0 ? speedMenu.steps.concat([speedMenu.customRate]).sort((a, b) => a - b) : speedMenu.steps
                 delegate: Controls.MenuItem {
                     required property real modelData
                     text: i18nc("@item:inmenu playback speed, %1 is the factor", "%1×", modelData)

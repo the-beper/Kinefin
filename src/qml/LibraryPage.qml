@@ -194,7 +194,7 @@ Kirigami.Page {
         id: filterDialog
 
         // Only one list is open at a time: the dialog follows it, and the chips of the page read from it. A page without a list has none to filter
-        library: page.listModel ?? page.model
+        list: page.listModel ?? page.model
         favoritesFixed: page.subtab === "favorites"
     }
 
@@ -277,6 +277,8 @@ Kirigami.Page {
                         page.connection.openType(page.tabType, entries[index].id);
                         currentIndex = Qt.binding(() => selector.scopeIndex());
                     }
+                    // The list opens below the box and above it when there is no room below, never over it
+                    PopupPlacement { popup: selector.popup; anchor: selector }
 
                     // Library names come from the server: plain text only (the style paints the selected name itself, as plain text; a custom contentItem breaks it, which reads text input API)
                     delegate: Controls.ItemDelegate {
@@ -621,83 +623,9 @@ Kirigami.Page {
         }
 
         // The filters of the list as chips with a remove button each, and Clear Filters for all of them (not the search, the sort or the library)
-        Flow {
-            id: chipBar
-            objectName: "filterChips"
-
-            Layout.fillWidth: true
-            Layout.leftMargin: Kirigami.Units.largeSpacing
-            Layout.rightMargin: Kirigami.Units.largeSpacing
-            Layout.topMargin: Kirigami.Units.smallSpacing
-            visible: page.listModel !== null && (filterDialog.chips.length > 0 || page.listModel.resolvingFacets)
-            spacing: Kirigami.Units.smallSpacing
-
-            Repeater {
-                model: filterDialog.chips
-
-                delegate: Rectangle {
-                    id: chip
-
-                    required property var modelData
-                    required property int index
-
-                    objectName: "filterChip_" + index
-                    implicitWidth: chipRow.implicitWidth + Kirigami.Units.smallSpacing * 2
-                    implicitHeight: chipRow.implicitHeight + Kirigami.Units.smallSpacing
-                    radius: height / 2
-                    color: Kirigami.Theme.alternateBackgroundColor
-                    border.width: 1
-                    border.color: Qt.alpha(Kirigami.Theme.textColor, 0.2)
-
-                    RowLayout {
-                        id: chipRow
-                        anchors.centerIn: parent
-                        spacing: 0
-
-                        // Genres, tags and ratings come from the server: plain text only
-                        Controls.Label {
-                            Layout.leftMargin: Kirigami.Units.smallSpacing
-                            Layout.maximumWidth: Kirigami.Units.gridUnit * 14
-                            elide: Text.ElideRight
-                            textFormat: Text.PlainText
-                            text: chip.modelData.label
-                        }
-
-                        // The label is server text for some chips: only the accessible name carries it, the control text is the fixed tooltip text
-                        Controls.ToolButton {
-                            objectName: "filterChipRemove_" + chip.index
-                            Layout.preferredWidth: Kirigami.Units.iconSizes.smallMedium + Kirigami.Units.smallSpacing
-                            Layout.preferredHeight: Kirigami.Units.iconSizes.smallMedium + Kirigami.Units.smallSpacing
-                            padding: 0
-                            display: Controls.AbstractButton.IconOnly
-                            icon.name: "window-close-symbolic"
-                            icon.width: Kirigami.Units.iconSizes.small
-                            icon.height: Kirigami.Units.iconSizes.small
-                            text: i18n("Remove this filter")
-                            Accessible.name: i18nc("accessible name of the button that removes one filter, %1 is the filter", "Remove the filter %1", chip.modelData.label)
-                            Controls.ToolTip.text: text
-                            Controls.ToolTip.visible: hovered || visualFocus
-                            Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
-                            onClicked: filterDialog.removeChip(chip.modelData)
-                        }
-                    }
-                }
-            }
-
-            Controls.Label {
-                objectName: "resolvingFiltersLabel"
-                visible: page.listModel !== null && page.listModel.resolvingFacets
-                opacity: 0.7
-                text: i18n("Applying the saved filters…")
-            }
-
-            Controls.Button {
-                objectName: "clearFiltersButton"
-                flat: true
-                icon.name: "edit-clear-all"
-                text: i18n("Clear Filters")
-                onClicked: page.listModel.clearFilters()
-            }
+        FilterChips {
+            dialog: filterDialog
+            list: page.listModel
         }
 
         MessageBox {

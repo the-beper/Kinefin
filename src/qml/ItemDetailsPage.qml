@@ -152,6 +152,7 @@ Kirigami.ScrollablePage {
     // The token-free static stream URL of the first source, for an external player; the Authorization header carries the token
     readonly property Kirigami.Action copyStreamUrlAction: Kirigami.Action {
         objectName: "copyStreamUrlAction"
+        displayHint: Kirigami.DisplayHint.AlwaysHide
         text: i18n("Copy Stream URL")
         icon.name: "edit-copy"
         visible: page.details.status === ItemDetailsModel.Ready && page.details.mediaSources.length > 0
@@ -182,7 +183,7 @@ Kirigami.ScrollablePage {
     readonly property Kirigami.Action editMetadataAction: Kirigami.Action {
         objectName: "editMetadataAction"
         text: i18n("Edit Metadata…")
-        icon.name: "document-edit"
+        icon.name: "document-properties"
         visible: page.details.status === ItemDetailsModel.Ready
                  && page.connection.currentUserIsAdministrator
                  && ["Movie", "Series", "Episode", "Season"].indexOf(page.details.type) >= 0
@@ -236,7 +237,8 @@ Kirigami.ScrollablePage {
     }
     readonly property Kirigami.Action addToPlaylistAction: Kirigami.Action {
         objectName: "addToPlaylistAction"
-        text: i18nc("@action:inmenu in the Add to submenu", "Playlist…")
+        displayHint: Kirigami.DisplayHint.AlwaysHide
+        text: i18nc("@action:inmenu", "Add to Playlist…")
         icon.name: "media-playlist-append"
         visible: page.details.status === ItemDetailsModel.Ready && page.details.playable
         onTriggered: page.Window.window.addToPlaylist(page.details.itemId)
@@ -244,7 +246,8 @@ Kirigami.ScrollablePage {
     // A movie or a whole series joins a collection; episodes belong to their series
     readonly property Kirigami.Action addToCollectionAction: Kirigami.Action {
         objectName: "addToCollectionAction"
-        text: i18nc("@action:inmenu in the Add to submenu", "Collection…")
+        displayHint: Kirigami.DisplayHint.AlwaysHide
+        text: i18nc("@action:inmenu", "Add to Collection…")
         icon.name: "folder-new"
         visible: page.details.status === ItemDetailsModel.Ready && (page.details.type === "Movie" || page.details.type === "Series")
         onTriggered: page.Window.window.addToCollection(page.details.itemId, page.details.name)
@@ -329,32 +332,16 @@ Kirigami.ScrollablePage {
     }
 
     title: details.name
-    // The bar keeps the four frequent actions (Cast, Download, the favorite toggle, watched state); the ⋮ menu holds the rest, the related entries folded into submenus that show only while one of their entries does, and Delete Media last behind a separator that shows only when something stands above it
-    readonly property Kirigami.Action addToMenuAction: Kirigami.Action {
-        objectName: "addToMenuAction"
-        displayHint: Kirigami.DisplayHint.AlwaysHide
-        text: i18nc("@action:inmenu submenu of the details menu", "Add to")
-        icon.name: "bookmark-new-symbolic"
-        visible: page.addToPlaylistAction.visible || page.addToCollectionAction.visible
-        children: [page.addToPlaylistAction, page.addToCollectionAction]
-    }
+    // The bar keeps the frequent actions (Cast, Download, the favorite toggle, watched state, Media Info); the ⋮ menu holds the rest, the edits of the server folded into the Edit submenu that shows only while one of its entries does, and Delete Media last behind a separator that shows only when something stands above it
     readonly property Kirigami.Action serverEditMenuAction: Kirigami.Action {
         objectName: "serverEditMenuAction"
         displayHint: Kirigami.DisplayHint.AlwaysHide
-        text: i18nc("@action:inmenu submenu of the details menu", "Edit on Server")
+        text: i18nc("@action:inmenu submenu of the details menu", "Edit")
         icon.name: "document-edit"
         visible: page.editMetadataAction.visible || page.identifyAction.visible || page.editImagesAction.visible || page.editSubtitlesAction.visible || page.refreshMetadataAction.visible
         children: [page.editMetadataAction, page.identifyAction, page.editImagesAction, page.editSubtitlesAction, page.refreshMetadataAction]
     }
-    readonly property Kirigami.Action utilitiesMenuAction: Kirigami.Action {
-        objectName: "utilitiesMenuAction"
-        displayHint: Kirigami.DisplayHint.AlwaysHide
-        text: i18nc("@action:inmenu submenu of the details menu", "Utilities")
-        icon.name: "tools-symbolic"
-        visible: page.copyStreamUrlAction.visible || page.mediaInfoAction.visible
-        children: [page.copyStreamUrlAction, page.mediaInfoAction]
-    }
-    readonly property bool overflowHasEntries: trailerAction.visible || playNextAction.visible || addToQueueAction.visible || automaticDownloadsAction.visible || stopDownloadsAction.visible || addToMenuAction.visible || serverEditMenuAction.visible || utilitiesMenuAction.visible
+    readonly property bool overflowHasEntries: trailerAction.visible || playNextAction.visible || addToQueueAction.visible || automaticDownloadsAction.visible || stopDownloadsAction.visible || addToPlaylistAction.visible || addToCollectionAction.visible || serverEditMenuAction.visible || copyStreamUrlAction.visible
     readonly property Kirigami.Action separatorDelete: Kirigami.Action {
         objectName: "overflowSeparatorDelete"
         separator: true
@@ -517,8 +504,9 @@ Kirigami.ScrollablePage {
     }
     readonly property Kirigami.Action mediaInfoAction: Kirigami.Action {
         objectName: "mediaInfoAction"
+        displayHint: Kirigami.DisplayHint.KeepVisible
         text: i18n("Show Media Info")
-        icon.name: "documentinfo"
+        icon.name: "documentinfo-symbolic"
         visible: page.details.mediaSources.length > 0
         onTriggered: {
             if (page.mediaInfoDialog)
@@ -528,7 +516,7 @@ Kirigami.ScrollablePage {
         }
     }
 
-    actions: [page.playOnAction, page.downloadAction, page.favoriteAction, page.togglePlayedAction, page.trailerAction, page.playNextAction, page.addToQueueAction, page.automaticDownloadsAction, page.stopDownloadsAction, page.addToMenuAction, page.serverEditMenuAction, page.utilitiesMenuAction, page.separatorDelete, page.deleteMediaAction]
+    actions: [page.playOnAction, page.downloadAction, page.favoriteAction, page.togglePlayedAction, page.mediaInfoAction, page.trailerAction, page.playNextAction, page.addToQueueAction, page.addToPlaylistAction, page.addToCollectionAction, page.automaticDownloadsAction, page.stopDownloadsAction, page.serverEditMenuAction, page.copyStreamUrlAction, page.separatorDelete, page.deleteMediaAction]
     // The row of the page carries the way back and the actions, as on the Movies and Shows tabs; the hero names the item
     globalToolBarStyle: Kirigami.ApplicationHeaderStyle.None
     // Without Kirigami's title row the page names itself to a screen reader
@@ -1345,6 +1333,8 @@ Kirigami.ScrollablePage {
                                 textRole: "label"
                                 Accessible.name: i18n("Audio track")
                                 onActivated: index => page.audioStreamIndex = page.audioChoices[index].index
+                                // The list opens below the box and above it when there is no room below, never over it
+                                PopupPlacement { popup: audioSelector.popup; anchor: audioSelector }
                                 // Written by the Binding so a reload that drops the choice can move it back
                                 Binding {
                                     target: audioSelector
@@ -1402,6 +1392,8 @@ Kirigami.ScrollablePage {
                                 textRole: "label"
                                 Accessible.name: i18n("Subtitle track")
                                 onActivated: index => page.subtitleStreamIndex = page.subtitleChoices[index].index
+                                // The list opens below the box and above it when there is no room below, never over it
+                                PopupPlacement { popup: subtitleSelector.popup; anchor: subtitleSelector }
                                 // Written by the Binding so a reload that drops the choice can move it back
                                 Binding {
                                     target: subtitleSelector

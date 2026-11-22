@@ -85,7 +85,7 @@ These hold everywhere; a change that breaks one needs a reason good enough to ch
 | --- | --- |
 | Profiles and data | Each profile has its own data and cache folders, listed in the [user guide](user-guide.md#where-kinefin-keeps-its-files); `src/settings` resolves them |
 | Translations | Every visible string is an `i18n()` call; `po/extract.sh` builds the catalog and `scripts/po.py` reports what is left to translate |
-| Interface rules | The interface follows the KDE Human Interface Guidelines and uses Kirigami controls; the desktop style is `org.kde.desktop` under `QApplication` |
+| Interface rules | The interface follows the KDE Human Interface Guidelines and uses Kirigami controls; the desktop style is `org.kde.desktop` under `QApplication`. A menu or combo box list that a button opens is placed by `PopupPlacement`, below the button or above it when there is no room, never over it; a menu at the pointer is not |
 | Playback contract | The settings and their mpv mapping, the device profile that decides when the server transcodes, and the playback reports follow Jellyfin Desktop wherever a native player allows |
 
 ## Decisions

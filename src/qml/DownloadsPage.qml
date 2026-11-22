@@ -251,7 +251,7 @@ Kirigami.ScrollablePage {
 
             function openMenu() {
                 if (hasMenu)
-                    rowMenu.popup(rowMore, 0, rowMore.height);
+                    rowMenu.open();
             }
 
             objectName: "downloadRow_" + itemId
@@ -395,7 +395,9 @@ Kirigami.ScrollablePage {
                     Controls.ToolTip.text: text
                     Controls.ToolTip.visible: hovered || visualFocus
                     Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
-                    onClicked: rowMenu.popup(rowMore, 0, rowMore.height)
+                    onClicked: rowMenu.open()
+                    // Below the button, above it when there is no room below
+                    PopupPlacement { popup: rowMenu; anchor: rowMore }
                     Controls.Menu {
                         id: rowMenu
                         Controls.MenuItem {

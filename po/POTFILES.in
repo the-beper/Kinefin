@@ -35,6 +35,7 @@ src/qml/DownloadsPage.qml
 src/qml/RuleDialog.qml
 src/qml/SubtitleSearchDialog.qml
 src/qml/FilterDialog.qml
+src/qml/FilterChips.qml
 src/qml/GenreRailsView.qml
 src/qml/GenreRailsPage.qml
 src/qml/LibraryContent.qml
@@ -59,9 +60,13 @@ src/qml/PlaybackInfoOverlay.qml
 src/qml/ShellHeader.qml
 src/qml/AboutDialog.qml
 src/qml/ShortcutsDialog.qml
+src/qml/DialogTitleBar.qml
 src/qml/ServersPage.qml
 src/qml/SettingRow.qml
 src/qml/SettingsPage.qml
 src/qml/UserPreferencesForm.qml
 src/qml/UserPreferencesSaveBar.qml
 src/qml/FavoritesPage.qml
+src/qml/FavoriteCard.qml
+src/qml/FavoritesBanners.qml
+src/qml/FavoritesSectionPage.qml

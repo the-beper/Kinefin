@@ -7,6 +7,7 @@
 #include "models/CollectionsModel.h"
 #include "models/DownloadsModel.h"
 #include "models/FavoritesModel.h"
+#include "models/FavoritesSectionModel.h"
 #include "models/FilterOptionsModel.h"
 #include "models/GenreRailsModel.h"
 #include "models/HomeRowsModel.h"
@@ -199,6 +200,12 @@ struct FavoritesModelForeign {
     QML_FOREIGN(Kinefin::FavoritesModel)
     QML_NAMED_ELEMENT(FavoritesModel)
     QML_UNCREATABLE("Created by the application")
+};
+
+struct FavoritesSectionModelForeign {
+    Q_GADGET
+    QML_FOREIGN(Kinefin::FavoritesSectionModel)
+    QML_NAMED_ELEMENT(FavoritesSectionModel)
 };
 
 struct PlaylistsControllerForeign {

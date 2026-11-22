@@ -74,9 +74,12 @@ Controls.ItemDelegate {
         return parts.join(", ");
     }
 
-    // Opens the card menu of the window: at the given point of the row, below it when none
-    function openMenu(x, y) {
-        Window.window?.openCardMenu?.(row, itemId, type, seriesId, x ?? 0, y ?? row.height, -1, favorite, played);
+    // Opens the card menu of the window: at the given point of the row, below it when none; from the row's menu button when one is given, below the button and never over it
+    function openMenu(x, y, button) {
+        if (button)
+            Window.window?.openCardMenuFrom?.(button, row, itemId, type, seriesId, -1, favorite, played);
+        else
+            Window.window?.openCardMenu?.(row, itemId, type, seriesId, x ?? 0, y ?? row.height, -1, favorite, played);
     }
 
     // A click makes this row the current one and gives its list the focus, so the focus comes back to this row after Back
@@ -221,6 +224,7 @@ Controls.ItemDelegate {
 
         // The pointer and keyboard ways to the menu are the right click and the Menu key: this button is for the pointer alone
         Controls.ToolButton {
+            id: listRowMenuButton
             objectName: "listRowMenuButton"
             focusPolicy: Qt.NoFocus
             visible: row.loaded
@@ -232,10 +236,7 @@ Controls.ItemDelegate {
             Controls.ToolTip.text: text
             Controls.ToolTip.visible: hovered
             Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
-            onClicked: {
-                const point = mapToItem(row, 0, height);
-                row.openMenu(point.x, point.y);
-            }
+            onClicked: row.openMenu(0, 0, listRowMenuButton)
         }
     }
 }

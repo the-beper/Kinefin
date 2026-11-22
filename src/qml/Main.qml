@@ -232,7 +232,7 @@ Kirigami.ApplicationWindow {
         });
     }
 
-    // Esc goes back like Alt+Left except on the first page; an open dialog takes the key first
+    // Esc ends a running autoscroll and nothing more, else it goes back like Alt+Left except on the first page; an open dialog takes the key first
     readonly property bool canEscapeBack: pageStack.currentIndex > 0 && pageStack.layers.depth <= 1
     function escapeBack() {
         if (canEscapeBack)
@@ -240,8 +240,18 @@ Kirigami.ApplicationWindow {
     }
     Shortcut {
         sequences: ["Escape"]
-        enabled: window.canEscapeBack
-        onActivated: window.escapeBack()
+        enabled: window.canEscapeBack || autoScroll.active
+        onActivated: {
+            if (autoScroll.active)
+                autoScroll.stop();
+            else
+                window.escapeBack();
+        }
+    }
+    // Middle-click autoscroll, one for every page and the header
+    AutoScroll {
+        id: autoScroll
+        shell: window
     }
 
     // What a remote control asks for besides the keys it sends: the player commands reach the player in every mode, the full page or the mini player
@@ -256,7 +266,9 @@ Kirigami.ApplicationWindow {
         switch (name) {
         case "back":
             // A popup closes on a real Escape through a shortcut, which a synthesised key never reaches: an open popup keeps the page under it as it is
-            if (!popupOpen())
+            if (autoScroll.active)
+                autoScroll.stop();
+            else if (!popupOpen())
                 escapeBack();
             break;
         case "home":
@@ -1097,11 +1109,20 @@ Kirigami.ApplicationWindow {
         pageStack.push(Qt.resolvedUrl("GenreRailsPage.qml"), { connection: connection });
     }
 
-    // The menu of a card (a right click, the Menu key or the button of the card): it opens at a point of the card, below it by default
-    // `resumeTicks` is -1 for a card without a quick play, else its saved position (0: none)
+    // The menu of a card (a right click or the Menu key): it opens at a point of the card, below it by default; `resumeTicks` is -1 for a card without a quick play, else its saved position (0: none)
     function openCardMenu(card, itemId, type, seriesId, x, y, resumeTicks, favorite, played) {
-        if (connection.state !== ConnectionController.Authenticated)
+        if (!prepareCardMenu(card, itemId, type, seriesId, resumeTicks, favorite, played))
             return;
+        cardMenu.popup(card, x ?? 0, y ?? card.height);
+    }
+    // The menu of the More Actions button of a card: below the button, above it when there is no room below, never over it
+    function openCardMenuFrom(button, card, itemId, type, seriesId, resumeTicks, favorite, played) {
+        if (prepareCardMenu(card, itemId, type, seriesId, resumeTicks, favorite, played))
+            cardMenu.openFor(button);
+    }
+    function prepareCardMenu(card, itemId, type, seriesId, resumeTicks, favorite, played) {
+        if (connection.state !== ConnectionController.Authenticated)
+            return false;
         cardMenu.itemId = itemId;
         cardMenu.itemType = type;
         cardMenu.seriesId = seriesId;
@@ -1109,7 +1130,7 @@ Kirigami.ApplicationWindow {
         cardMenu.favorite = favorite ?? false;
         cardMenu.played = played ?? false;
         cardMenu.positionTicks = card.resumeTicks ?? 0;
-        cardMenu.popup(card, x ?? 0, y ?? card.height);
+        return true;
     }
 
     function downloadFailureText(reason) {
@@ -1479,6 +1500,22 @@ Kirigami.ApplicationWindow {
     function favoritesPageGone() {
         if (--favoritesPages === 0)
             connection.favorites.close();
+    }
+
+    // Show All of a Favorites row goes above the Favorites page that asks, which stays below as it is; the page of that type already open is brought back instead. It reads the same snapshot, so no scan starts here
+    function openFavoritesSection(type, title, fromPage) {
+        if (!signedIn)
+            return;
+        for (let i = 0; i <= pageStack.currentIndex; ++i) {
+            const page = pageStack.get(i);
+            if (page?.objectName === "favoritesSectionPage" && page.type === type) {
+                popTo(page);
+                return;
+            }
+        }
+        if (fromPage)
+            popTo(fromPage);
+        pageStack.push(Qt.resolvedUrl("FavoritesSectionPage.qml"), { connection: connection, shell: window, type: type, title: title });
     }
 
     // The Playlists tab and the Home tile of the server's Playlists view: the page becomes the root of the stack

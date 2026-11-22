@@ -32,6 +32,33 @@ def heading_anchors(text: str) -> set[str]:
     return anchors
 
 
+def own_properties(text: str, start: int) -> str:
+    """What sits directly in the QML block whose opening brace ends just before `start`: nested blocks, strings and comments are left out."""
+    kept: list[str] = []
+    depth = 1
+    i = start
+    while depth:
+        if text.startswith("//", i):
+            i = text.index("\n", i)
+            continue
+        if text.startswith("/*", i):
+            i = text.index("*/", i) + 2
+            continue
+        char = text[i]
+        if char in "\"'":
+            i += 1
+            while text[i] != char:
+                i += 2 if text[i] == "\\" else 1
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+        elif depth == 1:
+            kept.append(char)
+        i += 1
+    return "".join(kept)
+
+
 class PlanningConsistency(unittest.TestCase):
     def test_mpris_and_sandbox_scope(self) -> None:
         manifest = content("build/flatpak/io.github.the_beper.Kinefin.yml")
@@ -80,12 +107,28 @@ class PlanningConsistency(unittest.TestCase):
                 self.assertTrue(messages <= keys, messages - keys)
                 self.assertEqual(module.pending(lang), [])
 
+    def test_every_kirigami_dialog_has_the_shared_title_bar(self) -> None:
+        # The header Kirigami.Dialog brings ignores the padding for the top and the bottom, so every dialog takes DialogTitleBar to look like the others
+        seen: set[str] = set()
+        missing = []
+        for path in sorted((ROOT / "src/qml").glob("*.qml")):
+            relative = path.relative_to(ROOT).as_posix()
+            qml = content(relative)
+            for match in re.finditer(r"\bKirigami\.Dialog\s*\{", qml):
+                seen.add(relative)
+                has_bar = re.search(r"\bheader:\s*DialogTitleBar\b", own_properties(qml, match.end()))
+                if not has_bar:
+                    line = qml.count("\n", 0, match.start()) + 1
+                    missing.append(f"{relative}:{line}")
+        self.assertIn("src/qml/FilterDialog.qml", seen)
+        self.assertEqual(missing, [])
+
     def test_d_f_checkboxes_do_not_mutate_drafts_on_programmatic_sync(self) -> None:
         # AbstractButton.toggled fires on any checked change, including a
         # property binding refresh. Only an actual user click may mutate the
         # filter draft or toggle the wrapping preference delegate.
         for file, start in (
-            ("src/qml/FilterDialog.qml", "id: optionComponent"),
+            ("src/qml/FilterDialog.qml", "component OptionRow:"),
             ("src/qml/UserPreferencesForm.qml", "component LibraryCheckRow:"),
         ):
             with self.subTest(file=file):

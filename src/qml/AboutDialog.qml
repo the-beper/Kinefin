@@ -37,10 +37,8 @@ Kirigami.Dialog {
     property string homepage: aboutData.homepage
     property string bugAddress: aboutData.bugAddress
 
-    // The room around the header icon and the close button, the same on every side, and the room around the content
-    readonly property real margin: Kirigami.Units.largeSpacing
+    // The room around the content
     readonly property real contentMargin: Kirigami.Units.largeSpacing * 2
-    readonly property real headerSize: Kirigami.Units.iconSizes.medium
 
     function webUrl(address: string): string {
         return /^https?:\/\//i.test(address) ? address : "";
@@ -77,34 +75,9 @@ Kirigami.Dialog {
     preferredWidth: Kirigami.Units.gridUnit * 27
     maximumHeight: absoluteMaximumHeight - Kirigami.Units.gridUnit * 4
 
-    header: Controls.Control {
-        // Every side set on its own: the desktop style ignores `padding`; the header spans the dialog border (1 px at the top and the sides)
-        topPadding: dialog.margin + 1
-        bottomPadding: dialog.margin
-        leftPadding: dialog.margin + 1
-        rightPadding: dialog.margin + 1
-        contentItem: RowLayout {
-            spacing: Kirigami.Units.largeSpacing
-            Kirigami.Icon {
-                source: "help-about"
-                Layout.preferredWidth: dialog.headerSize
-                Layout.preferredHeight: dialog.headerSize
-            }
-            Kirigami.Heading { level: 3; text: dialog.title; Layout.fillWidth: true }
-            Controls.ToolButton {
-                text: i18n("Close")
-                icon.name: "window-close"
-                icon.width: Kirigami.Units.iconSizes.smallMedium
-                icon.height: Kirigami.Units.iconSizes.smallMedium
-                display: Controls.AbstractButton.IconOnly
-                Layout.preferredWidth: dialog.headerSize
-                Layout.preferredHeight: dialog.headerSize
-                Controls.ToolTip.text: text
-                Controls.ToolTip.visible: hovered || visualFocus
-                Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
-                onClicked: dialog.close()
-            }
-        }
+    header: DialogTitleBar {
+        title: dialog.title
+        onCloseRequested: dialog.close()
     }
 
     // The dialog sizes itself from an Item's implicitHeight and scrolls the content when the window is too short

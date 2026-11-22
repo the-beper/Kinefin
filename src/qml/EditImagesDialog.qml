@@ -26,6 +26,11 @@ Kirigami.Dialog {
     standardButtons: Kirigami.Dialog.Cancel
     padding: Kirigami.Units.largeSpacing
 
+    header: DialogTitleBar {
+        title: dialog.title
+        onCloseRequested: dialog.close()
+    }
+
     function choose(imageType, index) {
         pendingType = imageType;
         pendingIndex = index;

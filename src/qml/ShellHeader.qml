@@ -779,13 +779,13 @@ Item {
         onTriggered: root.afterUnsavedSettled(() => root.connection.cancel())
     }
 
+    // Under the button, right-aligned with it (left-aligned when mirrored) as the bar ends there, and above it in a window too short to hold the menu below
+    PopupPlacement { popup: mainMenu; anchor: mainMenuButton }
+
     QQC2.Menu {
         id: mainMenu
         objectName: "mainMenu"
-        // Under the button, right-aligned with it (left-aligned when mirrored), where the bar ends: a binding, since the menu only knows its width once its entries show
         parent: mainMenuButton
-        x: Qt.application.layoutDirection === Qt.RightToLeft ? 0 : mainMenuButton.width - width
-        y: mainMenuButton.height
         // The widest shown entry (its label plus the shortcut column, which the style's MenuItem counts in its implicit width) and the menu's paddings, never wider than the window
         readonly property real widestEntry: {
             let widest = 0;

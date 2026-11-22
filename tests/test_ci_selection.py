@@ -18,7 +18,7 @@ class ChangeSelection(unittest.TestCase):
         self.dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.dir.cleanup)
         self.repo = Path(self.dir.name)
-        self.git("init", "-q")
+        self.git("init", "-q", "-b", "main")
         self.git("config", "user.name", "CI Test")
         self.git("config", "user.email", "ci@example.invalid")
         self.write("README.md", "readme\n")

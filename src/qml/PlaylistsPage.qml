@@ -104,10 +104,13 @@ Kirigami.ScrollablePage {
         objectName: "playlistsGrid"
 
         // Poster tiles of about ten grid units, at least one to a row
-        readonly property int columns: Math.max(1, Math.floor(width / (Kirigami.Units.gridUnit * 10)))
+        readonly property real usableWidth: Math.max(0, width - leftMargin)
+        readonly property int columns: Math.max(1, Math.floor(usableWidth / (Kirigami.Units.gridUnit * 10)))
 
         model: page.playlists.list
-        cellWidth: Math.floor(width / columns)
+        // The page margin on the left, as the library grid has it: the cards do not touch the edge
+        leftMargin: Kirigami.Units.largeSpacing
+        cellWidth: Math.floor(usableWidth / columns)
         // A 2:3 poster inside the tile margins, then the name and the second line
         cellHeight: Math.round((cellWidth - Kirigami.Units.largeSpacing - Kirigami.Units.smallSpacing * 2) * 1.5) + Kirigami.Units.gridUnit * 3.5 + Kirigami.Units.largeSpacing
         activeFocusOnTab: true

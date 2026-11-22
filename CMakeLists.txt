@@ -15,6 +15,10 @@ include(KDECMakeSettings)
 include(KDECompilerSettings NO_POLICY_SCOPE)
 
 find_package(Qt6 6.6 REQUIRED COMPONENTS Core Gui Widgets Quick Qml QuickControls2 DBus Network WebSockets)
+# The QML files are flattened with resource aliases, so there is no extra directory whose qmldir the new behaviour of this policy would generate
+if(QT_KNOWN_POLICY_QTP0004)
+    qt_policy(SET QTP0004 OLD)
+endif()
 find_package(KF6 6.8 REQUIRED COMPONENTS Config CoreAddons I18n DBusAddons Wallet)
 # The KDE runtime 6.11 ships SDL 3.2; the gamepad input needs nothing but the library
 find_package(SDL3 3.2 REQUIRED CONFIG)
@@ -85,6 +89,8 @@ add_library(kinefin_core STATIC
     src/models/FilterOptionsModel.h
     src/models/FavoritesModel.cpp
     src/models/FavoritesModel.h
+    src/models/FavoritesSectionModel.cpp
+    src/models/FavoritesSectionModel.h
     src/models/UserConfigurationModel.cpp
     src/models/UserConfigurationModel.h
     src/models/GenreRailsModel.cpp
@@ -248,7 +254,7 @@ target_link_libraries(kinefin_cast PUBLIC Qt6::Core Qt6::Network KF6::I18n)
 target_link_libraries(kinefin_player PUBLIC kinefin_cast)
 
 # The QML module lives in a static library of its own so that the UI tests can import it like the application does
-foreach(page Main PlayerPage OsdButton MiniPlayer PictureInPictureWindow PlaybackInfoOverlay ShellHeader AboutDialog ShortcutsDialog RemoteSessionsDialog SyncPlayDialog MediaInfoDialog CastDialog CastTargetRow HomePage LibraryTile LibraryPage ResumeItemsPage PersonPage MediaCard CardMenu CardRow EpisodeRow ItemDetailsPage SearchPage QueuePage FilterDialog GenreRailsView GenreRailsPage LibraryContent ItemListRow ItemRowGrid LoginPage UserPickerPage MessageBox ServersPage SettingsPage SettingRow UserPreferencesForm UserPreferencesSaveBar FavoritesPage TopFade MediaListRow PlaylistsPage PlaylistPage PlaylistDialogs AddToPlaylistDialog AddToCollectionDialog CollectionDialogs EditMetadataDialog IdentifyDialog EditImagesDialog EditSubtitlesDialog PageToolbar PageBackButton FadeInOnShow PageTitle PlainToolTip DownloadsPage RuleDialog SubtitleSearchDialog)
+foreach(page Main PlayerPage OsdButton MiniPlayer PictureInPictureWindow PlaybackInfoOverlay ShellHeader AboutDialog ShortcutsDialog DialogTitleBar RemoteSessionsDialog SyncPlayDialog MediaInfoDialog CastDialog CastTargetRow HomePage LibraryTile LibraryPage ResumeItemsPage PersonPage MediaCard CardMenu CardRow EpisodeRow ItemDetailsPage SearchPage QueuePage FilterDialog FilterChips GenreRailsView GenreRailsPage LibraryContent ItemListRow ItemRowGrid LoginPage UserPickerPage MessageBox ServersPage SettingsPage SettingRow UserPreferencesForm UserPreferencesSaveBar FavoritesPage FavoriteCard FavoritesBanners FavoritesSectionPage TopFade MediaListRow PlaylistsPage PlaylistPage PlaylistDialogs AddToPlaylistDialog AddToCollectionDialog CollectionDialogs EditMetadataDialog IdentifyDialog EditImagesDialog EditSubtitlesDialog PageToolbar PageBackButton FadeInOnShow PageTitle PlainToolTip PopupPlacement AutoScroll DownloadsPage RuleDialog SubtitleSearchDialog)
     set_source_files_properties(src/qml/${page}.qml PROPERTIES QT_RESOURCE_ALIAS ${page}.qml)
 endforeach()
 # The images the pages draw themselves, beside the QML files they belong to
@@ -275,9 +281,12 @@ qt_add_qml_module(kinefin_ui
         src/qml/FadeInOnShow.qml
         src/qml/PageTitle.qml
         src/qml/PlainToolTip.qml
+        src/qml/PopupPlacement.qml
+        src/qml/AutoScroll.qml
         src/qml/PlaybackInfoOverlay.qml
         src/qml/ShellHeader.qml
         src/qml/ShortcutsDialog.qml
+        src/qml/DialogTitleBar.qml
         src/qml/AboutDialog.qml
         src/qml/RemoteSessionsDialog.qml
         src/qml/SyncPlayDialog.qml
@@ -306,6 +315,7 @@ qt_add_qml_module(kinefin_ui
         src/qml/RuleDialog.qml
         src/qml/SubtitleSearchDialog.qml
         src/qml/FilterDialog.qml
+        src/qml/FilterChips.qml
         src/qml/GenreRailsView.qml
         src/qml/GenreRailsPage.qml
         src/qml/LibraryContent.qml
@@ -321,6 +331,9 @@ qt_add_qml_module(kinefin_ui
         src/qml/UserPreferencesForm.qml
         src/qml/UserPreferencesSaveBar.qml
         src/qml/FavoritesPage.qml
+        src/qml/FavoriteCard.qml
+        src/qml/FavoritesBanners.qml
+        src/qml/FavoritesSectionPage.qml
     RESOURCES
         src/qml/icons/critic-fresh.svg
         src/qml/icons/critic-rotten.svg
@@ -336,6 +349,8 @@ qt_add_qml_module(kinefin_ui
         src/app/ImageNetworkFactory.cpp
         src/app/ImageNetworkFactory.h
         src/app/ModelsQml.h
+        src/app/MiddleButtonWatcher.cpp
+        src/app/MiddleButtonWatcher.h
         src/app/MouseNavigation.cpp
         src/app/MouseNavigation.h
         src/app/MpvVideoItem.cpp

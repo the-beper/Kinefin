@@ -36,6 +36,11 @@ Kirigami.Dialog {
         }
     ]
 
+    header: DialogTitleBar {
+        title: dialog.title
+        onCloseRequested: dialog.close()
+    }
+
     function confirmDelete(track) {
         // One dialog at a time: the confirmation takes the edit dialog's place
         dialog.close();

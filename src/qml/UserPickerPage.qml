@@ -34,20 +34,25 @@ Kirigami.ScrollablePage {
         grid.forceActiveFocus(Qt.TabFocusReason);
     }
 
-    // The menu of a tile (a right click, the Menu key or the button of the tile): it opens at a point of the tile
-    function openUserMenu(tile, x, y) {
+    // The menu of a tile (a right click, the Menu key or the button of the tile): it opens at a point of the tile, or from the button when one is given
+    function openUserMenu(tile, x, y, button) {
         if (tile.isAdd)
             return;
         userMenu.userId = tile.modelData.id;
         userMenu.userName = tile.modelData.name;
         askPasswordItem.checked = tile.modelData.askPassword;
-        userMenu.popup(tile, x, y);
+        if (button)
+            userMenuPlacement.openFor(button);
+        else
+            userMenu.popup(tile, x, y);
     }
 
     function indexOfUser(userId) {
         return page.entries.findIndex(entry => entry.id === userId);
     }
 
+    // The button's menu goes below the button, above it when there is no room below; the pointer's and the keyboard's open at their point
+    PopupPlacement { id: userMenuPlacement; popup: userMenu }
     Controls.Menu {
         id: userMenu
         objectName: "userMenu"
@@ -290,8 +295,7 @@ Kirigami.ScrollablePage {
                         onClicked: {
                             grid.currentIndex = tile.index;
                             grid.forceActiveFocus(Qt.MouseFocusReason);
-                            const point = menuButton.mapToItem(tile, 0, menuButton.height);
-                            page.openUserMenu(tile, point.x, point.y);
+                            page.openUserMenu(tile, 0, 0, menuButton);
                         }
                     }
                 }

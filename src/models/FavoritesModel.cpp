@@ -3,6 +3,7 @@
 #include "FavoritesModel.h"
 
 #include "api/MediaSourceSelection.h"
+#include "models/LibraryItemsModel.h"
 
 #include <QJsonObject>
 #include <QJsonValue>
@@ -10,6 +11,8 @@
 #include <QVariantMap>
 
 #include <algorithm>
+#include <functional>
+#include <limits>
 
 namespace Kinefin {
 namespace {
@@ -26,16 +29,80 @@ QString plainLine(const QString &text, int limit)
     return clean.simplified();
 }
 
-// The first valid entry among the first genres of the item
-QString primaryGenre(const QJsonValue &value)
+// The first `limit` texts of the array that `accept` lets through, as plain lines of at most `chars` characters, each once (case-insensitive): a value of another type is not a text
+QStringList plainTexts(const QJsonValue &value, int limit, int chars,
+                       const std::function<bool(const QString &)> &accept)
 {
-    const QJsonArray genres = value.toArray();
-    for (qsizetype i = 0; i < genres.size() && i < FavoritesModel::MaxGenres; ++i) {
-        const QString genre = plainLine(genres.at(i).toString(), FavoritesModel::MaxGenreChars);
-        if (!genre.isEmpty())
-            return genre;
+    QStringList texts;
+    // A reply full of texts that do not pass costs no more than a few times what it can give
+    int looked = 0;
+    for (const QJsonValue &entry : value.toArray()) {
+        if (texts.size() >= limit || ++looked > limit * 8)
+            break;
+        const QString text = plainLine(entry.toString(), chars);
+        if (accept(text) && !texts.contains(text, Qt::CaseInsensitive))
+            texts.append(text);
     }
-    return {};
+    return texts;
+}
+
+// Each value once (case-insensitive, the first spelling stays) in the order given, at most `limit` of them, only those `accept` lets through
+QStringList distinctTexts(const QStringList &values, int limit,
+                          const std::function<bool(const QString &)> &accept)
+{
+    QStringList distinct;
+    // The case-folded values seen, so that thousands of values are not compared one against another
+    QSet<QString> seen;
+    for (const QString &value : values) {
+        if (distinct.size() >= limit)
+            break;
+        if (accept(value) && !seen.contains(value.toCaseFolded())) {
+            seen.insert(value.toCaseFolded());
+            distinct.append(value);
+        }
+    }
+    return distinct;
+}
+
+bool isGenreName(const QString &name)
+{
+    return !name.isEmpty() && name.size() <= FavoritesModel::MaxGenreChars;
+}
+
+// The filters reduced to the sections the snapshot has data for, without the values a filter cannot carry and the repeats, at most `limit` values in each list
+LibraryFilterState reducedFilters(const LibraryFilterState &state, int limit)
+{
+    LibraryFilterState reduced;
+    reduced.played = state.played;
+    reduced.resumable = state.resumable;
+    reduced.genreIds = distinctTexts(state.genreIds, limit, isGenreName);
+    reduced.tags = distinctTexts(state.tags, limit, isValidFilterText);
+    reduced.officialRatings = distinctTexts(state.officialRatings, limit, isValidFilterText);
+    for (const int year : state.years) {
+        if (reduced.years.size() < limit && year >= 1 && year <= 9999
+            && !reduced.years.contains(year))
+            reduced.years.append(year);
+    }
+    return reduced;
+}
+
+// Whether the item's texts hold any of the wanted ones
+bool hasAny(const QStringList &texts, const QStringList &wanted)
+{
+    return std::any_of(wanted.cbegin(), wanted.cend(), [&texts](const QString &text) {
+        return texts.contains(text, Qt::CaseInsensitive);
+    });
+}
+
+// The values of one facet for the dialog: the chosen ones first, so that the cap never drops one, then the snapshot's, each once and sorted
+QStringList facetTexts(const QStringList &chosen, const QStringList &seen, int limit,
+                       const QCollator &collator)
+{
+    QStringList texts = distinctTexts(chosen + seen, limit, [](const QString &) { return true; });
+    std::sort(texts.begin(), texts.end(), [&collator](const QString &a, const QString &b) {
+        return collator.compare(a, b) < 0;
+    });
+    return texts;
 }
 
 // The video types a favorite can have
@@ -58,16 +125,23 @@ QString includeTypesFor(const QString &collectionType)
     return {};
 }
 
-// What the card shows as the name: an episode is listed under its series
+// Whether the card names the series and keeps the item's own name as its second line: an episode or a season is listed under its series
+bool isListedUnderItsSeries(const ItemSummary &item)
+{
+    return (item.type == QLatin1String("Episode") || item.type == QLatin1String("Season"))
+           && !item.seriesName.isEmpty();
+}
+
+// What the card shows as the name
 const QString &displayName(const ItemSummary &item)
 {
-    return item.type == QLatin1String("Episode") && !item.seriesName.isEmpty() ? item.seriesName
-                                                                               : item.name;
+    return isListedUnderItsSeries(item) ? item.seriesName : item.name;
 }
 } // namespace
 
+// The filter options are filled from the snapshot, no request goes out, so there is no channel
 FavoritesModel::FavoritesModel(JellyfinClient *client, QObject *parent)
-    : QAbstractListModel(parent), m_client(client)
+    : QAbstractListModel(parent), m_client(client), m_filterOptions(client, -1, this)
 {
     m_collator.setCaseSensitivity(Qt::CaseInsensitive);
     if (m_client) {
@@ -155,6 +229,75 @@ void FavoritesModel::clear()
         m_libraries.clear();
         Q_EMIT librariesChanged();
     }
+    assignFilters({});
+}
+
+QVariantMap FavoritesModel::filters() const
+{
+    return LibraryItemsModel::filtersToVariant(m_filters);
+}
+
+void FavoritesModel::setFilters(const QVariantMap &values)
+{
+    assignFilters(reducedFilters(LibraryItemsModel::filtersFromVariant(values), MaxFilterValues));
+}
+
+bool FavoritesModel::filtersFit(const QVariantMap &values) const
+{
+    const LibraryFilterState state = reducedFilters(LibraryItemsModel::filtersFromVariant(values),
+                                                    std::numeric_limits<int>::max());
+    return state.genreIds.size() <= MaxFilterValues && state.tags.size() <= MaxFilterValues
+           && state.officialRatings.size() <= MaxFilterValues
+           && state.years.size() <= MaxFilterValues;
+}
+
+void FavoritesModel::clearFilters()
+{
+    assignFilters({});
+}
+
+bool FavoritesModel::passes(const FavoriteItem &item, const LibraryFilterState &state)
+{
+    const ItemSummary &summary = item.summary;
+    if ((state.played == PlayedState::Played && !summary.played)
+        || (state.played == PlayedState::Unplayed && summary.played))
+        return false;
+    if (state.resumable && summary.positionTicks <= 0)
+        return false;
+    if (!state.genreIds.isEmpty() && !hasAny(item.genres, state.genreIds))
+        return false;
+    if (!state.tags.isEmpty() && !hasAny(item.tags, state.tags))
+        return false;
+    if (!state.officialRatings.isEmpty()
+        && (item.officialRating.isEmpty()
+            || !state.officialRatings.contains(item.officialRating, Qt::CaseInsensitive)))
+        return false;
+    return state.years.isEmpty() || state.years.contains(summary.year);
+}
+
+bool FavoritesModel::passesFilters(int row) const
+{
+    return row >= 0 && row < count() && passes(m_items[size_t(row)], m_filters);
+}
+
+void FavoritesModel::assignFilters(const LibraryFilterState &state)
+{
+    if (state == m_filters)
+        return;
+    m_filters = state;
+    // The count first: a binding on both never sees a filter with the count of another
+    refreshMatchCount();
+    Q_EMIT filtersChanged();
+}
+
+void FavoritesModel::refreshMatchCount()
+{
+    const auto matches = [this](const FavoriteItem &item) { return passes(item, m_filters); };
+    const int matching = int(std::count_if(m_items.begin(), m_items.end(), matches));
+    if (matching == m_matchCount)
+        return;
+    m_matchCount = matching;
+    Q_EMIT matchCountChanged();
 }
 
 int FavoritesModel::librariesDone() const
@@ -209,6 +352,8 @@ void FavoritesModel::discardSnapshot()
         endResetModel();
         Q_EMIT countChanged();
     }
+    refreshMatchCount();
+    m_filterOptions.clear();
     if (m_capped || m_libraryFailed) {
         m_capped = false;
         m_libraryFailed = false;
@@ -226,6 +371,7 @@ void FavoritesModel::startLoad()
     m_userId = m_client->userId();
     m_next = 0;
     setStatus(Loading);
+    m_filterOptions.setLocalLoading();
     Q_EMIT progressChanged();
     requestNext();
 }
@@ -257,8 +403,8 @@ void FavoritesModel::requestNext()
         query.includeItemTypes = library.includeItemTypes;
         query.recursive = true;
         query.filters = QStringLiteral("IsFavorite");
-        query.fields = {QStringLiteral("Genres"), QStringLiteral("ChildCount"),
-                        QStringLiteral("RecursiveItemCount")};
+        query.fields = {QStringLiteral("Genres"), QStringLiteral("Tags"),
+                        QStringLiteral("ChildCount"), QStringLiteral("RecursiveItemCount")};
         query.cardImages = true;
         query.sortBy = QStringLiteral("SortName");
         query.sortOrder = QStringLiteral("Ascending");
@@ -318,7 +464,15 @@ void FavoritesModel::addItems(const Library &library, const QJsonArray &items)
         FavoriteItem favorite;
         favorite.summary = std::move(summary);
         favorite.libraryIds = QStringList{library.id};
-        favorite.primaryGenre = primaryGenre(object.value(QStringLiteral("Genres")));
+        favorite.genres = plainTexts(object.value(QStringLiteral("Genres")), MaxGenres,
+                                     MaxGenreChars, isGenreName);
+        favorite.tags = plainTexts(object.value(QStringLiteral("Tags")), MaxTags,
+                                   MaxFilterValueChars, isValidFilterText);
+        // One character more than a rating can have: a longer text is no rating, not a cut one
+        const QString rating = plainLine(object.value(QStringLiteral("OfficialRating")).toString(),
+                                         MaxFilterValueChars + 1);
+        if (isValidFilterText(rating))
+            favorite.officialRating = rating;
         m_stagingIndex.insert(key, int(m_staging.size()));
         m_staging.push_back(std::move(favorite));
     }
@@ -402,6 +556,8 @@ void FavoritesModel::finish()
     endResetModel();
     if (hasItems)
         Q_EMIT countChanged();
+    refreshMatchCount();
+    fillFilterOptions();
     if (m_capped != more || m_libraryFailed != failed) {
         m_capped = more;
         m_libraryFailed = failed;
@@ -411,12 +567,38 @@ void FavoritesModel::finish()
     setStatus(failed ? PartialError : more ? Capped : Complete);
 }
 
+// The facets of the dialog: the values of the snapshot (only the libraries that were read, after a failure) and the chosen ones, which stay whatever the snapshot has, with the spelling the filter has
+void FavoritesModel::fillFilterOptions()
+{
+    QStringList genres, tags, ratings;
+    QList<int> snapshotYears;
+    for (const FavoriteItem &favorite : m_items) {
+        genres += favorite.genres;
+        tags += favorite.tags;
+        if (!favorite.officialRating.isEmpty())
+            ratings.append(favorite.officialRating);
+        if (favorite.summary.year > 0)
+            snapshotYears.append(favorite.summary.year);
+    }
+    // The chosen years first, so that the cap never drops one, then the newest first
+    QList<int> years;
+    for (const int year : m_filters.years + snapshotYears) {
+        if (years.size() < MaxFacetOptions && !years.contains(year))
+            years.append(year);
+    }
+    std::sort(years.begin(), years.end(), std::greater<int>());
+    m_filterOptions.setLocalValues(
+        facetTexts(m_filters.genreIds, genres, FilterOptionsModel::MaxOptions, m_collator),
+        facetTexts(m_filters.officialRatings, ratings, MaxFacetOptions, m_collator), years,
+        facetTexts(m_filters.tags, tags, MaxTagOptions, m_collator));
+}
+
 int FavoritesModel::rowCount(const QModelIndex &parent) const
 {
     return parent.isValid() ? 0 : count();
 }
 
-QHash<int, QByteArray> FavoritesModel::roleNames() const
+QHash<int, QByteArray> FavoritesModel::itemRoleNames()
 {
     QHash<int, QByteArray> names{{ItemIdRole, "itemId"},
                                  {NameRole, "name"},
@@ -431,8 +613,7 @@ QHash<int, QByteArray> FavoritesModel::roleNames() const
                                  {PlayedPercentageRole, "playedPercentage"},
                                  {FavoriteRole, "favorite"},
                                  {LibraryIdsRole, "libraryIds"},
-                                 {LibraryNamesRole, "libraryNames"},
-                                 {GenreRole, "genre"}};
+                                 {LibraryNamesRole, "libraryNames"}};
     names.insert(cardRoleNames());
     return names;
 }
@@ -443,13 +624,12 @@ QVariant FavoritesModel::data(const QModelIndex &index, int role) const
         return {};
     const FavoriteItem &favorite = m_items[size_t(index.row())];
     const ItemSummary &item = favorite.summary;
-    const bool episode = item.type == QLatin1String("Episode");
     switch (role) {
     case Qt::DisplayRole:
     case NameRole:
         return displayName(item);
     case EpisodeTitleRole:
-        return episode ? item.name : QString();
+        return isListedUnderItsSeries(item) ? item.name : QString();
     case SeasonNumberRole:
         return item.seasonNumber;
     case EpisodeNumberRole:
@@ -478,8 +658,6 @@ QVariant FavoritesModel::data(const QModelIndex &index, int role) const
             names.append(libraryName(id));
         return QVariant::fromValue(names);
     }
-    case GenreRole:
-        return favorite.primaryGenre;
     default:
         return cardRoleData(item, role);
     }

@@ -11,7 +11,7 @@
 #include <vector>
 
 namespace Kinefin {
-// The values a library can be filtered by, from two sources that load and fail on their own. `GET /Items/Filters2` gives the genres (the rows of the list model: a genre id, the hex id that goes on the wire in `genreIds`, and its name) and the tags (plain texts, no ids); `GET /Items/Filters` (the legacy endpoint) gives the official ratings and the production years, and a server without it only hides those two sections (`legacyStatus` Unavailable) without touching the other facets. Everything here is server text: render it as plain text, never as a control's text. A facet is available once its source answered with at least one valid value; invalid ids, empty or unfit names and duplicates are dropped, names are capped and every facet holds at most `MaxOptions` (genres), `MaxTagOptions` (tags) or `MaxFacetOptions` (ratings and years) values. Tag and rating texts live in memory only. Each instance owns one channel, given at construction and used in the `Filters` and `FiltersLegacy` families: never share it with another consumer, and only this channel's answers and failures count. The model empties itself when the client loses its credentials
+// The values a library can be filtered by, from two sources that load and fail on their own. `GET /Items/Filters2` gives the genres (the rows of the list model: a genre id, the hex id that goes on the wire in `genreIds`, and its name) and the tags (plain texts, no ids); `GET /Items/Filters` (the legacy endpoint) gives the official ratings and the production years, and a server without it only hides those two sections (`legacyStatus` Unavailable) without touching the other facets. Everything here is server text: render it as plain text, never as a control's text. A facet is available once its source answered with at least one valid value; invalid ids, empty or unfit names and duplicates are dropped, names are capped and every facet holds at most `MaxOptions` (genres), `MaxTagOptions` (tags) or `MaxFacetOptions` (ratings and years) values. Tag and rating texts live in memory only. Each instance owns one channel, given at construction and used in the `Filters` and `FiltersLegacy` families: never share it with another consumer, and only this channel's answers and failures count; a model filled by `setLocalValues` sends no request and is given -1. The model empties itself when the client loses its credentials
 class FilterOptionsModel final : public QAbstractListModel {
     Q_OBJECT
     // The genre and tag source
@@ -48,6 +48,11 @@ class FilterOptionsModel final : public QAbstractListModel {
     void clear();
     // Asks again for the source or sources that failed
     Q_INVOKABLE void retry();
+    // Fills every facet from values the caller holds, with no request: both sources are Ready at once, a genre row's id is its name, and the same caps and checks as the requests apply (the given order is kept, each value once, the others dropped). For a model that has no server to ask, such as the Favorites snapshot
+    void setLocalValues(const QStringList &genres, const QStringList &ratings,
+                        const QList<int> &years, const QStringList &tags);
+    // Both sources Loading while the caller collects its values, with no request; the values held stay until setLocalValues() or clear(), as with load()
+    void setLocalLoading();
 
     Status status() const { return m_status; }
     Status legacyStatus() const { return m_legacyStatus; }

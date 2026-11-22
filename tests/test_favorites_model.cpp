@@ -1,23 +1,37 @@
 // SPDX-FileCopyrightText: 2026 Kinefin contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
-// The Favorites snapshot and its groupings against the fake server: one request at a time on channel 3082, dedup across libraries, the 1000 limit and its notice, a failing library, stale replies, the loss of the session, and the five groupings
+// The Favorites snapshot and its per-type views against the fake server: one request at a time on channel 3082, dedup across libraries, the 1000 limit and its notice, a failing library, stale replies, the loss of the session, and the section models of the Favorites rows, and the filters of the snapshot (what they match on, how sections and values combine, the facets the dialog offers, and their life across rescans and the session)
 #include "FakeJellyfin.h"
 
 #include "api/JellyfinClient.h"
 #include "models/FavoritesModel.h"
+#include "models/FavoritesSectionModel.h"
+#include "models/LibraryItemsModel.h"
 
 #include <QAbstractItemModelTester>
 #include <QJsonArray>
 #include <QSignalSpy>
 #include <QtTest/QtTest>
 
+#include <memory>
+
 using Kinefin::FavoritesModel;
+using Kinefin::FavoritesSectionModel;
+using Kinefin::FilterOptionsModel;
+using Kinefin::LibraryItemsModel;
 
 namespace {
 const QString kMovies = QStringLiteral("e2a1aa11a8d94b5c999a25cf59abcd01");
 const QString kKids = QStringLiteral("e2a1aa11a8d94b5c999a25cf59abcd02");
 const QString kShows = QStringLiteral("e2a1aa11a8d94b5c999a25cf59abcd03");
 const QString kBoxsets = QStringLiteral("e2a1aa11a8d94b5c999a25cf59abcd04");
+
+// The titles of fillFilterable()
+const QString kAlpha = QStringLiteral("Alpha");
+const QString kBravo = QStringLiteral("Bravo");
+const QString kCharlie = QStringLiteral("Charlie");
+const QString kDelta = QStringLiteral("Delta");
+const QString kEcho = QStringLiteral("Echo");
 
 QString idOf(int n)
 {
@@ -46,6 +60,22 @@ QJsonArray movies(int first, int count)
     for (int n = first; n < first + count; ++n)
         items.append(favorite(n));
     return items;
+}
+
+// A favorite with what the filters match on: tags, parental rating, watched state and a saved position (0 for none)
+QJsonObject filterable(int n, const QString &name, int year = 2000, const QStringList &genres = {},
+                       const QStringList &tags = {}, const QString &rating = {},
+                       bool played = false, qint64 position = 0)
+{
+    QJsonObject item = favorite(n, QStringLiteral("Movie"), year, genres, name);
+    if (!tags.isEmpty())
+        item.insert(QStringLiteral("Tags"), QJsonArray::fromStringList(tags));
+    if (!rating.isEmpty())
+        item.insert(QStringLiteral("OfficialRating"), rating);
+    item.insert(QStringLiteral("UserData"),
+                QJsonObject{{QStringLiteral("Played"), played},
+                            {QStringLiteral("PlaybackPositionTicks"), double(position)}});
+    return item;
 }
 
 QVariant library(const QString &id, const QString &name,
@@ -162,6 +192,49 @@ void fillMixed(Fixture &f)
                             QStringLiteral("Hotel"))};
 }
 
+// Five movies the filters can tell apart: Alpha (2020, Action and Drama, tag classic, PG-13, watched), Bravo (2020, Comedy, tags classic and family, PG, in progress), Charlie (1999, Drama, R, watched and started again), Delta (2010, Action, tag family, no rating) and Echo (no year, no genre, PG-13)
+void fillFilterable(Fixture &f)
+{
+    f.favorites[kMovies] =
+        QJsonArray{filterable(1, QStringLiteral("Alpha"), 2020,
+                              {QStringLiteral("Action"), QStringLiteral("Drama")},
+                              {QStringLiteral("classic")}, QStringLiteral("PG-13"), true),
+                   filterable(2, QStringLiteral("Bravo"), 2020, {QStringLiteral("Comedy")},
+                              {QStringLiteral("classic"), QStringLiteral("family")},
+                              QStringLiteral("PG"), false, 600000000),
+                   filterable(3, QStringLiteral("Charlie"), 1999, {QStringLiteral("Drama")}, {},
+                              QStringLiteral("R"), true, 300000000),
+                   filterable(4, QStringLiteral("Delta"), 2010, {QStringLiteral("Action")},
+                              {QStringLiteral("family")}),
+                   filterable(5, QStringLiteral("Echo"), 0, {}, {}, QStringLiteral("PG-13"))};
+}
+
+// A filter map with one section
+QVariantMap only(const QString &key, const QVariant &value)
+{
+    return QVariantMap{{key, value}};
+}
+
+// The names of the rows that pass the filters, in order
+QStringList passingNames(const Fixture &f)
+{
+    QStringList names;
+    for (int row = 0; row < f.model.count(); ++row) {
+        if (f.model.passesFilters(row))
+            names.append(f.value(row, FavoritesModel::NameRole).toString());
+    }
+    return names;
+}
+
+// The names of a section's rows, in order
+QStringList namesOf(const FavoritesSectionModel &section)
+{
+    QStringList names;
+    for (int row = 0; row < section.rowCount(); ++row)
+        names.append(section.data(section.index(row, 0), FavoritesModel::NameRole).toString());
+    return names;
+}
+
 const QVariantList kMixedLibraries{
     library(kMovies, QStringLiteral("Movies")), library(kKids, QStringLiteral("Kids")),
     library(kShows, QStringLiteral("Shows"), QStringLiteral("tvshows"))};
@@ -232,8 +305,9 @@ class TestFavoritesModel : public QObject {
         QCOMPARE(first.queryItemValue(QStringLiteral("limit")), QStringLiteral("100"));
         QCOMPARE(first.queryItemValue(QStringLiteral("includeItemTypes"), QUrl::FullyDecoded),
                  QStringLiteral("Movie"));
-        QVERIFY(first.queryItemValue(QStringLiteral("fields"), QUrl::FullyDecoded)
-                    .contains(QStringLiteral("Genres")));
+        const QString fields = first.queryItemValue(QStringLiteral("fields"), QUrl::FullyDecoded);
+        QVERIFY(fields.contains(QStringLiteral("Genres")));
+        QVERIFY(fields.contains(QStringLiteral("Tags")));
         const QUrlQuery shows = FakeJellyfin::capturedListingQuery(f.server.itemsRoutes.at(1));
         QCOMPARE(shows.queryItemValue(QStringLiteral("includeItemTypes"), QUrl::FullyDecoded),
                  QStringLiteral("Series,Season,Episode"));
@@ -503,34 +577,85 @@ class TestFavoritesModel : public QObject {
         QCOMPARE(f.itemIds(), (QStringList{idOf(1), idOf(2)}));
     }
 
-    void keepsOneSanitisedMainGenre()
+    void keepsTheSanitisedGenresTagsAndRatingOfEachFavorite()
     {
         Fixture f;
         QVERIFY(f.ok);
-        QJsonArray lateGenres;
-        for (int i = 0; i < FavoritesModel::MaxGenres; ++i)
+        QJsonArray manyGenres, manyTags, lateGenres, lateTags;
+        for (int i = 0; i < FavoritesModel::MaxGenres + 4; ++i)
+            manyGenres.append(QStringLiteral("Genre %1").arg(i));
+        for (int i = 0; i < FavoritesModel::MaxTags + 4; ++i)
+            manyTags.append(QStringLiteral("tag %1").arg(i));
+        // Entries that are no text do not count against the limit
+        for (int i = 0; i < FavoritesModel::MaxGenres + 4; ++i) {
             lateGenres.append(QString());
+            lateTags.append(QStringLiteral("a|b"));
+        }
         lateGenres.append(QStringLiteral("Late"));
-        QJsonObject skipsInvalid = favorite(1);
-        skipsInvalid.insert(QStringLiteral("Genres"),
-                            QJsonArray{QString(), 7,
-                                       QString(QStringLiteral("Sci") + QChar(ushort(0x202e))
-                                               + QStringLiteral("Fi\nx")),
-                                       QStringLiteral("Drama")});
-        QJsonObject tooLate = favorite(2);
-        tooLate.insert(QStringLiteral("Genres"), lateGenres);
-        QJsonObject tooLong = favorite(3);
+        lateTags.append(QStringLiteral("late tag"));
+
+        QJsonObject messy = favorite(1);
+        messy.insert(
+            QStringLiteral("Genres"),
+            QJsonArray{
+                QString(), 7,
+                QString(QStringLiteral("Sci") + QChar(ushort(0x202e)) + QStringLiteral("Fi\nx")),
+                QStringLiteral("Drama"), QStringLiteral("drama"), QStringLiteral("Sci Fi x")});
+        messy.insert(QStringLiteral("Tags"),
+                     QJsonArray{QStringLiteral("restored"), QStringLiteral("a|b"), QString(),
+                                QStringLiteral("  spaced \t out "), QStringLiteral("line\nbreak"),
+                                42, QString(200, QLatin1Char('t')), QStringLiteral("RESTORED")});
+        messy.insert(QStringLiteral("OfficialRating"), QStringLiteral("PG-13"));
+        QJsonObject many = favorite(2);
+        many.insert(QStringLiteral("Genres"), manyGenres);
+        many.insert(QStringLiteral("Tags"), manyTags);
+        many.insert(QStringLiteral("OfficialRating"), QStringLiteral("a|b"));
+        QJsonObject late = favorite(3);
+        late.insert(QStringLiteral("Genres"), lateGenres);
+        late.insert(QStringLiteral("Tags"), lateTags);
+        late.insert(QStringLiteral("OfficialRating"), QString(200, QLatin1Char('r')));
+        QJsonObject wrongTypes = favorite(4);
+        wrongTypes.insert(QStringLiteral("Genres"), QStringLiteral("Drama"));
+        wrongTypes.insert(QStringLiteral("Tags"), QJsonObject{{QStringLiteral("a"), 1}});
+        wrongTypes.insert(QStringLiteral("OfficialRating"), 7);
+        QJsonObject tooLong = favorite(5);
         tooLong.insert(QStringLiteral("Genres"), QJsonArray{QString(200, QLatin1Char('g'))});
-        QJsonObject wrongType = favorite(4);
-        wrongType.insert(QStringLiteral("Genres"), QStringLiteral("Drama"));
-        f.favorites[kMovies] = QJsonArray{skipsInvalid, tooLate, tooLong, wrongType};
+        f.favorites[kMovies] = QJsonArray{messy, many, late, wrongTypes, tooLong, favorite(6)};
         f.start({library(kMovies, QStringLiteral("Movies"))});
         QTRY_COMPARE(f.model.status(), FavoritesModel::Complete);
-        QCOMPARE(f.value(0, FavoritesModel::GenreRole).toString(), QStringLiteral("Sci Fi x"));
-        QVERIFY(f.value(1, FavoritesModel::GenreRole).toString().isEmpty());
-        QCOMPARE(f.value(2, FavoritesModel::GenreRole).toString().size(),
-                 FavoritesModel::MaxGenreChars);
-        QVERIFY(f.value(3, FavoritesModel::GenreRole).toString().isEmpty());
+        QCOMPARE(f.model.count(), 6);
+
+        // Control and format characters become spaces, a text is kept once whatever its case, and a tag the query could not carry is dropped
+        QCOMPARE(f.model.itemAt(0).genres,
+                 (QStringList{QStringLiteral("Sci Fi x"), QStringLiteral("Drama")}));
+        QCOMPARE(f.model.itemAt(0).tags,
+                 (QStringList{QStringLiteral("restored"), QStringLiteral("spaced out"),
+                              QStringLiteral("line break"), QString(128, QLatin1Char('t'))}));
+        QCOMPARE(f.model.itemAt(0).officialRating, QStringLiteral("PG-13"));
+
+        // Only the first MaxGenres and MaxTags texts are kept, and a rating a filter could not carry is dropped
+        QStringList firstGenres, firstTags;
+        for (int i = 0; i < FavoritesModel::MaxGenres; ++i)
+            firstGenres.append(QStringLiteral("Genre %1").arg(i));
+        for (int i = 0; i < FavoritesModel::MaxTags; ++i)
+            firstTags.append(QStringLiteral("tag %1").arg(i));
+        QCOMPARE(f.model.itemAt(1).genres, firstGenres);
+        QCOMPARE(f.model.itemAt(1).tags, firstTags);
+        QVERIFY(f.model.itemAt(1).officialRating.isEmpty());
+
+        QCOMPARE(f.model.itemAt(2).genres, QStringList{QStringLiteral("Late")});
+        QCOMPARE(f.model.itemAt(2).tags, QStringList{QStringLiteral("late tag")});
+        QVERIFY(f.model.itemAt(2).officialRating.isEmpty());
+
+        QVERIFY(f.model.itemAt(3).genres.isEmpty());
+        QVERIFY(f.model.itemAt(3).tags.isEmpty());
+        QVERIFY(f.model.itemAt(3).officialRating.isEmpty());
+
+        // A genre is cut to MaxGenreChars, an item without any has none
+        QCOMPARE(f.model.itemAt(4).genres.size(), 1);
+        QCOMPARE(f.model.itemAt(4).genres.constFirst().size(), FavoritesModel::MaxGenreChars);
+        QVERIFY(f.model.itemAt(5).genres.isEmpty());
+        QVERIFY(f.model.itemAt(5).tags.isEmpty());
     }
 
     void sortsByNameThenIdWhateverTheArrival()
@@ -578,9 +703,11 @@ class TestFavoritesModel : public QObject {
         const QHash<int, QByteArray> names = f.model.roleNames();
         for (const char *name :
              {"itemId", "name", "episodeTitle", "year", "type", "imageUrl", "played", "favorite",
-              "libraryIds", "libraryNames", "genre", "seriesId", "rating", "remainingMinutes",
-              "isNew", "seasonCount", "episodeCount", "seriesProgress"})
+              "libraryIds", "libraryNames", "seriesId", "rating", "remainingMinutes", "isNew",
+              "seasonCount", "episodeCount", "seriesProgress"})
             QVERIFY2(names.values().contains(name), name);
+        // The genres are the filters' data, not a role of the card
+        QVERIFY(!names.values().contains("genre"));
         QCOMPARE(f.value(0, FavoritesModel::TypeRole).toString(), QStringLiteral("Series"));
         QCOMPARE(f.value(0, Kinefin::SeasonCountRole).toInt(), 3);
         QCOMPARE(f.value(0, Kinefin::EpisodeCountRole).toInt(), 30);
@@ -591,6 +718,28 @@ class TestFavoritesModel : public QObject {
         QCOMPARE(f.value(1, FavoritesModel::SeasonNumberRole).toInt(), 1);
         QCOMPARE(f.value(1, FavoritesModel::EpisodeNumberRole).toInt(), 2);
         QVERIFY(!f.value(5, FavoritesModel::NameRole).isValid());
+    }
+
+    void aSeasonIsListedUnderItsSeriesAndKeepsItsOwnName()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        QJsonObject season =
+            favorite(3, QStringLiteral("Season"), 0, {}, QStringLiteral("Season 2"));
+        season.insert(QStringLiteral("SeriesName"), QStringLiteral("Show"));
+        QJsonObject orphan =
+            favorite(4, QStringLiteral("Season"), 0, {}, QStringLiteral("Specials"));
+        f.favorites[kShows] = QJsonArray{season, orphan};
+        f.start({library(kShows, QStringLiteral("Shows"), QStringLiteral("tvshows"))});
+        QTRY_COMPARE(f.model.status(), FavoritesModel::Complete);
+        QCOMPARE(f.model.rowCount(), 2);
+        // Sorted by the name the card shows: "Show" (the series' name) before "Specials"
+        QCOMPARE(f.value(0, FavoritesModel::NameRole).toString(), QStringLiteral("Show"));
+        QCOMPARE(f.value(0, FavoritesModel::EpisodeTitleRole).toString(),
+                 QStringLiteral("Season 2"));
+        // A season the server gives no series name keeps its own
+        QCOMPARE(f.value(1, FavoritesModel::NameRole).toString(), QStringLiteral("Specials"));
+        QCOMPARE(f.value(1, FavoritesModel::EpisodeTitleRole).toString(), QString());
     }
 
     void libraryListChangeDropsStaleReplies()
@@ -721,6 +870,580 @@ class TestFavoritesModel : public QObject {
             f.model.reload();
             QTRY_COMPARE(f.model.count(), 25);
         }
+    }
+
+    void aSectionListsOneTypeOfTheSnapshotInItsOrder()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        fillMixed(f);
+        struct Expected {
+            QString type;
+            QStringList names;
+        };
+        const QList<Expected> expected{
+            {QStringLiteral("Movie"),
+             {QStringLiteral("Alpha"), QStringLiteral("Bravo"), QStringLiteral("Charlie"),
+              QStringLiteral("Delta"), QStringLiteral("Echo")}},
+            {QStringLiteral("Series"), {QStringLiteral("Foxtrot")}},
+            {QStringLiteral("Season"), {QStringLiteral("Golf")}},
+            {QStringLiteral("Episode"), {QStringLiteral("Hotel")}},
+            {QStringLiteral("BoxSet"), {}},
+            {QStringLiteral("Video"), {}}};
+        std::vector<std::unique_ptr<FavoritesSectionModel>> sections;
+        for (const Expected &entry : expected) {
+            auto section = std::make_unique<FavoritesSectionModel>();
+            new QAbstractItemModelTester(section.get(), section.get());
+            section->setSource(&f.model);
+            section->setType(entry.type);
+            // Nothing before the scan
+            QCOMPARE(section->count(), 0);
+            sections.push_back(std::move(section));
+        }
+        f.start(kMixedLibraries);
+        QTRY_COMPARE(f.model.status(), FavoritesModel::Complete);
+        for (size_t i = 0; i < sections.size(); ++i) {
+            const QStringList &names = expected.at(qsizetype(i)).names;
+            QCOMPARE(namesOf(*sections[i]), names);
+            QCOMPARE(sections[i]->count(), int(names.size()));
+            QCOMPARE(sections[i]->total(), int(names.size()));
+        }
+        // Every role is the snapshot's own, and the same roles
+        const FavoritesSectionModel &episodes = *sections[3];
+        QCOMPARE(episodes.data(episodes.index(0, 0), FavoritesModel::TypeRole).toString(),
+                 QStringLiteral("Episode"));
+        QCOMPARE(episodes.data(episodes.index(0, 0), FavoritesModel::ItemIdRole).toString(),
+                 idOf(8));
+        QVERIFY(!episodes.data(episodes.index(1, 0), FavoritesModel::NameRole).isValid());
+        QCOMPARE(episodes.roleNames(), f.model.roleNames());
+    }
+
+    void aSectionLimitCapsTheRowsButNotTheTotal()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        f.favorites[kMovies] = movies(1, 30);
+        FavoritesSectionModel row;
+        QAbstractItemModelTester tester(&row);
+        row.setSource(&f.model);
+        row.setType(QStringLiteral("Movie"));
+        row.setLimit(24);
+        QSignalSpy counted(&row, &FavoritesSectionModel::countChanged);
+        f.start({library(kMovies, QStringLiteral("Movies"))});
+        QTRY_COMPARE(f.model.status(), FavoritesModel::Complete);
+        QCOMPARE(row.count(), 24);
+        QCOMPARE(row.total(), 30);
+        QVERIFY(counted.size() > 0);
+        // The first 24 of the snapshot, in its order
+        for (int i = 0; i < 24; ++i)
+            QCOMPARE(row.data(row.index(i, 0), FavoritesModel::ItemIdRole),
+                     f.value(i, FavoritesModel::ItemIdRole));
+
+        // No limit shows them all, one more than the type has changes nothing, a negative one is no limit
+        row.setLimit(0);
+        QCOMPARE(row.count(), 30);
+        row.setLimit(31);
+        QCOMPARE(row.count(), 30);
+        row.setLimit(-5);
+        QCOMPARE(row.limit(), 0);
+        QCOMPARE(row.count(), 30);
+
+        // Exactly the limit: every item shows and the total does not exceed it
+        row.setLimit(24);
+        f.favorites[kMovies] = movies(1, 24);
+        f.model.reload();
+        QTRY_COMPARE(f.model.status(), FavoritesModel::Complete);
+        QCOMPARE(row.count(), 24);
+        QCOMPARE(row.total(), 24);
+        f.favorites[kMovies] = movies(1, 25);
+        f.model.reload();
+        QTRY_COMPARE(f.model.status(), FavoritesModel::Complete);
+        QCOMPARE(row.count(), 24);
+        QCOMPARE(row.total(), 25);
+    }
+
+    void aSectionFollowsEveryNewSnapshot()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        f.favorites[kMovies] = movies(1, 3);
+        FavoritesSectionModel section;
+        QAbstractItemModelTester tester(&section);
+        section.setSource(&f.model);
+        section.setType(QStringLiteral("Movie"));
+        f.start({library(kMovies, QStringLiteral("Movies"))});
+        QTRY_COMPARE(f.model.status(), FavoritesModel::Complete);
+        QCOMPARE(section.count(), 3);
+
+        // A reload drops the rows at once, and the new scan fills them again
+        f.favorites[kMovies] = movies(10, 2);
+        f.model.reload();
+        QCOMPARE(section.count(), 0);
+        QCOMPARE(section.total(), 0);
+        QTRY_COMPARE(f.model.status(), FavoritesModel::Complete);
+        QCOMPARE(section.count(), 2);
+        QCOMPARE(section.data(section.index(0, 0), FavoritesModel::ItemIdRole).toString(),
+                 idOf(10));
+
+        // A lost session empties it as well
+        f.client.disconnectFromServer();
+        QCOMPARE(section.count(), 0);
+        QCOMPARE(section.total(), 0);
+
+        // Another type, or another source, is a new list
+        section.setType(QStringLiteral("Series"));
+        QCOMPARE(section.count(), 0);
+        section.setSource(nullptr);
+        QCOMPARE(section.count(), 0);
+    }
+
+    void aSectionOutlivesItsSource()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        f.favorites[kMovies] = movies(1, 5);
+        auto source = std::make_unique<FavoritesModel>(&f.client);
+        FavoritesSectionModel section;
+        section.setSource(source.get());
+        section.setType(QStringLiteral("Movie"));
+        source->setLibraries({library(kMovies, QStringLiteral("Movies"))});
+        source->load();
+        QTRY_COMPARE(source->status(), FavoritesModel::Complete);
+        QCOMPARE(section.count(), 5);
+        source.reset();
+        QCOMPARE(section.count(), 0);
+        QVERIFY(section.source() == nullptr);
+        QVERIFY(!section.data(section.index(0, 0), FavoritesModel::NameRole).isValid());
+    }
+
+    void filtersCombineSectionsWithAndAndValuesWithOr_data()
+    {
+        QTest::addColumn<QVariantMap>("filters");
+        QTest::addColumn<bool>("filtered");
+        QTest::addColumn<QStringList>("passing");
+        const QStringList all{kAlpha, kBravo, kCharlie, kDelta, kEcho};
+        const QString played = QStringLiteral("played");
+        const QString resumable = QStringLiteral("resumable");
+        const QString genres = QStringLiteral("genreIds");
+        const QString tags = QStringLiteral("tags");
+        const QString ratings = QStringLiteral("officialRatings");
+        const QString years = QStringLiteral("years");
+
+        QTest::newRow("none") << QVariantMap{} << false << all;
+        QTest::newRow("played") << only(played, QStringLiteral("Played")) << true
+                                << QStringList{kAlpha, kCharlie};
+        QTest::newRow("unplayed") << only(played, QStringLiteral("Unplayed")) << true
+                                  << QStringList{kBravo, kDelta, kEcho};
+        QTest::newRow("resumable means a saved position")
+            << only(resumable, true) << true << QStringList{kBravo, kCharlie};
+        QTest::newRow("played and resumable")
+            << QVariantMap{{played, QStringLiteral("Played")}, {resumable, true}} << true
+            << QStringList{kCharlie};
+        QTest::newRow("unplayed and resumable")
+            << QVariantMap{{played, QStringLiteral("Unplayed")}, {resumable, true}} << true
+            << QStringList{kBravo};
+        QTest::newRow("a genre") << only(genres, QStringList{QStringLiteral("Action")}) << true
+                                 << QStringList{kAlpha, kDelta};
+        QTest::newRow("genres are alternatives whatever their case")
+            << only(genres, QStringList{QStringLiteral("comedy"), QStringLiteral("ACTION")}) << true
+            << QStringList{kAlpha, kBravo, kDelta};
+        QTest::newRow("a tag") << only(tags, QStringList{QStringLiteral("family")}) << true
+                               << QStringList{kBravo, kDelta};
+        QTest::newRow("tags are alternatives")
+            << only(tags, QStringList{QStringLiteral("classic"), QStringLiteral("family")}) << true
+            << QStringList{kAlpha, kBravo, kDelta};
+        QTest::newRow("ratings are alternatives")
+            << only(ratings, QStringList{QStringLiteral("PG-13"), QStringLiteral("R")}) << true
+            << QStringList{kAlpha, kCharlie, kEcho};
+        QTest::newRow("years are alternatives") << only(years, QVariantList{2020, 1999}) << true
+                                                << QStringList{kAlpha, kBravo, kCharlie};
+        QTest::newRow("an item without a year matches no year")
+            << only(years, QVariantList{2020, 2010, 1999}) << true
+            << QStringList{kAlpha, kBravo, kCharlie, kDelta};
+        QTest::newRow("an item without a rating matches no rating")
+            << only(ratings,
+                    QStringList{QStringLiteral("PG"), QStringLiteral("PG-13"), QStringLiteral("R")})
+            << true << QStringList{kAlpha, kBravo, kCharlie, kEcho};
+        QTest::newRow("sections combine with and")
+            << QVariantMap{{genres, QStringList{QStringLiteral("Action"), QStringLiteral("Drama")}},
+                           {years, QVariantList{2020}},
+                           {ratings, QStringList{QStringLiteral("PG-13")}}}
+            << true << QStringList{kAlpha};
+        QTest::newRow("a genre and a status")
+            << QVariantMap{{genres, QStringList{QStringLiteral("Drama")}},
+                           {played, QStringLiteral("Unplayed")}}
+            << true << QStringList{};
+        QTest::newRow("a tag and a rating")
+            << QVariantMap{{tags, QStringList{QStringLiteral("classic")}},
+                           {ratings, QStringList{QStringLiteral("PG")}}}
+            << true << QStringList{kBravo};
+        QTest::newRow("a value nobody has")
+            << only(genres, QStringList{QStringLiteral("Horror")}) << true << QStringList{};
+        QTest::newRow("values a filter cannot carry are dropped")
+            << QVariantMap{{years, QVariantList{0, 10000, -3}},
+                           {tags, QStringList{QStringLiteral("a|b"), QString()}},
+                           {genres, QStringList{QString()}}}
+            << false << all;
+        QTest::newRow("sections the snapshot has no data for are dropped")
+            << QVariantMap{{QStringLiteral("favorites"), true},
+                           {QStringLiteral("features"), QStringList{QStringLiteral("Subtitles")}},
+                           {QStringLiteral("quality"), QStringLiteral("HD")},
+                           {QStringLiteral("is4K"), true},
+                           {QStringLiteral("is3D"), true},
+                           {QStringLiteral("videoTypes"), QStringList{QStringLiteral("Dvd")}},
+                           {QStringLiteral("seriesStatus"), QStringList{QStringLiteral("Ended")}},
+                           {QStringLiteral("episodeKind"), QStringLiteral("Specials")}}
+            << false << all;
+    }
+
+    void filtersCombineSectionsWithAndAndValuesWithOr()
+    {
+        QFETCH(QVariantMap, filters);
+        QFETCH(bool, filtered);
+        QFETCH(QStringList, passing);
+        Fixture f;
+        QVERIFY(f.ok);
+        fillFilterable(f);
+        f.start({library(kMovies, QStringLiteral("Movies"))});
+        QTRY_COMPARE(f.model.status(), FavoritesModel::Complete);
+        QCOMPARE(f.model.count(), 5);
+        QVERIFY(!f.model.filtered());
+        QCOMPARE(f.model.matchCount(), 5);
+
+        f.model.setFilters(filters);
+        QCOMPARE(f.model.filtered(), filtered);
+        QCOMPARE(passingNames(f), passing);
+        QCOMPARE(f.model.matchCount(), int(passing.size()));
+        // The snapshot stays whole, and the rule on the stored state is the one of every row
+        QCOMPARE(f.model.count(), 5);
+        QCOMPARE(f.model.rowCount(), 5);
+        const Kinefin::LibraryFilterState state =
+            LibraryItemsModel::filtersFromVariant(f.model.filters());
+        for (int row = 0; row < f.model.count(); ++row)
+            QCOMPARE(FavoritesModel::passes(f.model.itemAt(row), state),
+                     f.model.passesFilters(row));
+        QVERIFY(!f.model.passesFilters(-1));
+        QVERIFY(!f.model.passesFilters(5));
+    }
+
+    void filtersAreCleanedBoundedAndReported()
+    {
+        FavoritesModel model(nullptr);
+        QSignalSpy changed(&model, &FavoritesModel::filtersChanged);
+        const QVariantMap none = LibraryItemsModel::filtersToVariant({});
+        QCOMPARE(model.filters(), none);
+        QVERIFY(!model.filtered());
+
+        // The map is the library's, each value stays once whatever its case, in the order given
+        model.setFilters(
+            QVariantMap{{QStringLiteral("genreIds"),
+                         QStringList{QStringLiteral("Action"), QStringLiteral("action"),
+                                     QStringLiteral("ACTION"), QStringLiteral("Drama")}},
+                        {QStringLiteral("played"), QStringLiteral("Played")},
+                        {QStringLiteral("resumable"), true}});
+        QCOMPARE(changed.size(), 1);
+        QVERIFY(model.filtered());
+        QCOMPARE(model.filters().value(QStringLiteral("genreIds")).toStringList(),
+                 (QStringList{QStringLiteral("Action"), QStringLiteral("Drama")}));
+        QCOMPARE(model.filters().value(QStringLiteral("played")).toString(),
+                 QStringLiteral("Played"));
+        QVERIFY(model.filters().value(QStringLiteral("resumable")).toBool());
+        // The same filters again, even written back from the property, change nothing
+        model.setFilters(model.filters());
+        QCOMPARE(changed.size(), 1);
+        // A status the model does not know is no status
+        model.setFilters(only(QStringLiteral("played"), QStringLiteral("Bogus")));
+        QCOMPARE(changed.size(), 2);
+        QCOMPARE(model.filters().value(QStringLiteral("played")).toString(), QStringLiteral("Any"));
+        QVERIFY(!model.filtered());
+
+        // At most MaxFilterValues in each list
+        QStringList tags, genres;
+        QVariantList years;
+        for (int i = 0; i < Kinefin::MaxFilterValues + 10; ++i) {
+            tags.append(QStringLiteral("tag %1").arg(i));
+            genres.append(QStringLiteral("Genre %1").arg(i));
+            years.append(1900 + i);
+        }
+        const QVariantMap tooMany{{QStringLiteral("tags"), tags},
+                                  {QStringLiteral("genreIds"), genres},
+                                  {QStringLiteral("years"), years}};
+        QVERIFY(!model.filtersFit(tooMany));
+        QVERIFY(!model.filtersFit(only(QStringLiteral("tags"), tags)));
+        QVERIFY(!model.filtersFit(only(QStringLiteral("genreIds"), genres)));
+        QVERIFY(!model.filtersFit(only(QStringLiteral("years"), years)));
+        model.setFilters(tooMany);
+        QCOMPARE(model.filters().value(QStringLiteral("tags")).toStringList().size(),
+                 Kinefin::MaxFilterValues);
+        QCOMPARE(model.filters().value(QStringLiteral("genreIds")).toStringList().size(),
+                 Kinefin::MaxFilterValues);
+        QCOMPARE(model.filters().value(QStringLiteral("years")).toList().size(),
+                 Kinefin::MaxFilterValues);
+        QCOMPARE(model.filters().value(QStringLiteral("tags")).toStringList().constFirst(),
+                 QStringLiteral("tag 0"));
+        const QVariantMap stored = model.filters();
+
+        // Repeats and values a filter cannot carry do not count against the limit, and asking writes nothing
+        QStringList padded = tags.mid(0, Kinefin::MaxFilterValues);
+        padded += QStringList(20, QStringLiteral("TAG 0"));
+        padded += QStringList(20, QStringLiteral("a|b"));
+        QVERIFY(model.filtersFit(only(QStringLiteral("tags"), padded)));
+        const QStringList fifty = tags.mid(0, Kinefin::MaxFilterValues);
+        QVERIFY(model.filtersFit(only(QStringLiteral("tags"), fifty)));
+        QCOMPARE(model.filters(), stored);
+
+        model.clearFilters();
+        QVERIFY(!model.filtered());
+        QCOMPARE(model.filters(), none);
+        const int afterClear = int(changed.size());
+        model.clearFilters();
+        QCOMPARE(changed.size(), afterClear);
+    }
+
+    void aSectionCountsAndLimitsOnlyTheFavoritesThatPass()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        const QString odd = QStringLiteral("Odd");
+        const QString even = QStringLiteral("Even");
+        QJsonArray movieItems;
+        for (int n = 1; n <= 30; ++n) {
+            const QString title = QStringLiteral("Movie %1").arg(n, 2, 10, QLatin1Char('0'));
+            const QString genre = n % 2 == 1 ? odd : even;
+            movieItems.append(filterable(n, title, 2000, {genre}, {}, {}, n == 3));
+        }
+        f.favorites[kMovies] = movieItems;
+        const QString series = QStringLiteral("Series");
+        f.favorites[kShows] =
+            QJsonArray{favorite(101, series, 2015, {odd}, QStringLiteral("Show A")),
+                       favorite(102, series, 2015, {}, QStringLiteral("Show B"))};
+        FavoritesSectionModel row;
+        FavoritesSectionModel shows;
+        QAbstractItemModelTester rowTester(&row);
+        QAbstractItemModelTester showsTester(&shows);
+        row.setSource(&f.model);
+        row.setType(QStringLiteral("Movie"));
+        row.setLimit(10);
+        shows.setSource(&f.model);
+        shows.setType(QStringLiteral("Series"));
+        f.start({library(kMovies, QStringLiteral("Movies")),
+                 library(kShows, QStringLiteral("Shows"), QStringLiteral("tvshows"))});
+        QTRY_COMPARE(f.model.status(), FavoritesModel::Complete);
+        QCOMPARE(row.count(), 10);
+        QCOMPARE(row.total(), 30);
+        QCOMPARE(shows.count(), 2);
+        QCOMPARE(shows.total(), 2);
+
+        // The limit applies to the favorites that pass, and so does the total
+        QSignalSpy counted(&row, &FavoritesSectionModel::countChanged);
+        f.model.setFilters(only(QStringLiteral("genreIds"), QStringList{odd}));
+        QCOMPARE(counted.size(), 1);
+        QCOMPARE(row.count(), 10);
+        QCOMPARE(row.total(), 15);
+        for (int i = 0; i < 10; ++i)
+            QCOMPARE(row.data(row.index(i, 0), FavoritesModel::ItemIdRole).toString(),
+                     idOf(2 * i + 1));
+        QCOMPARE(shows.count(), 1);
+        QCOMPARE(shows.total(), 1);
+        QCOMPARE(shows.data(shows.index(0, 0), FavoritesModel::NameRole).toString(),
+                 QStringLiteral("Show A"));
+        // The snapshot itself stays whole
+        QCOMPARE(f.model.count(), 32);
+        QCOMPARE(f.model.rowCount(), 32);
+        QCOMPARE(f.model.matchCount(), 16);
+
+        // Fewer than the limit: every one of them shows
+        f.model.setFilters(QVariantMap{{QStringLiteral("genreIds"), QStringList{odd}},
+                                       {QStringLiteral("played"), QStringLiteral("Played")}});
+        QCOMPARE(row.count(), 1);
+        QCOMPARE(row.total(), 1);
+        QCOMPARE(row.data(row.index(0, 0), FavoritesModel::ItemIdRole).toString(), idOf(3));
+        QCOMPARE(shows.count(), 0);
+        QCOMPARE(shows.total(), 0);
+
+        // Nothing passes: the sections are empty, the snapshot is not
+        f.model.setFilters(only(QStringLiteral("genreIds"), QStringList{QStringLiteral("Horror")}));
+        QCOMPARE(row.count(), 0);
+        QCOMPARE(row.total(), 0);
+        QCOMPARE(shows.total(), 0);
+        QCOMPARE(f.model.matchCount(), 0);
+        QCOMPARE(f.model.count(), 32);
+
+        f.model.clearFilters();
+        QCOMPARE(row.count(), 10);
+        QCOMPARE(row.total(), 30);
+        QCOMPARE(shows.count(), 2);
+        QCOMPARE(f.model.matchCount(), 32);
+
+        // A filter that is set when a scan starts applies to the rows it fills
+        f.model.setFilters(only(QStringLiteral("genreIds"), QStringList{odd}));
+        f.model.reload();
+        QCOMPARE(row.count(), 0);
+        QCOMPARE(row.total(), 0);
+        QTRY_COMPARE(f.model.status(), FavoritesModel::Complete);
+        QCOMPARE(row.count(), 10);
+        QCOMPARE(row.total(), 15);
+        QCOMPARE(shows.count(), 1);
+    }
+
+    void filtersSurviveARescanAndGoWithTheSession()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        fillFilterable(f);
+        f.favorites[kKids] = QJsonArray{filterable(6, QStringLiteral("Foxtrot"), 2020,
+                                                   {QStringLiteral("Drama")}, {}, {}, true)};
+        const QVariant movieLibrary = library(kMovies, QStringLiteral("Movies"));
+        const QVariant kidsLibrary = library(kKids, QStringLiteral("Kids"));
+        f.start({movieLibrary});
+        QTRY_COMPARE(f.model.status(), FavoritesModel::Complete);
+        f.model.setFilters(
+            QVariantMap{{QStringLiteral("played"), QStringLiteral("Played")},
+                        {QStringLiteral("genreIds"),
+                         QStringList{QStringLiteral("Action"), QStringLiteral("Drama")}}});
+        const QVariantMap stored = f.model.filters();
+        // Alpha and Charlie
+        QCOMPARE(f.model.matchCount(), 2);
+        QSignalSpy changed(&f.model, &FavoritesModel::filtersChanged);
+
+        // A rescan empties the snapshot and the count, not the filters
+        f.model.reload();
+        QCOMPARE(f.model.count(), 0);
+        QCOMPARE(f.model.matchCount(), 0);
+        QVERIFY(f.model.filtered());
+        QCOMPARE(f.model.filters(), stored);
+        QTRY_COMPARE(f.model.status(), FavoritesModel::Complete);
+        QCOMPARE(f.model.matchCount(), 2);
+
+        // A visit that leaves and comes back
+        f.model.close();
+        f.model.load();
+        QCOMPARE(f.model.filters(), stored);
+        QCOMPARE(f.model.matchCount(), 2);
+
+        // Another library list drops the snapshot, and its scan is filtered by the same filters
+        f.model.setLibraries({movieLibrary, kidsLibrary});
+        QCOMPARE(f.model.count(), 0);
+        QCOMPARE(f.model.filters(), stored);
+        QTRY_COMPARE(f.model.status(), FavoritesModel::Complete);
+        QCOMPARE(f.model.count(), 6);
+        QCOMPARE(f.model.matchCount(), 3);
+        QCOMPARE(changed.size(), 0);
+
+        // The session is gone and the filters with it
+        f.client.disconnectFromServer();
+        QCOMPARE(f.model.status(), FavoritesModel::Idle);
+        QVERIFY(!f.model.filtered());
+        QCOMPARE(f.model.filters(), LibraryItemsModel::filtersToVariant({}));
+        QCOMPARE(f.model.matchCount(), 0);
+        QCOMPARE(changed.size(), 1);
+        QCOMPARE(f.model.filterOptions()->status(), FilterOptionsModel::Idle);
+    }
+
+    void theFacetsComeFromTheSnapshotAndKeepTheChosenValues()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        fillFilterable(f);
+        FilterOptionsModel &options = *f.model.filterOptions();
+        const auto genreColumn = [&options](int role) {
+            QStringList column;
+            for (int row = 0; row < options.rowCount(); ++row)
+                column.append(options.data(options.index(row), role).toString());
+            return column;
+        };
+        const auto genreNames = [&] { return genreColumn(FilterOptionsModel::NameRole); };
+        const auto genreIds = [&] { return genreColumn(FilterOptionsModel::GenreIdRole); };
+        QCOMPARE(options.status(), FilterOptionsModel::Idle);
+        QCOMPARE(options.legacyStatus(), FilterOptionsModel::Idle);
+
+        // A scan under way: Loading, nothing to offer yet
+        f.start({library(kMovies, QStringLiteral("Movies"))});
+        QCOMPARE(f.model.status(), FavoritesModel::Loading);
+        QCOMPARE(options.status(), FilterOptionsModel::Loading);
+        QCOMPARE(options.legacyStatus(), FilterOptionsModel::Loading);
+        QVERIFY(!options.available());
+        QVERIFY(!options.ratingsAvailable());
+        QTRY_COMPARE(f.model.status(), FavoritesModel::Complete);
+
+        // The values of the snapshot, each once, sorted (the years newest first); a genre's id is its name
+        QCOMPARE(options.status(), FilterOptionsModel::Ready);
+        QCOMPARE(options.legacyStatus(), FilterOptionsModel::Ready);
+        QVERIFY(options.available());
+        QVERIFY(options.tagsAvailable());
+        QVERIFY(options.ratingsAvailable());
+        QVERIFY(options.yearsAvailable());
+        QCOMPARE(genreNames(), (QStringList{QStringLiteral("Action"), QStringLiteral("Comedy"),
+                                            QStringLiteral("Drama")}));
+        QCOMPARE(genreIds(), genreNames());
+        QCOMPARE(options.tags(),
+                 (QStringList{QStringLiteral("classic"), QStringLiteral("family")}));
+        QCOMPARE(options.officialRatings(),
+                 (QStringList{QStringLiteral("PG"), QStringLiteral("PG-13"), QStringLiteral("R")}));
+        QCOMPARE(options.years(), (QList<int>{2020, 2010, 1999}));
+        QVERIFY(options.contains(QStringLiteral("DRAMA")));
+        QVERIFY(!options.contains(QStringLiteral("Horror")));
+
+        // The chosen values stay offered, with the spelling the filter has, whatever the next snapshot holds
+        f.model.setFilters(
+            QVariantMap{{QStringLiteral("genreIds"),
+                         QStringList{QStringLiteral("horror"), QStringLiteral("ACTION")}},
+                        {QStringLiteral("tags"), QStringList{QStringLiteral("zzz")}},
+                        {QStringLiteral("officialRatings"), QStringList{QStringLiteral("NC-17")}},
+                        {QStringLiteral("years"), QVariantList{1980}}});
+        f.favorites[kMovies] =
+            QJsonArray{filterable(1, kAlpha, 2021, {QStringLiteral("action")},
+                                  {QStringLiteral("Classic")}, QStringLiteral("PG"))};
+        f.model.reload();
+        QCOMPARE(options.status(), FilterOptionsModel::Loading);
+        QTRY_COMPARE(f.model.status(), FavoritesModel::Complete);
+        QCOMPARE(options.status(), FilterOptionsModel::Ready);
+        QCOMPARE(genreNames(), (QStringList{QStringLiteral("ACTION"), QStringLiteral("horror")}));
+        QCOMPARE(genreIds(), genreNames());
+        QCOMPARE(options.tags(), (QStringList{QStringLiteral("Classic"), QStringLiteral("zzz")}));
+        QCOMPARE(options.officialRatings(),
+                 (QStringList{QStringLiteral("NC-17"), QStringLiteral("PG")}));
+        QCOMPARE(options.years(), (QList<int>{2021, 1980}));
+
+        // A library that fails leaves the values of the others, and the chosen ones
+        f.favorites[kKids] =
+            QJsonArray{filterable(2, kBravo, 2005, {QStringLiteral("Comedy")},
+                                  {QStringLiteral("family")}, QStringLiteral("R"))};
+        f.failing[kKids] = 500;
+        f.model.setLibraries(
+            {library(kMovies, QStringLiteral("Movies")), library(kKids, QStringLiteral("Kids"))});
+        QCOMPARE(options.status(), FilterOptionsModel::Loading);
+        QTRY_COMPARE(f.model.status(), FavoritesModel::PartialError);
+        QCOMPARE(options.status(), FilterOptionsModel::Ready);
+        QCOMPARE(genreNames(), (QStringList{QStringLiteral("ACTION"), QStringLiteral("horror")}));
+        QCOMPARE(options.tags(), (QStringList{QStringLiteral("Classic"), QStringLiteral("zzz")}));
+        QCOMPARE(options.years(), (QList<int>{2021, 1980}));
+
+        // Leaving while a scan runs drops it, and there is nothing to offer
+        f.failing.clear();
+        f.server.holdListings = true;
+        const int before = int(f.server.itemsRoutes.size());
+        f.model.reload();
+        QTRY_VERIFY(f.server.itemsRoutes.size() > before);
+        f.model.close();
+        QCOMPARE(f.model.status(), FavoritesModel::Idle);
+        QCOMPARE(options.status(), FilterOptionsModel::Idle);
+        QCOMPARE(options.rowCount(), 0);
+        QVERIFY(options.tags().isEmpty());
+        QVERIFY(options.years().isEmpty());
+        f.server.holdListings = false;
+        f.server.releaseHeld();
+
+        // A new snapshot fills them again, and a lost session empties them
+        f.model.load();
+        QTRY_COMPARE(f.model.status(), FavoritesModel::Complete);
+        QCOMPARE(options.status(), FilterOptionsModel::Ready);
+        QVERIFY(options.available());
+        f.client.disconnectFromServer();
+        QCOMPARE(options.status(), FilterOptionsModel::Idle);
+        QCOMPARE(options.legacyStatus(), FilterOptionsModel::Idle);
+        QCOMPARE(options.rowCount(), 0);
+        QVERIFY(options.tags().isEmpty());
     }
 };
 
