@@ -18,6 +18,7 @@ Kirigami.Dialog {
     property var results: []
     property bool searching: false
     property string problem: ""
+    property int problemType: Kirigami.MessageType.Error
 
     title: i18n("Identify")
     preferredWidth: Kirigami.Units.gridUnit * 30 - Kirigami.Units.largeSpacing * 2
@@ -33,8 +34,15 @@ Kirigami.Dialog {
         results = [];
         if (!connection.remoteSearch(details.itemId, details.type, nameField.text, yearField.value)) {
             searching = false;
+            problemType = Kirigami.MessageType.Error;
             problem = i18n("The search could not be started: wait for the previous one or check the connection");
         }
+    }
+
+    // Return in the list hands the focus to the Apply button, which is what overwrites the item's metadata
+    function focusApply() {
+        if (applyButton.enabled)
+            applyButton.forceActiveFocus(Qt.TabFocusReason);
     }
 
     function applyResult(index) {
@@ -57,16 +65,19 @@ Kirigami.Dialog {
                 return;
             dialog.searching = false;
             dialog.results = results;
-            list.currentIndex = results.length > 0 ? 0 : -1;
+            // No match is selected until the user picks one
+            list.currentIndex = -1;
             if (results.length > 0)
                 list.forceActiveFocus(Qt.PopupFocusReason);
-            dialog.problem = results.length === 0 ? i18n("No matches") : "";
+            dialog.problemType = Kirigami.MessageType.Information;
+            dialog.problem = results.length === 0 ? i18n("No matches: try another name or year") : "";
         }
         function onRemoteSearchFailed(itemId, status) {
             if (!dialog.sameItem(itemId))
                 return;
             dialog.searching = false;
-            dialog.problem = i18n("The search failed: check the server's metadata providers and the connection");
+            dialog.problemType = Kirigami.MessageType.Error;
+            dialog.problem = i18n("The search failed: check the server’s metadata providers and the connection");
         }
         function onRemoteSearchApplied(itemId) {
             if (!dialog.sameItem(itemId))
@@ -120,11 +131,11 @@ Kirigami.Dialog {
             onClicked: dialog.search()
         }
 
-        Controls.Label {
+        MessageBox {
+            objectName: "identifyProblem"
             Layout.fillWidth: true
             visible: dialog.problem.length > 0
-            wrapMode: Text.Wrap
-            textFormat: Text.PlainText
+            type: dialog.problemType
             text: dialog.problem
         }
 
@@ -145,10 +156,11 @@ Kirigami.Dialog {
             model: dialog.results
             keyNavigationEnabled: true
             activeFocusOnTab: true
+            currentIndex: -1
             Accessible.role: Accessible.List
             Accessible.name: i18n("Matches")
-            Keys.onReturnPressed: dialog.applyResult(list.currentIndex)
-            Keys.onEnterPressed: dialog.applyResult(list.currentIndex)
+            Keys.onReturnPressed: dialog.focusApply()
+            Keys.onEnterPressed: dialog.focusApply()
             Controls.ScrollBar.vertical: Controls.ScrollBar {
                 policy: Controls.ScrollBar.AsNeeded
             }
@@ -162,12 +174,18 @@ Kirigami.Dialog {
                 objectName: "identifyRow_" + index
                 width: ListView.view.width
                 focusPolicy: Qt.NoFocus
-                highlighted: ListView.isCurrentItem && ListView.view.activeFocus
+                // The selected match stays marked while the focus is on Apply
+                highlighted: ListView.isCurrentItem
                 Accessible.name: row.modelData.name
-                Controls.ToolTip.visible: hovered && resultName.truncated
-                Controls.ToolTip.text: row.modelData.name
-                Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
-                onClicked: dialog.applyResult(index)
+                onClicked: {
+                    list.currentIndex = row.index;
+                    list.forceActiveFocus(Qt.MouseFocusReason);
+                }
+
+                PlainToolTip {
+                    visible: row.hovered && resultName.truncated
+                    text: row.modelData.name
+                }
 
                 contentItem: RowLayout {
                     spacing: Kirigami.Units.largeSpacing
@@ -229,6 +247,16 @@ Kirigami.Dialog {
                     }
                 }
             }
+        }
+
+        Controls.Button {
+            id: applyButton
+            objectName: "identifyApply"
+            Layout.alignment: Qt.AlignRight
+            text: i18nc("@action:button", "Apply Match")
+            icon.name: "dialog-ok-apply"
+            enabled: list.currentIndex >= 0 && !dialog.searching
+            onClicked: dialog.applyResult(list.currentIndex)
         }
     }
 }

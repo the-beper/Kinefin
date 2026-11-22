@@ -1,6 +1,6 @@
 #!/bin/sh
 # Usage: build/build-env.sh [command...] (default: interactive shell)
-# The build image is fedora45 (build/Containerfile); CI runs it from ghcr (publish-images.yml).
+# The build image is fedora45 (build/Containerfile); CI runs it from ghcr (images.yml).
 set -eu
 root=$(cd "$(dirname "$0")/.." && pwd)
 image=${KINEFIN_BUILD_IMAGE:-localhost/kinefin-build:fedora45}

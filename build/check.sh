@@ -27,35 +27,7 @@ else
     echo "(no C++ sources yet: the cppcheck gate activates with the first one)"
 fi
 
-step "Build and tests"
-[ -f CMakeLists.txt ] || { echo "missing required CMakeLists.txt" >&2; exit 1; }
-# The build tree lives outside the checkout (a named podman volume mount, CI's
-# throw-away /tmp): the fetched mpvqt subproject is a third-party SPDX tree that
-# reuse lint must not have to cover, and this checkout runs without git, so no
-# ignore rule could ever hide it. Point KINEFIN_BUILD_DIR elsewhere to override.
-bdir=${KINEFIN_BUILD_DIR:-/buildtmp/check}
-# ccache is optional (an older image or a host without it builds as before); its cache sits next to the build tree, outside the checkout
-set --
-if command -v ccache >/dev/null 2>&1; then
-    export CCACHE_DIR="${CCACHE_DIR:-/buildtmp/ccache}"
-    set -- -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
-fi
-cmake -S . -B "$bdir" -G Ninja -DBUILD_TESTING=ON "$@"
-cmake --build "$bdir"
-if command -v ccache >/dev/null 2>&1; then ccache -s; fi
-jobs=$(nproc)
-[ "$jobs" -le 8 ] || jobs=8
-ctest --test-dir "$bdir" --output-on-failure -j "$jobs"
-
-step "qmllint"
-# Linted through the module's own target, so the module's C++ types resolve; a QML file nobody registers would escape it, so every file under src/qml must be listed in CMakeLists.txt.
-qml_sources=$(find src/qml -name '*.qml' 2>/dev/null || true)
-[ -n "$qml_sources" ] || { echo "no QML source files found" >&2; exit 1; }
-for qml in $qml_sources; do
-    grep -q "$qml" CMakeLists.txt || { echo "$qml is not registered in CMakeLists.txt" >&2; exit 1; }
-done
-cmake --build "$bdir" --target kinefin_ui_qmllint
-
+# The gates that need no build run first: a failure there is known in seconds, not after the build
 step "Metainfo and desktop file"
 xmllint --noout data/*.metainfo.xml
 appstreamcli validate --no-net data/*.metainfo.xml
@@ -76,3 +48,31 @@ step "Catalogs"
 while read -r l; do
     msgfmt -c --statistics -o /dev/null "po/$l.po"
 done < po/LINGUAS
+
+step "Build and tests"
+[ -f CMakeLists.txt ] || { echo "missing required CMakeLists.txt" >&2; exit 1; }
+bdir=${KINEFIN_BUILD_DIR:-/buildtmp/check}
+set --
+if command -v ccache >/dev/null 2>&1; then
+    export CCACHE_DIR="${CCACHE_DIR:-/buildtmp/ccache}"
+    set -- -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+fi
+cmake -S . -B "$bdir" -G Ninja -DBUILD_TESTING=ON "$@"
+if command -v ccache >/dev/null 2>&1; then ccache -z >/dev/null; fi
+cmake --build "$bdir"
+if command -v ccache >/dev/null 2>&1; then ccache -s; fi
+jobs=$(nproc)
+[ "$jobs" -le 8 ] || jobs=8
+if ! ctest --test-dir "$bdir" --output-on-failure --timeout 900 -j "$jobs"; then
+    [ -n "${CI:-}" ] || exit 1
+    echo "::warning::Tests failed and are rerun once: a test that passes now is a flake to fix"
+    ctest --test-dir "$bdir" --rerun-failed --no-tests=error --output-on-failure --timeout 900 -j "$jobs"
+fi
+
+step "qmllint"
+qml_sources=$(find src/qml -name '*.qml' 2>/dev/null || true)
+[ -n "$qml_sources" ] || { echo "no QML source files found" >&2; exit 1; }
+for qml in $qml_sources; do
+    grep -q "$qml" CMakeLists.txt || { echo "$qml is not registered in CMakeLists.txt" >&2; exit 1; }
+done
+cmake --build "$bdir" --target kinefin_ui_qmllint

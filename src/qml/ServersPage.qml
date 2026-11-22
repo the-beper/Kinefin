@@ -38,6 +38,8 @@ Kirigami.ScrollablePage {
         const port = portField.text.trim();
         return port.length === 0 ? formHost : formHost + ":" + parseInt(port, 10);
     }
+    // The connection's error stays after a failed connect: one message box at a time, and the live check of the address is the one the user can act on, so it takes the place of the stale error. The insecure-connection warning comes from a connect that may not have used the form, so the address problem waits for it
+    readonly property bool addressProblemShown: !confirming && ((hostField.text.trim().length > 0 && formHost.length === 0) || !formPortValid)
     readonly property var newServerStatus: connection.serverReachability[formAddress] ?? ({})
 
     title: i18n("Servers")
@@ -81,7 +83,6 @@ Kirigami.ScrollablePage {
         property string serverId
         property string host
         title: i18n("Remove Server")
-        subtitle: i18n("Remove %1 from the saved servers? You will have to sign in again to use it", host)
         standardButtons: Kirigami.Dialog.Cancel
         customFooterActions: [
             Kirigami.Action {
@@ -93,6 +94,14 @@ Kirigami.ScrollablePage {
                 }
             }
         ]
+
+        // The subtitle would render the address as rich text: it goes into a plain-text label
+        Controls.Label {
+            Layout.fillWidth: true
+            wrapMode: Text.Wrap
+            textFormat: Text.PlainText
+            text: i18n("Remove %1 from the saved servers? You will have to sign in again to use it", removeDialog.host)
+        }
     }
 
     ColumnLayout {
@@ -102,7 +111,7 @@ Kirigami.ScrollablePage {
 
         MessageBox {
             Layout.fillWidth: true
-            visible: page.connection.errorText.length > 0
+            visible: page.connection.errorText.length > 0 && !page.addressProblemShown
             type: Kirigami.MessageType.Error
             text: page.connection.errorText
         }
@@ -120,8 +129,8 @@ Kirigami.ScrollablePage {
             type: Kirigami.MessageType.Warning
             // The address is the one the user typed, as it answered: it passed the form's checks and QUrl, so it carries no markup the box could render
             text: page.automaticScheme
-                  ? i18nc("@info %1 is the HTTP address that answered", "HTTPS did not answer, only %1 did: your username, password and session would travel unencrypted", page.connection.serverUrl)
-                  : i18n("This server does not use HTTPS: your username, password and session would travel unencrypted")
+                  ? i18nc("@info %1 is the HTTP address that answered", "HTTPS did not answer, only %1 did: your username, password, and session would travel unencrypted", page.connection.serverUrl)
+                  : i18n("This server does not use HTTPS: your username, password, and session would travel unencrypted")
             actions: [
                 Kirigami.Action {
                     text: i18n("Continue Anyway")
@@ -203,7 +212,7 @@ Kirigami.ScrollablePage {
                         MessageBox {
                             objectName: "serverAddressProblem"
                             Layout.fillWidth: true
-                            visible: (hostField.text.trim().length > 0 && page.formHost.length === 0) || !page.formPortValid
+                            visible: page.addressProblemShown
                             type: Kirigami.MessageType.Warning
                             text: page.formPortValid ? i18n("Enter only the domain or IP address, without a scheme or a path")
                                                      : i18n("Enter a port from 1 to 65535, or leave it empty")

@@ -21,7 +21,7 @@ Kirigami.Dialog {
         ["Escape", i18nc("@item:intable shortcut action", "Go Back")],
         ["Alt+Left", i18nc("@item:intable shortcut action", "Go Back")],
         ["Ctrl+F", i18nc("@item:intable shortcut action", "Search")],
-        ["F5", i18nc("@item:intable shortcut action", "Refresh")],
+        ["Ctrl+R", i18nc("@item:intable shortcut action", "Refresh")],
         ...dialog.tabRows,
         ["Ctrl+PgUp", i18nc("@item:intable shortcut action", "Previous Tab")],
         ["Ctrl+PgDown", i18nc("@item:intable shortcut action", "Next Tab")],
@@ -140,6 +140,9 @@ Kirigami.Dialog {
                 text: i18nc("@action:button", "Close")
                 Layout.preferredWidth: dialog.headerSize
                 Layout.preferredHeight: dialog.headerSize
+                QQC2.ToolTip.text: text
+                QQC2.ToolTip.visible: hovered || visualFocus
+                QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
                 onClicked: dialog.close()
             }
         }

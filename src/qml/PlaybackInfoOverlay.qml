@@ -198,8 +198,31 @@ Rectangle {
         contentHeight: column.implicitHeight
         clip: true
         boundsBehavior: Flickable.StopAtBounds
+        // Reached with Tab, like the bars' controls, and only while the rows overflow: the player keeps the keys until then
+        activeFocusOnTab: scrollable
+        Accessible.role: Accessible.Pane
+        Accessible.name: overlay.Accessible.name
         Controls.ScrollBar.vertical: Controls.ScrollBar {
             id: scrollBar
+        }
+
+        readonly property bool scrollable: contentHeight > height
+        readonly property real lineStep: Kirigami.Units.gridUnit * 2
+        function scrollBy(distance) {
+            contentY = Math.max(0, Math.min(contentHeight - height, contentY + distance));
+        }
+        // The keys scroll a panel that overflows; otherwise they go on to the player (Up and Down seek, Page Up and Page Down change the chapter)
+        Keys.onPressed: event => {
+            if (!scrollable || event.modifiers !== Qt.NoModifier)
+                return;
+            switch (event.key) {
+            case Qt.Key_Up: scrollBy(-lineStep); break;
+            case Qt.Key_Down: scrollBy(lineStep); break;
+            case Qt.Key_PageUp: scrollBy(-(height - lineStep)); break;
+            case Qt.Key_PageDown: scrollBy(height - lineStep); break;
+            default: return;
+            }
+            event.accepted = true;
         }
         ColumnLayout {
             id: column
@@ -262,6 +285,18 @@ Rectangle {
                 }
             }
         }
+    }
+    // The focus ring of the scrolling area, which the style draws for no Flickable
+    Rectangle {
+        objectName: "playbackInfoFocusRing"
+        anchors.fill: flick
+        anchors.margins: -Kirigami.Units.smallSpacing
+        visible: flick.activeFocus
+        color: "transparent"
+        radius: Kirigami.Units.smallSpacing
+        border.width: 2
+        border.color: Kirigami.Theme.focusColor
+        Accessible.ignored: true
     }
     Controls.ToolButton {
         id: closeButton

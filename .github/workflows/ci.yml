@@ -9,18 +9,22 @@ on:
 
 permissions: {}
 
-# Only a pull request cancels its older run (per ref); runs on main and manual runs always finish.
+# Only a pull request cancels its older run (per ref). A run on main always finishes: the release gate (release.yml, ci-gate) needs the finished run of the tagged commit, and the images of a push are decided on that push alone. Manual runs finish too.
 concurrency:
   group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # Which jobs the change needs (build/ci/changes.sh). Main and manual runs always run everything.
   changes:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     permissions:
       contents: read
+    env:
+      ACTIONLINT_VERSION: "1.7.12"
+      ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+      ZIZMOR_VERSION: "1.31.1"
+      ZIZMOR_SHA256: d185f726bdaf92df78273217dfdd24ebcd6b0ef48cf3ce776ff5762b6e138c99
     outputs:
       code: ${{ steps.changes.outputs.code }}
       packaging: ${{ steps.changes.outputs.packaging }}
@@ -38,78 +42,6 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           BEFORE_SHA: ${{ github.event.before }}
         run: build/ci/changes.sh
-
-  # A push to main that changes a build image starts publish-images.yml at the same time as this workflow. The jobs that run in those images pull them when they start, so they `needs` this job, which waits for the Images run of the same commit. `images=true`: the push changed an image input, the run must exist. `images=maybe`: the previous head is not in the checkout (force-push), so the push cannot be judged: wait only if an Images run is created within three minutes. Skipped when the push did not change an image input (and on pull requests, which never run publish-images.yml).
-  images:
-    needs: changes
-    if: contains(fromJSON('["true", "maybe"]'), needs.changes.outputs.images)
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    permissions:
-      actions: read
-    steps:
-      - name: Wait for the Images run of this commit
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          IMAGES_MODE: ${{ needs.changes.outputs.images }}
-        run: |
-          start=$(date +%s)
-          deadline=$(( start + 1200 ))
-          missing=0
-          errors=0
-          while :; do
-            # The run of a push can appear a few seconds after this one starts: a missing run is retried, then it is an error
-            if ! runs=$(gh run list --workflow publish-images.yml --event push --branch main --commit "$GITHUB_SHA" --json status,conclusion,databaseId); then
-              errors=$((errors + 1))
-              echo "gh run list failed ($errors of 5)" >&2
-              [ "$errors" -lt 5 ] || exit 1
-              sleep 15
-              continue
-            fi
-            errors=0
-            state=$(printf '%s' "$runs" | jq -r 'sort_by(.databaseId) | last | if . == null then "none" else "\(.status) \(.conclusion)" end')
-            echo "Images run of the push of $GITHUB_SHA to main: $state"
-            case $state in
-              none)
-                missing=$((missing + 1))
-                if [ "$IMAGES_MODE" = maybe ]; then
-                  if [ "$(date +%s)" -ge $(( start + 180 )) ]; then
-                    echo "::notice::No Images run appeared for $GITHUB_SHA within 3 minutes: the push (previous head not available) is taken not to have changed an image input"
-                    exit 0
-                  fi
-                elif [ "$missing" -ge 8 ]; then
-                  echo "No Images run exists for $GITHUB_SHA although the push changed an image input: check that publish-images.yml was triggered by this push" >&2
-                  exit 1
-                fi
-                ;;
-              "completed success") exit 0 ;;
-              "completed "*)
-                echo "The Images run failed (${state#completed }): the build images were not published, fix it and push again" >&2
-                exit 1
-                ;;
-            esac
-            if [ "$(date +%s)" -ge "$deadline" ]; then
-              echo "The Images run did not finish within 20 minutes" >&2
-              exit 1
-            fi
-            sleep 15
-          done
-
-  lint:
-    if: github.event_name != 'schedule'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-    env:
-      ACTIONLINT_VERSION: "1.7.12"
-      # From the release's own checksums file (actionlint_1.7.12_checksums.txt), linux amd64 tarball.
-      ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
 
       - name: Verify immutable GitHub Actions references
         run: python3 -I build/release/verify_action_pins.py
@@ -131,18 +63,34 @@ jobs:
           shellcheck --version
           find build scripts po \( -name '*.sh' -o -name '*.hook' \) -print0 | xargs -0 shellcheck -x --severity=warning
 
-      - name: Install actionlint
+      - name: Install actionlint and zizmor
         run: |
-          dir="$RUNNER_TEMP/actionlint"
+          dir="$RUNNER_TEMP/lint-tools"
           mkdir -p "$dir"
           tarball="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
           curl -fsSL -o "$dir/$tarball" "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/$tarball"
           echo "$ACTIONLINT_SHA256  $dir/$tarball" | sha256sum -c -
           tar -xzf "$dir/$tarball" -C "$dir" actionlint
+          tarball="zizmor-x86_64-unknown-linux-gnu.tar.gz"
+          curl -fsSL -o "$dir/$tarball" "https://github.com/zizmorcore/zizmor/releases/download/v${ZIZMOR_VERSION}/$tarball"
+          echo "$ZIZMOR_SHA256  $dir/$tarball" | sha256sum -c -
+          tar -xzf "$dir/$tarball" -C "$dir" zizmor
           echo "$dir" >> "$GITHUB_PATH"
 
       - name: actionlint
         run: actionlint -color
+
+      - name: zizmor
+        run: zizmor --offline .github/workflows
+
+  images:
+    needs: changes
+    if: contains(fromJSON('["true", "maybe"]'), needs.changes.outputs.images)
+    permissions:
+      contents: read
+      packages: write
+    # The workspace-relative form: the `$/` form of GitHub's July 2026 syntax is not yet known to every tool of the lint job
+    uses: ./.github/workflows/images.yml # zizmor: ignore[self-repository]
 
   check:
     needs: [changes, images]
@@ -152,17 +100,17 @@ jobs:
       && contains(fromJSON('["success", "skipped"]'), needs.images.result)
       && needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     permissions:
       contents: read
-      # The build image is private on ghcr: reading it needs this token.
       packages: read
+      actions: write
     env:
       # The UI tests wait this many times longer: the runner is several times slower than a development machine
       KINEFIN_TEST_TIMEOUT_SCALE: 3
       # The compiler cache lives outside the checkout (the REUSE gate scans it); the source and build paths are the same on every run, so the hashes match
       CCACHE_DIR: /buildtmp/ccache
-      CCACHE_MAXSIZE: 600M
+      CCACHE_MAXSIZE: 1200M
       CCACHE_COMPRESS: "1"
       CCACHE_BASEDIR: ${{ github.workspace }}
       CCACHE_NOHASHDIR: "1"
@@ -177,7 +125,7 @@ jobs:
         with:
           persist-credentials: false
 
-      # The key is unique per commit, so every run saves its objects and the next one restores the newest cache of the same image
+      # The key is unique per commit and only a push to main saves one: a pull request restores the newest cache of the same image and adds none
       - name: Restore the compiler cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -192,11 +140,19 @@ jobs:
 
       # Also after failing tests: the compiled objects are worth keeping
       - name: Save the compiler cache
-        if: always()
+        if: always() && github.event_name == 'push'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: /buildtmp/ccache
           key: ccache-fedora45-${{ hashFiles('build/Containerfile') }}-${{ github.sha }}
+
+      # Every save adds an entry that nothing replaces: keep the two newest, or the 10 GB of the repository fill up and push out the other caches
+      - name: Prune the old compiler caches
+        continue-on-error: true
+        if: always() && github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 -I build/ci/prune_caches.py ccache-fedora45- 2
 
   flatpak:
     needs: [changes, images]
@@ -212,22 +168,64 @@ jobs:
       contents: read
       # The flatpak image is private on ghcr: log podman into it with this token.
       packages: read
+      # Pruning the old Flatpak build states
+      actions: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      # On the plain runner, as the release's build job: the scripts run the image from publish-images.yml with rootless podman (no job container, no --privileged). The release pins the image by digest; CI tests the one the tag points to now.
       - name: Pull the build image
         env:
           GHCR_TOKEN: ${{ github.token }}
+          GHCR_USER: ${{ github.actor }}
         run: |
-          echo "$GHCR_TOKEN" | podman login ghcr.io -u "${{ github.actor }}" --password-stdin
+          echo "$GHCR_TOKEN" | podman login ghcr.io -u "$GHCR_USER" --password-stdin
           podman pull ghcr.io/the-beper/kinefin-flatpak:fedora45
           podman tag ghcr.io/the-beper/kinefin-flatpak:fedora45 localhost/kinefin-flatpak:fedora45
 
+      - name: Name the month of the cache
+        id: month
+        run: echo "value=$(date -u +%Y-%m)" >> "$GITHUB_OUTPUT"
+
+      # The module cache, the sources and the ccache, without the build trees (most of the size, and rebuilt anyway). The v1 in the key is bumped to drop every saved state at once
+      - name: Restore the Flatpak build state
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ runner.temp }}/flatpak-state/cache
+            ${{ runner.temp }}/flatpak-state/checksums
+            ${{ runner.temp }}/flatpak-state/downloads
+            ${{ runner.temp }}/flatpak-state/git
+            ${{ runner.temp }}/flatpak-state/ccache
+          key: flatpak-state-v1-${{ steps.month.outputs.value }}-${{ github.sha }}
+          restore-keys: flatpak-state-v1-${{ steps.month.outputs.value }}-
+
       - name: Build Flatpak
+        id: build
+        env:
+          KINEFIN_FLATPAK_STATE_DIR: ${{ runner.temp }}/flatpak-state
         run: build/flatpak/build-flatpak.sh
+
+      # Right after the build, also when it failed or ran out of time: the modules it finished are kept, so a build that is too long for one run converges
+      - name: Save the Flatpak build state
+        if: always() && github.event_name == 'push' && steps.build.conclusion != 'skipped'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ runner.temp }}/flatpak-state/cache
+            ${{ runner.temp }}/flatpak-state/checksums
+            ${{ runner.temp }}/flatpak-state/downloads
+            ${{ runner.temp }}/flatpak-state/git
+            ${{ runner.temp }}/flatpak-state/ccache
+          key: flatpak-state-v1-${{ steps.month.outputs.value }}-${{ github.sha }}
+
+      - name: Prune the old Flatpak build states
+        continue-on-error: true
+        if: always() && github.event_name == 'push' && steps.build.conclusion != 'skipped'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 -I build/ci/prune_caches.py flatpak-state-v1- 2
 
       - name: Smoke test (mandatory after packaging succeeds)
         run: build/flatpak/test-flatpak.sh dist/Kinefin-x86_64.flatpak
@@ -237,13 +235,12 @@ jobs:
           name: Kinefin-x86_64.flatpak
           path: dist/Kinefin-x86_64.flatpak
           if-no-files-found: error
-          retention-days: 3
+          retention-days: 1
           compression-level: 0
 
-  # The one check to require (branch protection and the release gate): green only when every job that had to run succeeded. A job that was skipped because the change did not need it counts as done; any other skip, failure or cancellation fails it. `images` may be `maybe` (previous head unknown after a force-push): the job runs then and succeeds even when no Images run exists.
   required:
     if: always()
-    needs: [changes, images, lint, check, flatpak]
+    needs: [changes, images, check, flatpak]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions: {}
@@ -260,7 +257,6 @@ jobs:
           # job -> the `changes` output that makes it mandatory (None: always)
           flag_of = {
               "images": "images",
-              "lint": None,
               "check": "code",
               "flatpak": "packaging",
           }

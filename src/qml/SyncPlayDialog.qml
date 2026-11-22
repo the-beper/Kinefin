@@ -222,11 +222,12 @@ Kirigami.Dialog {
                     wrapMode: Text.Wrap
                     text: i18n("Waiting for the other members to be ready")
                 }
+                // One box at a time, the first that applies: a failed request, offline, then not following
                 MessageBox {
                     objectName: "syncPlayOffline"
                     Layout.fillWidth: true
                     Layout.topMargin: Kirigami.Units.largeSpacing
-                    visible: dialog.syncPlay?.offline ?? false
+                    visible: (dialog.syncPlay?.offline ?? false) && dialog.failure < 0
                     type: Kirigami.MessageType.Warning
                     text: i18n("The connection to the server was lost. The group is joined again once it is back")
                 }
@@ -234,7 +235,7 @@ Kirigami.Dialog {
                     objectName: "syncPlayNotFollowing"
                     Layout.fillWidth: true
                     Layout.topMargin: Kirigami.Units.largeSpacing
-                    visible: dialog.joined && !dialog.following
+                    visible: dialog.joined && !dialog.following && !(dialog.syncPlay?.offline ?? false) && dialog.failure < 0
                     type: Kirigami.MessageType.Information
                     text: i18n("Playback here is independent of the group. Use Follow Again to keep in step with it")
                 }
@@ -265,6 +266,8 @@ Kirigami.Dialog {
                         readonly property int lastIndex: (dialog.queue?.count ?? 1) - 1
 
                         highlighted: current
+                        // The style's row background reads this hint, not Kirigami.Theme.useAlternateBackgroundColor, and the row's index
+                        Kirigami.StyleHints.useAlternateBackgroundColor: true
                         // The row itself does nothing: its buttons do
                         hoverEnabled: false
                         focusPolicy: Qt.NoFocus
@@ -302,41 +305,45 @@ Kirigami.Dialog {
                                 QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
                                 onClicked: dialog.syncPlay.playEntry(entryRow.playlistItemId)
                             }
+                            // The HIG allows two buttons in a row at most: Play and the menu, as the Downloads rows have
                             QQC2.ToolButton {
-                                objectName: "syncPlayQueueUp"
-                                enabled: entryRow.index > 0 && entryRow.editable
-                                icon.name: "arrow-up"
-                                text: i18nc("@action:button", "Move Up")
-                                display: QQC2.AbstractButton.IconOnly
-                                Accessible.name: i18nc("@action:button %1 title", "Move %1 up", entryRow.title)
-                                QQC2.ToolTip.text: text
-                                QQC2.ToolTip.visible: hovered || visualFocus
-                                QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
-                                onClicked: dialog.syncPlay.moveEntry(entryRow.playlistItemId, entryRow.index - 1)
-                            }
-                            QQC2.ToolButton {
-                                objectName: "syncPlayQueueDown"
-                                enabled: entryRow.index < entryRow.lastIndex && entryRow.editable
-                                icon.name: "arrow-down"
-                                text: i18nc("@action:button", "Move Down")
-                                display: QQC2.AbstractButton.IconOnly
-                                Accessible.name: i18nc("@action:button %1 title", "Move %1 down", entryRow.title)
-                                QQC2.ToolTip.text: text
-                                QQC2.ToolTip.visible: hovered || visualFocus
-                                QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
-                                onClicked: dialog.syncPlay.moveEntry(entryRow.playlistItemId, entryRow.index + 1)
-                            }
-                            QQC2.ToolButton {
-                                objectName: "syncPlayQueueRemove"
+                                id: rowMore
+                                objectName: "syncPlayQueueMore"
                                 enabled: entryRow.editable
-                                icon.name: "edit-delete-remove"
-                                text: i18nc("@action:button", "Remove")
+                                icon.name: "overflow-menu"
+                                text: i18n("More Actions")
                                 display: QQC2.AbstractButton.IconOnly
-                                Accessible.name: i18nc("@action:button %1 title", "Remove %1 from the queue", entryRow.title)
+                                Accessible.name: i18nc("@action:button %1 is the item", "More Actions for %1", entryRow.title)
                                 QQC2.ToolTip.text: text
                                 QQC2.ToolTip.visible: hovered || visualFocus
                                 QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
-                                onClicked: dialog.syncPlay.removeEntry(entryRow.playlistItemId)
+                                onClicked: rowMenu.popup(rowMore, 0, rowMore.height)
+
+                                QQC2.Menu {
+                                    id: rowMenu
+                                    objectName: "syncPlayQueueMenu"
+                                    QQC2.MenuItem {
+                                        objectName: "syncPlayQueueUp"
+                                        text: i18n("Move Up")
+                                        icon.name: "arrow-up"
+                                        enabled: entryRow.index > 0 && entryRow.editable
+                                        onTriggered: dialog.syncPlay.moveEntry(entryRow.playlistItemId, entryRow.index - 1)
+                                    }
+                                    QQC2.MenuItem {
+                                        objectName: "syncPlayQueueDown"
+                                        text: i18n("Move Down")
+                                        icon.name: "arrow-down"
+                                        enabled: entryRow.index < entryRow.lastIndex && entryRow.editable
+                                        onTriggered: dialog.syncPlay.moveEntry(entryRow.playlistItemId, entryRow.index + 1)
+                                    }
+                                    QQC2.MenuItem {
+                                        objectName: "syncPlayQueueRemove"
+                                        text: i18n("Remove")
+                                        icon.name: "edit-delete-remove"
+                                        enabled: entryRow.editable
+                                        onTriggered: dialog.syncPlay.removeEntry(entryRow.playlistItemId)
+                                    }
+                                }
                             }
                         }
                     }
@@ -365,7 +372,7 @@ Kirigami.Dialog {
             MessageBox {
                 objectName: "syncPlayGroupsFailed"
                 Layout.fillWidth: true
-                visible: dialog.listing && dialog.groups?.status === SyncPlayGroupsModel.Failed
+                visible: dialog.listing && dialog.groups?.status === SyncPlayGroupsModel.Failed && dialog.failure < 0
                 type: Kirigami.MessageType.Error
                 text: i18n("Could not load the SyncPlay groups")
                 actions: [

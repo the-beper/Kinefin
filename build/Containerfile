@@ -1,6 +1,6 @@
 FROM registry.fedoraproject.org/fedora:45
 
-# The build/check image (localhost/kinefin-build:fedora45 locally, ghcr.io/the-beper/kinefin-build:fedora45 in CI, publish-images.yml). Everything build/check.sh needs. Package notes for Fedora 45, verified on this machine (dnf):
+# The build/check image (localhost/kinefin-build:fedora45 locally, ghcr.io/the-beper/kinefin-build:fedora45 in CI, images.yml). Everything build/check.sh needs. Package notes for Fedora 45, verified on this machine (dnf):
 #   - libmpv headers are `mpv-devel` (0.41.0); the old name `mpv-libs-devel` does not exist here.
 #   - Gamepad input is SDL3 (`SDL3-devel`, 3.4.x); SDL2 in Fedora is a compat shim over SDL3.
 #   - `clang-tools-extra` provides the clang-format used by the .clang-format style gate in check.sh.

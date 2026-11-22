@@ -17,6 +17,8 @@ Kirigami.ScrollablePage {
     readonly property PlaylistsController playlists: connection.playlists
     readonly property bool loading: playlists.status === PlaylistsController.Loading
     readonly property bool failed: playlists.status === PlaylistsController.Failed
+    // One box at a time, the first that applies: a failed read (the cards are stale), the cap
+    readonly property string notice: failed && playlists.list.count > 0 ? "failed" : playlists.capped ? "capped" : ""
 
     title: i18n("Playlists")
     // The row of the page carries the actions, as on the Movies and Shows tabs
@@ -71,7 +73,7 @@ Kirigami.ScrollablePage {
             objectName: "playlistsFailed"
             Layout.fillWidth: true
             Layout.margins: Kirigami.Units.largeSpacing
-            visible: page.failed && page.playlists.list.count > 0
+            visible: page.notice === "failed"
             type: Kirigami.MessageType.Warning
             text: i18n("The playlists could not be read again")
             actions: [
@@ -86,7 +88,7 @@ Kirigami.ScrollablePage {
             objectName: "playlistsCapped"
             Layout.fillWidth: true
             Layout.margins: Kirigami.Units.largeSpacing
-            visible: page.playlists.capped
+            visible: page.notice === "capped"
             text: i18np("Showing the first %1 playlist of %2", "Showing the first %1 playlists of %2", page.playlists.list.count, page.playlists.total)
         }
     }

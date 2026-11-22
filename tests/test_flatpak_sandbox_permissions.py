@@ -228,7 +228,7 @@ class FlatpakSandboxPermissionsTest(unittest.TestCase):
         self.assertIn("No such file", result.stderr)
 
     def test_ci_and_release_gate_before_build_and_flathub_upload(self) -> None:
-        ci = (SOURCE / ".github/workflows/verify.yml").read_text(encoding="utf-8")
+        ci = (SOURCE / ".github/workflows/ci.yml").read_text(encoding="utf-8")
         release = (SOURCE / ".github/workflows/release.yml").read_text(encoding="utf-8")
         command = "python3 -I build/release/verify_flatpak_permissions.py"
         self.assertIn(command, ci)

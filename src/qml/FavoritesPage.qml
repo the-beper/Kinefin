@@ -88,10 +88,11 @@ Kirigami.ScrollablePage {
     header: ColumnLayout {
         spacing: 0
 
+        // One box at a time: a failed library comes first, and its box says the list may be incomplete as well
         MessageBox {
             objectName: "favoritesCappedBanner"
             Layout.margins: Kirigami.Units.largeSpacing
-            visible: page.favorites.capped
+            visible: page.favorites.capped && !page.favorites.libraryFailed
             type: Kirigami.MessageType.Information
             text: i18np("Showing %1 favorite: the list may be incomplete", "Showing %1 favorites: the list may be incomplete", page.favorites.count)
         }
@@ -101,7 +102,7 @@ Kirigami.ScrollablePage {
             Layout.margins: Kirigami.Units.largeSpacing
             visible: page.favorites.libraryFailed
             type: Kirigami.MessageType.Warning
-            text: i18n("Some libraries could not be read")
+            text: i18n("Some libraries could not be read: the list may be incomplete")
             actions: [
                 Kirigami.Action {
                     text: i18n("Retry")
@@ -180,7 +181,7 @@ Kirigami.ScrollablePage {
             visible: !page.loading && !page.idle && page.favorites.libraryCount === 0
             icon.name: "folder-video"
             text: i18n("No libraries to show")
-            explanation: i18n("Favorites come from your movie, TV show and collection libraries")
+            explanation: i18n("Favorites come from your movie, TV show, and collection libraries")
             helpfulAction: Kirigami.Action {
                 text: i18n("Go to Home")
                 icon.name: "go-home"
@@ -197,7 +198,7 @@ Kirigami.ScrollablePage {
             visible: !page.loading && !page.idle && page.favorites.libraryCount > 0 && page.favorites.count === 0 && !page.favorites.libraryFailed
             icon.name: "favorite"
             text: i18n("No favorites yet")
-            explanation: i18n("Movies, shows and collections you mark as favorites on the server show up here")
+            explanation: i18n("Movies, shows, and collections you mark as favorites on the server show up here")
             helpfulAction: Kirigami.Action {
                 text: i18n("Reload")
                 icon.name: "view-refresh"

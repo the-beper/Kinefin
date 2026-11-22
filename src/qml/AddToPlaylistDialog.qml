@@ -127,13 +127,21 @@ Kirigami.Dialog {
             highlighted: ListView.isCurrentItem && ListView.view.activeFocus
             enabled: !dialog.playlists.writing
             Accessible.name: name
+            // The style shows its own tooltip, with the delegate's empty text, for a truncated label: the plain one below replaces it
+            Controls.ToolTip.visible: false
             onClicked: dialog.pick(itemId)
 
             // The playlist name comes from the server: plain text only
             contentItem: Controls.Label {
+                id: playlistLabel
                 elide: Text.ElideRight
                 maximumLineCount: 1
                 textFormat: Text.PlainText
+                text: row.name
+            }
+
+            PlainToolTip {
+                visible: row.hovered && playlistLabel.truncated
                 text: row.name
             }
         }

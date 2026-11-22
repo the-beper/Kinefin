@@ -142,7 +142,7 @@ Controls.Menu {
     Controls.MenuItem {
         objectName: "cardMenuDownload"
         text: i18n("Download")
-        icon.name: "folder-download"
+        icon.name: "download-symbolic"
         visible: menu.downloadable && menu.downloadState.length === 0
         height: visible ? implicitHeight : 0
         onTriggered: menu.downloadRequested(menu.itemId)

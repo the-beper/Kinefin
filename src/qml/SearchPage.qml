@@ -118,7 +118,7 @@ Kirigami.ScrollablePage {
                     case SearchModel.NoResults:
                         return i18n("Nothing in your libraries matches");
                     default:
-                        return i18n("Type the name of a movie, series or episode");
+                        return i18n("Type the name of a movie, series, or episode");
                     }
                 }
                 icon.name: page.searchState === SearchModel.NoResults ? "edit-none" : "system-search"

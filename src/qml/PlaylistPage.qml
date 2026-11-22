@@ -5,7 +5,7 @@ import QtQuick.Controls as Controls
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 
-// One playlist in its order, read again every time the page comes to the front. Play and Shuffle make the playlist the saved queue (Undo on the Queue page brings the old one back) and start it; the rows move and go at once, their writes follow (see PlaylistEntriesModel)
+// One playlist in its order, read again every time the page comes to the front. Play and Shuffle make the playlist the saved queue (Undo on the Queue page brings the old one back) and start it; the rows move at once (a removal after its confirmation) and their writes follow (see PlaylistEntriesModel)
 Kirigami.ScrollablePage {
     id: page
     objectName: "playlistPage"
@@ -27,6 +27,8 @@ Kirigami.ScrollablePage {
     readonly property bool canChangePlaylist: !entries.writing && !connection.playlists.writing
     // The rows stay as they are while a rename or delete is on its way, and while the queue reads the playlist (an edit then would give it half of each order)
     readonly property bool canEditRows: !connection.playlists.writing && !shell.playlistWaiting
+    // One box at a time, the first that applies: a failed read (the rows are stale), a refused change, the cap
+    readonly property string notice: failed && entries.count > 0 ? "failed" : entries.editError !== PlaylistEntriesModel.NoEditError ? "editFailed" : entries.capped ? "capped" : ""
 
     // Read again with the list of playlists
     readonly property string knownName: name || (connection.playlists.status, connection.playlists.nameOf(playlistId))
@@ -87,6 +89,17 @@ Kirigami.ScrollablePage {
         list.currentIndex = entries.count > 0 ? Math.min(row, entries.count - 1) : -1;
     }
 
+    // The menu and the Delete key come here: the entry goes only once the dialog is confirmed
+    function askRemoveRow(row) {
+        const item = list.itemAtIndex(row);
+        if (!item || !page.canEditRows || !entries.canRemove(row))
+            return;
+        removeDialog.row = row;
+        removeDialog.itemId = item.itemId;
+        removeDialog.itemName = item.title;
+        removeDialog.open();
+    }
+
     Connections {
         target: page.connection.playlists
         function onRenamed(playlistId, name) {
@@ -117,7 +130,7 @@ Kirigami.ScrollablePage {
             displayHint: Kirigami.DisplayHint.AlwaysHide
             // Only while the page is in front: a page left under another keeps its actions
             shortcut: "F2"
-            enabled: page.canChangePlaylist && page.isCurrentPage
+            enabled: page.canChangePlaylist && page.isCurrentPage && !removeDialog.visible
             onTriggered: page.shell.renamePlaylist(page.playlistId, page.knownName)
         },
         Kirigami.Action {
@@ -129,6 +142,41 @@ Kirigami.ScrollablePage {
             onTriggered: page.shell.askDeletePlaylist(page.playlistId)
         }
     ]
+
+    // The entry is named in a plain-text label: the dialog's subtitle would read a title that starts with a tag as rich text
+    Kirigami.PromptDialog {
+        id: removeDialog
+        objectName: "removePlaylistEntryDialog"
+
+        property int row: -1
+        property string itemId: ""
+        property string itemName: ""
+
+        title: i18n("Remove from Playlist")
+        standardButtons: Kirigami.Dialog.Cancel
+        customFooterActions: [
+            Kirigami.Action {
+                objectName: "removePlaylistEntryConfirm"
+                text: i18nc("@action:button", "Remove")
+                icon.name: "edit-delete-remove"
+                enabled: page.canEditRows
+                onTriggered: {
+                    removeDialog.close();
+                    // The row may have moved or gone while the dialog was open
+                    if (list.itemAtIndex(removeDialog.row)?.itemId === removeDialog.itemId)
+                        page.removeRow(removeDialog.row);
+                }
+            }
+        ]
+        onClosed: page.focusPrimary()
+
+        Controls.Label {
+            Layout.fillWidth: true
+            wrapMode: Text.Wrap
+            textFormat: Text.PlainText
+            text: removeDialog.itemName.length > 0 ? i18n("Remove %1 from this playlist? The video stays in the library", removeDialog.itemName) : i18n("Remove this video from the playlist? The video stays in the library")
+        }
+    }
 
     header: ColumnLayout {
         spacing: 0
@@ -153,7 +201,7 @@ Kirigami.ScrollablePage {
             objectName: "playlistFailed"
             Layout.fillWidth: true
             Layout.margins: Kirigami.Units.largeSpacing
-            visible: page.failed && page.entries.count > 0
+            visible: page.notice === "failed"
             type: Kirigami.MessageType.Warning
             text: i18n("The playlist could not be read again")
             actions: [
@@ -168,7 +216,7 @@ Kirigami.ScrollablePage {
             objectName: "playlistEditFailed"
             Layout.fillWidth: true
             Layout.margins: Kirigami.Units.largeSpacing
-            visible: page.entries.editError !== PlaylistEntriesModel.NoEditError
+            visible: page.notice === "editFailed"
             type: Kirigami.MessageType.Warning
             text: page.entries.editError === PlaylistEntriesModel.EditForbidden ? i18n("Missing permission to change this playlist") : i18n("The change could not be saved and the playlist was read again from the server: try the change again")
         }
@@ -176,7 +224,7 @@ Kirigami.ScrollablePage {
             objectName: "playlistCapped"
             Layout.fillWidth: true
             Layout.margins: Kirigami.Units.largeSpacing
-            visible: page.entries.capped
+            visible: page.notice === "capped"
             text: i18np("Showing the first %1 entry of %2", "Showing the first %1 entries of %2", page.entries.count, page.entries.total)
         }
     }
@@ -224,10 +272,10 @@ Kirigami.ScrollablePage {
         }
         Controls.MenuItem {
             objectName: "playlistMenuRemove"
-            text: i18n("Remove from Playlist")
+            text: i18n("Remove from Playlist…")
             icon.name: "edit-delete-remove"
             enabled: menu.removable
-            onTriggered: page.removeRow(menu.row)
+            onTriggered: page.askRemoveRow(menu.row)
         }
         Controls.MenuSeparator {}
         Controls.MenuItem {
@@ -266,7 +314,7 @@ Kirigami.ScrollablePage {
         Keys.onEnterPressed: if (list.currentItem) page.Window.window.openItem(list.currentItem.itemId, page)
         Keys.onSpacePressed: if (list.currentItem) page.Window.window.openItem(list.currentItem.itemId, page)
         Keys.onMenuPressed: if (list.currentItem) page.openMenu(list.currentItem, list.currentItem.sideMargin, list.currentItem.height)
-        Keys.onDeletePressed: page.removeRow(list.currentIndex)
+        Keys.onDeletePressed: page.askRemoveRow(list.currentIndex)
         Keys.onPressed: event => {
             if (event.modifiers === Qt.ControlModifier && event.key === Qt.Key_Up) {
                 page.moveRow(list.currentIndex, -1);

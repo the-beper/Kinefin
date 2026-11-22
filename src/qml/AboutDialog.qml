@@ -100,7 +100,7 @@ Kirigami.Dialog {
                 Layout.preferredWidth: dialog.headerSize
                 Layout.preferredHeight: dialog.headerSize
                 Controls.ToolTip.text: text
-                Controls.ToolTip.visible: hovered
+                Controls.ToolTip.visible: hovered || visualFocus
                 Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
                 onClicked: dialog.close()
             }

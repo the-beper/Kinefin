@@ -36,6 +36,8 @@ Kirigami.ScrollablePage {
             downloads.reconcileOutbox();
     }
 
+    // Read once per change: the box, the header and the resolution share it
+    readonly property var outboxConflicts: downloads.outboxConflicts
     readonly property int rulesRevision: downloads.rulesRevision
     // The revision is part of the expression, so the binding follows the rule store
     readonly property var trackedRules: rulesRevision >= 0 ? downloads.seriesRules() : []
@@ -130,6 +132,12 @@ Kirigami.ScrollablePage {
         page.downloads.removeDownload(serverId, userId, itemId);
     }
 
+    // The conflicts are resolved together: the summary box has no choice per item
+    function resolveConflicts(keepServer) {
+        for (const conflict of page.outboxConflicts)
+            page.downloads.resolveOutboxConflict(conflict.serverId, conflict.userId, conflict.itemId, keepServer);
+    }
+
     function askRemove(serverId, userId, itemId, name) {
         removeDialog.serverId = serverId;
         removeDialog.userId = userId;
@@ -219,6 +227,7 @@ Kirigami.ScrollablePage {
         delegate: Controls.ItemDelegate {
             id: row
 
+            required property int index
             required property string serverId
             required property string userId
             required property string itemId
@@ -248,6 +257,8 @@ Kirigami.ScrollablePage {
             objectName: "downloadRow_" + itemId
             width: list.width
             highlighted: ListView.isCurrentItem && ListView.view.activeFocus
+            // The style's row background reads this hint, not Kirigami.Theme.useAlternateBackgroundColor, and the row's index
+            Kirigami.StyleHints.useAlternateBackgroundColor: true
             // Only a downloaded row acts on a click: no hover feedback elsewhere
             hoverEnabled: downloaded
             onClicked: {
@@ -262,8 +273,8 @@ Kirigami.ScrollablePage {
 
                 Item {
                     Layout.alignment: Qt.AlignVCenter
-                    Layout.preferredWidth: 40
-                    Layout.preferredHeight: 60
+                    Layout.preferredWidth: Kirigami.Units.gridUnit * 2.25
+                    Layout.preferredHeight: Kirigami.Units.gridUnit * 3.375
 
                     Kirigami.Icon {
                         anchors.centerIn: parent
@@ -294,16 +305,18 @@ Kirigami.ScrollablePage {
                     spacing: Kirigami.Units.smallSpacing / 2
 
                     Controls.Label {
+                        id: nameLabel
                         Layout.fillWidth: true
                         text: row.name
                         textFormat: Text.PlainText
                         elide: Text.ElideRight
                         font.weight: Font.DemiBold
                         color: row.highlighted ? Kirigami.Theme.highlightedTextColor : Kirigami.Theme.textColor
-                        Controls.ToolTip.text: text
-                        Controls.ToolTip.visible: truncated && nameHover.hovered
-                        Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
                         HoverHandler { id: nameHover }
+                        PlainToolTip {
+                            visible: nameLabel.truncated && nameHover.hovered
+                            text: nameLabel.text
+                        }
                     }
                     Controls.Label {
                         Layout.fillWidth: true
@@ -430,7 +443,7 @@ Kirigami.ScrollablePage {
             height: visible ? notices.implicitHeight + Kirigami.Units.largeSpacing * 2 : 0
             visible: (!page.downloads.canDownload && !page.connection.offline)
                      || page.downloads.storageFailed
-                     || page.downloads.outboxConflicts.length > 0
+                     || page.outboxConflicts.length > 0
                      || page.trackedRules.length > 0
 
             ColumnLayout {
@@ -443,19 +456,41 @@ Kirigami.ScrollablePage {
                 }
                 spacing: Kirigami.Units.smallSpacing
 
+                // One box at a time, the first that applies: the conflicts, the storage warning, the permission note
                 MessageBox {
-                    objectName: "downloadsPermissionNote"
+                    objectName: "downloadsOutboxConflicts"
                     Layout.fillWidth: true
-                    visible: !page.downloads.canDownload && !page.connection.offline
-                    type: Kirigami.MessageType.Information
-                    text: i18n("This server does not allow downloads for this user. Downloaded items stay available on this device")
+                    visible: page.outboxConflicts.length > 0
+                    type: Kirigami.MessageType.Warning
+                    text: page.outboxConflicts.length === 1
+                        ? i18n("%1 was played on another device without being marked as watched there. Keep the server’s state or mark it as watched here", page.outboxConflicts[0].name)
+                        : i18n("Several downloads were played on another device without being marked as watched there. Keep the server’s state or mark them all as watched here")
+                    actions: [
+                        Kirigami.Action {
+                            text: i18n("Keep Server State")
+                            icon.name: "document-save"
+                            onTriggered: page.resolveConflicts(true)
+                        },
+                        Kirigami.Action {
+                            text: i18n("Mark as Watched")
+                            icon.name: "checkmark-symbolic"
+                            onTriggered: page.resolveConflicts(false)
+                        }
+                    ]
                 }
                 MessageBox {
                     objectName: "downloadsStorageWarning"
                     Layout.fillWidth: true
-                    visible: page.downloads.storageFailed
+                    visible: page.outboxConflicts.length === 0 && page.downloads.storageFailed
                     type: Kirigami.MessageType.Warning
                     text: i18n("The download list could not be saved. Downloads stay available for this session only")
+                }
+                MessageBox {
+                    objectName: "downloadsPermissionNote"
+                    Layout.fillWidth: true
+                    visible: page.outboxConflicts.length === 0 && !page.downloads.storageFailed && !page.downloads.canDownload && !page.connection.offline
+                    type: Kirigami.MessageType.Information
+                    text: i18n("This server does not allow downloads for this user. Downloaded items stay available on this device")
                 }
                 ColumnLayout {
                     Layout.fillWidth: true
@@ -498,27 +533,6 @@ Kirigami.ScrollablePage {
                                 onClicked: page.downloads.removeSeriesRule(modelData.seriesId)
                             }
                         }
-                    }
-                }
-                Repeater {
-                    model: page.downloads.outboxConflicts
-                    delegate: MessageBox {
-                        required property var modelData
-                        Layout.fillWidth: true
-                        type: Kirigami.MessageType.Warning
-                        text: i18n("%1 was played on another device without being marked as watched there. Keep the server’s state or mark it as watched here", modelData.name)
-                        actions: [
-                            Kirigami.Action {
-                                text: i18n("Keep Server State")
-                                icon.name: "document-save"
-                                onTriggered: page.downloads.resolveOutboxConflict(modelData.serverId, modelData.userId, modelData.itemId, true)
-                            },
-                            Kirigami.Action {
-                                text: i18n("Mark as Watched")
-                                icon.name: "emblem-checked"
-                                onTriggered: page.downloads.resolveOutboxConflict(modelData.serverId, modelData.userId, modelData.itemId, false)
-                            }
-                        ]
                     }
                 }
             }

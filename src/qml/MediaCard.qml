@@ -474,10 +474,6 @@ Controls.ItemDelegate {
                     // No tooltip: the disc on the poster says it all and a popup covers the card. The card name is plain server text
                     Accessible.name: card.resumeTicks > 0 ? i18n("Resume %1", card.name) : i18n("Play %1", card.name)
 
-                    HoverHandler {
-                        cursorShape: Qt.PointingHandCursor
-                    }
-
                     // The press never reaches the card, so the card becomes current here and Back returns to it
                     onClicked: {
                         card.makeCurrent();

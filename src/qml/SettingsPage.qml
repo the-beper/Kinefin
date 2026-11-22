@@ -31,7 +31,7 @@ Kirigami.Page {
         { section: "video", title: i18n("Video"), icon: "video-display" },
         { section: "subtitles", title: i18n("Subtitles"), icon: "media-view-subtitles-symbolic" },
         { section: "library", title: i18n("Library"), icon: "folder-videos" }
-    ].concat(downloadsAvailable ? [{ section: "downloads", title: i18n("Downloads"), icon: "folder-download" }] : []).concat([
+    ].concat(downloadsAvailable ? [{ section: "downloads", title: i18n("Downloads"), icon: "folder-download-symbolic" }] : []).concat([
         { section: "other", title: i18n("mpv Configuration"), icon: "preferences-other" }
     ])
     readonly property var accountEntries: signedIn ? [{ section: "user", title: i18n("User"), icon: "preferences-desktop-user" }] : []

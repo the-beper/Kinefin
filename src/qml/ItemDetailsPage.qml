@@ -23,6 +23,26 @@ Kirigami.ScrollablePage {
     // The images are dropped while the page is out of view, which frees their textures
     readonly property bool inView: Kirigami.ColumnView.inViewport
     readonly property bool showSimilar: details.similarStatus === ItemDetailsModel.Loading || details.similarStatus === ItemDetailsModel.Failed || (details.similarStatus === ItemDetailsModel.Ready && details.similar.count > 0)
+    // The one message box the page shows, the first with something to report in this order: the item, the main section (seasons, collection, episodes), the similar items, the favorite and watched updates, then the partial episodes warning. A section title never stays without its box. Each box shows only when it is the one named here
+    readonly property string shownBox: {
+        if (details.status === ItemDetailsModel.Failed)
+            return "item";
+        if (showContent) {
+            if (childModel.kind === ItemChildrenModel.Series && childModel.seasonsStatus === ItemChildrenModel.Failed)
+                return "seasons";
+            if (childModel.kind === ItemChildrenModel.BoxSet && childModel.itemsStatus === ItemChildrenModel.Failed)
+                return "collection";
+            if (childModel.kind === ItemChildrenModel.Season && childModel.episodes.status === SeasonEpisodesModel.Failed)
+                return "episodes";
+            if (details.similarStatus === ItemDetailsModel.Failed)
+                return "similar";
+        }
+        if (details.status === ItemDetailsModel.Ready && (details.favoriteError || details.playedError))
+            return "update";
+        if (childModel.episodes.pageError && childModel.episodes.status !== SeasonEpisodesModel.Failed)
+            return "episodesPartial";
+        return "";
+    }
 
     // Set by the first Media Info action: the Loader then builds the dialog, which hands itself back in mediaInfoDialog
     property bool mediaInfoWanted: false
@@ -119,8 +139,8 @@ Kirigami.ScrollablePage {
     readonly property Kirigami.Action trailerAction: Kirigami.Action {
         objectName: "trailerAction"
         displayHint: Kirigami.DisplayHint.AlwaysHide
-        text: i18n("Trailer")
-        icon.name: "media-playback-start"
+        text: i18n("Play Trailer")
+        icon.name: "camera-video-symbolic"
         visible: page.details.status === ItemDetailsModel.Ready && page.details.trailers.length > 0
         onTriggered: {
             if (page.details.trailers.length === 0)
@@ -253,7 +273,7 @@ Kirigami.ScrollablePage {
         objectName: "downloadAction"
         displayHint: Kirigami.DisplayHint.KeepVisible
         text: page.downloadRemovable ? i18n("Delete Download…") : page.downloadCancellable ? i18n("Cancel Download") : i18n("Download")
-        icon.name: page.downloadRemovable ? "edit-delete" : page.downloadCancellable ? "process-stop" : "folder-download"
+        icon.name: page.downloadRemovable ? "edit-delete" : page.downloadCancellable ? "process-stop" : "download-symbolic"
         visible: page.downloadable
         onTriggered: {
             if (page.downloadRemovable)
@@ -273,7 +293,7 @@ Kirigami.ScrollablePage {
         objectName: "automaticDownloadsAction"
         displayHint: Kirigami.DisplayHint.AlwaysHide
         text: page.seriesRule.kind ? i18n("Edit Automatic Downloads…") : i18n("Automatic Downloads…")
-        icon.name: "folder-download"
+        icon.name: "download-later-symbolic"
         visible: page.details.status === ItemDetailsModel.Ready
                  && (page.details.type === "Series" || page.details.type === "Season")
                  && page.connection.downloads.canDownload
@@ -497,7 +517,7 @@ Kirigami.ScrollablePage {
     }
     readonly property Kirigami.Action mediaInfoAction: Kirigami.Action {
         objectName: "mediaInfoAction"
-        text: i18n("Media Info")
+        text: i18n("Show Media Info")
         icon.name: "documentinfo"
         visible: page.details.mediaSources.length > 0
         onTriggered: {
@@ -831,7 +851,7 @@ Kirigami.ScrollablePage {
                 }
 
                 MessageBox {
-                    visible: page.details.status === ItemDetailsModel.Failed
+                    visible: page.shownBox === "item"
                     type: Kirigami.MessageType.Error
                     text: i18n("Could not load this item: check the connection to the server and try again")
                     actions: [
@@ -843,28 +863,26 @@ Kirigami.ScrollablePage {
                     ]
                 }
 
+                // One box for both updates, so the two failures never stack: Retry repeats whichever failed
                 MessageBox {
-                    visible: page.details.favoriteError && page.details.status === ItemDetailsModel.Ready
+                    objectName: "detailsUpdateErrorBox"
+                    visible: page.shownBox === "update"
                     type: Kirigami.MessageType.Error
-                    text: i18n("Could not update Favorites. Check the connection and try again")
+                    text: {
+                        if (page.details.favoriteError && page.details.playedError)
+                            return i18n("Could not update Favorites and watched status. Check the connection and try again");
+                        return page.details.favoriteError ? i18n("Could not update Favorites. Check the connection and try again") : i18n("Could not update watched status. Check the connection and try again");
+                    }
                     actions: [
                         Kirigami.Action {
                             text: i18n("Retry")
                             icon.name: "view-refresh"
-                            onTriggered: page.details.toggleFavorite()
-                        }
-                    ]
-                }
-
-                MessageBox {
-                    visible: page.details.playedError && page.details.status === ItemDetailsModel.Ready
-                    type: Kirigami.MessageType.Error
-                    text: i18n("Could not update watched status. Check the connection and try again")
-                    actions: [
-                        Kirigami.Action {
-                            text: i18n("Retry")
-                            icon.name: "view-refresh"
-                            onTriggered: page.details.togglePlayed()
+                            onTriggered: {
+                                if (page.details.favoriteError)
+                                    page.details.toggleFavorite();
+                                if (page.details.playedError)
+                                    page.details.togglePlayed();
+                            }
                         }
                     ]
                 }
@@ -1668,7 +1686,7 @@ Kirigami.ScrollablePage {
                     }
 
                     MessageBox {
-                        visible: page.childModel.kind === ItemChildrenModel.Series && page.childModel.seasonsStatus === ItemChildrenModel.Failed
+                        visible: page.shownBox === "seasons"
                         type: Kirigami.MessageType.Error
                         text: i18n("Could not load the seasons")
                         actions: [
@@ -1724,7 +1742,7 @@ Kirigami.ScrollablePage {
                     }
 
                     MessageBox {
-                        visible: page.childModel.kind === ItemChildrenModel.BoxSet && page.childModel.itemsStatus === ItemChildrenModel.Failed
+                        visible: page.shownBox === "collection"
                         type: Kirigami.MessageType.Error
                         text: i18n("Could not load the items of this collection")
                         actions: [
@@ -1818,7 +1836,7 @@ Kirigami.ScrollablePage {
                     }
 
                     MessageBox {
-                        visible: page.details.similarStatus === ItemDetailsModel.Failed
+                        visible: page.shownBox === "similar"
                         type: Kirigami.MessageType.Error
                         text: i18n("Could not load similar items")
                         actions: [
@@ -1864,7 +1882,7 @@ Kirigami.ScrollablePage {
                     }
 
                     MessageBox {
-                        visible: page.childModel.kind === ItemChildrenModel.Season && page.childModel.episodes.status === SeasonEpisodesModel.Failed
+                        visible: page.shownBox === "episodes"
                         type: Kirigami.MessageType.Error
                         text: i18n("Could not load the episodes: check the connection to the server and try again")
                         actions: [
@@ -1922,7 +1940,7 @@ Kirigami.ScrollablePage {
 
                 MessageBox {
                     id: episodesWarning
-                    visible: page.childModel.episodes.pageError && page.childModel.episodes.status !== SeasonEpisodesModel.Failed
+                    visible: page.shownBox === "episodesPartial"
                     type: Kirigami.MessageType.Warning
                     text: i18n("Some episodes could not be loaded")
                     actions: [

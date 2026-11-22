@@ -17,9 +17,12 @@ Kirigami.AbstractCard {
     showClickFeedback: true
     Accessible.name: library.name
     Accessible.description: library.browsable ? "" : i18n("Not supported yet")
-    Controls.ToolTip.text: library.name
-    Controls.ToolTip.visible: (hovered || visualFocus) && image.status === Image.Ready
-    Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
+
+    // The library name is server text: the tooltip shows it as plain text
+    PlainToolTip {
+        visible: (tile.hovered || tile.visualFocus) && image.status === Image.Ready
+        text: tile.library.name
+    }
 
     // The focus ring the keyboard and the pad show: the style's own highlight fills the card, which would hide the image
     background: Rectangle {

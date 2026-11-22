@@ -567,7 +567,7 @@ ColumnLayout {
         }
         FormCard.FormCard {
             FormCard.FormSectionText {
-                text: page.isMalformed("MyMediaExcludes") ? page.malformedNote() : i18n("Checked libraries get no tile and no Recently Added row on Home. Hiding a library here does not remove access to it: it stays available in Movies, Shows, Favorites and Search")
+                text: page.isMalformed("MyMediaExcludes") ? page.malformedNote() : i18n("Checked libraries get no tile and no Recently Added row on Home. Hiding a library here does not remove access to it: it stays available in Movies, Shows, Favorites, and Search")
             }
             Repeater {
                 model: page.prefs.libraries
@@ -591,7 +591,7 @@ ColumnLayout {
         }
         FormCard.FormCard {
             FormCard.FormSectionText {
-                text: page.isMalformed("LatestItemsExcludes") ? page.malformedNote() : i18n("Checked libraries get no Recently Added row on Home. Their tiles, Continue Watching and Next Up are not affected")
+                text: page.isMalformed("LatestItemsExcludes") ? page.malformedNote() : i18n("Checked libraries get no Recently Added row on Home. Their tiles, Continue Watching, and Next Up are not affected")
             }
             Repeater {
                 model: page.prefs.libraries

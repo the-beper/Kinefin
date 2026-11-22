@@ -801,7 +801,7 @@ Kirigami.ApplicationWindow {
             window.showPassiveNotification(text);
         }
         function onClipSaveFailed(noSpace) {
-            window.showPassiveNotification(noSpace ? i18n("The clip could not be saved: not enough free disk space") : i18n("The clip could not be saved"));
+            window.showPassiveNotification(noSpace ? i18n("The clip could not be saved: not enough free disk space. Free some space and try again") : i18n("The clip could not be saved. Try again"));
         }
     }
 
@@ -824,7 +824,7 @@ Kirigami.ApplicationWindow {
             return false;
         const info = connection.downloads.playableDownload(serverId, userId, itemId);
         if (!info.path) {
-            window.showPassiveNotification(i18n("The downloaded file is not available"));
+            window.showPassiveNotification(i18n("The downloaded file is not available: download the item again"));
             return false;
         }
         const episode = info.type === "Episode" && info.seriesName.length > 0;
@@ -833,7 +833,7 @@ Kirigami.ApplicationWindow {
             ? i18nc("episode label and episode title", "%1 — %2", EpisodeLabel.label(info.seasonNumber, info.episodeNumber), info.name)
             : "";
         if (!window.player.playLocalFile(info.path, itemId, title, subtitle, info.positionTicks || 0, info)) {
-            window.showPassiveNotification(i18n("The downloaded file could not be played"));
+            window.showPassiveNotification(i18n("The downloaded file could not be played: try again, or download the item again"));
             return false;
         }
         // Set only once the file plays: the player reports the previous file's last position while it is replaced, and that one belongs to the previous owner
@@ -1115,17 +1115,17 @@ Kirigami.ApplicationWindow {
     function downloadFailureText(reason) {
         switch (reason) {
         case "forbidden":
-            return i18n("The server does not allow downloads for this user");
+            return i18n("The server does not allow downloads for this user: check the permissions of the account on the server or sign in again");
         case "notfound":
-            return i18n("The item is no longer on the server");
+            return i18n("The item is no longer on the server: refresh the page to update it");
         case "unsupported":
             return i18n("This item cannot be downloaded");
         case "network":
-            return i18n("Could not reach the server");
+            return i18n("Could not reach the server. Check the connection and try again");
         case "queue":
-            return i18n("The download could not be queued");
+            return i18n("The download could not be queued: try again");
         }
-        return i18n("The download could not be started");
+        return i18n("The download could not be started: try again");
     }
 
     // The confirmation of Delete Download, from the card menu and the details page
@@ -1534,7 +1534,7 @@ Kirigami.ApplicationWindow {
                 started = window.player.castTo(udn);
             }
             if (!started)
-                window.showPassiveNotification(udn === "local" ? i18n("Could not start playback") : i18nc("@info %1 is a device name", "Could not start playback on %1: open Cast again to search for it", window.plainNotificationText(name)));
+                window.showPassiveNotification(udn === "local" ? i18n("Could not start playback: try again") : i18nc("@info %1 is a device name", "Could not start playback on %1: open Cast again to search for it", window.plainNotificationText(name)));
         }
     }
 
@@ -1948,7 +1948,7 @@ Kirigami.ApplicationWindow {
             Kirigami.Action {
                 objectName: "meteredDownloadConfirm"
                 text: i18n("Download")
-                icon.name: "folder-download"
+                icon.name: "download-symbolic"
                 onTriggered: {
                     window.connection.downloads.downloadItem(meteredDownloadDialog.itemId);
                     meteredDownloadDialog.close();

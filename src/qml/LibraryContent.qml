@@ -342,6 +342,8 @@ Item {
 
             delegate: ItemListRow {
                 width: ListView.view ? ListView.view.width : implicitWidth
+                // The rows have trailing items (favorite, rating, watched, unplayed count, menu): alternate colours help follow a row across
+                Kirigami.StyleHints.useAlternateBackgroundColor: true
                 // The list is the one tab stop, the arrow keys move inside it
                 focusPolicy: Qt.NoFocus
                 focusVisible: content.userMoved

@@ -141,19 +141,14 @@ Kirigami.Dialog {
             placeholderText: i18n("Drama, Thriller")
             Accessible.name: i18n("Genres")
         }
-        Controls.Label {
+        // One box at a time: the overview first
+        MessageBox {
+            objectName: "editMetadataInvalid"
             Layout.fillWidth: true
-            visible: !dialog.overviewValid
-            wrapMode: Text.Wrap
-            textFormat: Text.PlainText
-            text: i18n("The overview is limited to 16384 characters")
-        }
-        Controls.Label {
-            Layout.fillWidth: true
-            visible: !dialog.genresValid
-            wrapMode: Text.Wrap
-            textFormat: Text.PlainText
-            text: i18n("Use at most 20 genres, each of 128 characters at most")
+            Layout.topMargin: Kirigami.Units.largeSpacing
+            visible: !dialog.overviewValid || !dialog.genresValid
+            type: Kirigami.MessageType.Warning
+            text: !dialog.overviewValid ? i18n("The overview is limited to 16384 characters") : i18n("Use at most 20 genres, each of 128 characters at most")
         }
     }
 }

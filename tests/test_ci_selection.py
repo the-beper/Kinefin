@@ -86,28 +86,28 @@ class ChangeSelection(unittest.TestCase):
         self.git("add", ".")
         self.git("commit", "-qm", path)
 
-    def test_push_changing_an_image_input_waits_for_images(self) -> None:
+    def test_push_changing_an_image_input_publishes_the_images(self) -> None:
         for path in ("build/Containerfile", "build/flatpak/Containerfile",
-                     ".github/workflows/publish-images.yml"):
+                     ".github/workflows/images.yml"):
             with self.subTest(path=path):
                 before = self.head()
                 self.commit_file(path)
                 self.assertIn("code=true packaging=true images=true",
                               self.selection(event="push", before=before))
 
-    def test_image_input_changed_in_an_earlier_pushed_commit_waits(self) -> None:
+    def test_image_input_changed_in_an_earlier_pushed_commit_publishes(self) -> None:
         before = self.head()
         self.commit_file("build/Containerfile")
         self.commit_file("src/player/PlaybackSession.cpp")
         self.assertIn("images=true", self.selection(event="push", before=before))
 
-    def test_ordinary_push_does_not_wait_for_images(self) -> None:
+    def test_ordinary_push_does_not_publish_the_images(self) -> None:
         before = self.head()
         self.commit_file("build/check.sh")
         self.assertIn("code=true packaging=true images=false",
                       self.selection(event="push", before=before))
 
-    def test_push_with_unknown_previous_commit_may_wait_for_images(self) -> None:
+    def test_push_with_unknown_previous_commit_may_publish_the_images(self) -> None:
         self.commit_file("build/Containerfile")
         for before in ("0" * 40, "unknown", "1" * 40):
             with self.subTest(before=before):
@@ -123,7 +123,7 @@ class ChangeSelection(unittest.TestCase):
                                 capture_output=True, check=True, timeout=15)
         self.assertIn("images=maybe", result.stderr)
 
-    def test_pull_request_and_manual_runs_never_wait_for_images(self) -> None:
+    def test_pull_request_and_manual_runs_never_publish_the_images(self) -> None:
         self.commit_file("build/Containerfile")
         self.assertIn("images=false", self.selection())
         self.assertIn("images=false", self.selection(event="workflow_dispatch", before=self.base))

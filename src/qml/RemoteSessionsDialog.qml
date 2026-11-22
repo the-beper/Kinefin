@@ -134,6 +134,7 @@ Kirigami.Dialog {
                 text: i18n("No connected devices found")
             }
 
+            // One box at a time, the first that applies: the list that failed to load, then the command that failed
             MessageBox {
                 objectName: "remoteSessionsFailed"
                 Layout.fillWidth: true
@@ -153,8 +154,9 @@ Kirigami.Dialog {
             }
 
             MessageBox {
+                objectName: "remoteCommandFailed"
                 Layout.fillWidth: true
-                visible: dialog.remote.commandFailed
+                visible: dialog.remote.commandFailed && dialog.answer !== RemoteSessionsModel.Failed
                 type: Kirigami.MessageType.Error
                 text: i18n("The remote command failed. Refresh the devices and try again")
             }

@@ -152,7 +152,7 @@ The main menu, opened from the avatar at the right end of the header, has the ac
 
 The header holds the tabs **Home**, **Downloads**, **Favorites** and **Playlists**, then **Movies** and **Shows** when the server has a library of that type. Further right are the search box, the **Queue** button with its count, and the main menu. When the window is narrow the labels become icons with tooltips, and the search box becomes a button.
 
-Escape and Alt+Left go back. The mouse back button does too. F5 reloads the page in front.
+Escape and Alt+Left go back. The mouse back button does too. Ctrl+R reloads the page in front.
 
 ### Home
 
@@ -199,7 +199,7 @@ To filter:
 | Section | Options | Applies to |
 | --- | --- | --- |
 | Status | Played or Unplayed, Resumable, Favorites | Resumable: movies only |
-| Features | Subtitles, Trailer, Special Features, Theme Song, Theme Video | Movies, series and episodes |
+| Features | Subtitles, Trailer, Special features, Theme song, Theme video | Movies, series and episodes |
 | Video Quality | HD or SD, 4K, 3D | Movies and episodes |
 | Video Type | Blu-ray, DVD | Movies and episodes |
 | Series Status | Continuing, Ended, Unreleased | Series |
@@ -244,19 +244,19 @@ Selecting a card opens the details page: a hero with the backdrop, logo, a facts
 
 | Entry | Contains | Shown |
 | --- | --- | --- |
-| **Trailer** | | When the server has one |
+| **Play Trailer** | | When the server has one |
 | **Play Next**, **Add to Queue** | | Queueable items |
 | **Automatic Downloads…**, **Stop Automatic Downloads** | | Series and seasons; Stop only while a rule exists |
 | **Add to** | **Playlist…**, **Collection…** | |
 | **Edit on Server** | **Edit Metadata…**, **Identify…**, **Edit Images…**, **Edit Subtitles…**, **Refresh Metadata** | Administrators |
-| **Utilities** | **Copy Stream URL**, **Media Info** | |
+| **Utilities** | **Copy Stream URL**, **Show Media Info** | |
 | **Delete Media…** | | Last entry, when the server allows deletion |
 
-**Media Info** opens a dialog with the container, size, bit rate and streams of each source, and **Copy** puts the text on the clipboard.
+**Show Media Info** opens a dialog with the container, size, bit rate and streams of each source, and **Copy** puts the text on the clipboard.
 
-Before you play, choose the audio track and the subtitles (or **Off**) with **Audio** and **Subtitles** in the row under the facts, which appears only when there is a choice; **Play** and **Resume** use them. When the item has a resume point, **Play from Beginning** appears left of **Resume** and starts from the first second. **Trailer** opens the item's first trailer in your browser. **Copy Stream URL** puts the URL of the first source on the clipboard, without a token. **Refresh Metadata** asks the server to fetch the item's metadata and images again.
+Before you play, choose the audio track and the subtitles (or **Off**) with **Audio** and **Subtitles** in the row under the facts, which appears only when there is a choice; **Play** and **Resume** use them. When the item has a resume point, **Play from Beginning** appears left of **Resume** and starts from the first second. **Play Trailer** opens the item's first trailer in your browser. **Copy Stream URL** puts the URL of the first source on the clipboard, without a token. **Refresh Metadata** asks the server to fetch the item's metadata and images again.
 
-On a movie or show page, **Collection…** in the **Add to** submenu puts the item into an existing collection or a new one. An administrator can change the item on the server. **Delete Media…** removes a movie, episode or video when the server allows it, after a confirmation; the server deletes the file and it cannot be recovered. **Edit Metadata…** changes the name, overview, year, official rating and genres. **Identify…** on a movie or a show searches the metadata providers and applies the match you pick. **Edit Images…** replaces or removes the primary image, the backdrop or the logo. **Edit Subtitles…** uploads an external subtitle file or deletes an external track. Clicking a cast member opens the movies, shows and episodes that person appears in.
+On a movie or show page, **Collection…** in the **Add to** submenu puts the item into an existing collection or a new one. An administrator can change the item on the server. **Delete Media…** removes a movie, episode or video when the server allows it, after a confirmation; the server deletes the file and it cannot be recovered. **Edit Metadata…** changes the name, overview, year, official rating and genres. **Identify…** on a movie or a show searches the metadata providers; select a match and press **Apply Match** to apply it. **Edit Images…** replaces or removes the primary image, the backdrop or the logo. **Edit Subtitles…** uploads an external subtitle file or deletes an external track. Clicking a cast member opens the movies, shows and episodes that person appears in.
 
 A series page lists seasons and one Next Up entry, a season page lists its episodes, and an episode page links to its series and season. A collection page lists its first 100 items. **Playlist…** in the **Add to** submenu is on movie, episode and video pages.
 
@@ -277,7 +277,7 @@ To add an item to a playlist, choose **Add to Playlist…** in a card menu, or *
 To edit a playlist:
 
 - Ctrl+Up and Ctrl+Down, or **Move Up** and **Move Down** in the row menu, reorder entries.
-- Delete, or **Remove from Playlist**, removes one. There is no confirmation and no undo.
+- Delete, or **Remove from Playlist…**, removes one after you confirm. There is no undo, and the video stays in the library.
 - **Rename…** (also F2) and **Delete…** are in the page toolbar overflow and in a playlist card's menu. Deleting asks first.
 - **New Playlist…** in the toolbar creates an empty playlist.
 
@@ -513,7 +513,7 @@ Ctrl+Shift+/ opens the shortcuts dialog, which lists the keys below and, while a
 | Ctrl+Q | Quit |
 | Escape, Alt+Left | Go back |
 | Ctrl+F | Search |
-| F5 | Refresh |
+| Ctrl+R | Refresh |
 | Ctrl+1 to Ctrl+6 | Tab by position |
 | Ctrl+PgUp, Ctrl+PgDown, Ctrl+[, Ctrl+], Ctrl+Shift+Tab, Ctrl+Tab | Previous or next tab, wrapping |
 | Menu, Shift+F10 | Open the item menu |

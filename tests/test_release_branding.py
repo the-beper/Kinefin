@@ -120,7 +120,7 @@ class BrandingTest(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("verified", result.stdout)
-        ci = (ROOT / ".github/workflows/verify.yml").read_text()
+        ci = (ROOT / ".github/workflows/ci.yml").read_text()
         release = (ROOT / ".github/workflows/release.yml").read_text()
         self.assertIn("python3 -I build/release/verify_release_branding.py", ci)
         self.assertIn("python3 -I build/release/verify_release_branding.py", release)

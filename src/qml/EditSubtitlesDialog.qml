@@ -18,6 +18,8 @@ Kirigami.Dialog {
 
     readonly property var subtitles: details.mediaSources.length > 0 ? details.mediaSources[0].subtitles : []
     property int deleteIndex: -1
+    // Empty means undetermined; the client refuses anything but two or three letters
+    readonly property bool languageValid: languageField.length === 0 || languageField.acceptableInput
 
     title: i18n("Edit Subtitles")
     preferredWidth: Kirigami.Units.gridUnit * 30 - Kirigami.Units.largeSpacing * 2
@@ -29,6 +31,7 @@ Kirigami.Dialog {
             objectName: "subtitleUpload"
             text: i18n("Upload…")
             icon.name: "document-open"
+            enabled: dialog.languageValid
             onTriggered: subtitleDialog.open()
         }
     ]
@@ -87,9 +90,12 @@ Kirigami.Dialog {
         title: i18n("Choose a Subtitle")
         nameFilters: [i18n("Subtitles (*.srt *.ass *.ssa *.vtt)")]
         onAccepted: {
-            if (!dialog.connection.uploadSubtitle(dialog.details.itemId, selectedFile,
-                                                  languageField.text, forcedSwitch.checked))
-                dialog.shell.showPassiveNotification(i18n("The subtitle could not be uploaded: choose an srt, ass, ssa or vtt file under 2 MiB in UTF-8, use a two- or three-letter language code, and wait for any upload on its way"));
+            // The formats of JellyfinClient::uploadSubtitle, which answers false alike for an empty, oversized, unreadable or non-UTF-8 file, an upload already on its way and a lost session
+            if (!/\.(srt|ass|ssa|vtt)$/i.test(selectedFile.toString()))
+                dialog.shell.showPassiveNotification(i18n("The file is not an srt, ass, ssa, or vtt subtitle"));
+            else if (!dialog.connection.uploadSubtitle(dialog.details.itemId, selectedFile,
+                                                       languageField.text, forcedSwitch.checked))
+                dialog.shell.showPassiveNotification(i18n("The subtitle could not be uploaded: check the file (not empty, under 2 MiB, in UTF-8) and wait for any upload on its way"));
         }
     }
 
@@ -124,7 +130,7 @@ Kirigami.Dialog {
             opacity: 0.7
             wrapMode: Text.Wrap
             textFormat: Text.PlainText
-            text: i18n("srt, ass, ssa or vtt, UTF-8, at most 2 MiB")
+            text: i18n("srt, ass, ssa, or vtt, UTF-8, at most 2 MiB")
         }
 
         ListView {
@@ -148,9 +154,11 @@ Kirigami.Dialog {
                 objectName: "subtitleRow_" + index
                 width: ListView.view.width
                 focusPolicy: Qt.NoFocus
-                Controls.ToolTip.visible: hovered && trackText.truncated
-                Controls.ToolTip.text: trackText.text
-                Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
+
+                PlainToolTip {
+                    visible: row.hovered && trackText.truncated
+                    text: trackText.text
+                }
 
                 contentItem: RowLayout {
                     Controls.Label {
@@ -168,8 +176,9 @@ Kirigami.Dialog {
                         icon.name: "edit-delete"
                         display: Controls.AbstractButton.IconOnly
                         Accessible.name: i18nc("@action:button", "Delete subtitle %1", dialog.trackLabel(row.modelData))
-                        Controls.ToolTip.visible: hovered
+                        Controls.ToolTip.visible: hovered || visualFocus
                         Controls.ToolTip.text: text
+                        Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
                         onClicked: dialog.confirmDelete(row.modelData)
                     }
                 }
@@ -185,6 +194,9 @@ Kirigami.Dialog {
                 Kirigami.FormData.label: i18nc("@label:textbox", "Language:")
                 placeholderText: i18n("eng")
                 maximumLength: 3
+                validator: RegularExpressionValidator {
+                    regularExpression: /[A-Za-z]{2,3}/
+                }
                 Accessible.name: i18n("Language")
                 Accessible.description: i18n("Language code of two or three letters, empty for undetermined")
             }
@@ -194,6 +206,15 @@ Kirigami.Dialog {
                 Kirigami.FormData.label: i18n("Forced:")
                 Accessible.name: i18n("Forced")
             }
+        }
+
+        MessageBox {
+            objectName: "subtitleLanguageInvalid"
+            Layout.fillWidth: true
+            Layout.topMargin: Kirigami.Units.largeSpacing
+            visible: !dialog.languageValid && (languageField.length >= 2 || !languageField.activeFocus)
+            type: Kirigami.MessageType.Warning
+            text: i18n("Use a language code of two or three letters, or leave the field empty")
         }
     }
 }

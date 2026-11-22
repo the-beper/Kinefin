@@ -3246,6 +3246,33 @@ class TestUiPages : public QObject {
                                 "|Season 2, Episode 6|Episode 6"));
     }
 
+    void aPlainToolTipShowsMarkupAsText()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QQmlComponent component(&ui.engine);
+        component.setData("import QtQuick\nimport org.kde.kinefin\nItem {\n"
+                          "    property QtObject tipObject: tip\n"
+                          "    PlainToolTip { id: tip; text: \"<b>bold</b> name\" }\n"
+                          "}",
+                          QUrl());
+        std::unique_ptr<QObject> created(component.create());
+        QVERIFY2(created, qPrintable(component.errorString()));
+        QObject *tip = created->property("tipObject").value<QObject *>();
+        QVERIFY(tip);
+        auto *content = tip->property("contentItem").value<QQuickItem *>();
+        QVERIFY(content);
+        // The label that renders the text reads it as plain text, so a name that starts with a tag stays a name
+        bool found = false;
+        for (QQuickItem *item : allItems(content)) {
+            if (item->property("text").toString() == QStringLiteral("<b>bold</b> name")) {
+                found = true;
+                QCOMPARE(item->property("textFormat").toInt(), int(Qt::PlainText));
+            }
+        }
+        QVERIFY(found);
+    }
+
     void aCardRowBuildsItsListWithItsFirstCards()
     {
         Ui ui(m_home->path());
@@ -3566,12 +3593,12 @@ class TestUiPages : public QObject {
         QQuickItem *page = ui.item(QStringLiteral("itemDetailsPage"));
         const QObject *info = page->findChild<QObject *>(QStringLiteral("mediaInfoAction"));
         QVERIFY(info);
-        QCOMPARE(info->property("text").toString(), QStringLiteral("Media Info"));
+        QCOMPARE(info->property("text").toString(), QStringLiteral("Show Media Info"));
         QTRY_VERIFY(info->property("visible").toBool());
         QVERIFY(!ui.popup(QStringLiteral("mediaInfoDialog")));
         QObject *dialog = openMediaInfo(ui, page);
         QVERIFY(dialog);
-        QCOMPARE(dialog->property("title").toString(), QStringLiteral("Media Info"));
+        QCOMPARE(dialog->property("title").toString(), QStringLiteral("Show Media Info"));
         const QStringList texts = dialogTexts(dialog);
         for (const QString &expected :
              {QStringLiteral("Arcturus 1080p"), QStringLiteral("Container"), QStringLiteral("mkv"),
@@ -6889,9 +6916,9 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(ui.server.viewRequests > before);
         QTRY_VERIFY(!menu->property("visible").toBool());
 
-        // F5 is the entry's key, with no page action left to make it ambiguous
+        // Ctrl+R is the entry's key, with no page action left to make it ambiguous
         before = ui.server.viewRequests;
-        QTest::keyClick(ui.window, Qt::Key_F5);
+        QTest::keyClick(ui.window, Qt::Key_R, Qt::ControlModifier);
         QTRY_VERIFY(ui.server.viewRequests > before);
     }
 
@@ -6983,9 +7010,9 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(ui.server.itemsRoutes.size() > scans);
         QTRY_COMPARE(ui.controller.favorites()->status(), Kinefin::FavoritesModel::Complete);
         QCOMPARE(ui.server.viewRequests, views);
-        // And so does F5, the entry's key
+        // And so does Ctrl+R, the entry's key
         const int menuScans = ui.server.itemsRoutes.size();
-        QTest::keyClick(ui.window, Qt::Key_F5);
+        QTest::keyClick(ui.window, Qt::Key_R, Qt::ControlModifier);
         QTRY_VERIFY(ui.server.itemsRoutes.size() > menuScans);
         QTRY_COMPARE(ui.controller.favorites()->status(), Kinefin::FavoritesModel::Complete);
     }
@@ -7052,9 +7079,9 @@ class TestUiPages : public QObject {
         QVERIFY(
             QMetaObject::invokeMethod(ui.shellAction(QStringLiteral("refreshAction")), "trigger"));
         QTRY_VERIFY(detailRequests() > before + 1);
-        // F5 is the main menu's: the page has no Refresh of its own to make it ambiguous
+        // Ctrl+R is the main menu's: the page has no Refresh of its own to make it ambiguous
         const auto afterMenu = detailRequests();
-        QTest::keyClick(ui.window, Qt::Key_F5);
+        QTest::keyClick(ui.window, Qt::Key_R, Qt::ControlModifier);
         QTRY_VERIFY(detailRequests() > afterMenu);
     }
 
@@ -7077,12 +7104,12 @@ class TestUiPages : public QObject {
         QVERIFY(buttonRect.right() > ui.window->width() / 2);
         QVERIFY(buttonRect.left() > queue->mapToScene(QPointF(0, 0)).x());
 
-        // No text for the style to draw beside the avatar and no tooltip over it; the label is static and the name says who is signed in
+        // No text for the style to draw beside the avatar; the tooltip names the button and the accessible name says who is signed in
         QVERIFY(button->property("text").toString().isEmpty());
-        QVERIFY(QQmlProperty(button, QStringLiteral("QQC2.ToolTip.text"), qmlContext(button))
-                    .read()
-                    .toString()
-                    .isEmpty());
+        QCOMPARE(QQmlProperty(button, QStringLiteral("QQC2.ToolTip.text"), qmlContext(button))
+                     .read()
+                     .toString(),
+                 QStringLiteral("Main Menu"));
         QCOMPARE(button->property("label").toString(), QStringLiteral("Main Menu"));
         // The user list reaches the header just after the session does
         QTRY_COMPARE(accessibleNameOf(button), QStringLiteral("Main Menu, signed in as Alice"));
@@ -7396,9 +7423,12 @@ class TestUiPages : public QObject {
                     .first()
                     ->property("highlighted")
                     .toBool());
-        // The second entry: up, play, out
-        QVERIFY(QMetaObject::invokeMethod(
-            ui.itemsStartingWith(QStringLiteral("syncPlayQueueUp")).at(1), "clicked"));
+        // The second entry: up and out are in its More Actions menu, play is beside it
+        QQuickItem *more = ui.itemsStartingWith(QStringLiteral("syncPlayQueueMore")).at(1);
+        QVERIFY(QMetaObject::invokeMethod(more, "click"));
+        QObject *moveUp = more->findChild<QObject *>(QStringLiteral("syncPlayQueueUp"));
+        QVERIFY(moveUp);
+        QVERIFY(QMetaObject::invokeMethod(moveUp, "click"));
         QTRY_COMPARE(syncPlayRequests(ui, QStringLiteral("MovePlaylistItem")), 1);
         QCOMPARE(lastSyncPlayBody(ui, QStringLiteral("MovePlaylistItem"))
                      .value(QStringLiteral("NewIndex"))
@@ -7411,8 +7441,11 @@ class TestUiPages : public QObject {
                      .value(QStringLiteral("PlaylistItemId"))
                      .toString(),
                  second);
-        QVERIFY(QMetaObject::invokeMethod(
-            ui.itemsStartingWith(QStringLiteral("syncPlayQueueRemove")).at(1), "clicked"));
+        more = ui.itemsStartingWith(QStringLiteral("syncPlayQueueMore")).at(1);
+        QVERIFY(QMetaObject::invokeMethod(more, "click"));
+        QObject *removeEntry = more->findChild<QObject *>(QStringLiteral("syncPlayQueueRemove"));
+        QVERIFY(removeEntry);
+        QVERIFY(QMetaObject::invokeMethod(removeEntry, "click"));
         QTRY_COMPARE(syncPlayRequests(ui, QStringLiteral("RemoveFromPlaylist")), 1);
         // Not following, then following again
         QObject *follow = ui.popup(QStringLiteral("syncPlayFollowAction"));
@@ -10178,7 +10211,7 @@ class TestUiPages : public QObject {
         QVERIFY(QMetaObject::invokeMethod(root, "castCurrent"));
         chooseThisComputer();
         QVERIFY(stub.calls.contains(QStringLiteral("castTo local")));
-        QTRY_VERIFY(ui.showsText(QStringLiteral("Could not start playback"), true));
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Could not start playback: try again"), true));
         // A device that stops on its own: named in a notification, and its markup is not read
         Q_EMIT stub.castStoppedElsewhere(QStringLiteral("<b>TV</b>"));
         QTRY_VERIFY(ui.showsText(QStringLiteral("Playback was stopped on ‹b>TV‹/b>"), true));
@@ -10325,7 +10358,7 @@ class TestUiPages : public QObject {
         QObject *trailer = page->findChild<QObject *>(QStringLiteral("trailerAction"));
         QVERIFY(trailer);
         QTRY_VERIFY(trailer->property("visible").toBool());
-        QCOMPARE(trailer->property("text").toString(), QStringLiteral("Trailer"));
+        QCOMPARE(trailer->property("text").toString(), QStringLiteral("Play Trailer"));
     }
 
     void theDetailsPageCopiesTheStreamUrlAndRefreshesMetadata()
@@ -10500,12 +10533,21 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(!ui.server.remoteSearchBodies.isEmpty());
         QVERIFY(ui.server.remoteSearchBodies.constLast().contains("Arcturus"));
         QVERIFY(ui.server.remoteSearchBodies.constLast().contains("\"Year\":2012"));
-        // Return on the focused result list applies the current match from the keyboard
+        // A click selects a result, Return hands the focus to Apply Match, and nothing goes to the server before it is pressed
+        QQuickItem *apply = ui.item(QStringLiteral("identifyApply"));
+        QVERIFY(apply);
+        QVERIFY(!apply->property("enabled").toBool());
+        ui.clickCenter(row);
+        QTRY_VERIFY(apply->property("enabled").toBool());
+        QVERIFY(ui.server.remoteSearchApplies.isEmpty());
         QQuickItem *results = ui.item(QStringLiteral("identifyResults"));
         QVERIFY(results);
         results->forceActiveFocus();
         QTRY_VERIFY(results->hasActiveFocus());
         QTest::keyClick(ui.window, Qt::Key_Return);
+        QTRY_VERIFY(apply->hasActiveFocus());
+        QVERIFY(ui.server.remoteSearchApplies.isEmpty());
+        QVERIFY(QMetaObject::invokeMethod(apply, "click"));
         QTRY_VERIFY(!ui.server.remoteSearchApplies.isEmpty());
         QVERIFY(ui.server.remoteSearchApplies.constLast().contains("\"Tmdb\":\"123\""));
     }
@@ -12263,23 +12305,24 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(focusIsIn(QStringLiteral("libraryPage")));
     }
 
-    void aFailedHomeRowOffersItsOwnRetry()
+    void failedHomeRowsShareOneRetryBox()
     {
         Ui ui(m_home->path());
         ui.server.listingStatus.insert(QStringLiteral("Resume"), 500);
+        ui.server.listingStatus.insert(QStringLiteral("NextUp"), 500);
         QVERIFY(ui.load());
         QVERIFY(ui.signIn());
-        QTRY_VERIFY(ui.showsText(QStringLiteral("Could not load this row"), false));
-        // The other rows are unaffected
-        QTRY_VERIFY(ui.showsText(QStringLiteral("Next Up")));
+        // Two rows fail and one box says so, with one Retry for both
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Could not load 2 rows"), false));
+        QVERIFY(!ui.showsText(QStringLiteral("Could not load 1 row"), false));
         ui.server.listingStatus.clear();
-        ui.controller.homeRows()->retry(0);
-        QTRY_COMPARE(
-            ui.controller.homeRows()
-                ->data(ui.controller.homeRows()->index(0), Kinefin::HomeRowsModel::StatusRole)
-                .toInt(),
-            int(Kinefin::HomeRowsModel::Ready));
-        QVERIFY(!ui.showsText(QStringLiteral("Could not load this row"), false));
+        QQuickItem *page = ui.item(QStringLiteral("homePage"));
+        QVERIFY(page);
+        QVERIFY(QMetaObject::invokeMethod(page, "retryFailedRows"));
+        auto *rows = ui.controller.homeRows();
+        QTRY_COMPARE(rows->data(rows->index(0), Kinefin::HomeRowsModel::StatusRole).toInt(),
+                     int(Kinefin::HomeRowsModel::Ready));
+        QTRY_VERIFY(!ui.showsText(QStringLiteral("Could not load 2 rows"), false));
         QQuickItem *list = nullptr;
         QTRY_VERIFY((list = ui.item(QStringLiteral("homeRowList_0"))) != nullptr);
         QTRY_VERIFY(list->isVisible());
@@ -14208,7 +14251,8 @@ class TestUiPages : public QObject {
         QCOMPARE(ui.controller.favorites()->status(), Kinefin::FavoritesModel::PartialError);
         // The movies show, the failure is no empty state
         QTRY_VERIFY(ui.item(QStringLiteral("favoritesPartialBanner"))->isVisible());
-        QVERIFY(ui.showsText(QStringLiteral("Some libraries could not be read")));
+        QVERIFY(ui.showsText(
+            QStringLiteral("Some libraries could not be read: the list may be incomplete")));
         QVERIFY(!ui.item(QStringLiteral("favoritesCappedBanner"))->isVisible());
         QVERIFY(!ui.item(QStringLiteral("favoritesEmpty"))->isVisible());
         QTRY_COMPARE(ui.item(QStringLiteral("favoritesGrid"))->property("count").toInt(), 3);
@@ -14605,8 +14649,8 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(disc->property("color").value<QColor>() != resting);
         QTRY_VERIFY(button->scale() > 1.0);
         QVERIFY(button->isVisible());
-        // Over the button the pointer is a hand
-        QTRY_COMPARE(ui.window->cursor().shape(), Qt::PointingHandCursor);
+        // The pointer stays an arrow: the HIG keeps the hand for web-style links
+        QVERIFY(ui.window->cursor().shape() != Qt::PointingHandCursor);
         // The glyph is centred vertically and a little right of the middle, where the triangle looks centred
         auto *content = button->property("contentItem").value<QQuickItem *>();
         QVERIFY(content && !content->childItems().isEmpty());
@@ -17257,9 +17301,21 @@ class TestUiPages : public QObject {
                  films.at(0));
         QTRY_COMPARE(ui.server.playlistItemIds(evening),
                      (QStringList{films.at(1), films.at(0), films.at(2)}));
-        // Delete removes it, and the next entry takes its row
+        // Delete asks first, and nothing goes before the answer
         QTest::keyClick(ui.window, Qt::Key_Delete);
+        QObject *removeDialog = ui.popup(QStringLiteral("removePlaylistEntryDialog"));
+        QTRY_VERIFY(removeDialog && removeDialog->property("opened").toBool());
+        QCOMPARE(ui.server.playlistItemIds(evening),
+                 (QStringList{films.at(1), films.at(0), films.at(2)}));
+        // Confirming removes it, and the next entry takes its row
+        QObject *removeConfirm =
+            removeDialog->findChild<QObject *>(QStringLiteral("removePlaylistEntryConfirm"));
+        QVERIFY(removeConfirm);
+        QVERIFY(QMetaObject::invokeMethod(removeConfirm, "trigger"));
         QTRY_COMPARE(ui.server.playlistItemIds(evening), (QStringList{films.at(1), films.at(2)}));
+        // The dialog gives the keys back to the list before the next key goes in
+        QTRY_VERIFY(!removeDialog->property("opened").toBool());
+        QTRY_VERIFY(list->hasActiveFocus());
         QCOMPARE(list->property("currentIndex").toInt(), 1);
         QTRY_COMPARE(page->property("loading").toBool(), false);
         // A change the server refuses comes back, and the page says why

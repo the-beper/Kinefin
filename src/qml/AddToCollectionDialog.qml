@@ -110,9 +110,8 @@ Kirigami.Dialog {
             enabled: loaded
             highlighted: ListView.isCurrentItem && ListView.view.activeFocus
             Accessible.name: name
-            Controls.ToolTip.visible: hovered && collectionLabel.truncated
-            Controls.ToolTip.text: row.name
-            Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
+            // The style shows its own tooltip, with the delegate's empty text, for a truncated label: the plain one below replaces it
+            Controls.ToolTip.visible: false
             onClicked: dialog.pick(itemId)
 
             // The collection name comes from the server: plain text only
@@ -121,6 +120,11 @@ Kirigami.Dialog {
                 elide: Text.ElideRight
                 maximumLineCount: 1
                 textFormat: Text.PlainText
+                text: row.name
+            }
+
+            PlainToolTip {
+                visible: row.hovered && collectionLabel.truncated
                 text: row.name
             }
         }

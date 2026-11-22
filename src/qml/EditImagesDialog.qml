@@ -69,7 +69,7 @@ Kirigami.Dialog {
         onAccepted: {
             if (!dialog.connection.uploadImage(dialog.details.itemId, dialog.pendingType,
                                                dialog.pendingIndex, selectedFile))
-                dialog.shell.showPassiveNotification(i18n("The image could not be sent: choose a JPEG, PNG or WebP under 20 MiB"));
+                dialog.shell.showPassiveNotification(i18n("The image could not be sent: choose a JPEG, PNG, or WebP under 20 MiB"));
         }
     }
 
@@ -104,7 +104,7 @@ Kirigami.Dialog {
             opacity: 0.7
             wrapMode: Text.Wrap
             textFormat: Text.PlainText
-            text: i18n("JPEG, PNG or WebP, at most 20 MiB")
+            text: i18n("JPEG, PNG, or WebP, at most 20 MiB")
         }
 
         Kirigami.FormLayout {

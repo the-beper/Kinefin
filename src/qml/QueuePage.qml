@@ -276,7 +276,7 @@ Kirigami.ScrollablePage {
             visible: page.queue.count === 0 && !page.queue.busy && !page.queue.restoreFailed
             icon.name: "media-track-queue-amarok"
             text: i18n("The queue is empty")
-            explanation: i18n("Add a movie, an episode, a season or a series with Add to Queue")
+            explanation: i18n("Add a movie, an episode, a season, or a series with Add to Queue")
         }
 
         delegate: MediaListRow {

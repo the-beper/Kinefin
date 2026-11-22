@@ -15,7 +15,7 @@ Kirigami.Dialog {
     property var window: null
     readonly property var entries: sources.map(source => ({ name: source.name, rows: sourceRows(source) }))
 
-    title: i18nc("@title:window", "Media Info")
+    title: i18nc("@title:window", "Show Media Info")
     // The content lines up with the title, which the header insets by the same room
     padding: Kirigami.Units.largeSpacing
     preferredWidth: Kirigami.Units.gridUnit * 30

@@ -164,7 +164,7 @@ class FlatpakSourcesTest(unittest.TestCase):
 
     def test_workflows_check_both_local_and_flathub_before_artifact_upload(self) -> None:
         release = (SOURCE / ".github/workflows/release.yml").read_text(encoding="utf-8")
-        ci = (SOURCE / ".github/workflows/verify.yml").read_text(encoding="utf-8")
+        ci = (SOURCE / ".github/workflows/ci.yml").read_text(encoding="utf-8")
         command = "python3 -I build/release/verify_flatpak_sources.py"
         self.assertIn(command, ci)
         self.assertLess(ci.index(command), ci.index("  check:"))

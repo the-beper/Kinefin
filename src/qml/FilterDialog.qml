@@ -145,7 +145,7 @@ Kirigami.Dialog {
         case "favorites":
             return i18nc("@option:check filter by favorite", "Favorites");
         case "features":
-            return { Subtitles: i18nc("@option:check filter by feature", "Subtitles"), Trailer: i18nc("@option:check filter by feature", "Trailer"), SpecialFeatures: i18nc("@option:check filter by feature", "Special Features"), ThemeSong: i18nc("@option:check filter by feature", "Theme Song"), ThemeVideo: i18nc("@option:check filter by feature", "Theme Video") }[value] ?? "";
+            return { Subtitles: i18nc("@option:check filter by feature", "Subtitles"), Trailer: i18nc("@option:check filter by feature", "Trailer"), SpecialFeatures: i18nc("@option:check filter by feature", "Special features"), ThemeSong: i18nc("@option:check filter by feature", "Theme song"), ThemeVideo: i18nc("@option:check filter by feature", "Theme video") }[value] ?? "";
         case "quality":
             return value === "HD" ? i18nc("@option:check filter by video quality", "HD") : i18nc("@option:check filter by video quality", "SD");
         case "is4K":

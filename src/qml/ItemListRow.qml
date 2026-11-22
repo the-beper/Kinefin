@@ -103,9 +103,12 @@ Controls.ItemDelegate {
     Accessible.name: countsLine.length > 0 ? name + ", " + countsLine : (episodeSpoken.length > 0 ? name + ", " + episodeSpoken : (year > 0 ? name + " (" + year + ")" : name))
     Accessible.description: description
 
+    // The row paints its own background, so the style's alternating rows do not apply: the list sets `Kirigami.StyleHints.useAlternateBackgroundColor` and the odd rows take the theme's alternate colour here
+    readonly property bool alternate: Kirigami.StyleHints.useAlternateBackgroundColor && index % 2 === 1
+
     background: Rectangle {
         readonly property bool ring: row.highlighted || (row.visualFocus && row.focusVisible)
-        color: row.hovered ? Qt.alpha(Kirigami.Theme.highlightColor, 0.15) : "transparent"
+        color: row.hovered ? Qt.alpha(Kirigami.Theme.highlightColor, 0.15) : (row.alternate ? Kirigami.Theme.alternateBackgroundColor : "transparent")
         radius: Kirigami.Units.cornerRadius
         border.width: ring ? 2 : 0
         border.color: Kirigami.Theme.highlightColor
@@ -117,7 +120,8 @@ Controls.ItemDelegate {
         Rectangle {
             Layout.preferredWidth: Kirigami.Units.gridUnit * 3
             Layout.preferredHeight: Kirigami.Units.gridUnit * 4.5
-            color: Kirigami.Theme.alternateBackgroundColor
+            // The other of the two background colours on an alternate row, or the placeholder would melt into it
+            color: row.alternate ? Kirigami.Theme.backgroundColor : Kirigami.Theme.alternateBackgroundColor
             radius: Kirigami.Units.cornerRadius
             clip: true
 
@@ -173,7 +177,7 @@ Controls.ItemDelegate {
                 Layout.topMargin: Kirigami.Units.smallSpacing
                 Layout.preferredHeight: Math.max(2, Kirigami.Units.smallSpacing / 2)
                 visible: row.inProgress
-                color: Kirigami.Theme.alternateBackgroundColor
+                color: row.alternate ? Kirigami.Theme.backgroundColor : Kirigami.Theme.alternateBackgroundColor
 
                 Rectangle {
                     height: parent.height

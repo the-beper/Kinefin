@@ -149,7 +149,7 @@ class RuntimePinsTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_both_ci_and_release_gate_run_before_flatpak_build(self) -> None:
-        ci = (SOURCE / ".github/workflows/verify.yml").read_text(encoding="utf-8")
+        ci = (SOURCE / ".github/workflows/ci.yml").read_text(encoding="utf-8")
         release = (SOURCE / ".github/workflows/release.yml").read_text(encoding="utf-8")
         command = "python3 -I build/release/verify_runtime_pins.py"
         self.assertIn(command, ci)

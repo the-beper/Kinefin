@@ -31,10 +31,50 @@ Kirigami.ScrollablePage {
 
     readonly property bool showLibraries: page.connection.homeLibraries.length > 0 && (page.Window.window?.homeLibrariesEnabled ?? true)
 
+    // How many rows failed to load, counted again whenever the model changes: no property of it says so
+    property int failedRows: 0
+
+    // HomeRowsModel::StatusRole is Qt::UserRole + 4
+    function countFailedRows() {
+        const rows = page.connection.homeRows;
+        let failed = 0;
+        for (let i = 0; i < rows.rowCount(); ++i) {
+            if (rows.data(rows.index(i, 0), Qt.UserRole + 4) === HomeRowsModel.Failed)
+                ++failed;
+        }
+        failedRows = failed;
+    }
+
+    // Asks every failed row again; the model skips the others
+    function retryFailedRows() {
+        const rows = page.connection.homeRows;
+        for (let i = 0; i < rows.rowCount(); ++i)
+            rows.retry(i);
+    }
+
+    Component.onCompleted: countFailedRows()
+
+    Connections {
+        target: page.connection.homeRows
+        function onDataChanged() {
+            page.countFailedRows();
+        }
+        function onModelReset() {
+            page.countFailedRows();
+        }
+        function onRowsInserted() {
+            page.countFailedRows();
+        }
+        function onRowsRemoved() {
+            page.countFailedRows();
+        }
+    }
+
     ColumnLayout {
         id: homeColumn
         spacing: Kirigami.Units.largeSpacing
 
+        // One box at a time, the page's own error first
         MessageBox {
             visible: page.connection.errorText.length > 0
             type: Kirigami.MessageType.Error
@@ -44,6 +84,21 @@ Kirigami.ScrollablePage {
                     text: i18n("Retry")
                     icon.name: "view-refresh"
                     onTriggered: page.connection.reloadLibraries()
+                }
+            ]
+        }
+
+        // A failed row is hidden, so this box is what says it is missing
+        MessageBox {
+            objectName: "homeRowsFailed"
+            visible: page.failedRows > 0 && page.connection.errorText.length === 0
+            type: Kirigami.MessageType.Error
+            text: i18np("Could not load %1 row: check the connection to the server and try again", "Could not load %1 rows: check the connection to the server and try again", page.failedRows)
+            actions: [
+                Kirigami.Action {
+                    text: i18n("Retry")
+                    icon.name: "view-refresh"
+                    onTriggered: page.retryFailedRows()
                 }
             ]
         }
@@ -168,7 +223,7 @@ Kirigami.ScrollablePage {
                 }
 
                 Layout.fillWidth: true
-                visible: shown
+                visible: shown && status !== HomeRowsModel.Failed
                 spacing: Kirigami.Units.smallSpacing
 
                 RowLayout {
@@ -204,21 +259,6 @@ Kirigami.ScrollablePage {
                         running: parent.visible
                         Accessible.name: i18n("Loading…")
                     }
-                }
-
-                MessageBox {
-                    visible: row.status === HomeRowsModel.Failed
-                    type: Kirigami.MessageType.Error
-                    text: i18n("Could not load this row: check the connection to the server and try again")
-                }
-
-                // A row retry button, not a MessageBox action: Kirigami's action toolbar fails when a row flips between states
-                Controls.Button {
-                    visible: row.status === HomeRowsModel.Failed
-                    Layout.alignment: Qt.AlignLeft
-                    text: i18n("Retry")
-                    icon.name: "view-refresh"
-                    onClicked: page.connection.homeRows.retry(row.index)
                 }
 
                 CardRow {

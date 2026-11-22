@@ -36,7 +36,7 @@ Item {
 
     function openReleasePage(url) {
         if (!Qt.openUrlExternally(url))
-            shell.showPassiveNotification(i18n("Could not open the release page in the browser"));
+            shell.showPassiveNotification(i18n("Could not open the release page: check the default browser"));
     }
 
     UpdateChecker {
@@ -294,6 +294,7 @@ Item {
 
                 QQC2.ToolTip.text: display === QQC2.AbstractButton.IconOnly ? text : ""
                 QQC2.ToolTip.visible: (hovered || visualFocus) && QQC2.ToolTip.text.length > 0
+                QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
 
                 Layout.fillHeight: true
 
@@ -491,11 +492,14 @@ Item {
             // The hover and focus frame keeps some room around the avatar and the arrow
             leftPadding: Kirigami.Units.largeSpacing
             rightPadding: Kirigami.Units.largeSpacing
-            // Not `text`: with no icon of its own the style would draw it beside the avatar. No tooltip either (the avatar and the arrow say what it is); the name is for screen readers
+            // Not `text`: with no icon of its own the style would draw it beside the avatar; the label is the tooltip, and the accessible name adds who is signed in
             readonly property string label: i18nc("@action:button", "Main Menu")
             Accessible.name: root.signedIn && root.currentUser ? i18nc("@label %1 is a user name", "Main Menu, signed in as %1", root.currentUser.name) : label
             Accessible.role: Accessible.ButtonMenu
             display: QQC2.AbstractButton.IconOnly
+            QQC2.ToolTip.text: label
+            QQC2.ToolTip.visible: (hovered || visualFocus) && !mainMenu.opened
+            QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
             // The menu marks where its entries lead while one of them shows
             down: shell.currentSection === "settings"
             onClicked: mainMenu.open()
@@ -597,7 +601,7 @@ Item {
 
         property string section: "downloads"
         text: i18nc("@title:tab", "Downloads")
-        icon.name: "folder-download"
+        icon.name: "folder-download-symbolic"
         visible: root.signedIn || root.offline
         enabled: root.signedIn || root.offline
         shortcut: root.tabShortcut(downloadsAction)
@@ -671,14 +675,14 @@ Item {
         icon.name: "help-about"
         onTriggered: aboutDialog.open()
     }
-    // The one Refresh of the app: no page binds F5 itself, or the two shortcuts would be ambiguous. One key, not StandardKey.Refresh: the style's MenuItem binds a single sequence and warns on a standard key that has several
+    // The one Refresh of the app, on Ctrl+R (never a function key alone, per the HIG): no page binds it itself, or the two shortcuts would be ambiguous. One sequence, not StandardKey.Refresh: the style's MenuItem binds a single sequence and warns on a standard key that has several
     Kirigami.Action {
         id: refreshAction
         objectName: "refreshAction"
 
         text: i18nc("@action:inmenu", "Refresh")
         icon.name: "view-refresh"
-        shortcut: "F5"
+        shortcut: "Ctrl+R"
         visible: root.signedIn
         // Only a page that has something to refresh takes it: Home reloads the libraries, the others do it themselves
         enabled: typeof shell.pageStack.currentItem?.refreshPage === "function" || shell.pageStack.currentItem?.objectName === "homePage"
@@ -750,7 +754,7 @@ Item {
         objectName: "signOutAction"
 
         text: i18nc("@action:inmenu", "Sign Out…")
-        tooltip: i18nc("@info:tooltip", "Remove this user's saved session from this system")
+        tooltip: i18nc("@info:tooltip", "Remove this user’s saved session from this system")
         icon.name: "system-log-out"
         visible: root.signedIn
         // Signing out removes the saved session and queue of the user, so it asks first (about unsaved preferences, then about the sign-out)

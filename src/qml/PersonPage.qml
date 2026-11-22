@@ -48,7 +48,7 @@ Kirigami.ScrollablePage {
             Layout.margins: Kirigami.Units.largeSpacing
             visible: page.model.status === PersonItemsModel.Failed
             type: Kirigami.MessageType.Error
-            text: i18n("Could not load this person's media: check the connection to the server and try again")
+            text: i18n("Could not load this person’s media: check the connection to the server and try again")
             actions: [
                 Kirigami.Action {
                     text: i18n("Retry")
@@ -126,7 +126,7 @@ Kirigami.ScrollablePage {
             visible: page.model.status === PersonItemsModel.Ready && page.model.totalCount === 0
             icon.name: "user-identity"
             text: i18n("No media with this person")
-            explanation: i18n("Movies, shows and episodes featuring this person show up here")
+            explanation: i18n("Movies, shows, and episodes featuring this person show up here")
         }
 
         delegate: MediaCard {

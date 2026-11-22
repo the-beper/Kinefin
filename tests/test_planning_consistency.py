@@ -129,7 +129,7 @@ class PlanningConsistency(unittest.TestCase):
         self.assertEqual(broken, [])
 
     def test_package_checks_and_snapshot_facts(self) -> None:
-        self.assertTrue((ROOT / ".github/workflows/verify.yml").exists())
+        self.assertTrue((ROOT / ".github/workflows/ci.yml").exists())
         self.assertTrue((ROOT / "scripts/po.py").exists())
         script = content("build/check.sh")
         self.assertIn("po/extract.sh --check", script)

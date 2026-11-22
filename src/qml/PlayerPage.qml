@@ -147,6 +147,8 @@ Kirigami.Page {
     readonly property string pauseText: page.player.paused ? i18n("Resume") : i18n("Pause")
     readonly property string pauseIcon: page.player.paused ? "media-playback-start" : "media-playback-pause"
     readonly property string fullScreenText: page.fullScreen ? i18nc("@action:button", "Exit Full Screen Mode") : i18nc("@action:button", "Full Screen Mode")
+    // A delay in seconds with one decimal, as the locale writes it
+    function delayText(seconds) { return Number(seconds).toLocaleString(Qt.locale(), "f", 1); }
     function togglePlayback() { page.player.togglePause(); page.wakeChrome(); }
     function skipPrevious() { page.player.previous(); page.wakeChrome(); }
     function skipNext() { page.player.next(); page.wakeChrome(); }
@@ -534,7 +536,7 @@ Kirigami.Page {
             NumberAnimation { duration: Kirigami.Units.longDuration; easing.type: Easing.OutCubic }
         }
         text: shownLabel
-        icon.name: "media-skip-forward"
+        icon.name: "media-seek-forward"
         onClicked: { page.player.skipSegment(); page.wakeChrome(); }
     }
     // A clip or GIF in the making, outside the bars like Up Next: Cancel stops it and removes the file
@@ -1235,7 +1237,7 @@ Kirigami.Page {
             objectName: "playerContextSkipItem"
             visible: skipButton.shown
             height: visible ? implicitHeight : 0
-            icon.name: "media-skip-forward"
+            icon.name: "media-seek-forward"
             text: skipButton.shownLabel
             onTriggered: { page.player.skipSegment(); page.wakeChrome(); }
         }
@@ -1438,13 +1440,31 @@ Kirigami.Page {
                 clip: true
                 model: page.connection.queue
                 delegate: Controls.ItemDelegate {
+                    id: queueRow
                     required property int index
                     required property string itemId
                     required property string name
                     width: ListView.view.width
-                    text: name
                     highlighted: page.player.currentIndex === index
+                    Accessible.name: name
+                    // The style shows its own tooltip, with the delegate's empty text, for a truncated label: the plain one below replaces it
+                    Controls.ToolTip.visible: false
                     onClicked: { page.player.playQueue(index); queuePanel.close(); }
+
+                    // The item's name comes from the server: plain text only
+                    contentItem: Controls.Label {
+                        id: queueName
+                        elide: Text.ElideRight
+                        maximumLineCount: 1
+                        textFormat: Text.PlainText
+                        text: queueRow.name
+                        color: queueRow.highlighted || queueRow.down ? Kirigami.Theme.highlightedTextColor : Kirigami.Theme.textColor
+                    }
+
+                    PlainToolTip {
+                        visible: queueRow.hovered && queueName.truncated
+                        text: queueRow.name
+                    }
                 }
             }
         }
@@ -1699,7 +1719,7 @@ Kirigami.Page {
             id: qualityMenu
             objectName: moreRoot.namePrefix + "QualityMenu"
             title: i18n("Quality")
-            icon.name: "speedometer"
+            icon.name: "view-statistics"
             enabled: page.player.qualityAvailable && !page.player.qualitySwitching && !page.player.casting
             Instantiator {
                 model: page.player.qualitySteps
@@ -1740,12 +1760,12 @@ Kirigami.Page {
         Controls.Menu {
             title: i18n("AV Sync")
             icon.name: "settings-configure"
-            Controls.MenuItem { text: i18n("Audio delay: %1 s", page.player.audioDelay.toFixed(1)); enabled: false }
-            Controls.MenuItem { text: i18n("Audio earlier (-0.1 s)"); onTriggered: page.player.adjustAudioDelay(Math.max(-10, page.player.audioDelay - 0.1)) }
+            Controls.MenuItem { text: i18n("Audio delay: %1 s", page.delayText(page.player.audioDelay)); enabled: false }
+            Controls.MenuItem { text: i18n("Audio earlier (−0.1 s)"); onTriggered: page.player.adjustAudioDelay(Math.max(-10, page.player.audioDelay - 0.1)) }
             Controls.MenuItem { text: i18n("Audio later (+0.1 s)"); onTriggered: page.player.adjustAudioDelay(Math.min(10, page.player.audioDelay + 0.1)) }
             Controls.MenuSeparator {}
-            Controls.MenuItem { text: i18n("Subtitle delay: %1 s", page.player.subtitleDelay.toFixed(1)); enabled: false }
-            Controls.MenuItem { text: i18n("Subtitles earlier (-0.1 s)"); onTriggered: page.player.adjustSubtitleDelay(Math.max(-10, page.player.subtitleDelay - 0.1)) }
+            Controls.MenuItem { text: i18n("Subtitle delay: %1 s", page.delayText(page.player.subtitleDelay)); enabled: false }
+            Controls.MenuItem { text: i18n("Subtitles earlier (−0.1 s)"); onTriggered: page.player.adjustSubtitleDelay(Math.max(-10, page.player.subtitleDelay - 0.1)) }
             Controls.MenuItem { text: i18n("Subtitles later (+0.1 s)"); onTriggered: page.player.adjustSubtitleDelay(Math.min(10, page.player.subtitleDelay + 0.1)) }
         }
         Controls.Menu {

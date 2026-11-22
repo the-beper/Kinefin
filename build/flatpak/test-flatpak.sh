@@ -39,7 +39,7 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 HOME=$(mktemp -d)
 export HOME
 trap 'flatpak kill "$id" 2>/dev/null; kill %1 2>/dev/null; rm -rf "$HOME"' EXIT
-export XDG_DATA_HOME=$HOME/xdg-data XDG_CONFIG_HOME=$HOME/xdg-config
+export XDG_DATA_HOME="$HOME"/xdg-data XDG_CONFIG_HOME="$HOME"/xdg-config
 # Without it Flatpak keeps the app's runtime folder under ~/.cache instead of the /run/user one the socket check reads
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 mkdir -p "$XDG_DATA_HOME" "$XDG_CONFIG_HOME"

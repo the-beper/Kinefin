@@ -15,11 +15,13 @@ Controls.Label {
     maximumLineCount: 1
     font.weight: Font.DemiBold
     textFormat: Text.PlainText
-    Controls.ToolTip.text: text
-    Controls.ToolTip.visible: truncated && hover.hovered
-    Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
 
     HoverHandler {
         id: hover
+    }
+
+    PlainToolTip {
+        visible: label.truncated && hover.hovered
+        text: label.text
     }
 }

@@ -23,10 +23,10 @@ is_packaging() {
     return 1
 }
 
-# The paths that make publish-images.yml publish the build images on a push to main: the jobs that run in those images must wait for that run
+# The paths that make ci.yml publish the build images (images.yml) on a push to main: the jobs that run in those images wait for that
 is_image_input() {
     case $1 in
-        build/Containerfile | build/flatpak/Containerfile | .github/workflows/publish-images.yml) return 0 ;;
+        build/Containerfile | build/flatpak/Containerfile | .github/workflows/images.yml) return 0 ;;
     esac
     return 1
 }
@@ -34,7 +34,7 @@ is_image_input() {
 if [ "${EVENT_NAME:-}" != pull_request ]; then
     code=true
     packaging=true
-    # Only a push to main starts publish-images.yml, and only when it changed one of those paths: judge by the pushed range, as GitHub's path filter does. After a force-push (or a new branch) the previous head is not in the checkout, so the range is unknown: images=maybe makes the job wait only if an Images run shows up
+    # Only a push to main publishes the images, and only when it changed one of those paths: judge by the pushed range, as GitHub's path filter does. After a force-push (or a new branch) the previous head is not in the checkout, so the range is unknown: images=maybe publishes them to be safe
     if [ "${EVENT_NAME:-}" = push ]; then
         if [ -z "${BEFORE_SHA:-}" ] || ! git cat-file -e "${BEFORE_SHA}^{commit}" 2>/dev/null; then
             echo "changes.sh: previous commit '${BEFORE_SHA:-}' not available, cannot tell whether the push changed an image input (images=maybe)" >&2

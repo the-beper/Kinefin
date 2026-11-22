@@ -31,7 +31,7 @@ build/build-env.sh ctest --test-dir "${KINEFIN_BUILD_DIR:-/buildtmp/check}" --ou
 
 The UI tests (`test_ui_pages`) run as the shards `ui_pages_0` to `ui_pages_5`, which CMake builds from the test class, so they run side by side under `-j` (each counts as two processors, so `-j4` runs two at a time); `ui_pages_shards` fails when a test function is in no shard. `KINEFIN_TEST_TIMEOUT_SCALE` (integer 1 to 10, default 1) multiplies every wait of `test_ui_pages`; CI sets it to 3. One UI test alone: `build/build-env.sh /buildtmp/check/bin/test_ui_pages <function>`. Screenshots for a UI review: `KINEFIN_SHOTS=<directory inside the checkout> build/build-env.sh /buildtmp/check/bin/test_ui_pages visualTourWhenRequested` walks Home, a library, the details page (wide and narrow), the track list and the edit dialogs and saves one PNG per step; without the variable the test skips. The directory must be inside the checkout because the build container mounts only that.
 
-`build/check.sh` uses ccache automatically when the image has it (cache in `/buildtmp/ccache`, the same build volume); CI keeps that directory between runs with `actions/cache`.
+`build/check.sh` uses ccache automatically when the image has it (cache in `/buildtmp/ccache`, the same build volume); CI restores the newest cache of that directory with `actions/cache`; only a push to main saves a new one, and `build/ci/prune_caches.py` keeps the two newest.
 
 The build tree defaults to `/buildtmp/check` (a named podman volume that build-env.sh mounts, incremental between runs). Keep CMake build trees outside the checkout: the `dist/` tree is scanned by the REUSE gate, which would otherwise have to cover the fetched third-party mpvqt sources. `dist/` is not in git. To run the built app in the container you are on your own: playback needs a real session; do that on the host once it can be host-built, or inside the container for offscreen-only experiments.
 
@@ -55,6 +55,8 @@ build/build-env.sh build/check.sh
 
 `python3 scripts/po.py status` alone shows the pending translations per language (zero is required).
 
+The gates that need no build (metainfo, catalogs, Python tests, REUSE) run before the build, and every test has a 15-minute timeout. With `CI` set, `build/check.sh` reruns the failed tests once and prints a warning, so that a timing flake of the UI tests costs one rerun instead of the whole job; locally a failure fails at once. In CI the `changes` job also runs the static checks (shellcheck, actionlint, zizmor, the release verifiers) before the long jobs start.
+
 `tests/shell_smoke.py` starts the binary offscreen five times (Servers, then Settings, About, the sign-in page and Home through the `KINEFIN_START_PAGE` start-up hook; the sign-in page and Home open without a session) and fails on any QML problem. Run it before proposing a commit. Shell scripts (`build/`, `scripts/`, `po/`) are shellcheck-clean (`--severity=warning`); C++ code follows the Qt-like style of `.clang-format` (LLVM base with explicit knobs: the image's clang-format has no `Qt` preset). Run `clang-format -i <files>` before proposing, because the image gate fails on drift. `.editorconfig` governs the non-C++ text files.
 
 `tests/test_kwallet_host.cpp` runs against the session's real KWallet and is skipped unless `KINEFIN_TEST_KWALLET=1`. Run it against the session bus from the build container, after a build in `/buildtmp/dev`:
@@ -70,7 +72,7 @@ build/flatpak/build-flatpak.sh                 # dist/Kinefin-x86_64.flatpak
 KINEFIN_EXPECT_VERSION=X.Y.Z build/flatpak/test-flatpak.sh dist/Kinefin-x86_64.flatpak
 ```
 
-The build script installs the org.kde runtime at commits recorded in `build/flatpak/runtime-pins.conf` and refuses to run outside rootless podman. Until the first release, the About dialog of a local bundle shows its build time (`YYYY.MM.DD.HHMM`, the host's local time, or `KINEFIN_BUILD_ID` when set) in place of the version; a build with `CI` set (every workflow) keeps the version, and `--version`, the update check and the server always get the version of `CMakeLists.txt`. `test-flatpak.sh` installs the bundle into a throwaway container `HOME`, checks the version, installed sandbox permissions and raster icons, D-Bus single-instance behaviour, the MPRIS name, the remote-control socket (private, with its welcome, taken back after a killed instance), private profile storage and QML start-up. A real Plasma/Wayland host is still needed for playback, KWallet, portals and GUI acceptance.
+The build script installs the org.kde runtime at commits recorded in `build/flatpak/runtime-pins.conf` and refuses to run outside rootless podman. The runtimes live in the podman volume `kinefin-flatpak`; the flatpak-builder state (module cache, sources, ccache) lives in the volume `kinefin-flatpak-state`, or in the host directory `KINEFIN_FLATPAK_STATE_DIR`, which CI restores on every run and saves after a push to main, with a key per month and without the build trees (the release job has none and builds clean). The first local build after the state moved to its own volume starts cold. Until the first release, the About dialog of a local bundle shows its build time (`YYYY.MM.DD.HHMM`, the host's local time, or `KINEFIN_BUILD_ID` when set) in place of the version; a build with `CI` set (every workflow) keeps the version, and `--version`, the update check and the server always get the version of `CMakeLists.txt`. `test-flatpak.sh` installs the bundle into a throwaway container `HOME`, checks the version, installed sandbox permissions and raster icons, D-Bus single-instance behaviour, the MPRIS name, the remote-control socket (private, with its welcome, taken back after a killed instance), private profile storage and QML start-up. A real Plasma/Wayland host is still needed for playback, KWallet, portals and GUI acceptance.
 
 ## Translations
 
@@ -99,6 +101,7 @@ Source checks and the 128px/256px icon are present, but they do not replace a bu
 
 ## How to work here
 
+- Follow the [code of conduct](CODE_OF_CONDUCT.md).
 - Follow the [KDE HIG](https://develop.kde.org/hig/); a deliberate exception states its reason in the change.
 - Client settings keep Jellyfin Desktop's names, defaults and values wherever they map to mpv. A setting added, renamed or dropped updates the [settings reference](docs/settings.md) in the same change; `test_settings_parity` fails otherwise.
 - A change users or contributors can see updates the [user guide](docs/user-guide.md) or the [architecture overview](docs/architecture.md) in the same change.

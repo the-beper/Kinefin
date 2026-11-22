@@ -1,5 +1,5 @@
 #!/bin/sh
-# Builds an OSTree repository (dist/flatpak-repo, or $KINEFIN_FLATPAK_REPO) and dist/Kinefin-x86_64.flatpak inside a throw-away rootless podman container. Runtimes and the Flatpak build cache live in the podman volume "kinefin-flatpak", not on the host.
+# Builds an OSTree repository (dist/flatpak-repo, or $KINEFIN_FLATPAK_REPO) and dist/Kinefin-x86_64.flatpak inside a throw-away rootless podman container. The runtimes live in the podman volume "kinefin-flatpak" and the flatpak-builder state (module cache, sources, ccache) in the volume "kinefin-flatpak-state", or in the host directory $KINEFIN_FLATPAK_STATE_DIR that CI caches between runs; nothing lands on the host otherwise.
 # Usage: build/flatpak/build-flatpak.sh [flatpak-builder options...]
 # TODO (first release): port KuickShare's prepare/sign/finish pipeline (a signed OSTree repository on GitHub Pages) if the Flatpak is ever self-hosted; until then Flathub is the only repository and the bundle goes to the GitHub release as an asset.
 set -eu
@@ -19,8 +19,14 @@ if [ ! -e /run/.containerenv ]; then
     # Rootless podman only: root in the container is then the calling user on the host. No --privileged: bubblewrap, the sandbox of flatpak-builder (and of its icon validation), needs /proc unmasked to mount its own (unmask=ALL) and SYS_ADMIN and NET_ADMIN to create namespaces as container root. Without NET_ADMIN, "loopback: Failed RTM_NEWADDR". The capabilities hold inside the container's user namespace only.
     [ "$(podman info --format '{{.Host.Security.Rootless}}')" = true ] || { echo "build-flatpak.sh needs rootless podman" >&2; exit 1; }
     podman image exists "$image" || podman build -t "$image" -f "$root/build/flatpak/Containerfile" "$root/build/flatpak"
+    # A leading slash makes podman bind the host directory, otherwise it is the name of a volume
+    state=kinefin-flatpak-state
+    if [ -n "${KINEFIN_FLATPAK_STATE_DIR:-}" ]; then
+        state=$(readlink -m "$KINEFIN_FLATPAK_STATE_DIR")
+        mkdir -p "$state"
+    fi
     exec podman run --rm --security-opt unmask=ALL --cap-add SYS_ADMIN --cap-add NET_ADMIN --security-opt label=disable --network=host -e KINEFIN_FLATPAK_REPO -e KINEFIN_BUILD_ID \
-        -v kinefin-flatpak:/var/lib/flatpak -v "$root:$root" -w "$root" \
+        -v kinefin-flatpak:/var/lib/flatpak -v "$state:/var/lib/flatpak/builder/state" -v "$root:$root" -w "$root" \
         "$image" "$root/build/flatpak/build-flatpak.sh" "$@"
 fi
 
@@ -55,7 +61,8 @@ cd build/flatpak
 trap 'rm -f "$root/build/flatpak/build-id"' EXIT
 rm -f build-id
 if [ -n "$KINEFIN_BUILD_ID" ]; then printf '%s\n' "$KINEFIN_BUILD_ID" > build-id; fi
-flatpak-builder --force-clean --disable-rofiles-fuse --default-branch=stable \
+# --ccache: the SDK ships /usr/bin/ccache and flatpak-builder keeps the cache in the state directory, which CI restores
+flatpak-builder --force-clean --disable-rofiles-fuse --ccache --default-branch=stable \
     --state-dir="$builder/state" --repo="$repo" "$@" \
     "$builder/build" "$id.yml"
 cd "$root"

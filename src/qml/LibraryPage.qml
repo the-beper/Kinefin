@@ -307,6 +307,7 @@ Kirigami.Page {
 
             // The network open, so the series below are not anonymous: server text, plain only
             Controls.Label {
+                id: networkNameLabel
                 objectName: "networkNameLabel"
                 Layout.maximumWidth: Kirigami.Units.gridUnit * 12
                 visible: page.networkBackShown && text.length > 0
@@ -314,13 +315,15 @@ Kirigami.Page {
                 font.weight: Font.DemiBold
                 textFormat: Text.PlainText
                 text: page.subtabs?.networkName ?? ""
-                // A long name is cut: the whole one shows under the pointer
-                Controls.ToolTip.text: text
-                Controls.ToolTip.visible: truncated && networkNameHover.hovered
-                Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
 
                 HoverHandler {
                     id: networkNameHover
+                }
+
+                // A long name is cut: the whole one shows under the pointer, as plain text
+                PlainToolTip {
+                    visible: networkNameLabel.truncated && networkNameHover.hovered
+                    text: networkNameLabel.text
                 }
             }
 
@@ -660,7 +663,7 @@ Kirigami.Page {
                             text: chip.modelData.label
                         }
 
-                        // The label is server text for some chips: only the accessible name carries it, never the control text
+                        // The label is server text for some chips: only the accessible name carries it, the control text is the fixed tooltip text
                         Controls.ToolButton {
                             objectName: "filterChipRemove_" + chip.index
                             Layout.preferredWidth: Kirigami.Units.iconSizes.smallMedium + Kirigami.Units.smallSpacing
@@ -670,9 +673,10 @@ Kirigami.Page {
                             icon.name: "window-close-symbolic"
                             icon.width: Kirigami.Units.iconSizes.small
                             icon.height: Kirigami.Units.iconSizes.small
+                            text: i18n("Remove this filter")
                             Accessible.name: i18nc("accessible name of the button that removes one filter, %1 is the filter", "Remove the filter %1", chip.modelData.label)
-                            Controls.ToolTip.text: i18n("Remove this filter")
-                            Controls.ToolTip.visible: hovered
+                            Controls.ToolTip.text: text
+                            Controls.ToolTip.visible: hovered || visualFocus
                             Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
                             onClicked: filterDialog.removeChip(chip.modelData)
                         }
