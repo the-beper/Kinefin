@@ -194,6 +194,9 @@ class JellyfinClient final : public QObject {
     bool setItemPlayed(const QString &itemId, bool played);
     // Takes back a Mark as Watched: back at `positionTicks`, the resume point the watched write cleared, and watched again only when `played` (a rewatch the server kept as played) (`POST /UserItems/{id}/UserData`, live-verified on 12.4). Shares the one-write-per-item rule of setItemPlayed; success emits itemPlayedUpdated(id, played) and then itemProgressUpdated, a failure itemPlayedUpdateFailed(id, played, status)
     bool restoreItemProgress(const QString &itemId, qint64 positionTicks, bool played = false);
+    // Reads the user data of items again after a `UserDataChanged` hint (a playback of this or another device, a write from another session) and reports what the server has through itemFavoriteUpdated, itemPlayedUpdated and itemProgressUpdated, favorite first, then played, then progress as an Undo does, so every model that follows the three signals shows it. The ids go in requests of `UserDataChunk` (`GET /Items?ids=`, which carries `UserData`); an id with a write of its own pending is left out, since that write's answer is newer. The server names an episode together with its season but not the series, so the series of the seasons and episodes that come back are read as well, once (a series page and a series card follow an episode that changed). A failed or invalid answer emits nothing and a 401 ends the session. Returns whether a request went out
+    bool refreshUserData(const QStringList &itemIds);
+    static constexpr int UserDataChunk = 100;
     // Remote subtitle search and download through the server's provider plugin (`RemoteSearch/Subtitles`); false without the policy, an invalid id/language or a session. A 401 expires the session and emits no remote*Failed signal, because the shell signs out and closes the player
     bool searchRemoteSubtitles(const QString &itemId, const QString &language);
     // The server answers the download before its refresh lists the file, and with 204 even when it could not save it: remoteSubtitleDownloaded comes once the item has one more external subtitle stream than before, remoteSubtitleNotSaved when none showed within the wait
@@ -465,6 +468,7 @@ class JellyfinClient final : public QObject {
     void itemProgressUpdated(const QString &itemId, qint64 positionTicks, double playedPercentage);
 
   private:
+    bool requestUserData(const QStringList &itemIds, bool followSeries);
     enum class State {
         Disconnected,
         Probing,
@@ -529,6 +533,10 @@ class JellyfinClient final : public QObject {
     QSet<QNetworkReply *> m_pending;
     QSet<QString> m_favoritePending;
     QSet<QString> m_playedPending;
+    // When this client last wrote the state of an item (ms since the epoch, by normalized id): the server echoes a write in a UserDataChanged, which a refresh must not read again
+    QHash<QString, qint64> m_ownWrites;
+    void noteOwnWrite(const QString &key);
+    bool wroteRecently(const QString &key) const;
     QString m_refreshItemId;
     QSet<QString> m_collectionWrites;
     QString m_deletePending;

@@ -258,6 +258,35 @@ ConnectionController::ConnectionController(const QString &profileId, const QStri
     // A library scan only wakes the rule scanner: LibraryChanged is a hint, never an item list
     connect(&m_socket, &JellyfinSocketClient::libraryChanged, this,
             [this] { m_downloads.scheduleRuleScan(); });
+    // A change of user data (this device's playback, another device, a write from another session) is a hint: the ids are read again in one round a second at most, and what reads back goes to the models through the client's three signals
+    m_userDataRefresh.setSingleShot(true);
+    m_userDataRefresh.setInterval(1000);
+    connect(&m_socket, &JellyfinSocketClient::userDataChanged, this,
+            [this](const QStringList &ids) {
+                for (const QString &id : ids) {
+                    if (m_userDataPending.size() >= UserDataPendingMax)
+                        break;
+                    m_userDataPending.insert(id.toLower().remove(QLatin1Char('-')));
+                }
+                if (!m_userDataHeld && !m_userDataRefresh.isActive())
+                    m_userDataRefresh.start();
+            });
+    connect(&m_userDataRefresh, &QTimer::timeout, this, [this] {
+        QStringList round;
+        while (!m_userDataPending.isEmpty() && round.size() < UserDataRound) {
+            const auto first = m_userDataPending.begin();
+            round.append(*first);
+            m_userDataPending.erase(first);
+        }
+        if (!round.isEmpty())
+            m_client.refreshUserData(round);
+        if (!m_userDataPending.isEmpty() && !m_userDataHeld)
+            m_userDataRefresh.start();
+    });
+    connect(&m_client, &JellyfinClient::credentialsCleared, this, [this] {
+        m_userDataPending.clear();
+        m_userDataRefresh.stop();
+    });
     m_offlineRefresh.setSingleShot(true);
     m_offlineRefresh.setInterval(1000);
     connect(&m_offlineRefresh, &QTimer::timeout, this, [this] { refreshOfflineAvailable(); });
@@ -1544,6 +1573,17 @@ ItemDetailsModel *ConnectionController::createItemDetails(const QString &itemId,
     const int channel = m_nextDetailsChannel;
     m_nextDetailsChannel += ItemDetailsModel::ChannelsPerModel;
     return new ItemDetailsModel(&m_client, itemId, channel, owner);
+}
+
+void ConnectionController::holdUserDataRefresh(bool hold)
+{
+    if (hold == m_userDataHeld)
+        return;
+    m_userDataHeld = hold;
+    if (hold)
+        m_userDataRefresh.stop();
+    else if (!m_userDataPending.isEmpty())
+        m_userDataRefresh.start();
 }
 
 void ConnectionController::reloadHome()

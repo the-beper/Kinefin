@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "settings/MpvConf.h"
+
 #include <QObject>
 #include <QRect>
 #include <QSet>
@@ -9,6 +11,7 @@
 #include <QStringList>
 #include <QVariant>
 
+#include <functional>
 #include <memory>
 
 class KConfig;
@@ -40,6 +43,18 @@ class ClientSettings final : public QObject {
     static QString pathForProfile(const QString &profileId);
 
     [[nodiscard]] QString path() const { return m_path; }
+    // `<profile data dir>/mpv.conf`, next to the settings file: options for mpv in its own format, applied under the managed settings
+    [[nodiscard]] QString mpvConfPath() const;
+    // libmpv's verdict on entries (the app installs it: this library does not link mpv); without one only the parser decides
+    using MpvConfValidator = std::function<QList<MpvConfProblem>(const QList<MpvConfEntry> &)>;
+    void setMpvConfValidator(MpvConfValidator validator)
+    {
+        m_mpvConfValidator = std::move(validator);
+    }
+    // Reads mpv.conf again: the entries that apply and what is wrong with the other lines, in line order. `exists` tells whether the file is there; one that is not a regular file or is larger than MaxMpvConfBytes is not read
+    [[nodiscard]] MpvConf readMpvConf(bool *exists = nullptr) const;
+    // For the Settings page: `path`, `exists`, `applied` (the lines that apply) and `problems`, each with its `line`, `name` and `kind` (syntax, section, notAllowed, tooLong, unknownOption or badValue)
+    Q_INVOKABLE QVariantMap mpvConfReport() const;
     // The stored value, or the default when absent or invalid. Invalid QVariant for an unknown key
     Q_INVOKABLE QVariant value(const QString &section, const QString &key) const;
     // Hidden keys can be read by the program but not changed through here; they are only hand-edited
@@ -76,6 +91,7 @@ class ClientSettings final : public QObject {
     QVariant storedValue(const QString &section, const QString &key) const;
 
     QString m_path;
+    MpvConfValidator m_mpvConfValidator;
     std::unique_ptr<KConfig>
         m_config; // null while the file is a newer format that cannot be moved aside
     QHash<QString, QVariant> m_memory; // values of a session that cannot write

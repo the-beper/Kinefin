@@ -95,6 +95,61 @@ QString ClientSettings::pathForProfile(const QString &profileId)
     return directory.isEmpty() ? QString() : directory + QStringLiteral("/kinefin.conf");
 }
 
+QString ClientSettings::mpvConfPath() const
+{
+    return m_path.isEmpty() ? QString()
+                            : QFileInfo(m_path).absolutePath() + QStringLiteral("/mpv.conf");
+}
+
+MpvConf ClientSettings::readMpvConf(bool *exists) const
+{
+    const QFileInfo info(mpvConfPath());
+    if (exists)
+        *exists = info.exists();
+    if (m_path.isEmpty() || !info.exists())
+        return {};
+    if (!info.isFile())
+        return {{}, {{0, QString(), MpvConfProblem::File}}};
+    if (info.size() > MaxMpvConfBytes)
+        return {{}, {{0, QString(), MpvConfProblem::TooLong}}};
+    QFile file(info.filePath());
+    if (!file.open(QIODevice::ReadOnly))
+        return {{}, {{0, QString(), MpvConfProblem::File}}};
+    MpvConf conf = parseMpvConf(QString::fromUtf8(file.read(MaxMpvConfBytes)));
+    if (m_mpvConfValidator)
+        conf.problems.append(m_mpvConfValidator(conf.entries));
+    // A line that mpv refuses is not applied either
+    const QList<MpvConfProblem> problems = conf.problems;
+    conf.entries.removeIf([&problems](const MpvConfEntry &entry) {
+        return std::any_of(
+            problems.cbegin(), problems.cend(),
+            [&entry](const MpvConfProblem &problem) { return problem.line == entry.line; });
+    });
+    std::stable_sort(
+        conf.problems.begin(), conf.problems.end(),
+        [](const MpvConfProblem &a, const MpvConfProblem &b) { return a.line < b.line; });
+    return conf;
+}
+
+QVariantMap ClientSettings::mpvConfReport() const
+{
+    static const QStringList kinds{QStringLiteral("syntax"),        QStringLiteral("section"),
+                                   QStringLiteral("notAllowed"),    QStringLiteral("tooLong"),
+                                   QStringLiteral("unknownOption"), QStringLiteral("badValue"),
+                                   QStringLiteral("file")};
+    bool exists = false;
+    const MpvConf conf = readMpvConf(&exists);
+    QVariantList problems;
+    for (const MpvConfProblem &problem : conf.problems)
+        problems.append(QVariantMap{{QStringLiteral("line"), problem.line},
+                                    {QStringLiteral("name"), problem.name},
+                                    {QStringLiteral("kind"), kinds.value(int(problem.kind))}});
+    return {{QStringLiteral("path"), mpvConfPath()},
+            {QStringLiteral("exists"), exists},
+            {QStringLiteral("applied"), int(conf.entries.size())},
+            {QStringLiteral("problems"), problems}};
+}
+
 QVariant ClientSettings::storedValue(const QString &section, const QString &key) const
 {
     const SettingDefinition *definition = findSetting(section, key);

@@ -48,6 +48,8 @@ QVariant episodeValue(const JellyfinClient *client, const ItemSummary &item, boo
         return item.playedPercentage;
     case SeasonEpisodesModel::FavoriteRole:
         return item.favorite;
+    case SeasonEpisodesModel::PositionTicksRole:
+        return item.positionTicks;
     default:
         return {};
     }
@@ -106,6 +108,7 @@ QHash<int, QByteArray> SeasonEpisodesModel::roleNameTable()
             {PlayedRole, "played"},
             {PlayedPercentageRole, "playedPercentage"},
             {FavoriteRole, "favorite"},
+            {PositionTicksRole, "positionTicks"},
             {LoadedRole, "loaded"}};
 }
 

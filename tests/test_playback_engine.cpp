@@ -6,6 +6,7 @@
 
 #include "api/JellyfinClient.h"
 #include "models/PlayQueue.h"
+#include "player/MpvConfValidator.h"
 #include "player/PlaybackEngine.h"
 #include "player/PlaybackSession.h"
 #include "player/PlayerController.h"
@@ -14,7 +15,9 @@
 
 #include <MpvController>
 
+#include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QScreen>
 #include <QSignalSpy>
 #include <QTemporaryDir>
@@ -440,6 +443,39 @@ class TestPlaybackEngine : public QObject {
         customMpv.apply();
         QVERIFY(!verify());
         QCOMPARE(bundle(), QStringLiteral("/x.pem"));
+    }
+
+    // The profile's mpv.conf is the lowest layer: what the settings manage wins over it, the Manual MPV Configuration wins over both, an option nothing else sets is applied, and a line mpv or the parser refuses is not
+    void theProfilesMpvConfIsAppliedUnderTheManagedSettings()
+    {
+        JellyfinClient client;
+        PlaybackSession session;
+        PlaybackEngine engine(client, session);
+        QVERIFY(engine.init({QStringLiteral("vo=null"), QStringLiteral("ao=null")}));
+        QVERIFY(QDir(dir.path()).mkpath(QStringLiteral("profile-conf")));
+        QFile conf(dir.filePath(QStringLiteral("profile-conf/mpv.conf")));
+        QVERIFY(conf.open(QIODevice::WriteOnly));
+        conf.write("# a profile of its own\n"
+                   "volume-max=130\n"
+                   "tls-verify=no\n"
+                   "no-such-option=1\n"
+                   "volume-max=oops\n"
+                   "script=/tmp/x.lua\n");
+        conf.close();
+        ClientSettings settings(settingsFile(dir, QStringLiteral("profile-conf/kinefin.conf"),
+                                             "[other]\nother_conf=audio-pitch-correction=no\n"));
+        settings.setMpvConfValidator(&Kinefin::validateMpvConf);
+        PlayerSettings mpv(settings, engine);
+        mpv.apply();
+        QCOMPARE(propertyText(engine.mpvProperty(QStringLiteral("volume-max"))),
+                 QStringLiteral("130"));
+        // The managed tls-verify (the default is on) beats the file
+        QCOMPARE(propertyText(engine.mpvProperty(QStringLiteral("tls-verify"))),
+                 QStringLiteral("true"));
+        QCOMPARE(propertyText(engine.mpvProperty(QStringLiteral("audio-pitch-correction"))),
+                 QStringLiteral("false"));
+        QVERIFY(!QFileInfo::exists(dir.filePath(QStringLiteral("x.lua"))));
+        QCOMPARE(settings.mpvConfReport().value(QStringLiteral("problems")).toList().size(), 3);
     }
 
     void nightModeAddsTheFilterBeforeTheAc3Encoder()

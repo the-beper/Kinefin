@@ -173,7 +173,7 @@ void DownloadManager::setSourceResolver(SourceResolver resolver)
     pump();
 }
 
-bool DownloadManager::enqueue(const DownloadRecord &record)
+bool DownloadManager::enqueue(const DownloadRecord &record, bool batch)
 {
     DownloadRecord stored = record;
     stored.container = downloadContainer(record.container);
@@ -184,7 +184,7 @@ bool DownloadManager::enqueue(const DownloadRecord &record)
     stored.updatedAt = now();
     if (stored.addedAt <= 0)
         stored.addedAt = stored.updatedAt;
-    if (!m_store.upsert(stored, true))
+    if (!m_store.upsert(stored, !batch))
         return false;
     ++m_generation[stored.key()];
     const std::optional<DownloadRecord> saved =
@@ -192,7 +192,8 @@ bool DownloadManager::enqueue(const DownloadRecord &record)
     if (saved)
         Q_EMIT recordChanged(*saved);
     Q_EMIT recordsChanged();
-    pump();
+    if (!batch)
+        pump();
     return true;
 }
 

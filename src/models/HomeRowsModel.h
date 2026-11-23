@@ -7,6 +7,7 @@
 
 #include <QAbstractListModel>
 #include <QString>
+#include <QTimer>
 #include <QVariantList>
 
 #include <vector>
@@ -31,6 +32,7 @@ class HomeRowsModel final : public QAbstractListModel {
         CountRole,
         ShownRole
     };
+    Q_ENUM(Role)
 
     // How many items a row asks for
     static constexpr int ItemsPerRow = 24;
@@ -81,5 +83,7 @@ class HomeRowsModel final : public QAbstractListModel {
     bool m_unplayedOnly = false;
     bool m_favorites = false;
     std::vector<Row> m_rows;
+    // One reload for the burst of played and progress signals a refresh of user data causes
+    QTimer m_reloadSoon;
 };
 } // namespace Kinefin

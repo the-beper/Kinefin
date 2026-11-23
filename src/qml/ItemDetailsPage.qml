@@ -107,14 +107,40 @@ Kirigami.ScrollablePage {
         return "";
     }
 
+    // A series or a season has no stream of its own: Play starts its first episode and Continue the one to go on with (a series' Next Up, a season's first unplayed), each played alone like an episode opened by itself
+    readonly property bool playsEpisodes: childModel.kind === ItemChildrenModel.Series || childModel.kind === ItemChildrenModel.Season
+    // The buttons wait for the answers of both listings, so their text and target do not change after they show; a listing that failed leaves its episode out
+    readonly property bool episodesReady: playsEpisodes && childModel.playTargetsReady
+    // Play starts the first episode; when its listing failed the one to go on with stands in
+    readonly property var startEpisode: !episodesReady ? ({}) : (childModel.hasFirstEpisode ? childModel.firstEpisode : nextUp)
+    // Something was watched: the episode to go on with is in progress, or is not the first one
+    readonly property bool continueOffered: episodesReady && childModel.hasNextUp && ((nextUp.positionTicks ?? 0) > 0 || (childModel.hasFirstEpisode && nextUp.itemId !== childModel.firstEpisode.itemId))
+
+    // What a hero button of a series or a season plays, for a screen reader: the button itself says Play or Continue
+    function episodeDescription(episode) {
+        if (!playsEpisodes || !episode?.itemId)
+            return "";
+        const label = episode.seasonNumber > 0 && episode.episodeNumber > 0 ? EpisodeLabel.label(episode.seasonNumber, episode.episodeNumber) + " " : "";
+        return label + (episode.name ?? "");
+    }
+    readonly property string playDescription: episodeDescription(continueOffered ? nextUp : startEpisode)
+    readonly property string startDescription: episodeDescription(startEpisode)
+
     // Play is the hero's button, the others are page actions
     readonly property Kirigami.Action playAction: Kirigami.Action {
         objectName: "playAction"
-        text: page.details.canResume ? i18n("Resume") : i18n("Play")
+        text: page.continueOffered ? ((page.nextUp.positionTicks ?? 0) > 0 ? i18n("Resume") : i18nc("@action:button", "Continue")) : (page.details.canResume ? i18n("Resume") : i18n("Play"))
         icon.name: "media-playback-start"
-        visible: page.details.playable
+        visible: page.details.playable || (page.playsEpisodes && !!page.startEpisode.itemId)
         enabled: page.details.status === ItemDetailsModel.Ready && !!page.Window.window?.player
-        onTriggered: page.Window.window.playItemWithStreams(page.details.itemId, page.details.canResume ? page.details.resumePositionTicks : 0, page.audioStreamIndex, page.subtitleStreamIndex)
+        onTriggered: {
+            if (page.playsEpisodes) {
+                const episode = page.continueOffered ? page.nextUp : page.startEpisode;
+                page.Window.window.playItemWithStreams(episode.itemId, page.continueOffered ? (episode.positionTicks ?? 0) : 0, page.audioStreamIndex, page.subtitleStreamIndex);
+            } else {
+                page.Window.window.playItemWithStreams(page.details.itemId, page.details.canResume ? page.details.resumePositionTicks : 0, page.audioStreamIndex, page.subtitleStreamIndex);
+            }
+        }
     }
     readonly property Kirigami.Action playOnAction: Kirigami.Action {
         objectName: "playOnAction"
@@ -126,14 +152,14 @@ Kirigami.ScrollablePage {
         tooltip: page.Window.window?.groupRouting ? i18nc("@info:tooltip", "Not available while following a SyncPlay group") : ""
         onTriggered: page.Window.window.playOn(page.details.itemId, page.details.canResume ? page.details.resumePositionTicks : 0)
     }
-    // Restart: a movie or an episode in progress starts over from the first second
+    // Restart: a movie or an episode in progress starts over from the first second, a series or a season that was watched from its first episode
     readonly property Kirigami.Action playFromBeginningAction: Kirigami.Action {
         objectName: "playFromBeginningAction"
         text: i18n("Play from Beginning")
         icon.name: "media-skip-backward"
-        visible: page.details.status === ItemDetailsModel.Ready && page.details.playable && page.details.canResume
+        visible: page.details.status === ItemDetailsModel.Ready && ((page.details.playable && page.details.canResume) || page.continueOffered)
         enabled: page.playAction.enabled
-        onTriggered: page.Window.window.playItemWithStreams(page.details.itemId, 0, page.audioStreamIndex, page.subtitleStreamIndex)
+        onTriggered: page.Window.window.playItemWithStreams(page.playsEpisodes ? page.startEpisode.itemId : page.details.itemId, 0, page.audioStreamIndex, page.subtitleStreamIndex)
     }
     // The first remote trailer the server offers, in the browser: only https URLs are kept by the parser
     readonly property Kirigami.Action trailerAction: Kirigami.Action {
@@ -294,13 +320,39 @@ Kirigami.ScrollablePage {
                                       ? page.connection.downloads.seriesRule(ruleSeriesId) : ({})
     readonly property Kirigami.Action automaticDownloadsAction: Kirigami.Action {
         objectName: "automaticDownloadsAction"
-        displayHint: Kirigami.DisplayHint.AlwaysHide
         text: page.seriesRule.kind ? i18n("Edit Automatic Downloads…") : i18n("Automatic Downloads…")
         icon.name: "download-later-symbolic"
         visible: page.details.status === ItemDetailsModel.Ready
                  && (page.details.type === "Series" || page.details.type === "Season")
                  && page.connection.downloads.canDownload
         onTriggered: ruleDialog.open()
+    }
+    // A series or a season is downloaded by its episodes: the top bar has one action with a menu, as the movie page has Download
+    readonly property Kirigami.Action downloadAllAction: Kirigami.Action {
+        objectName: "downloadAllAction"
+        text: i18n("Download All…")
+        icon.name: "download-symbolic"
+        onTriggered: downloadAllDialog.open()
+    }
+    readonly property Kirigami.Action downloadMenuAction: Kirigami.Action {
+        objectName: "downloadMenuAction"
+        displayHint: Kirigami.DisplayHint.KeepVisible
+        text: i18n("Download")
+        icon.name: "download-symbolic"
+        visible: page.automaticDownloadsAction.visible
+        children: [page.downloadAllAction, page.automaticDownloadsAction]
+    }
+    DownloadAllDialog {
+        id: downloadAllDialog
+        downloads: page.connection.downloads
+        containerId: page.details.itemId
+        series: page.details.type === "Series"
+        onQueued: (count, expected) => {
+            if (count < expected)
+                page.Window.window.showPassiveNotification(i18n("Only %1 of %2 downloads could be queued", count, expected), "long", i18n("Show Downloads"), () => page.Window.window.openDownloads());
+            else if (count > 0)
+                page.Window.window.showPassiveNotification(i18np("%1 download queued", "%1 downloads queued", count), "long", i18n("Show Downloads"), () => page.Window.window.openDownloads());
+        }
     }
     readonly property Kirigami.Action stopDownloadsAction: Kirigami.Action {
         objectName: "stopDownloadsAction"
@@ -341,7 +393,7 @@ Kirigami.ScrollablePage {
         visible: page.editMetadataAction.visible || page.identifyAction.visible || page.editImagesAction.visible || page.editSubtitlesAction.visible || page.refreshMetadataAction.visible
         children: [page.editMetadataAction, page.identifyAction, page.editImagesAction, page.editSubtitlesAction, page.refreshMetadataAction]
     }
-    readonly property bool overflowHasEntries: trailerAction.visible || playNextAction.visible || addToQueueAction.visible || automaticDownloadsAction.visible || stopDownloadsAction.visible || addToPlaylistAction.visible || addToCollectionAction.visible || serverEditMenuAction.visible || copyStreamUrlAction.visible
+    readonly property bool overflowHasEntries: trailerAction.visible || playNextAction.visible || addToQueueAction.visible || stopDownloadsAction.visible || addToPlaylistAction.visible || addToCollectionAction.visible || serverEditMenuAction.visible || copyStreamUrlAction.visible
     readonly property Kirigami.Action separatorDelete: Kirigami.Action {
         objectName: "overflowSeparatorDelete"
         separator: true
@@ -394,8 +446,10 @@ Kirigami.ScrollablePage {
         if (!playFocusPending || !isCurrentPage)
             return;
         const now = page.Window.activeFocusItem;
-        // The user moved the focus elsewhere while the details loaded: leave it there
+        // The user moved the focus elsewhere while the details loaded, or down the episode list: leave it there
         if (now && now !== page && now !== list && now !== page.Window.window)
+            return;
+        if (now === list && list.currentIndex > 0)
             return;
         focusPlay();
     }
@@ -406,6 +460,7 @@ Kirigami.ScrollablePage {
     Connections {
         target: page.playAction
         function onEnabledChanged() { Qt.callLater(page.focusPendingPlay); }
+        function onVisibleChanged() { Qt.callLater(page.focusPendingPlay); }
     }
 
     function runtimeText(minutes) {
@@ -498,7 +553,7 @@ Kirigami.ScrollablePage {
         // A rewatch stopped halfway is in progress, not watched, as on its card
         text: page.details.played && !page.details.canResume ? i18n("Mark as Unwatched") : i18n("Mark as Watched")
         icon.name: page.details.played && !page.details.canResume ? "view-hidden" : "checkmark-symbolic"
-        visible: page.details.status === ItemDetailsModel.Ready && page.details.playable
+        visible: page.details.status === ItemDetailsModel.Ready && page.details.canMarkPlayed
         enabled: !page.details.playedBusy
         onTriggered: page.details.togglePlayed()
     }
@@ -516,7 +571,7 @@ Kirigami.ScrollablePage {
         }
     }
 
-    actions: [page.playOnAction, page.downloadAction, page.favoriteAction, page.togglePlayedAction, page.mediaInfoAction, page.trailerAction, page.playNextAction, page.addToQueueAction, page.addToPlaylistAction, page.addToCollectionAction, page.automaticDownloadsAction, page.stopDownloadsAction, page.serverEditMenuAction, page.copyStreamUrlAction, page.separatorDelete, page.deleteMediaAction]
+    actions: [page.playOnAction, page.downloadAction, page.downloadMenuAction, page.favoriteAction, page.togglePlayedAction, page.mediaInfoAction, page.trailerAction, page.playNextAction, page.addToQueueAction, page.addToPlaylistAction, page.addToCollectionAction, page.stopDownloadsAction, page.serverEditMenuAction, page.copyStreamUrlAction, page.separatorDelete, page.deleteMediaAction]
     // The row of the page carries the way back and the actions, as on the Movies and Shows tabs; the hero names the item
     globalToolBarStyle: Kirigami.ApplicationHeaderStyle.None
     // Without Kirigami's title row the page names itself to a screen reader
@@ -1255,6 +1310,7 @@ Kirigami.ScrollablePage {
                                     objectName: "detailsPlayFromBeginning"
                                     visible: !hero.narrow && command.visible
                                     command: page.playFromBeginningAction
+                                    Accessible.description: page.startDescription
                                 }
 
                                 ActionButton {
@@ -1262,6 +1318,7 @@ Kirigami.ScrollablePage {
                                     objectName: "detailsPlay"
                                     visible: !hero.narrow && command.visible
                                     command: page.playAction
+                                    Accessible.description: page.playDescription
                                     highlighted: true
                                     Component.onCompleted: page.widePlayButton = playWide
                                 }
@@ -1281,6 +1338,7 @@ Kirigami.ScrollablePage {
                             Layout.preferredWidth: 0
                             visible: command.visible
                             command: page.playFromBeginningAction
+                            Accessible.description: page.startDescription
                         }
 
                         ActionButton {
@@ -1290,6 +1348,7 @@ Kirigami.ScrollablePage {
                             Layout.preferredWidth: 0
                             visible: command.visible
                             command: page.playAction
+                            Accessible.description: page.playDescription
                             highlighted: true
                             Component.onCompleted: page.narrowPlayButton = playNarrow
                         }

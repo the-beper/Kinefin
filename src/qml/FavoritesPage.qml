@@ -151,7 +151,7 @@ Kirigami.ScrollablePage {
                 width: parent.width - Kirigami.Units.gridUnit * 4
                 visible: page.loading
                 text: i18n("Loading favorites…")
-                explanation: page.favorites.libraryCount > 0 ? i18np("%1 favorite found, %2 of %3 libraries read", "%1 favorites found, %2 of %3 libraries read", page.favorites.loadedCount, page.favorites.librariesDone, page.favorites.libraryCount) : ""
+                explanation: page.favorites.libraryCount > 0 ? i18nc("@info the favorites found, then how many libraries were read", "%1, %2", i18np("%1 favorite found", "%1 favorites found", page.favorites.loadedCount), i18np("%2 of %1 library read", "%2 of %1 libraries read", page.favorites.libraryCount, page.favorites.librariesDone)) : ""
                 determinate: page.favorites.libraryCount > 0
                 progressBar.value: page.favorites.libraryCount > 0 ? 100 * page.favorites.librariesDone / page.favorites.libraryCount : 0
             }

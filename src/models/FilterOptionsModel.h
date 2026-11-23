@@ -32,6 +32,7 @@ class FilterOptionsModel final : public QAbstractListModel {
     enum Status { Idle, Loading, Ready, Failed, Unavailable };
     Q_ENUM(Status)
     enum Role { GenreIdRole = Qt::UserRole + 1, NameRole };
+    Q_ENUM(Role)
 
     static constexpr int MaxOptions = 500;
     static constexpr int MaxNameLength = 128;

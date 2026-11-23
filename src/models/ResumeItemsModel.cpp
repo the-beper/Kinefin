@@ -14,10 +14,14 @@ ResumeItemsModel::ResumeItemsModel(JellyfinClient *client, QObject *parent)
                 &ResumeItemsModel::onResumeReady);
         connect(m_client, &JellyfinClient::listingFailed, this, &ResumeItemsModel::onListingFailed);
         // A manual watched-state edit can remove an entry from Continue Watching.
-        connect(m_client, &JellyfinClient::itemPlayedUpdated, this, [this] {
+        m_restartSoon.setSingleShot(true);
+        m_restartSoon.setInterval(250);
+        connect(&m_restartSoon, &QTimer::timeout, this, [this] {
             if (m_open)
                 restartPaging();
         });
+        connect(m_client, &JellyfinClient::itemPlayedUpdated, this,
+                [this] { m_restartSoon.start(); });
         connect(m_client, &JellyfinClient::itemFavoriteUpdated, this,
                 [this](const QString &id, bool favorite) {
                     applyFavorite(id, favorite, FavoriteRole);

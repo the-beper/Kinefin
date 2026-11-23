@@ -27,7 +27,7 @@ In the tables, the Key column is the key as stored in the file and the Default c
 | Gamepad (Experimental) (Application) | `sdlEnabled` | `true` | On or off | Turns SDL3 gamepad input on or off. Off, Kinefin never initialises SDL and never opens a `/dev/input` device. |
 | Enable Input Repeat (Application) | `enableInputRepeat` | `true` | On or off | Repeats an action while you hold a gamepad direction or a keyboard key. Text fields keep their own key repeat, and the toggles in the player overlay never repeat. |
 | Ignore Certificate Errors (Application) | `ignoreSSLErrors` | `false` | On or off | Accepts invalid TLS certificates for all traffic to the Jellyfin server (API, WebSocket, images, mpv), never for the update check or the metadata providers' covers. Off, a certificate error stops the connection with a message naming this switch. A warning shows on the General page while it is on. The `--ignore-certificate-errors` flag forces it on for a run. |
-| Auto-Detect Certificate Bundle (Application) | `autodetectCertBundle` | `true` | On or off | Points mpv at the first readable system certificate bundle. Off, mpv and FFmpeg use their own defaults. A `tls-ca-file` line in `mpv.conf` or in Manual MPV Configuration overrides it. |
+| Auto-Detect Certificate Bundle (Application) | `autodetectCertBundle` | `true` | On or off | Points mpv at the first readable system certificate bundle. Off, mpv and FFmpeg use their own defaults. A `tls-ca-file` line in Manual MPV Configuration overrides it; the same line in `mpv.conf` does not, since the file is the lowest layer. |
 
 ## Audio (`audio`)
 
@@ -110,13 +110,23 @@ Every tab switch applies at once. Turning a tab off returns you to the main tab,
 | Write Kodi Metadata Files | `kodiSidecars` | `false` | On or off | Writes a Kodi-compatible `.nfo` file and `poster.jpg` next to an exported file. |
 | Export When Download Completes | `exportOnCompletion` | `false` | On or off | Copies each finished download to the host folder you chose, through the document portal. The control stays disabled with an explanation while no durable portal grant exists. |
 
-The Downloads category is hidden when the server does not allow you to download media.
+The Downloads category is hidden when the server does not allow you to download media. Under its cards, **Automatic Downloads** opens the page that lists the automatic download rules of your series, and says how many are tracked.
 
 ## mpv Configuration (`other`)
 
 | Setting | Key | Default | Values | What it does |
 | --- | --- | --- | --- | --- |
 | Manual MPV Configuration | `other_conf` | `""` | `key=value` lines in `mpv.conf` syntax | Passes the lines to mpv after every managed setting, so they win over the settings above. Removing a line restores the default only after a restart. |
+
+Besides that setting, the profile's own `mpv.conf` is read from the profile folder (`~/.local/share/kinefin/profiles/<profile>/mpv.conf`, under `~/.var/app/io.github.the_beper.Kinefin/` in the Flatpak). The category's **mpv.conf file** card says whether the file is there, how many of its lines apply and what is wrong with the others, with a **Check Again** button.
+
+- The file is applied first, then the settings above, then Manual MPV Configuration: a line for an option that a setting manages is overridden by it.
+- A line is `option=value`, `option` alone (a flag, set to `yes`), `no-option` (set to `no`), a `#` comment, a blank line, and a value may be in single or double quotes.
+- A `[profile]` section is reported, and the lines under it are left out.
+- `script`, `scripts`, `load-scripts`, `include`, `input-conf`, `config`, `config-dir`, `profile`, `input-ipc-server`, `input-ipc-client`, `ytdl`, `ytdl-format`, `ytdl-raw-options` and `http-*` are refused, as are the options and values that mpv itself does not accept. That list guards against the obvious and is not a sandbox: the file is yours, and mpv runs the other lines as written. A refused line is reported with its line number and skipped, and the others apply.
+- The limits are 64 KiB, 1000 lines, 64 characters for an option name and 4096 for a value.
+
+The same rules apply to Manual MPV Configuration. Changes take effect at the next playback; removing a line restores the default only after a restart.
 
 ## Settings without a control
 

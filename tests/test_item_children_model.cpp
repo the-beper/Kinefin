@@ -43,6 +43,28 @@ QByteArray envelope(const QJsonArray &items, int total = -1)
         .toJson(QJsonDocument::Compact);
 }
 
+QJsonObject episodeJson(int number, bool played = false, qint64 position = 0, bool missing = false)
+{
+    QJsonObject episode{
+        {QStringLiteral("Id"), QStringLiteral("%1").arg(number, 32, 16, QLatin1Char('d'))},
+        {QStringLiteral("Name"), QStringLiteral("Episode %1").arg(number)},
+        {QStringLiteral("Type"), QStringLiteral("Episode")},
+        {QStringLiteral("SeriesId"), kSeries},
+        {QStringLiteral("ParentIndexNumber"), 1},
+        {QStringLiteral("IndexNumber"), number},
+        {QStringLiteral("UserData"),
+         QJsonObject{{QStringLiteral("Played"), played},
+                     {QStringLiteral("PlaybackPositionTicks"), position}}}};
+    if (missing)
+        episode.insert(QStringLiteral("LocationType"), QStringLiteral("Virtual"));
+    return episode;
+}
+
+QString episodeId(int number)
+{
+    return QStringLiteral("%1").arg(number, 32, 16, QLatin1Char('d'));
+}
+
 struct Fixture {
     Fixture() { ok = server.listen() && login(client, server); }
 
@@ -111,6 +133,169 @@ class TestItemChildrenModel : public QObject {
                 ->data(f.children.seasons()->index(0), Kinefin::ItemRowModel::UnplayedCountRole)
                 .toInt(),
             2);
+    }
+
+    void aSeriesStartsFromTheFirstEpisodeOfItsFirstRegularSeason()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        // The Specials come first in the list the server sends
+        f.server.listingRawBody.insert(QStringLiteral("Episodes"),
+                                       envelope({episodeJson(1, true), episodeJson(2)}, 12));
+        f.server.listingRawBody.insert(QStringLiteral("NextUp"),
+                                       envelope({episodeJson(2, false, 5'000'000'000)}));
+        const QJsonArray seasons = QJsonDocument::fromJson(fixture(QStringLiteral("shows_seasons")))
+                                       .object()
+                                       .value(QStringLiteral("Items"))
+                                       .toArray();
+        f.server.listingRawBody.insert(QStringLiteral("Seasons"),
+                                       envelope({seasons.at(2), seasons.at(1), seasons.at(0)}));
+        f.children.load(detailsOf(QStringLiteral("series_item")));
+        // The buttons wait for every answer
+        QVERIFY(!f.children.playTargetsReady());
+        QTRY_VERIFY(f.children.hasFirstEpisode());
+        QTRY_VERIFY(f.children.playTargetsReady());
+        QVERIFY(f.children.hasNextUp());
+        QCOMPARE(f.children.firstEpisode().value(QStringLiteral("itemId")).toString(),
+                 episodeId(1));
+        QCOMPARE(f.children.firstEpisode().value(QStringLiteral("seasonNumber")).toInt(), 1);
+        // A few episodes of Season 1 (the first with a file counts), never the Specials or the whole list
+        const QUrlQuery first = FakeJellyfin::capturedListingQuery(
+            f.server.listingRoutes.value(QStringLiteral("Episodes")).constFirst());
+        QCOMPARE(first.queryItemValue(QStringLiteral("seasonId")),
+                 QStringLiteral("22aa33bb44cc55dd66ee77ff8899aa00"));
+        QCOMPARE(first.queryItemValue(QStringLiteral("startIndex")), QStringLiteral("0"));
+        QCOMPARE(first.queryItemValue(QStringLiteral("limit")), QStringLiteral("10"));
+        // The Next Up entry carries the saved position for the Resume button
+        QCOMPARE(f.children.nextUp().value(QStringLiteral("positionTicks")).toLongLong(),
+                 qint64(5'000'000'000));
+    }
+
+    void aSeriesWithOnlySpecialsStartsFromThem()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        const QJsonArray seasons = QJsonDocument::fromJson(fixture(QStringLiteral("shows_seasons")))
+                                       .object()
+                                       .value(QStringLiteral("Items"))
+                                       .toArray();
+        f.server.listingRawBody.insert(QStringLiteral("Seasons"), envelope({seasons.at(2)}));
+        f.server.listingRawBody.insert(QStringLiteral("Episodes"), envelope({episodeJson(7)}));
+        f.children.load(detailsOf(QStringLiteral("series_item")));
+        QTRY_VERIFY(f.children.hasFirstEpisode());
+        const QUrlQuery first = FakeJellyfin::capturedListingQuery(
+            f.server.listingRoutes.value(QStringLiteral("Episodes")).constFirst());
+        QCOMPARE(first.queryItemValue(QStringLiteral("seasonId")),
+                 QStringLiteral("33bb44cc55dd66ee77ff8899aa001122"));
+    }
+
+    void aSeriesWithoutSeasonsOrWithAMissingFirstEpisodeHasNone()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        f.server.listingRawBody.insert(QStringLiteral("Seasons"), envelope({}));
+        f.children.load(detailsOf(QStringLiteral("series_item")));
+        QTRY_COMPARE(f.children.seasonsStatus(), ItemChildrenModel::Ready);
+        QTRY_VERIFY(f.children.hasNextUp());
+        QVERIFY(!f.children.hasFirstEpisode());
+        // Nothing to ask for is an answer too
+        QTRY_VERIFY(f.children.playTargetsReady());
+        QVERIFY(!f.server.listingRoutes.contains(QStringLiteral("Episodes")));
+        // An episode that has no file cannot play: the first one that has takes its place, and none leaves the series without
+        f.server.listingRawBody.insert(QStringLiteral("Seasons"),
+                                       fixture(QStringLiteral("shows_seasons")));
+        f.server.listingRawBody.insert(QStringLiteral("Episodes"),
+                                       envelope({episodeJson(1, false, 0, true),
+                                                 episodeJson(2, false, 0, true), episodeJson(3)}));
+        QSignalSpy answered(&f.client, &Kinefin::JellyfinClient::episodesReady);
+        f.children.load(detailsOf(QStringLiteral("series_item")));
+        QTRY_COMPARE(answered.size(), 1);
+        QTRY_VERIFY(f.children.hasFirstEpisode());
+        QCOMPARE(f.children.firstEpisode().value(QStringLiteral("itemId")).toString(),
+                 episodeId(3));
+        f.server.listingRawBody.insert(QStringLiteral("Episodes"),
+                                       envelope({episodeJson(1, false, 0, true)}));
+        f.children.load(detailsOf(QStringLiteral("series_item")));
+        QTRY_COMPARE(answered.size(), 2);
+        QTRY_VERIFY(!f.children.hasFirstEpisode());
+        QVERIFY(f.children.playTargetsReady());
+    }
+
+    void aSeasonAsksForItsFirstEpisodeAndItsFirstUnplayedOne()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        f.server.generatedEpisodeTotal = 12;
+        f.server.itemsResponder = [](const QByteArray &route) {
+            const bool unplayed = route.contains("filters=IsUnplayed");
+            // The first unplayed one has a saved position; a missing episode before it is skipped
+            const QJsonArray items = unplayed
+                                         ? QJsonArray{episodeJson(4, false, 0, true),
+                                                      episodeJson(5, false, 9'000'000'000)}
+                                         : QJsonArray{episodeJson(1, true), episodeJson(2, true)};
+            return std::pair<int, QByteArray>{200, envelope(items)};
+        };
+        f.children.load(detailsOf(QStringLiteral("season_item")));
+        QVERIFY(!f.children.playTargetsReady());
+        QTRY_VERIFY(f.children.hasNextUp());
+        QVERIFY(f.children.playTargetsReady());
+        QVERIFY(f.children.hasFirstEpisode());
+        QCOMPARE(f.children.firstEpisode().value(QStringLiteral("itemId")).toString(),
+                 episodeId(1));
+        QCOMPARE(f.children.nextUp().value(QStringLiteral("itemId")).toString(), episodeId(5));
+        QCOMPARE(f.children.nextUp().value(QStringLiteral("positionTicks")).toLongLong(),
+                 qint64(9'000'000'000));
+        QCOMPARE(f.server.itemsRoutes.size(), 2);
+        for (const QByteArray &route : f.server.itemsRoutes) {
+            const QUrlQuery query = FakeJellyfin::capturedListingQuery(route);
+            QCOMPARE(query.queryItemValue(QStringLiteral("parentId")), kSeason);
+            QCOMPARE(query.queryItemValue(QStringLiteral("includeItemTypes")),
+                     QStringLiteral("Episode"));
+            QCOMPARE(query.queryItemValue(QStringLiteral("sortBy")), QStringLiteral("IndexNumber"));
+            QVERIFY(!query.hasQueryItem(QStringLiteral("recursive")));
+        }
+        QVERIFY(!f.server.itemsRoutes.constFirst().contains("filters="));
+        // Another item drops the answers, a reload of the same one keeps them until it answers
+        f.children.load(detailsOf(QStringLiteral("season_item")));
+        QVERIFY(f.children.playTargetsReady());
+        f.children.clear();
+        QVERIFY(!f.children.playTargetsReady());
+    }
+
+    void aSeasonWithNothingUnplayedHasNoEpisodeToGoOnWith()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        f.server.generatedEpisodeTotal = 3;
+        f.server.itemsResponder = [](const QByteArray &route) {
+            return std::pair<int, QByteArray>{200,
+                                              envelope(route.contains("filters=IsUnplayed")
+                                                           ? QJsonArray{}
+                                                           : QJsonArray{episodeJson(1, true)})};
+        };
+        f.children.load(detailsOf(QStringLiteral("season_item")));
+        QTRY_VERIFY(f.children.hasFirstEpisode());
+        QTRY_COMPARE(f.server.itemsRoutes.size(), 2);
+        QVERIFY(!f.children.hasNextUp());
+    }
+
+    void theSeasonTargetsFailQuietlyAndAskOnce()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        f.server.generatedEpisodeTotal = 3;
+        f.server.itemsResponder = [](const QByteArray &) {
+            return std::pair<int, QByteArray>{500, QByteArray()};
+        };
+        f.children.load(detailsOf(QStringLiteral("season_item")));
+        QTRY_COMPARE(f.server.itemsRoutes.size(), 2);
+        // The first failure still asks for the one to go on with, whose failure ends it
+        QTRY_VERIFY(f.children.playTargetsReady());
+        QTest::qWait(100);
+        QCOMPARE(f.server.itemsRoutes.size(), 2);
+        QVERIFY(!f.children.hasFirstEpisode());
+        QVERIFY(!f.children.hasNextUp());
+        QTRY_COMPARE(f.children.episodes()->status(), Kinefin::PagedItemsModel::Ready);
     }
 
     void nothingNextHidesTheEntry()

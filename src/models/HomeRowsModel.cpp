@@ -36,11 +36,15 @@ HomeRowsModel::HomeRowsModel(JellyfinClient *client, QObject *parent)
             [this](const QString &family, int, const QString &, int channel) {
                 fail(family, channel);
             });
-    // Continue Watching, Next Up and Recently Added depend on the played flag.
-    connect(m_client, &JellyfinClient::itemPlayedUpdated, this, [this] {
+    // Continue Watching, Next Up and Recently Added depend on the played flag, and Continue Watching on the position too; a refresh of user data reports many items in one turn, which make one reload
+    m_reloadSoon.setSingleShot(true);
+    m_reloadSoon.setInterval(250);
+    connect(&m_reloadSoon, &QTimer::timeout, this, [this] {
         if (!m_rows.empty())
             reload();
     });
+    connect(m_client, &JellyfinClient::itemPlayedUpdated, this, [this] { m_reloadSoon.start(); });
+    connect(m_client, &JellyfinClient::itemProgressUpdated, this, [this] { m_reloadSoon.start(); });
     // A 401, a disconnect, a server switch and a sign-out all end with this signal
     connect(m_client, &JellyfinClient::credentialsCleared, this, [this] { clear(); });
 }

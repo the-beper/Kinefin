@@ -202,7 +202,18 @@ ItemDetailsModel::ItemDetailsModel(JellyfinClient *client, const QString &itemId
                         m_details.resumePositionTicks = 0;
                         if (playable())
                             m_details.playedPercentage = played ? 100 : 0;
+                        // The episodes of a series or a season changed under it: what hangs below it (seasons, the episode to go on with, the episode list) is read again, and after this model's own write its unplayed count is known only when none is left
+                        const bool container = !playable();
+                        if (container && m_playedBusy)
+                            m_details.unplayedCount = played ? 0 : -1;
                         Q_EMIT detailsChanged();
+                        // After this model's own write the episodes below changed without a signal of their own: all is read again; after a refresh of user data a season's episodes follow it in place and only its targets are asked again
+                        if (container && m_below.kind() != ItemChildrenModel::None) {
+                            if (m_playedBusy || m_below.kind() == ItemChildrenModel::Series)
+                                m_below.load(m_details);
+                            else
+                                m_below.refreshSeasonTargets();
+                        }
                     }
                     if (m_playedBusy || m_playedError) {
                         m_playedBusy = false;
@@ -249,6 +260,12 @@ ItemDetailsModel::~ItemDetailsModel()
 bool ItemDetailsModel::playable() const
 {
     return isPlayableVideo(m_details.type);
+}
+
+bool ItemDetailsModel::canMarkPlayed() const
+{
+    return playable() || m_details.type == QLatin1String("Series")
+           || m_details.type == QLatin1String("Season");
 }
 
 bool ItemDetailsModel::hasSimilar() const
@@ -298,9 +315,8 @@ bool ItemDetailsModel::toggleFavorite()
 
 bool ItemDetailsModel::togglePlayed()
 {
-    // Parent series/seasons have aggregated watched state. Do not pretend that
-    // marking the parent alone marks all child episodes as watched.
-    if (!m_client || m_status != Ready || !m_details.valid || !playable() || m_playedBusy)
+    // The server marks every episode of a series or a season, and answers Played for the series or season itself
+    if (!m_client || m_status != Ready || !m_details.valid || !canMarkPlayed() || m_playedBusy)
         return false;
     m_playedBusy = true;
     m_playedError = false;

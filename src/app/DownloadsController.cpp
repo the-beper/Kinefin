@@ -378,6 +378,7 @@ DownloadsController::DownloadsController(JellyfinClient *client, const QString &
     connect(m_client, &JellyfinClient::userProfileRefreshed, this,
             [this] { refreshCanDownload(); });
     connect(m_client, &JellyfinClient::credentialsCleared, this, [this] {
+        cancelDownloadAll();
         for (auto it = m_fetches.cbegin(); it != m_fetches.cend(); ++it)
             m_client->releaseListingChannel(it.key());
         for (auto it = m_outboxFetches.cbegin(); it != m_outboxFetches.cend(); ++it)
@@ -547,6 +548,166 @@ bool DownloadsController::downloadItemForRule(const QString &itemId, const QStri
         m_fetchRuleDates.insert(channel, created);
     m_fetching.insert(itemId.toLower());
     return true;
+}
+
+std::optional<DownloadRecord> DownloadsController::recordForPlanned(const QJsonObject &item) const
+{
+    if (item.value(QStringLiteral("Type")).toString() != QLatin1String("Episode")
+        || item.value(QStringLiteral("LocationType")).toString() == QLatin1String("Virtual")
+        || !item.value(QStringLiteral("MediaSources")).isArray()
+        || item.value(QStringLiteral("MediaSources")).toArray().isEmpty())
+        return std::nullopt;
+    return recordFor(item, {});
+}
+
+QVariantMap DownloadsController::downloadAllPlan() const
+{
+    QVariantMap plan{{QStringLiteral("state"), m_all.state},
+                     {QStringLiteral("containerId"), m_all.containerId},
+                     {QStringLiteral("unwatchedOnly"), m_all.unwatchedOnly},
+                     {QStringLiteral("truncated"), m_all.truncated},
+                     {QStringLiteral("limit"), MaxDownloadAll},
+                     {QStringLiteral("total"), m_all.total}};
+    int count = 0;
+    int already = 0;
+    int watched = 0;
+    qint64 size = 0;
+    bool sizeKnown = true;
+    for (const QJsonObject &item : m_all.items) {
+        const std::optional<DownloadRecord> record = recordForPlanned(item);
+        if (!record)
+            continue;
+        if (m_manager.store()->find(record->serverId, record->userId, record->itemId)) {
+            ++already;
+            continue;
+        }
+        const bool played = item.value(QStringLiteral("UserData"))
+                                .toObject()
+                                .value(QStringLiteral("Played"))
+                                .toBool();
+        if (m_all.unwatchedOnly && played) {
+            ++watched;
+            continue;
+        }
+        ++count;
+        if (record->size > 0)
+            size += record->size;
+        else
+            sizeKnown = false;
+    }
+    plan.insert(QStringLiteral("count"), count);
+    plan.insert(QStringLiteral("alreadyDownloaded"), already);
+    plan.insert(QStringLiteral("watchedSkipped"), watched);
+    plan.insert(QStringLiteral("size"), size);
+    plan.insert(QStringLiteral("sizeKnown"), sizeKnown && count > 0);
+    return plan;
+}
+
+bool DownloadsController::planDownloadAll(const QString &containerId, bool series)
+{
+    cancelDownloadAll();
+    if (!canDownload() || !isValidJellyfinId(containerId) || m_client->userId().isEmpty())
+        return false;
+    m_all.containerId = containerId;
+    m_all.series = series;
+    m_all.state = QStringLiteral("reading");
+    m_all.channel = m_nextChannel++;
+    requestDownloadAllPage();
+    if (m_all.state != QLatin1String("reading"))
+        return false;
+    Q_EMIT downloadAllPlanChanged();
+    return true;
+}
+
+void DownloadsController::requestDownloadAllPage()
+{
+    ItemQuery query;
+    query.parentId = m_all.containerId;
+    query.recursive = m_all.series;
+    query.includeItemTypes = QStringLiteral("Episode");
+    query.sortBy = m_all.series ? QStringLiteral("ParentIndexNumber,IndexNumber")
+                                : QStringLiteral("IndexNumber");
+    query.sortOrder = QStringLiteral("Ascending");
+    query.startIndex = int(m_all.items.size());
+    query.limit = DownloadAllPage;
+    query.fields = {QStringLiteral("MediaSources"), QStringLiteral("CanDownload")};
+    if (!m_client->fetchItems(query, m_all.channel))
+        endDownloadAll(QStringLiteral("failed"));
+}
+
+void DownloadsController::onDownloadAllItems(const QJsonArray &items, int total)
+{
+    const qsizetype before = m_all.items.size();
+    for (const QJsonValue &value : items) {
+        if (value.isObject() && int(m_all.items.size()) < MaxDownloadAll)
+            m_all.items.append(value.toObject());
+    }
+    m_all.total = int(m_all.items.size());
+    // A page that adds nothing ends the reading, whatever total the server claims
+    const bool more = m_all.items.size() > before && int(m_all.items.size()) < total;
+    if (more && int(m_all.items.size()) >= MaxDownloadAll) {
+        m_all.truncated = true;
+    } else if (more) {
+        requestDownloadAllPage();
+        return;
+    }
+    m_client->releaseListingChannel(m_all.channel);
+    m_all.channel = -1;
+    m_all.state = QStringLiteral("ready");
+    Q_EMIT downloadAllPlanChanged();
+}
+
+void DownloadsController::endDownloadAll(const QString &state)
+{
+    if (m_all.channel >= 0)
+        m_client->releaseListingChannel(m_all.channel);
+    m_all = DownloadAll();
+    m_all.state = state;
+    Q_EMIT downloadAllPlanChanged();
+}
+
+void DownloadsController::setDownloadAllUnwatchedOnly(bool unwatchedOnly)
+{
+    if (m_all.unwatchedOnly == unwatchedOnly)
+        return;
+    m_all.unwatchedOnly = unwatchedOnly;
+    Q_EMIT downloadAllPlanChanged();
+}
+
+int DownloadsController::startDownloadAll()
+{
+    if (m_all.state != QLatin1String("ready") || !canDownload())
+        return 0;
+    int queued = 0;
+    // The queue starts with the oldest: the batch keeps the order of the episodes by a millisecond each
+    qint64 added = QDateTime::currentMSecsSinceEpoch();
+    for (const QJsonObject &item : m_all.items) {
+        std::optional<DownloadRecord> record = recordForPlanned(item);
+        if (!record || m_manager.store()->find(record->serverId, record->userId, record->itemId))
+            continue;
+        const bool played = item.value(QStringLiteral("UserData"))
+                                .toObject()
+                                .value(QStringLiteral("Played"))
+                                .toBool();
+        if (m_all.unwatchedOnly && played)
+            continue;
+        // The index is written once the batch is in, not after each record
+        record->addedAt = added++;
+        if (m_manager.enqueue(*record, true))
+            ++queued;
+    }
+    m_manager.store()->flush();
+    m_manager.wake();
+    m_all = DownloadAll();
+    Q_EMIT downloadAllPlanChanged();
+    return queued;
+}
+
+void DownloadsController::cancelDownloadAll()
+{
+    if (m_all.state == QLatin1String("idle") && m_all.channel < 0)
+        return;
+    endDownloadAll(QStringLiteral("idle"));
 }
 
 void DownloadsController::rewindRuleCursor(const QString &seriesId, const QDateTime &created)
@@ -950,9 +1111,10 @@ bool DownloadsController::setSeriesRule(const QString &seriesId, const QString &
     rule.kind = kind;
     rule.seasonNumber = seasonNumber;
     rule.count = std::clamp(count, 1, 3);
-    rule.enabled = true;
     const std::optional<DownloadRule> existing =
         m_rules.find(rule.serverId, rule.userId, rule.seriesId);
+    // Editing a paused rule leaves it paused
+    rule.enabled = existing ? existing->enabled : true;
     if (existing) {
         rule.cursorDate = existing->cursorDate;
         rule.cursorId = existing->cursorId;
@@ -974,6 +1136,28 @@ bool DownloadsController::removeSeriesRule(const QString &seriesId)
     return m_rules.remove(m_client->serverId(), m_client->userId(), seriesId);
 }
 
+bool DownloadsController::setSeriesRuleEnabled(const QString &seriesId, bool enabled)
+{
+    if (m_client->userId().isEmpty())
+        return false;
+    std::optional<DownloadRule> rule =
+        m_rules.find(m_client->serverId(), m_client->userId(), seriesId);
+    if (!rule)
+        return false;
+    if (rule->enabled == enabled)
+        return true;
+    rule->enabled = enabled;
+    if (enabled) {
+        rule->cursorDate = QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
+        rule->cursorId.clear();
+    }
+    if (!m_rules.upsert(*rule))
+        return false;
+    if (enabled)
+        scanRules();
+    return true;
+}
+
 QVariantList DownloadsController::seriesRules() const
 {
     QVariantList result;
@@ -987,7 +1171,8 @@ QVariantList DownloadsController::seriesRules() const
                                   {QStringLiteral("seriesName"), rule.seriesName},
                                   {QStringLiteral("kind"), rule.kind},
                                   {QStringLiteral("seasonNumber"), rule.seasonNumber},
-                                  {QStringLiteral("count"), rule.count}});
+                                  {QStringLiteral("count"), rule.count},
+                                  {QStringLiteral("enabled"), rule.enabled}});
     }
     return result;
 }
@@ -1379,7 +1564,10 @@ void DownloadsController::onOutboxItemsReady(const QJsonArray &items, int channe
 
 void DownloadsController::onItemsReady(const QJsonArray &items, int totalRecordCount, int channel)
 {
-    Q_UNUSED(totalRecordCount)
+    if (m_all.channel >= 0 && channel == m_all.channel) {
+        onDownloadAllItems(items, totalRecordCount);
+        return;
+    }
     if (m_outboxVerifies.contains(channel)) {
         const QString key = m_outboxVerifies.take(channel);
         m_client->releaseListingChannel(channel);
@@ -1462,6 +1650,10 @@ void DownloadsController::onListingFailed(const QString &family, int httpStatus,
                                           const QString &reason, int channel)
 {
     Q_UNUSED(reason)
+    if (m_all.channel >= 0 && channel == m_all.channel) {
+        endDownloadAll(QStringLiteral("failed"));
+        return;
+    }
     if (m_outboxVerifies.remove(channel) > 0) {
         // Keep the event for the next trigger instead of looping on a failing read
         m_client->releaseListingChannel(channel);

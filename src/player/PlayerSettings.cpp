@@ -142,6 +142,7 @@ void PlayerSettings::apply()
 {
     if (!m_engine.isInitialized())
         return;
+    applyConfFile();
     applyAudio();
     applyVideo();
     applySubtitles();
@@ -405,25 +406,44 @@ void PlayerSettings::applySubtitles()
         m_engine.setMpvProperty(name, value);
 }
 
+void PlayerSettings::applyEntry(const MpvConfEntry &entry)
+{
+    if (entry.listOperation.isEmpty())
+        m_engine.setMpvProperty(entry.name, entry.value);
+    else
+        m_engine.mpvCommand(
+            {QStringLiteral("change-list"), entry.name, entry.listOperation, entry.value});
+}
+
+void PlayerSettings::applyConfFile()
+{
+    const MpvConf conf = m_settings.readMpvConf();
+    for (const MpvConfProblem &problem : conf.problems) {
+        if (problem.line == 0)
+            qCWarning(playerLog) << "mpv.conf is not read: it is not a regular file, cannot be "
+                                    "opened or is too large";
+        else
+            qCWarning(playerLog) << "mpv.conf line" << problem.line << problem.name
+                                 << "is not applied";
+    }
+    for (const MpvConfEntry &entry : conf.entries)
+        applyEntry(entry);
+}
+
 void PlayerSettings::applyOverrides(const QStringList &only)
 {
     const QString conf =
         m_settings.value(QStringLiteral("other"), QStringLiteral("other_conf")).toString();
-    static const QRegularExpression keyPattern(QStringLiteral("^[a-z][a-z0-9-]{0,63}$"));
-    for (const QString &line : conf.split(QLatin1Char('\n'))) {
-        const QString entry = line.trimmed();
-        if (entry.isEmpty() || entry.startsWith(QLatin1Char('#')))
-            continue;
-        const qsizetype pos = entry.indexOf(QLatin1Char('='));
-        if (pos <= 0)
-            continue;
-        const QString name = entry.left(pos).trimmed();
-        if (!only.isEmpty() && !only.contains(name))
-            continue;
-        if (keyPattern.match(name).hasMatch() && !name.startsWith(QStringLiteral("http-"))
-            && name != QLatin1String("scripts") && name != QLatin1String("script")
-            && name != QLatin1String("input-conf") && name != QLatin1String("include"))
-            m_engine.setMpvProperty(name, entry.mid(pos + 1).trimmed());
+    const MpvConf parsed = parseMpvConf(conf);
+    // The whole setting is re-applied when a setting changes and parts of it for single options: only the whole round says what is wrong
+    if (only.isEmpty()) {
+        for (const MpvConfProblem &problem : parsed.problems)
+            qCWarning(playerLog) << "Manual MPV Configuration line" << problem.line << problem.name
+                                 << "is not applied";
+    }
+    for (const MpvConfEntry &entry : parsed.entries) {
+        if (only.isEmpty() || only.contains(entry.name))
+            applyEntry(entry);
     }
 }
 

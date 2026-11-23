@@ -87,6 +87,9 @@ class TestJellyfinLive : public QObject {
     // Reporting, ~10 s: a Failed Stopped leaves the user's play state untouched
     void failedStopsLeaveUserDataAlone();
 
+    // ~15 s: an episode marked watched by one client is read by another through refreshUserData, and the series of the episode comes with it (the marking is undone at the end)
+    void userDataRefreshReadsWhatAnotherSessionWrote();
+
     // Reporting, ~25 s: a 4K HDR item forced through the HLS negotiation, a Transcode marker in the live session record, and a Stopped that ends the server job
     void hlsTranscodeLifecycle();
 
@@ -746,6 +749,48 @@ void TestJellyfinLive::failedStopsLeaveUserDataAlone()
             << before.value(QStringLiteral("PlaybackPositionTicks")).toInt() << "->"
             << after.value(QStringLiteral("PlaybackPositionTicks")).toInt();
     client.disconnectFromServer();
+}
+
+void TestJellyfinLive::userDataRefreshReadsWhatAnotherSessionWrote()
+{
+    if (!m_live)
+        QSKIP("no KINEFIN_LIVE_* environment, skipping the live checks");
+    Kinefin::JellyfinClient reader;
+    Kinefin::JellyfinClient writer;
+    QVERIFY(authenticate(reader));
+    QVERIFY(authenticate(writer));
+    const QString userId = fetchMe(reader).value(QStringLiteral("Id")).toString();
+    const QJsonArray rows =
+        getJson(reader,
+                QStringLiteral("/Items?userId=") + userId
+                    + QStringLiteral(
+                        "&recursive=true&includeItemTypes=Episode&filters=IsUnplayed&limit=1"))
+            .value(QStringLiteral("Items"))
+            .toArray();
+    if (rows.isEmpty())
+        QSKIP("this user has no unplayed episode");
+    const QString episode = rows.first().toObject().value(QStringLiteral("Id")).toString();
+    const QString series = rows.first().toObject().value(QStringLiteral("SeriesId")).toString();
+    QVERIFY(!episode.isEmpty());
+    QVERIFY(!series.isEmpty());
+    QSignalSpy played(&reader, &Kinefin::JellyfinClient::itemPlayedUpdated);
+    QSignalSpy written(&writer, &Kinefin::JellyfinClient::itemPlayedUpdated);
+    const auto undo = qScopeGuard([&] {
+        writer.setItemPlayed(episode, false);
+        QTest::qWait(1500);
+    });
+    QVERIFY(writer.setItemPlayed(episode, true));
+    QTRY_COMPARE_WITH_TIMEOUT(written.size(), 1, 10000);
+    QVERIFY(reader.refreshUserData({episode}));
+    QTRY_COMPARE_WITH_TIMEOUT(played.size(), 2, 10000);
+    QCOMPARE(played.at(0).at(0).toString().toLower(), episode.toLower());
+    QVERIFY(played.at(0).at(1).toBool());
+    QCOMPARE(played.at(1).at(0).toString().toLower(), series.toLower());
+    qInfo() << LIVE_FACT << "refreshUserData of one episode read the episode and its series:"
+            << "played" << played.at(0).at(1).toBool() << "and series played"
+            << played.at(1).at(1).toBool();
+    reader.disconnectFromServer();
+    writer.disconnectFromServer();
 }
 
 void TestJellyfinLive::hlsTranscodeLifecycle()

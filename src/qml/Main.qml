@@ -544,6 +544,8 @@ Kirigami.ApplicationWindow {
 
     // How the playback shows: "none" while nothing plays, "full" while the player page is in front, "mini" while it goes on under another page, "pip" while it shows in its own window. The C++ side knows nothing of it
     property string playbackMode: "none"
+    // The changes of user data that a playback causes are read again once it is over
+    onPlaybackModeChanged: connection.holdUserDataRefresh(playbackMode !== "none")
     // The player page pushed last; QML clears it when the page is deleted
     property Item playerPage: null
     // Whether the picture-in-picture window exists: set before the mode moves into it, cleared only after the video has left it, since the destruction of the window is what frees its render context
@@ -775,8 +777,12 @@ Kirigami.ApplicationWindow {
                 endPlayback();
         }
         restoreVisibilityAfterPlayer();
-        if (signedIn)
+        if (signedIn) {
             connection.reloadHome();
+            // The details page under the player has not seen the position or the watched state change: the stop event also updates it in place, this covers a socket that was down. Other pages follow the same event in place, a reload would reset their scroll
+            if (playbackMode === "none" && pageStack.currentItem?.objectName === "itemDetailsPage")
+                pageStack.currentItem.refreshPage();
+        }
     }
 
     // The end of the playback, in every mode; the check is made a turn later, since the next item of a queue may already be starting
@@ -1530,6 +1536,26 @@ Kirigami.ApplicationWindow {
         if (!signedIn && !offline)
             return;
         openTab("downloads");
+    }
+
+    // The automatic download rules open above the Downloads tab, which a page elsewhere (the Settings link) gives way to after the question about unsaved changes; a page of them already open is brought back
+    function openDownloadRules() {
+        if (!signedIn && !offline)
+            return;
+        for (let i = 0; i <= pageStack.currentIndex; ++i) {
+            const page = pageStack.get(i);
+            if (page?.objectName === "downloadRulesPage") {
+                popTo(page);
+                return;
+            }
+        }
+        if (askBeforeLeaving(() => openDownloadRules()))
+            return;
+        if (rootTab !== "downloads")
+            openTab("downloads");
+        else
+            popToBase();
+        pageStack.push(Qt.resolvedUrl("DownloadRulesPage.qml"), { connection: connection });
     }
 
     // A playlist opens above the page asking (the pages above it give way); `name`, when the caller knows it, titles the page

@@ -167,6 +167,8 @@ Home shows these rows:
 | Favorites | Up to 24 of your favorite movies and series in random order, a new pick at each load. **Show All** opens the Favorites tab |
 | Recently Added | One row per movie or series library. **Show All** opens that library, newest first |
 
+Progress, watched marks and favorites that change on the server, because you played something on another device or stopped playing here, show on the cards, the rows and the open details page about a second later, without a reload. While something plays in Kinefin the update waits until it stops.
+
 Below the rows, under **Libraries**, is one tile per library. A tile of a movie or TV library opens its tab with that library selected, and a collections tile opens a library page.
 
 Cards show a rating, the minutes left, a played check or the number of unplayed episodes, and a **New** chip for items added in the last 7 days that you have not played. A series card also shows its seasons, episodes and a watched-episode bar. Hovering a Continue Watching card shows a **Play** disc and a **Mark as Watched** button.
@@ -258,7 +260,7 @@ Selecting a card opens the details page: a hero with the backdrop, logo, a facts
 | **Play Next**, **Add to Queue** | | Queueable items |
 | **Add to Playlist…** | | Movies, episodes and videos |
 | **Add to Collection…** | | Movies and series |
-| **Automatic Downloads…**, **Stop Automatic Downloads** | | Series and seasons; Stop only while a rule exists |
+| **Stop Automatic Downloads** | | Series and seasons, only while a rule exists |
 | **Edit** | **Edit Metadata…**, **Identify…**, **Edit Images…**, **Edit Subtitles…**, **Refresh Metadata** | Administrators |
 | **Copy Stream URL** | | When the item has a source |
 | **Delete Media…** | | Last entry, when the server allows deletion |
@@ -269,7 +271,7 @@ Before you play, choose the audio track and the subtitles (or **Off**) with **Au
 
 On a movie or show page, **Add to Collection…** puts the item into an existing collection or a new one. An administrator can change the item on the server. **Delete Media…** removes a movie, episode or video when the server allows it, after a confirmation; the server deletes the file and it cannot be recovered. **Edit Metadata…** changes the name, overview, year, official rating and genres. **Identify…** on a movie or a show searches the metadata providers; select a match and press **Apply Match** to apply it. **Edit Images…** replaces or removes the primary image, the backdrop or the logo. **Edit Subtitles…** uploads an external subtitle file or deletes an external track. Clicking a cast member opens the movies, shows and episodes that person appears in.
 
-A series page lists seasons and one Next Up entry, a season page lists its episodes, and an episode page links to its series and season. A collection page lists its first 100 items. **Add to Playlist…** is on movie, episode and video pages.
+A series page lists seasons and one Next Up entry, a season page lists its episodes, and an episode page links to its series and season. A series or a season has **Play**, which plays its first episode (a series starts from its first regular season, not from the Specials). **Mark as Watched** or **Mark as Unwatched** in the toolbar marks every episode of a series or a season; the seasons, the episode to continue with and the episode list are read again afterwards. Once you have watched part of it, **Continue** goes on with the series' Next Up episode, or the season's first unwatched one (it reads **Resume** and picks up where you stopped when that episode is in progress), and **Play from Beginning** starts over from the first episode. The buttons appear when the server has answered for both. Each plays one episode, like opening that episode and pressing Play. A collection page lists its first 100 items. **Add to Playlist…** is on movie, episode and video pages.
 
 ### Search
 
@@ -455,13 +457,15 @@ The **Downloads** tab holds a download queue, saved files and offline playback. 
 
 To download an item, choose **Download** on its details page or in a card menu. Kinefin fetches the original file with no re-encoding and resumes an interrupted transfer. External text subtitles (up to 8) and chapters are saved with it, once the file completes. Embedded subtitles stay in the file.
 
+To download a whole series or season, choose **Download** in the toolbar of its page, then **Download All…**. A dialog reads the episodes and says how many it will fetch and how much space they take together (when the server gives every size). **Only unwatched episodes** is on by default; switch it off to include the ones you watched. Episodes that are already on this device or have no file are left out, a series of more than 1000 episodes is cut at 1000, and nothing starts before you press **Download**. The batch joins the queue in order, and a notification names how many entered it.
+
 The Downloads page has an active section and a completed one. Each row has one main button (**Play**, **Resume**, **Retry** or **Pause**) and **More Actions**: **Export…**, **Cancel Download** and **Delete Download…**, which asks first. A click on a completed row plays it. The footer shows the storage used and the number of changes waiting to sync.
 
 **Settings**, **Downloads** sets how many downloads run at once and whether automatic downloads wait for an unmetered network.
 
 ### Automatic downloads for a series
 
-Each series can have one rule. To set it, open the series or one of its seasons and choose **Automatic Downloads…** in the page's actions (**Edit Automatic Downloads…** once the series has a rule). A rule adds unwatched, already aired episodes only:
+Each series can have one rule. To set it, open the series or one of its seasons and choose **Download**, then **Automatic Downloads…** (**Edit Automatic Downloads…** once the series has a rule). A rule adds unwatched, already aired episodes only:
 
 | Rule | Behaviour |
 | --- | --- |
@@ -469,7 +473,9 @@ Each series can have one rule. To set it, open the series or one of its seasons 
 | **Whole season**, offered from a season page | Downloads every episode of that season |
 | **New episodes** | Downloads new episodes of an airing series |
 
-New episodes are looked for at sign-in, every 6 hours and when the server reports a library change. **Stop Automatic Downloads**, on the series page or in the **Downloads** tab, removes the rule.
+New episodes are looked for at sign-in, every 6 hours and when the server reports a library change. **Stop Automatic Downloads**, on the series page, removes the rule.
+
+All the rules are on one page: **Automatic Downloads** in the toolbar of the **Downloads** tab, or the **Automatic Downloads** link in **Settings**, **Downloads**. Each row shows the series and its rule. The switch pauses the rule or turns it back on; a paused rule downloads nothing. A rule for new episodes takes up from the moment you switch it on, so what was added meanwhile is not fetched; the other rules download the episodes that are unwatched at that time. **Edit Automatic Downloads…** opens the rule dialog, and **Stop Automatic Downloads** (or Delete on the current row) removes the rule, with an **Undo** in the notification that follows (the rule comes back as it was, except that a rule for new episodes takes up from that moment).
 
 ### Export to a folder
 

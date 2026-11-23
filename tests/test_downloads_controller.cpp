@@ -424,6 +424,219 @@ class TestDownloadsController : public QObject {
     }
 
     // The item fetch of a rule download fails after the scan moved the cursor (the server answers with other items than the one asked for, which is no download of it): the cursor goes back before that episode, so the next scan offers it again
+    void aPausedRuleScansNothingAndTakesUpFromNowWhenSwitchedOn()
+    {
+        Rig rig;
+        QVERIFY(rig.signIn());
+        DownloadRule rule =
+            rig.rule(QStringLiteral("newEpisodes"), QStringLiteral("2020-01-01T00:00:00.000Z"));
+        rule.cursorId = hexId('e', 9);
+        QVERIFY(seedRule(rule));
+        const QString added = hexId('e', 3);
+        rig.server.listingRawBody.insert(
+            QStringLiteral("Episodes"),
+            envelope(QJsonArray{listed(added, 2, QStringLiteral("2021-04-01T00:00:00.0000000Z"))}));
+        rig.open();
+        QVERIFY(rig.downloads->seriesRules()
+                    .constFirst()
+                    .toMap()
+                    .value(QStringLiteral("enabled"))
+                    .toBool());
+
+        QSignalSpy revision(rig.downloads.get(), &DownloadsController::rulesRevisionChanged);
+        QVERIFY(rig.downloads->setSeriesRuleEnabled(kSeries, false));
+        QCOMPARE(revision.count(), 1);
+        QVERIFY(!rig.downloads->seriesRules()
+                     .constFirst()
+                     .toMap()
+                     .value(QStringLiteral("enabled"))
+                     .toBool());
+        QVERIFY(!rig.downloads->seriesRule(kSeries).value(QStringLiteral("enabled")).toBool());
+        // Nothing is asked of the server for a paused rule
+        rig.downloads->scanRules();
+        QTest::qWait(300);
+        QVERIFY(!rig.server.listingRoutes.contains(QStringLiteral("Episodes")));
+        // The same state again is no change
+        QVERIFY(rig.downloads->setSeriesRuleEnabled(kSeries, false));
+        QCOMPARE(revision.count(), 1);
+
+        // Editing a paused rule keeps it paused
+        QVERIFY(rig.downloads->setSeriesRule(kSeries, QStringLiteral("Abyss Station"),
+                                             QStringLiteral("newEpisodes"), -1, 2));
+        QVERIFY(!rig.downloads->seriesRule(kSeries).value(QStringLiteral("enabled")).toBool());
+        QVERIFY(!rig.server.listingRoutes.contains(QStringLiteral("Episodes")));
+
+        // Switched on again: the cursor is now, so what was added meanwhile is not downloaded
+        const QDateTime before = QDateTime::currentDateTimeUtc().addSecs(-1);
+        QVERIFY(rig.downloads->setSeriesRuleEnabled(kSeries, true));
+        const std::optional<DownloadRule> stored = storedRule(rule);
+        QVERIFY(stored);
+        QVERIFY(stored->enabled);
+        QVERIFY(stored->cursorId.isEmpty());
+        QVERIFY(QDateTime::fromString(stored->cursorDate, Qt::ISODateWithMs) >= before);
+    }
+
+    // An episode row of the Download All listing: the fixture episode with its sources, in the watched state asked for
+    static QJsonObject plannedRow(int number, bool played, const QString &locationType = {},
+                                  bool withSize = true)
+    {
+        QJsonObject row = episodeItem(hexId('e', number), QStringLiteral("Episode %1").arg(number));
+        row.insert(QStringLiteral("UserData"), QJsonObject{{QStringLiteral("Played"), played}});
+        if (!locationType.isEmpty())
+            row.insert(QStringLiteral("LocationType"), locationType);
+        if (!withSize) {
+            QJsonArray sources = row.value(QStringLiteral("MediaSources")).toArray();
+            QJsonObject source = sources.first().toObject();
+            source.remove(QStringLiteral("Size"));
+            sources.replace(0, source);
+            row.insert(QStringLiteral("MediaSources"), sources);
+        }
+        return row;
+    }
+
+    void downloadAllCountsWhatABatchWouldQueueAndQueuesIt()
+    {
+        Rig rig;
+        QVERIFY(rig.signIn());
+        rig.server.listingRawBody.insert(
+            QStringLiteral("Items"),
+            envelope(QJsonArray{plannedRow(1, false), plannedRow(2, true),
+                                plannedRow(3, false, QStringLiteral("Virtual")),
+                                plannedRow(4, false, {}, false)}));
+        rig.open();
+        QSignalSpy changed(rig.downloads.get(), &DownloadsController::downloadAllPlanChanged);
+        QVERIFY(rig.downloads->planDownloadAll(kSeries, true));
+        QCOMPARE(rig.downloads->downloadAllPlan().value(QStringLiteral("state")).toString(),
+                 QStringLiteral("reading"));
+        QTRY_COMPARE(rig.downloads->downloadAllPlan().value(QStringLiteral("state")).toString(),
+                     QStringLiteral("ready"));
+        // A series is read recursively, 25 rows at a time, for the sources and the download permission
+        const QUrlQuery query =
+            FakeJellyfin::capturedListingQuery(rig.server.itemsRoutes.constFirst());
+        QCOMPARE(query.queryItemValue(QStringLiteral("parentId")), kSeries);
+        QCOMPARE(query.queryItemValue(QStringLiteral("recursive")), QStringLiteral("true"));
+        QCOMPARE(query.queryItemValue(QStringLiteral("includeItemTypes")),
+                 QStringLiteral("Episode"));
+        QCOMPARE(query.queryItemValue(QStringLiteral("limit")), QStringLiteral("25"));
+        QVERIFY(query.queryItemValue(QStringLiteral("fields"))
+                    .contains(QStringLiteral("MediaSources")));
+        // The watched one and the one without a file stay out; the size of the last one is not known
+        QVariantMap plan = rig.downloads->downloadAllPlan();
+        QCOMPARE(plan.value(QStringLiteral("total")).toInt(), 4);
+        QCOMPARE(plan.value(QStringLiteral("count")).toInt(), 2);
+        QCOMPARE(plan.value(QStringLiteral("watchedSkipped")).toInt(), 1);
+        QVERIFY(!plan.value(QStringLiteral("sizeKnown")).toBool());
+        QCOMPARE(plan.value(QStringLiteral("size")).toLongLong(), qint64(64 * 1024));
+        // Counting the watched one too is no request
+        const int reads = rig.server.itemsRoutes.size();
+        rig.downloads->setDownloadAllUnwatchedOnly(false);
+        plan = rig.downloads->downloadAllPlan();
+        QCOMPARE(plan.value(QStringLiteral("count")).toInt(), 3);
+        QCOMPARE(plan.value(QStringLiteral("watchedSkipped")).toInt(), 0);
+        QCOMPARE(rig.server.itemsRoutes.size(), reads);
+        QVERIFY(changed.size() >= 3);
+
+        // Starting queues them from the rows already read, in order, with no second request each
+        QCOMPARE(rig.downloads->startDownloadAll(), 3);
+        QCOMPARE(rig.server.itemsRoutes.size(), reads);
+        QCOMPARE(rig.downloads->downloadAllPlan().value(QStringLiteral("state")).toString(),
+                 QStringLiteral("idle"));
+        QVERIFY(!rig.downloads->downloadState(hexId('e', 1)).isEmpty());
+        QVERIFY(!rig.downloads->downloadState(hexId('e', 2)).isEmpty());
+        QVERIFY(!rig.downloads->downloadState(hexId('e', 4)).isEmpty());
+        QVERIFY(rig.downloads->downloadState(hexId('e', 3)).isEmpty());
+
+        // What has a record is left out of the next plan
+        QVERIFY(rig.downloads->planDownloadAll(kSeries, true));
+        QTRY_COMPARE(rig.downloads->downloadAllPlan().value(QStringLiteral("state")).toString(),
+                     QStringLiteral("ready"));
+        plan = rig.downloads->downloadAllPlan();
+        QCOMPARE(plan.value(QStringLiteral("alreadyDownloaded")).toInt(), 3);
+        QCOMPARE(plan.value(QStringLiteral("count")).toInt(), 0);
+        QCOMPARE(rig.downloads->startDownloadAll(), 0);
+    }
+
+    void downloadAllOfASeasonIsNotRecursiveAndAFailureOrACancelEndsThePlan()
+    {
+        Rig rig;
+        QVERIFY(rig.signIn());
+        rig.server.listingRawBody.insert(QStringLiteral("Items"),
+                                         envelope(QJsonArray{plannedRow(1, false)}));
+        rig.open();
+        QVERIFY(rig.downloads->planDownloadAll(kSeries, false));
+        QTRY_COMPARE(rig.downloads->downloadAllPlan().value(QStringLiteral("state")).toString(),
+                     QStringLiteral("ready"));
+        const QUrlQuery query =
+            FakeJellyfin::capturedListingQuery(rig.server.itemsRoutes.constFirst());
+        QVERIFY(!query.hasQueryItem(QStringLiteral("recursive")));
+        QCOMPARE(rig.downloads->downloadAllPlan().value(QStringLiteral("sizeKnown")).toBool(),
+                 true);
+        rig.downloads->cancelDownloadAll();
+        QCOMPARE(rig.downloads->downloadAllPlan().value(QStringLiteral("state")).toString(),
+                 QStringLiteral("idle"));
+        QCOMPARE(rig.downloads->startDownloadAll(), 0);
+
+        // A bad id or a refusing server ends in a failure that the dialog can name
+        QVERIFY(!rig.downloads->planDownloadAll(QStringLiteral("../x"), true));
+        rig.server.listingStatus.insert(QStringLiteral("Items"), 500);
+        QVERIFY(rig.downloads->planDownloadAll(kSeries, true));
+        QTRY_COMPARE(rig.downloads->downloadAllPlan().value(QStringLiteral("state")).toString(),
+                     QStringLiteral("failed"));
+        QCOMPARE(rig.downloads->startDownloadAll(), 0);
+    }
+
+    // A server that claims more rows than it sends must not keep the reading going
+    void downloadAllStopsWhenAPageAddsNothing()
+    {
+        Rig rig;
+        QVERIFY(rig.signIn());
+        rig.server.listingRawBody.insert(
+            QStringLiteral("Items"),
+            compact(QJsonObject{{QStringLiteral("Items"), QJsonArray{0, QStringLiteral("x")}},
+                                {QStringLiteral("TotalRecordCount"), 100000}}));
+        rig.open();
+        QVERIFY(rig.downloads->planDownloadAll(kSeries, true));
+        QTRY_COMPARE(rig.downloads->downloadAllPlan().value(QStringLiteral("state")).toString(),
+                     QStringLiteral("ready"));
+        QCOMPARE(rig.downloads->downloadAllPlan().value(QStringLiteral("total")).toInt(), 0);
+        QCOMPARE(rig.server.itemsRoutes.size(), 1);
+    }
+
+    void downloadAllStopsAtItsLimitAndSaysSo()
+    {
+        Rig rig;
+        QVERIFY(rig.signIn());
+        // Pages of the same rows, a series that says it has far more
+        QJsonArray page;
+        for (int i = 1; i <= DownloadsController::DownloadAllPage; ++i)
+            page.append(plannedRow(i, false));
+        rig.server.listingRawBody.insert(
+            QStringLiteral("Items"),
+            compact(QJsonObject{{QStringLiteral("Items"), page},
+                                {QStringLiteral("TotalRecordCount"), 5000}}));
+        rig.open();
+        QVERIFY(rig.downloads->planDownloadAll(kSeries, true));
+        QTRY_COMPARE_WITH_TIMEOUT(
+            rig.downloads->downloadAllPlan().value(QStringLiteral("state")).toString(),
+            QStringLiteral("ready"), 15000);
+        const QVariantMap plan = rig.downloads->downloadAllPlan();
+        QVERIFY(plan.value(QStringLiteral("truncated")).toBool());
+        QCOMPARE(plan.value(QStringLiteral("total")).toInt(), DownloadsController::MaxDownloadAll);
+        QCOMPARE(plan.value(QStringLiteral("limit")).toInt(), DownloadsController::MaxDownloadAll);
+        QCOMPARE(rig.server.itemsRoutes.size(),
+                 DownloadsController::MaxDownloadAll / DownloadsController::DownloadAllPage);
+    }
+
+    void aRuleOfAnotherSeriesCannotBeSwitched()
+    {
+        Rig rig;
+        QVERIFY(rig.signIn());
+        QVERIFY(seedRule(rig.rule(QStringLiteral("nextN"))));
+        rig.open();
+        QVERIFY(!rig.downloads->setSeriesRuleEnabled(hexId('a', 5), false));
+        QVERIFY(rig.downloads->seriesRule(kSeries).value(QStringLiteral("enabled")).toBool());
+    }
+
     void aRuleDownloadThatFailsLaterRewindsTheCursor()
     {
         Rig rig;

@@ -4590,6 +4590,68 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(!timer->property("running").toBool());
     }
 
+    // A series is marked episode by episode by the server: the page offers it, the label follows, and the Continue button reads the episodes again
+    void aSeriesPageMarksItsEpisodesWatchedAndUnwatched()
+    {
+        Ui ui(m_home->path());
+        ui.serveShow();
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        QQuickItem *series = openDetails(ui, kSeriesId);
+        QVERIFY(series);
+        QObject *mark = series->findChild<QObject *>(QStringLiteral("togglePlayedAction"));
+        QVERIFY(mark);
+        QTRY_VERIFY(mark->property("visible").toBool());
+        QCOMPARE(mark->property("text").toString(), QStringLiteral("Mark as Watched"));
+        const int nextUpReads = ui.server.listingRoutes.value(QStringLiteral("NextUp")).size();
+        QVERIFY(QMetaObject::invokeMethod(mark, "trigger"));
+        QTRY_COMPARE(mark->property("text").toString(), QStringLiteral("Mark as Unwatched"));
+        QCOMPARE(ui.server.playedWrites.size(), 1);
+        QTRY_VERIFY(ui.server.listingRoutes.value(QStringLiteral("NextUp")).size() > nextUpReads);
+        QVERIFY(QMetaObject::invokeMethod(mark, "trigger"));
+        QTRY_COMPARE(mark->property("text").toString(), QStringLiteral("Mark as Watched"));
+        QCOMPARE(ui.server.playedWrites.size(), 2);
+        // A collection has no episodes of its own: no action
+        QQuickItem *boxSet = openDetails(ui, kBoxSetId);
+        QVERIFY(boxSet);
+        QObject *none = boxSet->findChild<QObject *>(QStringLiteral("togglePlayedAction"));
+        QVERIFY(none);
+        QVERIFY(!none->property("visible").toBool());
+    }
+
+    // The server says that user data changed (the stop of a playback, another device): the details page under the player shows the new state without a reload, and so does a card
+    void aUserDataChangedFrameUpdatesTheOpenDetailsPageInPlace()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        QQuickItem *page = openDetails(ui, kMovieId);
+        QVERIFY(page);
+        QObject *mark = page->findChild<QObject *>(QStringLiteral("togglePlayedAction"));
+        QVERIFY(mark);
+        // The fixture movie is in progress, not watched
+        QTRY_COMPARE(mark->property("text").toString(), QStringLiteral("Mark as Watched"));
+        QTRY_VERIFY(ui.server.lastConnection() != nullptr);
+
+        QJsonObject movie = QJsonDocument::fromJson(ui.server.itemsById.value(kMovieId)).object();
+        movie.insert(QStringLiteral("UserData"),
+                     QJsonObject{{QStringLiteral("Played"), true},
+                                 {QStringLiteral("PlaybackPositionTicks"), 0},
+                                 {QStringLiteral("IsFavorite"), false}});
+        ui.server.itemsById.insert(kMovieId, QJsonDocument(movie).toJson(QJsonDocument::Compact));
+        const QJsonObject frame{
+            {QStringLiteral("MessageType"), QStringLiteral("UserDataChanged")},
+            {QStringLiteral("Data"),
+             QJsonObject{{QStringLiteral("UserId"), ui.controller.currentUserId()},
+                         {QStringLiteral("UserDataList"),
+                          QJsonArray{QJsonObject{{QStringLiteral("ItemId"), kMovieId}}}}}}};
+        ui.server.lastConnection()->sendText(
+            QString::fromUtf8(QJsonDocument(frame).toJson(QJsonDocument::Compact)));
+        QTRY_COMPARE_WITH_TIMEOUT(mark->property("text").toString(),
+                                  QStringLiteral("Mark as Unwatched"), 8000);
+    }
+
     void aMissingItemShowsNotFound()
     {
         Ui ui(m_home->path());
@@ -4832,6 +4894,139 @@ class TestUiPages : public QObject {
         const int depth = ui.stackDepth();
         QVERIFY(ui.revealAndClickUntil(page, entry, [&] { return ui.stackDepth() == depth + 1; }));
         QTRY_VERIFY(ui.showsText(QStringLiteral("Weightless")));
+    }
+
+    // A series has no stream of its own: Continue plays the server's Next Up episode, Play from Beginning the first one, each alone
+    void aSeriesPageContinuesWithItsNextUpAndRestartsFromItsFirstEpisode()
+    {
+        QuickPlayStub stub;
+        Ui ui(m_home->path());
+        ui.serveShow();
+        QVERIFY(ui.load());
+        QObject *root = ui.engine.rootObjects().constFirst();
+        QVERIFY(root->setProperty("player", QVariant::fromValue<QObject *>(&stub)));
+        ui.window->setProperty("requestedItemId", kSeriesId);
+        QVERIFY(ui.signIn());
+        QQuickItem *page = nullptr;
+        QTRY_VERIFY((page = ui.item(QStringLiteral("itemDetailsPage"))) != nullptr);
+        QObject *play = page->findChild<QObject *>(QStringLiteral("playAction"));
+        QObject *restart = page->findChild<QObject *>(QStringLiteral("playFromBeginningAction"));
+        QVERIFY(play);
+        QVERIFY(restart);
+        QTRY_COMPARE(play->property("text").toString(), QStringLiteral("Continue"));
+        QTRY_VERIFY(play->property("visible").toBool());
+        // A screen reader hears which episode each button plays
+        QTRY_VERIFY(
+            page->property("playDescription").toString().contains(QStringLiteral("Weightless")));
+        QVERIFY(page->property("startDescription")
+                    .toString()
+                    .contains(QStringLiteral("The Silent Sea")));
+        QTRY_VERIFY(restart->property("visible").toBool());
+        QTRY_VERIFY(play->property("enabled").toBool());
+        QTRY_VERIFY(Ui::itemIn(page, QStringLiteral("detailsPlay")) != nullptr);
+        QVERIFY(QMetaObject::invokeMethod(play, "trigger"));
+        QTRY_COMPARE(stub.streamCalls.size(), 1);
+        QCOMPARE(stub.streamCalls.constLast().id,
+                 QStringLiteral("c2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7"));
+        QCOMPARE(stub.streamCalls.constLast().resumeTicks, qint64(0));
+        QVERIFY(QMetaObject::invokeMethod(restart, "trigger"));
+        QTRY_COMPARE(stub.streamCalls.size(), 2);
+        QCOMPARE(stub.streamCalls.constLast().id,
+                 QStringLiteral("b1b2c3d4e5f64788990a1b2c3d4e5f60"));
+        QCOMPARE(stub.streamCalls.constLast().resumeTicks, qint64(0));
+    }
+
+    // Nothing watched: the Next Up episode is the first one, so there is only Play
+    void aSeriesNothingWatchedOffersOnlyPlay()
+    {
+        QuickPlayStub stub;
+        Ui ui(m_home->path());
+        ui.serveShow();
+        const QJsonArray episodes =
+            QJsonDocument::fromJson(fixture(QStringLiteral("episodes_page")))
+                .object()
+                .value(QStringLiteral("Items"))
+                .toArray();
+        ui.server.listingRawBody.insert(
+            QStringLiteral("NextUp"),
+            QJsonDocument(QJsonObject{{QStringLiteral("Items"), QJsonArray{episodes.first()}},
+                                      {QStringLiteral("TotalRecordCount"), 1}})
+                .toJson(QJsonDocument::Compact));
+        QVERIFY(ui.load());
+        QObject *root = ui.engine.rootObjects().constFirst();
+        QVERIFY(root->setProperty("player", QVariant::fromValue<QObject *>(&stub)));
+        ui.window->setProperty("requestedItemId", kSeriesId);
+        QVERIFY(ui.signIn());
+        QQuickItem *page = nullptr;
+        QTRY_VERIFY((page = ui.item(QStringLiteral("itemDetailsPage"))) != nullptr);
+        QObject *play = page->findChild<QObject *>(QStringLiteral("playAction"));
+        QObject *restart = page->findChild<QObject *>(QStringLiteral("playFromBeginningAction"));
+        QVERIFY(play);
+        QVERIFY(restart);
+        QTRY_VERIFY(play->property("visible").toBool());
+        QTRY_VERIFY(play->property("enabled").toBool());
+        QCOMPARE(play->property("text").toString(), QStringLiteral("Play"));
+        QVERIFY(!restart->property("visible").toBool());
+        QVERIFY(QMetaObject::invokeMethod(play, "trigger"));
+        QTRY_COMPARE(stub.streamCalls.size(), 1);
+        QCOMPARE(stub.streamCalls.constLast().id,
+                 QStringLiteral("b1b2c3d4e5f64788990a1b2c3d4e5f60"));
+    }
+
+    // A season goes on with its first unplayed episode, at the saved position
+    void aSeasonPageContinuesWithItsFirstUnplayedEpisode()
+    {
+        QuickPlayStub stub;
+        Ui ui(m_home->path());
+        ui.serveShow();
+        const auto episode = [](int number, qint64 position) {
+            return QJsonObject{
+                {QStringLiteral("Id"), QStringLiteral("%1").arg(number, 32, 16, QLatin1Char('d'))},
+                {QStringLiteral("Name"), QStringLiteral("Episode %1").arg(number)},
+                {QStringLiteral("Type"), QStringLiteral("Episode")},
+                {QStringLiteral("SeriesId"), kSeriesId},
+                {QStringLiteral("ParentIndexNumber"), 1},
+                {QStringLiteral("IndexNumber"), number},
+                {QStringLiteral("UserData"),
+                 QJsonObject{{QStringLiteral("Played"), false},
+                             {QStringLiteral("PlaybackPositionTicks"), position}}}};
+        };
+        ui.server.itemsResponder = [&](const QByteArray &route) {
+            if (!route.contains("includeItemTypes=Episode"))
+                return std::pair<int, QByteArray>{};
+            const QJsonArray items = route.contains("filters=IsUnplayed")
+                                         ? QJsonArray{episode(3, 9'000'000'000)}
+                                         : QJsonArray{episode(1, 0)};
+            return std::pair<int, QByteArray>{
+                200, QJsonDocument(QJsonObject{{QStringLiteral("Items"), items},
+                                               {QStringLiteral("TotalRecordCount"), 1}})
+                         .toJson(QJsonDocument::Compact)};
+        };
+        QVERIFY(ui.load());
+        QObject *root = ui.engine.rootObjects().constFirst();
+        QVERIFY(root->setProperty("player", QVariant::fromValue<QObject *>(&stub)));
+        ui.window->setProperty("requestedItemId", kSeasonId);
+        QVERIFY(ui.signIn());
+        QQuickItem *page = nullptr;
+        QTRY_VERIFY((page = ui.item(QStringLiteral("itemDetailsPage"))) != nullptr);
+        QObject *play = page->findChild<QObject *>(QStringLiteral("playAction"));
+        QObject *restart = page->findChild<QObject *>(QStringLiteral("playFromBeginningAction"));
+        QVERIFY(play);
+        QVERIFY(restart);
+        // The episode to go on with is in progress: Resume, at its saved position
+        QTRY_COMPARE(play->property("text").toString(), QStringLiteral("Resume"));
+        QTRY_VERIFY(play->property("enabled").toBool());
+        QTRY_VERIFY(restart->property("visible").toBool());
+        QVERIFY(QMetaObject::invokeMethod(play, "trigger"));
+        QTRY_COMPARE(stub.streamCalls.size(), 1);
+        QCOMPARE(stub.streamCalls.constLast().id,
+                 QStringLiteral("%1").arg(3, 32, 16, QLatin1Char('d')));
+        QCOMPARE(stub.streamCalls.constLast().resumeTicks, qint64(9'000'000'000));
+        QVERIFY(QMetaObject::invokeMethod(restart, "trigger"));
+        QTRY_COMPARE(stub.streamCalls.size(), 2);
+        QCOMPARE(stub.streamCalls.constLast().id,
+                 QStringLiteral("%1").arg(1, 32, 16, QLatin1Char('d')));
+        QCOMPARE(stub.streamCalls.constLast().resumeTicks, qint64(0));
     }
 
     void aLongSeasonPagesOnlyWhileScrolling()
@@ -5364,6 +5559,12 @@ class TestUiPages : public QObject {
         for (const QString &key : facetKeys(ui))
             QTRY_VERIFY2(shownItem(ui, QStringLiteral("filterFacet_") + key) != nullptr,
                          qPrintable(key));
+        // Every entry has a symbolic icon of its own kind: all or none, as the HIG asks of a list
+        const QStringList icons = facetField(ui, QStringLiteral("icon"));
+        QCOMPARE(icons.size(), 8);
+        for (const QString &icon : icons)
+            QVERIFY2(icon.endsWith(QLatin1String("-symbolic")), qPrintable(icon));
+        QCOMPARE(QSet<QString>(icons.cbegin(), icons.cend()).size(), 8);
         QCOMPARE(currentFacetOf(ui), QStringLiteral("status"));
         QTRY_VERIFY(shownItem(ui, QStringLiteral("filterOption_played_Played")) != nullptr);
         // The tag rows come with their facet
@@ -9884,7 +10085,132 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(ui.controller.downloads()->seriesRule(kSeriesId).isEmpty());
     }
 
-    void aTrackedRuleIsRemovedFromTheDownloadsPage()
+    void theRulesPageListsPausesEditsAndStopsARule()
+    {
+        Ui ui(m_home->path());
+        ui.serveShow();
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        Kinefin::DownloadsController *downloads = ui.controller.downloads();
+        QVERIFY(downloads->setSeriesRule(kSeriesId, QStringLiteral("Series"),
+                                         QStringLiteral("nextN"), -1, 3));
+        QVERIFY(ui.clickTab(QStringLiteral("Downloads")));
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("downloadsPage"));
+        // The rules are no longer a block of the Downloads page
+        QVERIFY(!ui.item(QStringLiteral("trackedRulesRepeater")));
+        QObject *open =
+            ui.currentDetails()->findChild<QObject *>(QStringLiteral("downloadRulesAction"));
+        QVERIFY(open);
+        QVERIFY(QMetaObject::invokeMethod(open, "trigger"));
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("downloadRulesPage"));
+        QQuickItem *page = ui.currentDetails();
+        QTRY_VERIFY(ui.item(QStringLiteral("downloadRule_") + kSeriesId) != nullptr);
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Next 3 episodes")));
+        QVERIFY(!ui.item(QStringLiteral("downloadRulesEmpty"))->isVisible());
+
+        // Pause and resume, from the switch of the row
+        QQuickItem *toggle = ui.item(QStringLiteral("downloadRuleSwitch_") + kSeriesId);
+        QVERIFY(toggle);
+        QVERIFY(toggle->property("checked").toBool());
+        ui.clickCenter(toggle);
+        QTRY_VERIFY(!downloads->seriesRule(kSeriesId).value(QStringLiteral("enabled")).toBool());
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Next 3 episodes · Paused")));
+        QTRY_VERIFY(!toggle->property("checked").toBool());
+        ui.clickCenter(toggle);
+        QTRY_VERIFY(downloads->seriesRule(kSeriesId).value(QStringLiteral("enabled")).toBool());
+        QTRY_VERIFY(toggle->property("checked").toBool());
+
+        // Edit opens the rule dialog on what is stored
+        QQuickItem *edit = ui.item(QStringLiteral("downloadRuleEdit_") + kSeriesId);
+        QVERIFY(edit);
+        QVERIFY(QMetaObject::invokeMethod(edit, "click"));
+        QObject *dialog = page->findChild<QObject *>(QStringLiteral("ruleDialog"));
+        QVERIFY(dialog);
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QCOMPARE(dialog->property("selectedKind").toString(), QStringLiteral("nextN"));
+        QCOMPARE(dialog->property("seriesId").toString(), kSeriesId);
+        QObject *newEpisodes = dialog->findChild<QObject *>(QStringLiteral("ruleKindNewEpisodes"));
+        QVERIFY(newEpisodes);
+        QVERIFY(QMetaObject::invokeMethod(newEpisodes, "toggle"));
+        QVERIFY(QMetaObject::invokeMethod(newEpisodes, "toggled"));
+        QObject *save = dialog->findChild<QObject *>(QStringLiteral("ruleDialogSave"));
+        QVERIFY(QMetaObject::invokeMethod(save, "trigger"));
+        QTRY_COMPARE(downloads->seriesRule(kSeriesId).value(QStringLiteral("kind")).toString(),
+                     QStringLiteral("newEpisodes"));
+        QTRY_VERIFY(ui.showsText(QStringLiteral("New episodes")));
+
+        // Stop removes the rule and the page says how to make one
+        QQuickItem *stop = ui.item(QStringLiteral("downloadRuleStop_") + kSeriesId);
+        QVERIFY(stop);
+        QSignalSpy revisions(downloads, &Kinefin::DownloadsController::rulesRevisionChanged);
+        QVERIFY(QMetaObject::invokeMethod(stop, "click"));
+        QTRY_VERIFY(downloads->seriesRule(kSeriesId).isEmpty());
+        QCOMPARE(revisions.size(), 1);
+        QTRY_VERIFY(ui.item(QStringLiteral("downloadRulesEmpty"))->isVisible());
+        QTRY_VERIFY(!ui.item(QStringLiteral("downloadRule_") + kSeriesId));
+    }
+
+    void theRulesPageOpensAboveTheDownloadsTabFromAnyPage()
+    {
+        Ui ui(m_home->path());
+        ui.serveShow();
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        QQuickItem *series = openDetails(ui, kSeriesId);
+        QVERIFY(series);
+        QVERIFY(QMetaObject::invokeMethod(ui.window, "openDownloadRules"));
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("downloadRulesPage"));
+        // The Downloads tab is under it, and the details page gave way
+        QCOMPARE(ui.stackDepth(), 2);
+        QQuickItem *rules = ui.currentDetails();
+        QVERIFY(QMetaObject::invokeMethod(ui.window, "openDownloadRules"));
+        QTest::qWait(200);
+        QCOMPARE(ui.stackDepth(), 2);
+        QCOMPARE(ui.currentDetails(), rules);
+        QVERIFY(ui.item(QStringLiteral("downloadsPage")) != nullptr);
+    }
+
+    // The mpv Configuration entry says whether the profile's mpv.conf is there, how much of it applies and what is wrong with the rest
+    void theMpvConfigurationEntryReportsTheProfilesMpvConf()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        QFile::remove(ui.settings.mpvConfPath());
+        QVERIFY(
+            QMetaObject::invokeMethod(ui.shellAction(QStringLiteral("settingsAction")), "trigger"));
+        QTRY_VERIFY(ui.item(QStringLiteral("settingsPage")) != nullptr);
+        QQuickItem *settings = ui.item(QStringLiteral("settingsPage"));
+        // Only the mpv Configuration entry has the card
+        QVERIFY(!ui.item(QStringLiteral("settingsMpvConfCard"))
+                || !ui.item(QStringLiteral("settingsMpvConfCard"))->isVisible());
+        QVERIFY(QMetaObject::invokeMethod(settings, "selectSection",
+                                          Q_ARG(QVariant, QStringLiteral("other"))));
+        QQuickItem *card = nullptr;
+        QTRY_VERIFY((card = ui.item(QStringLiteral("settingsMpvConfCard"))) != nullptr);
+        QTRY_VERIFY(card->isVisible());
+        QTRY_VERIFY(ui.showsText(QStringLiteral("There is no mpv.conf in the profile folder")));
+        QVERIFY(!ui.item(QStringLiteral("settingsMpvConfProblems"))->isVisible());
+
+        QFile file(ui.settings.mpvConfPath());
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write("deband=yes\nscripts=/tmp/x.lua\nBad Name=1\n");
+        file.close();
+        QQuickItem *check = ui.item(QStringLiteral("settingsMpvConfCheck"));
+        QVERIFY(check);
+        ui.clickCenter(check);
+        QTRY_VERIFY(ui.showsText(QStringLiteral("1 line of mpv.conf is valid")));
+        QQuickItem *problems = ui.item(QStringLiteral("settingsMpvConfProblems"));
+        QVERIFY(problems);
+        QTRY_VERIFY(problems->isVisible());
+        QTRY_VERIFY(problems->property("text").toString().contains(
+            QStringLiteral("Line 2: the option scripts is not allowed")));
+        QVERIFY(problems->property("text").toString().contains(
+            QStringLiteral("Line 3: this is not an option line")));
+        QFile::remove(ui.settings.mpvConfPath());
+    }
+
+    void theSettingsLinkNamesHowManySeriesAreTrackedAndOpensThem()
     {
         Ui ui(m_home->path());
         ui.serveShow();
@@ -9892,26 +10218,102 @@ class TestUiPages : public QObject {
         QVERIFY(buildState(ui, QStringLiteral("library")));
         QVERIFY(ui.controller.downloads()->setSeriesRule(kSeriesId, QStringLiteral("Series"),
                                                          QStringLiteral("nextN"), -1, 3));
-        QTRY_VERIFY(!ui.controller.downloads()->seriesRule(kSeriesId).isEmpty());
-        QVERIFY(ui.clickTab(QStringLiteral("Downloads")));
-        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("downloadsPage"));
-        QQuickItem *stop = nullptr;
-        QTRY_VERIFY((stop = ui.item(QStringLiteral("stopSeriesRule_0"))) != nullptr);
-        QTRY_VERIFY(ui.showsText(QStringLiteral("Next 3 episodes")));
-        QSignalSpy revisions(ui.controller.downloads(),
-                             &Kinefin::DownloadsController::rulesRevisionChanged);
-        const int revision = ui.controller.downloads()->rulesRevision();
-        QVERIFY(QMetaObject::invokeMethod(stop, "click"));
-        QTRY_VERIFY(ui.controller.downloads()->seriesRule(kSeriesId).isEmpty());
-        QCOMPARE(revisions.size(), 1);
-        QCOMPARE(ui.controller.downloads()->rulesRevision(), revision + 1);
-        QQuickItem *page = ui.item(QStringLiteral("downloadsPage"));
-        QVERIFY(page);
-        QObject *repeater = page->findChild<QObject *>(QStringLiteral("trackedRulesRepeater"));
-        QVERIFY(repeater);
-        QTRY_COMPARE(page->property("trackedRules").toList().size(), 0);
-        QTRY_COMPARE(repeater->property("count").toInt(), 0);
-        QTRY_VERIFY(!ui.showsText(QStringLiteral("Next 3 episodes")));
+        QVERIFY(
+            QMetaObject::invokeMethod(ui.shellAction(QStringLiteral("settingsAction")), "trigger"));
+        QTRY_VERIFY(ui.item(QStringLiteral("settingsPage")) != nullptr);
+        QQuickItem *settings = ui.item(QStringLiteral("settingsPage"));
+        // Only the Downloads entry has the link
+        QVERIFY(!ui.item(QStringLiteral("settingsLinkToRules"))
+                || !ui.item(QStringLiteral("settingsRulesCard"))->isVisible());
+        QVERIFY(QMetaObject::invokeMethod(settings, "selectSection",
+                                          Q_ARG(QVariant, QStringLiteral("downloads"))));
+        QQuickItem *link = nullptr;
+        QTRY_VERIFY((link = ui.item(QStringLiteral("settingsLinkToRules"))) != nullptr);
+        QTRY_VERIFY(link->isVisible());
+        QTRY_VERIFY(ui.showsText(QStringLiteral("1 series tracked")));
+        ui.clickCenter(link);
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("downloadRulesPage"));
+        QTRY_VERIFY(ui.item(QStringLiteral("downloadRule_") + kSeriesId) != nullptr);
+        QVERIFY(!ui.item(QStringLiteral("settingsPage")));
+    }
+
+    // A series or a season is downloaded by its episodes: one top-bar action with a menu, and a dialog that counts what the batch holds before anything is queued
+    void theDownloadMenuOfASeriesOffersDownloadAllAndAutomaticDownloads()
+    {
+        Ui ui(m_home->path());
+        ui.serveShow();
+        const auto episode = [](int number, bool played) {
+            QJsonObject row = fixtureObject(QStringLiteral("episode_item"));
+            row.insert(QStringLiteral("Id"),
+                       QStringLiteral("%1").arg(number, 32, 16, QLatin1Char('d')));
+            row.insert(QStringLiteral("Name"), QStringLiteral("Episode %1").arg(number));
+            row.insert(QStringLiteral("CanDownload"), true);
+            row.insert(QStringLiteral("UserData"), QJsonObject{{QStringLiteral("Played"), played}});
+            return row;
+        };
+        ui.server.listingRawBody.insert(
+            QStringLiteral("Items"),
+            QJsonDocument(QJsonObject{{QStringLiteral("Items"),
+                                       QJsonArray{episode(1, false), episode(2, true)}},
+                                      {QStringLiteral("TotalRecordCount"), 2}})
+                .toJson(QJsonDocument::Compact));
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        QQuickItem *series = openDetails(ui, kSeriesId);
+        QVERIFY(series);
+        QObject *menu = series->findChild<QObject *>(QStringLiteral("downloadMenuAction"));
+        QVERIFY(menu);
+        QTRY_VERIFY(menu->property("visible").toBool());
+        QCOMPARE(menu->property("text").toString(), QStringLiteral("Download"));
+        QCOMPARE(QQmlListReference(menu, "children").count(), 2);
+        QObject *all = series->findChild<QObject *>(QStringLiteral("downloadAllAction"));
+        QVERIFY(all);
+        QVERIFY(QMetaObject::invokeMethod(all, "trigger"));
+        QObject *dialog = series->findChild<QObject *>(QStringLiteral("downloadAllDialog"));
+        QVERIFY(dialog);
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QObject *summary = dialog->findChild<QObject *>(QStringLiteral("downloadAllSummary"));
+        QVERIFY(summary);
+        // The count, and the size the sources add up to
+        QTRY_VERIFY(summary->property("text").toString().startsWith(
+            QStringLiteral("1 episode will be downloaded (")));
+        QVERIFY(summary->property("text").toString().endsWith(QStringLiteral(" in all)")));
+        QObject *confirm = dialog->findChild<QObject *>(QStringLiteral("downloadAllConfirm"));
+        QVERIFY(confirm);
+        QVERIFY(confirm->property("enabled").toBool());
+        // Leaving the watched ones in changes the count, not the server
+        const int reads = ui.server.itemsRoutes.size();
+        ui.controller.downloads()->setDownloadAllUnwatchedOnly(false);
+        QTRY_VERIFY(summary->property("text").toString().startsWith(
+            QStringLiteral("2 episodes will be downloaded (")));
+        QCOMPARE(ui.server.itemsRoutes.size(), reads);
+        QVERIFY(ui.controller.downloads()
+                    ->downloadState(QStringLiteral("%1").arg(1, 32, 16, QLatin1Char('d')))
+                    .isEmpty());
+        QVERIFY(QMetaObject::invokeMethod(confirm, "trigger"));
+        QTRY_VERIFY(!dialog->property("opened").toBool());
+        QVERIFY(!ui.controller.downloads()
+                     ->downloadState(QStringLiteral("%1").arg(1, 32, 16, QLatin1Char('d')))
+                     .isEmpty());
+        QVERIFY(!ui.controller.downloads()
+                     ->downloadState(QStringLiteral("%1").arg(2, 32, 16, QLatin1Char('d')))
+                     .isEmpty());
+
+        // Closing the dialog drops its plan
+        QVERIFY(QMetaObject::invokeMethod(all, "trigger"));
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QVERIFY(QMetaObject::invokeMethod(dialog, "close"));
+        QTRY_VERIFY(!dialog->property("opened").toBool());
+        QTRY_COMPARE(
+            ui.controller.downloads()->downloadAllPlan().value(QStringLiteral("state")).toString(),
+            QStringLiteral("idle"));
+
+        // A season has it too, a movie only the plain Download
+        QQuickItem *season = openDetails(ui, kSeasonId);
+        QVERIFY(season);
+        QObject *seasonMenu = season->findChild<QObject *>(QStringLiteral("downloadMenuAction"));
+        QVERIFY(seasonMenu);
+        QTRY_VERIFY(seasonMenu->property("visible").toBool());
     }
 
     void reopeningTheRuleDialogShowsTheStoredKind()
@@ -13039,16 +13441,16 @@ class TestUiPages : public QObject {
             names << actions.at(i)->objectName();
             texts << actions.at(i)->property("text").toString();
         }
-        // The bar keeps Cast, Download, the favorite toggle, the watched state and Media Info; the ⋮ menu has Trailer, the queue entries, Add to Playlist and Collection, the automatic downloads, the Edit submenu and Copy Stream URL, then Delete Media behind a separator (the favorite action is objectName toggleFavoriteAction; Play from Beginning is a hero button, not an action of the page)
+        // The bar keeps Cast, Download (the Download… menu of a series or a season), the favorite toggle, the watched state and Media Info; the ⋮ menu has Trailer, the queue entries, Add to Playlist and Collection, Stop Automatic Downloads, the Edit submenu and Copy Stream URL, then Delete Media behind a separator (the favorite action is objectName toggleFavoriteAction; Play from Beginning is a hero button, not an action of the page)
         QCOMPARE(
             names,
             (QStringList{
                 QStringLiteral("playOnAction"), QStringLiteral("downloadAction"),
-                QStringLiteral("toggleFavoriteAction"), QStringLiteral("togglePlayedAction"),
-                QStringLiteral("mediaInfoAction"), QStringLiteral("trailerAction"),
-                QStringLiteral("playNextAction"), QStringLiteral("addToQueueAction"),
-                QStringLiteral("addToPlaylistAction"), QStringLiteral("addToCollectionAction"),
-                QStringLiteral("automaticDownloadsAction"), QStringLiteral("stopDownloadsAction"),
+                QStringLiteral("downloadMenuAction"), QStringLiteral("toggleFavoriteAction"),
+                QStringLiteral("togglePlayedAction"), QStringLiteral("mediaInfoAction"),
+                QStringLiteral("trailerAction"), QStringLiteral("playNextAction"),
+                QStringLiteral("addToQueueAction"), QStringLiteral("addToPlaylistAction"),
+                QStringLiteral("addToCollectionAction"), QStringLiteral("stopDownloadsAction"),
                 QStringLiteral("serverEditMenuAction"), QStringLiteral("copyStreamUrlAction"),
                 QStringLiteral("overflowSeparatorDelete"), QStringLiteral("deleteMediaAction")}));
         // The entries show for an administrator, the Edit submenu with the entries it holds

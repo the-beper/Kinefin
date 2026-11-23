@@ -132,6 +132,65 @@ class TestItemDetailsModel : public QObject {
         QVERIFY(!movie->canResume());
     }
 
+    void aSeriesAndASeasonCanBeMarkedAndWhatHangsBelowIsReadAgain()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        const QString series = QStringLiteral("aa11bb22cc33dd44ee55ff6677889900");
+        f.server.itemsById.insert(series, fixtureItem(QStringLiteral("series_item")));
+        auto details = f.open(series);
+        QTRY_COMPARE(details->status(), ItemDetailsModel::Ready);
+        QVERIFY(!details->playable());
+        QVERIFY(details->canMarkPlayed());
+        QTRY_COMPARE(details->below()->seasonsStatus(), Kinefin::ItemChildrenModel::Ready);
+        QTRY_VERIFY(details->below()->playTargetsReady());
+        const int seasonReads = f.server.listingRoutes.value(QStringLiteral("Seasons")).size();
+        const int nextUpReads = f.server.listingRoutes.value(QStringLiteral("NextUp")).size();
+
+        QVERIFY(details->togglePlayed());
+        QVERIFY(details->playedBusy());
+        QTRY_VERIFY(!details->playedBusy());
+        QVERIFY(!details->playedError());
+        QCOMPARE(f.server.playedWrites.size(), 1);
+        QCOMPARE(f.server.playedWrites.constFirst().method, QByteArrayLiteral("POST"));
+        QVERIFY(details->played());
+        QCOMPARE(details->unplayedCount(), 0);
+        // The seasons and the episode to go on with come from the server again
+        QTRY_COMPARE(f.server.listingRoutes.value(QStringLiteral("Seasons")).size(),
+                     seasonReads + 1);
+        QTRY_COMPARE(f.server.listingRoutes.value(QStringLiteral("NextUp")).size(),
+                     nextUpReads + 1);
+
+        QVERIFY(details->togglePlayed());
+        QTRY_VERIFY(!details->playedBusy());
+        QCOMPARE(f.server.playedWrites.constLast().method, QByteArrayLiteral("DELETE"));
+        QVERIFY(!details->played());
+        // Not known until the page reads the series again
+        QCOMPARE(details->unplayedCount(), -1);
+
+        const QString season = QStringLiteral("11aa22bb33cc44dd55ee66ff778899aa");
+        f.server.itemsById.insert(season, fixtureItem(QStringLiteral("season_item")));
+        auto seasonDetails = f.open(season, ItemDetailsModel::FirstChannel + 2);
+        QTRY_COMPARE(seasonDetails->status(), ItemDetailsModel::Ready);
+        QVERIFY(seasonDetails->canMarkPlayed());
+        QVERIFY(seasonDetails->togglePlayed());
+        QTRY_VERIFY(!seasonDetails->playedBusy());
+        QVERIFY(seasonDetails->played());
+    }
+
+    void aCollectionCannotBeMarked()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        const QString boxSet = QStringLiteral("bb11cc22dd33ee44ff5566778899aabb");
+        f.server.itemsById.insert(boxSet, fixtureItem(QStringLiteral("boxset_item")));
+        auto details = f.open(boxSet);
+        QTRY_COMPARE(details->status(), ItemDetailsModel::Ready);
+        QVERIFY(!details->canMarkPlayed());
+        QVERIFY(!details->togglePlayed());
+        QVERIFY(f.server.playedWrites.isEmpty());
+    }
+
     void watchedFailuresDoNotChangeStateAndCanBeRetried()
     {
         Fixture f;

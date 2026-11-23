@@ -236,6 +236,8 @@ class ConnectionController : public QObject {
     Q_INVOKABLE Kinefin::ItemDetailsModel *createItemDetails(const QString &itemId, QObject *owner);
     // Loads the home rows again (the libraries are kept)
     Q_INVOKABLE void reloadHome();
+    // While something plays the server sends a UserDataChanged with every progress report: the ids wait and are read again once the playback is over. `hold` false lets them go at once
+    Q_INVOKABLE void holdUserDataRefresh(bool hold);
     // Turns the Home Favorites row on or off (the Show on Home setting): off makes no request for it, and a change shows at once without reloading the other rows
     Q_INVOKABLE void setHomeFavoritesEnabled(bool enabled) { m_home.setFavoritesEnabled(enabled); }
     // Whether a library of this tab type ("movies" or "tvshows") is listed
@@ -470,6 +472,12 @@ class ConnectionController : public QObject {
     bool m_offlineAvailable = false; // the last value announced
     // A record changes with every progress tick: the files are looked at once a second at most
     QTimer m_offlineRefresh;
+    static constexpr int UserDataPendingMax = 10000;
+    static constexpr int UserDataRound = 500;
+    // The ids a UserDataChanged named, normalized, until the next round reads them again: a burst is one round of at most UserDataRound ids, the rest wait for the next
+    QTimer m_userDataRefresh;
+    QSet<QString> m_userDataPending;
+    bool m_userDataHeld = false;
     QString m_currentUserId;                   // the last value announced
     bool m_currentUserIsAdministrator = false; // the last value announced
     QString m_restoringUserId;                 // the saved user a restore in flight is for

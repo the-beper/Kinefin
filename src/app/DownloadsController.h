@@ -72,6 +72,8 @@ class DownloadsController final : public QObject {
     Q_PROPERTY(QString ownerUserId READ ownerUserId NOTIFY ownerChanged)
     // Bumped when a series rule changes, so the series page follows it
     Q_PROPERTY(int rulesRevision READ rulesRevision NOTIFY rulesRevisionChanged)
+    // What a Download All would queue (see planDownloadAll): `state` is idle, reading, ready or failed; `count` the episodes it would queue, `size` their known bytes and `sizeKnown` whether every one has a size; `total` the episodes read, `alreadyDownloaded` and `watchedSkipped` the ones left out, `truncated` whether the series has more than MaxDownloadAll; `unwatchedOnly` the choice the count follows
+    Q_PROPERTY(QVariantMap downloadAllPlan READ downloadAllPlan NOTIFY downloadAllPlanChanged)
 
   public:
     DownloadsController(JellyfinClient *client, const QString &profileId,
@@ -95,6 +97,7 @@ class DownloadsController final : public QObject {
     QString ownerServerId() const;
     QString ownerUserId() const;
     int rulesRevision() const { return m_rulesRevision; }
+    QVariantMap downloadAllPlan() const;
 
     // The session can serve downloads; false stops the active transfers and holds the queue
     void setOnline(bool online);
@@ -149,7 +152,19 @@ class DownloadsController final : public QObject {
                                    const QString &kind, int seasonNumber = -1, int count = 3);
     Q_INVOKABLE QVariantList seriesRules() const;
     Q_INVOKABLE bool removeSeriesRule(const QString &seriesId);
+    // Pauses or resumes the rule of a series. A rule for new episodes that was off takes up from now on when it is switched on again (its cursor moves to now), so what was added meanwhile is not caught up; the other kinds download what is unwatched at that time
+    Q_INVOKABLE bool setSeriesRuleEnabled(const QString &seriesId, bool enabled);
     Q_INVOKABLE QVariantMap seriesRule(const QString &seriesId) const;
+    // Download All of a series (`series`: every season, Specials included) or of a season: reads the episodes once, DownloadAllPage per request and at most MaxDownloadAll, and counts what the batch would queue. Nothing is queued until startDownloadAll. A new plan replaces the one before
+    Q_INVOKABLE bool planDownloadAll(const QString &containerId, bool series);
+    // Whether the watched episodes stay out of the batch (the default): recounts, no request
+    Q_INVOKABLE void setDownloadAllUnwatchedOnly(bool unwatchedOnly);
+    // Queues the planned episodes in order, from the rows already read, and ends the plan; returns how many entered the queue
+    Q_INVOKABLE int startDownloadAll();
+    // Drops the plan and the request in flight
+    Q_INVOKABLE void cancelDownloadAll();
+    static constexpr int DownloadAllPage = 25;
+    static constexpr int MaxDownloadAll = 1000;
     // Runs the enabled rules now (startup, sign-in, reconnect, LibraryChanged, every 6 h)
     Q_INVOKABLE void scanRules();
     // A LibraryChanged hint wakes the scanner, debounced; the event is never treated as an item
@@ -163,6 +178,7 @@ class DownloadsController final : public QObject {
     void storageFailedChanged();
     void outboxChanged();
     void rulesRevisionChanged();
+    void downloadAllPlanChanged();
     void exportFinished(const QString &itemId, bool ok);
     // Another export still runs: nothing was started
     void exportBusy(const QString &itemId);
@@ -196,6 +212,23 @@ class DownloadsController final : public QObject {
     void dropExtras();
     void onListingFailed(const QString &family, int httpStatus, const QString &reason, int channel);
     std::optional<DownloadRecord> recordFor(const QJsonObject &item, const QString &ruleId) const;
+    // The record a Download All makes of a row it read, or nothing for a row that is not an episode with a file this user may download
+    std::optional<DownloadRecord> recordForPlanned(const QJsonObject &item) const;
+    void requestDownloadAllPage();
+    void onDownloadAllItems(const QJsonArray &items, int total);
+    void endDownloadAll(const QString &state);
+
+    struct DownloadAll {
+        QString state = QStringLiteral("idle");
+        QString containerId;
+        bool series = false;
+        bool unwatchedOnly = true;
+        bool truncated = false;
+        int channel = -1;
+        int total = 0;
+        QList<QJsonObject> items;
+    };
+    DownloadAll m_all;
 
     JellyfinClient *m_client = nullptr;
     DownloadManager m_manager;

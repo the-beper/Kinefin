@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "settings/MpvConf.h"
+
 #include <QObject>
 #include <QPointer>
 #include <QString>
@@ -17,8 +19,7 @@ namespace Kinefin {
 class PlaybackEngine;
 class ClientSettings;
 
-// Applies the profile's validated settings to the same mpv instance that renders
-// video. Settings changes are reflected live; the user-owned other_conf wins last.
+// Applies the profile's validated settings to the same mpv instance that renders video, live: the profile's mpv.conf first, the managed settings over it, and the user-owned other_conf last
 class PlayerSettings final : public QObject {
     Q_OBJECT
   public:
@@ -67,7 +68,11 @@ class PlayerSettings final : public QObject {
     // `applyAspect` and then the aspect entries of mpv.conf
     void reapplyAspect(bool reset);
     void applySubtitles();
-    // Every entry of mpv.conf, or only those named in `only`
+    // One entry: a plain value is set as a property, a list operation (`glsl-shaders-append`) goes through change-list
+    void applyEntry(const MpvConfEntry &entry);
+    // The valid entries of the profile's mpv.conf, before any managed setting; a problem is logged
+    void applyConfFile();
+    // Every entry of the Manual MPV Configuration setting, or only those named in `only`
     void applyOverrides(const QStringList &only = {});
     void applyDisplayRate();
     void followScreen(QScreen *screen);

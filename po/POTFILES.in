@@ -32,6 +32,8 @@ src/qml/MediaInfoDialog.qml
 src/qml/SearchPage.qml
 src/qml/QueuePage.qml
 src/qml/DownloadsPage.qml
+src/qml/DownloadRulesPage.qml
+src/qml/DownloadAllDialog.qml
 src/qml/RuleDialog.qml
 src/qml/SubtitleSearchDialog.qml
 src/qml/FilterDialog.qml

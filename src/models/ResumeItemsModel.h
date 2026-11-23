@@ -7,6 +7,8 @@
 #include "models/ItemRowModel.h"
 #include "models/PagedItemsModel.h"
 
+#include <QTimer>
+
 namespace Kinefin {
 // Everything in Continue Watching as a paged list (see PagedItemsModel, with the card roles of CardRoles.h): the "Show All" page of the Home row. It uses its own listing channel, so the Home row never sees its replies. `open()` loads the first page, `close()` empties the model and frees the channel, and the model also empties itself whenever the client loses its credentials
 class ResumeItemsModel final : public PagedItemsModel {
@@ -53,5 +55,7 @@ class ResumeItemsModel final : public PagedItemsModel {
 
     JellyfinClient *m_client;
     bool m_open = false;
+    // One restart for the burst of played signals of a refresh of user data
+    QTimer m_restartSoon;
 };
 } // namespace Kinefin

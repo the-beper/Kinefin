@@ -194,6 +194,133 @@ class TestJellyfinClient : public QObject {
         QVERIFY(!client.fetchMediaSegments(QStringLiteral("a/b")));
     }
 
+    void refreshUserDataReportsWhatTheServerHasAndSkipsAPendingWrite()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        const auto row = [](const QString &id, bool played, qint64 position, bool favorite) {
+            return QJsonDocument(
+                       QJsonObject{{QStringLiteral("Id"), id},
+                                   {QStringLiteral("Name"), QStringLiteral("Item")},
+                                   {QStringLiteral("Type"), QStringLiteral("Movie")},
+                                   {QStringLiteral("UserData"),
+                                    QJsonObject{{QStringLiteral("Played"), played},
+                                                {QStringLiteral("PlaybackPositionTicks"), position},
+                                                {QStringLiteral("IsFavorite"), favorite}}}})
+                .toJson(QJsonDocument::Compact);
+        };
+        server.itemsById.insert(kItemA, row(kItemA, false, 3'000'000'000, true));
+        server.itemsById.insert(kItemB, row(kItemB, true, 0, false));
+        server.itemsById.insert(kItemC, row(kItemC, true, 0, false));
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        QSignalSpy favorite(&client, &Kinefin::JellyfinClient::itemFavoriteUpdated);
+        QSignalSpy played(&client, &Kinefin::JellyfinClient::itemPlayedUpdated);
+        QSignalSpy progress(&client, &Kinefin::JellyfinClient::itemProgressUpdated);
+
+        // An id that is not one, a repeat (another spelling too) and an id with a write pending are left out
+        server.holdPlayedWrites = true;
+        QVERIFY(client.setItemPlayed(kItemC, true));
+        QVERIFY(client.refreshUserData(
+            {kItemA, kItemB, kItemA.toUpper(), kItemC, QStringLiteral("../x")}));
+        QTRY_COMPARE(played.size(), 2);
+        QCOMPARE(played.at(0).at(0).toString(), kItemA);
+        QCOMPARE(played.at(0).at(1).toBool(), false);
+        QCOMPARE(played.at(1).at(0).toString(), kItemB);
+        QCOMPARE(played.at(1).at(1).toBool(), true);
+        // A saved position follows the played flag, and only an item that has one
+        QCOMPARE(progress.size(), 1);
+        QCOMPARE(progress.constFirst().at(0).toString(), kItemA);
+        QCOMPARE(progress.constFirst().at(1).toLongLong(), qint64(3'000'000'000));
+        QCOMPARE(favorite.size(), 2);
+        QCOMPARE(favorite.at(0).at(1).toBool(), true);
+        QCOMPARE(favorite.at(1).at(1).toBool(), false);
+        const QString route = QString::fromUtf8(server.itemsRoutes.constLast());
+        QVERIFY(route.contains(kItemA));
+        QVERIFY(route.contains(kItemB));
+        QVERIFY(!route.contains(kItemC));
+        QVERIFY(!route.contains(QStringLiteral("..")));
+        server.holdPlayedWrites = false;
+        server.releaseHeld();
+
+        // Nothing to ask: no request
+        const int asked = server.itemsRoutes.size();
+        QVERIFY(!client.refreshUserData({}));
+        QVERIFY(!client.refreshUserData({QStringLiteral("../bad"), QString()}));
+        QCOMPARE(server.itemsRoutes.size(), asked);
+    }
+
+    // The server names an episode together with its season and not the series: the series is read as well, once
+    void refreshUserDataAlsoReadsTheSeriesOfAnEpisodeOnce()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        const QString series = kItemB;
+        const auto row = [&series](const QString &id, const QString &type, bool played) {
+            QJsonObject item{
+                {QStringLiteral("Id"), id},
+                {QStringLiteral("Type"), type},
+                {QStringLiteral("UserData"), QJsonObject{{QStringLiteral("Played"), played},
+                                                         {QStringLiteral("IsFavorite"), false}}}};
+            if (type != QLatin1String("Series"))
+                item.insert(QStringLiteral("SeriesId"), series);
+            return QJsonDocument(item).toJson(QJsonDocument::Compact);
+        };
+        server.itemsById.insert(kItemA, row(kItemA, QStringLiteral("Episode"), true));
+        server.itemsById.insert(kItemC, row(kItemC, QStringLiteral("Season"), false));
+        server.itemsById.insert(series, row(series, QStringLiteral("Series"), false));
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        QSignalSpy played(&client, &Kinefin::JellyfinClient::itemPlayedUpdated);
+        QVERIFY(client.refreshUserData({kItemA, kItemC}));
+        QTRY_COMPARE(played.size(), 3);
+        QCOMPARE(played.at(0).at(0).toString(), kItemA);
+        QCOMPARE(played.at(1).at(0).toString(), kItemC);
+        // The episode and the season share one series: one more request, for it
+        QCOMPARE(played.at(2).at(0).toString(), series);
+        QCOMPARE(server.itemsRoutes.size(), 2);
+        QVERIFY(server.itemsRoutes.constLast().contains(series.toUtf8()));
+        // A series row names no series: nothing more is asked
+        QTest::qWait(200);
+        QCOMPARE(server.itemsRoutes.size(), 2);
+        // A series that the answer already holds is not asked for again
+        played.clear();
+        QVERIFY(client.refreshUserData({kItemA, series}));
+        QTRY_COMPARE(played.size(), 2);
+        QCOMPARE(server.itemsRoutes.size(), 3);
+    }
+
+    void refreshUserDataAsksInChunksAndAFailureEmitsNothing()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        QSignalSpy played(&client, &Kinefin::JellyfinClient::itemPlayedUpdated);
+        // 250 ids make three requests, which the server does not know: nothing comes back
+        server.itemsById.insert(kItemA, "{}");
+        const QStringList ids = manyIds(250);
+        server.itemsById.insert(
+            ids.first(),
+            QJsonDocument(QJsonObject{{QStringLiteral("Id"), ids.first()},
+                                      {QStringLiteral("Type"), QStringLiteral("Movie")},
+                                      {QStringLiteral("UserData"),
+                                       QJsonObject{{QStringLiteral("Played"), true}}}})
+                .toJson(QJsonDocument::Compact));
+        QVERIFY(client.refreshUserData(ids));
+        QTRY_COMPARE(server.itemsRoutes.size(), 3);
+        QTRY_COMPARE(played.size(), 1);
+        QCOMPARE(played.constFirst().at(0).toString(), ids.first());
+        for (const QByteArray &route : std::as_const(server.itemsRoutes))
+            QVERIFY(route.count(',') <= Kinefin::JellyfinClient::UserDataChunk - 1);
+        // A failed answer reports nothing
+        server.listingStatus.insert(QStringLiteral("Items"), 500);
+        const int before = played.size();
+        QVERIFY(client.refreshUserData({kItemA}));
+        QTest::qWait(300);
+        QCOMPARE(played.size(), before);
+    }
+
     void subtitleDownloadRequiresSameOriginAndNeverFollowsRedirect()
     {
         FakeJellyfin server;

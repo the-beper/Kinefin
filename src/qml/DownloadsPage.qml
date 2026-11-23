@@ -27,9 +27,20 @@ Kirigami.ScrollablePage {
 
     header: PageToolbar {
         title: (page.Window.window?.compactHeader ?? false) ? page.title : ""
+        actions: page.actions
         toolbarObjectName: "downloadsToolbar"
         titleObjectName: "downloadsHeading"
     }
+
+    // The rules that add episodes by themselves have a page of their own above this one
+    actions: [
+        Kirigami.Action {
+            objectName: "downloadRulesAction"
+            text: i18n("Automatic Downloads")
+            icon.name: "download-later-symbolic"
+            onTriggered: page.Window.window.openDownloadRules()
+        }
+    ]
 
     Component.onCompleted: {
         if (!connection.offline)
@@ -38,21 +49,6 @@ Kirigami.ScrollablePage {
 
     // Read once per change: the box, the header and the resolution share it
     readonly property var outboxConflicts: downloads.outboxConflicts
-    readonly property int rulesRevision: downloads.rulesRevision
-    // The revision is part of the expression, so the binding follows the rule store
-    readonly property var trackedRules: rulesRevision >= 0 ? downloads.seriesRules() : []
-
-    function ruleKindText(rule) {
-        switch (rule.kind) {
-        case "nextN":
-            return i18np("Next %1 episode", "Next %1 episodes", rule.count);
-        case "season":
-            return i18n("Season %1", rule.seasonNumber);
-        case "newEpisodes":
-            return i18n("New episodes");
-        }
-        return "";
-    }
 
     // The list takes the keys as soon as the page shows
     function focusPrimary() {
@@ -446,7 +442,6 @@ Kirigami.ScrollablePage {
             visible: (!page.downloads.canDownload && !page.connection.offline)
                      || page.downloads.storageFailed
                      || page.outboxConflicts.length > 0
-                     || page.trackedRules.length > 0
 
             ColumnLayout {
                 id: notices
@@ -493,49 +488,6 @@ Kirigami.ScrollablePage {
                     visible: page.outboxConflicts.length === 0 && !page.downloads.storageFailed && !page.downloads.canDownload && !page.connection.offline
                     type: Kirigami.MessageType.Information
                     text: i18n("This server does not allow downloads for this user. Downloaded items stay available on this device")
-                }
-                ColumnLayout {
-                    Layout.fillWidth: true
-                    visible: page.trackedRules.length > 0
-                    spacing: 0
-
-                    Kirigami.ListSectionHeader {
-                        Layout.fillWidth: true
-                        text: i18n("Tracked Series")
-                    }
-                    Repeater {
-                        objectName: "trackedRulesRepeater"
-                        model: page.trackedRules
-                        delegate: RowLayout {
-                            required property var modelData
-                            required property int index
-                            Layout.fillWidth: true
-                            spacing: Kirigami.Units.largeSpacing
-
-                            Controls.Label {
-                                Layout.fillWidth: true
-                                textFormat: Text.PlainText
-                                elide: Text.ElideRight
-                                text: modelData.seriesName.length > 0 ? modelData.seriesName : i18n("Unknown series")
-                            }
-                            Controls.Label {
-                                textFormat: Text.PlainText
-                                color: Kirigami.Theme.disabledTextColor
-                                text: page.ruleKindText(modelData)
-                            }
-                            Controls.ToolButton {
-                                objectName: "stopSeriesRule_" + index
-                                text: i18n("Stop Automatic Downloads")
-                                icon.name: "edit-delete-remove"
-                                display: Controls.AbstractButton.IconOnly
-                                Accessible.name: i18nc("@action:button %1 is the series", "Stop Automatic Downloads of %1", modelData.seriesName.length > 0 ? modelData.seriesName : i18n("Unknown series"))
-                                Controls.ToolTip.text: text
-                                Controls.ToolTip.visible: hovered || visualFocus
-                                Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
-                                onClicked: page.downloads.removeSeriesRule(modelData.seriesId)
-                            }
-                        }
-                    }
                 }
             }
         }

@@ -199,12 +199,11 @@ Kirigami.Dialog {
         return String(value);
     }
 
-    // FilterOptionsModel::GenreIdRole and NameRole are Qt::UserRole + 1 and + 2
     function genreName(genreId) {
         for (let row = 0; row < options.rowCount(); ++row) {
             const index = options.index(row, 0);
-            if (options.data(index, Qt.UserRole + 1) === genreId)
-                return options.data(index, Qt.UserRole + 2);
+            if (options.data(index, FilterOptionsModel.GenreIdRole) === genreId)
+                return options.data(index, FilterOptionsModel.NameRole);
         }
         return "";
     }
@@ -266,36 +265,36 @@ Kirigami.Dialog {
     function buildFacets() {
         optionsRevision;
         const facets = [];
-        const add = (key, title, state) => facets.push({ key: key, title: title, busy: state === FilterOptionsModel.Loading, failed: state === FilterOptionsModel.Failed });
-        add("status", i18nc("@title:group section of the filter dialog", "Status"));
+        const add = (key, title, icon, state) => facets.push({ key: key, title: title, icon: icon, busy: state === FilterOptionsModel.Loading, failed: state === FilterOptionsModel.Failed });
+        add("status", i18nc("@title:group section of the filter dialog", "Status"), "view-visible-symbolic");
         if (list.featuresAvailable ?? false)
-            add("features", i18nc("@title:group section of the filter dialog", "Features"));
+            add("features", i18nc("@title:group section of the filter dialog", "Features"), "view-list-details-symbolic");
         if (list.videoQualityAvailable ?? false) {
-            add("quality", i18nc("@title:group section of the filter dialog", "Video Quality"));
-            add("videoType", i18nc("@title:group section of the filter dialog: Blu-ray and DVD", "Video Type"));
+            add("quality", i18nc("@title:group section of the filter dialog", "Video Quality"), "video-television-symbolic");
+            add("videoType", i18nc("@title:group section of the filter dialog: Blu-ray and DVD", "Video Type"), "media-optical-symbolic");
         }
         if (list.seriesStatusAvailable ?? false)
-            add("seriesStatus", i18nc("@title:group section of the filter dialog", "Series Status"));
+            add("seriesStatus", i18nc("@title:group section of the filter dialog", "Series Status"), "view-time-schedule-symbolic");
         if (list.episodeKindAvailable ?? false)
-            add("episodes", i18nc("@title:group section of the filter dialog", "Episodes"));
+            add("episodes", i18nc("@title:group section of the filter dialog", "Episodes"), "view-media-playlist-symbolic");
 
         const source = options.status;
         if (source === FilterOptionsModel.Loading || source === FilterOptionsModel.Failed) {
-            add("genresAndTags", i18nc("@title:group section of the filter dialog", "Genres and Tags"), source);
+            add("genresAndTags", i18nc("@title:group section of the filter dialog", "Genres and Tags"), "tag-symbolic", source);
         } else if (source === FilterOptionsModel.Ready) {
             if (options.available)
-                add("genres", i18nc("@title:group section of the filter dialog", "Genres"));
+                add("genres", i18nc("@title:group section of the filter dialog", "Genres"), "view-media-genre-symbolic");
             if (options.tagsAvailable)
-                add("tags", i18nc("@title:group section of the filter dialog", "Tags"));
+                add("tags", i18nc("@title:group section of the filter dialog", "Tags"), "tag-symbolic");
         }
         const legacy = options.legacyStatus;
         if (legacy === FilterOptionsModel.Loading || legacy === FilterOptionsModel.Failed) {
-            add("ratingsAndYears", i18nc("@title:group section of the filter dialog", "Ratings and Years"), legacy);
+            add("ratingsAndYears", i18nc("@title:group section of the filter dialog", "Ratings and Years"), "starred-symbolic", legacy);
         } else if (legacy === FilterOptionsModel.Ready) {
             if (options.ratingsAvailable)
-                add("ratings", i18nc("@title:group section of the filter dialog", "Ratings"));
+                add("ratings", i18nc("@title:group section of the filter dialog", "Ratings"), "starred-symbolic");
             if (options.yearsAvailable)
-                add("years", i18nc("@title:group section of the filter dialog", "Years"));
+                add("years", i18nc("@title:group section of the filter dialog", "Years"), "view-calendar-symbolic");
         }
         return facets;
     }
@@ -416,8 +415,8 @@ Kirigami.Dialog {
         case "genres":
             for (let row = 0; row < options.rowCount(); ++row) {
                 const index = options.index(row, 0);
-                const genreId = options.data(index, Qt.UserRole + 1);
-                const name = options.data(index, Qt.UserRole + 2);
+                const genreId = options.data(index, FilterOptionsModel.GenreIdRole);
+                const name = options.data(index, FilterOptionsModel.NameRole);
                 // Where the id is the name the object name takes the place of the row, never the text
                 if (listed(genreId, name))
                     option("genreIds", genreId, genreIdsAreNames ? "genreIds_" + row : undefined, name);
@@ -618,6 +617,7 @@ Kirigami.Dialog {
         objectName: "filterFacet_" + modelData.key
         focusPolicy: Qt.NoFocus
         text: modelData.title
+        icon.name: modelData.icon
         checked: !dialog.narrow && dialog.currentFacet === modelData.key
         highlighted: checked
         onClicked: dialog.openFacet(modelData.key)

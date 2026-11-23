@@ -57,7 +57,8 @@ class DownloadManager final : public QObject {
     void setSourceResolver(SourceResolver resolver);
 
     // Inserts or replaces the record and schedules it; false when the store refused it
-    bool enqueue(const DownloadRecord &record);
+    // `batch` true leaves the write of the index to the store's own timer and does not start a transfer yet: for a batch, followed by one flush of the store and one wake()
+    bool enqueue(const DownloadRecord &record, bool batch = false);
     // Queues a record again after a failure, or resumes a paused one
     bool retry(const QString &serverId, const QString &userId, const QString &itemId);
     // Runs the queue now: for a gate that opened without setOnline or setMetered changing (the download policy became known)

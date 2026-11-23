@@ -25,6 +25,7 @@ class SeasonEpisodesModel final : public PagedItemsModel {
         PlayedRole,
         PlayedPercentageRole,
         FavoriteRole,
+        PositionTicksRole,
         LoadedRole
     };
 

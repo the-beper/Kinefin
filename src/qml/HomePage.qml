@@ -34,12 +34,11 @@ Kirigami.ScrollablePage {
     // How many rows failed to load, counted again whenever the model changes: no property of it says so
     property int failedRows: 0
 
-    // HomeRowsModel::StatusRole is Qt::UserRole + 4
     function countFailedRows() {
         const rows = page.connection.homeRows;
         let failed = 0;
         for (let i = 0; i < rows.rowCount(); ++i) {
-            if (rows.data(rows.index(i, 0), Qt.UserRole + 4) === HomeRowsModel.Failed)
+            if (rows.data(rows.index(i, 0), HomeRowsModel.StatusRole) === HomeRowsModel.Failed)
                 ++failed;
         }
         failedRows = failed;

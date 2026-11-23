@@ -538,6 +538,32 @@ class TestHomeRowsModel : public QObject {
         QTRY_VERIFY(f.status(0) == int(HomeRowsModel::Failed));
     }
 
+    // The played and the progress signals of a refresh of user data come in bursts: the rows reload once, and a position moves Continue Watching too
+    void aBurstOfPlayedAndProgressSignalsReloadsTheRowsOnce()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        f.rows.load(libraries());
+        QTRY_VERIFY(f.allSettled());
+        const int before = f.server.listingRoutes.value(QStringLiteral("Resume")).size();
+        for (int i = 0; i < 20; ++i) {
+            Q_EMIT f.client.itemPlayedUpdated(
+                QStringLiteral("aaaa0000aaaa0000aaaa0000aaaa00%1").arg(i, 2, 10, QLatin1Char('0')),
+                true);
+            Q_EMIT f.client.itemProgressUpdated(
+                QStringLiteral("bbbb0000bbbb0000bbbb0000bbbb00%1").arg(i, 2, 10, QLatin1Char('0')),
+                1'000'000'000, 12.0);
+        }
+        QTRY_COMPARE(f.server.listingRoutes.value(QStringLiteral("Resume")).size(), before + 1);
+        QTRY_VERIFY(f.allSettled());
+        QTest::qWait(200);
+        QCOMPARE(f.server.listingRoutes.value(QStringLiteral("Resume")).size(), before + 1);
+        // A progress signal alone reloads them
+        Q_EMIT f.client.itemProgressUpdated(QStringLiteral("cccc0000cccc0000cccc0000cccc0001"),
+                                            2'000'000'000, 20.0);
+        QTRY_COMPARE(f.server.listingRoutes.value(QStringLiteral("Resume")).size(), before + 2);
+    }
+
     void theFavoritesRowSitsAfterNextUpWithItsRequest()
     {
         Fixture f;

@@ -25,6 +25,37 @@ Kirigami.Page {
     readonly property real miniPlayerClearance: saveBar.visible ? saveBar.height : 0
     // The server can deny downloads to this user: the entry and its settings disappear with the permission
     readonly property bool downloadsAvailable: signedIn && connection.downloads.canDownload
+    // What the profile's mpv.conf holds (`path`, `exists`, `applied`, `problems`), read again when the mpv Configuration entry shows and on Check Again
+    property var mpvConfReport: ({ path: "", exists: false, applied: 0, problems: [] })
+    // The first few problems, one line each, in plain words
+    readonly property string mpvConfProblemText: {
+        const lines = mpvConfReport.problems.slice(0, 5).map(problem => {
+            if (problem.line === 0)
+                return problem.kind === "tooLong" ? i18n("The file is too large, nothing of it is read") : i18n("The file cannot be read: it is not a regular file or cannot be opened");
+            switch (problem.kind) {
+            case "section":
+                return i18n("Line %1: profile sections are not supported, the lines from here on are ignored", problem.line);
+            case "notAllowed":
+                return i18n("Line %1: the option %2 is not allowed", problem.line, problem.name);
+            case "tooLong":
+                return i18n("Line %1: the line or the file is too long", problem.line);
+            case "unknownOption":
+                return i18n("Line %1: mpv does not know the option %2", problem.line, problem.name);
+            case "badValue":
+                return i18n("Line %1: mpv does not accept the value of %2", problem.line, problem.name);
+            }
+            return i18n("Line %1: this is not an option line", problem.line);
+        });
+        const more = mpvConfReport.problems.length - lines.length;
+        if (more > 0)
+            lines.push(i18np("and %1 more", "and %1 more", more));
+        return [mpvConfReport.problems[0]?.line === 0 ? i18n("mpv.conf is not used") : i18n("These lines of mpv.conf are skipped, the others are valid")].concat(lines).join("\n");
+    }
+    function refreshMpvConf() {
+        mpvConfReport = settings.mpvConfReport();
+    }
+    // The series with an automatic download rule; the revision is part of the expression so that it follows the rule store
+    readonly property int ruleCount: downloadsAvailable && connection.downloads.rulesRevision >= 0 ? connection.downloads.seriesRules().length : 0
     readonly property var deviceEntries: [
         { section: "main", title: i18n("General"), icon: "preferences-system-windows" },
         { section: "audio", title: i18n("Audio"), icon: "audio-speakers" },
@@ -40,6 +71,8 @@ Kirigami.Page {
     // The User form holds dozens of rows and takes a moment to build: it starts a few frames after the entry is chosen, so the list, the heading and the spinner show the choice first (built asynchronously instead, it crashed in the tests, cause not found)
     property bool userFormReady: false
     onActiveSectionChanged: {
+        if (activeSection === "other")
+            refreshMpvConf();
         userFormReady = false;
         if (activeSection === "user")
             userFormDelay.restart();
@@ -345,6 +378,79 @@ Kirigami.Page {
                                         }
                                     }
                                 }
+                            }
+                        }
+                        FormCard.FormHeader {
+                            visible: confCard.visible
+                            title: i18nc("@title:group", "mpv.conf file")
+                        }
+                        FormCard.FormCard {
+                            id: confCard
+                            objectName: "settingsMpvConfCard"
+                            Layout.fillWidth: true
+                            visible: page.activeSection === "other"
+
+                            FormCard.AbstractFormDelegate {
+                                objectName: "settingsMpvConfStatus"
+                                background: null
+                                focusPolicy: Qt.NoFocus
+                                contentItem: ColumnLayout {
+                                    spacing: Kirigami.Units.smallSpacing
+
+                                    Controls.Label {
+                                        Layout.fillWidth: true
+                                        wrapMode: Text.Wrap
+                                        textFormat: Text.PlainText
+                                        text: !page.mpvConfReport.exists ? i18n("There is no mpv.conf in the profile folder") : i18np("%1 line of mpv.conf is valid", "%1 lines of mpv.conf are valid", page.mpvConfReport.applied)
+                                    }
+                                    Controls.Label {
+                                        Layout.fillWidth: true
+                                        wrapMode: Text.WrapAnywhere
+                                        textFormat: Text.PlainText
+                                        color: Kirigami.Theme.disabledTextColor
+                                        font: Kirigami.Theme.smallFont
+                                        text: page.mpvConfReport.path
+                                    }
+                                    Controls.Label {
+                                        Layout.fillWidth: true
+                                        wrapMode: Text.Wrap
+                                        textFormat: Text.PlainText
+                                        color: Kirigami.Theme.disabledTextColor
+                                        font: Kirigami.Theme.smallFont
+                                        text: i18n("Kinefin’s settings override this file, and Manual MPV Configuration overrides both")
+                                    }
+                                }
+                            }
+                            FormCard.FormButtonDelegate {
+                                objectName: "settingsMpvConfCheck"
+                                text: i18n("Check Again")
+                                icon.name: "view-refresh"
+                                onClicked: page.refreshMpvConf()
+                            }
+                        }
+                        MessageBox {
+                            objectName: "settingsMpvConfProblems"
+                            Layout.fillWidth: true
+                            Layout.topMargin: Kirigami.Units.largeSpacing
+                            visible: confCard.visible && page.mpvConfReport.problems.length > 0
+                            type: Kirigami.MessageType.Warning
+                            text: page.mpvConfProblemText
+                        }
+                        FormCard.FormHeader {
+                            visible: rulesCard.visible
+                            title: i18nc("@title:group", "Automatic downloads")
+                        }
+                        FormCard.FormCard {
+                            id: rulesCard
+                            objectName: "settingsRulesCard"
+                            Layout.fillWidth: true
+                            visible: page.downloadsAvailable && page.activeSection === "downloads"
+
+                            FormCard.FormButtonDelegate {
+                                objectName: "settingsLinkToRules"
+                                text: i18n("Automatic Downloads")
+                                description: page.ruleCount === 0 ? i18n("No series tracked") : i18np("%1 series tracked", "%1 series tracked", page.ruleCount)
+                                onClicked: page.Window.window.openDownloadRules()
                             }
                         }
                         FormCard.FormHeader {

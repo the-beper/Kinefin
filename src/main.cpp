@@ -13,6 +13,7 @@
 #include "integration/RemoteInputServer.h"
 #include "integration/ScreenSaverInhibitor.h"
 #include "integration/SuspendInhibitor.h"
+#include "player/MpvConfValidator.h"
 #include "player/PlayerController.h"
 #include "settings/ClientSettings.h"
 #include "settings/KWalletTokenStore.h"
@@ -258,6 +259,7 @@ int main(int argc, char *argv[])
         return 1;
     }
     Kinefin::ClientSettings settings(Kinefin::ClientSettings::pathForProfile(profileId));
+    settings.setMpvConfValidator(&Kinefin::validateMpvConf);
     settings.setCertificateErrorsIgnoredByCommandLine(
         parser.isSet(QStringLiteral("ignore-certificate-errors")));
     const auto settingsLevel = Kinefin::parseLogLevel(

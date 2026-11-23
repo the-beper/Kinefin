@@ -55,6 +55,8 @@ class ItemDetailsModel final : public QObject {
     Q_PROPERTY(bool canResume READ canResume NOTIFY detailsChanged)
     Q_PROPERTY(qint64 resumePositionTicks READ resumePositionTicks NOTIFY detailsChanged)
     Q_PROPERTY(bool playable READ playable NOTIFY detailsChanged)
+    // A movie, an episode or a video, and also a series or a season, which the server marks episode by episode
+    Q_PROPERTY(bool canMarkPlayed READ canMarkPlayed NOTIFY detailsChanged)
     Q_PROPERTY(QString seriesName READ seriesName NOTIFY detailsChanged)
     Q_PROPERTY(QString seriesId READ seriesId NOTIFY detailsChanged)
     Q_PROPERTY(QString seasonId READ seasonId NOTIFY detailsChanged)
@@ -132,6 +134,7 @@ class ItemDetailsModel final : public QObject {
     bool canResume() const { return m_details.resumePositionTicks > 0 && playable(); }
     qint64 resumePositionTicks() const { return m_details.resumePositionTicks; }
     bool playable() const;
+    bool canMarkPlayed() const;
     QString seriesName() const { return m_details.seriesName; }
     QString seriesId() const { return m_details.seriesId; }
     QString seasonId() const { return m_details.seasonId; }

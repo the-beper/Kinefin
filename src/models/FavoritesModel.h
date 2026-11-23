@@ -13,6 +13,7 @@
 #include <QHash>
 #include <QJsonArray>
 #include <QStringList>
+#include <QTimer>
 #include <QVariantList>
 #include <QVariantMap>
 
@@ -181,6 +182,8 @@ class FavoritesModel final : public QAbstractListModel {
     QString m_userId;
     Status m_status = Idle;
     bool m_active = false;
+    // One reaction to the played and favorite signals of a refresh of user data, which come in bursts
+    QTimer m_changedSoon;
     bool m_capped = false;
     bool m_libraryFailed = false;
     // A new distinct item was turned away because the snapshot is full, or a library was cut at MaxItems with more announced

@@ -1921,10 +1921,12 @@ bool JellyfinClient::setItemFavorite(const QString &itemId, bool favorite)
                             && QString(id.toString()).remove(QLatin1Char('-')).toLower() == key);
             }
         }
-        if (valid)
+        if (valid) {
+            noteOwnWrite(key);
             Q_EMIT itemFavoriteUpdated(itemId, favorite);
-        else
+        } else {
             Q_EMIT itemFavoriteUpdateFailed(itemId, favorite, status);
+        }
     });
     return true;
 }
@@ -1966,10 +1968,12 @@ bool JellyfinClient::setItemPlayed(const QString &itemId, bool played)
                             && QString(id.toString()).remove(QLatin1Char('-')).toLower() == key);
             }
         }
-        if (valid)
+        if (valid) {
+            noteOwnWrite(key);
             Q_EMIT itemPlayedUpdated(itemId, played);
-        else
+        } else {
             Q_EMIT itemPlayedUpdateFailed(itemId, played, status);
+        }
     });
     return true;
 }
@@ -2020,11 +2024,119 @@ bool JellyfinClient::restoreItemProgress(const QString &itemId, qint64 positionT
             return;
         }
         const double percentage = data.value(QStringLiteral("PlayedPercentage")).toDouble(0);
+        noteOwnWrite(key);
         Q_EMIT itemPlayedUpdated(itemId, played);
         Q_EMIT itemProgressUpdated(itemId, qint64(position),
                                    percentage >= 0 && percentage <= 100 ? percentage : 0);
     });
     return true;
+}
+
+bool JellyfinClient::refreshUserData(const QStringList &itemIds)
+{
+    return requestUserData(itemIds, true);
+}
+
+void JellyfinClient::noteOwnWrite(const QString &key)
+{
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    // Old entries go before the table can grow
+    if (m_ownWrites.size() > 256) {
+        for (auto it = m_ownWrites.begin(); it != m_ownWrites.end();)
+            it = now - it.value() > 10'000 ? m_ownWrites.erase(it) : std::next(it);
+    }
+    m_ownWrites.insert(key, now);
+}
+
+bool JellyfinClient::wroteRecently(const QString &key) const
+{
+    const auto found = m_ownWrites.constFind(key);
+    return found != m_ownWrites.constEnd()
+           && QDateTime::currentMSecsSinceEpoch() - found.value() < 4000;
+}
+
+bool JellyfinClient::requestUserData(const QStringList &itemIds, bool followSeries)
+{
+    if (!isAuthenticated() || !isValidJellyfinId(m_userId))
+        return false;
+    QStringList ids;
+    QSet<QString> seen;
+    for (const QString &id : itemIds) {
+        const QString key = QString(id).remove(QLatin1Char('-')).toLower();
+        if (!isValidJellyfinId(id) || seen.contains(key) || m_playedPending.contains(key)
+            || m_favoritePending.contains(key) || wroteRecently(key))
+            continue;
+        seen.insert(key);
+        ids.append(id);
+    }
+    bool asked = false;
+    for (qsizetype at = 0; at < ids.size(); at += UserDataChunk) {
+        const QStringList chunk = ids.mid(at, UserDataChunk);
+        QUrl url = endpoint(QStringLiteral("/Items"));
+        QUrlQuery wire;
+        wire.addQueryItem(QStringLiteral("ids"), chunk.join(QLatin1Char(',')));
+        wire.addQueryItem(QStringLiteral("userId"), m_userId);
+        url.setQuery(wire);
+        QNetworkReply *reply = m_network.get(requestFor(url, true));
+        attach(reply, m_generation, [this, seen, followSeries](QNetworkReply *finished) {
+            const int status =
+                finished->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            if (status == 401) {
+                invalidateSession();
+                return;
+            }
+            QJsonObject data;
+            if (status != 200 || finished->error() != QNetworkReply::NoError
+                || !parseObject(finished, &data) || !data.value(QStringLiteral("Items")).isArray())
+                return;
+            constexpr qint64 maxTicks = 24LL * 3600 * 10'000'000;
+            QStringList series;
+            QSet<QString> done;
+            for (const QJsonValue &value : data.value(QStringLiteral("Items")).toArray()) {
+                const QJsonObject item = value.toObject();
+                const QString id = item.value(QStringLiteral("Id")).toString();
+                const QString key = QString(id).remove(QLatin1Char('-')).toLower();
+                const QJsonValue userData = item.value(QStringLiteral("UserData"));
+                // Only what was asked for, and only a row that has user data: a write that started since the request is newer than this answer
+                if (!isValidJellyfinId(id) || !seen.contains(key) || !userData.isObject()
+                    || m_playedPending.contains(key) || m_favoritePending.contains(key)
+                    || wroteRecently(key))
+                    continue;
+                // A row repeated in the answer is read once
+                if (done.contains(key))
+                    continue;
+                done.insert(key);
+                const QString type = item.value(QStringLiteral("Type")).toString();
+                const QString seriesId = item.value(QStringLiteral("SeriesId")).toString();
+                if (followSeries
+                    && (type == QLatin1String("Episode") || type == QLatin1String("Season"))
+                    && series.size() < UserDataChunk && isValidJellyfinId(seriesId)
+                    && !seen.contains(QString(seriesId).remove(QLatin1Char('-')).toLower())
+                    && !series.contains(seriesId))
+                    series.append(seriesId);
+                const QJsonObject state = userData.toObject();
+                const QJsonValue played = state.value(QStringLiteral("Played"));
+                const QJsonValue favorite = state.value(QStringLiteral("IsFavorite"));
+                const double position =
+                    state.value(QStringLiteral("PlaybackPositionTicks")).toDouble(0);
+                const double percentage =
+                    state.value(QStringLiteral("PlayedPercentage")).toDouble(0);
+                if (favorite.isBool())
+                    Q_EMIT itemFavoriteUpdated(id, favorite.toBool());
+                if (!played.isBool())
+                    continue;
+                Q_EMIT itemPlayedUpdated(id, played.toBool());
+                if (position > 0 && position <= double(maxTicks))
+                    Q_EMIT itemProgressUpdated(id, qint64(position),
+                                               percentage >= 0 && percentage <= 100 ? percentage
+                                                                                    : 0);
+            }
+            if (!series.isEmpty())
+                requestUserData(series, false);
+        });
+        asked = true;
+    }
+    return asked;
 }
 
 bool JellyfinClient::searchRemoteSubtitles(const QString &itemId, const QString &language)
@@ -3574,6 +3686,7 @@ void JellyfinClient::abortPending()
     ++m_generation;
     m_favoritePending.clear();
     m_playedPending.clear();
+    m_ownWrites.clear();
     m_playlistPending.clear();
     m_refreshItemId.clear();
     m_collectionWrites.clear();

@@ -396,6 +396,73 @@ class TestConnectionController : public QObject {
                      Kinefin::JellyfinSocketClient::State::Disconnected);
     }
 
+    void aUserDataChangedFrameIsReadAgainOnceAndHeldWhileSomethingPlays()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        const QString first = QStringLiteral("aaaa0000aaaa0000aaaa0000aaaa0001");
+        const QString second = QStringLiteral("bbbb0000bbbb0000bbbb0000bbbb0002");
+        for (const QString &id : {first, second})
+            server.itemsById.insert(
+                id, QJsonDocument(QJsonObject{{QStringLiteral("Id"), id},
+                                              {QStringLiteral("Type"), QStringLiteral("Movie")},
+                                              {QStringLiteral("UserData"),
+                                               QJsonObject{{QStringLiteral("Played"), true}}}})
+                        .toJson(QJsonDocument::Compact));
+        auto controller = makeController();
+        QVERIFY(signInFixtureUser(*controller, server));
+        QTRY_COMPARE(controller->socket()->state(),
+                     Kinefin::JellyfinSocketClient::State::Authenticated);
+        FakeSocketConnection *connection = server.lastConnection();
+        QVERIFY(connection);
+        const auto frame = [&](const QStringList &ids) {
+            QJsonArray rows;
+            for (const QString &id : ids)
+                rows.append(QJsonObject{{QStringLiteral("ItemId"), id}});
+            connection->sendText(QString::fromUtf8(
+                QJsonDocument(
+                    QJsonObject{
+                        {QStringLiteral("MessageType"), QStringLiteral("UserDataChanged")},
+                        {QStringLiteral("Data"),
+                         QJsonObject{{QStringLiteral("UserId"), controller->currentUserId()},
+                                     {QStringLiteral("UserDataList"), rows}}}})
+                    .toJson(QJsonDocument::Compact)));
+        };
+        const auto reads = [&] {
+            int count = 0;
+            for (const QByteArray &route : std::as_const(server.itemsRoutes))
+                count += route.contains(first.toUtf8()) || route.contains(second.toUtf8());
+            return count;
+        };
+        QSignalSpy played(&controller->playbackClient(),
+                          &Kinefin::JellyfinClient::itemPlayedUpdated);
+
+        // Two frames in a burst are one round that reads the ids once
+        frame({first});
+        frame({second, first});
+        QTRY_COMPARE_WITH_TIMEOUT(played.size(), 2, 5000);
+        QCOMPARE(reads(), 1);
+
+        // While something plays the ids wait, and go when it is over
+        controller->holdUserDataRefresh(true);
+        frame({first});
+        QTest::qWait(1500);
+        QCOMPARE(reads(), 1);
+        QCOMPARE(played.size(), 2);
+        controller->holdUserDataRefresh(false);
+        QTRY_COMPARE_WITH_TIMEOUT(played.size(), 3, 5000);
+        QCOMPARE(reads(), 2);
+
+        // A sign-out drops what waited
+        controller->holdUserDataRefresh(true);
+        frame({second});
+        QTest::qWait(100);
+        controller->signOut();
+        controller->holdUserDataRefresh(false);
+        QTest::qWait(1500);
+        QCOMPARE(reads(), 2);
+    }
+
     // A test runs only when asked, sends no credentials and says once that it ended
     void aServerTestSendsNoCredentialsAndReportsItsEnd()
     {
