@@ -214,6 +214,8 @@ class TestPlayQueue : public QObject {
         const QUrlQuery wire = FakeJellyfin::capturedListingQuery(
             f.server.listingRoutes.value(QStringLiteral("Episodes")).constFirst());
         QCOMPARE(wire.queryItemValue(QStringLiteral("seasonId")), kSeason);
+        // The server's virtual episodes (no file) never reach a queue
+        QCOMPARE(wire.queryItemValue(QStringLiteral("isMissing")), QStringLiteral("false"));
     }
 
     void aSeasonThatIsPlayedAddsAllOfIt()
@@ -945,6 +947,7 @@ class TestPlayQueue : public QObject {
         const QUrlQuery wire = FakeJellyfin::capturedListingQuery(
             f.server.listingRoutes.value(QStringLiteral("Episodes")).constFirst());
         QVERIFY(wire.queryItemValue(QStringLiteral("seasonId")).isEmpty());
+        QCOMPARE(wire.queryItemValue(QStringLiteral("isMissing")), QStringLiteral("false"));
         QVERIFY(
             f.server.lastListingRoute.value(QStringLiteral("Episodes")).contains(kSeries.toUtf8()));
     }

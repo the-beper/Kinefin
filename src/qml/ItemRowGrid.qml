@@ -42,7 +42,7 @@ GridView {
     // The tiles are not tab stops: the grid is, and it opens the current one
     function openCurrent() {
         if (grid.currentItem?.enabled)
-            grid.activated(grid.currentItem.itemId);
+            grid.activated(grid.currentItem.openId);
     }
     Keys.onReturnPressed: openCurrent()
     Keys.onEnterPressed: openCurrent()
@@ -59,16 +59,19 @@ GridView {
         required property int seasonNumber
         required property int episodeNumber
         required property string episodeTitle
+        // An episode the server only knows of (an upcoming one) has no page to play from: its card opens the series, and has no menu
+        required property bool virtualItem
+        readonly property string openId: virtualItem && seriesId.length > 0 ? seriesId : itemId
 
         width: grid.cellWidth - grid.gutter
         height: grid.cellHeight - grid.gutter
         // The grid is the one tab stop, the arrow keys move inside it
         focusPolicy: Qt.NoFocus
         landscape: grid.landscape
-        hasMenu: grid.hasMenu
+        hasMenu: grid.hasMenu && !virtualItem
         loaded: true
         highlighted: GridView.isCurrentItem && grid.activeFocus
-        onClicked: grid.activated(itemId)
+        onClicked: grid.activated(openId)
         subtitle: {
             if (episodeNumber >= 0) {
                 const label = EpisodeLabel.label(seasonNumber, episodeNumber);

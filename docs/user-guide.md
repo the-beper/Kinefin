@@ -14,6 +14,7 @@
   - [Act on a card](#act-on-a-card)
   - [Movies and Shows](#movies-and-shows)
   - [Show more library tabs](#show-more-library-tabs)
+  - [Missing and unaired episodes](#missing-and-unaired-episodes)
   - [Item details](#item-details)
   - [Search](#search)
   - [Favorites](#favorites)
@@ -252,6 +253,16 @@ Sub-tabs sit in the toolbar of **Movies** and **Shows**. The main tab is always 
 | Episodes | Shows | All episodes of the chosen library |
 
 Suggestions in **Shows** and Collections in both tabs ignore the library selector and cover all libraries. Which sub-tabs are on by default is in the [settings reference](settings.md#library-library).
+
+### Missing and unaired episodes
+
+When the server knows a series from a metadata provider such as TMDb, it can list episodes it has no file for: **Missing** ones that have aired and **Unaired** ones that premiere later. Kinefin leaves them out of its lists and never plays, queues or downloads them, with these exceptions:
+
+| Where | What shows |
+| --- | --- |
+| A season, with **Show missing episodes** on in **Settings**, **User** | Dimmed rows with a Missing or Unaired mark, from the next time the season loads; they do not open |
+| The **Upcoming** sub-tab | The unaired episodes; a card opens the series |
+| The **Missing** and **Unaired** filters of the **Episodes** sub-tab | The episodes you ask for; their page has no Play or Download |
 
 ### Item details
 

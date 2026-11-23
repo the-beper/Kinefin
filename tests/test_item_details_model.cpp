@@ -697,6 +697,28 @@ class TestItemDetailsModel : public QObject {
         QCOMPARE(withoutFlag.sources.constFirst().etag, QStringLiteral("\"old\""));
     }
 
+    // An episode the server only knows of has nothing to play or download, whatever CanDownload says; a season of a series without season folders is Virtual too and keeps its download
+    void aVirtualEpisodeCannotBePlayedOrDownloaded()
+    {
+        const QJsonObject episode{{QStringLiteral("Id"), kMovie},
+                                  {QStringLiteral("Name"), QStringLiteral("Not here")},
+                                  {QStringLiteral("Type"), QStringLiteral("Episode")},
+                                  {QStringLiteral("LocationType"), QStringLiteral("Virtual")},
+                                  {QStringLiteral("CanDownload"), true}};
+        const Kinefin::ItemDetails parsed = Kinefin::parseItemDetails(episode);
+        QVERIFY(parsed.valid);
+        QVERIFY(parsed.virtualItem);
+        QVERIFY(!parsed.canDownload);
+        QJsonObject real = episode;
+        real.insert(QStringLiteral("LocationType"), QStringLiteral("FileSystem"));
+        QVERIFY(!Kinefin::parseItemDetails(real).virtualItem);
+        QVERIFY(Kinefin::parseItemDetails(real).canDownload);
+        QJsonObject season = episode;
+        season.insert(QStringLiteral("Type"), QStringLiteral("Season"));
+        QVERIFY(!Kinefin::parseItemDetails(season).virtualItem);
+        QVERIFY(Kinefin::parseItemDetails(season).canDownload);
+    }
+
     void mediaBadgesComeFromTheFirstSource()
     {
         Fixture f;

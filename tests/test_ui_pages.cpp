@@ -4984,6 +4984,133 @@ class TestUiPages : public QObject {
         QCOMPARE(stub.streamCalls.constLast().resumeTicks, qint64(0));
     }
 
+    // An episode the server only knows of (missing, or unaired when it premieres later) is a row with its mark that does not open: there is no page of it to play from
+    void aMissingEpisodeRowIsMarkedAndDoesNotOpen()
+    {
+        Ui ui(m_home->path());
+        ui.serveShow();
+        const QJsonObject real = QJsonDocument::fromJson(fixture(QStringLiteral("episodes_page")))
+                                     .object()
+                                     .value(QStringLiteral("Items"))
+                                     .toArray()
+                                     .first()
+                                     .toObject();
+        const QString missingId = QStringLiteral("d1d2d3d4d5d64788990a1b2c3d4e5f61");
+        const QString unairedId = QStringLiteral("d1d2d3d4d5d64788990a1b2c3d4e5f62");
+        const auto virtualCopy = [&real](const QString &id, int number, int days) {
+            QJsonObject episode = real;
+            episode.insert(QStringLiteral("Id"), id);
+            episode.insert(QStringLiteral("Name"), QStringLiteral("Not here %1").arg(number));
+            episode.insert(QStringLiteral("IndexNumber"), number);
+            episode.insert(QStringLiteral("LocationType"), QStringLiteral("Virtual"));
+            episode.insert(
+                QStringLiteral("PremiereDate"),
+                QDateTime::currentDateTimeUtc().addDays(days).toString(Qt::ISODateWithMs));
+            return episode;
+        };
+        ui.server.listingRawBody.insert(QStringLiteral("Episodes"),
+                                        envelope(QJsonArray{real, virtualCopy(missingId, 98, -30),
+                                                            virtualCopy(unairedId, 99, 30)}));
+        QVERIFY(ui.load());
+        ui.window->setProperty("requestedItemId", kSeasonId);
+        QVERIFY(ui.signIn());
+        QQuickItem *realRow = nullptr;
+        QQuickItem *missingRow = nullptr;
+        QQuickItem *unairedRow = nullptr;
+        QTRY_VERIFY(
+            (realRow = Ui::itemIn(ui.currentDetails(), QStringLiteral("episodeRow_") + kEpisodeId))
+            != nullptr);
+        QTRY_VERIFY((missingRow =
+                         Ui::itemIn(ui.currentDetails(), QStringLiteral("episodeRow_") + missingId))
+                    != nullptr);
+        QTRY_VERIFY((unairedRow =
+                         Ui::itemIn(ui.currentDetails(), QStringLiteral("episodeRow_") + unairedId))
+                    != nullptr);
+        QVERIFY(realRow->isEnabled());
+        QCOMPARE(realRow->property("availabilityText").toString(), QString());
+        QVERIFY(!missingRow->isEnabled());
+        QCOMPARE(missingRow->property("availabilityText").toString(), QStringLiteral("Missing"));
+        QVERIFY(!unairedRow->isEnabled());
+        QCOMPARE(unairedRow->property("availabilityText").toString(), QStringLiteral("Unaired"));
+        // The mark is part of what a screen reader says
+        QVERIFY(
+            missingRow->property("description").toString().startsWith(QStringLiteral("Missing")));
+        QQuickItem *badge = Ui::itemIn(missingRow, QStringLiteral("episodeAvailability"));
+        QVERIFY(badge && badge->isVisible());
+        QVERIFY(!Ui::itemIn(realRow, QStringLiteral("episodeAvailability"))->isVisible());
+        // A click on them opens nothing
+        const int depth = ui.stackDepth();
+        ui.revealAndClick(ui.currentDetails(), missingRow);
+        ui.revealAndClick(ui.currentDetails(), unairedRow);
+        QTest::qWait(300);
+        QCOMPARE(ui.stackDepth(), depth);
+        // The real one still opens
+        QVERIFY(ui.revealAndClickUntil(ui.currentDetails(), realRow,
+                                       [&] { return ui.stackDepth() == depth + 1; }));
+    }
+
+    // The season list asks the server for the real episodes only, and drops that when the user's DisplayMissingEpisodes is on
+    void theDisplayOptionLetsMissingEpisodesIntoTheList()
+    {
+        for (const bool display : {false, true}) {
+            Ui ui(m_home->path());
+            ui.serveShow();
+            QJsonObject configuration = preferencesConfiguration();
+            configuration.insert(QStringLiteral("DisplayMissingEpisodes"), display);
+            ui.server.usersMeRawBody = preferencesUser(configuration);
+            QVERIFY(ui.load());
+            QVERIFY(ui.signIn());
+            // The configuration is read at sign-in: the list reads it from the session
+            QTRY_VERIFY(ui.controller.userConfiguration()->loaded());
+            QVERIFY(QMetaObject::invokeMethod(ui.window, "openItem", Q_ARG(QVariant, kSeasonId),
+                                              Q_ARG(QVariant, QVariant())));
+            QTRY_VERIFY(Ui::itemIn(ui.currentDetails(), QStringLiteral("episodeRow_") + kEpisodeId)
+                        != nullptr);
+            const QList<QByteArray> routes =
+                ui.server.listingRoutes.value(QStringLiteral("Episodes"));
+            QVERIFY(!routes.isEmpty());
+            QCOMPARE(FakeJellyfin::capturedListingQuery(routes.constFirst())
+                         .hasQueryItem(QStringLiteral("isMissing")),
+                     !display);
+        }
+    }
+
+    // An upcoming episode has no file: its card has no menu and opens its series
+    void anUpcomingEpisodeCardOpensItsSeries()
+    {
+        Ui ui(m_home->path());
+        ui.serveShow();
+        QJsonObject upcoming = fixtureObject(QStringLiteral("episode_item"));
+        upcoming.insert(QStringLiteral("LocationType"), QStringLiteral("Virtual"));
+        upcoming.insert(QStringLiteral("SeriesId"), kSeriesId);
+        ui.server.listingRawBody.insert(QStringLiteral("Upcoming"), envelope(QJsonArray{upcoming}));
+        QVERIFY(ui.load());
+        setSubtabSetting(ui, QStringLiteral("tv.upcoming"), true);
+        QVERIFY(buildState(ui, QStringLiteral("tvTab")));
+        QTRY_VERIFY(subtabButton(ui, QStringLiteral("upcoming")) != nullptr);
+        settleToolbar(ui);
+        QVERIFY(selectSubtab(ui, QStringLiteral("upcoming")));
+        QQuickItem *grid = nullptr;
+        QTRY_VERIFY((grid = ui.item(QStringLiteral("upcomingGrid"))) != nullptr);
+        QQuickItem *card = nullptr;
+        QTRY_VERIFY((card = Ui::itemIn(grid, QStringLiteral("mediaCard_")
+                                                 + upcoming.value(QStringLiteral("Id")).toString()))
+                    != nullptr);
+        QVERIFY(!card->property("hasMenu").toBool());
+        const int depth = ui.stackDepth();
+        // Return on the current card opens the series too
+        grid->forceActiveFocus();
+        QTest::keyClick(ui.window, Qt::Key_Return);
+        QTRY_COMPARE(ui.stackDepth(), depth + 1);
+        QTRY_COMPARE(ui.currentDetails()->property("itemId").toString(), kSeriesId);
+        auto *stack = ui.window->property("pageStack").value<QObject *>();
+        QVERIFY(QMetaObject::invokeMethod(stack, "pop", Q_ARG(QVariant, QVariant())));
+        QTRY_COMPARE(ui.stackDepth(), depth);
+        // So does a click
+        QVERIFY(ui.revealAndClickUntil(grid, card, [&] { return ui.stackDepth() == depth + 1; }));
+        QTRY_COMPARE(ui.currentDetails()->property("itemId").toString(), kSeriesId);
+    }
+
     // Nothing watched: the Next Up episode is the first one, so there is only Play
     void aSeriesNothingWatchedOffersOnlyPlay()
     {

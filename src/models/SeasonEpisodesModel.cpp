@@ -50,6 +50,10 @@ QVariant episodeValue(const JellyfinClient *client, const ItemSummary &item, boo
         return item.favorite;
     case SeasonEpisodesModel::PositionTicksRole:
         return item.positionTicks;
+    case SeasonEpisodesModel::VirtualRole:
+        return item.virtualItem;
+    case SeasonEpisodesModel::UnairedRole:
+        return isUnaired(item, QDateTime::currentDateTimeUtc());
     default:
         return {};
     }
@@ -84,6 +88,8 @@ void SeasonEpisodesModel::open(const QString &seriesId, const QString &seasonId)
     clear();
     m_seriesId = seriesId;
     m_seasonId = seasonId;
+    // Every page of the list is asked the same way, whatever the option does meanwhile
+    m_withVirtual = m_client && m_client->displayMissingEpisodes();
     // An id the server could not have sent is refused by the client without a request: the model ends up Failed
     restartPaging();
 }
@@ -109,6 +115,8 @@ QHash<int, QByteArray> SeasonEpisodesModel::roleNameTable()
             {PlayedPercentageRole, "playedPercentage"},
             {FavoriteRole, "favorite"},
             {PositionTicksRole, "positionTicks"},
+            {VirtualRole, "virtualItem"},
+            {UnairedRole, "unaired"},
             {LoadedRole, "loaded"}};
 }
 
@@ -134,7 +142,10 @@ QVariant SeasonEpisodesModel::rowData(const ItemSummary &item, bool loaded, int 
 
 bool SeasonEpisodesModel::sendPage(int start, int limit)
 {
-    return m_client && m_client->fetchEpisodes(m_seriesId, m_seasonId, start, limit, m_channel);
+    const bool forRuleScan = false;
+    return m_client
+           && m_client->fetchEpisodes(m_seriesId, m_seasonId, start, limit, m_channel, forRuleScan,
+                                      m_withVirtual);
 }
 
 void SeasonEpisodesModel::onEpisodesReady(const QJsonArray &items, int total, int channel)

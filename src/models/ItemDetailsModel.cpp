@@ -280,7 +280,7 @@ ItemDetailsModel::~ItemDetailsModel()
 
 bool ItemDetailsModel::playable() const
 {
-    return isPlayableVideo(m_details.type);
+    return isPlayableVideo(m_details.type) && !m_details.virtualItem;
 }
 
 bool ItemDetailsModel::canMarkPlayed() const

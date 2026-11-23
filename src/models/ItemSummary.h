@@ -45,6 +45,8 @@ struct ItemSummary {
     qreal playedPercentage = 0;
     qreal communityRating = -1;
     QDateTime dateCreated;
+    // `PremiereDate`, invalid when the server sends none: a virtual episode that premieres after now is unaired, otherwise it is missing
+    QDateTime premiereDate;
     bool played = false;
     bool favorite = false;
     // An episode the library lists but has no file for (LocationType Virtual)
@@ -60,6 +62,9 @@ void applyPlayed(ItemSummary &item, bool played);
 bool watchedToEnd(const ItemSummary &item);
 // A saved position the server confirmed (an Undo of Mark as Watched): the progress and the time left come back
 void applyProgress(ItemSummary &item, qint64 positionTicks, double playedPercentage);
+
+// A virtual item (the server only knows of it) that premieres after `nowUtc`: unaired, as opposed to missing
+bool isUnaired(const ItemSummary &item, const QDateTime &nowUtc);
 
 // How long an unplayed item counts as new
 constexpr int NewItemDays = 7;

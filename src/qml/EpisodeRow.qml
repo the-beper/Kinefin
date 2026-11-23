@@ -9,8 +9,8 @@ import org.kde.kirigami as Kirigami
 Controls.ItemDelegate {
     id: row
     objectName: "episodeRow_" + itemId
-    // A placeholder row has nothing to open and does not answer the pointer or the keys
-    enabled: loaded
+    // A placeholder row has nothing to open and does not answer the pointer or the keys, nor does an episode the server only knows of: there is no page of it to play from
+    enabled: loaded && !virtualItem
 
     property string itemId: ""
     property string name: ""
@@ -25,11 +25,15 @@ Controls.ItemDelegate {
     property real playedPercentage: 0
     property bool favorite: false
     property bool loaded: true
+    // The server lists the episode but has no file for it: missing, or unaired when it premieres later
+    property bool virtualItem: false
+    property bool unaired: false
     // The label reads "S1:E5" instead of "E5", for a row shown outside its season
     property bool showSeason: false
 
     readonly property bool inProgress: loaded && playedPercentage > 0 && playedPercentage < 100
     readonly property real thumbnailWidth: Kirigami.Units.gridUnit * 10
+    readonly property string availabilityText: !loaded || !virtualItem ? "" : (unaired ? i18nc("badge on an episode that has not premiered yet", "Unaired") : i18nc("badge on an episode that is not in the library", "Missing"))
 
     readonly property string numberText: {
         if (episodeNumber < 0)
@@ -49,6 +53,8 @@ Controls.ItemDelegate {
         if (!loaded)
             return "";
         const parts = [];
+        if (availabilityText.length > 0)
+            parts.push(availabilityText);
         if (runtimeText.length > 0)
             parts.push(runtimeText);
         // A rewatch stopped halfway is in progress, not watched, as on its card
@@ -134,6 +140,30 @@ Controls.ItemDelegate {
                     anchors.margins: Kirigami.Units.smallSpacing / 2
                     source: "checkmark-symbolic"
                     color: Kirigami.Theme.highlightedTextColor
+                }
+            }
+
+            // Not enabled: the row is dimmed, so the badge sits on a solid background of its own
+            Rectangle {
+                objectName: "episodeAvailability"
+                anchors {
+                    bottom: parent.bottom
+                    left: parent.left
+                    margins: Kirigami.Units.smallSpacing
+                }
+                width: availabilityLabel.implicitWidth + Kirigami.Units.largeSpacing
+                height: availabilityLabel.implicitHeight + Kirigami.Units.smallSpacing
+                radius: Kirigami.Units.cornerRadius
+                visible: row.availabilityText.length > 0
+                color: Qt.rgba(0, 0, 0, 0.7)
+
+                Controls.Label {
+                    id: availabilityLabel
+                    anchors.centerIn: parent
+                    color: "white"
+                    textFormat: Text.PlainText
+                    text: row.availabilityText
+                    Accessible.ignored: true
                 }
             }
 

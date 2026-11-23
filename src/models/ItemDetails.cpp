@@ -235,7 +235,11 @@ ItemDetails parseItemDetails(const QJsonObject &item)
             details.playedPercentage = percentage.toDouble();
     }
     // Absent or unreadable leaves the policy in charge
-    details.canDownload = item.value(QStringLiteral("CanDownload")).toBool(true);
+    details.virtualItem =
+        details.type == QLatin1String("Episode")
+        && item.value(QStringLiteral("LocationType")).toString() == QLatin1String("Virtual");
+    details.canDownload =
+        !details.virtualItem && item.value(QStringLiteral("CanDownload")).toBool(true);
     details.canDelete = item.value(QStringLiteral("CanDelete")).toBool(false);
 
     details.seriesName = text(item.value(QStringLiteral("SeriesName")), ItemDetails::MaxName);

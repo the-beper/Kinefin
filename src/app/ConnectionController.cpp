@@ -1789,6 +1789,9 @@ void ConnectionController::applyPreferences(const UserPreferencesSnapshot *snaps
     if (snapshot) {
         m_preferences = *snapshot;
         m_hasPreferences = true;
+        // A late answer of a session that is gone must not leave its option to the next one
+        if (m_state == Authenticated)
+            m_client.setDisplayMissingEpisodes(snapshot->displayMissingEpisodes);
     }
     m_preferencesSettled = true;
     Q_EMIT homeProjectionChanged();

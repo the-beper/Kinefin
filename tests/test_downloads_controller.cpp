@@ -379,6 +379,9 @@ class TestDownloadsController : public QObject {
         QCOMPARE(FakeJellyfin::capturedListingQuery(episodeRoutes.first())
                      .queryItemValue(QStringLiteral("fields")),
                  QStringLiteral("DateCreated"));
+        QCOMPARE(FakeJellyfin::capturedListingQuery(episodeRoutes.first())
+                     .queryItemValue(QStringLiteral("isMissing")),
+                 QStringLiteral("false"));
         const std::optional<DownloadRule> stored = storedRule(rule);
         QVERIFY(stored);
         QCOMPARE(stored->cursorDate, QStringLiteral("2021-01-01T00:00:00.000Z"));
@@ -518,6 +521,8 @@ class TestDownloadsController : public QObject {
         QCOMPARE(query.queryItemValue(QStringLiteral("includeItemTypes")),
                  QStringLiteral("Episode"));
         QCOMPARE(query.queryItemValue(QStringLiteral("limit")), QStringLiteral("25"));
+        // The server's virtual episodes (no file) are asked away, not only skipped afterwards
+        QCOMPARE(query.queryItemValue(QStringLiteral("isMissing")), QStringLiteral("false"));
         QVERIFY(query.queryItemValue(QStringLiteral("fields"))
                     .contains(QStringLiteral("MediaSources")));
         // The watched one and the one without a file stay out; the size of the last one is not known

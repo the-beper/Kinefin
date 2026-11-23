@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: kinefin 0\n"
 "Report-Msgid-Bugs-To: https://github.com/the-beper/Kinefin/issues\n"
-"POT-Creation-Date: 2026-11-23 15:18+0000\n"
+"POT-Creation-Date: 2026-11-23 15:56+0000\n"
 "PO-Revision-Date: 2026-11-07 00:00+0000\n"
 "Last-Translator: the-beper\n"
 "Language-Team: Italian\n"
@@ -141,12 +141,12 @@ msgid "Could not search the network"
 msgstr "Impossibile cercare nella rete"
 
 #: src/player/PlayerController.cpp:88 src/qml/HomePage.qml:291
-#: src/qml/HomePage.qml:298 src/qml/EpisodeRow.qml:44
+#: src/qml/HomePage.qml:298 src/qml/EpisodeRow.qml:48
 #: src/qml/ResumeItemsPage.qml:144 src/qml/ResumeItemsPage.qml:151
 #: src/qml/PersonPage.qml:150 src/qml/PersonPage.qml:157
 #: src/qml/SearchPage.qml:224 src/qml/SearchPage.qml:231
 #: src/qml/GenreRailsView.qml:224 src/qml/GenreRailsView.qml:231
-#: src/qml/ItemRowGrid.qml:75 src/qml/ItemRowGrid.qml:82 src/qml/Main.qml:863
+#: src/qml/ItemRowGrid.qml:78 src/qml/ItemRowGrid.qml:85 src/qml/Main.qml:863
 #: src/qml/MediaListRow.qml:31 src/qml/FavoriteCard.qml:17
 #: src/qml/FavoriteCard.qml:26
 msgctxt "episode label and episode title"
@@ -362,7 +362,9 @@ msgstr ""
 msgid ""
 "The file cannot be opened from here. Choose it with Add Subtitle File in the "
 "Subtitles menu"
-msgstr "Da qui non è possibile aprire il file. Sceglilo con “Aggiungi file di sottotitoli” nel menu Sottotitoli"
+msgstr ""
+"Da qui non è possibile aprire il file. Sceglilo con “Aggiungi file di "
+"sottotitoli” nel menu Sottotitoli"
 
 #: src/player/PlayerController.cpp:4151 src/qml/EditSubtitlesDialog.qml:100
 msgid "The file is not an srt, ass, ssa, or vtt subtitle"
@@ -379,7 +381,9 @@ msgstr "Il sottotitolo deve essere un file leggibile di al massimo 2 MiB"
 #: src/player/PlayerController.cpp:4163 src/player/PlayerController.cpp:4170
 msgid ""
 "The subtitle could not be added. Check the free disk space and try again"
-msgstr "Impossibile aggiungere il sottotitolo: controlla lo spazio libero su disco e riprova"
+msgstr ""
+"Impossibile aggiungere il sottotitolo: controlla lo spazio libero su disco e "
+"riprova"
 
 #: src/player/PlayerController.cpp:4174
 msgid "The file could not be read as a subtitle"
@@ -1021,7 +1025,7 @@ msgid "Networks"
 msgstr "Reti"
 
 #: src/settings/SettingDefinitions.cpp:846 src/qml/ItemDetailsPage.qml:844
-#: src/qml/ItemDetailsPage.qml:1926 src/qml/SearchPage.qml:154
+#: src/qml/ItemDetailsPage.qml:1928 src/qml/SearchPage.qml:154
 #: src/qml/RuleDialog.qml:109
 msgid "Episodes"
 msgstr "Episodi"
@@ -1064,9 +1068,9 @@ msgstr "Home"
 
 #: src/qml/HomePage.qml:83 src/qml/HomePage.qml:98
 #: src/qml/ItemDetailsPage.qml:903 src/qml/ItemDetailsPage.qml:922
-#: src/qml/ItemDetailsPage.qml:1746 src/qml/ItemDetailsPage.qml:1802
-#: src/qml/ItemDetailsPage.qml:1896 src/qml/ItemDetailsPage.qml:1942
-#: src/qml/ItemDetailsPage.qml:2000 src/qml/LibraryPage.qml:643
+#: src/qml/ItemDetailsPage.qml:1748 src/qml/ItemDetailsPage.qml:1804
+#: src/qml/ItemDetailsPage.qml:1898 src/qml/ItemDetailsPage.qml:1944
+#: src/qml/ItemDetailsPage.qml:2004 src/qml/LibraryPage.qml:643
 #: src/qml/LibraryPage.qml:665 src/qml/LibraryPage.qml:680
 #: src/qml/ResumeItemsPage.qml:48 src/qml/ResumeItemsPage.qml:62
 #: src/qml/PersonPage.qml:54 src/qml/PersonPage.qml:68
@@ -1117,8 +1121,8 @@ msgid "Show All in %1"
 msgstr "Mostra tutti in %1"
 
 #: src/qml/HomePage.qml:259 src/qml/ItemDetailsPage.qml:894
-#: src/qml/ItemDetailsPage.qml:1737 src/qml/ItemDetailsPage.qml:1793
-#: src/qml/ItemDetailsPage.qml:1887 src/qml/ItemDetailsPage.qml:1933
+#: src/qml/ItemDetailsPage.qml:1739 src/qml/ItemDetailsPage.qml:1795
+#: src/qml/ItemDetailsPage.qml:1889 src/qml/ItemDetailsPage.qml:1935
 #: src/qml/LibraryPage.qml:770 src/qml/ResumeItemsPage.qml:116
 #: src/qml/PersonPage.qml:122 src/qml/SearchPage.qml:182
 #: src/qml/QueuePage.qml:244 src/qml/QueuePage.qml:253
@@ -1129,35 +1133,45 @@ msgstr "Mostra tutti in %1"
 msgid "Loading…"
 msgstr "Caricamento…"
 
-#: src/qml/EpisodeRow.qml:46 src/qml/ItemDetailsPage.qml:468
+#: src/qml/EpisodeRow.qml:36
+msgctxt "badge on an episode that has not premiered yet"
+msgid "Unaired"
+msgstr "Non ancora trasmesso"
+
+#: src/qml/EpisodeRow.qml:36
+msgctxt "badge on an episode that is not in the library"
+msgid "Missing"
+msgstr "Mancante"
+
+#: src/qml/EpisodeRow.qml:50 src/qml/ItemDetailsPage.qml:468
 msgid "%1 h %2 min"
 msgstr "%1 h %2 min"
 
-#: src/qml/EpisodeRow.qml:46 src/qml/ItemDetailsPage.qml:468
+#: src/qml/EpisodeRow.qml:50 src/qml/ItemDetailsPage.qml:468
 #: src/qml/MediaListRow.qml:39
 msgid "%1 min"
 msgstr "%1 min"
 
-#: src/qml/EpisodeRow.qml:56 src/qml/ItemDetailsPage.qml:1282
+#: src/qml/EpisodeRow.qml:62 src/qml/ItemDetailsPage.qml:1282
 #: src/qml/ItemListRow.qml:65 src/qml/MediaCard.qml:96
 #: src/qml/MediaListRow.qml:78
 msgctxt "state of an item"
 msgid "Played"
 msgstr "Visto"
 
-#: src/qml/EpisodeRow.qml:58 src/qml/ItemDetailsPage.qml:1304
+#: src/qml/EpisodeRow.qml:64 src/qml/ItemDetailsPage.qml:1304
 #: src/qml/ItemListRow.qml:67 src/qml/MediaCard.qml:98
 msgid "Favorite"
 msgstr "Preferito"
 
-#: src/qml/EpisodeRow.qml:60 src/qml/ItemListRow.qml:73
+#: src/qml/EpisodeRow.qml:66 src/qml/ItemListRow.qml:73
 #: src/qml/MediaCard.qml:106
 msgid "%1 percent watched"
 msgid_plural "%1 percent watched"
 msgstr[0] "%1 percento visto"
 msgstr[1] "%1 percento visto"
 
-#: src/qml/EpisodeRow.qml:61 src/qml/MediaListRow.qml:40
+#: src/qml/EpisodeRow.qml:67 src/qml/MediaListRow.qml:40
 msgctxt "separator between items of a list"
 msgid ", "
 msgstr ", "
@@ -1592,49 +1606,49 @@ msgid_plural "Writers"
 msgstr[0] "Sceneggiatura"
 msgstr[1] "Sceneggiatura"
 
-#: src/qml/ItemDetailsPage.qml:1728 src/qml/ItemDetailsPage.qml:1758
+#: src/qml/ItemDetailsPage.qml:1730 src/qml/ItemDetailsPage.qml:1760
 msgid "Seasons"
 msgstr "Stagioni"
 
-#: src/qml/ItemDetailsPage.qml:1743
+#: src/qml/ItemDetailsPage.qml:1745
 msgid "Could not load the seasons"
 msgstr "Impossibile caricare le stagioni"
 
-#: src/qml/ItemDetailsPage.qml:1776 src/qml/ItemDetailsPage.qml:1814
+#: src/qml/ItemDetailsPage.qml:1778 src/qml/ItemDetailsPage.qml:1816
 msgid "In This Collection"
 msgstr "In questa raccolta"
 
-#: src/qml/ItemDetailsPage.qml:1784
+#: src/qml/ItemDetailsPage.qml:1786
 msgid "%1 of %2 items"
 msgstr "%1 di %2 elementi"
 
-#: src/qml/ItemDetailsPage.qml:1799
+#: src/qml/ItemDetailsPage.qml:1801
 msgid "Could not load the items of this collection"
 msgstr "Impossibile caricare gli elementi di questa raccolta"
 
-#: src/qml/ItemDetailsPage.qml:1838
+#: src/qml/ItemDetailsPage.qml:1840
 msgid "Chapters"
 msgstr "Capitoli"
 
-#: src/qml/ItemDetailsPage.qml:1878 src/qml/ItemDetailsPage.qml:1907
+#: src/qml/ItemDetailsPage.qml:1880 src/qml/ItemDetailsPage.qml:1909
 msgid "More Like This"
 msgstr "Simili a questo"
 
-#: src/qml/ItemDetailsPage.qml:1893
+#: src/qml/ItemDetailsPage.qml:1895
 msgid "Could not load similar items"
 msgstr "Impossibile caricare gli elementi simili"
 
-#: src/qml/ItemDetailsPage.qml:1939
+#: src/qml/ItemDetailsPage.qml:1941
 msgid ""
 "Could not load the episodes: check the connection to the server and try again"
 msgstr ""
 "Impossibile caricare gli episodi: verifica la connessione al server e riprova"
 
-#: src/qml/ItemDetailsPage.qml:1954
+#: src/qml/ItemDetailsPage.qml:1956
 msgid "This season has no episodes"
 msgstr "Questa stagione non ha episodi"
 
-#: src/qml/ItemDetailsPage.qml:1997
+#: src/qml/ItemDetailsPage.qml:2001
 msgid "Some episodes could not be loaded"
 msgstr "Alcuni episodi non sono stati caricati"
 
@@ -3606,12 +3620,15 @@ msgstr "Carica"
 msgid ""
 "The subtitle could not be uploaded: check the file (not empty, at most 2 "
 "MiB, in UTF-8) and wait for any upload on its way"
-msgstr "Impossibile caricare il sottotitolo: controlla il file (non vuoto, al massimo 2 MiB, in UTF-8) e attendi la fine di eventuali caricamenti in corso"
+msgstr ""
+"Impossibile caricare il sottotitolo: controlla il file (non vuoto, al "
+"massimo 2 MiB, in UTF-8) e attendi la fine di eventuali caricamenti in corso"
 
 #: src/qml/UploadSubtitleDialog.qml:111
 msgid ""
 "This subtitle is added to “%1” on the server, for everyone who watches it"
-msgstr "Questo sottotitolo viene aggiunto a “%1” sul server, per chiunque lo guardi"
+msgstr ""
+"Questo sottotitolo viene aggiunto a “%1” sul server, per chiunque lo guardi"
 
 #: src/qml/GenreRailsView.qml:89
 msgid ""

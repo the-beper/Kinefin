@@ -1102,6 +1102,8 @@ class TestPlayerController : public QObject {
                                           + QByteArrayLiteral("/Episodes"))));
         QVERIFY(route.contains("limit=100"));
         QVERIFY(!route.contains("seasonId"));
+        // A virtual episode (no file) is never a next or a previous one
+        QVERIFY(route.contains("isMissing=false"));
         // The saved queue knows nothing of it
         QCOMPARE(chain.controller.queueCount(), 0);
         QCOMPARE(chain.controller.currentIndex(), -1);

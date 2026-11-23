@@ -152,9 +152,9 @@ class JellyfinClient final : public QObject {
                      int channel = 0);
     // One series' seasons, and its episodes per season (`seasonId` empty = every season, paged by `startIndex`/`limit`; `startIndex` < 0 lets the server default)
     bool fetchSeasons(const QString &seriesId, int channel = 0);
-    // `forRuleScan` asks for `DateCreated` instead of `Overview`: the server sends the date only when asked
+    // `forRuleScan` asks for `DateCreated` instead of `Overview`: the server sends the date only when asked. The episodes the server only knows of (missing and unaired ones, LocationType Virtual) are left out with `isMissing=false`, which the route does not apply by itself; `withVirtual` lets them in, for the list a user reads while DisplayMissingEpisodes is on
     bool fetchEpisodes(const QString &seriesId, const QString &seasonId, int startIndex, int limit,
-                       int channel = 0, bool forRuleScan = false);
+                       int channel = 0, bool forRuleScan = false, bool withVirtual = false);
     // Similar items of any item kind (the generic `/Items/{itemId}/Similar` route)
     bool fetchSimilarItems(const QString &itemId, int limit, int channel = 0);
     // Drops the pending requests of one channel (silently, like a superseded one) and forgets its bookkeeping: for a consumer that is going away, or one that abandons what it asked for and may use the channel again later. Channel 0 is not releasable
@@ -338,6 +338,9 @@ class JellyfinClient final : public QObject {
     QString userImageTag() const;
     // `Policy.IsAdministrator` of the signed-in user as the server last reported it (login reply, then `/Users/Me`); false when unknown, absent or not a bool, and unless authenticated (a restored session knows it only once verifySession() answers). A convenience for hiding entries: the server enforces the rights
     bool isAdministrator() const;
+    // The user's saved DisplayMissingEpisodes, kept by the session after its configuration is read: a list that asks for it when it opens (the episodes of a season) shows the episodes the server only knows of while it is on. A cleared session forgets it
+    bool displayMissingEpisodes() const { return m_displayMissingEpisodes; }
+    void setDisplayMissingEpisodes(bool display) { m_displayMissingEpisodes = display; }
     // `Policy.EnableContentDownloading` as the server last reported it (login reply, then `/Users/Me`); false when unknown, absent or not a bool, and unless authenticated. A convenience for hiding the download actions: the server enforces the route policy
     bool canDownload() const;
     // `Policy.EnableSubtitleManagement` of the signed-in user, false while unknown or without a session: the OpenSubtitles entry is hidden
@@ -551,6 +554,7 @@ class JellyfinClient final : public QObject {
     QUrl m_base;
     QString m_serverId;
     QString m_userId;
+    bool m_displayMissingEpisodes = false;
     QString m_userName;
     QString m_userImageTag;
     bool m_isAdministrator = false;

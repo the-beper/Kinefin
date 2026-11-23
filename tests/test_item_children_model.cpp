@@ -377,6 +377,45 @@ class TestItemChildrenModel : public QObject {
                  QStringLiteral("Episode 61"));
     }
 
+    // The episodes the server only knows of: a season list asks for the real ones, and lets the others in (marked missing or unaired by their premiere date) only when the user's option is on
+    void virtualEpisodesFollowTheDisplayOption()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        QJsonObject unaired = episodeJson(3, false, 0, true);
+        unaired.insert(QStringLiteral("PremiereDate"),
+                       QDateTime::currentDateTimeUtc().addDays(30).toString(Qt::ISODateWithMs));
+        QJsonObject missing = episodeJson(2, false, 0, true);
+        missing.insert(QStringLiteral("PremiereDate"),
+                       QDateTime::currentDateTimeUtc().addDays(-30).toString(Qt::ISODateWithMs));
+        f.server.listingRawBody.insert(QStringLiteral("Episodes"),
+                                       envelope(QJsonArray{episodeJson(1), missing, unaired}));
+        f.children.load(detailsOf(QStringLiteral("season_item")));
+        SeasonEpisodesModel *episodes = f.children.episodes();
+        QTRY_COMPARE(episodes->status(), Kinefin::PagedItemsModel::Ready);
+        QCOMPARE(FakeJellyfin::capturedListingQuery(
+                     f.server.listingRoutes.value(QStringLiteral("Episodes")).constFirst())
+                     .queryItemValue(QStringLiteral("isMissing")),
+                 QStringLiteral("false"));
+        const auto flag = [episodes](int row, int role) {
+            return episodes->data(episodes->index(row), role).toBool();
+        };
+        QVERIFY(!flag(0, SeasonEpisodesModel::VirtualRole));
+        QVERIFY(!flag(0, SeasonEpisodesModel::UnairedRole));
+        QVERIFY(flag(1, SeasonEpisodesModel::VirtualRole));
+        QVERIFY(!flag(1, SeasonEpisodesModel::UnairedRole));
+        QVERIFY(flag(2, SeasonEpisodesModel::VirtualRole));
+        QVERIFY(flag(2, SeasonEpisodesModel::UnairedRole));
+
+        // With DisplayMissingEpisodes on, the list stops asking them away
+        f.client.setDisplayMissingEpisodes(true);
+        f.children.load(detailsOf(QStringLiteral("season_item")));
+        QTRY_COMPARE(f.server.listingRoutes.value(QStringLiteral("Episodes")).size(), 2);
+        QVERIFY(!FakeJellyfin::capturedListingQuery(
+                     f.server.listingRoutes.value(QStringLiteral("Episodes")).constLast())
+                     .hasQueryItem(QStringLiteral("isMissing")));
+    }
+
     void episodeRowsCarryNumberTitleRuntimeAndProgress()
     {
         Fixture f;

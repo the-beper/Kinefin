@@ -910,6 +910,13 @@ void addLibraryFilterParameters(QUrlQuery &wire, const ItemQuery &query)
     addTrue("isUnaired", query.isUnaired);
 }
 
+// Whether a listing of items can hold episodes: `includeItemTypes` names the type
+bool asksForEpisodes(const QString &includeItemTypes)
+{
+    return includeItemTypes.split(QLatin1Char(','), Qt::SkipEmptyParts)
+        .contains(QStringLiteral("Episode"));
+}
+
 // The /Items query of one item listing, or when `query.itemIds` is set an ids= resolution that carries only the ids and the fields (the details-refresh form): documented by ItemQuery. `userId` rides along on every listing call
 QUrlQuery listingQuery(const ItemQuery &query, const QString &userId)
 {
@@ -930,6 +937,9 @@ QUrlQuery listingQuery(const ItemQuery &query, const QString &userId)
         if (!query.personIds.isEmpty())
             wire.addQueryItem(QStringLiteral("personIds"), query.personIds.join(QLatin1Char(',')));
         addLibraryFilterParameters(wire, query);
+        // The episodes the server only knows of (missing and unaired ones) have no media: a listing of episodes leaves them out, unless a filter asks for them
+        if (!query.isMissing && !query.isUnaired && asksForEpisodes(query.includeItemTypes))
+            wire.addQueryItem(QStringLiteral("isMissing"), QStringLiteral("false"));
         if (!query.searchTerm.isEmpty())
             // Encoded here, once: QUrlQuery keeps a %XX of its input as it is, so a typed "%25" must already be "%2525"
             wire.addQueryItem(QStringLiteral("searchTerm"),
@@ -1275,7 +1285,7 @@ bool JellyfinClient::fetchSeasons(const QString &seriesId, int channel)
 }
 
 bool JellyfinClient::fetchEpisodes(const QString &seriesId, const QString &seasonId, int startIndex,
-                                   int limit, int channel, bool forRuleScan)
+                                   int limit, int channel, bool forRuleScan, bool withVirtual)
 {
     if (m_state != State::Authenticated || !isValidJellyfinId(seriesId)
         || (!seasonId.isEmpty() && !isValidJellyfinId(seasonId)) || startIndex < -1 || limit < -1)
@@ -1293,6 +1303,9 @@ bool JellyfinClient::fetchEpisodes(const QString &seriesId, const QString &seaso
         wire.addQueryItem(QStringLiteral("limit"), QString::number(limit));
     wire.addQueryItem(QStringLiteral("fields"),
                       forRuleScan ? QStringLiteral("DateCreated") : QStringLiteral("Overview"));
+    // The route lists the episodes the server only knows of for everyone, DisplayMissingEpisodes or not
+    if (!withVirtual)
+        wire.addQueryItem(QStringLiteral("isMissing"), QStringLiteral("false"));
     addImageTypeParameters(wire);
     wire.addQueryItem(QStringLiteral("userId"), m_userId);
     url.setQuery(wire);
@@ -3737,6 +3750,7 @@ void JellyfinClient::clearToken()
     m_userName.clear();
     m_userImageTag.clear();
     m_isAdministrator = false;
+    m_displayMissingEpisodes = false;
     m_canDownload = false;
     m_canManageSubtitles = false;
     m_canTranscode = false;

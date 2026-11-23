@@ -26,6 +26,9 @@ class SeasonEpisodesModel final : public PagedItemsModel {
         PlayedPercentageRole,
         FavoriteRole,
         PositionTicksRole,
+        // The server only knows of the episode (no file): missing, or unaired when it premieres later
+        VirtualRole,
+        UnairedRole,
         LoadedRole
     };
 
@@ -58,5 +61,6 @@ class SeasonEpisodesModel final : public PagedItemsModel {
     int m_channel;
     QString m_seriesId;
     QString m_seasonId;
+    bool m_withVirtual = false;
 };
 } // namespace Kinefin

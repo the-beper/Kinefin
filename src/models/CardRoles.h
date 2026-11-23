@@ -24,7 +24,9 @@ enum CardRole {
     // The share of a series' episodes watched, 0 to 1
     SeriesProgressRole,
     // The saved playback position in ticks, 0 when there is none
-    ResumeTicksRole
+    ResumeTicksRole,
+    // The server only knows of the item (an upcoming or missing episode): there is nothing to play, download or queue
+    VirtualItemRole
 };
 
 QHash<int, QByteArray> cardRoleNames();

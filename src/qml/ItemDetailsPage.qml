@@ -1717,6 +1717,8 @@ Kirigami.ScrollablePage {
                         played: page.nextUp.played ?? false
                         playedPercentage: page.nextUp.playedPercentage ?? 0
                         favorite: page.nextUp.favorite ?? false
+                        virtualItem: page.nextUp.virtualItem ?? false
+                        unaired: page.nextUp.unaired ?? false
                         loaded: page.nextUp.loaded ?? false
                         onClicked: page.Window.window.openItem(itemId, page)
                     }
@@ -1974,6 +1976,8 @@ Kirigami.ScrollablePage {
             played: model.played
             playedPercentage: model.playedPercentage
             favorite: model.favorite
+            virtualItem: model.virtualItem
+            unaired: model.unaired
             loaded: model.loaded
             onClicked: page.Window.window.openItem(itemId, page)
         }

@@ -109,6 +109,8 @@ struct ItemDetails {
     bool favorite = false;
     // The item's CanDownload when the server sent one; absent or unreadable leaves it true, so the policy decides
     bool canDownload = true;
+    // An episode the server only knows of (LocationType Virtual, no file): nothing to play or download. A season of a series without season folders is Virtual too, so only an episode counts
+    bool virtualItem = false;
     // `CanDelete` from the server; false unless it says so, so no delete is ever sent blindly
     bool canDelete = false;
     qreal playedPercentage = 0;

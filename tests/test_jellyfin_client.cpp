@@ -1847,6 +1847,78 @@ class TestJellyfinClient : public QObject {
         QVERIFY(!client.isAuthenticated());
     }
 
+    // The episodes the server only knows of (missing and unaired, LocationType Virtual) are asked away from every listing of episodes, and let in only when a list asks for them or a filter does
+    void virtualEpisodesAreLeftOutUnlessAskedFor()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        const QString series = QStringLiteral("aa11bb22cc33dd44ee55ff6677889900");
+        QSignalSpy episodes(&client, &Kinefin::JellyfinClient::episodesReady);
+        QSignalSpy items(&client, &Kinefin::JellyfinClient::itemsReady);
+        const auto wire = [&server](const QString &family) {
+            return FakeJellyfin::capturedListingQuery(server.lastListingRoute.value(family));
+        };
+        const QString isMissing = QStringLiteral("isMissing");
+        // The route of a series lists them for every user: playback, queues and downloads never want them
+        QVERIFY(client.fetchEpisodes(series, {}, 0, 10));
+        QTRY_COMPARE(episodes.size(), 1);
+        QCOMPARE(wire(QStringLiteral("Episodes")).queryItemValue(isMissing),
+                 QStringLiteral("false"));
+        QVERIFY(client.fetchEpisodes(series, {}, 0, 10, 0, true));
+        QTRY_COMPARE(episodes.size(), 2);
+        QCOMPARE(wire(QStringLiteral("Episodes")).queryItemValue(isMissing),
+                 QStringLiteral("false"));
+        // A list that asks for them gets them, and says so in no other way than the missing parameter
+        QVERIFY(client.fetchEpisodes(series, {}, 0, 10, 0, false, true));
+        QTRY_COMPARE(episodes.size(), 3);
+        QVERIFY(!wire(QStringLiteral("Episodes")).hasQueryItem(isMissing));
+
+        // The general listing leaves them out of any query that names the Episode type
+        Kinefin::ItemQuery query;
+        query.includeItemTypes = QStringLiteral("Movie,Episode");
+        int sent = 0;
+        const auto fetch = [&](const Kinefin::ItemQuery &q) {
+            const bool ok = client.fetchItems(q);
+            ++sent;
+            return ok && QTest::qWaitFor([&] { return items.size() == sent; }, 5000);
+        };
+        QVERIFY(fetch(query));
+        QCOMPARE(wire(QStringLiteral("Items")).queryItemValue(isMissing), QStringLiteral("false"));
+        // A filter that asks for them wins
+        Kinefin::ItemQuery missing;
+        missing.includeItemTypes = QStringLiteral("Episode");
+        missing.isMissing = true;
+        QVERIFY(fetch(missing));
+        QCOMPARE(wire(QStringLiteral("Items")).queryItemValue(isMissing), QStringLiteral("true"));
+        Kinefin::ItemQuery unaired;
+        unaired.includeItemTypes = QStringLiteral("Episode");
+        unaired.isUnaired = true;
+        QVERIFY(fetch(unaired));
+        QVERIFY(!wire(QStringLiteral("Items")).hasQueryItem(isMissing));
+        QCOMPARE(wire(QStringLiteral("Items")).queryItemValue(QStringLiteral("isUnaired")),
+                 QStringLiteral("true"));
+        // A listing of other types, and one by ids, is left as it is
+        Kinefin::ItemQuery movies;
+        movies.includeItemTypes = QStringLiteral("Movie,Series");
+        QVERIFY(fetch(movies));
+        QVERIFY(!wire(QStringLiteral("Items")).hasQueryItem(isMissing));
+        Kinefin::ItemQuery byIds;
+        byIds.itemIds = {series};
+        byIds.includeItemTypes = QStringLiteral("Episode");
+        QVERIFY(fetch(byIds));
+        QVERIFY(!wire(QStringLiteral("Items")).hasQueryItem(isMissing));
+
+        // A cleared session forgets the saved option
+        client.setDisplayMissingEpisodes(true);
+        QVERIFY(client.displayMissingEpisodes());
+        server.denyListings = true;
+        QVERIFY(client.fetchSeasons(series));
+        QTRY_VERIFY(!client.isAuthenticated());
+        QVERIFY(!client.displayMissingEpisodes());
+    }
+
     void seasonsAndEpisodesKeepOneRequestPerChannel()
     {
         FakeJellyfin server;

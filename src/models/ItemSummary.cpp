@@ -118,6 +118,11 @@ void applyProgress(ItemSummary &item, qint64 positionTicks, double playedPercent
             : -1;
 }
 
+bool isUnaired(const ItemSummary &item, const QDateTime &nowUtc)
+{
+    return item.virtualItem && item.premiereDate.isValid() && item.premiereDate > nowUtc;
+}
+
 bool isRecentlyAdded(const ItemSummary &item, const QDateTime &nowUtc)
 {
     // A date more than a day ahead is a wrong clock or a hostile value: it never counts as new
@@ -184,6 +189,7 @@ ItemSummary parseItemSummary(const QJsonObject &item)
     }
     summary.communityRating = parseCommunityRating(item.value(QStringLiteral("CommunityRating")));
     summary.dateCreated = parseTimestamp(item.value(QStringLiteral("DateCreated")));
+    summary.premiereDate = parseTimestamp(item.value(QStringLiteral("PremiereDate")));
     summary.childCount = boundedCount(item.value(QStringLiteral("ChildCount")), 1'000'000);
     summary.recursiveItemCount =
         boundedCount(item.value(QStringLiteral("RecursiveItemCount")), 10'000'000);

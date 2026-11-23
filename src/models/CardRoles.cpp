@@ -18,7 +18,8 @@ QHash<int, QByteArray> cardRoleNames()
             {SeasonCountRole, "seasonCount"},
             {EpisodeCountRole, "episodeCount"},
             {SeriesProgressRole, "seriesProgress"},
-            {ResumeTicksRole, "resumeTicks"}};
+            {ResumeTicksRole, "resumeTicks"},
+            {VirtualItemRole, "virtualItem"}};
 }
 
 QVariant cardRoleData(const ItemSummary &item, int role)
@@ -39,6 +40,9 @@ QVariant cardRoleData(const ItemSummary &item, int role)
         return series ? item.recursiveItemCount : -1;
     case ResumeTicksRole:
         return item.positionTicks;
+    case VirtualItemRole:
+        // A season of a series without season folders is Virtual too
+        return item.virtualItem && item.type == QLatin1String("Episode");
     case SeriesProgressRole: {
         if (!series || item.recursiveItemCount <= 0 || item.unplayedCount < 0)
             return qreal(-1);
