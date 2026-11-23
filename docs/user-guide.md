@@ -383,6 +383,8 @@ To show a second subtitle line, for example a translation, choose a text track i
 
 An external subtitle on a transcode is extracted by the server on first use. That can take minutes for a large file, and a notification says so.
 
+To show a subtitle file of your own, once the video has started, drop an `.srt`, `.ass`, `.ssa` or `.vtt` file on the player, or choose **Add Subtitle File…** in the **Subtitles** menu. The file, at most 2 MiB (eight files per item), is copied and shown at once under its file name; a notification says when something is wrong with it. In the Flatpak the sandbox may not see a file dropped from elsewhere: **Add Subtitle File…** opens it through the portal. A reopen of the item (a change of quality, for example) adds the files back and selects again the one that was shown. They are for the item that plays: they are not kept for its next visit or for the next episode, and they go when another item starts. An administrator is offered **Upload to Server…** in the notification: it names the item, asks for the language and **Forced**, and keeps the file on the server as an external subtitle of the item for everyone who watches it (UTF-8 only). Nothing is added while casting.
+
 To search for a subtitle online:
 
 1. Open **Subtitles** and choose **Search Online Subtitles…**.
@@ -457,6 +459,8 @@ The entry shows only while you are signed in and the server permits SyncPlay. **
 In a group the player waits for the others, and notifications name members who join and leave. Pause, resume, seek, **Next** and **Previous**, shuffle and repeat act on the whole group. Speed is not available and automatic intro skipping is off. The group's queue can be reordered and trimmed in the dialog. Joining a group stops anything you were playing alone.
 
 Closing the player stops following the group but keeps you in it. **Follow Again** in the dialog catches up. A lost connection joins the group again.
+
+While you are in a group the top bar has a **SyncPlay Group** button next to the queue. Its tooltip says the group's name and how many people are in it, **Not following** when the playback is not in step with the group (the icon dims) and **Waiting for others** when the group waits for someone (a dot appears on the icon). Its menu lists the group and its members, up to ten, and has **Stop Following** or **Follow Again**, **Leave Group** and **SyncPlay…**, which opens the dialog. In a narrow window the same menu is the **SyncPlay Group** entry of the main menu.
 
 ### Control other sessions
 

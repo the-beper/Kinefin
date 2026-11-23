@@ -2630,6 +2630,148 @@ class TestPlayerController : public QObject {
         QCOMPARE(chain.engine()->mpvProperty(QStringLiteral("glsl-shaders")).toList().size(), 1);
     }
 
+    // A subtitle file added by hand: only the four formats and a readable file of at most 2 MiB, a copy of its own, shown selected under its file name, and a word for every refusal
+    void aSubtitleFileAddedByHandIsShownAndEveryRefusalSaysWhy()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        const QString stream = makeTransportStream(chain.dir, 10);
+        QVERIFY(!stream.isEmpty());
+        QVERIFY(chain.engine()->init({QStringLiteral("vo=null"), QStringLiteral("ao=null")}));
+        QSignalSpy added(&chain.controller, &Kinefin::PlayerController::subtitleFileAdded);
+        QSignalSpy refused(&chain.controller, &Kinefin::PlayerController::subtitleFileRefused);
+        const auto write = [&chain](const QString &name, const QByteArray &bytes) {
+            const QString path = chain.dir.filePath(name);
+            QFile file(path);
+            return file.open(QIODevice::WriteOnly) && file.write(bytes) == bytes.size()
+                       ? QUrl::fromLocalFile(path)
+                       : QUrl();
+        };
+        const QByteArray srtText = "1\n00:00:01,000 --> 00:00:02,000\nHello\n\n";
+        QVERIFY(chain.controller.playLocalFile(stream, kMovie, QStringLiteral("Local Movie"), {}));
+        // mpv has no file yet: the answer is to wait, and nothing is kept
+        QVERIFY(!chain.controller.addSubtitleFile(write(QStringLiteral("early.srt"), srtText)));
+        QCOMPARE(refused.size(), 1);
+        QCOMPARE(refused.constFirst().constFirst().toString(),
+                 QStringLiteral("Wait until the video has started to add a subtitle"));
+        refused.clear();
+        QTRY_VERIFY(chain.controller.canSeek());
+        const auto reason = [&refused](int index) {
+            return refused.at(index).constFirst().toString();
+        };
+        // A file of this computer only
+        QVERIFY(
+            !chain.controller.addSubtitleFile(QUrl(QStringLiteral("https://example.org/a.srt"))));
+        QCOMPARE(reason(0), QStringLiteral("Only a subtitle file on this computer can be added"));
+        // The four formats only
+        QVERIFY(!chain.controller.addSubtitleFile(write(QStringLiteral("notes.txt"), "hello")));
+        QCOMPARE(reason(1), QStringLiteral("The file is not an srt, ass, ssa, or vtt subtitle"));
+        // A file this process cannot see says so, not that its format is wrong
+        QVERIFY(!chain.controller.addSubtitleFile(
+            QUrl::fromLocalFile(chain.dir.filePath(QStringLiteral("missing.srt")))));
+        QVERIFY(reason(2).startsWith(QStringLiteral("The file cannot be opened from here")));
+        // Not empty, and at most 2 MiB
+        QVERIFY(!chain.controller.addSubtitleFile(write(QStringLiteral("empty.srt"), "")));
+        QCOMPARE(reason(3),
+                 QStringLiteral("The subtitle must be a readable file of at most 2 MiB"));
+        QVERIFY(!chain.controller.addSubtitleFile(
+            write(QStringLiteral("big.srt"), QByteArray(2 * 1024 * 1024 + 1, 'x'))));
+        QCOMPARE(reason(4),
+                 QStringLiteral("The subtitle must be a readable file of at most 2 MiB"));
+        QCOMPARE(added.size(), 0);
+
+        // A good file is copied, added and selected under its name
+        const QUrl original = write(QStringLiteral("Film Title.srt"), srtText);
+        QVERIFY(!original.isEmpty());
+        QVERIFY(chain.controller.addSubtitleFile(original));
+        QCOMPARE(added.size(), 1);
+        QCOMPARE(added.constFirst().at(0).toString(), QStringLiteral("Film Title"));
+        const QUrl copy = added.constFirst().at(1).toUrl();
+        QVERIFY(copy.isLocalFile() && copy != original && QFile::exists(copy.toLocalFile()));
+        QTRY_VERIFY_WITH_TIMEOUT(
+            std::any_of(chain.controller.subtitleTracks().cbegin(),
+                        chain.controller.subtitleTracks().cend(),
+                        [](const QVariant &track) {
+                            const QVariantMap map = track.toMap();
+                            return map.value(QStringLiteral("name"))
+                                       .toString()
+                                       .contains(QStringLiteral("Film Title"))
+                                   && map.value(QStringLiteral("selected")).toBool();
+                        }),
+            5000);
+        // The original may go away: the copy is the player's
+        QVERIFY(QFile::remove(original.toLocalFile()));
+        QVERIFY(QFile::exists(copy.toLocalFile()));
+        // A file of this device has no server item to keep it on
+        QVERIFY(!chain.controller.canUploadAddedSubtitles());
+        // Eight files at most for an item
+        for (int count = 1; count < 8; ++count)
+            QVERIFY(chain.controller.addSubtitleFile(
+                write(QStringLiteral("More %1.srt").arg(count), srtText)));
+        refused.clear();
+        QVERIFY(!chain.controller.addSubtitleFile(write(QStringLiteral("Ninth.srt"), srtText)));
+        QCOMPARE(refused.constFirst().constFirst().toString(),
+                 QStringLiteral("No more subtitle files can be added to this item"));
+        // Another item starts without them, and their copies go
+        QVERIFY(chain.controller.playLocalFile(stream, kOtherMovie, QStringLiteral("Other"), {}));
+        QTRY_VERIFY(!QFile::exists(copy.toLocalFile()));
+        QTRY_VERIFY(chain.controller.canSeek());
+        QVERIFY(chain.controller.addSubtitleFile(write(QStringLiteral("Again.srt"), srtText)));
+        // Nothing plays in a player that has not been given an item: nothing to add to
+        Chain idle;
+        QVERIFY(idle.ok);
+        QSignalSpy nothing(&idle.controller, &Kinefin::PlayerController::subtitleFileRefused);
+        QVERIFY(!idle.controller.addSubtitleFile(write(QStringLiteral("late.srt"), "x")));
+        QCOMPARE(nothing.size(), 1);
+        QCOMPARE(nothing.constFirst().constFirst().toString(),
+                 QStringLiteral("Nothing is playing to add a subtitle to"));
+    }
+
+    // An added subtitle file stays with its item: a reopen of the item (here a quality step) adds it again and selects it again, and another item starts without it
+    void anAddedSubtitleFileFollowsAReopenAndNotAnotherItem()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        QVERIFY(startsStarving(chain));
+        stall(chain, false);
+        const auto showsSelected = [&chain] {
+            const QVariantList tracks = chain.controller.subtitleTracks();
+            return std::any_of(tracks.cbegin(), tracks.cend(), [](const QVariant &track) {
+                const QVariantMap map = track.toMap();
+                return map.value(QStringLiteral("name")).toString() == QLatin1String("Film Title")
+                       && map.value(QStringLiteral("selected")).toBool();
+            });
+        };
+        QSignalSpy added(&chain.controller, &Kinefin::PlayerController::subtitleFileAdded);
+        const QString path = chain.dir.filePath(QStringLiteral("Film Title.srt"));
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        QVERIFY(file.write("1\n00:00:01,000 --> 00:00:02,000\nHello\n\n") > 0);
+        file.close();
+        QVERIFY(chain.controller.addSubtitleFile(QUrl::fromLocalFile(path)));
+        const QString copy = added.constFirst().at(1).toUrl().toLocalFile();
+        QTRY_VERIFY(showsSelected());
+
+        // The same item opened again: the file is added again and is the selected subtitle again
+        chain.controller.setQuality(8'000'000);
+        QTRY_COMPARE(chain.server.playbackInfoRequests, 1);
+        // The server is told no subtitle of its own is wanted: it must not burn one in under the file
+        const QJsonObject request =
+            QJsonDocument::fromJson(chain.server.lastPlaybackInfoBody).object();
+        QVERIFY(request.contains(QStringLiteral("SubtitleStreamIndex")));
+        QCOMPARE(request.value(QStringLiteral("SubtitleStreamIndex")).toInt(), -1);
+        Q_EMIT chain.client.playbackInfoReady(lowerSource(chain, 8'000'000));
+        QTRY_VERIFY(!chain.controller.qualitySwitching());
+        QTRY_VERIFY(!chain.controller.loading());
+        QTRY_VERIFY(chain.controller.canSeek());
+        QTRY_VERIFY(showsSelected());
+        QVERIFY(QFile::exists(copy));
+
+        // Another item: nothing of it is kept
+        QVERIFY(chain.controller.playItem(kOtherMovie, 0));
+        QTRY_VERIFY(!QFile::exists(copy));
+    }
+
     void clipLengthLimits()
     {
         Chain chain;

@@ -133,7 +133,7 @@ Kirigami.Page {
     FileDialog {
         id: subtitleFileDialog
         objectName: "playerSubtitleFileDialog"
-        title: i18n("Choose a Subtitle")
+        title: i18n("Add Subtitle File")
         nameFilters: [i18n("Subtitles (*.srt *.ass *.ssa *.vtt)")]
         onAccepted: page.player.addSubtitleFile(selectedFile)
     }
@@ -1693,28 +1693,6 @@ Kirigami.Page {
                 const up = wheelArea.travel > 0;
                 wheelArea.travel -= up ? 120 : -120;
                 wheelArea.stepped(up ? 1 : -1);
-            }
-        }
-    }
-    // A menu entry for a name from the server or the file: it never becomes the entry's `text`, which the style's label reads as markup (it is built even when replaced) and searches for a mnemonic. The space before the name is the style's for a check mark, which every menu that uses it has
-    component PlainMenuItem: Controls.MenuItem {
-        id: plainItem
-        property string plainText
-        Accessible.name: plainText
-        contentItem: RowLayout {
-            Item {
-                Layout.preferredWidth: plainItem.indicator ? plainItem.indicator.width : Kirigami.Units.smallSpacing
-            }
-            Controls.Label {
-                Layout.fillWidth: true
-                Layout.maximumWidth: Kirigami.Units.gridUnit * 24
-                Layout.alignment: Qt.AlignVCenter
-                text: plainItem.plainText
-                textFormat: Text.PlainText
-                maximumLineCount: 1
-                font: plainItem.font
-                color: plainItem.pressed ? Kirigami.Theme.highlightedTextColor : Kirigami.Theme.textColor
-                elide: Text.ElideRight
             }
         }
     }

@@ -14,10 +14,13 @@ Kirigami.Dialog {
     // The window shows the notifications
     required property var shell
 
-    // The item the file was added to (the playing one may have changed since) and the file
+    // The item the file was added to (the playing one may have changed since) with its name, and the file
     property string itemId: ""
+    property string itemName: ""
     property url file
     property string fileTitle: ""
+    // An upload this dialog started: the server's answer is announced only then, not for an upload or a delete of Edit Subtitles
+    property bool uploading: false
     // Empty means undetermined; the client refuses anything but two or three letters
     readonly property bool languageValid: languageField.length === 0 || languageField.acceptableInput
 
@@ -40,8 +43,11 @@ Kirigami.Dialog {
         onCloseRequested: dialog.close()
     }
 
-    function openFor(item, copy, name) {
+    function openFor(item, itemTitle, copy, name) {
+        if (connection.state !== ConnectionController.Authenticated)
+            return;
         itemId = item;
+        itemName = itemTitle;
         file = copy;
         fileTitle = name;
         languageField.text = "";
@@ -50,10 +56,13 @@ Kirigami.Dialog {
     }
 
     function upload() {
-        close();
-        // The formats of JellyfinClient::uploadSubtitle, which answers false alike for an empty, oversized, unreadable or non-UTF-8 file, an upload already on its way and a lost session
-        if (!connection.uploadSubtitle(itemId, file, languageField.text, forcedSwitch.checked))
-            shell.showPassiveNotification(i18n("The subtitle could not be uploaded: check the file (not empty, under 2 MiB, in UTF-8) and wait for any upload on its way"));
+        // The formats of JellyfinClient::uploadSubtitle, which answers false alike for an empty, oversized, unreadable or non-UTF-8 file, an upload already on its way and a lost session: the dialog stays for another try
+        if (connection.uploadSubtitle(itemId, file, languageField.text, forcedSwitch.checked)) {
+            uploading = true;
+            close();
+        } else {
+            shell.showPassiveNotification(i18n("The subtitle could not be uploaded: check the file (not empty, at most 2 MiB, in UTF-8) and wait for any upload on its way"));
+        }
     }
 
     onOpened: languageField.forceActiveFocus(Qt.PopupFocusReason)
@@ -61,12 +70,24 @@ Kirigami.Dialog {
     Connections {
         target: dialog.connection
         function onItemSubtitleUpdated(itemId) {
-            if (itemId === dialog.itemId && dialog.file.toString().length > 0)
+            if (dialog.uploading && itemId === dialog.itemId) {
+                dialog.uploading = false;
                 dialog.shell.showPassiveNotification(i18n("Subtitles updated"));
+            }
         }
         function onItemSubtitleUpdateFailed(itemId, status) {
-            if (itemId === dialog.itemId && dialog.file.toString().length > 0)
+            if (dialog.uploading && itemId === dialog.itemId) {
+                dialog.uploading = false;
                 dialog.shell.showPassiveNotification(i18n("The subtitle could not be changed: check the file and the connection to the server"));
+            }
+        }
+        // Another sign-in is another user: the file and the item are not offered to it
+        function onStateChanged() {
+            if (dialog.connection.state !== ConnectionController.Authenticated) {
+                dialog.close();
+                dialog.itemId = "";
+                dialog.uploading = false;
+            }
         }
     }
 
@@ -81,12 +102,13 @@ Kirigami.Dialog {
             text: dialog.fileTitle
             font.weight: Font.DemiBold
         }
+        // The item's name is the server's text: plain text
         Controls.Label {
             Layout.fillWidth: true
             opacity: 0.7
             wrapMode: Text.Wrap
             textFormat: Text.PlainText
-            text: i18n("The subtitle becomes one of the external subtitles of this item on the server, for everyone who watches it. srt, ass, ssa, or vtt, UTF-8, at most 2 MiB")
+            text: i18n("This subtitle is added to “%1” on the server, for everyone who watches it", dialog.itemName)
         }
 
         Kirigami.FormLayout {
@@ -111,6 +133,15 @@ Kirigami.Dialog {
                 Kirigami.FormData.label: i18n("Forced:")
                 Accessible.name: i18n("Forced")
             }
+        }
+
+        MessageBox {
+            objectName: "uploadSubtitleLanguageInvalid"
+            Layout.fillWidth: true
+            Layout.topMargin: Kirigami.Units.largeSpacing
+            visible: !dialog.languageValid && (languageField.length >= 2 || !languageField.activeFocus)
+            type: Kirigami.MessageType.Warning
+            text: i18n("Use a language code of two or three letters, or leave the field empty")
         }
     }
 }

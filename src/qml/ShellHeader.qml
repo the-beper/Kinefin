@@ -6,7 +6,7 @@ import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 import org.kde.kirigamiaddons.components as Components
 
-// The top bar: the Home, Movies, Shows, Downloads, Favorites and Playlists tabs at the left, content-sized with an underline under the current one (Movies and Shows only while the server has a library of the type), and search, queue and the one menu button (the account avatar) at the right; the menu holds the account and the application entries. The tabs carry their labels while they fit with the search box at its minimum width (`labelledTabs`) and are icon-only otherwise; Compact (narrower than the bar with icon-only tabs and the box at its minimum, `minimumBarWidth`) turns the box into a search button and folds the queue into the menu
+// The top bar: the Home, Movies, Shows, Downloads, Favorites and Playlists tabs at the left, content-sized with an underline under the current one (Movies and Shows only while the server has a library of the type), and search, queue, the SyncPlay group while one is joined and the one menu button (the account avatar) at the right; the menu holds the account and the application entries. The tabs carry their labels while they fit with the search box at its minimum width (`labelledTabs`) and are icon-only otherwise; Compact (narrower than the bar with icon-only tabs and the box at its minimum, `minimumBarWidth`) turns the box into a search button and folds the queue into the menu
 Item {
     id: root
     objectName: "shellHeader"
@@ -157,8 +157,8 @@ Item {
     readonly property real tabsStart: Kirigami.Units.smallSpacing + (headerBackButton.visible ? headerBackButton.implicitWidth + Kirigami.Units.smallSpacing : 0)
     readonly property real searchMinimumWidth: Kirigami.Units.gridUnit * 11
     readonly property real searchMaximumWidth: Kirigami.Units.gridUnit * 20
-    // What the right cluster takes besides the search box outside Compact mode, with the spacing before it and the margin after it
-    readonly property real rightFixedWidth: queueButton.implicitWidth + clusterSeparator.implicitWidth + mainMenuButton.implicitWidth + rightCluster.spacing * 3 + Kirigami.Units.smallSpacing
+    // What the right cluster takes besides the search box outside Compact mode, with the spacing before it and the margin after it; the group button counts while a group is joined (its `joined`, not its `visible`, which follows Compact)
+    readonly property real rightFixedWidth: queueButton.implicitWidth + clusterSeparator.implicitWidth + mainMenuButton.implicitWidth + rightCluster.spacing * 3 + Kirigami.Units.smallSpacing + (groupButton.joined ? groupButton.implicitWidth + rightCluster.spacing : 0)
     FontMetrics {
         id: tabFontMetrics
         font: Kirigami.Theme.defaultFont
@@ -474,6 +474,68 @@ Item {
             }
         }
 
+        // While a SyncPlay group is joined: who is in it, whether the playback keeps in step with it and whether it waits for someone, with the quick actions of the group in a menu (the queue, the groups list and a new group stay in the dialog)
+        QQC2.ToolButton {
+            id: groupButton
+            objectName: "syncPlayGroupButton"
+
+            readonly property var syncPlay: root.syncPlay
+            readonly property bool joined: root.signedIn && !!syncPlay && syncPlay.status === SyncPlayController.Joined
+            // The name of the group is server text: a plain text tooltip below, the accessible name says the same
+            readonly property string summary: {
+                if (!joined)
+                    return "";
+                const name = syncPlay.groupName.length > 0 ? syncPlay.groupName : i18n("Unnamed group");
+                const parts = [i18ncp("@info:tooltip %2 is the name of the group", "SyncPlay group %2: %1 person", "SyncPlay group %2: %1 people", syncPlay.participants.length, name)];
+                if (!syncPlay.following)
+                    parts.push(i18nc("@info:tooltip the playback does not keep in step with the group", "Not following"));
+                else if (syncPlay.waiting)
+                    parts.push(i18nc("@info:tooltip the group waits for someone", "Waiting for others"));
+                return parts.join(" · ");
+            }
+
+            Layout.alignment: Qt.AlignVCenter
+            visible: !root.compact && joined
+            text: i18nc("@action:button", "SyncPlay Group")
+            icon.name: "system-users-symbolic"
+            display: QQC2.AbstractButton.IconOnly
+            // Not following is the state to see: the icon dims
+            opacity: syncPlay?.following ? 1 : 0.55
+            down: groupMenu.opened
+            Accessible.name: summary
+            Accessible.role: Accessible.ButtonMenu
+            onClicked: groupMenu.open()
+
+            PlainToolTip {
+                text: groupButton.summary
+                visible: (groupButton.hovered || groupButton.visualFocus) && !groupMenu.opened
+            }
+
+            // The group waits for someone, on the icon's corner; the tooltip and the accessible name say it in words
+            Rectangle {
+                objectName: "syncPlayWaitingBadge"
+                visible: (groupButton.syncPlay?.following ?? false) && (groupButton.syncPlay?.waiting ?? false)
+                anchors {
+                    top: parent.top
+                    right: parent.right
+                    topMargin: Kirigami.Units.smallSpacing
+                    rightMargin: Kirigami.Units.smallSpacing
+                }
+                width: Kirigami.Units.smallSpacing * 2
+                height: width
+                radius: width / 2
+                color: Kirigami.Theme.neutralTextColor
+                Accessible.ignored: true
+            }
+
+            GroupMenu {
+                id: groupMenu
+                objectName: "syncPlayGroupMenu"
+                parent: groupButton
+            }
+            PopupPlacement { popup: groupMenu; anchor: groupButton }
+        }
+
         Kirigami.Separator {
             id: clusterSeparator
 
@@ -781,6 +843,83 @@ Item {
 
     // Under the button, right-aligned with it (left-aligned when mirrored) as the bar ends there, and above it in a window too short to hold the menu below
     PopupPlacement { popup: mainMenu; anchor: mainMenuButton }
+
+    // The quick actions of the group the viewer is in: the menu of the button in the bar and, in a compact window, an entry of the main menu
+    component GroupMenu: QQC2.Menu {
+        id: groupMenuRoot
+
+        // The submenu of a compact window leaves it out: the main menu has the SyncPlay entry right above it
+        property bool withDialogEntry: true
+        readonly property var syncPlay: root.syncPlay
+        readonly property var members: syncPlay?.participants ?? []
+        readonly property int shownMembers: 10
+
+        PlainMenuItem {
+            objectName: "syncPlayMenuGroup"
+            plainText: (groupMenuRoot.syncPlay?.groupName ?? "").length > 0 ? groupMenuRoot.syncPlay.groupName : i18n("Unnamed group")
+            enabled: false
+        }
+        Instantiator {
+            model: groupMenuRoot.members.slice(0, groupMenuRoot.shownMembers)
+            delegate: PlainMenuItem {
+                required property string modelData
+                objectName: "syncPlayMenuMember"
+                plainText: modelData
+                enabled: false
+            }
+            onObjectAdded: (index, object) => groupMenuRoot.insertItem(index + 1, object)
+            onObjectRemoved: (index, object) => groupMenuRoot.removeItem(object)
+        }
+        QQC2.MenuItem {
+            objectName: "syncPlayMenuMore"
+            visible: groupMenuRoot.members.length > groupMenuRoot.shownMembers
+            enabled: false
+            text: i18ncp("@item:inmenu more people in the group than the menu lists", "and %1 more", "and %1 more", groupMenuRoot.members.length - groupMenuRoot.shownMembers)
+        }
+        QQC2.MenuSeparator {}
+        QQC2.MenuItem {
+            objectName: "syncPlayMenuFollow"
+            text: groupMenuRoot.syncPlay?.following ? i18nc("@action:button", "Stop Following") : i18nc("@action:button", "Follow Again")
+            icon.name: groupMenuRoot.syncPlay?.following ? "media-playback-pause" : "media-playback-start"
+            enabled: !(groupMenuRoot.syncPlay?.offline ?? false)
+            onTriggered: groupMenuRoot.syncPlay.following ? groupMenuRoot.syncPlay.stopFollowing() : groupMenuRoot.syncPlay.resumeFollowing()
+        }
+        QQC2.MenuItem {
+            objectName: "syncPlayMenuLeave"
+            text: i18nc("@action:button", "Leave Group")
+            icon.name: "list-remove-user"
+            onTriggered: groupMenuRoot.syncPlay.leaveGroup()
+        }
+        QQC2.MenuSeparator {
+            visible: groupMenuRoot.withDialogEntry
+        }
+        QQC2.MenuItem {
+            objectName: "syncPlayMenuOpen"
+            visible: groupMenuRoot.withDialogEntry
+            text: i18nc("@action:inmenu", "SyncPlay…")
+            icon.name: "system-users"
+            onTriggered: syncPlayDialog.open()
+        }
+    }
+
+    // A compact window has no room for the button: the group's menu is an entry of the main menu, under SyncPlay
+    Instantiator {
+        model: root.compact && groupButton.joined ? 1 : 0
+        delegate: GroupMenu {
+            objectName: "syncPlayGroupSubmenu"
+            withDialogEntry: false
+            title: i18nc("@title:menu", "SyncPlay Group")
+        }
+        onObjectAdded: (index, object) => {
+            let at = mainMenu.count;
+            for (let i = 0; i < mainMenu.count; ++i) {
+                if (mainMenu.itemAt(i)?.objectName === "menuSyncPlayItem")
+                    at = i + 1;
+            }
+            mainMenu.insertMenu(at, object);
+        }
+        onObjectRemoved: (index, object) => mainMenu.removeMenu(object)
+    }
 
     QQC2.Menu {
         id: mainMenu

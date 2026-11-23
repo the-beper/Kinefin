@@ -9,6 +9,7 @@ This page covers building, checking, packaging and the working rules. The [archi
 | `build/Containerfile` | The build/check image (Fedora 45, Qt 6/KF6/ECM, mpv-devel, gettext) |
 | `build/build-env.sh` | Runs any command in that image: the only supported way to build and check locally |
 | `build/check.sh` | Every automated check (clang-format, cppcheck, build, ctest, qmllint, metainfo, desktop file, translation consistency, Python contract tests, `reuse lint`, catalogs): the one list |
+| `build/desktop-check.sh` | Reads a running Plasma session and reports on MPRIS, the screen and suspend inhibitions, KWallet and KRunner (`--act` also controls the player; run it with Kinefin open and a video playing) |
 | `build/flatpak/` | The Flatpak image (`Containerfile`), the manifest (`io.github.the_beper.Kinefin.yml`), and its build/test scripts |
 | `build/release/` | Version bump, Flatpak source/runtime/permission/Action gates, Flathub manifest generator, artifact verification, attestation checks, release publisher and first-release checklist |
 | `data/` | Desktop file, AppStream metainfo and icons (`icons/hicolor`: the scalable SVG source and the 128/256 px PNG renders) |

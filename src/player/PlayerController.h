@@ -770,6 +770,7 @@ class PlayerController final : public QObject {
     QString m_pendingSecondaryFile;
     // The server's stream index of each external subtitle file loaded into mpv for this stream, by file name, in the order it was added (mpv's track ids follow that order)
     QHash<QString, int> m_loadedSubtitles;
+    // Every subtitle file mpv was given for this stream (the server's and the ones added by hand), in the order they were added: a clip export lists them the same way
     QStringList m_loadedSubtitleOrder;
     // The user turned subtitles off for this item; a same-item reopen keeps it
     bool m_subtitlesOff = false;
@@ -873,6 +874,9 @@ class PlayerController final : public QObject {
     QList<LocalSubtitle> m_localSubtitles;
     // The subtitle files the viewer added by hand to this item, added to mpv again when the item reopens
     QList<LocalSubtitle> m_addedSubtitles;
+    // The added file that is the selected subtitle, and the mpv ids of the added files in the track list as it was last read
+    QString m_selectedAddedSubtitle;
+    QHash<int, QString> m_addedSubtitleTracks;
     bool m_stopping = false;
     bool m_trackRestored = false;
     int m_selectedAudioId = 0;

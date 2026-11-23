@@ -2253,6 +2253,7 @@ class PlayerStub : public QObject {
     Q_PROPERTY(double clipProgress MEMBER clipProgress NOTIFY changed)
     Q_PROPERTY(qint64 clipStartTicks MEMBER clipStartTicks NOTIFY changed)
     Q_PROPERTY(qint64 clipEndTicks MEMBER clipEndTicks NOTIFY changed)
+    Q_PROPERTY(QString itemId MEMBER itemId NOTIFY changed)
     Q_PROPERTY(bool deband MEMBER deband NOTIFY changed)
     Q_PROPERTY(QVariantList shaders MEMBER shaders NOTIFY changed)
     Q_PROPERTY(QStringList activeShaders MEMBER activeShaders NOTIFY changed)
@@ -2392,6 +2393,11 @@ class PlayerStub : public QObject {
         clipLooping = looping;
         Q_EMIT changed();
     }
+    Q_INVOKABLE bool addSubtitleFile(const QUrl &file)
+    {
+        return record(QStringLiteral("addSubtitleFile"), file.toString());
+    }
+    Q_INVOKABLE bool canUploadAddedSubtitles() const { return uploadable; }
     Q_INVOKABLE void refreshEnhancements() { record(QStringLiteral("refreshEnhancements")); }
     Q_INVOKABLE void setDeband(bool on)
     {
@@ -2582,6 +2588,8 @@ class PlayerStub : public QObject {
     bool clipSavingGif = false;
     double clipProgress = 0;
     qint64 clipStartTicks = -1;
+    QString itemId = QStringLiteral("f0e1d2c3b4a5968778695a4b3c2d1e0f");
+    bool uploadable = false;
     bool deband = false;
     QVariantList shaders;
     QStringList activeShaders;
@@ -2618,6 +2626,8 @@ class PlayerStub : public QObject {
     void qualityChangeFailed();
     void clipMarkChanged(const QString &text);
     void subtitleExtracting();
+    void subtitleFileAdded(const QString &title, const QUrl &copy);
+    void subtitleFileRefused(const QString &reason);
     void subtitleBusy();
     void qualityUnavailable();
     // The device stopped on its own or another controller took it
@@ -8989,6 +8999,143 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(ui.server.syncPlayListRequests > asked);
         QTRY_COMPARE(ui.itemsStartingWith(QStringLiteral("syncPlayGroupRow")).size(), 1);
         QVERIFY(!failed->isVisible());
+    }
+
+    // While a group is joined the top bar has a button for it: its tooltip and accessible name say who is in it, whether the playback keeps in step and whether the group waits; its menu has the quick actions of the dialog; a window too narrow for it has the same menu inside the main menu
+    void theTopBarShowsTheJoinedSyncPlayGroupAndItsQuickActions()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(1200));
+        QVERIFY(buildState(ui, QStringLiteral("home")));
+        QQuickItem *button = ui.item(QStringLiteral("syncPlayGroupButton"));
+        QVERIFY(button);
+        QVERIFY(!button->isVisible());
+        // Joined, with a name that is markup and twelve people
+        QTRY_VERIFY(ui.syncPlay.available() && ui.server.lastConnection());
+        QVERIFY(ui.syncPlay.joinGroup(kSyncPlayGroup));
+        QStringList people;
+        for (int i = 1; i <= 12; ++i)
+            people << QStringLiteral("<i>guest</i> %1").arg(i);
+        ui.server.lastConnection()->sendText(syncPlayUpdate(
+            QStringLiteral("GroupJoined"),
+            QJsonObject{{QStringLiteral("GroupId"), kSyncPlayGroup},
+                        {QStringLiteral("GroupName"), QStringLiteral("<b>Night</b> & day")},
+                        {QStringLiteral("State"), QStringLiteral("Idle")},
+                        {QStringLiteral("Participants"), QJsonArray::fromStringList(people)},
+                        {QStringLiteral("LastUpdatedAt"),
+                         QStringLiteral("2026-11-16T16:37:42.0164616Z")}}));
+        QTRY_VERIFY(button->isVisible());
+        QCOMPARE(button->property("summary").toString(),
+                 QStringLiteral("SyncPlay group <b>Night</b> & day: 12 people"));
+        QCOMPARE(accessibleNameOf(button), button->property("summary").toString());
+        QCOMPARE(button->property("opacity").toDouble(), 1.0);
+        QVERIFY(!ui.item(QStringLiteral("syncPlayWaitingBadge"))->isVisible());
+        // The bar's width budget counts the button, so the tabs and the search box make room for it
+        const qreal widthWithGroup = ui.shellHeader()->property("rightFixedWidth").toDouble();
+
+        // The menu: the group, ten names and "and 2 more", then the actions
+        QObject *menu = ui.popup(QStringLiteral("syncPlayGroupMenu"));
+        QVERIFY(menu);
+        QVERIFY(QMetaObject::invokeMethod(button, "click"));
+        QTRY_VERIFY(menu->property("opened").toBool());
+        const auto named = [&](const QString &name) {
+            QList<QQuickItem *> found;
+            for (QQuickItem *item : ui.menuItems(QStringLiteral("syncPlayGroupMenu"))) {
+                if (item->objectName() == name)
+                    found.append(item);
+            }
+            return found;
+        };
+        QCOMPARE(named(QStringLiteral("syncPlayMenuGroup")).size(), 1);
+        QCOMPARE(named(QStringLiteral("syncPlayMenuGroup"))
+                     .constFirst()
+                     ->property("plainText")
+                     .toString(),
+                 QStringLiteral("<b>Night</b> & day"));
+        QTRY_COMPARE(named(QStringLiteral("syncPlayMenuMember")).size(), 10);
+        QCOMPARE(named(QStringLiteral("syncPlayMenuMember"))
+                     .constFirst()
+                     ->property("plainText")
+                     .toString(),
+                 QStringLiteral("<i>guest</i> 1"));
+        QQuickItem *more = named(QStringLiteral("syncPlayMenuMore")).constFirst();
+        QVERIFY(more->isVisible());
+        QCOMPARE(more->property("text").toString(), QStringLiteral("and 2 more"));
+        QCOMPARE(
+            named(QStringLiteral("syncPlayMenuFollow")).constFirst()->property("text").toString(),
+            QStringLiteral("Stop Following"));
+        // The popup sits by its button, inside the window
+        QTRY_VERIFY2(popupProblem(menu, button, ui.window).isEmpty(),
+                     qPrintable(popupProblem(menu, button, ui.window)));
+
+        // Stop Following sends what the dialog's button sends, and the button dims
+        QVERIFY(QMetaObject::invokeMethod(named(QStringLiteral("syncPlayMenuFollow")).constFirst(),
+                                          "click"));
+        QTRY_COMPARE(syncPlayRequests(ui, QStringLiteral("SetIgnoreWait")), 1);
+        QTRY_VERIFY(button->property("opacity").toDouble() < 1.0);
+        QVERIFY(button->property("summary").toString().endsWith(QStringLiteral("Not following")));
+        QTRY_VERIFY(!menu->property("visible").toBool());
+        QVERIFY(QMetaObject::invokeMethod(button, "click"));
+        QTRY_VERIFY(menu->property("opened").toBool());
+        QCOMPARE(
+            named(QStringLiteral("syncPlayMenuFollow")).constFirst()->property("text").toString(),
+            QStringLiteral("Follow Again"));
+        QVERIFY(QMetaObject::invokeMethod(named(QStringLiteral("syncPlayMenuFollow")).constFirst(),
+                                          "click"));
+        QTRY_COMPARE(syncPlayRequests(ui, QStringLiteral("SetIgnoreWait")), 2);
+        QTRY_COMPARE(button->property("opacity").toDouble(), 1.0);
+
+        // The group waits for someone: a badge on the icon and the words in the tooltip
+        ui.server.lastConnection()->sendText(
+            syncPlayUpdate(QStringLiteral("StateUpdate"),
+                           QJsonObject{{QStringLiteral("State"), QStringLiteral("Waiting")},
+                                       {QStringLiteral("Reason"), QStringLiteral("Buffer")}}));
+        QTRY_VERIFY(ui.item(QStringLiteral("syncPlayWaitingBadge"))->isVisible());
+        QVERIFY(
+            button->property("summary").toString().endsWith(QStringLiteral("Waiting for others")));
+
+        // A window too narrow for the button has the menu in the main menu, under SyncPlay
+        QVERIFY(ui.opensWindowOfWidth(ui.window->minimumWidth()));
+        QTRY_VERIFY(!button->isVisible());
+        QObject *main = ui.openMainMenuByClick();
+        QVERIFY(main);
+        QTRY_VERIFY(ui.shownMenuNames(QStringLiteral("mainMenu"))
+                        .contains(QStringLiteral("menuSyncPlayItem")));
+        QObject *submenu =
+            ui.shellHeader()->findChild<QObject *>(QStringLiteral("syncPlayGroupSubmenu"));
+        QVERIFY(submenu);
+        QCOMPARE(submenu->property("title").toString(), QStringLiteral("SyncPlay Group"));
+        // It is an entry of the main menu, after SyncPlay
+        const QList<QQuickItem *> entries = ui.menuItems(QStringLiteral("mainMenu"));
+        const auto entry =
+            std::find_if(entries.cbegin(), entries.cend(), [submenu](const QQuickItem *item) {
+                return item->property("subMenu").value<QObject *>() == submenu;
+            });
+        QVERIFY(entry != entries.cend());
+        const auto syncPlayEntry =
+            std::find_if(entries.cbegin(), entries.cend(), [](const QQuickItem *item) {
+                return item->objectName() == QLatin1String("menuSyncPlayItem");
+            });
+        QVERIFY(syncPlayEntry != entries.cend() && syncPlayEntry + 1 == entry);
+        // The SyncPlay entry right above opens the dialog: the submenu does not repeat it
+        const QObject *openEntry =
+            submenu->findChild<QObject *>(QStringLiteral("syncPlayMenuOpen"));
+        QVERIFY(!openEntry || !openEntry->property("visible").toBool());
+        QVERIFY(Ui::closeMenu(main));
+
+        // Leave Group leaves, and the button goes
+        QVERIFY(ui.opensWindowOfWidth(1200));
+        QTRY_VERIFY(button->isVisible());
+        QVERIFY(QMetaObject::invokeMethod(button, "click"));
+        QTRY_VERIFY(menu->property("opened").toBool());
+        QVERIFY(QMetaObject::invokeMethod(named(QStringLiteral("syncPlayMenuLeave")).constFirst(),
+                                          "click"));
+        QTRY_COMPARE(syncPlayRequests(ui, QStringLiteral("Leave")), 1);
+        ui.server.lastConnection()->sendText(
+            QString::fromUtf8(fixture(QStringLiteral("ws_syncplay_group_left"))));
+        QTRY_VERIFY(!button->isVisible());
+        QTRY_VERIFY(ui.shellHeader()->property("rightFixedWidth").toDouble() < widthWithGroup);
     }
 
     void theSyncPlayDialogShowsAndEditsTheGroupQueue()
@@ -22372,6 +22519,121 @@ class TestUiPages : public QObject {
         stub.casting = true;
         Q_EMIT stub.changed();
         QTRY_VERIFY(!menu->property("enabled").toBool());
+    }
+
+    // A file dropped on the player goes to the player, one at a time and whatever it is (the player says what is wrong with it); the Subtitles menu has the same way in; the shell answers the player with a notification, and an administrator is offered the upload
+    void playerTakesADroppedSubtitleFileAndTheShellAnswers()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *page = openPlayer(ui, stub);
+        QVERIFY(page);
+        page->findChild<QObject *>(QStringLiteral("playerChromeTimer"))
+            ->setProperty("interval", 600000);
+        const auto drop = [&](const QList<QUrl> &urls) {
+            QMimeData mime;
+            mime.setUrls(urls);
+            const QPoint at(ui.window->width() / 2, ui.window->height() / 3);
+            QDragEnterEvent enter(at, Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier);
+            QCoreApplication::sendEvent(ui.window, &enter);
+            QDropEvent dropped(at, Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier);
+            QCoreApplication::sendEvent(ui.window, &dropped);
+            return enter.isAccepted();
+        };
+        const QUrl srt = QUrl::fromLocalFile(QStringLiteral("/tmp/film.srt"));
+        stub.calls.clear();
+        QVERIFY(drop({srt}));
+        QCOMPARE(stub.calls, QStringList{QStringLiteral("addSubtitleFile ") + srt.toString()});
+        // Any file goes to the player, which says why it is wrong
+        stub.calls.clear();
+        const QUrl other = QUrl::fromLocalFile(QStringLiteral("/tmp/film.mkv"));
+        QVERIFY(drop({other}));
+        QCOMPARE(stub.calls, QStringList{QStringLiteral("addSubtitleFile ") + other.toString()});
+        // Two files at once are refused by the page, which names the rule
+        stub.calls.clear();
+        drop({srt, other});
+        QVERIFY(stub.calls.isEmpty());
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Drop one subtitle file at a time")));
+        // A drag that holds no file is not taken
+        QMimeData text;
+        text.setText(QStringLiteral("not a file"));
+        QDragEnterEvent plain(QPoint(100, 100), Qt::CopyAction, &text, Qt::LeftButton,
+                              Qt::NoModifier);
+        QCoreApplication::sendEvent(ui.window, &plain);
+        QVERIFY(!plain.isAccepted());
+        // Nothing is taken while a renderer plays
+        stub.casting = true;
+        Q_EMIT stub.changed();
+        stub.calls.clear();
+        drop({srt});
+        QVERIFY(stub.calls.isEmpty());
+        stub.casting = false;
+        Q_EMIT stub.changed();
+
+        // The player's answers: a refusal says why, an added file says so, and an administrator is offered the upload
+        Q_EMIT stub.subtitleFileRefused(
+            QStringLiteral("The file is not an srt, ass, ssa, or vtt subtitle"));
+        QTRY_VERIFY(
+            ui.showsText(QStringLiteral("The file is not an srt, ass, ssa, or vtt subtitle")));
+        Q_EMIT stub.subtitleFileAdded(QStringLiteral("film"), srt);
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Subtitle added")));
+        QVERIFY(!ui.showsText(QStringLiteral("Upload to Server…")));
+        stub.uploadable = true;
+        stub.title = QStringLiteral("<i>Some</i> Film");
+        Q_EMIT stub.subtitleFileAdded(QStringLiteral("<b>film</b>"), srt);
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Upload to Server…")));
+        QVERIFY(ui.clickButton(QStringLiteral("Upload to Server…")));
+        QObject *upload = ui.popup(QStringLiteral("uploadSubtitleDialog"));
+        QTRY_VERIFY(upload && upload->property("opened").toBool());
+        QCOMPARE(upload->property("fileTitle").toString(), QStringLiteral("<b>film</b>"));
+        QCOMPARE(upload->property("itemId").toString(), stub.itemId);
+        QCOMPARE(upload->property("itemName").toString(), QStringLiteral("<i>Some</i> Film"));
+        // No answer is announced for an upload this dialog did not start
+        QVERIFY(!upload->property("uploading").toBool());
+        // The language is two or three letters or none; Upload waits for it
+        QObject *language = ui.popup(QStringLiteral("uploadSubtitleLanguage"));
+        QVERIFY(language);
+        QVERIFY(language->setProperty("text", QStringLiteral("x1")));
+        QTRY_VERIFY(!upload->property("languageValid").toBool());
+        QObject *invalid = ui.popup(QStringLiteral("uploadSubtitleLanguageInvalid"));
+        QVERIFY(invalid);
+        QTRY_VERIFY(invalid->property("visible").toBool());
+        QVERIFY(language->setProperty("text", QStringLiteral("nld")));
+        QTRY_VERIFY(upload->property("languageValid").toBool());
+        QTRY_VERIFY(!invalid->property("visible").toBool());
+        QVERIFY(QMetaObject::invokeMethod(upload, "close"));
+    }
+
+    // The Subtitles menu has Add Subtitle File…, off while casting
+    void theSubtitlesMenuOffersAddSubtitleFile()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *page = openPlayer(ui, stub);
+        QVERIFY(page);
+        page->findChild<QObject *>(QStringLiteral("playerChromeTimer"))
+            ->setProperty("interval", 600000);
+        QObject *menu = ui.popup(QStringLiteral("playerSubtitlesMenu"));
+        QVERIFY(menu);
+        QVERIFY(QMetaObject::invokeMethod(menu, "open"));
+        QTRY_VERIFY(menu->property("opened").toBool());
+        QQuickItem *entry = nullptr;
+        for (QQuickItem *item : ui.menuItems(QStringLiteral("playerSubtitlesMenu"))) {
+            if (item->objectName() == QLatin1String("playerAddFile"))
+                entry = item;
+        }
+        QVERIFY(entry);
+        QCOMPARE(entry->property("text").toString(), QStringLiteral("Add Subtitle File…"));
+        QVERIFY(entry->isEnabled());
+        stub.casting = true;
+        Q_EMIT stub.changed();
+        QTRY_VERIFY(!entry->isEnabled());
     }
 
     // L loops the marked part, the period and the comma step a frame, Shift+I shows Playback Info and I alone still marks the start

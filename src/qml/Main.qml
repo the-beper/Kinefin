@@ -821,8 +821,9 @@ Kirigami.ApplicationWindow {
         function onSubtitleFileAdded(title, copy) {
             // An administrator can keep it on the server too: the offer is the notification's action, for this item and this file
             const itemId = window.player.itemId;
+            const itemName = window.player.title;
             if (window.player.canUploadAddedSubtitles())
-                window.showPassiveNotification(i18n("Subtitle added"), "long", i18n("Upload…"), () => uploadSubtitleDialog.openFor(itemId, copy, title));
+                window.showPassiveNotification(i18n("Subtitle added"), "long", i18nc("@action:button", "Upload to Server…"), () => uploadSubtitleDialog.openFor(itemId, itemName, copy, title));
             else
                 window.showPassiveNotification(i18n("Subtitle added"));
         }
@@ -1594,6 +1595,13 @@ Kirigami.ApplicationWindow {
 
     CollectionDialogs {
         id: collectionDialogs
+        connection: window.connection
+        shell: window
+    }
+
+    // Keeps a subtitle file added to the playing item on the server (the notification's Upload…)
+    UploadSubtitleDialog {
+        id: uploadSubtitleDialog
         connection: window.connection
         shell: window
     }

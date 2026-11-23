@@ -557,15 +557,21 @@ PlayerController::PlayerController(JellyfinClient &client, PlayQueue &queue,
                                }))
                 downloadSubtitle(*subtitle);
         }
-        // The subtitle files the viewer added by hand come back with the reopened item, in the Subtitles menu (not selected: the remembered choice decides)
-        for (const LocalSubtitle &file : std::as_const(m_addedSubtitles))
-            m_engine.mpvCommand(
-                {QStringLiteral("sub-add"), file.path, QStringLiteral("auto"), file.title});
         // A download's subtitle files join the tracks before the remembered choice is restored; `auto` leaves the choice to it
         if (m_localPlayback) {
             for (const LocalSubtitle &file : std::as_const(m_localSubtitles))
                 m_engine.mpvCommand({QStringLiteral("sub-add"), file.path, QStringLiteral("auto"),
                                      file.title, file.language});
+        }
+        // The subtitle files the viewer added by hand come back with the reopened item, in the order mpv lists them; the one that was selected is selected again once the choice is restored
+        for (auto added = m_addedSubtitles.begin(); added != m_addedSubtitles.end();) {
+            if (m_engine.mpvCommand({QStringLiteral("sub-add"), added->path, QStringLiteral("auto"),
+                                     added->title})) {
+                m_loadedSubtitleOrder.append(added->path);
+                ++added;
+            } else {
+                added = m_addedSubtitles.erase(added);
+            }
         }
         refreshTracks();
         // Opened paused (a group's item, or a reopen after a subtitle download), the Start went out as playing: a paused Progress follows once the position is known
@@ -1220,6 +1226,7 @@ void PlayerController::reportLocalPosition(bool ended)
 namespace {
 // The limit and the extensions are the downloads' own (DownloadsController::MaxSubtitleTracks, subtitleExtension)
 constexpr int MaxLocalSubtitles = 8;
+constexpr int MaxAddedSubtitles = 8;
 
 // The chapters a download stored, with the caps of the server's own: the same parser reads them
 QList<ChapterSummary> localChapters(const QVariantList &entries)
@@ -1583,11 +1590,14 @@ JellyfinClient::StreamChoice PlayerController::currentStreams() const
     if (directPlay()) {
         if (m_selectedAudioIndex)
             streams.audioStreamIndex = m_selectedAudioIndex;
+        // A subtitle file added by hand plays here: the server must not burn one of its own in under it
         streams.subtitleStreamIndex =
-            m_selectedSubtitleId == 0 ? std::optional<int>(-1) : m_selectedSubtitleIndex;
+            m_selectedSubtitleId == 0 || !m_selectedAddedSubtitle.isEmpty()
+                ? std::optional<int>(-1)
+                : m_selectedSubtitleIndex;
     } else if (m_selectedSubtitleIndex) {
         streams.subtitleStreamIndex = m_selectedSubtitleIndex;
-    } else if (m_subtitlesOff) {
+    } else if (m_subtitlesOff || !m_selectedAddedSubtitle.isEmpty()) {
         // No track selected in a transcode may also be a burned-in subtitle: only the user's own choice means none
         streams.subtitleStreamIndex = -1;
     }
@@ -2955,6 +2965,8 @@ void PlayerController::refreshTracks()
     // Subtitles turned off leave no selected track: the remembered choice is then none, not the last one
     m_selectedSubtitleId = 0;
     m_secondarySubtitleId = 0;
+    m_addedSubtitleTracks.clear();
+    QString selectedFile;
     for (const QVariant &entry : tracks) {
         const QVariantMap map = entry.toMap();
         const QString type = map.value(QStringLiteral("type")).toString();
@@ -2989,6 +3001,17 @@ void PlayerController::refreshTracks()
             else
                 m_selectedSubtitleId = id;
         }
+        if (type == QLatin1String("sub") && map.value(QStringLiteral("external")).toBool()) {
+            const QString file = map.value(QStringLiteral("external-filename")).toString();
+            const bool added =
+                std::any_of(m_addedSubtitles.cbegin(), m_addedSubtitles.cend(),
+                            [&file](const LocalSubtitle &entry) { return entry.path == file; });
+            if (added) {
+                m_addedSubtitleTracks.insert(id, file);
+                if (selected && !secondary)
+                    selectedFile = file;
+            }
+        }
         const QVariantMap result{{QStringLiteral("id"), id},
                                  {QStringLiteral("name"), label},
                                  {QStringLiteral("selected"), selected && !secondary},
@@ -3020,6 +3043,9 @@ void PlayerController::refreshTracks()
         m_subtitleTracks = subs;
         Q_EMIT tracksChanged();
     }
+    // Only a list that holds the added files tells which one is selected: while a reopened file is still loading, the one that was selected stays the one to select again
+    if (m_trackRestored && !m_addedSubtitleTracks.isEmpty())
+        m_selectedAddedSubtitle = selectedFile;
     if (!m_trackRestored && !tracks.isEmpty()) {
         m_trackRestored = true;
         restoreTracks();
@@ -3074,8 +3100,11 @@ void PlayerController::selectSubtitleTrack(int id)
     m_trackChosen = true;
     m_selectedSubtitleIndex =
         id == 0 ? std::nullopt : streamIndexOfTrack(QStringLiteral("sub"), id);
-    rememberTracks(m_selectedAudioId, id, m_secondarySubtitleId);
-    if (keepsSeriesTracks()) {
+    // A subtitle file added by hand is for this item only, and its mpv id means nothing to the next session or the next episode
+    m_selectedAddedSubtitle = m_addedSubtitleTracks.value(id);
+    if (!m_addedSubtitleTracks.contains(id))
+        rememberTracks(m_selectedAudioId, id, m_secondarySubtitleId);
+    if (keepsSeriesTracks() && !m_addedSubtitleTracks.contains(id)) {
         const auto choice = choiceOf(m_subtitleFacts, id);
         if (id == 0 || choice)
             seriesStore().setSubtitle(m_itemSeriesId, id == 0, choice);
@@ -3116,6 +3145,8 @@ void PlayerController::selectSecondarySubtitleTrack(int id)
     if (!setSecondarySubtitle(id))
         return;
     m_trackChosen = true;
+    if (m_addedSubtitleTracks.contains(id))
+        return;
     rememberTracks(m_selectedAudioId, m_selectedSubtitleId, id);
     if (keepsSeriesTracks()) {
         const auto choice = id == 0 ? std::nullopt : choiceOf(secondarySubtitleFacts(), id);
@@ -3513,7 +3544,11 @@ void PlayerController::resetForNextItem()
 {
     resetEnhancements();
     resetDelays();
+    for (const LocalSubtitle &added : std::as_const(m_addedSubtitles))
+        QFile::remove(added.path);
     m_addedSubtitles.clear();
+    m_selectedAddedSubtitle.clear();
+    m_addedSubtitleTracks.clear();
 }
 
 void PlayerController::resetDelays()
@@ -3658,10 +3693,8 @@ bool PlayerController::saveClip(bool gif, const QUrl &destination)
         for (const LocalSubtitle &file : std::as_const(m_localSubtitles))
             request.subtitleFiles.append(file.path);
     }
-    // The server's external subtitle files mpv added come after the download's own
+    // The subtitle files mpv added come after the download's own: the server's external ones and the ones added by hand, in the order of mpv's tracks
     request.subtitleFiles.append(m_loadedSubtitleOrder);
-    for (const LocalSubtitle &added : std::as_const(m_addedSubtitles))
-        request.subtitleFiles.append(added.path);
     request.subtitleStyle = m_mpvSettings.subtitleProperties();
     request.tlsVerify = m_mpvSettings.tlsVerify();
     request.tlsCaFile = m_mpvSettings.tlsCaFile();
@@ -3952,6 +3985,15 @@ void PlayerController::restoreTracks()
         else if (tracks.secondary > 0)
             setSecondarySubtitle(tracks.secondary);
     }
+    // The subtitle file added by hand that was selected before the reopen is not the item's remembered choice: it goes first
+    for (auto added = m_addedSubtitleTracks.cbegin(); added != m_addedSubtitleTracks.cend();
+         ++added) {
+        if (!m_selectedAddedSubtitle.isEmpty() && added.value() == m_selectedAddedSubtitle) {
+            m_engine.setMpvProperty(QStringLiteral("sid"), added.key());
+            m_trackChosen = true;
+            break;
+        }
+    }
 }
 
 void PlayerController::restoreSecondarySubtitle()
@@ -4091,29 +4133,59 @@ bool PlayerController::addSubtitleFile(const QUrl &file)
         return refuse(i18n("Nothing is playing to add a subtitle to"));
     if (m_casting)
         return refuse(i18n("A subtitle cannot be added while casting"));
+    // mpv has no file to add it to before the video has started
+    if (!m_fileLoaded || m_stopping)
+        return refuse(i18n("Wait until the video has started to add a subtitle"));
     if (!file.isLocalFile())
         return refuse(i18n("Only a subtitle file on this computer can be added"));
     const QFileInfo info(file.toLocalFile());
+    // The Flatpak sees only what the portal hands it: a dropped file of the host may not exist here
+    if (!info.exists())
+        return refuse(i18n("The file cannot be opened from here. Choose it with Add Subtitle File "
+                           "in the Subtitles menu"));
     const QString suffix = info.suffix().toLower();
-    if (!info.isFile() || suffix.isEmpty()
+    if (!info.isFile()
         || !QStringList{QStringLiteral("srt"), QStringLiteral("ass"), QStringLiteral("ssa"),
                         QStringLiteral("vtt")}
                 .contains(suffix))
         return refuse(i18n("The file is not an srt, ass, ssa, or vtt subtitle"));
-    if (!info.isReadable() || info.size() <= 0 || info.size() > MaxSubtitleBytes)
+    if (m_addedSubtitles.size() >= MaxAddedSubtitles)
+        return refuse(i18n("No more subtitle files can be added to this item"));
+    // The read is bounded whatever the file has become since the check
+    QFile source(info.absoluteFilePath());
+    const QByteArray bytes = source.open(QIODevice::ReadOnly) && info.isReadable()
+                                 ? source.read(MaxSubtitleBytes + 1)
+                                 : QByteArray();
+    if (bytes.isEmpty() || bytes.size() > MaxSubtitleBytes)
         return refuse(i18n("The subtitle must be a readable file of at most 2 MiB"));
     if (!m_subtitleDir.isValid())
-        return refuse(i18n("The subtitle could not be added"));
+        return refuse(
+            i18n("The subtitle could not be added. Check the free disk space and try again"));
     // A copy of its own: the original may go away or change while the item plays, and a reopen adds it again from here
     const QString copy = m_subtitleDir.path() + QStringLiteral("/added-")
                          + QString::number(++m_subtitleFileSeq) + QLatin1Char('.') + suffix;
-    if (!QFile::copy(info.absoluteFilePath(), copy))
-        return refuse(i18n("The subtitle could not be added"));
+    QSaveFile out(copy);
+    if (!out.open(QIODevice::WriteOnly) || out.write(bytes) != bytes.size() || !out.commit())
+        return refuse(
+            i18n("The subtitle could not be added. Check the free disk space and try again"));
     const QString title = info.completeBaseName();
+    if (!m_engine.mpvCommand({QStringLiteral("sub-add"), copy, QStringLiteral("select"), title})) {
+        QFile::remove(copy);
+        return refuse(i18n("The file could not be read as a subtitle"));
+    }
+    // A choice made now wins over a download that is still on its way, and over the item's own remembered one
+    m_detailsStreams.reset();
+    if (!m_pendingSubtitleSecondary)
+        dropPendingSubtitle();
+    m_trackChosen = true;
     m_addedSubtitles.append({copy, title, QString()});
-    m_engine.mpvCommand({QStringLiteral("sub-add"), copy, QStringLiteral("select"), title});
+    m_loadedSubtitleOrder.append(copy);
+    m_selectedAddedSubtitle = copy;
     m_subtitlesOff = false;
-    QTimer::singleShot(250, this, &PlayerController::refreshTracks);
+    QTimer::singleShot(250, this, [this] {
+        refreshTracks();
+        m_reporter.reportNow();
+    });
     Q_EMIT subtitleFileAdded(title, QUrl::fromLocalFile(copy));
     return true;
 }
