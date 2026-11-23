@@ -4,15 +4,27 @@ A native KDE Plasma 6 client for Jellyfin servers: Kirigami interface, its own R
 
 ## Screenshots
 
-![Home with the libraries, Continue Watching, Next Up and Recently Added](docs/images/home.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/dark/home.png">
+  <img alt="Home with the libraries, Continue Watching, Next Up and Recently Added" src="docs/images/home.png">
+</picture>
 
-![The Movies tab, a grid of posters](docs/images/library.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/dark/library.png">
+  <img alt="The Movies tab, a grid of posters" src="docs/images/library.png">
+</picture>
 
-![The page of a series with its Next Up episode and seasons](docs/images/series.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/dark/series.png">
+  <img alt="The page of a series with its Next Up episode and seasons" src="docs/images/series.png">
+</picture>
 
-![The player with its controls](docs/images/player.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/dark/player.png">
+  <img alt="The player with its controls" src="docs/images/player.png">
+</picture>
 
-The pictures show a library of the open films of the Blender Foundation and Blender Studio, with their posters and frames, rendered by `build/screenshots.sh` in the Breeze style of Plasma. The artwork is licensed CC BY; the film in the player is *Tears of Steel* (CC BY 3.0, Blender Foundation | mango.blender.org).
+The pictures show a library of the open films of the Blender Foundation and Blender Studio, with their posters and frames, rendered by `build/screenshots.sh` in the Breeze style of Plasma, in the light and the dark color scheme (the page shows the one your browser asks for). The artwork is licensed CC BY; the film in the player is *Tears of Steel* (CC BY 3.0, Blender Foundation | mango.blender.org).
 
 <details>
 <summary>Credits of the artwork</summary>

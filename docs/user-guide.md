@@ -160,7 +160,10 @@ A middle click on a page that scrolls starts autoscroll: a marker shows where yo
 
 ### Home
 
-![Home with the libraries, Continue Watching, Next Up and Recently Added](images/home.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/dark/home.png">
+  <img alt="Home with the libraries, Continue Watching, Next Up and Recently Added" src="images/home.png">
+</picture>
 
 Home shows these rows:
 
@@ -194,7 +197,10 @@ The entries shown depend on the item's type. Marking as watched from a card show
 
 ### Movies and Shows
 
-![The Movies tab: a grid of posters with the toolbar above it](images/library.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/dark/library.png">
+  <img alt="The Movies tab: a grid of posters with the toolbar above it" src="images/library.png">
+</picture>
 
 **Movies** and **Shows** list every library of that type. When you have two or more such libraries, a selector lets you pick one or **All Libraries**. Kinefin remembers the selection, the view options, the filters and the sort for each library.
 
@@ -206,7 +212,10 @@ To filter:
 2. Select a section and check the options you want. The number next to a section says how many of its options are checked. Options of one section are combined with OR, different sections with AND.
 3. Press **Apply**. **Clear** unchecks every option in all sections, and **Cancel** drops the choices not applied yet.
 
-![The Filters dialog on the Movies tab, with its sections on the left](images/filters.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/dark/filters.png">
+  <img alt="The Filters dialog on the Movies tab, with its sections on the left" src="images/filters.png">
+</picture>
 
 | Section | Options | Applies to |
 | --- | --- | --- |
@@ -272,7 +281,10 @@ When the server knows a series from a metadata provider such as TMDb, it can lis
 
 ### Item details
 
-![The details page of a movie: backdrop, facts line, Play, the track selectors and the overview](images/details.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/dark/details.png">
+  <img alt="The details page of a movie: backdrop, facts line, Play, the track selectors and the overview" src="images/details.png">
+</picture>
 
 Selecting a card opens the details page: a hero with the backdrop, logo, a facts line (year, rating, runtime, end time) and **Play** or **Resume**. Under it come media badges (resolution, HDR, codecs, subtitle count), the overview, the credits, the cast and the related rows. The toolbar keeps **Cast…**, **Download**, the favorite toggle, **Mark as Watched** or **Mark as Unwatched**, and **Show Media Info**. The overflow menu (the **⋮** button) holds:
 
@@ -295,9 +307,15 @@ On a movie or show page, **Add to Collection…** puts the item into an existing
 
 A series page lists seasons and one Next Up entry, a season page lists its episodes, and an episode page links to its series and season. A series or a season has **Play**, which plays its first episode (a series starts from its first regular season, not from the Specials). **Mark as Watched** or **Mark as Unwatched** in the toolbar marks every episode of a series or a season; the seasons, the episode to continue with and the episode list are read again afterwards. Once you have watched part of it, **Continue** goes on with the series' Next Up episode, or the season's first unwatched one (it reads **Resume** and picks up where you stopped when that episode is in progress), and **Play from Beginning** starts over from the first episode. The buttons appear when the server has answered for both. Each plays one episode, like opening that episode and pressing Play. A collection page lists its first 100 items. **Add to Playlist…** is on movie, episode and video pages.
 
-![The page of a series: play buttons, the Next Up episode and the seasons](images/series.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/dark/series.png">
+  <img alt="The page of a series: play buttons, the Next Up episode and the seasons" src="images/series.png">
+</picture>
 
-![The page of a season: its episodes with a still, the runtime and the first lines of the overview](images/season.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/dark/season.png">
+  <img alt="The page of a season: its episodes with a still, the runtime and the first lines of the overview" src="images/season.png">
+</picture>
 
 ### Search
 
@@ -351,7 +369,10 @@ The video fills the window. Bars with the controls appear when you move the poin
 
 ### Control playback
 
-![The player with its controls showing: the title, the elapsed and total time around the seek bar, and the Audio and Subtitles menus](images/player.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/dark/player.png">
+  <img alt="The player with its controls showing: the title, the elapsed and total time around the seek bar, and the Audio and Subtitles menus" src="images/player.png">
+</picture>
 
 The top bar has **Back** (leaves the player, playback continues in the mini player), the title and episode line, and **Cast** and **Picture-in-Picture** buttons. In a SyncPlay group a group button also shows there.
 
@@ -402,7 +423,10 @@ The Audio menu ends with **Night Mode**, which raises quiet dialogue and lowers 
 
 ### Audio and subtitle tracks
 
-![The Subtitles menu of the player, listing the tracks and Add Subtitle File](images/player-subtitles.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/dark/player-subtitles.png">
+  <img alt="The Subtitles menu of the player, listing the tracks and Add Subtitle File" src="images/player-subtitles.png">
+</picture>
 
 The **Audio** and **Subtitles** menus list the tracks of the file. **Subtitles** also lists the external subtitle files the server has for the item, and **Off**.
 
