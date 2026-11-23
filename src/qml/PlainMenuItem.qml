@@ -16,6 +16,11 @@ Controls.MenuItem {
         Item {
             Layout.preferredWidth: plainItem.indicator ? plainItem.indicator.width : Kirigami.Units.smallSpacing
         }
+        // The column the style keeps for the icon of its own entries once an entry of the menu has one: without it the names would sit to the left of the style's labels
+        Item {
+            visible: Boolean(plainItem.ListView.view && plainItem.ListView.view.hasIcons)
+            Layout.preferredWidth: Kirigami.Settings.hasTransientTouchInput ? Kirigami.Units.iconSizes.smallMedium : Kirigami.Units.iconSizes.small
+        }
         Controls.Label {
             Layout.fillWidth: true
             Layout.maximumWidth: Kirigami.Units.gridUnit * 24

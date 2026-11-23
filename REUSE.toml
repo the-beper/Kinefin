@@ -29,3 +29,59 @@ path = "third_party/wayland/xx-pip-v1.xml"
 precedence = "override"
 SPDX-FileCopyrightText = "2025 Vlad Zahorodnii"
 SPDX-License-Identifier = "MIT"
+
+# Posters and frames of the open films of the Blender Foundation and Blender Studio, for the documentation screenshots (credits in README.md)
+[[annotations]]
+path = ["tests/assets/doc/poster-big-buck-bunny.jpg"]
+precedence = "override"
+SPDX-FileCopyrightText = "Blender Foundation | peach.blender.org"
+SPDX-License-Identifier = "CC-BY-3.0"
+
+[[annotations]]
+path = ["tests/assets/doc/poster-sintel.jpg"]
+precedence = "override"
+SPDX-FileCopyrightText = "Blender Foundation | durian.blender.org"
+SPDX-License-Identifier = "CC-BY-3.0"
+
+[[annotations]]
+path = ["tests/assets/doc/poster-tears-of-steel.jpg", "tests/assets/doc/frame-tears-of-steel-*.jpg"]
+precedence = "override"
+SPDX-FileCopyrightText = "Blender Foundation | mango.blender.org"
+SPDX-License-Identifier = "CC-BY-3.0"
+
+[[annotations]]
+path = ["tests/assets/doc/poster-elephants-dream.jpg"]
+precedence = "override"
+SPDX-FileCopyrightText = "Bassam Kurdali, Andy Goralczyk and the Blender Foundation"
+SPDX-License-Identifier = "CC-BY-4.0"
+
+[[annotations]]
+path = ["tests/assets/doc/poster-cosmos-laundromat.jpg"]
+precedence = "override"
+SPDX-FileCopyrightText = "Andy Goralczyk and the Blender Foundation"
+SPDX-License-Identifier = "CC-BY-4.0"
+
+[[annotations]]
+path = ["tests/assets/doc/poster-spring.jpg"]
+precedence = "override"
+SPDX-FileCopyrightText = "Blender Foundation"
+SPDX-License-Identifier = "CC-BY-4.0"
+
+[[annotations]]
+path = ["tests/assets/doc/poster-coffee-run.jpg"]
+precedence = "override"
+SPDX-FileCopyrightText = "Hjalti Hjalmarsson (Blender Cloud)"
+SPDX-License-Identifier = "CC-BY-4.0"
+
+[[annotations]]
+path = ["tests/assets/doc/poster-sprite-fright.jpg", "tests/assets/doc/poster-charge.jpg"]
+precedence = "override"
+SPDX-FileCopyrightText = "Blender Studio"
+SPDX-License-Identifier = "CC-BY-4.0"
+
+# The screenshots show those posters and frames inside Kinefin's own interface
+[[annotations]]
+path = "docs/images/**"
+precedence = "override"
+SPDX-FileCopyrightText = ["2026 Kinefin contributors", "Blender Foundation", "Blender Studio"]
+SPDX-License-Identifier = "GPL-3.0-or-later AND CC-BY-3.0 AND CC-BY-4.0"

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Kinefin contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
 // The real Main.qml of the application, loaded from the QML module offscreen against the fake server: signed in, the Home page with its library tiles and rows, the library grid, its empty and failed states, plain-text rendering of server metadata and the return to sign-in. Any QML warning fails a test except Kirigami's own noise (the same list as tests/shell_smoke.py: keep them in step)
+#include "DocScene.h"
 #include "FakeJellyfin.h"
 #include "MemoryTokenStore.h"
 
@@ -2531,7 +2532,13 @@ class PlayerStub : public QObject {
     }
     Q_INVOKABLE void previewAt(qint64 ticks) { record(QStringLiteral("previewAt"), ticks); }
     Q_INVOKABLE void clearPreview() {}
-    Q_INVOKABLE QString timeText(qint64 ticks) const { return QString::number(ticks / 10000000); }
+    // The seconds as a number, which the tests compare; the documentation screenshots ask for the controller's own spelling
+    Q_INVOKABLE QString timeText(qint64 ticks) const
+    {
+        return spelledTimes ? Kinefin::playbackTimeText(ticks, durationTicks >= 3600 * 10'000'000LL)
+                            : QString::number(ticks / 10000000);
+    }
+    bool spelledTimes = false;
 
     bool active = false;
     bool loading = false;
@@ -14247,6 +14254,297 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(ui.window->cursor().shape() != Qt::IBeamCursor);
     }
 
+    // KINEFIN_DOC_SHOTS=<directory inside the checkout>: renders the pages the documentation shows against a library of the open films of Blender (DocScene.h, artwork in tests/assets/doc) and saves one PNG per page; unset, it skips. build/screenshots.sh runs it on a virtual X server with Mesa's software GL, since the offscreen platform draws neither the Kirigami shaders (icons of the OSD, portraits) nor ShadowedRectangle
+    void documentationScreenshotsWhenRequested()
+    {
+        const QString shots = qEnvironmentVariable("KINEFIN_DOC_SHOTS");
+        if (shots.isEmpty())
+            QSKIP("KINEFIN_DOC_SHOTS is not set");
+        QDir directory(shots);
+        QVERIFY(QDir().mkpath(directory.absolutePath()));
+        using namespace DocScene;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        ui.serveShow();
+        FakeJellyfin &server = ui.server;
+        const auto envelopeOf = [](const QJsonArray &items) { return envelope(items); };
+        // Tears of Steel is the film whose page opens, and the show's first season is the fixture season: they take the ids of the fixtures behind those routes
+        const int tearsOfSteel = 3;
+        const auto movieId = [&](int n) { return n == tearsOfSteel ? kMovieId : id(1, n); };
+        const QList<int> order{tearsOfSteel, 1, 2, 0, 4, 5, 6, 7, 8};
+        QJsonArray movieCards;
+        for (const int n : order) {
+            QJsonObject entry = movieCard(n);
+            entry.insert(QStringLiteral("Id"), movieId(n));
+            movieCards.append(entry);
+            server.imageBodies.insert(movieId(n) + QStringLiteral("/Primary"),
+                                      poster(films().at(n)));
+            server.imageBodies.insert(movieId(n) + QStringLiteral("/Thumb"),
+                                      landscape(films().at(n)));
+        }
+        server.imageBodies.insert(kMovieId + QStringLiteral("/Backdrop"),
+                                  fileBytes(QStringLiteral("frame-tears-of-steel-backdrop.jpg")));
+        // The libraries on Home and the grid of the movies
+        const auto library = [](const QString &libraryId, const QString &name, const QString &type,
+                                int count) {
+            return QJsonObject{{QStringLiteral("Name"), name},
+                               {QStringLiteral("Id"), libraryId},
+                               {QStringLiteral("CollectionType"), type},
+                               {QStringLiteral("ImageTags"),
+                                QJsonObject{{QStringLiteral("Primary"), QStringLiteral("p")}}},
+                               {QStringLiteral("PrimaryImageAspectRatio"), 1.7777},
+                               {QStringLiteral("ChildCount"), count}};
+        };
+        server.viewsRawBody = envelope(
+            QJsonArray{library(kMovies, QStringLiteral("Movies"), QStringLiteral("movies"), 9),
+                       library(kSeries, QStringLiteral("Shows"), QStringLiteral("tvshows"), 1)});
+        server.imageBodies.insert(kMovies,
+                                  fileBytes(QStringLiteral("frame-tears-of-steel-bridge.jpg")));
+        server.imageBodies.insert(kSeries,
+                                  fileBytes(QStringLiteral("frame-tears-of-steel-backdrop.jpg")));
+        server.listingRawBody.insert(QStringLiteral("Items"), envelopeOf(movieCards));
+        server.listingRawBody.insert(QStringLiteral("Similar"),
+                                     envelopeOf(QJsonArray{movieCards.at(1), movieCards.at(2),
+                                                           movieCards.at(3), movieCards.at(4)}));
+        // Continue Watching, Next Up and Recently Added
+        QJsonObject resumeFirst = movieCard(2, 0.4);
+        resumeFirst.insert(QStringLiteral("Id"), movieId(2));
+        QJsonObject resumeSecond = movieCard(0, 0.7);
+        resumeSecond.insert(QStringLiteral("Id"), movieId(0));
+        server.listingRawBody.insert(
+            QStringLiteral("Resume"),
+            envelopeOf(QJsonArray{resumeFirst, episode(5, kSeasonId, 0.25), resumeSecond}));
+        server.listingRawBody.insert(QStringLiteral("NextUp"),
+                                     envelopeOf(QJsonArray{episode(1, kSeasonId)}));
+        server.listingRawBody.insert(
+            QStringLiteral("Latest"),
+            QJsonDocument(QJsonArray{movieCards.at(8), movieCards.at(7), movieCards.at(6),
+                                     movieCards.at(5), movieCards.at(4)})
+                .toJson(QJsonDocument::Compact));
+        // The movie page: the fixture movie under the film's name, its cast from the poster
+        QJsonObject movie = fixtureObject(QStringLiteral("movie_item"));
+        const Film &tears = films().at(tearsOfSteel);
+        movie.insert(QStringLiteral("Name"), QString::fromLatin1(tears.name));
+        movie.insert(QStringLiteral("ProductionYear"), tears.year);
+        movie.insert(QStringLiteral("Overview"), QString::fromLatin1(tears.overview));
+        movie.insert(QStringLiteral("Taglines"), QJsonArray{});
+        movie.insert(QStringLiteral("Genres"), QJsonArray{QString::fromLatin1(tears.genre)});
+        movie.insert(QStringLiteral("GenreItems"), QJsonArray{});
+        movie.insert(
+            QStringLiteral("Studios"),
+            QJsonArray{QJsonObject{{QStringLiteral("Name"), QStringLiteral("Blender Foundation")},
+                                   {QStringLiteral("Id"), id(6, 1)}}});
+        movie.remove(QStringLiteral("CommunityRating"));
+        movie.remove(QStringLiteral("CriticRating"));
+        movie.remove(QStringLiteral("OfficialRating"));
+        movie.insert(QStringLiteral("Chapters"), QJsonArray{});
+        movie.insert(QStringLiteral("RunTimeTicks"), qint64(tears.minutes) * 60 * 10'000'000);
+        movie.insert(QStringLiteral("UserData"),
+                     QJsonObject{{QStringLiteral("Played"), false},
+                                 {QStringLiteral("PlaybackPositionTicks"), 0}});
+        QJsonObject movieTags = movie.value(QStringLiteral("ImageTags")).toObject();
+        movieTags.remove(QStringLiteral("Logo"));
+        movieTags.insert(QStringLiteral("Primary"), QStringLiteral("p"));
+        movie.insert(QStringLiteral("ImageTags"), movieTags);
+        // The cast and the director are those of the poster; their portraits are not part of the film's material, so each is drawn as initials
+        QJsonArray people;
+        const QList<std::pair<QString, QString>> crew{
+            {QStringLiteral("Derek de Lint"), QStringLiteral("Actor")},
+            {QStringLiteral("Sergio Hasselbaink"), QStringLiteral("Actor")},
+            {QStringLiteral("Vanja Rukavina"), QStringLiteral("Actor")},
+            {QStringLiteral("Denise Rebergen"), QStringLiteral("Actor")},
+            {QStringLiteral("Ian Hubert"), QStringLiteral("Director")}};
+        for (int n = 0; n < crew.size(); ++n) {
+            const QString personId = id(5, n);
+            people.append(QJsonObject{{QStringLiteral("Name"), crew.at(n).first},
+                                      {QStringLiteral("Id"), personId},
+                                      {QStringLiteral("Type"), crew.at(n).second},
+                                      {QStringLiteral("PrimaryImageTag"), QStringLiteral("p")}});
+            server.imageBodies.insert(personId, avatar(crew.at(n).first, 190 + n * 55));
+        }
+        movie.insert(QStringLiteral("People"), people);
+        server.itemsById.insert(kMovieId, QJsonDocument(movie).toJson(QJsonDocument::Compact));
+        // The show: the open films as the episodes of its one season
+        QJsonObject series = fixtureObject(QStringLiteral("series_item"));
+        series.insert(QStringLiteral("Name"), QStringLiteral("Blender Open Movies"));
+        series.insert(QStringLiteral("ProductionYear"), films().first().year);
+        series.insert(QStringLiteral("Overview"),
+                      QStringLiteral("The short films of the open movie projects of the Blender "
+                                     "Foundation and Blender Studio, one episode each."));
+        series.insert(QStringLiteral("Genres"), QJsonArray{QStringLiteral("Animation")});
+        series.insert(QStringLiteral("Studios"), QJsonArray{});
+        series.insert(QStringLiteral("People"), QJsonArray{});
+        series.remove(QStringLiteral("CommunityRating"));
+        series.remove(QStringLiteral("OfficialRating"));
+        QJsonObject seriesTags = series.value(QStringLiteral("ImageTags")).toObject();
+        seriesTags.insert(QStringLiteral("Primary"), QStringLiteral("p"));
+        series.insert(QStringLiteral("ImageTags"), seriesTags);
+        series.insert(QStringLiteral("BackdropImageTags"), QJsonArray{QStringLiteral("b")});
+        server.itemsById.insert(kSeriesId, QJsonDocument(series).toJson(QJsonDocument::Compact));
+        server.imageBodies.insert(kSeriesId + QStringLiteral("/Primary"), poster(films().at(1)));
+        server.imageBodies.insert(kSeriesId + QStringLiteral("/Thumb"), landscape(films().at(1)));
+        server.imageBodies.insert(kSeriesId + QStringLiteral("/Backdrop"),
+                                  fileBytes(QStringLiteral("frame-tears-of-steel-bridge.jpg")));
+        QJsonObject showEntry = movieCard(1);
+        showEntry.insert(QStringLiteral("Id"), kSeriesId);
+        showEntry.insert(QStringLiteral("Type"), QStringLiteral("Series"));
+        showEntry.insert(QStringLiteral("Name"), QStringLiteral("Blender Open Movies"));
+        showEntry.insert(QStringLiteral("ProductionYear"), films().first().year);
+        const QJsonArray showCards{showEntry};
+        QJsonObject seasonOne = fixtureObject(QStringLiteral("season_item"));
+        seasonOne.insert(QStringLiteral("Name"), QStringLiteral("Season 1"));
+        seasonOne.insert(QStringLiteral("IndexNumber"), 1);
+        seasonOne.insert(QStringLiteral("SeriesName"), QStringLiteral("Blender Open Movies"));
+        seasonOne.insert(QStringLiteral("SeriesPrimaryImageTag"), QStringLiteral("p"));
+        seasonOne.insert(QStringLiteral("ParentBackdropImageTags"),
+                         QJsonArray{QStringLiteral("b")});
+        seasonOne.insert(QStringLiteral("ImageTags"),
+                         QJsonObject{{QStringLiteral("Primary"), QStringLiteral("p")}});
+        seasonOne.insert(QStringLiteral("UserData"),
+                         QJsonObject{{QStringLiteral("Played"), false},
+                                     {QStringLiteral("UnplayedItemCount"), int(films().size())}});
+        server.itemsById.insert(kSeasonId, QJsonDocument(seasonOne).toJson(QJsonDocument::Compact));
+        server.imageBodies.insert(kSeasonId, poster(films().at(2)));
+        server.listingRawBody.insert(
+            QStringLiteral("Seasons"),
+            envelopeOf(QJsonArray{
+                QJsonObject{{QStringLiteral("Id"), kSeasonId},
+                            {QStringLiteral("Name"), QStringLiteral("Season 1")},
+                            {QStringLiteral("Type"), QStringLiteral("Season")},
+                            {QStringLiteral("IndexNumber"), 1},
+                            {QStringLiteral("SeriesId"), kSeriesId},
+                            {QStringLiteral("ImageTags"),
+                             QJsonObject{{QStringLiteral("Primary"), QStringLiteral("p")}}},
+                            {QStringLiteral("UserData"),
+                             QJsonObject{{QStringLiteral("UnplayedItemCount"), int(films().size())},
+                                         {QStringLiteral("Played"), false}}}}}));
+        QJsonArray episodes;
+        for (int n = 0; n < films().size(); ++n) {
+            const QJsonObject entry = episode(n, kSeasonId, n == 1 ? 0.5 : 0);
+            episodes.append(entry);
+            server.imageBodies.insert(entry.value(QStringLiteral("Id")).toString(),
+                                      landscape(films().at(n)));
+        }
+        server.listingRawBody.insert(QStringLiteral("Episodes"), envelopeOf(episodes));
+        // The signed-in user, drawn as initials
+        server.imageBodies.insert(QStringLiteral("user"),
+                                  avatar(QStringLiteral("Alex Rivera"), 210));
+
+        QVERIFY(ui.load());
+        // The buttons that play need a player behind them; none plays here
+        PlayerStub stub;
+        QVERIFY(ui.engine.rootObjects().constFirst()->setProperty(
+            "player", QVariant::fromValue<QObject *>(&stub)));
+        ui.window->resize(1280, 960);
+        QVERIFY(qWaitForScaled(
+            [&] { return ui.window->width() == 1280 && ui.window->height() == 960; }, 3000));
+        QVERIFY(ui.signIn());
+        // An item of no size that takes the keyboard focus, so that no row of a list shows as current
+        auto *focusSink = new QQuickItem(ui.window->contentItem());
+        const auto shot = [&](const QString &name) {
+            // No pointer over a card and no focused row: a page as it is when nothing is touched
+            QTest::mouseMove(ui.window, QPoint(680, 21));
+            focusSink->forceActiveFocus(Qt::OtherFocusReason);
+            QTest::qWait(1200);
+            const QImage image = ui.window->grabWindow();
+            QVERIFY2(!image.isNull(), qPrintable(name));
+            QVERIFY2(image.save(directory.filePath(name + QStringLiteral(".png")), "PNG", 0),
+                     qPrintable(name));
+        };
+        QTRY_VERIFY(ui.item(QStringLiteral("libraryCard_") + kMovies) != nullptr);
+        shot(QStringLiteral("home"));
+        QVERIFY(ui.openLibraryTile(kMovies));
+        QQuickItem *card = nullptr;
+        QTRY_VERIFY((card = Ui::itemIn(ui.item(QStringLiteral("libraryPage")),
+                                       QStringLiteral("mediaCard_") + kMovieId))
+                    != nullptr);
+        shot(QStringLiteral("library"));
+        QTRY_COMPARE(ui.controller.movies()->filterOptions()->legacyStatus(),
+                     Kinefin::FilterOptionsModel::Ready);
+        QVERIFY(openFilterDialog(ui));
+        shot(QStringLiteral("filters"));
+        QObject *filterDialog = ui.popup(QStringLiteral("filterDialog"));
+        QVERIFY(QMetaObject::invokeMethod(filterDialog, "close"));
+        QTRY_VERIFY(!filterDialog->property("visible").toBool());
+        ui.clickCenter(card);
+        QTRY_VERIFY(ui.item(QStringLiteral("itemDetailsPage")) != nullptr);
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Cast and Crew")));
+        // Taller, so that the names under the portraits of the cast are in the picture
+        ui.window->resize(1280, 1040);
+        QVERIFY(qWaitForScaled([&] { return ui.window->height() == 1040; }, 3000));
+        shot(QStringLiteral("details"));
+        ui.window->resize(1280, 960);
+        QVERIFY(qWaitForScaled([&] { return ui.window->height() == 960; }, 3000));
+        // The shows: the grid asks for the same listing, now of the series
+        QVERIFY(ui.clickTab(QStringLiteral("Home")));
+        QTRY_VERIFY(ui.item(QStringLiteral("libraryCard_") + kSeries) != nullptr);
+        server.listingRawBody.insert(QStringLiteral("Items"), envelopeOf(showCards));
+        QVERIFY(ui.openLibraryTile(kSeries));
+        QQuickItem *showCard = nullptr;
+        QTRY_VERIFY((showCard = Ui::itemIn(ui.item(QStringLiteral("libraryPage")),
+                                           QStringLiteral("mediaCard_") + kSeriesId))
+                    != nullptr);
+        ui.clickCenter(showCard);
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Seasons")));
+        shot(QStringLiteral("series"));
+        QVERIFY(QMetaObject::invokeMethod(ui.window, "openItem", Q_ARG(QVariant, kSeasonId),
+                                          Q_ARG(QVariant, QVariant())));
+        QTRY_VERIFY(
+            Ui::itemIn(ui.currentDetails(),
+                       QStringLiteral("episodeRow_")
+                           + episodes.at(0).toObject().value(QStringLiteral("Id")).toString())
+            != nullptr);
+        shot(QStringLiteral("season"));
+        // The player: the controls are the page's own and the stub gives them their values; the video slot holds a frame of the open film Tears of Steel (CC BY 3.0, Blender Foundation) where mpv draws one
+        stub.itemId = kMovieId;
+        stub.title = QStringLiteral("Tears of Steel");
+        stub.subtitle = QStringLiteral("2012");
+        stub.active = true;
+        stub.paused = false;
+        stub.spelledTimes = true;
+        stub.durationTicks = qint64(12 * 60 + 14) * 10'000'000;
+        stub.positionTicks = qint64(5 * 60 + 10) * 10'000'000;
+        stub.volume = 70;
+        const auto track = [](int trackId, const QString &name, bool selected) {
+            return QVariantMap{{QStringLiteral("id"), trackId},
+                               {QStringLiteral("name"), name},
+                               {QStringLiteral("selected"), selected}};
+        };
+        stub.audioTracks = {track(1, QStringLiteral("English"), true),
+                            track(2, QStringLiteral("Italian"), false)};
+        stub.subtitleTracks = {track(3, QStringLiteral("English"), true),
+                               track(4, QStringLiteral("Italian"), false),
+                               track(5, QStringLiteral("English (forced)"), false)};
+        stub.chapters = {};
+        stub.segmentBands = {};
+        ui.window->resize(1280, 720);
+        QVERIFY(qWaitForScaled([&] { return ui.window->height() == 720; }, 3000));
+        QQuickItem *player = openPlayer(ui, stub);
+        QVERIFY(player);
+        player->findChild<QObject *>(QStringLiteral("playerChromeTimer"))
+            ->setProperty("interval", 600000);
+        const QString framePath =
+            QStringLiteral(KINEFIN_SOURCE_DIR "/tests/assets/doc/frame-tears-of-steel-player.jpg");
+        QVERIFY(QFile::exists(framePath));
+        QQmlComponent stillComponent(&ui.engine);
+        stillComponent.setData(
+            "import QtQuick\nImage { anchors.fill: parent; fillMode: Image.PreserveAspectCrop }",
+            QUrl());
+        QObject *stillItem = stillComponent.create(ui.engine.rootContext());
+        QVERIFY2(stillItem, qPrintable(stillComponent.errorString()));
+        auto *slot = player->findChild<QQuickItem *>(QStringLiteral("playerVideoSlot"));
+        QVERIFY(slot);
+        qobject_cast<QQuickItem *>(stillItem)->setParentItem(slot);
+        stillItem->setProperty("source", QUrl::fromLocalFile(framePath));
+        shot(QStringLiteral("player"));
+        QObject *subtitles = ui.popup(QStringLiteral("playerSubtitlesMenu"));
+        QVERIFY(subtitles);
+        QVERIFY(QMetaObject::invokeMethod(subtitles, "open"));
+        QTRY_VERIFY(subtitles->property("opened").toBool());
+        shot(QStringLiteral("player-subtitles"));
+        QVERIFY(QMetaObject::invokeMethod(subtitles, "close"));
+    }
+
     // KINEFIN_SHOTS=<directory inside the checkout>: walks Home, the library, the details page and its dialogs and saves a PNG at every step, for the HIG/UX reviews; unset, it skips
     void visualTourWhenRequested()
     {
@@ -22738,6 +23036,9 @@ class TestUiPages : public QObject {
     void theSubtitlesMenuOffersAddSubtitleFile()
     {
         PlayerStub stub;
+        stub.subtitleTracks = {QVariantMap{{QStringLiteral("id"), 3},
+                                           {QStringLiteral("name"), QStringLiteral("English")},
+                                           {QStringLiteral("selected"), false}}};
         Ui ui(m_home->path());
         ui.serveMovie();
         QVERIFY(ui.load());
@@ -22758,6 +23059,26 @@ class TestUiPages : public QObject {
         QVERIFY(entry);
         QCOMPARE(entry->property("text").toString(), QStringLiteral("Add Subtitle File…"));
         QVERIFY(entry->isEnabled());
+        // The names of the tracks line up with the labels of the style's own entries, as the entry with an icon makes the style keep a column for it
+        const auto labelX = [](QQuickItem *item, const QString &text) {
+            for (QQuickItem *child : allItems(item)) {
+                if (child->inherits("QQuickText")
+                    && child->property("text").toString().contains(text))
+                    return child->mapToScene(QPointF(0, 0)).x();
+            }
+            return -1.0;
+        };
+        QQuickItem *off = nullptr;
+        QQuickItem *track = nullptr;
+        for (QQuickItem *item : ui.menuItems(QStringLiteral("playerSubtitlesMenu"))) {
+            if (item->objectName() == QLatin1String("playerSubtitlesOff"))
+                off = item;
+            else if (!item->property("plainText").toString().isEmpty())
+                track = item;
+        }
+        QVERIFY(off && track);
+        QTRY_VERIFY(labelX(track, QStringLiteral("English")) > 0);
+        QCOMPARE(labelX(off, QStringLiteral("Off")), labelX(track, QStringLiteral("English")));
         stub.casting = true;
         Q_EMIT stub.changed();
         QTRY_VERIFY(!entry->isEnabled());

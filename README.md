@@ -2,6 +2,40 @@
 
 A native KDE Plasma 6 client for Jellyfin servers: Kirigami interface, its own REST client and a libmpv playback engine, without WebEngine. It browses movies and TV series (Home, library tabs with filters, Favorites, search, details, a play queue), plays them with mpv or on a DLNA TV or player, downloads them for offline playback, can control the server's remote sessions and searches from KRunner; music and audiobooks are not built yet. It builds and runs as a Flatpak, but acceptance against a real Jellyfin server on a Plasma desktop is still pending for most v1 features; this is **not yet a release-ready client**.
 
+## Screenshots
+
+![Home with the libraries, Continue Watching, Next Up and Recently Added](docs/images/home.png)
+
+![The Movies tab, a grid of posters](docs/images/library.png)
+
+![The page of a series with its Next Up episode and seasons](docs/images/series.png)
+
+![The player with its controls](docs/images/player.png)
+
+The pictures show a library of the open films of the Blender Foundation and Blender Studio, with their posters and frames, rendered by `build/screenshots.sh` in the Breeze style of Plasma. The artwork is licensed CC BY; the film in the player is *Tears of Steel* (CC BY 3.0, Blender Foundation | mango.blender.org).
+
+<details>
+<summary>Credits of the artwork</summary>
+
+| Film | File on Wikimedia Commons | License |
+| --- | --- | --- |
+| Elephants Dream | [ElephantsDreamPoster.jpg](https://commons.wikimedia.org/wiki/File:ElephantsDreamPoster.jpg) | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
+| Big Buck Bunny | [Big buck bunny poster big.jpg](https://commons.wikimedia.org/wiki/File:Big_buck_bunny_poster_big.jpg) | [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/) |
+| Sintel | [Sintel poster.jpg](https://commons.wikimedia.org/wiki/File:Sintel_poster.jpg) | [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/) |
+| Tears of Steel (poster) | [Tos-poster.png](https://commons.wikimedia.org/wiki/File:Tos-poster.png) | [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/) |
+| Tears of Steel (frame) | [Tears of Steel frame 08 4a.jpg](https://commons.wikimedia.org/wiki/File:Tears_of_Steel_frame_08_4a.jpg) | [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/) |
+| Tears of Steel (frame) | [Tears of Steel frame 01 2a.jpg](https://commons.wikimedia.org/wiki/File:Tears_of_Steel_frame_01_2a.jpg) | [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/) |
+| Tears of Steel (frame of the player) | [Tears of Steel frame 09 1a.jpg](https://commons.wikimedia.org/wiki/File:Tears_of_Steel_frame_09_1a.jpg) | [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/) |
+| Cosmos Laundromat | [CosmosLaundromatPoster.jpg](https://commons.wikimedia.org/wiki/File:CosmosLaundromatPoster.jpg) | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
+| Spring | [Spring2019AlphaPosterBlender.jpg](https://commons.wikimedia.org/wiki/File:Spring2019AlphaPosterBlender.jpg) | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
+| Coffee Run | [Coffee Run-movie poster.png](https://commons.wikimedia.org/wiki/File:Coffee_Run-movie_poster.png) | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
+| Sprite Fright | [Sprite Fright-movie poster.jpg](https://commons.wikimedia.org/wiki/File:Sprite_Fright-movie_poster.jpg) | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
+| Charge | [Charge-movie poster.jpg](https://commons.wikimedia.org/wiki/File:Charge-movie_poster.jpg) | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
+
+The posters and frames are scaled or cropped copies of the files above; the screenshots in `docs/images` are derived from them and carry the same licenses.
+
+</details>
+
 ## Building
 
 Everything that needs Qt, KF6 or ECM runs in a Podman container; see [CONTRIBUTING.md](CONTRIBUTING.md).

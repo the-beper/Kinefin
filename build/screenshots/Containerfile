@@ -1,0 +1,4 @@
+# The build image with what the screenshots of the documentation need and the UI tests of CI do not: the Breeze Qt style (the controls are drawn as Plasma does; the tests are tuned to the style the build image has), and a virtual X server with Mesa's software OpenGL (the offscreen platform draws neither the Kirigami shaders, so the icons of the player and the portraits of the cast stay blank). Used by build/screenshots.sh only
+FROM localhost/kinefin-build:fedora45
+USER root
+RUN dnf install -y --setopt=install_weak_deps=False plasma-breeze xorg-x11-server-Xvfb xorg-x11-xauth mesa-dri-drivers mesa-libEGL mesa-libGL xcb-util-cursor xcb-util-image xcb-util-keysyms xcb-util-renderutil xcb-util-wm libxkbcommon-x11 && dnf clean all

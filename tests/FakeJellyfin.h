@@ -234,6 +234,8 @@ class FakeJellyfin {
     int imageStatus = 200;
     bool redirectImages = false;
     QByteArray imageBody; // overrides the PNG when not empty
+    // An image of its own for one item: keyed "<item id>/<image type>" (Primary, Backdrop, Thumb), then by "<item id>", and "user" for the avatars; the documentation screenshots use it
+    QHash<QString, QByteArray> imageBodies;
     QByteArray lastImageRoute;
     QByteArray lastImageAuth;
     QByteArray lastImageCookie;
@@ -1461,7 +1463,8 @@ class FakeJellyfin {
                     hasAvatar = hasAvatar || (user.id == id && !user.tag.isEmpty());
             }
             if (hasAvatar)
-                respond(socket, 200, kTinyPng, "Cache-Control: public, max-age=31536000\r\n");
+                respond(socket, 200, imageBodies.value(QStringLiteral("user"), kTinyPng),
+                        "Cache-Control: public, max-age=31536000\r\n");
             else
                 respond(socket, 404, {});
             return;
@@ -1970,12 +1973,29 @@ class FakeJellyfin {
                 respond(socket, imageStatus, {});
             } else {
                 // Cache-Control mirrors what the server sends for a tagged image
-                respond(socket, 200, imageBody.isEmpty() ? kTinyPng : imageBody,
+                respond(socket, 200, itemImage(route),
                         "Cache-Control: public, max-age=31536000\r\n");
             }
             return;
         }
         respond(socket, 404, {});
+    }
+
+    // The body of an image request: the one set for the item and type, else the generic one
+    QByteArray itemImage(const QByteArray &route) const
+    {
+        const QString path = QString::fromLatin1(route.left(route.indexOf('?')));
+        const qsizetype itemAt = path.indexOf(QStringLiteral("/Items/"));
+        const qsizetype typeAt = path.indexOf(QStringLiteral("/Images/"));
+        if (itemAt >= 0 && typeAt > itemAt) {
+            const QString id = path.mid(itemAt + 7, typeAt - itemAt - 7);
+            const QString type = path.mid(typeAt + 8).section(QLatin1Char('/'), 0, 0);
+            if (imageBodies.contains(id + QLatin1Char('/') + type))
+                return imageBodies.value(id + QLatin1Char('/') + type);
+            if (imageBodies.contains(id))
+                return imageBodies.value(id);
+        }
+        return imageBody.isEmpty() ? kTinyPng : imageBody;
     }
 
     // The server comes last so it is destroyed first: its child sockets may still emit `disconnected` while it dies, and the slots touch the members above

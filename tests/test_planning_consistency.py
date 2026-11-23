@@ -171,6 +171,19 @@ class PlanningConsistency(unittest.TestCase):
                     broken.append(f"{document.relative_to(ROOT)} -> {target}")
         self.assertEqual(broken, [])
 
+    def test_documentation_images_exist(self) -> None:
+        """The pictures of the root documentation and docs/ (Markdown images, and src or srcset of HTML) are files of the checkout."""
+        missing = []
+        for document in [*ROOT.glob("*.md"), *ROOT.glob("docs/*.md")]:
+            text = document.read_text(encoding="utf-8")
+            targets = re.findall(r"!\[[^\]]*\]\(([^)\s]+)", text) + re.findall(r"""(?:src|srcset)=["']([^"']+)["']""", text)
+            for target in targets:
+                if target.startswith(("http:", "https:")):
+                    continue
+                if not (document.parent / urllib.parse.unquote(target)).exists():
+                    missing.append(f"{document.relative_to(ROOT)} -> {target}")
+        self.assertEqual(missing, [])
+
     def test_package_checks_and_snapshot_facts(self) -> None:
         self.assertTrue((ROOT / ".github/workflows/ci.yml").exists())
         self.assertTrue((ROOT / "scripts/po.py").exists())
