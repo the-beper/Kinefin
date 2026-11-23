@@ -77,6 +77,13 @@ struct SourceSelection {
 [[nodiscard]] SourceSelection selectPlaybackSource(const QJsonObject &response,
                                                    const QString &itemId, const QUrl &serverBase,
                                                    QByteArrayView accessToken);
+
+// Whether a subtitle codec is one the server converts to WebVTT (SubRip, SRT, ASS, SSA, WebVTT, MOV text); everything else is an image or an unknown format and is burnt in
+[[nodiscard]] bool isTextSubtitleCodec(QStringView codec);
+
+// The token-free WebVTT route of the subtitle stream `index` of a media source, with the cues counted from `startTicks` (a transcode that starts there): `/Videos/{item}/{source}/Subtitles/{index}/{startTicks}/Stream.vtt` under the server's base. Empty for an invalid id, a negative index or start
+[[nodiscard]] QUrl castSubtitleUrl(const QUrl &serverBase, const QString &itemId,
+                                   const QString &mediaSourceId, int index, qint64 startTicks);
 } // namespace Kinefin
 
 Q_DECLARE_METATYPE(Kinefin::PlaybackSource)

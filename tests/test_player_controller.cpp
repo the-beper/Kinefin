@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Kinefin contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
 // The player controller without a renderer: the engine is not attached, so an item stays loading and nothing is negotiated, but the item's own request, the playlist of a series and the end-of-file decision all run against the fake server; the tests of a repeat after a real end start the engine on its own (vo=null, ao=null) to give it the position and the duration of a played file
+#include "FakeCastDevice.h"
 #include "FakeJellyfin.h"
 #include "FakeRenderer.h"
 #include "MpvProbe.h"
@@ -22,6 +23,8 @@
 #include <QTemporaryDir>
 #include <QtTest/QtTest>
 #include <mpv/client.h>
+#include <functional>
+#include <memory>
 #include <optional>
 
 using Kinefin::PlayerController;
@@ -235,6 +238,111 @@ bool castMovie(Chain &chain, FakeRenderer &fake)
                                   return entry.route.endsWith("/Sessions/Playing");
                               });
     });
+}
+
+// The reports the server received on the route that ends with `suffix`: the Start is `/Sessions/Playing`
+int reportCount(const Chain &chain, QByteArrayView suffix)
+{
+    return int(std::count_if(
+        chain.server.reportLog.cbegin(), chain.server.reportLog.cend(),
+        [suffix](const FakeJellyfin::ReportLog &entry) { return entry.route.endsWith(suffix); }));
+}
+
+int startReports(const Chain &chain)
+{
+    return reportCount(chain, "/Sessions/Playing");
+}
+
+int progressReports(const Chain &chain)
+{
+    return reportCount(chain, "/Sessions/Playing/Progress");
+}
+
+QJsonObject lastReport(const Chain &chain, QByteArrayView suffix)
+{
+    for (qsizetype i = chain.server.reportLog.size() - 1; i >= 0; --i) {
+        if (chain.server.reportLog.at(i).route.endsWith(suffix))
+            return QJsonDocument::fromJson(chain.server.reportLog.at(i).body).object();
+    }
+    return {};
+}
+
+const QString kCastDeviceId = QStringLiteral("0123456789abcdef0123456789abcdef");
+const QString kCastTarget = QStringLiteral("cast:") + kCastDeviceId;
+const QString kCastName = QStringLiteral("Test Hub");
+const QString kCastMediaNs = QString(Kinefin::kCastNsMedia);
+const QString kLoad = QStringLiteral("LOAD");
+
+Kinefin::CastDeviceInfo fakeCastInfo(const FakeCastDevice &device)
+{
+    Kinefin::CastDeviceInfo info;
+    info.id = kCastDeviceId;
+    info.name = kCastName;
+    info.model = QStringLiteral("Google Nest Hub");
+    info.address = QHostAddress::LocalHost;
+    info.port = device.port();
+    info.capabilities = 231941;
+    info.version = 5;
+    return info;
+}
+
+// A fake Cast device and the options its sender runs with: short times, the device never looked up by multicast and loopback accepted as a media address. `trust` is what the sender believes, `identity` what the device presents
+struct CastRig {
+    explicit CastRig(const CastTestPki &pki) : CastRig(pki, pki) {}
+    CastRig(const CastTestPki &trust, const CastTestPki &identity) : device(identity)
+    {
+        options.channel.trust = trust.trust();
+        options.launchTimeoutMs = 3000;
+        options.startTimeoutMs = 5000;
+        options.stuckMs = 2000;
+        options.statusPollMs = 60'000;
+        options.positionTickMs = 50;
+        options.reconnectAttempts = 1;
+        options.reconnectDelayMs = 50;
+        options.stopTimeoutMs = 1500;
+        options.resolveDevice =
+            [](const QString &,
+               std::function<void(const std::optional<Kinefin::CastDeviceInfo> &)> done) {
+                done(std::nullopt);
+            };
+        options.mediaAddressPolicy = [](const QHostAddress &) { return true; };
+    }
+    // The controller knows the device without a search; the options are read here, so they are set before
+    bool add(Chain &chain)
+    {
+        device.receiverEnabled = true;
+        if (!device.listen())
+            return false;
+        chain.controller.castController()->addCastDevice(fakeCastInfo(device), options);
+        return true;
+    }
+
+    FakeCastDevice device;
+    Kinefin::CastSender::Options options;
+};
+
+// The item casts and the server heard the Start of it
+bool castStarted(const Chain &chain)
+{
+    return QTest::qWaitFor(
+        [&chain] {
+            return chain.controller.casting() && !chain.controller.loading()
+                   && startReports(chain) > 0;
+        },
+        10000);
+}
+
+bool castMovieOn(Chain &chain, CastRig &rig, qint64 resumeTicks = 0)
+{
+    return rig.add(chain) && chain.controller.playItemOn(kCastTarget, kMovie, resumeTicks)
+           && castStarted(chain);
+}
+
+// The JSON of the `index`th LOAD the device received
+QJsonObject nthLoad(const FakeCastDevice &device, qsizetype index)
+{
+    const QList<FakeCastDevice::Received> loads = device.frames(kCastMediaNs, kLoad);
+    return index < loads.size() ? FakeCastDevice::jsonOf(loads.at(index).message) : QJsonObject();
 }
 } // namespace
 
@@ -1492,6 +1600,512 @@ class TestPlayerController : public QObject {
         QCOMPARE(finished.size(), 1);
         QVERIFY(!chain.controller.casting());
         QTRY_COMPARE(stoppedReports(chain), 1);
+    }
+
+    void theMovieOnACastDevice()
+    {
+        QVERIFY(castPki().isValid());
+        CastRig rig(castPki());
+        // The reply PLAYING at the start comes with the LOAD and the position moves later: playback starts then
+        rig.device.movingDelayMs = 1200;
+        rig.options.stuckMs = 4000;
+        Chain chain;
+        QVERIFY(chain.ok);
+        QVERIFY(rig.add(chain));
+        QVERIFY(chain.controller.playItemOn(kCastTarget, kMovie, 20 * kSecond));
+        QTRY_COMPARE(rig.device.count(kCastMediaNs, kLoad), 1);
+        QCOMPARE(chain.controller.castTargetId(), kCastTarget);
+        QCOMPARE(chain.controller.castTargetName(), kCastName);
+
+        // The server was asked once, from the resume point, with the profile of the device's model
+        QCOMPARE(chain.server.playbackInfoRequests, 1);
+        const QJsonObject asked =
+            QJsonDocument::fromJson(chain.server.lastPlaybackInfoBody).object();
+        QCOMPARE(qint64(asked.value(QStringLiteral("StartTimeTicks")).toDouble()), 20 * kSecond);
+        const QJsonObject profile = asked.value(QStringLiteral("DeviceProfile")).toObject();
+        QCOMPARE(profile.value(QStringLiteral("Name")).toString(),
+                 QStringLiteral("Kinefin Google Cast"));
+        QCOMPARE(profile.value(QStringLiteral("DirectPlayProfiles"))
+                     .toArray()
+                     .at(0)
+                     .toObject()
+                     .value(QStringLiteral("Container"))
+                     .toString(),
+                 QStringLiteral("mp4,m4v,mkv"));
+
+        // The device got the direct stream of the server, with no sign-in and no track, at the resume point
+        const QJsonObject load = nthLoad(rig.device, 0);
+        const QJsonObject media = load.value(QStringLiteral("media")).toObject();
+        QCOMPARE(media.value(QStringLiteral("contentType")).toString(),
+                 QStringLiteral("video/x-matroska"));
+        QVERIFY(media.value(QStringLiteral("contentId"))
+                    .toString()
+                    .startsWith(chain.server.url(QStringLiteral("/jellyfin")).toString()
+                                + QStringLiteral("/Videos/") + kMovie
+                                + QStringLiteral("/stream?")));
+        QVERIFY(!media.contains(QStringLiteral("tracks")));
+        QCOMPARE(load.value(QStringLiteral("currentTime")).toDouble(), 20.0);
+
+        // The reply PLAYING at the start is not a start: the server hears of it at the first moving position
+        QTest::qWait(300);
+        QCOMPARE(startReports(chain), 0);
+        QVERIFY(chain.controller.loading());
+        QTRY_COMPARE(startReports(chain), 1);
+        QVERIFY(!chain.controller.loading());
+        QVERIFY(chain.controller.casting());
+        const QJsonObject started = lastReport(chain, "/Sessions/Playing");
+        QCOMPARE(started.value(QStringLiteral("ItemId")).toString(), kMovie);
+        QCOMPARE(started.value(QStringLiteral("PlayMethod")).toString(),
+                 QStringLiteral("DirectPlay"));
+        QCOMPARE(started.value(QStringLiteral("PlaySessionId")).toString(),
+                 QStringLiteral("b6c7d8e9f0a1b2c3"));
+        QTRY_VERIFY(chain.controller.positionTicks() > 20 * kSecond);
+        QTRY_COMPARE(chain.controller.status(), PlayerController::Status::Playing);
+
+        // A pause and a resume are one Progress each, and reach the device as PAUSE and PLAY
+        const int progressBefore = progressReports(chain);
+        chain.controller.pause();
+        QTRY_VERIFY(chain.controller.paused());
+        QTRY_COMPARE(progressReports(chain), progressBefore + 1);
+        const QJsonObject paused = lastReport(chain, "/Sessions/Playing/Progress");
+        QVERIFY(paused.value(QStringLiteral("IsPaused")).toBool());
+        QVERIFY(paused.value(QStringLiteral("PositionTicks")).toDouble() > double(20 * kSecond));
+        chain.controller.resume();
+        QTRY_VERIFY(!chain.controller.paused());
+        QTRY_COMPARE(progressReports(chain), progressBefore + 2);
+        QVERIFY(!lastReport(chain, "/Sessions/Playing/Progress")
+                     .value(QStringLiteral("IsPaused"))
+                     .toBool());
+        QCOMPARE(rig.device.count(kCastMediaNs, QStringLiteral("PAUSE")), 1);
+        QCOMPARE(rig.device.count(kCastMediaNs, QStringLiteral("PLAY")), 1);
+
+        chain.controller.seek(60 * kSecond);
+        QTRY_COMPARE(rig.device.count(kCastMediaNs, QStringLiteral("SEEK")), 1);
+        const QList<FakeCastDevice::Received> seeks =
+            rig.device.frames(kCastMediaNs, QStringLiteral("SEEK"));
+        QCOMPARE(FakeCastDevice::jsonOf(seeks.constFirst().message)
+                     .value(QStringLiteral("currentTime"))
+                     .toDouble(),
+                 60.0);
+        // The position is the device's own: past the one asked for, and stopped where the device paused
+        QTRY_VERIFY(chain.controller.positionTicks() > 60 * kSecond);
+        chain.controller.pause();
+        QTRY_VERIFY(chain.controller.paused());
+
+        chain.controller.stopCasting();
+        QVERIFY(!chain.controller.casting());
+        QTRY_COMPARE(stoppedReports(chain), 1);
+        const QJsonObject stopped = lastReport(chain, "/Sessions/Playing/Stopped");
+        QVERIFY(stopped.value(QStringLiteral("PositionTicks")).toDouble() > double(60 * kSecond));
+        QVERIFY(!stopped.value(QStringLiteral("Failed")).toBool());
+        QCOMPARE(stopped.value(QStringLiteral("PlaySessionId")).toString(),
+                 QStringLiteral("b6c7d8e9f0a1b2c3"));
+        // The media is stopped and the device's app let go
+        QTRY_COMPARE(rig.device.count(kCastMediaNs, QStringLiteral("STOP")), 1);
+        QTRY_COMPARE(rig.device.appStops, 1);
+        // The direct play was probed once with a range and no credential before the device got it
+        QCOMPARE(chain.server.streamRoutes.size(), 1);
+        QVERIFY(chain.server.streamAuthorizations.constFirst().isEmpty());
+    }
+
+    void aLocalPlaybackMovesToACastDeviceAtItsPosition()
+    {
+        QVERIFY(castPki().isValid());
+        CastRig rig(castPki());
+        Chain chain;
+        QVERIFY(chain.ok);
+        QVERIFY(rig.add(chain));
+        // The movie plays here: mpv runs a generated clip in place of the server's stream
+        QVERIFY(chain.controller.playItem(kMovie, 0));
+        QVERIFY(chain.engine()->init({QStringLiteral("vo=null"), QStringLiteral("ao=null")}));
+        Q_EMIT chain.client.playbackInfoFailed(kMovie, 500, QString());
+        QVERIFY(!chain.controller.loading());
+        QVERIFY(chain.opensClip(kMovie, 30));
+        chain.controller.seek(10 * kSecond);
+        QTRY_VERIFY(chain.controller.positionTicks() >= 10 * kSecond);
+        // Paused, so the position the device gets does not depend on how long the test takes
+        chain.controller.pause();
+        QTRY_VERIFY(chain.controller.paused());
+        QTRY_VERIFY(startReports(chain) > 0);
+        const qsizetype reportsBefore = chain.server.reportLog.size();
+        QVERIFY(chain.controller.castTo(kCastTarget));
+        QTRY_VERIFY(chain.controller.casting());
+
+        // The local Stopped (its own play session) comes before the cast's Start, which waits for the device to move
+        qsizetype stopped = -1;
+        qsizetype started = -1;
+        const auto ordered = [&] {
+            stopped = -1;
+            started = -1;
+            for (qsizetype i = reportsBefore; i < chain.server.reportLog.size(); ++i) {
+                const FakeJellyfin::ReportLog &entry = chain.server.reportLog.at(i);
+                if (stopped < 0 && entry.route.endsWith("/Sessions/Playing/Stopped"))
+                    stopped = i;
+                if (stopped >= 0 && started < 0 && entry.route.endsWith("/Sessions/Playing"))
+                    started = i;
+            }
+            return started > stopped && stopped >= 0;
+        };
+        QTRY_VERIFY(ordered());
+        QVERIFY(chain.server.reportLog.at(stopped).body.contains("\"PlaySessionId\":\"s1\""));
+        QVERIFY(!chain.server.reportLog.at(started).body.contains("\"PlaySessionId\":\"s1\""));
+        for (qsizetype i = reportsBefore; i < stopped; ++i)
+            QVERIFY(!chain.server.reportLog.at(i).route.endsWith("/Sessions/Playing"));
+
+        // The server was asked with the profile of the device, from where mpv was, and the device starts there
+        const QJsonObject asked =
+            QJsonDocument::fromJson(chain.server.lastPlaybackInfoBody).object();
+        QCOMPARE(asked.value(QStringLiteral("DeviceProfile"))
+                     .toObject()
+                     .value(QStringLiteral("Name"))
+                     .toString(),
+                 QStringLiteral("Kinefin Google Cast"));
+        const qint64 askedFrom = qint64(asked.value(QStringLiteral("StartTimeTicks")).toDouble());
+        QVERIFY(askedFrom >= 10 * kSecond && askedFrom <= 11 * kSecond);
+        const double loadAt = rig.device.lastLoad().value(QStringLiteral("currentTime")).toDouble();
+        QVERIFY(loadAt >= 10 && loadAt <= 11);
+        chain.controller.stopCasting();
+    }
+
+    void aCastDirectPlayTheDeviceRefusesIsAskedOnceMoreAsATranscode()
+    {
+        QVERIFY(castPki().isValid());
+        CastRig rig(castPki());
+        rig.device.loadFails = true;
+        Chain chain;
+        QVERIFY(chain.ok);
+        // The first answer is the direct play the device refuses; the server then offers a transcode, which the device takes
+        int answers = 0;
+        QObject::connect(
+            &chain.client, &Kinefin::JellyfinClient::playbackInfoReady, &chain.client, [&] {
+                if (++answers == 1)
+                    chain.server.playbackInfoFixture = QStringLiteral("playbackinfo_transcode");
+                else
+                    rig.device.loadFails = false;
+            });
+        QVERIFY(castMovieOn(chain, rig));
+        QCOMPARE(chain.server.playbackInfoRequests, 2);
+        const QJsonObject profile = QJsonDocument::fromJson(chain.server.lastPlaybackInfoBody)
+                                        .object()
+                                        .value(QStringLiteral("DeviceProfile"))
+                                        .toObject();
+        QCOMPARE(profile.value(QStringLiteral("Name")).toString(),
+                 QStringLiteral("Kinefin Google Cast"));
+        QVERIFY(profile.value(QStringLiteral("DirectPlayProfiles")).toArray().isEmpty());
+        QCOMPARE(rig.device.count(kCastMediaNs, kLoad), 2);
+        const QJsonObject refused =
+            nthLoad(rig.device, 0).value(QStringLiteral("media")).toObject();
+        const QJsonObject again = nthLoad(rig.device, 1).value(QStringLiteral("media")).toObject();
+        QCOMPARE(refused.value(QStringLiteral("contentType")).toString(),
+                 QStringLiteral("video/x-matroska"));
+        QCOMPARE(again.value(QStringLiteral("contentType")).toString(),
+                 QStringLiteral("video/mp4"));
+        QVERIFY(again.value(QStringLiteral("contentId"))
+                    .toString()
+                    .contains(QStringLiteral("master.m3u8")));
+        // The refused attempt never played: one Start, no Stopped for it
+        QCOMPARE(startReports(chain), 1);
+        QCOMPARE(stoppedReports(chain), 0);
+        chain.controller.stopCasting();
+    }
+
+    void aStuckCastIsRefusedAndRenegotiated()
+    {
+        QVERIFY(castPki().isValid());
+        CastRig rig(castPki());
+        // The device answers the LOAD and its position never moves: the sender gives the stream up after stuckMs
+        rig.device.movesAfterLoad = false;
+        rig.options.stuckMs = 300;
+        Chain chain;
+        QVERIFY(chain.ok);
+        int answers = 0;
+        QObject::connect(
+            &chain.client, &Kinefin::JellyfinClient::playbackInfoReady, &chain.client, [&] {
+                if (++answers == 1)
+                    chain.server.playbackInfoFixture = QStringLiteral("playbackinfo_transcode");
+                else
+                    rig.device.movesAfterLoad = true;
+            });
+        QVERIFY(castMovieOn(chain, rig));
+        QCOMPARE(chain.server.playbackInfoRequests, 2);
+        QVERIFY(QJsonDocument::fromJson(chain.server.lastPlaybackInfoBody)
+                    .object()
+                    .value(QStringLiteral("DeviceProfile"))
+                    .toObject()
+                    .value(QStringLiteral("DirectPlayProfiles"))
+                    .toArray()
+                    .isEmpty());
+        QCOMPARE(rig.device.count(kCastMediaNs, kLoad), 2);
+        QCOMPARE(nthLoad(rig.device, 0)
+                     .value(QStringLiteral("media"))
+                     .toObject()
+                     .value(QStringLiteral("contentType"))
+                     .toString(),
+                 QStringLiteral("video/x-matroska"));
+        QCOMPARE(nthLoad(rig.device, 1)
+                     .value(QStringLiteral("media"))
+                     .toObject()
+                     .value(QStringLiteral("contentType"))
+                     .toString(),
+                 QStringLiteral("video/mp4"));
+        // The stuck attempt never played: one Start, no Stopped for it
+        QCOMPARE(startReports(chain), 1);
+        QCOMPARE(stoppedReports(chain), 0);
+        chain.controller.stopCasting();
+    }
+
+    void theEndOfACastItemAdvancesTheQueue()
+    {
+        QVERIFY(castPki().isValid());
+        CastRig rig(castPki());
+        Chain chain;
+        QVERIFY(chain.ok);
+        chain.serveEpisodeThree();
+        chain.controller.setNextEpisodeAutoPlay(true);
+        QVERIFY(rig.add(chain));
+        QVERIFY(chain.controller.playItemOn(kCastTarget, episodeId(3), 0));
+        QTRY_VERIFY(chain.controller.hasNext());
+        QVERIFY(castStarted(chain));
+
+        // The device reports the end of the episode
+        rig.device.pushMediaEntry(rig.device.mediaEntry(
+            rig.device.mediaSessionId, QStringLiteral("IDLE"), QStringLiteral("FINISHED")));
+        rig.device.hasMedia = false;
+        QTRY_COMPARE(chain.controller.itemId(), episodeId(4));
+        // The next episode goes to the same device
+        QTRY_COMPARE(rig.device.count(kCastMediaNs, kLoad), 2);
+        QVERIFY(
+            nthLoad(rig.device, 1)
+                .value(QStringLiteral("media"))
+                .toObject()
+                .value(QStringLiteral("contentId"))
+                .toString()
+                .contains(QStringLiteral("/Videos/") + episodeId(4) + QStringLiteral("/stream")));
+        QTRY_VERIFY(chain.controller.casting() && !chain.controller.loading()
+                    && startReports(chain) == 2);
+        QCOMPARE(chain.controller.castTargetId(), kCastTarget);
+        QCOMPARE(chain.controller.itemId(), episodeId(4));
+        QTRY_COMPARE(stoppedReports(chain), 1);
+        QCOMPARE(lastReport(chain, "/Sessions/Playing/Stopped")
+                     .value(QStringLiteral("ItemId"))
+                     .toString(),
+                 episodeId(3));
+        chain.controller.stopCasting();
+    }
+
+    void thisComputerTakesTheCastBackFromACastDeviceAtItsPosition()
+    {
+        QVERIFY(castPki().isValid());
+        CastRig rig(castPki());
+        Chain chain;
+        QVERIFY(chain.ok);
+        QVERIFY(castMovieOn(chain, rig));
+        // Moved on the device, then paused there so that its position holds still
+        chain.controller.seek(42 * kSecond);
+        QTRY_VERIFY(chain.controller.positionTicks() > 42 * kSecond);
+        chain.controller.pause();
+        QTRY_VERIFY(chain.controller.paused());
+        QVERIFY(chain.controller.castTo(QStringLiteral("local")));
+        QVERIFY(!chain.controller.casting());
+        QVERIFY(chain.controller.castTargetId().isEmpty());
+        QCOMPARE(chain.controller.itemId(), kMovie);
+        // The device stops and lets its app go, the cast's session ends with the device's position, and the item waits for the local player
+        QTRY_COMPARE(rig.device.count(kCastMediaNs, QStringLiteral("STOP")), 1);
+        QTRY_COMPARE(rig.device.appStops, 1);
+        QTRY_COMPARE(stoppedReports(chain), 1);
+        const double position = lastReport(chain, "/Sessions/Playing/Stopped")
+                                    .value(QStringLiteral("PositionTicks"))
+                                    .toDouble();
+        QVERIFY(position > double(42 * kSecond) && position < double(50 * kSecond));
+        QVERIFY(chain.controller.loading());
+    }
+
+    void continueHereAfterACastFailure()
+    {
+        QVERIFY(castPki().isValid());
+        CastRig rig(castPki());
+        Chain chain;
+        QVERIFY(chain.ok);
+        QVERIFY(castMovieOn(chain, rig, 20 * kSecond));
+        QTRY_VERIFY(chain.controller.positionTicks() > 20 * kSecond);
+        // The device goes away and is not found again
+        rig.device.stopListening();
+        rig.device.dropConnection();
+        QTRY_VERIFY(chain.controller.canContinueHere());
+        QVERIFY(chain.controller.errorText().contains(kCastName));
+        QVERIFY(!chain.controller.casting());
+        QCOMPARE(chain.controller.itemId(), kMovie);
+        QTRY_COMPARE(stoppedReports(chain), 1);
+        // The failed session closes at the position the device got to
+        const QJsonObject stopped = lastReport(chain, "/Sessions/Playing/Stopped");
+        QVERIFY(stopped.value(QStringLiteral("Failed")).toBool());
+        QVERIFY(stopped.value(QStringLiteral("PositionTicks")).toDouble() > double(20 * kSecond));
+        QVERIFY(chain.controller.castTo(QStringLiteral("local")));
+        QVERIFY(!chain.controller.canContinueHere());
+        QVERIFY(chain.controller.errorText().isEmpty());
+        QVERIFY(chain.controller.loading());
+    }
+
+    void anUntrustedDeviceShowsItsOwnTextAndSendsNothing()
+    {
+        QVERIFY(castPki().isValid());
+        QVERIFY(otherCastPki().isValid());
+        // The device presents the chain of another PKI than the one the sender trusts
+        CastRig rig(castPki(), otherCastPki());
+        Chain chain;
+        QVERIFY(chain.ok);
+        QVERIFY(rig.add(chain));
+        QVERIFY(chain.controller.playItemOn(kCastTarget, kMovie, 0));
+        QTRY_VERIFY(chain.controller.canContinueHere());
+        QCOMPARE(
+            chain.controller.errorText(),
+            QStringLiteral("Kinefin could not verify that Test Hub is a Google Cast device, so "
+                           "nothing was sent to it: play on this computer or choose another "
+                           "device."));
+        QVERIFY(!chain.controller.casting());
+        // Only the challenge reached the device
+        QCOMPARE(rig.device.receivedCount(), 1);
+        QCOMPARE(rig.device.challenges, 1);
+        QCOMPARE(rig.device.received.constFirst().message.ns, QString(Kinefin::kCastNsDeviceAuth));
+        QCOMPARE(rig.device.count(kCastMediaNs, kLoad), 0);
+        QTest::qWait(200);
+        QCOMPARE(rig.device.receivedCount(), 1);
+        // The attempt never played: the server heard nothing of it
+        QCOMPARE(startReports(chain), 0);
+        QCOMPARE(stoppedReports(chain), 0);
+    }
+
+    void aTextSubtitleGoesAsATrackAndAnImageSubtitleIsBurntIn()
+    {
+        QVERIFY(castPki().isValid());
+        {
+            // SubRip: the server leaves it as text and the device fetches the WebVTT route as a track
+            CastRig rig(castPki());
+            Chain chain;
+            QVERIFY(chain.ok);
+            QVERIFY(
+                castsWithSubtitle(chain, rig,
+                                  playbackInfoWithSubtitle(QStringLiteral("playbackinfo_direct"),
+                                                           QStringLiteral("subrip"), true)));
+            const QJsonObject asked =
+                QJsonDocument::fromJson(chain.server.lastPlaybackInfoBody).object();
+            QCOMPARE(asked.value(QStringLiteral("SubtitleStreamIndex")).toInt(), 2);
+            QCOMPARE(subtitleMethod(asked, QStringLiteral("subrip")), QStringLiteral("External"));
+            QCOMPARE(subtitleMethod(asked, QStringLiteral("pgssub")), QStringLiteral("Encode"));
+            const QJsonObject load = nthLoad(rig.device, 0);
+            const QJsonArray tracks = load.value(QStringLiteral("media"))
+                                          .toObject()
+                                          .value(QStringLiteral("tracks"))
+                                          .toArray();
+            QCOMPARE(tracks.size(), 1);
+            const QJsonObject track = tracks.at(0).toObject();
+            QCOMPARE(track.value(QStringLiteral("trackContentId")).toString(),
+                     subtitleRoute(chain, 0));
+            QCOMPARE(track.value(QStringLiteral("trackContentType")).toString(),
+                     QStringLiteral("text/vtt"));
+            QCOMPARE(track.value(QStringLiteral("language")).toString(), QStringLiteral("eng"));
+            QCOMPARE(track.value(QStringLiteral("name")).toString(), QStringLiteral("English SDH"));
+            QCOMPARE(load.value(QStringLiteral("activeTrackIds")).toArray().size(), 1);
+            chain.controller.stopCasting();
+        }
+        {
+            // PGS: no track can carry it, the profile makes the server burn it in
+            CastRig rig(castPki());
+            Chain chain;
+            QVERIFY(chain.ok);
+            QVERIFY(
+                castsWithSubtitle(chain, rig,
+                                  playbackInfoWithSubtitle(QStringLiteral("playbackinfo_direct"),
+                                                           QStringLiteral("pgssub"), false)));
+            const QJsonObject asked =
+                QJsonDocument::fromJson(chain.server.lastPlaybackInfoBody).object();
+            QCOMPARE(asked.value(QStringLiteral("SubtitleStreamIndex")).toInt(), 2);
+            QCOMPARE(subtitleMethod(asked, QStringLiteral("pgssub")), QStringLiteral("Encode"));
+            const QJsonObject load = nthLoad(rig.device, 0);
+            QVERIFY(
+                !load.value(QStringLiteral("media")).toObject().contains(QStringLiteral("tracks")));
+            QVERIFY(!load.contains(QStringLiteral("activeTrackIds")));
+            chain.controller.stopCasting();
+        }
+    }
+
+    void aTranscodeCastSeeksByReloadingWithTheTrackAtTheNewStart()
+    {
+        QVERIFY(castPki().isValid());
+        CastRig rig(castPki());
+        Chain chain;
+        QVERIFY(chain.ok);
+        QVERIFY(castsWithSubtitle(chain, rig,
+                                  playbackInfoWithSubtitle(QStringLiteral("playbackinfo_transcode"),
+                                                           QStringLiteral("subrip"), true)));
+        // The first load starts at the resume point and the track counts from there
+        const QJsonObject first = nthLoad(rig.device, 0);
+        const QJsonObject firstMedia = first.value(QStringLiteral("media")).toObject();
+        QCOMPARE(firstMedia.value(QStringLiteral("contentType")).toString(),
+                 QStringLiteral("video/mp4"));
+        QVERIFY(firstMedia.value(QStringLiteral("contentId"))
+                    .toString()
+                    .contains(QStringLiteral("StartTimeTicks=0")));
+        QCOMPARE(firstMedia.value(QStringLiteral("tracks"))
+                     .toArray()
+                     .at(0)
+                     .toObject()
+                     .value(QStringLiteral("trackContentId"))
+                     .toString(),
+                 subtitleRoute(chain, 0));
+
+        // A run of seeks reloads once, at the last one
+        const qint64 target = 300 * kSecond;
+        chain.controller.seek(100 * kSecond);
+        chain.controller.seek(target);
+        QTRY_COMPARE(rig.device.count(kCastMediaNs, kLoad), 2);
+        QTest::qWait(700);
+        QCOMPARE(rig.device.count(kCastMediaNs, kLoad), 2);
+        const QJsonObject again = nthLoad(rig.device, 1);
+        const QJsonObject media = again.value(QStringLiteral("media")).toObject();
+        QCOMPARE(again.value(QStringLiteral("sessionId")).toString(),
+                 first.value(QStringLiteral("sessionId")).toString());
+        QCOMPARE(again.value(QStringLiteral("currentTime")).toDouble(), 0.0);
+        const QString contentId = media.value(QStringLiteral("contentId")).toString();
+        QVERIFY(contentId.contains(QStringLiteral("StartTimeTicks=3000000000")));
+        QCOMPARE(contentId.count(QStringLiteral("StartTimeTicks")), 1);
+        const QJsonArray tracks = media.value(QStringLiteral("tracks")).toArray();
+        QCOMPARE(tracks.size(), 1);
+        QCOMPARE(tracks.at(0).toObject().value(QStringLiteral("trackContentId")).toString(),
+                 subtitleRoute(chain, target));
+        QCOMPARE(again.value(QStringLiteral("activeTrackIds")).toArray().size(), 1);
+        // The cast goes on from the new start under the same session, with no second Start
+        QTRY_VERIFY(chain.controller.positionTicks() > target);
+        QVERIFY(chain.controller.casting());
+        QCOMPARE(startReports(chain), 1);
+        QCOMPARE(rig.device.connections, 1);
+        chain.controller.stopCasting();
+    }
+
+    void nothingSentToACastDeviceCarriesTheToken()
+    {
+        QVERIFY(castPki().isValid());
+        // A direct play, and a transcode whose URL from the server carries the token as ApiKey
+        for (const bool transcode : {false, true}) {
+            CastRig rig(castPki());
+            Chain chain;
+            QVERIFY(chain.ok);
+            if (transcode)
+                chain.server.playbackInfoFixture = QStringLiteral("playbackinfo_transcode");
+            QVERIFY(castMovieOn(chain, rig));
+            const QList<FakeCastDevice::Received> received = rig.device.received;
+            QVERIFY(!received.isEmpty());
+            for (const FakeCastDevice::Received &entry : received) {
+                const QByteArray payload = entry.message.payload.toLower();
+                QVERIFY(!payload.contains(kFixtureToken));
+                QVERIFY(!payload.contains("api_key"));
+                QVERIFY(!payload.contains("apikey"));
+            }
+            // What the media server was asked carried no credential either
+            for (const QByteArray &authorization : std::as_const(chain.server.streamAuthorizations))
+                QVERIFY(authorization.isEmpty());
+            chain.controller.stopCasting();
+        }
     }
 
     void aMinutesTimerAndTheEndModesReplaceEachOther()
@@ -3426,6 +4040,75 @@ class TestPlayerController : public QObject {
         }
         return -1;
     }
+
+    // The keys take longer to make than any test, so a test that casts makes them on first use
+    const CastTestPki &castPki()
+    {
+        if (!m_castPki)
+            m_castPki = std::make_unique<CastTestPki>();
+        return *m_castPki;
+    }
+    const CastTestPki &otherCastPki()
+    {
+        if (!m_otherCastPki)
+            m_otherCastPki = std::make_unique<CastTestPki>();
+        return *m_otherCastPki;
+    }
+    // The fixture's PlaybackInfo response with its one subtitle stream, index 2, of `codec`
+    static QByteArray playbackInfoWithSubtitle(const QString &fixtureName, const QString &codec,
+                                               bool text)
+    {
+        QJsonObject response = QJsonDocument::fromJson(fixture(fixtureName)).object();
+        QJsonArray sources = response.value(QStringLiteral("MediaSources")).toArray();
+        QJsonObject source = sources.at(0).toObject();
+        QJsonArray streams;
+        const QJsonArray all = source.value(QStringLiteral("MediaStreams")).toArray();
+        for (const QJsonValue &stream : all) {
+            if (stream.toObject().value(QStringLiteral("Type")).toString()
+                != QLatin1String("Subtitle"))
+                streams.append(stream);
+        }
+        streams.append(QJsonObject{{QStringLiteral("Index"), 2},
+                                   {QStringLiteral("Type"), QStringLiteral("Subtitle")},
+                                   {QStringLiteral("Codec"), codec},
+                                   {QStringLiteral("Language"), QStringLiteral("eng")},
+                                   {QStringLiteral("Title"), QStringLiteral("English SDH")},
+                                   {QStringLiteral("IsTextSubtitleStream"), text},
+                                   {QStringLiteral("IsExternal"), false}});
+        source.insert(QStringLiteral("MediaStreams"), streams);
+        sources.replace(0, source);
+        response.insert(QStringLiteral("MediaSources"), sources);
+        return QJsonDocument(response).toJson(QJsonDocument::Compact);
+    }
+    // The movie cast with the subtitle pick of the details page (stream 2) against the server's `response`
+    static bool castsWithSubtitle(Chain &chain, CastRig &rig, const QByteArray &response)
+    {
+        chain.server.playbackInfoRawBody = response;
+        return rig.add(chain) && chain.controller.playItemWithStreams(kMovie, 0, -1, 2)
+               && chain.controller.playItemOn(kCastTarget, kMovie, 0) && castStarted(chain);
+    }
+    // The Method the profile of a PlaybackInfo request gives the subtitles of `format`
+    static QString subtitleMethod(const QJsonObject &request, const QString &format)
+    {
+        const QJsonArray profiles = request.value(QStringLiteral("DeviceProfile"))
+                                        .toObject()
+                                        .value(QStringLiteral("SubtitleProfiles"))
+                                        .toArray();
+        for (const QJsonValue &entry : profiles) {
+            if (entry.toObject().value(QStringLiteral("Format")).toString() == format)
+                return entry.toObject().value(QStringLiteral("Method")).toString();
+        }
+        return {};
+    }
+    // The token-free WebVTT route of the movie's subtitle 2, with the cues counted from `startTicks`
+    static QString subtitleRoute(const Chain &chain, qint64 startTicks)
+    {
+        return chain.server.url(QStringLiteral("/jellyfin")).toString() + QStringLiteral("/Videos/")
+               + kMovie + QLatin1Char('/') + kSourceId + QStringLiteral("/Subtitles/2/")
+               + QString::number(startTicks) + QStringLiteral("/Stream.vtt");
+    }
+    std::unique_ptr<CastTestPki> m_castPki;
+    std::unique_ptr<CastTestPki> m_otherCastPki;
     QTemporaryDir m_data;
 };
 

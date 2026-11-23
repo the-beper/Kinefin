@@ -2,10 +2,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "cast/CastController.h"
 
+#include "cast/CastProfile.h"
 #include "cast/CastTargetsModel.h"
 #include "cast/DlnaRenderer.h"
+#include "cast/RendererProfile.h"
 #include "cast/Soap.h"
 
+#include <QHostAddress>
 #include <QLoggingCategory>
 #include <QNetworkProxy>
 #include <QNetworkReply>
@@ -20,18 +23,29 @@ Q_LOGGING_CATEGORY(castLog, "kinefin.cast.controller")
 
 namespace Kinefin {
 namespace {
+// The protocol leads, so that a TV that offers both DLNA and Google Cast lists two rows that differ in their text and not only in a suffix of the name
+QString protocolDetail(const QString &protocol, const QString &model, const QHostAddress &address)
+{
+    if (model.isEmpty())
+        return i18nc("@info:label protocol and network address of a device", "%1, %2", protocol,
+                     address.toString());
+    return i18nc("@info:label protocol, model and network address of a device", "%1, %2, %3",
+                 protocol, model, address.toString());
+}
+
 QString targetDetail(const RendererInfo &info)
 {
     QString model = info.model.trimmed();
     if (model.isEmpty())
         model = info.manufacturer.trimmed();
-    if (model.isEmpty())
-        return info.address.toString();
-    return i18n("%1, %2", model, info.address.toString());
+    return protocolDetail(i18nc("@item the DLNA protocol", "DLNA"), model, info.address);
 }
 } // namespace
 
-CastController::CastController(QObject *parent) : CastController(SsdpSearch::Options{}, parent) {}
+CastController::CastController(QObject *parent)
+    : CastController(SsdpSearch::Options{}, MdnsSearch::Options{}, parent)
+{
+}
 
 CastController::CastController(const SsdpSearch::Options &options, QObject *parent)
     : QObject(parent), m_targets(new CastTargetsModel(this)), m_search(options)
@@ -39,7 +53,24 @@ CastController::CastController(const SsdpSearch::Options &options, QObject *pare
     m_discovery.setProxy(QNetworkProxy(QNetworkProxy::NoProxy));
     connect(&m_search, &SsdpSearch::deviceFound, this, &CastController::fetchRenderer);
     connect(&m_search, &SsdpSearch::finished, this, [this] {
-        dropUnseen();
+        // A device that answered neither search is dropped once both are over
+        if (!searching())
+            dropUnseen();
+        Q_EMIT searchingChanged();
+    });
+}
+
+CastController::CastController(const SsdpSearch::Options &ssdp, const MdnsSearch::Options &mdns,
+                               QObject *parent)
+    : CastController(ssdp, parent)
+{
+    m_mdns = new MdnsSearch(mdns, this);
+    connect(m_mdns, &MdnsSearch::deviceFound, this, &CastController::onCastDeviceFound);
+    connect(m_mdns, &MdnsSearch::deviceGone, this,
+            [this](const QString &id) { m_seen.remove(QStringLiteral("cast:") + id); });
+    connect(m_mdns, &MdnsSearch::finished, this, [this] {
+        if (!searching())
+            dropUnseen();
         Q_EMIT searchingChanged();
     });
 }
@@ -48,29 +79,37 @@ CastController::~CastController() = default;
 
 bool CastController::searching() const
 {
-    return m_search.running();
+    return m_search.running() || (m_mdns && m_mdns->running());
 }
 
 void CastController::search()
 {
     setError({});
-    if (m_search.running())
+    if (searching())
         return;
     m_seen.clear();
-    if (!m_search.start())
+    const bool ssdp = m_search.start();
+    const bool mdns = m_mdns && m_mdns->start();
+    if (!ssdp && !mdns)
         setError(i18n("Could not search the network"));
+    else if (!ssdp || (m_mdns && !mdns))
+        setError(
+            i18n("Some devices may not be listed: the search could not cover the whole network"));
     Q_EMIT searchingChanged();
 }
 
 void CastController::stopSearch()
 {
     m_search.stop();
+    if (m_mdns)
+        m_mdns->stop();
     Q_EMIT searchingChanged();
 }
 
 void CastController::fetchRenderer(const SsdpResponse &response)
 {
-    if (const DlnaRenderer *known = m_renderers.value(response.udn, nullptr)) {
+    if (const auto *known =
+            qobject_cast<const DlnaRenderer *>(m_renderers.value(response.udn, nullptr))) {
         // Only the address that listed a device speaks for it: another host answering with its UDN is ignored, and a device that really moved is read again once a search no longer finds it at the old address
         if (response.sender != known->info().address)
             return;
@@ -207,7 +246,7 @@ void CastController::fetchProtocolInfo(const RendererInfo &info,
 
 void CastController::addRenderer(const RendererInfo &info)
 {
-    if (DlnaRenderer *old = m_renderers.value(info.udn, nullptr)) {
+    if (CastRenderer *old = m_renderers.value(info.udn, nullptr)) {
         if (old == m_active)
             return;
         old->deleteLater();
@@ -229,6 +268,77 @@ void CastController::addTarget(const RendererInfo &info)
     Q_EMIT targetsChanged();
 }
 
+void CastController::addCastDevice(const CastDeviceInfo &info, const CastSender::Options &options)
+{
+    const QString target = CastSender::targetId(info);
+    if (CastRenderer *old = m_renderers.value(target, nullptr)) {
+        if (old == m_active)
+            return;
+        old->deleteLater();
+    }
+    auto *sender = new CastSender(info, options, this);
+    m_renderers.insert(target, sender);
+    connectRenderer(sender);
+    addCastTarget(info);
+}
+
+void CastController::addCastTarget(const CastDeviceInfo &info)
+{
+    CastTargetsModel::Target target;
+    target.udn = CastSender::targetId(info);
+    target.name = info.name.isEmpty() ? info.address.toString() : info.name;
+    target.detail = protocolDetail(i18nc("@item the Google Cast protocol", "Google Cast"),
+                                   info.model.trimmed(), info.address);
+    target.kind = QStringLiteral("cast");
+    m_targets->add(std::move(target));
+    Q_EMIT targetsChanged();
+}
+
+void CastController::onCastDeviceFound(const CastDeviceInfo &info)
+{
+    const QString target = CastSender::targetId(info);
+    m_seen.insert(target);
+    if (const auto *known = qobject_cast<const CastSender *>(m_renderers.value(target, nullptr))) {
+        // The same device at the same place: kept as it is; a device that moved is read again unless it plays now
+        if ((known->info().address == info.address && known->info().port == info.port)
+            || known == m_active) {
+            if (m_targets->indexOf(target) < 0)
+                addCastTarget(known->info());
+            return;
+        }
+    }
+    addCastDevice(info);
+}
+
+bool CastController::hasTarget(const QString &id) const
+{
+    return m_renderers.contains(id);
+}
+
+QJsonObject CastController::deviceProfile(const QString &id, bool burnInSubtitles,
+                                          bool transcodeOnly) const
+{
+    if (const auto *cast = qobject_cast<const CastSender *>(m_renderers.value(id, nullptr)))
+        return castDeviceProfile(cast->info().model, burnInSubtitles, transcodeOnly);
+    if (const RendererInfo *info = infoFor(id))
+        return rendererDeviceProfile(info->sinkMimeTypes, burnInSubtitles, transcodeOnly);
+    return {};
+}
+
+QString CastController::mimeFor(const QString &id, const QString &container, bool transcode) const
+{
+    if (qobject_cast<const CastSender *>(m_renderers.value(id, nullptr)))
+        return castMime(container, transcode);
+    if (const RendererInfo *info = infoFor(id))
+        return rendererMime(transcode ? QStringLiteral("ts") : container, info->sinkMimeTypes);
+    return {};
+}
+
+bool CastController::takesTextTrack(const QString &id) const
+{
+    return qobject_cast<const CastSender *>(m_renderers.value(id, nullptr)) != nullptr;
+}
+
 void CastController::dropUnseen()
 {
     // A device that did not answer this search is off, gone or moved: its row and its renderer go, the renderer that plays stays
@@ -246,48 +356,48 @@ void CastController::dropUnseen()
     Q_EMIT targetsChanged();
 }
 
-void CastController::connectRenderer(DlnaRenderer *renderer)
+void CastController::connectRenderer(CastRenderer *renderer)
 {
-    connect(renderer, &DlnaRenderer::stateChanged, this,
-            [this, renderer](DlnaRenderer::Transport state, qint64, qint64) {
+    connect(renderer, &CastRenderer::stateChanged, this,
+            [this, renderer](CastRenderer::Transport state, qint64, qint64) {
                 if (renderer != m_active)
                     return;
                 switch (state) {
-                case DlnaRenderer::Transport::Playing:
+                case CastRenderer::Transport::Playing:
                     Q_EMIT playing();
                     break;
-                case DlnaRenderer::Transport::Paused:
+                case CastRenderer::Transport::Paused:
                     Q_EMIT paused();
                     break;
-                case DlnaRenderer::Transport::Transitioning:
+                case CastRenderer::Transport::Transitioning:
                     Q_EMIT buffering();
                     break;
-                case DlnaRenderer::Transport::Stopped:
-                case DlnaRenderer::Transport::NoMedia:
+                case CastRenderer::Transport::Stopped:
+                case CastRenderer::Transport::NoMedia:
                     break;
                 }
             });
-    connect(renderer, &DlnaRenderer::positionChanged, this, [this, renderer] {
+    connect(renderer, &CastRenderer::positionChanged, this, [this, renderer] {
         if (renderer == m_active)
             Q_EMIT positionChanged();
     });
-    connect(renderer, &DlnaRenderer::volumeChanged, this, [this, renderer] {
+    connect(renderer, &CastRenderer::volumeChanged, this, [this, renderer] {
         if (renderer == m_active)
             Q_EMIT volumeChanged();
     });
-    connect(renderer, &DlnaRenderer::ended, this, [this, renderer] {
+    connect(renderer, &CastRenderer::ended, this, [this, renderer] {
         if (renderer != m_active)
             return;
         clearActive();
         Q_EMIT ended();
     });
-    connect(renderer, &DlnaRenderer::stopped, this, [this, renderer] {
+    connect(renderer, &CastRenderer::stopped, this, [this, renderer] {
         if (renderer != m_active)
             return;
         clearActive();
         Q_EMIT stopped();
     });
-    connect(renderer, &DlnaRenderer::failed, this, [this, renderer](DlnaRenderer::Failure failure) {
+    connect(renderer, &CastRenderer::failed, this, [this, renderer](CastRenderer::Failure failure) {
         if (renderer != m_active)
             return;
         clearActive();
@@ -295,7 +405,7 @@ void CastController::connectRenderer(DlnaRenderer *renderer)
     });
 }
 
-void CastController::setActive(DlnaRenderer *renderer)
+void CastController::setActive(CastRenderer *renderer)
 {
     m_active = renderer;
 }
@@ -317,16 +427,29 @@ bool CastController::load(const QString &udn, const QUrl &url, const QString &mi
                           const QString &title, qint64 startMs, qint64 durationMs,
                           const QUrl &serverBase, bool direct)
 {
-    DlnaRenderer *renderer = m_renderers.value(udn, nullptr);
-    if (!renderer || !renderer->load(url, mime, title, startMs, durationMs, serverBase, direct))
+    CastLoad request;
+    request.url = url;
+    request.mime = mime;
+    request.title = title;
+    request.startMs = startMs;
+    request.durationMs = durationMs;
+    request.serverBase = serverBase;
+    request.direct = direct;
+    return load(udn, request);
+}
+
+bool CastController::load(const QString &id, const CastLoad &request)
+{
+    CastRenderer *renderer = m_renderers.value(id, nullptr);
+    if (!renderer || !renderer->load(request))
         return false;
     setActive(renderer);
     return true;
 }
 
-bool CastController::reload(const QUrl &url, qint64 startMs)
+bool CastController::reload(const QUrl &url, qint64 startMs, const QUrl &subtitleUrl)
 {
-    return m_active && m_active->reload(url, startMs);
+    return m_active && m_active->reload(url, startMs, subtitleUrl);
 }
 
 void CastController::setDurationMs(qint64 durationMs)
@@ -367,16 +490,20 @@ bool CastController::setMuted(bool muted)
 
 QString CastController::activeUdn() const
 {
-    return m_active ? m_active->info().udn : QString();
+    return m_active ? m_active->id() : QString();
 }
 
 QString CastController::activeName() const
 {
-    return m_active ? nameFor(m_active->info().udn) : QString();
+    return m_active ? nameFor(m_active->id()) : QString();
 }
 
 QString CastController::nameFor(const QString &udn) const
 {
+    if (const auto *cast = qobject_cast<const CastSender *>(m_renderers.value(udn, nullptr))) {
+        const QString name = cast->info().name.trimmed();
+        return name.isEmpty() ? cast->info().address.toString() : name;
+    }
     const RendererInfo *info = infoFor(udn);
     if (!info)
         return {};
@@ -386,7 +513,7 @@ QString CastController::nameFor(const QString &udn) const
 
 const RendererInfo *CastController::infoFor(const QString &udn) const
 {
-    const DlnaRenderer *renderer = m_renderers.value(udn, nullptr);
+    const auto *renderer = qobject_cast<const DlnaRenderer *>(m_renderers.value(udn, nullptr));
     return renderer ? &renderer->info() : nullptr;
 }
 
@@ -397,12 +524,12 @@ bool CastController::active() const
 
 bool CastController::isPlaying() const
 {
-    return m_active && m_active->transport() == DlnaRenderer::Transport::Playing;
+    return m_active && m_active->transport() == CastRenderer::Transport::Playing;
 }
 
 bool CastController::isPaused() const
 {
-    return m_active && m_active->transport() == DlnaRenderer::Transport::Paused;
+    return m_active && m_active->transport() == CastRenderer::Transport::Paused;
 }
 
 std::optional<qint64> CastController::positionMs() const

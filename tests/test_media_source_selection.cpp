@@ -8,6 +8,8 @@
 
 #include "api/MediaSourceSelection.h"
 
+using Kinefin::castSubtitleUrl;
+using Kinefin::isTextSubtitleCodec;
 using Kinefin::isValidJellyfinId;
 using Kinefin::pickStream;
 using Kinefin::PlaybackMediaInfo;
@@ -761,6 +763,36 @@ class TestMediaSourceSelection : public QObject {
         for (const QString &bad : {QStringLiteral("a/b"), QStringLiteral("a b"),
                                    QStringLiteral("a?b"), QStringLiteral("..")})
             QVERIFY2(!isValidJellyfinId(bad), qPrintable(bad));
+    }
+
+    void castSubtitleUrlHasTheTicksSegmentAndKeepsThePrefix()
+    {
+        const QUrl base(QStringLiteral("https://jf.example/jellyfin"));
+        const QString item = QStringLiteral("0123456789abcdef0123456789abcdef");
+        const QString source = QStringLiteral("fedcba9876543210fedcba9876543210");
+        const QUrl url = castSubtitleUrl(base, item, source, 3, 900'000'000);
+        QCOMPARE(url.toString(),
+                 QStringLiteral("https://jf.example/jellyfin/Videos/%1/%2/Subtitles/3/900000000/"
+                                "Stream.vtt")
+                     .arg(item, source));
+        QVERIFY(url.query().isEmpty());
+        QVERIFY(castSubtitleUrl(base, QStringLiteral("../x"), source, 3, 0).isEmpty());
+        QVERIFY(castSubtitleUrl(base, item, QStringLiteral("a/b"), 3, 0).isEmpty());
+        QVERIFY(castSubtitleUrl(base, item, source, -1, 0).isEmpty());
+        QVERIFY(castSubtitleUrl(base, item, source, 3, -1).isEmpty());
+    }
+
+    void textSubtitleCodecsAreTheOnesTheServerConvertsToWebVtt()
+    {
+        for (const QString &codec :
+             {QStringLiteral("subrip"), QStringLiteral("SRT"), QStringLiteral("ass"),
+              QStringLiteral("ssa"), QStringLiteral("vtt"), QStringLiteral("WebVTT"),
+              QStringLiteral("mov_text"), QStringLiteral(" subrip ")})
+            QVERIFY2(isTextSubtitleCodec(codec), qPrintable(codec));
+        for (const QString &codec :
+             {QStringLiteral("pgssub"), QStringLiteral("dvdsub"), QStringLiteral("dvbsub"),
+              QStringLiteral("hdmv_pgs_subtitle"), QStringLiteral(""), QStringLiteral("unknown")})
+            QVERIFY2(!isTextSubtitleCodec(codec), qPrintable(codec));
     }
 };
 QTEST_APPLESS_MAIN(TestMediaSourceSelection)

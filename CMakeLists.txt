@@ -16,6 +16,8 @@ include(KDECMakeSettings)
 include(KDECompilerSettings NO_POLICY_SCOPE)
 
 find_package(Qt6 6.6 REQUIRED COMPONENTS Core Gui Widgets Quick Qml QuickControls2 DBus Network WebSockets)
+# libcrypto verifies the device authentication of Cast devices (CastDeviceAuth.cpp): Qt has no RSA signature API and checks chains against the process-wide CA list
+find_package(OpenSSL 3.0 REQUIRED COMPONENTS Crypto)
 # The QML files are flattened with resource aliases, so there is no extra directory whose qmldir the new behaviour of this policy would generate
 if(QT_KNOWN_POLICY_QTP0004)
     qt_policy(SET QTP0004 OLD)
@@ -230,10 +232,23 @@ add_library(kinefin_integration STATIC
 target_compile_definitions(kinefin_integration PRIVATE TRANSLATION_DOMAIN="kinefin")
 target_link_libraries(kinefin_integration PUBLIC kinefin_player Qt6::DBus Qt6::Gui Qt6::Network Qt6::Quick KF6::I18n SDL3::SDL3)
 
-# Cast-out building blocks: SSDP search, UPnP descriptions, SOAP, DIDL and the renderer device profile; Qt Core and Network only
+# Cast-out building blocks: SSDP and mDNS search, UPnP descriptions, SOAP, DIDL, the renderer device profile and the Cast V2 channel with its device authentication; Qt Core and Network, and libcrypto
 add_library(kinefin_cast STATIC
+    src/cast/CastChannel.cpp
+    src/cast/CastChannel.h
     src/cast/CastController.cpp
     src/cast/CastController.h
+    src/cast/CastDeviceAuth.cpp
+    src/cast/CastDeviceAuth.h
+    src/cast/CastNetwork.cpp
+    src/cast/CastNetwork.h
+    src/cast/CastProfile.cpp
+    src/cast/CastProfile.h
+    src/cast/CastProto.cpp
+    src/cast/CastProto.h
+    src/cast/CastRenderer.h
+    src/cast/CastSender.cpp
+    src/cast/CastSender.h
     src/cast/CastTargetsModel.cpp
     src/cast/CastTargetsModel.h
     src/cast/CastText.cpp
@@ -242,12 +257,16 @@ add_library(kinefin_cast STATIC
     src/cast/Didl.h
     src/cast/DlnaRenderer.cpp
     src/cast/DlnaRenderer.h
+    src/cast/Mdns.cpp
+    src/cast/Mdns.h
     src/cast/RendererProfile.cpp
     src/cast/RendererProfile.h
     src/cast/Soap.cpp
     src/cast/Soap.h
     src/cast/Ssdp.cpp
     src/cast/Ssdp.h
+    src/cast/StreamProbe.cpp
+    src/cast/StreamProbe.h
     src/cast/UpnpDescription.cpp
     src/cast/UpnpDescription.h
     src/cast/XmlTree.cpp
@@ -256,6 +275,13 @@ add_library(kinefin_cast STATIC
 target_include_directories(kinefin_cast PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_compile_definitions(kinefin_cast PRIVATE TRANSLATION_DOMAIN="kinefin")
 target_link_libraries(kinefin_cast PUBLIC Qt6::Core Qt6::Network KF6::I18n)
+target_link_libraries(kinefin_cast PRIVATE OpenSSL::Crypto)
+# The pinned Cast roots; the resource is initialised by CastTrust::google() because the library is static
+qt_add_resources(kinefin_cast "cast_roots"
+    PREFIX "/cast"
+    BASE "${CMAKE_CURRENT_SOURCE_DIR}/third_party/openscreen"
+    FILES third_party/openscreen/cast_root_ca.der third_party/openscreen/eureka_root_ca.der
+)
 target_link_libraries(kinefin_player PUBLIC kinefin_cast)
 
 # The QML module lives in a static library of its own so that the UI tests can import it like the application does
@@ -519,7 +545,7 @@ if(BUILD_TESTING)
 
     add_executable(test_player_controller tests/test_player_controller.cpp)
     target_compile_definitions(test_player_controller PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
-    target_link_libraries(test_player_controller PRIVATE kinefin_player kinefin_core Qt6::Test Qt6::Network)
+    target_link_libraries(test_player_controller PRIVATE kinefin_player kinefin_core Qt6::Test Qt6::Network OpenSSL::Crypto)
     add_test(NAME player_controller COMMAND test_player_controller)
 
     add_executable(test_syncplay_controller tests/test_syncplay_controller.cpp)
@@ -575,6 +601,35 @@ if(BUILD_TESTING)
     add_executable(test_cast_renderer tests/test_cast_renderer.cpp)
     target_link_libraries(test_cast_renderer PRIVATE kinefin_cast Qt6::Test Qt6::Network)
     add_test(NAME cast_renderer COMMAND test_cast_renderer)
+
+    add_executable(test_cast_mdns tests/test_cast_mdns.cpp)
+    target_link_libraries(test_cast_mdns PRIVATE kinefin_cast Qt6::Test Qt6::Network)
+    target_compile_definitions(test_cast_mdns PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(NAME cast_mdns COMMAND test_cast_mdns)
+
+    add_executable(test_cast_proto tests/test_cast_proto.cpp)
+    target_link_libraries(test_cast_proto PRIVATE kinefin_cast Qt6::Test)
+    add_test(NAME cast_proto COMMAND test_cast_proto)
+
+    add_executable(test_cast_device_auth tests/test_cast_device_auth.cpp)
+    target_link_libraries(test_cast_device_auth PRIVATE kinefin_cast Qt6::Test OpenSSL::Crypto)
+    add_test(NAME cast_device_auth COMMAND test_cast_device_auth)
+
+    add_executable(test_cast_channel tests/test_cast_channel.cpp)
+    target_link_libraries(test_cast_channel PRIVATE kinefin_cast Qt6::Test Qt6::Network OpenSSL::Crypto)
+    add_test(NAME cast_channel COMMAND test_cast_channel)
+
+    add_executable(test_cast_profile tests/test_cast_profile.cpp)
+    target_link_libraries(test_cast_profile PRIVATE kinefin_cast Qt6::Test)
+    add_test(NAME cast_profile COMMAND test_cast_profile)
+
+    add_executable(test_cast_sender tests/test_cast_sender.cpp)
+    target_link_libraries(test_cast_sender PRIVATE kinefin_cast Qt6::Test Qt6::Network OpenSSL::Crypto)
+    add_test(NAME cast_sender COMMAND test_cast_sender)
+
+    add_executable(test_cast_controller tests/test_cast_controller.cpp)
+    target_link_libraries(test_cast_controller PRIVATE kinefin_cast Qt6::Test Qt6::Network OpenSSL::Crypto)
+    add_test(NAME cast_controller COMMAND test_cast_controller)
 
     add_executable(test_screensaver_inhibitor tests/test_screensaver_inhibitor.cpp)
     target_compile_definitions(test_screensaver_inhibitor PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")

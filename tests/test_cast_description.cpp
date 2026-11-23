@@ -504,16 +504,55 @@ class TestCastDescription : public QObject {
         QVERIFY(parseSinkProtocolInfo(QString()).isEmpty());
 
         QStringList entries;
-        for (int i = 0; i < kMaxListEntries; ++i)
+        for (int i = 0; i < kMaxSinkVideoTypes; ++i)
             entries.append(QStringLiteral("http-get:*:video/x%1:*").arg(i));
         entries.append(QStringLiteral("http-get:*:video/late:*"));
         const QStringList capped = parseSinkProtocolInfo(entries.join(QLatin1Char(',')));
-        QCOMPARE(capped.size(), kMaxListEntries);
+        QCOMPARE(capped.size(), kMaxSinkVideoTypes);
         QVERIFY(!capped.contains(QStringLiteral("video/late")));
         const QString longEntry = QStringLiteral("http-get:*:video/")
                                   + QString(kMaxListEntryChars, QLatin1Char('a'))
                                   + QStringLiteral(":*");
         QVERIFY(parseSinkProtocolInfo(longEntry).isEmpty());
+    }
+
+    void aLongSinkKeepsItsVideoTypesWhateverTheOrder()
+    {
+        // An alphabetical sink with its video types after 300 others, as a real renderer lists them
+        QStringList entries;
+        for (int i = 0; i < 300; ++i)
+            entries.append(QStringLiteral("http-get:*:audio/a%1:*").arg(i));
+        for (int i = 0; i < 99; ++i)
+            entries.append(QStringLiteral("http-get:*:video/v%1:*").arg(i));
+        entries.append(QStringLiteral("http-get:*:video/x-matroska:*"));
+        QCOMPARE(entries.size(), 400);
+        const QStringList mimes = parseSinkProtocolInfo(entries.join(QLatin1Char(',')));
+        QVERIFY(mimes.contains(QStringLiteral("video/x-matroska")));
+        QVERIFY(mimes.contains(QStringLiteral("video/v0")));
+        QCOMPARE(mimes.filter(QStringLiteral("video/")).size(), 100);
+        QCOMPARE(mimes.filter(QStringLiteral("audio/")).size(), kMaxSinkOtherTypes);
+    }
+
+    void aHostileSinkStaysBounded()
+    {
+        QStringList entries;
+        for (int i = 0; i < 3000; ++i)
+            entries.append(QStringLiteral("http-get:*:video/v%1:*").arg(i));
+        for (int i = 0; i < 3000; ++i)
+            entries.append(QStringLiteral("http-get:*:application/a%1:*").arg(i));
+        const QStringList mimes = parseSinkProtocolInfo(entries.join(QLatin1Char(',')));
+        QCOMPARE(mimes.filter(QStringLiteral("video/")).size(), kMaxSinkVideoTypes);
+        QCOMPARE(mimes.size(), kMaxSinkVideoTypes + kMaxSinkOtherTypes);
+
+        // Entries that are no http-get count against the raw cap, though they keep nothing
+        QStringList padded;
+        for (int i = 0; i < kMaxSinkEntries; ++i)
+            padded.append(QStringLiteral("rtsp-rtp-udp:*:video/p%1:*").arg(i));
+        padded.append(QStringLiteral("http-get:*:video/late:*"));
+        QVERIFY(parseSinkProtocolInfo(padded.join(QLatin1Char(','))).isEmpty());
+        padded.removeFirst();
+        QCOMPARE(parseSinkProtocolInfo(padded.join(QLatin1Char(','))),
+                 QStringList{QStringLiteral("video/late")});
     }
 
     void sameOrigin()

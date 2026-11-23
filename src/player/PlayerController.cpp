@@ -4,7 +4,6 @@
 
 #include "api/DeviceProfile.h"
 #include "api/JellyfinClient.h"
-#include "cast/RendererProfile.h"
 #include "downloads/ExportNames.h"
 #include "models/ItemSummary.h"
 #include "models/PlayQueue.h"
@@ -32,6 +31,7 @@
 #include <QStorageInfo>
 #include <QUrl>
 #include <QUrlQuery>
+#include <QUuid>
 
 #include <utility>
 
@@ -42,14 +42,16 @@ namespace Kinefin {
 namespace {
 constexpr qint64 TicksPerSecond = 10'000'000;
 
-// A transcode asked from another start: the server begins its job at StartTimeTicks, and the rest of the query stays as the server wrote it
-QUrl withStartTicks(QUrl url, qint64 ticks)
+// A transcode asked from another start: the server begins its job at StartTimeTicks, and the rest of the query stays as the server wrote it. `freshSession` gives it a new PlaySessionId: the server names the job's output file after that id and serves the earlier file again for the same id, whatever the start
+QUrl withStartTicks(QUrl url, qint64 ticks, bool freshSession = false)
 {
     QUrlQuery query(url);
     const auto items = query.queryItems(QUrl::FullyEncoded);
     QUrlQuery kept;
     for (const auto &[name, value] : items) {
-        if (name.compare(QLatin1String("StartTimeTicks"), Qt::CaseInsensitive) != 0)
+        if (freshSession && name.compare(QLatin1String("PlaySessionId"), Qt::CaseInsensitive) == 0)
+            kept.addQueryItem(name, QUuid::createUuid().toString(QUuid::Id128));
+        else if (name.compare(QLatin1String("StartTimeTicks"), Qt::CaseInsensitive) != 0)
             kept.addQueryItem(name, value);
     }
     kept.addQueryItem(QStringLiteral("StartTimeTicks"),
@@ -328,8 +330,9 @@ PlayerController::PlayerController(JellyfinClient &client, PlayQueue &queue,
     m_castSeek.setInterval(400);
     connect(&m_castSeek, &QTimer::timeout, this, [this] {
         if (m_casting && m_source.method == PlaybackSource::Method::Transcode)
-            m_cast->reload(withStartTicks(m_source.url, m_castSeekTarget),
-                           m_castSeekTarget / 10'000);
+            m_cast->reload(withStartTicks(m_source.url, m_castSeekTarget, true),
+                           m_castSeekTarget / 10'000,
+                           castTextTrack(m_castSeekTarget).value_or(CastTextTrack{}).url);
     });
     connect(m_cast, &CastController::playing, this, &PlayerController::onCastPlaying);
     connect(m_cast, &CastController::paused, this, &PlayerController::onCastPaused);
@@ -896,7 +899,7 @@ bool PlayerController::castTo(const QString &udn)
         return startItem(m_itemId, std::max<qint64>(0, position));
     }
     // A downloaded file has no server stream a renderer could fetch
-    if (!m_cast->infoFor(udn) || m_localPlayback)
+    if (!m_cast->hasTarget(udn) || m_localPlayback)
         return false;
     if (castTarget() && udn == m_castTarget && (m_casting || m_loading))
         return true;
@@ -905,8 +908,9 @@ bool PlayerController::castTo(const QString &udn)
     bool otherAudio = false;
     if (!m_casting && !m_itemId.isEmpty()) {
         m_requestedStreams.audioStreamIndex = m_selectedAudioIndex;
+        // A subtitle that is no server stream (a file added here) cannot go to the device: no stale choice of an earlier item is kept for it
         m_requestedStreams.subtitleStreamIndex = m_selectedSubtitleIndex ? m_selectedSubtitleIndex
-                                                 : m_subtitlesOff
+                                                 : (m_subtitlesOff || m_selectedSubtitleId != 0)
                                                      ? std::optional<int>(-1)
                                                      : m_requestedStreams.subtitleStreamIndex;
         const StreamSummary *track = pickStream(m_source.media.source, u"Audio");
@@ -936,7 +940,7 @@ bool PlayerController::playItemOn(const QString &udn, const QString &id, qint64 
         clearCastTarget();
         return playItem(id, resumeTicks);
     }
-    if (!m_cast->infoFor(udn))
+    if (!m_cast->hasTarget(udn))
         return false;
     m_castTarget = udn;
     m_castName = m_cast->nameFor(udn);
@@ -1483,16 +1487,12 @@ void PlayerController::requestPending()
     if (!m_loading || m_itemId.isEmpty() || m_session.state() != PlaybackSession::State::Idle)
         return;
     if (castTarget()) {
-        const RendererInfo *info = m_cast->infoFor(m_castTarget);
-        if (!info) {
+        if (!m_cast->hasTarget(m_castTarget)) {
             castFailed(i18n("The device is no longer available: search for it again from Cast."));
             return;
         }
-        const bool burnIn = m_selectedSubtitleId != 0
-                            || (m_requestedStreams.subtitleStreamIndex
-                                && *m_requestedStreams.subtitleStreamIndex >= 0);
         const QJsonObject profile =
-            rendererDeviceProfile(info->sinkMimeTypes, burnIn, m_castTranscodeOnly);
+            m_cast->deviceProfile(m_castTarget, castBurnIn(), m_castTranscodeOnly);
         if (!m_client.requestPlaybackInfo(m_itemId, m_resumeTicks, profile, UnlimitedBitrate,
                                           m_requestedStreams)) {
             m_loading = false;
@@ -1893,10 +1893,43 @@ void PlayerController::onSource(const PlaybackSource &source)
     Q_EMIT changed();
 }
 
+bool PlayerController::castBurnIn() const
+{
+    // A target that takes a text track gets the profile that leaves the choice to the server: text formats stay external for the track, image formats are encoded into the picture
+    if (m_cast->takesTextTrack(m_castTarget))
+        return false;
+    // A DLNA renderer takes no track: the server burns the chosen subtitle in
+    const std::optional<int> index = m_requestedStreams.subtitleStreamIndex;
+    return index && *index >= 0;
+}
+
+std::optional<CastTextTrack> PlayerController::castTextTrack(qint64 startTicks) const
+{
+    if (m_castTarget.isEmpty() || !m_cast->takesTextTrack(m_castTarget))
+        return std::nullopt;
+    const std::optional<int> index = m_requestedStreams.subtitleStreamIndex;
+    if (!index || *index < 0)
+        return std::nullopt;
+    for (const StreamSummary &stream : m_source.media.source.streams) {
+        if (stream.type != QLatin1String("Subtitle") || stream.index != *index)
+            continue;
+        if (!isTextSubtitleCodec(stream.codec))
+            return std::nullopt;
+        CastTextTrack track;
+        track.url = castSubtitleUrl(m_client.serverUrl(), m_source.itemId, m_source.mediaSourceId,
+                                    *index, startTicks);
+        if (track.url.isEmpty())
+            return std::nullopt;
+        track.language = stream.language;
+        track.name = stream.title.isEmpty() ? stream.language : stream.title;
+        return track;
+    }
+    return std::nullopt;
+}
+
 void PlayerController::startCast(const PlaybackSource &source)
 {
-    const RendererInfo *info = m_cast->infoFor(m_castTarget);
-    if (!info || m_session.state() != PlaybackSession::State::Idle) {
+    if (!m_cast->hasTarget(m_castTarget) || m_session.state() != PlaybackSession::State::Idle) {
         castFailed(i18n("The device is no longer available: search for it again from Cast."));
         return;
     }
@@ -1910,12 +1943,12 @@ void PlayerController::startCast(const PlaybackSource &source)
             "The server's stream link would give the device your sign-in, so it was not sent."));
         return;
     }
-    const QString container = source.method == PlaybackSource::Method::Transcode
-                                  ? QStringLiteral("ts")
-                                  : source.media.source.container;
-    const QString mime = rendererMime(container, info->sinkMimeTypes);
+    const bool transcode = source.method == PlaybackSource::Method::Transcode;
+    const QString mime = m_cast->mimeFor(m_castTarget, source.media.source.container, transcode);
     if (mime.isEmpty()) {
-        castFailed(i18nc("@info %1 is a device name", "%1 cannot play this kind of video.", name));
+        castFailed(i18nc("@info %1 is a device name",
+                         "%1 cannot play this kind of video: play it on this computer instead.",
+                         name));
         return;
     }
     m_loading = false;
@@ -1938,11 +1971,19 @@ void PlayerController::startCast(const PlaybackSource &source)
     // The item's own reply may come after Playback Info: the renderer then lists the media source's name
     const QString title = m_title.isEmpty() ? source.media.source.name : m_title;
     // The renderer counts a transcode's position from its start: the start is put in the URL, whatever the server wrote there
-    const QUrl url = source.method == PlaybackSource::Method::Transcode
-                         ? withStartTicks(source.url, m_resumeTicks)
-                         : source.url;
-    if (!m_cast->load(m_castTarget, url, mime, title, m_castPositionMs, m_castDurationMs,
-                      m_client.serverUrl(), source.method == PlaybackSource::Method::Direct)) {
+    CastLoad request;
+    request.url = transcode ? withStartTicks(source.url, m_resumeTicks) : source.url;
+    request.mime = mime;
+    request.title = title;
+    request.subtitle = m_subtitle;
+    request.startMs = m_castPositionMs;
+    request.durationMs = m_castDurationMs;
+    request.serverBase = m_client.serverUrl();
+    request.direct = !transcode;
+    request.imageUrl = artworkUrl();
+    if (const auto track = castTextTrack(transcode ? m_resumeTicks : 0))
+        request.track = *track;
+    if (!m_cast->load(m_castTarget, request)) {
         castFailed(i18nc("@info %1 is a device name",
                          "%1 could not play this video: check that it can reach the server.",
                          name));
@@ -2022,14 +2063,16 @@ void PlayerController::onCastStopped()
     Q_EMIT castStoppedElsewhere(name);
 }
 
-void PlayerController::onCastFailed(DlnaRenderer::Failure failure)
+void PlayerController::onCastFailed(CastRenderer::Failure failure)
 {
     if (!m_casting)
         return;
     const QString name = m_castName;
-    // A direct play the renderer refused before it ever played is asked once more as a transcode
-    if (failure == DlnaRenderer::Failure::Refused
-        && m_session.state() == PlaybackSession::State::Opening
+    // A direct play the renderer refused before it ever played, or left standing at its start, is asked once more as a transcode
+    const bool neverPlayed =
+        m_session.state() == PlaybackSession::State::Opening
+        || (m_session.state() != PlaybackSession::State::Idle && m_castPositionMs < 2000);
+    if (failure == CastRenderer::Failure::Refused && neverPlayed
         && m_source.method == PlaybackSource::Method::Direct && !m_castTranscodeOnly) {
         closeCast(false);
         m_castTranscodeOnly = true;
@@ -2037,16 +2080,24 @@ void PlayerController::onCastFailed(DlnaRenderer::Failure failure)
         return;
     }
     switch (failure) {
-    case DlnaRenderer::Failure::Refused:
+    case CastRenderer::Failure::Refused:
         castFailed(i18nc("@info %1 is a device name",
                          "%1 could not play this video: check that it can reach the server.",
                          name));
         break;
-    case DlnaRenderer::Failure::NotResponding:
+    case CastRenderer::Failure::Untrusted:
         castFailed(i18nc("@info %1 is a device name",
-                         "%1 stopped responding: check that it is on and on this network.", name));
+                         "Kinefin could not verify that %1 is a Google Cast device, so nothing was "
+                         "sent to it: play on this computer or choose another device.",
+                         name));
         break;
-    case DlnaRenderer::Failure::ServerRefused:
+    case CastRenderer::Failure::NotResponding:
+        castFailed(i18nc("@info %1 is a device name",
+                         "%1 stopped responding: check that it is turned on and connected to this "
+                         "network.",
+                         name));
+        break;
+    case CastRenderer::Failure::ServerRefused:
         castFailed(i18n("The server does not let other devices play its videos without a sign-in, "
                         "so this video cannot be cast."));
         break;

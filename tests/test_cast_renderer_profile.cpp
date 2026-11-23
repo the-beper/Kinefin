@@ -68,6 +68,26 @@ class TestRendererProfile : public QObject {
                  golden({}));
     }
 
+    void quicktimeAndMpegtsSinksDirectPlay()
+    {
+        const QString quicktime = QStringLiteral("video/quicktime");
+        const QString mpegts = QStringLiteral("video/mpegts");
+        const QString canonical = QStringLiteral("video/mp4");
+        const QStringList mixed{quicktime, mpegts, QStringLiteral("video/x-matroska")};
+        const QStringList audioOnly{QStringLiteral("audio/mp4"), QStringLiteral("audio/mpegts")};
+        const QJsonObject mp4 = golden({directPlay(QStringLiteral("mp4,m4v"))});
+        QCOMPARE(rendererDeviceProfile({quicktime}, false, false), mp4);
+        QCOMPARE(rendererDeviceProfile({QStringLiteral("Video/QuickTime")}, false, false), mp4);
+        QCOMPARE(rendererDeviceProfile({quicktime, canonical}, false, false), mp4);
+        QCOMPARE(rendererDeviceProfile({mpegts}, false, false),
+                 golden({directPlay(QStringLiteral("ts"))}));
+        QCOMPARE(rendererDeviceProfile(mixed, false, false),
+                 golden({directPlay(QStringLiteral("mp4,m4v,mkv,ts"))}));
+        QCOMPARE(rendererDeviceProfile(mixed, false, true), golden({}));
+        QCOMPARE(rendererDeviceProfile(audioOnly, false, false), golden({}));
+        QCOMPARE(rendererDeviceProfile({}, false, false), golden({}));
+    }
+
     void transcodeOnlyDropsDirectPlay()
     {
         QCOMPARE(rendererDeviceProfile({QStringLiteral("video/mp4")}, false, true), golden({}));
@@ -141,6 +161,36 @@ class TestRendererProfile : public QObject {
         QTest::newRow("avi second")
             << QStringLiteral("avi") << QStringList{QStringLiteral("video/x-msvideo")}
             << QStringLiteral("video/x-msvideo");
+        QTest::newRow("mp4 quicktime only")
+            << QStringLiteral("mp4") << QStringList{QStringLiteral("video/quicktime")}
+            << QStringLiteral("video/quicktime");
+        QTest::newRow("m4v quicktime only")
+            << QStringLiteral("m4v") << QStringList{QStringLiteral("video/quicktime")}
+            << QStringLiteral("video/quicktime");
+        QTest::newRow("ffmpeg mp4 list quicktime only")
+            << QStringLiteral("mov,mp4,m4a,3gp,3g2,mj2")
+            << QStringList{QStringLiteral("video/quicktime")} << QStringLiteral("video/quicktime");
+        QTest::newRow("mp4 and quicktime keeps mp4")
+            << QStringLiteral("mp4")
+            << QStringList{QStringLiteral("video/quicktime"), QStringLiteral("video/mp4")}
+            << QStringLiteral("video/mp4");
+        QTest::newRow("ts mpegts only")
+            << QStringLiteral("ts") << QStringList{QStringLiteral("video/mpegts")}
+            << QStringLiteral("video/mpegts");
+        QTest::newRow("mpegts container mpegts only")
+            << QStringLiteral("mpegts") << QStringList{QStringLiteral("video/mpegts")}
+            << QStringLiteral("video/mpegts");
+        QTest::newRow("ts mp2t wins over mpegts")
+            << QStringLiteral("ts")
+            << QStringList{QStringLiteral("video/mpegts"), QStringLiteral("video/mp2t")}
+            << QStringLiteral("video/mp2t");
+        QTest::newRow("ts dlna type wins over mpegts")
+            << QStringLiteral("ts")
+            << QStringList{QStringLiteral("video/mpegts"),
+                           QStringLiteral("video/vnd.dlna.mpeg-tts")}
+            << QStringLiteral("video/vnd.dlna.mpeg-tts");
+        QTest::newRow("mp4 audio only sink")
+            << QStringLiteral("mp4") << QStringList{QStringLiteral("audio/mp4")} << QString();
         QTest::newRow("not listed")
             << QStringLiteral("mp4") << QStringList{QStringLiteral("video/webm")} << QString();
         QTest::newRow("empty sink") << QStringLiteral("mkv") << QStringList() << QString();

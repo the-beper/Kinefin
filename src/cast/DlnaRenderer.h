@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "cast/CastRenderer.h"
 #include "cast/Soap.h"
+#include "cast/StreamProbe.h"
 #include "cast/UpnpDescription.h"
 
 #include <QByteArray>
@@ -21,31 +23,14 @@ class QNetworkReply;
 namespace Kinefin {
 
 // One DLNA renderer: its own network manager without credentials, cookies, proxy or redirects, one SOAP action at a time with user commands ahead of polls, a 3 s timeout and a 1 s poll
-class DlnaRenderer final : public QObject {
+class DlnaRenderer final : public CastRenderer {
     Q_OBJECT
 
   public:
-    enum class Transport {
-        Stopped,
-        Playing,
-        Paused,
-        Transitioning,
-        NoMedia,
-    };
-    Q_ENUM(Transport)
-
-    enum class Failure {
-        // The renderer would not play the stream it was given: a fault on the load, no PLAYING in time, a stop before it ever played. Another stream may still play
-        Refused,
-        // No answer to the load or to three polls in a row
-        NotResponding,
-        // The server asks the renderer for a credential: nothing reached the renderer
-        ServerRefused,
-    };
-    Q_ENUM(Failure)
-
     // No PLAYING this long after a load is a refusal of the stream
     static constexpr int StartTimeoutMs = 30'000;
+    // PLAYING this long without the position moving is a refusal of a direct play's stream
+    static constexpr int StallTimeoutMs = 20'000;
     // The token-less range probe of a direct play
     static constexpr int ProbeTimeoutMs = 5000;
     // SetAVTransportURI and Play: many renderers fetch the stream before they answer
@@ -54,48 +39,46 @@ class DlnaRenderer final : public QObject {
     explicit DlnaRenderer(RendererInfo info, QObject *parent = nullptr);
 
     const RendererInfo &info() const { return m_info; }
-    bool hasVolume() const { return m_info.hasVolume(); }
-    bool canPause() const { return m_info.canPause(); }
+    QString id() const override { return m_info.udn; }
+    bool hasVolume() const override { return m_info.hasVolume(); }
+    bool canPause() const override { return m_info.canPause(); }
     // A direct play seeks with REL_TIME; a transcode seeks by loading its URL at another start
-    bool canSeek() const { return !m_direct || m_info.canSeekRelTime(); }
+    bool canSeek() const override { return !m_direct || m_info.canSeekRelTime(); }
     bool direct() const { return m_direct; }
 
     // Loads and plays `url`, an http or https URL under `serverBase`: a direct play first checks with one token-less range request that the server lets the renderer in, then seeks to `startMs` when the renderer lists REL_TIME; a transcode URL already starts at `startMs`, and its positions count from there. The transport state comes through stateChanged
     bool load(const QUrl &url, const QString &mime, const QString &title, qint64 startMs,
               qint64 durationMs, const QUrl &serverBase, bool direct);
     // The same transcode again from `url`, which starts at `startMs`: how a transcode seeks
-    bool reload(const QUrl &url, qint64 startMs);
-    bool play();
-    bool pause();
+    bool load(const CastLoad &request) override
+    {
+        return load(request.url, request.mime, request.title, request.startMs, request.durationMs,
+                    request.serverBase, request.direct);
+    }
+    bool reload(const QUrl &url, qint64 startMs, const QUrl &subtitleUrl = {}) override;
+    bool play() override;
+    bool pause() override;
     // A direct play only: a transcode seeks by loading the same URL at another start
-    bool seek(qint64 positionMs);
-    bool stop();
-    bool setVolume(int volume);
-    bool setMuted(bool muted);
+    bool seek(qint64 positionMs) override;
+    bool stop() override;
+    bool setVolume(int volume) override;
+    bool setMuted(bool muted) override;
     bool refreshVolume();
     // The item's runtime once the server named it: the renderer's own duration of a transcode is not trusted
-    void setDurationMs(qint64 durationMs);
+    void setDurationMs(qint64 durationMs) override;
 
     void startPolling();
     void stopPolling();
     bool polling() const { return m_pollTimer.isActive(); }
-    qint64 positionMs() const { return m_positionMs; }
-    qint64 durationMs() const { return m_durationMs; }
-    std::optional<Transport> transport() const { return m_reportedTransport; }
+    qint64 positionMs() const override { return m_positionMs; }
+    qint64 durationMs() const override { return m_durationMs; }
+    std::optional<Transport> transport() const override { return m_reportedTransport; }
     // -1 until the renderer answered GetVolume
-    int volume() const { return m_volume; }
-    bool muted() const { return m_muted; }
+    int volume() const override { return m_volume; }
+    bool muted() const override { return m_muted; }
     QUrl url() const { return m_url; }
-
-  Q_SIGNALS:
-    void stateChanged(Kinefin::DlnaRenderer::Transport state, qint64 positionMs, qint64 durationMs);
-    void positionChanged(qint64 positionMs, qint64 durationMs);
-    void volumeChanged(int volume, bool muted);
-    // The renderer answered STOPPED at the end of the item
-    void ended();
-    // The renderer stopped on its own, or another control point took its track
-    void stopped();
-    void failed(Kinefin::DlnaRenderer::Failure failure);
+    // For the tests: a shorter StallTimeoutMs
+    void setStallTimeoutMs(int ms) { m_stallTimer.setInterval(ms); }
 
   private:
     struct Command {
@@ -114,6 +97,7 @@ class DlnaRenderer final : public QObject {
     Command avTransportCommand(const QString &action, QList<SoapArgument> arguments = {}) const;
     void startTransport();
     void probe();
+    void onProbeFinished(int status);
     void enqueue(Command command);
     void sendNext();
     void send(const Command &command);
@@ -125,6 +109,8 @@ class DlnaRenderer final : public QObject {
     void handlePosition(const SoapResult &result);
     void handleVolume(const SoapResult &result);
     void updateState(Transport state);
+    void watchStall(qint64 rendererMs);
+    void resetStall();
     bool isOwnTrack(const QString &track) const;
     void abortProbe();
     void fail(Failure failure);
@@ -135,12 +121,17 @@ class DlnaRenderer final : public QObject {
     QQueue<Command> m_polls;
     std::optional<Command> m_current;
     QNetworkReply *m_reply = nullptr;
-    QPointer<QNetworkReply> m_probe;
+    StreamProbe m_probe{&m_network};
     QByteArray m_response;
     int m_responseLimit = kMaxSoapResponseBytes;
     QTimer m_timeout;
     QTimer m_pollTimer;
     QTimer m_startTimer;
+    QTimer m_stallTimer;
+    // The first position the renderer gave while PLAYING for this load: the stall timer runs from it
+    std::optional<qint64> m_stallBaseMs;
+    // The position moved since: the load plays, and the stall watchdog is off for it
+    bool m_progressSeen = false;
     // Every load and stop starts a new generation: an answer to a command of an earlier one is dropped
     quint64 m_generation = 0;
     QUrl m_url;

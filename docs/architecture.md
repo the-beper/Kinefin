@@ -26,7 +26,7 @@ flowchart LR
         API["JellyfinClient and<br/>JellyfinSocketClient<br/>src/api"]
         Mpv["PlaybackEngine<br/>libmpv"]
         Plasma["Plasma integration<br/>MPRIS, KRunner, inhibitors"]
-        Cast["DLNA cast<br/>src/cast"]
+        Cast["Cast to devices<br/>src/cast"]
     end
     QML --> Session
     QML --> Player
@@ -38,7 +38,7 @@ flowchart LR
     API <--> Server
 ```
 
-The interface shows what two controllers expose. `ConnectionController` owns the session with the server and the models behind every page. `PlayerController` owns playback, wherever it happens: in the window, in the mini player or picture-in-picture, or on a DLNA device. Both reach the server's REST and WebSocket APIs only through the API client. Images go through `src/imagecache`, and mpv opens the media stream itself.
+The interface shows what two controllers expose. `ConnectionController` owns the session with the server and the models behind every page. `PlayerController` owns playback, wherever it happens: in the window, in the mini player or picture-in-picture, or on a DLNA or Google Cast device. Both reach the server's REST and WebSocket APIs only through the API client. Images go through `src/imagecache`, and mpv opens the media stream itself.
 
 ## Entry points
 
@@ -62,7 +62,9 @@ The directories build into static libraries (`kinefin_core`, `kinefin_player`, `
 | `src/downloads/` | The download queue and transfers, per-series rules, export, and the watched-state changes made offline that wait for the server |
 | `src/player/` | `PlaybackSession` (the lifecycle of one playback and when to report it), `PlaybackEngine` (libmpv through mpvqt), `PlayerController`, and the pieces they share: settings mapped to mpv, the bitrate fallback, trickplay previews, clip export, per-series track choices |
 | `src/syncplay/` | SyncPlay groups: the server clock, the group queue and following the group |
-| `src/cast/` | DLNA cast: SSDP discovery, device descriptions, SOAP control of a renderer, and `CastController` |
+| `src/cast/` (shared) | Cast to devices: `CastController` drives the active device through the `CastRenderer` interface; `CastNetwork` (the interfaces a multicast search uses) and `StreamProbe` (the token-less probe of a direct-play URL) |
+| `src/cast/` (DLNA) | SSDP discovery, device descriptions, SOAP control of a renderer |
+| `src/cast/` (Google Cast) | `Mdns` discovery, `CastChannel` (the Cast V2 channel and its heartbeat), `CastDeviceAuth` (device authentication on libcrypto), `CastProto` (CASTV2 framing and protobuf), `CastSender` (the Default Media Receiver session), `CastProfile` (the device profile by model) |
 | `src/integration/` | Plasma and desktop integration: MPRIS, the KRunner runner, screensaver and suspend inhibition, the remote-control socket, `jellyfin://` links, gamepads (SDL3) with spatial navigation, the update check |
 | `src/app/` | Glue between C++ and QML: `ConnectionController`, QML singletons and helpers, the mpv video item |
 | `src/qml/` | The interface, one file per page, dialog or reusable control |

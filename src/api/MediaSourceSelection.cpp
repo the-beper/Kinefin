@@ -351,4 +351,26 @@ SourceSelection selectPlaybackSource(const QJsonObject &response, const QString 
     }
     return failure(QStringLiteral("No playable media source"));
 }
+
+bool isTextSubtitleCodec(QStringView codec)
+{
+    static const QStringList text{QStringLiteral("subrip"),  QStringLiteral("srt"),
+                                  QStringLiteral("ass"),     QStringLiteral("ssa"),
+                                  QStringLiteral("vtt"),     QStringLiteral("webvtt"),
+                                  QStringLiteral("mov_text")};
+    return text.contains(codec.toString().trimmed().toLower());
+}
+
+QUrl castSubtitleUrl(const QUrl &serverBase, const QString &itemId, const QString &mediaSourceId,
+                     int index, qint64 startTicks)
+{
+    if (!isValidJellyfinId(itemId) || !isValidJellyfinId(mediaSourceId) || index < 0
+        || startTicks < 0)
+        return {};
+    return absoluteUrl(
+        serverBase, QStringLiteral("/Videos/") + itemId + QLatin1Char('/') + mediaSourceId
+                        + QStringLiteral("/Subtitles/") + QString::number(index) + QLatin1Char('/')
+                        + QString::number(startTicks) + QStringLiteral("/Stream.vtt"));
+}
+
 } // namespace Kinefin

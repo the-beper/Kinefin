@@ -12,7 +12,8 @@ struct ContainerMimes {
     QLatin1StringView container;
     // Whether the direct play profile names it (the others are aliases of a Jellyfin container name)
     bool profile;
-    std::array<QLatin1StringView, 3> mimes;
+    // The canonical type first, then the names some sinks use instead: the first one the sink lists is sent
+    std::array<QLatin1StringView, 4> mimes;
 };
 
 constexpr QLatin1StringView kNone{};
@@ -20,26 +21,30 @@ constexpr QLatin1StringView kNone{};
 const std::array<ContainerMimes, 8> &containerTable()
 {
     static const std::array<ContainerMimes, 8> table{{
-        {QLatin1StringView("mp4"), true, {QLatin1StringView("video/mp4"), kNone, kNone}},
-        {QLatin1StringView("m4v"), true, {QLatin1StringView("video/mp4"), kNone, kNone}},
+        {QLatin1StringView("mp4"),
+         true,
+         {QLatin1StringView("video/mp4"), QLatin1StringView("video/quicktime"), kNone, kNone}},
+        {QLatin1StringView("m4v"),
+         true,
+         {QLatin1StringView("video/mp4"), QLatin1StringView("video/quicktime"), kNone, kNone}},
         {QLatin1StringView("mkv"),
          true,
-         {QLatin1StringView("video/x-matroska"), QLatin1StringView("video/x-mkv"), kNone}},
+         {QLatin1StringView("video/x-matroska"), QLatin1StringView("video/x-mkv"), kNone, kNone}},
         {QLatin1StringView("matroska"),
          false,
-         {QLatin1StringView("video/x-matroska"), QLatin1StringView("video/x-mkv"), kNone}},
+         {QLatin1StringView("video/x-matroska"), QLatin1StringView("video/x-mkv"), kNone, kNone}},
         {QLatin1StringView("ts"),
          true,
          {QLatin1StringView("video/mpeg"), QLatin1StringView("video/mp2t"),
-          QLatin1StringView("video/vnd.dlna.mpeg-tts")}},
+          QLatin1StringView("video/vnd.dlna.mpeg-tts"), QLatin1StringView("video/mpegts")}},
         {QLatin1StringView("mpegts"),
          false,
          {QLatin1StringView("video/mpeg"), QLatin1StringView("video/mp2t"),
-          QLatin1StringView("video/vnd.dlna.mpeg-tts")}},
-        {QLatin1StringView("webm"), true, {QLatin1StringView("video/webm"), kNone, kNone}},
+          QLatin1StringView("video/vnd.dlna.mpeg-tts"), QLatin1StringView("video/mpegts")}},
+        {QLatin1StringView("webm"), true, {QLatin1StringView("video/webm"), kNone, kNone, kNone}},
         {QLatin1StringView("avi"),
          true,
-         {QLatin1StringView("video/avi"), QLatin1StringView("video/x-msvideo"), kNone}},
+         {QLatin1StringView("video/avi"), QLatin1StringView("video/x-msvideo"), kNone, kNone}},
     }};
     return table;
 }

@@ -1,0 +1,2 @@
+mdns_googlecast_1.bin sender 192.168.7.10: one Google Nest Hub (fn "Hub 01", ca 231941, port 8009 in SRV); answer section PTR, additional section SRV, TXT, A, AAAA
+mdns_googlecast_2.bin sender 192.168.7.39: a Google Nest Hub (fn "Hub 02 display area", ca 231941, port 8009) and the Google Cast Group it hosts (fn "Test group", md "Google Cast Group", ca 199204 without the video bit, UUID id with dashes, port in its SRV); two PTR answers, SRV, TXT, A and AAAA records

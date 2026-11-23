@@ -134,6 +134,12 @@ class FakeRenderer : public QObject {
     bool playStarts = true;
     // When set, GetPositionInfo names this track instead of the one loaded
     QString reportedTrackUri;
+    // When set, GetTransportInfo answers this state string as it is (any case, vendor values) instead of the real state
+    QString reportedTransport;
+    // When set, GetPositionInfo answers this RelTime as it is (NOT_IMPLEMENTED, garbage) instead of the clock
+    QString reportedRelTime;
+    // A Seek while the renderer is STOPPED answers success and does nothing, as gmrender-resurrect does
+    bool ignoreSeekWhileStopped = false;
     QStringList actions;
     QList<QByteArray> bodies;
     QList<QByteArray> headers;
@@ -289,6 +295,8 @@ class FakeRenderer : public QObject {
             return envelope(service, action, "<InstanceID>0</InstanceID>");
         }
         if (action == QLatin1StringView("Seek")) {
+            if (ignoreSeekWhileStopped && transport == QLatin1StringView("STOPPED"))
+                return envelope(service, action, "<InstanceID>0</InstanceID>");
             const QString body = QString::fromUtf8(bodies.constLast());
             const int start = body.indexOf(QStringLiteral("<Target>"));
             const int end = body.indexOf(QStringLiteral("</Target>"));
@@ -307,7 +315,7 @@ class FakeRenderer : public QObject {
                          QStringLiteral("<CurrentTransportState>%1</CurrentTransportState>"
                                         "<CurrentTransportStatus>OK</CurrentTransportStatus>"
                                         "<CurrentSpeed>1</CurrentSpeed>")
-                             .arg(transport)
+                             .arg(reportedTransport.isEmpty() ? transport : reportedTransport)
                              .toUtf8());
             // A renderer that could not fetch the stream gives up after one TRANSITIONING
             if (!playStarts && transport == QLatin1StringView("TRANSITIONING"))
@@ -323,7 +331,7 @@ class FakeRenderer : public QObject {
                     .arg(seconds / 60 % 60, 2, 10, QLatin1Char('0'))
                     .arg(seconds % 60, 2, 10, QLatin1Char('0'));
             };
-            const QString time = clock(position);
+            const QString time = reportedRelTime.isEmpty() ? clock(position) : reportedRelTime;
             const QString total = clock(duration);
             return envelope(
                 service, action,

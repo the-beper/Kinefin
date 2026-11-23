@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "cast/Ssdp.h"
 
+#include "cast/CastNetwork.h"
+
 #include <QLoggingCategory>
 #include <QNetworkDatagram>
 #include <QNetworkInterface>
@@ -306,20 +308,8 @@ void SsdpSearch::sendQuery()
         m_socket.writeDatagram(request, m_options.target, m_options.port);
         return;
     }
-    const QNetworkInterface::InterfaceFlags wanted =
-        QNetworkInterface::IsUp | QNetworkInterface::IsRunning | QNetworkInterface::CanMulticast;
-    for (const QNetworkInterface &iface : QNetworkInterface::allInterfaces()) {
-        const auto flags = iface.flags();
-        if (!flags.testFlags(wanted))
-            continue;
-        if (flags.testAnyFlags(QNetworkInterface::IsLoopBack | QNetworkInterface::IsPointToPoint))
-            continue;
-        bool hasIpv4 = false;
-        for (const QNetworkAddressEntry &entry : iface.addressEntries())
-            hasIpv4 = hasIpv4 || entry.ip().protocol() == QAbstractSocket::IPv4Protocol;
-        if (!hasIpv4)
-            continue;
-        m_socket.setMulticastInterface(iface);
+    for (const CastInterface &iface : castInterfaces()) {
+        m_socket.setMulticastInterface(iface.interface);
         m_socket.writeDatagram(request, m_options.target, m_options.port);
     }
 }

@@ -5,7 +5,7 @@ import QtQuick.Controls as Controls
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 
-// Where a video plays: This Computer first, then the DLNA devices a search finds while the dialog is open. One window of one size: the search, the devices and the empty state share the room under This Computer. A pick closes the dialog
+// Where a video plays: This Computer first, then the DLNA renderers and Google Cast devices a search finds while the dialog is open. One window of one size: the search, the devices and the empty state share the room under This Computer. A pick closes the dialog
 Kirigami.Dialog {
     id: dialog
     objectName: "castDialog"
@@ -194,7 +194,7 @@ Kirigami.Dialog {
             visible: list.count === 0 && dialog.searchError.length === 0 && !dialog.searching && dialog.searchedOnce
             icon.name: "video-television"
             text: i18nc("@info:placeholder", "No devices found")
-            explanation: i18nc("@info:placeholder", "TVs and players that accept video over DLNA appear here when they are on this network.")
+            explanation: i18nc("@info:placeholder", "TVs and players that accept video over DLNA or Google Cast appear here when they are on this network.")
         }
     }
 }

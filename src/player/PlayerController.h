@@ -563,12 +563,15 @@ class PlayerController final : public QObject {
     void onState(PlaybackSession::State from, PlaybackSession::State to);
     bool castTarget() const;
     void startCast(const PlaybackSource &source);
+    // Whether the chosen subtitle must be burnt in for the cast target, and the WebVTT track of it for a target that fetches one
+    bool castBurnIn() const;
+    std::optional<CastTextTrack> castTextTrack(qint64 startTicks) const;
     void onCastPlaying();
     void onCastPaused();
     void onCastBuffering();
     void onCastEnded();
     void onCastStopped();
-    void onCastFailed(DlnaRenderer::Failure failure);
+    void onCastFailed(CastRenderer::Failure failure);
     // Closes the cast's server session (Stopped at the renderer's position) and, with `stopRenderer`, stops the renderer too; the target stays
     void closeCast(bool stopRenderer);
     void clearCastTarget();

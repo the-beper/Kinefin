@@ -50,6 +50,7 @@
   - [The Admin Dashboard entry is missing](#the-admin-dashboard-entry-is-missing)
   - [Search Online Subtitles… is missing](#search-online-subtitles-is-missing)
   - [A cast device is not listed](#a-cast-device-is-not-listed)
+  - [A Google Cast device does not play](#a-google-cast-device-does-not-play)
   - [KRunner shows no Kinefin results](#krunner-shows-no-kinefin-results)
   - [The picture-in-picture window falls behind other windows](#the-picture-in-picture-window-falls-behind-other-windows)
 - [Where Kinefin keeps its files](#where-kinefin-keeps-its-files)
@@ -566,7 +567,7 @@ Offline playback has no server session and sends no reports. Kinefin stores the 
 
 ## Cast to another device
 
-Kinefin plays on DLNA (UPnP) renderers such as smart TVs and network players. Google Cast is not supported.
+Kinefin plays on DLNA (UPnP) renderers such as smart TVs and network players, and on Google Cast devices such as Chromecast and Nest Hub. Cast speakers that play only audio, and groups without video, are not listed. Each row of the picker starts its detail line with the protocol: `DLNA, <model>, <address>` or `Google Cast, <model>, <address>`. A DLNA renderer that reports playing but never moves its position is treated as refusing the file after 20 seconds, and a direct play is asked again as a transcode.
 
 To cast:
 
@@ -576,7 +577,9 @@ To cast:
 
 A cast from a card or details page starts at the resume point. From the player the playing video moves to the device at its position, with its audio and subtitle choice. **This Computer** brings the video back at the device's position.
 
-The controls of the player, the keyboard, MPRIS and other sessions act on the device: pause, resume, seek, chapters, **Next**, **Previous**, volume and mute where the device supports them. Speed, aspect, track menus, subtitle search, screenshots, clips, picture-in-picture, automatic quality lowering and the Up Next card are off while casting. A chosen subtitle is burned in, which makes the server transcode. If the device refuses the file, Kinefin asks the server once more for a transcode.
+The controls of the player, the keyboard, MPRIS and other sessions act on the device: pause, resume, seek, chapters, **Next**, **Previous**, volume and mute where the device supports them. Speed, aspect, track menus, subtitle search, screenshots, clips, picture-in-picture, automatic quality lowering and the Up Next card are off while casting. On a DLNA renderer a chosen subtitle is burned in, which makes the server transcode. On a Google Cast device a text subtitle (SubRip, ASS, SSA, WebVTT, MOV text) goes to the device as a track, and an image subtitle (PGS, DVD, DVB) is burned in by the server. A subtitle file you added yourself is not sent to the device, neither as a track nor burned in. If a device refuses a direct play, Kinefin asks the server once more for a transcode.
+
+A Google Cast device plays through Google's Default Media Receiver, so no Google account or registration is involved. Before anything is sent, the device has to prove that it is a Google Cast device; if it cannot, the player says so and sends nothing. A Google Cast receiver app on a device that Google does not make, for example the Cast option of the AirScreen app on a Fire TV, cannot pass that check and is not supported: use the DLNA entry of the same device. Seeking in a transcode reloads it at the new position. If another app or phone takes the device, the cast ends with a notice; after a lost connection Kinefin retries 3 times before it ends the cast.
 
 **Cast…** is disabled while you follow a SyncPlay group and hidden for a downloaded file. The screen is allowed to blank while a cast plays, and the computer is kept from suspending.
 
@@ -685,7 +688,22 @@ The entry has conditions, listed in [Audio and subtitle tracks](#audio-and-subti
 
 ### A cast device is not listed
 
-Devices appear only while the **Cast** dialog is open, and only DLNA renderers on the same network are listed; see [Cast to another device](#cast-to-another-device).
+Devices appear only while the **Cast** dialog is open. DLNA renderers and Google Cast devices answer a multicast search, so each must be on the same network as the computer. Check for access point (client) isolation, a firewall zone that drops multicast, and a VPN that takes the route. See [Cast to another device](#cast-to-another-device).
+
+### A Google Cast device does not play
+
+The device fetches the video from the server itself, so the server must be reachable from the device by IP address or a public name. Google Cast devices ignore the network's DNS: when an `http` server is named by a host name that resolves to a private address, Kinefin gives the device that IP instead and it plays. An `https` server named by a name the device cannot resolve fails, because the certificate would not match an IP. An `http` server behind a name-based reverse proxy fails too, because the device sends the IP as the Host header.
+
+The device model sets what plays. Above these limits the server transcodes to H.264 in MP4:
+
+| Device | Plays without transcoding |
+|---|---|
+| Nest Hub | H.264 up to 720p60 in MP4 or Matroska, VP9 up to 720p60 in WebM |
+| Nest Hub Max | H.264 up to 720p30 in MP4 or Matroska, VP9 up to 720p30 in WebM |
+| Chromecast Ultra | H.264 up to 1080p60 in MP4, HEVC and VP9 up to 4K |
+| Other models | H.264 up to 1080p30 in MP4 |
+
+If the player says Kinefin could not verify that the device is a Google Cast device, nothing was sent to it: play on this computer or pick another device.
 
 ### KRunner shows no Kinefin results
 

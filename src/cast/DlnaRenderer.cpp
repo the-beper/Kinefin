@@ -18,21 +18,26 @@ namespace {
 constexpr int kPollIntervalMs = 1000;
 constexpr int kPollFailuresBeforeFailed = 3;
 constexpr qint64 kEndWindowMs = 10'000;
-// A range probe answer is one byte; a server that ignores the range is cut off well before a whole file
-constexpr qint64 kMaxProbeBytes = 64 * 1024;
 constexpr qint64 kMaxDurationMs = 24LL * 3600 * 1000;
+// How far before its wanted start the first position of a direct play may be before it is sought again
+constexpr qint64 kStartSlackMs = 2'000;
+constexpr qint64 kStallProgressMs = 500;
 
 DlnaRenderer::Transport transportFrom(const QString &state)
 {
-    if (state == QLatin1String("PLAYING"))
+    const auto is = [&state](QLatin1StringView name) {
+        return state.compare(name, Qt::CaseInsensitive) == 0;
+    };
+    if (is(QLatin1StringView("PLAYING")))
         return DlnaRenderer::Transport::Playing;
-    if (state == QLatin1String("PAUSED_PLAYBACK"))
+    if (is(QLatin1StringView("PAUSED_PLAYBACK")) || is(QLatin1StringView("PAUSED_RECORDING")))
         return DlnaRenderer::Transport::Paused;
-    if (state == QLatin1String("TRANSITIONING"))
-        return DlnaRenderer::Transport::Transitioning;
-    if (state == QLatin1String("NO_MEDIA_PRESENT"))
+    if (is(QLatin1StringView("STOPPED")))
+        return DlnaRenderer::Transport::Stopped;
+    if (is(QLatin1StringView("NO_MEDIA_PRESENT")))
         return DlnaRenderer::Transport::NoMedia;
-    return DlnaRenderer::Transport::Stopped;
+    // A state this code does not know (vendor values) is not an end: a Stopped would close a started session
+    return DlnaRenderer::Transport::Transitioning;
 }
 
 // No cookie is sent or kept, whatever a renderer or the server sets
@@ -47,9 +52,10 @@ void withoutCookies(QNetworkRequest &request)
 } // namespace
 
 DlnaRenderer::DlnaRenderer(RendererInfo info, QObject *parent)
-    : QObject(parent), m_info(std::move(info))
+    : CastRenderer(parent), m_info(std::move(info))
 {
     m_network.setProxy(QNetworkProxy(QNetworkProxy::NoProxy));
+    connect(&m_probe, &StreamProbe::finished, this, &DlnaRenderer::onProbeFinished);
     m_timeout.setSingleShot(true);
     m_timeout.setInterval(kSoapTimeoutMs);
     connect(&m_timeout, &QTimer::timeout, this, &DlnaRenderer::onTimeout);
@@ -59,6 +65,12 @@ DlnaRenderer::DlnaRenderer(RendererInfo info, QObject *parent)
     m_startTimer.setInterval(StartTimeoutMs);
     connect(&m_startTimer, &QTimer::timeout, this, [this] {
         qCWarning(rendererLog) << "no PLAYING in time from" << m_info.udn;
+        fail(Failure::Refused);
+    });
+    m_stallTimer.setSingleShot(true);
+    m_stallTimer.setInterval(StallTimeoutMs);
+    connect(&m_stallTimer, &QTimer::timeout, this, [this] {
+        qCWarning(rendererLog) << "no progress while PLAYING from" << m_info.udn;
         fail(Failure::Refused);
     });
 }
@@ -89,6 +101,7 @@ bool DlnaRenderer::load(const QUrl &url, const QString &mime, const QString &tit
     ++m_generation;
     abortProbe();
     stopPolling();
+    resetStall();
     m_commands.clear();
     m_url = url;
     m_serverBase = serverBase;
@@ -114,45 +127,24 @@ bool DlnaRenderer::load(const QUrl &url, const QString &mime, const QString &tit
 void DlnaRenderer::probe()
 {
     // The renderer fetches the URL with no credential: the same request without one tells whether the server lets it in, before anything reaches the renderer
-    QNetworkRequest request(m_url);
-    withoutCookies(request);
-    request.setRawHeader("Range", "bytes=0-0");
-    request.setTransferTimeout(ProbeTimeoutMs);
-    QNetworkReply *reply = m_network.get(request);
-    m_probe = reply;
-    const quint64 generation = m_generation;
-    auto received = std::make_shared<qint64>(0);
-    connect(reply, &QNetworkReply::readyRead, this, [reply, received] {
-        *received += reply->readAll().size();
-        if (*received > kMaxProbeBytes)
-            reply->abort();
-    });
-    QTimer::singleShot(ProbeTimeoutMs, reply, [reply] { reply->abort(); });
-    connect(reply, &QNetworkReply::finished, this, [this, reply, generation] {
-        reply->deleteLater();
-        if (generation != m_generation || reply != m_probe)
-            return;
-        m_probe = nullptr;
-        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-        if (status != 206) {
-            qCWarning(rendererLog)
-                << "the stream answered" << status << "without credentials for" << m_info.udn;
-            // A sign-in asked for is the server's rule; anything else is a stream that may still play another way
-            fail(status == 401 || status == 403 ? Failure::ServerRefused : Failure::Refused);
-            return;
-        }
-        startTransport();
-    });
+    m_probe.start(m_url);
+}
+
+void DlnaRenderer::onProbeFinished(int status)
+{
+    if (status != 206) {
+        qCWarning(rendererLog) << "the stream answered" << status << "without credentials for"
+                               << m_info.udn;
+        // A sign-in asked for is the server's rule; anything else is a stream that may still play another way
+        fail(status == 401 || status == 403 ? Failure::ServerRefused : Failure::Refused);
+        return;
+    }
+    startTransport();
 }
 
 void DlnaRenderer::abortProbe()
 {
-    if (QNetworkReply *reply = m_probe) {
-        m_probe = nullptr;
-        disconnect(reply, nullptr, this, nullptr);
-        reply->abort();
-        reply->deleteLater();
-    }
+    m_probe.abort();
 }
 
 void DlnaRenderer::startTransport()
@@ -180,7 +172,7 @@ void DlnaRenderer::startTransport()
     refreshVolume();
 }
 
-bool DlnaRenderer::reload(const QUrl &url, qint64 startMs)
+bool DlnaRenderer::reload(const QUrl &url, qint64 startMs, const QUrl &)
 {
     if (m_direct || m_url.isEmpty())
         return false;
@@ -228,6 +220,7 @@ bool DlnaRenderer::stop()
     ++m_generation;
     abortProbe();
     m_startTimer.stop();
+    resetStall();
     m_stopping = true;
     stopPolling();
     m_commands.clear();
@@ -461,13 +454,14 @@ void DlnaRenderer::handlePosition(const SoapResult &result)
     // A transcode starts at its own start, and the renderer counts from there; until it plays, the start stands (a renderer still TRANSITIONING says 0, and the Start report would carry it)
     if (const auto position = parseUpnpTime(result.values.value(QStringLiteral("RelTime")));
         position && m_started) {
+        watchStall(*position);
         qint64 value = std::max<qint64>(0, *position) + (m_direct ? 0 : m_startMs);
         if (m_durationMs > 0)
             value = std::min(value, m_durationMs);
         // Many renderers refuse a Seek before Play: the first position of a resumed direct play far before its start asks once more, and the start stands until the renderer moved, so no report takes the resume point back to zero
         if (m_direct && m_started && !m_startChecked) {
             m_startChecked = true;
-            if (m_startMs > kEndWindowMs && value < m_startMs - kEndWindowMs
+            if (m_startMs >= kStartSlackMs && value < m_startMs - kStartSlackMs
                 && m_info.canSeekRelTime()) {
                 enqueue(avTransportCommand(QStringLiteral("Seek"),
                                            {{QStringLiteral("Unit"), QStringLiteral("REL_TIME")},
@@ -482,10 +476,32 @@ void DlnaRenderer::handlePosition(const SoapResult &result)
         ++m_generation;
         stopPolling();
         m_startTimer.stop();
+        resetStall();
         Q_EMIT stopped();
         return;
     }
     Q_EMIT positionChanged(m_positionMs, m_durationMs);
+}
+
+void DlnaRenderer::watchStall(qint64 rendererMs)
+{
+    // A transcode is a chunked stream without a length, on which renderers are known to keep RelTime at 0 while they play
+    if (!m_direct || m_progressSeen || m_reportedTransport != Transport::Playing)
+        return;
+    if (!m_stallBaseMs) {
+        m_stallBaseMs = rendererMs;
+        m_stallTimer.start();
+    } else if (qAbs(rendererMs - *m_stallBaseMs) >= kStallProgressMs) {
+        m_progressSeen = true;
+        m_stallTimer.stop();
+    }
+}
+
+void DlnaRenderer::resetStall()
+{
+    m_stallTimer.stop();
+    m_stallBaseMs.reset();
+    m_progressSeen = false;
 }
 
 bool DlnaRenderer::isOwnTrack(const QString &track) const
@@ -523,6 +539,10 @@ void DlnaRenderer::updateState(Transport state)
     const bool wasTransitioning =
         m_reportedTransport && *m_reportedTransport == Transport::Transitioning;
     m_reportedTransport = state;
+    if (state == Transport::Playing && m_stallBaseMs && !m_progressSeen)
+        m_stallTimer.start();
+    else
+        m_stallTimer.stop();
     if (state == Transport::Playing || state == Transport::Paused) {
         m_started = true;
         m_startTimer.stop();
@@ -552,6 +572,7 @@ void DlnaRenderer::fail(Failure failure)
     abortProbe();
     stopPolling();
     m_startTimer.stop();
+    resetStall();
     m_commands.clear();
     m_current.reset();
     m_timeout.stop();

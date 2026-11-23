@@ -22,9 +22,8 @@ finish-args:
   # The access tokens live in the user's KWallet (KWalletTokenStore): the daemon is the only way to them from the sandbox, and there is no plaintext fallback.
   - --talk-name=org.kde.kwalletd6
   # Portals: the browser links (server web UI, externallinks) and the folder picker of the download export (a per-folder Document-portal grant, never a --filesystem=home).
-  # TODO: --system-talk-name=org.freedesktop.Avahi lands here only
-  # when the Google Cast stage needs mDNS discovery (DLNA stage discovers via SSDP, no grant needed).
   - --talk-name=org.freedesktop.portal.Desktop
+  # Cast out finds DLNA renderers with SSDP and Google Cast devices with mDNS: both are multicast UDP on --share=network, so there is no Avahi bus name here
 # xdg-download is not needed: downloads live inside the sandbox and reach a host folder only through a portal grant
 
 cleanup:

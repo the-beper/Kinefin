@@ -16,9 +16,13 @@ namespace Kinefin {
 inline constexpr int kMaxDescriptionBytes = 64 * 1024;
 // A description or SCPD fetch gives up after this long (5 s); the fetching code enforces it
 inline constexpr int kDescriptionTimeoutMs = 5000;
-// Entries of one list (services, actions, allowed values, sink entries) and characters of one entry (256 entries of 256 characters); more entries are ignored, a longer entry is skipped
+// Entries of one list (services, actions, allowed values) and characters of one entry (256 entries of 256 characters); more entries are ignored, a longer entry is skipped
 inline constexpr int kMaxListEntries = 256;
 inline constexpr int kMaxListEntryChars = 256;
+// A sink lists hundreds of entries (338 seen), alphabetically: its raw entries are read up to this many, and the distinct MIME types kept are capped apart for `video/*` and for the rest, so that neither can push the other out
+inline constexpr int kMaxSinkEntries = 4096;
+inline constexpr int kMaxSinkVideoTypes = 256;
+inline constexpr int kMaxSinkOtherTypes = 64;
 // Longest service URL, absolute or relative
 inline constexpr int kMaxServiceUrlChars = 512;
 // Devices (the root and its embedded ones) a description is searched for the renderer
@@ -78,7 +82,7 @@ std::optional<RendererInfo> parseDeviceDescription(const QByteArray &xml, const 
 // Reads the AVTransport SCPD into `info.actions` and `info.seekModes`. False, with a fixed message in `error`, when the document breaks a limit or lacks SetAVTransportURI, Play, Stop, GetTransportInfo or GetPositionInfo, which the service requires
 bool parseAvTransportScpd(const QByteArray &xml, RendererInfo &info, QString *error = nullptr);
 
-// The MIME types of the `http-get` entries of a ConnectionManager `Sink` (`protocol:network:contentFormat:additionalInfo`, comma separated): lower case, parameters removed, no duplicates, wildcards and malformed entries skipped, at most kMaxListEntries entries read
+// The MIME types of the `http-get` entries of a ConnectionManager `Sink` (`protocol:network:contentFormat:additionalInfo`, comma separated): lower case, parameters removed, no duplicates, wildcards and malformed entries skipped, in the order the sink lists them. At most kMaxSinkEntries raw entries are read, and at most kMaxSinkVideoTypes `video/*` and kMaxSinkOtherTypes other types are kept
 QStringList parseSinkProtocolInfo(const QString &sink);
 
 } // namespace Kinefin

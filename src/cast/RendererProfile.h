@@ -12,7 +12,7 @@ namespace Kinefin {
 QJsonObject rendererDeviceProfile(const QStringList &sinkMimeTypes, bool burnIn,
                                   bool transcodeOnly);
 
-// The MIME type to send for `container`, a Jellyfin container name or a comma separated list of them (`mkv`, `matroska,webm`, `mov,mp4,m4a`): the first the sink lists of those the container maps to (mp4 and m4v video/mp4; mkv and matroska video/x-matroska, video/x-mkv; ts and mpegts video/mpeg, video/mp2t, video/vnd.dlna.mpeg-tts; webm video/webm; avi video/avi, video/x-msvideo). Empty when the sink lists none, except for ts, the transcode container, which gets video/mpeg when the sink lists no MPEG-TS type either
+// The MIME type to send for `container`, a Jellyfin container name or a comma separated list of them (`mkv`, `matroska,webm`, `mov,mp4,m4a`): the first the sink lists of those the container maps to (mp4 and m4v video/mp4, video/quicktime; mkv and matroska video/x-matroska, video/x-mkv; ts and mpegts video/mpeg, video/mp2t, video/vnd.dlna.mpeg-tts, video/mpegts; webm video/webm; avi video/avi, video/x-msvideo). Empty when the sink lists none, except for ts, the transcode container, which gets video/mpeg when the sink lists no MPEG-TS type either
 QString rendererMime(const QString &container, const QStringList &sinkMimeTypes);
 
 } // namespace Kinefin

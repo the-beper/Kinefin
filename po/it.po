@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: kinefin 0\n"
 "Report-Msgid-Bugs-To: https://github.com/the-beper/Kinefin/issues\n"
-"POT-Creation-Date: 2026-11-23 15:56+0000\n"
+"POT-Creation-Date: 2026-11-23 20:28+0000\n"
 "PO-Revision-Date: 2026-11-07 00:00+0000\n"
 "Last-Translator: the-beper\n"
 "Language-Team: Italian\n"
@@ -102,22 +102,22 @@ msgstr "Quick Connect non riuscito o scaduto. Avvialo di nuovo"
 msgid "Could not load the libraries. Try again"
 msgstr "Impossibile caricare le librerie. Riprova"
 
-#: src/app/EpisodeLabelQml.cpp:11 src/player/PlayerController.cpp:77
+#: src/app/EpisodeLabelQml.cpp:11 src/player/PlayerController.cpp:79
 msgctxt "season and episode number"
 msgid "S%1:E%2"
 msgstr "S%1:E%2"
 
-#: src/app/EpisodeLabelQml.cpp:12 src/player/PlayerController.cpp:82
+#: src/app/EpisodeLabelQml.cpp:12 src/player/PlayerController.cpp:84
 msgctxt "episode number"
 msgid "E%1"
 msgstr "E%1"
 
-#: src/app/EpisodeLabelQml.cpp:20 src/player/PlayerController.cpp:75
+#: src/app/EpisodeLabelQml.cpp:20 src/player/PlayerController.cpp:77
 msgctxt "season and episode range"
 msgid "S%1:E%2–E%3"
 msgstr "S%1:E%2–E%3"
 
-#: src/app/EpisodeLabelQml.cpp:22 src/player/PlayerController.cpp:80
+#: src/app/EpisodeLabelQml.cpp:22 src/player/PlayerController.cpp:82
 msgctxt "episode number range"
 msgid "E%1–E%2"
 msgstr "E%1–E%2"
@@ -133,14 +133,35 @@ msgid "Episode %1"
 msgstr "Episodio %1"
 
 #: src/cast/CastController.cpp:30
+msgctxt "@info:label protocol and network address of a device"
 msgid "%1, %2"
 msgstr "%1, %2"
 
-#: src/cast/CastController.cpp:61
+#: src/cast/CastController.cpp:32
+msgctxt "@info:label protocol, model and network address of a device"
+msgid "%1, %2, %3"
+msgstr "%1, %2, %3"
+
+#: src/cast/CastController.cpp:41
+msgctxt "@item the DLNA protocol"
+msgid "DLNA"
+msgstr "DLNA"
+
+#: src/cast/CastController.cpp:94
 msgid "Could not search the network"
 msgstr "Impossibile cercare nella rete"
 
-#: src/player/PlayerController.cpp:88 src/qml/HomePage.qml:291
+#: src/cast/CastController.cpp:97
+msgid ""
+"Some devices may not be listed: the search could not cover the whole network"
+msgstr "Alcuni dispositivi potrebbero non comparire: la ricerca non ha potuto coprire tutta la rete"
+
+#: src/cast/CastController.cpp:290
+msgctxt "@item the Google Cast protocol"
+msgid "Google Cast"
+msgstr "Google Cast"
+
+#: src/player/PlayerController.cpp:90 src/qml/HomePage.qml:291
 #: src/qml/HomePage.qml:298 src/qml/EpisodeRow.qml:48
 #: src/qml/ResumeItemsPage.qml:144 src/qml/ResumeItemsPage.qml:151
 #: src/qml/PersonPage.qml:150 src/qml/PersonPage.qml:157
@@ -153,23 +174,23 @@ msgctxt "episode label and episode title"
 msgid "%1 — %2"
 msgstr "%1 — %2"
 
-#: src/player/PlayerController.cpp:392
+#: src/player/PlayerController.cpp:395
 msgid "The secondary subtitles could not be downloaded"
 msgstr "Impossibile scaricare i sottotitoli secondari"
 
-#: src/player/PlayerController.cpp:393
+#: src/player/PlayerController.cpp:396
 msgid "Could not download the subtitle."
 msgstr "Impossibile scaricare i sottotitoli."
 
-#: src/player/PlayerController.cpp:476
+#: src/player/PlayerController.cpp:479
 msgid "The video could not be opened. Try again."
 msgstr "Impossibile aprire il video. Riprova."
 
-#: src/player/PlayerController.cpp:1411
+#: src/player/PlayerController.cpp:1415
 msgid "The downloaded file could not be opened."
 msgstr "Impossibile aprire il file scaricato."
 
-#: src/player/PlayerController.cpp:1488 src/player/PlayerController.cpp:1900
+#: src/player/PlayerController.cpp:1491 src/player/PlayerController.cpp:1933
 msgid "The device is no longer available: search for it again from Cast."
 msgstr "Il dispositivo non è più disponibile: cercalo di nuovo da Cast."
 
@@ -214,7 +235,7 @@ msgstr "Sottotitolo esterno %1"
 msgid "The selected media source could not be opened."
 msgstr "Impossibile aprire la sorgente multimediale selezionata."
 
-#: src/player/PlayerController.cpp:1910
+#: src/player/PlayerController.cpp:1943
 msgid ""
 "The server's stream link would give the device your sign-in, so it was not "
 "sent."
@@ -222,29 +243,37 @@ msgstr ""
 "Il collegamento allo stream del server darebbe al dispositivo i tuoi dati di "
 "accesso, quindi non è stato inviato."
 
-#: src/player/PlayerController.cpp:1918
+#: src/player/PlayerController.cpp:1950
 msgctxt "@info %1 is a device name"
-msgid "%1 cannot play this kind of video."
-msgstr "%1 non può riprodurre questo tipo di video."
+msgid "%1 cannot play this kind of video: play it on this computer instead."
+msgstr "%1 non può riprodurre questo tipo di video: riproducilo invece su questo computer."
 
-#: src/player/PlayerController.cpp:1934
+#: src/player/PlayerController.cpp:1967
 msgid "The playback session could not be opened."
 msgstr "Impossibile aprire la sessione di riproduzione."
 
-#: src/player/PlayerController.cpp:1947 src/player/PlayerController.cpp:2042
+#: src/player/PlayerController.cpp:1988 src/player/PlayerController.cpp:2085
 msgctxt "@info %1 is a device name"
 msgid "%1 could not play this video: check that it can reach the server."
 msgstr ""
 "%1 non è riuscito a riprodurre questo video: verifica che possa raggiungere "
 "il server."
 
-#: src/player/PlayerController.cpp:2047
+#: src/player/PlayerController.cpp:2090
 msgctxt "@info %1 is a device name"
-msgid "%1 stopped responding: check that it is on and on this network."
-msgstr ""
-"%1 non risponde più: verifica che sia acceso e collegato a questa rete."
+msgid ""
+"Kinefin could not verify that %1 is a Google Cast device, so nothing was "
+"sent to it: play on this computer or choose another device."
+msgstr "Kinefin non è riuscito a verificare che %1 sia un dispositivo Google Cast, quindi non gli è stato inviato nulla: riproduci su questo computer o scegli un altro dispositivo."
 
-#: src/player/PlayerController.cpp:2050
+#: src/player/PlayerController.cpp:2096
+msgctxt "@info %1 is a device name"
+msgid ""
+"%1 stopped responding: check that it is turned on and connected to this "
+"network."
+msgstr "%1 non risponde più: verifica che sia acceso e collegato a questa rete."
+
+#: src/player/PlayerController.cpp:2101
 msgid ""
 "The server does not let other devices play its videos without a sign-in, so "
 "this video cannot be cast."
@@ -252,113 +281,113 @@ msgstr ""
 "Il server non consente ad altri dispositivi di riprodurre i suoi video senza "
 "accesso, quindi questo video non può essere trasmesso."
 
-#: src/player/PlayerController.cpp:2139
+#: src/player/PlayerController.cpp:2190
 msgctxt "@item a chapter the server gives no name"
 msgid "Chapter %1"
 msgstr "Capitolo %1"
 
-#: src/player/PlayerController.cpp:2981
+#: src/player/PlayerController.cpp:3032
 msgid "Audio track %1"
 msgstr "Traccia audio %1"
 
-#: src/player/PlayerController.cpp:2982
+#: src/player/PlayerController.cpp:3033
 msgid "Subtitle %1"
 msgstr "Sottotitolo %1"
 
-#: src/player/PlayerController.cpp:3302
+#: src/player/PlayerController.cpp:3353
 msgid "Could not save the screenshot."
 msgstr "Impossibile salvare lo screenshot."
 
-#: src/player/PlayerController.cpp:3354
+#: src/player/PlayerController.cpp:3405
 msgid "Clips cannot be saved from HDR video"
 msgstr "Impossibile salvare clip da video HDR"
 
-#: src/player/PlayerController.cpp:3356
+#: src/player/PlayerController.cpp:3407
 msgid "The start of the clip is no longer buffered"
 msgstr "L'inizio della clip non è più in cache"
 
-#: src/player/PlayerController.cpp:3369 src/player/PlayerController.cpp:3390
+#: src/player/PlayerController.cpp:3420 src/player/PlayerController.cpp:3441
 msgid "Set a start and an end"
 msgstr "Imposta un inizio e una fine"
 
-#: src/player/PlayerController.cpp:3374 src/player/PlayerController.cpp:3422
+#: src/player/PlayerController.cpp:3425 src/player/PlayerController.cpp:3473
 msgid "A GIF lasts at most 15 seconds"
 msgstr "Una GIF dura al massimo 15 secondi"
 
-#: src/player/PlayerController.cpp:3375 src/player/PlayerController.cpp:3420
+#: src/player/PlayerController.cpp:3426 src/player/PlayerController.cpp:3471
 msgid "A video clip lasts at most 60 seconds"
 msgstr "Una clip video dura al massimo 60 secondi"
 
-#: src/player/PlayerController.cpp:3381 src/player/PlayerController.cpp:3411
+#: src/player/PlayerController.cpp:3432 src/player/PlayerController.cpp:3462
 msgid "No usable video encoder"
 msgstr "Nessun encoder video utilizzabile"
 
-#: src/player/PlayerController.cpp:3392
+#: src/player/PlayerController.cpp:3443
 msgid "End at %1; set a start"
 msgstr "Fine a %1; imposta un inizio"
 
-#: src/player/PlayerController.cpp:3394
+#: src/player/PlayerController.cpp:3445
 msgid "Start at %1; set an end"
 msgstr "Inizio a %1; imposta una fine"
 
-#: src/player/PlayerController.cpp:3396
+#: src/player/PlayerController.cpp:3447
 msgid "The end of the clip is before its start"
 msgstr "La fine della clip è prima del suo inizio"
 
-#: src/player/PlayerController.cpp:3397
+#: src/player/PlayerController.cpp:3448
 msgid "%1 to %2 (%3 s)"
 msgstr "%1 – %2 (%3 s)"
 
-#: src/player/PlayerController.cpp:3432
+#: src/player/PlayerController.cpp:3483
 msgid "Clip start at %1"
 msgstr "Inizio clip a %1"
 
-#: src/player/PlayerController.cpp:3442
+#: src/player/PlayerController.cpp:3493
 msgid "Clip end at %1"
 msgstr "Fine clip a %1"
 
-#: src/player/PlayerController.cpp:3483
+#: src/player/PlayerController.cpp:3534
 msgid "Mark a start and an end to loop the part"
 msgstr "Imposta un inizio e una fine per ripetere la parte"
 
-#: src/player/PlayerController.cpp:3490
+#: src/player/PlayerController.cpp:3541
 msgid "Looping the marked part"
 msgstr "Ripetizione della parte segnata"
 
-#: src/player/PlayerController.cpp:3490
+#: src/player/PlayerController.cpp:3541
 msgid "Loop off"
 msgstr "Ripetizione disattivata"
 
-#: src/player/PlayerController.cpp:3901
+#: src/player/PlayerController.cpp:3952
 msgid "Skip Intro"
 msgstr "Salta introduzione"
 
-#: src/player/PlayerController.cpp:3902
+#: src/player/PlayerController.cpp:3953
 msgid "Skip Recap"
 msgstr "Salta riepilogo"
 
-#: src/player/PlayerController.cpp:3903
+#: src/player/PlayerController.cpp:3954
 msgid "Skip Outro"
 msgstr "Salta conclusione"
 
-#: src/player/PlayerController.cpp:4133
+#: src/player/PlayerController.cpp:4184
 msgid "Nothing is playing to add a subtitle to"
 msgstr "Non c’è nulla in riproduzione a cui aggiungere un sottotitolo"
 
-#: src/player/PlayerController.cpp:4135
+#: src/player/PlayerController.cpp:4186
 msgid "A subtitle cannot be added while casting"
 msgstr "Non si può aggiungere un sottotitolo durante la trasmissione"
 
-#: src/player/PlayerController.cpp:4138
+#: src/player/PlayerController.cpp:4189
 msgid "Wait until the video has started to add a subtitle"
 msgstr "Attendi che il video sia partito per aggiungere un sottotitolo"
 
-#: src/player/PlayerController.cpp:4140
+#: src/player/PlayerController.cpp:4191
 msgid "Only a subtitle file on this computer can be added"
 msgstr ""
 "Si può aggiungere solo un file di sottotitoli presente su questo computer"
 
-#: src/player/PlayerController.cpp:4144
+#: src/player/PlayerController.cpp:4195
 msgid ""
 "The file cannot be opened from here. Choose it with Add Subtitle File in the "
 "Subtitles menu"
@@ -366,26 +395,26 @@ msgstr ""
 "Da qui non è possibile aprire il file. Sceglilo con “Aggiungi file di "
 "sottotitoli” nel menu Sottotitoli"
 
-#: src/player/PlayerController.cpp:4151 src/qml/EditSubtitlesDialog.qml:100
+#: src/player/PlayerController.cpp:4202 src/qml/EditSubtitlesDialog.qml:100
 msgid "The file is not an srt, ass, ssa, or vtt subtitle"
 msgstr "Il file non è un sottotitolo srt, ass, ssa o vtt"
 
-#: src/player/PlayerController.cpp:4153
+#: src/player/PlayerController.cpp:4204
 msgid "No more subtitle files can be added to this item"
 msgstr "Non si possono aggiungere altri file di sottotitoli a questo elemento"
 
-#: src/player/PlayerController.cpp:4160
+#: src/player/PlayerController.cpp:4211
 msgid "The subtitle must be a readable file of at most 2 MiB"
 msgstr "Il sottotitolo deve essere un file leggibile di al massimo 2 MiB"
 
-#: src/player/PlayerController.cpp:4163 src/player/PlayerController.cpp:4170
+#: src/player/PlayerController.cpp:4214 src/player/PlayerController.cpp:4221
 msgid ""
 "The subtitle could not be added. Check the free disk space and try again"
 msgstr ""
 "Impossibile aggiungere il sottotitolo: controlla lo spazio libero su disco e "
 "riprova"
 
-#: src/player/PlayerController.cpp:4174
+#: src/player/PlayerController.cpp:4225
 msgid "The file could not be read as a subtitle"
 msgstr "Impossibile leggere il file come sottotitolo"
 
@@ -1680,11 +1709,11 @@ msgstr "Nessun dispositivo trovato"
 #: src/qml/CastDialog.qml:197
 msgctxt "@info:placeholder"
 msgid ""
-"TVs and players that accept video over DLNA appear here when they are on "
-"this network."
+"TVs and players that accept video over DLNA or Google Cast appear here when "
+"they are on this network."
 msgstr ""
-"Le TV e i lettori che accettano video tramite DLNA compaiono qui quando sono "
-"su questa rete."
+"Le TV e i lettori che accettano video tramite DLNA o Google Cast compaiono "
+"qui quando sono su questa rete."
 
 #: src/qml/LibraryPage.qml:33 src/qml/SearchPage.qml:150
 msgid "Movies"

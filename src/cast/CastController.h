@@ -2,12 +2,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "cast/CastRenderer.h"
+#include "cast/CastSender.h"
 #include "cast/CastTargetsModel.h"
 #include "cast/DlnaRenderer.h"
+#include "cast/Mdns.h"
 #include "cast/Ssdp.h"
 #include "cast/UpnpDescription.h"
 
 #include <QHash>
+#include <QJsonObject>
 #include <QNetworkAccessManager>
 #include <QObject>
 #include <QSet>
@@ -21,7 +25,7 @@ class QNetworkReply;
 
 namespace Kinefin {
 
-// Discovery and control of the DLNA renderers the picker lists. A search runs only while it is asked for; a renderer is listed once its description, SCPD and GetProtocolInfo answer. The renderer's own network traffic stays in its DlnaRenderer
+// Discovery and control of the DLNA renderers and the Google Cast devices the picker lists. A search runs only while it is asked for; a DLNA renderer is listed once its description, SCPD and GetProtocolInfo answer, a Cast device once its mDNS records are complete. The device's own network traffic stays in its DlnaRenderer or CastSender
 class CastController final : public QObject {
     Q_OBJECT
     Q_PROPERTY(Kinefin::CastTargetsModel *targets READ targets CONSTANT)
@@ -30,7 +34,10 @@ class CastController final : public QObject {
 
   public:
     explicit CastController(QObject *parent = nullptr);
+    // SSDP only: what the DLNA tests use, so that no multicast query leaves for Cast devices
     explicit CastController(const SsdpSearch::Options &options, QObject *parent = nullptr);
+    CastController(const SsdpSearch::Options &ssdp, const MdnsSearch::Options &mdns,
+                   QObject *parent = nullptr);
     ~CastController() override;
 
     CastTargetsModel *targets() const { return m_targets; }
@@ -41,11 +48,22 @@ class CastController final : public QObject {
     Q_INVOKABLE void stopSearch();
     // Adds a renderer whose description the caller already read, as a discovery answer would (tests, a future manual entry)
     void addRenderer(const RendererInfo &info);
+    // The same for a Cast device whose mDNS records the caller already read
+    void addCastDevice(const CastDeviceInfo &info, const CastSender::Options &options = {});
+
+    // Whether the picker lists the target `id` (a UDN or `cast:` and a device id)
+    bool hasTarget(const QString &id) const;
+    // The device profile PlaybackInfo is asked with for the target, and the contentType of a stream for it (empty when the target cannot play the container)
+    QJsonObject deviceProfile(const QString &id, bool burnInSubtitles, bool transcodeOnly) const;
+    QString mimeFor(const QString &id, const QString &container, bool transcode) const;
+    // Whether the target fetches a text track itself (Google Cast) instead of needing every subtitle burnt in
+    bool takesTextTrack(const QString &id) const;
 
     bool load(const QString &udn, const QUrl &url, const QString &mime, const QString &title,
               qint64 startMs, qint64 durationMs, const QUrl &serverBase, bool direct);
-    // The active transcode again from `url`, which starts at `startMs`
-    bool reload(const QUrl &url, qint64 startMs);
+    bool load(const QString &id, const CastLoad &request);
+    // The active transcode again from `url`, which starts at `startMs`, with its text track when it has one
+    bool reload(const QUrl &url, qint64 startMs, const QUrl &subtitleUrl = {});
     void setDurationMs(qint64 durationMs);
     bool pause();
     bool resume();
@@ -79,7 +97,7 @@ class CastController final : public QObject {
     void buffering();
     void stopped();
     void ended();
-    void failed(Kinefin::DlnaRenderer::Failure failure);
+    void failed(Kinefin::CastRenderer::Failure failure);
     void positionChanged();
     void volumeChanged();
 
@@ -88,21 +106,25 @@ class CastController final : public QObject {
     void fetchDocument(const QUrl &url, int limit, int timeoutMs,
                        std::function<void(bool, const QByteArray &)> done);
     void fetchProtocolInfo(const RendererInfo &info, std::function<void(QStringList)> done);
-    void setActive(DlnaRenderer *renderer);
+    void setActive(CastRenderer *renderer);
     void clearActive();
     void setError(const QString &error);
-    void connectRenderer(DlnaRenderer *renderer);
+    void connectRenderer(CastRenderer *renderer);
     void addTarget(const RendererInfo &info);
+    void addCastTarget(const CastDeviceInfo &info);
+    void onCastDeviceFound(const CastDeviceInfo &info);
     void dropUnseen();
 
     CastTargetsModel *m_targets = nullptr;
     SsdpSearch m_search;
+    // Null for the SSDP-only controller
+    MdnsSearch *m_mdns = nullptr;
     QNetworkAccessManager m_discovery;
-    QHash<QString, DlnaRenderer *> m_renderers;
+    QHash<QString, CastRenderer *> m_renderers;
     QSet<QString> m_pending;
     // The UDNs that answered the running or the last search
     QSet<QString> m_seen;
-    DlnaRenderer *m_active = nullptr;
+    CastRenderer *m_active = nullptr;
     QString m_error;
 };
 

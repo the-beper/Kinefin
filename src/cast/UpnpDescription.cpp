@@ -285,9 +285,11 @@ QStringList parseSinkProtocolInfo(const QString &sink)
     static const QRegularExpression mimePattern(
         QStringLiteral("^[a-z0-9][a-z0-9!#$&^_.+-]*/[a-z0-9][a-z0-9!#$&^_.+-]*$"));
     QStringList mimes;
+    int videos = 0;
+    int others = 0;
     int seen = 0;
     for (const QString &entry : sink.split(QLatin1Char(','))) {
-        if (++seen > kMaxListEntries)
+        if (++seen > kMaxSinkEntries)
             break;
         const QString trimmed = entry.trimmed();
         if (trimmed.isEmpty() || trimmed.size() > kMaxListEntryChars)
@@ -304,6 +306,11 @@ QStringList parseSinkProtocolInfo(const QString &sink)
         mime = mime.trimmed().toLower();
         if (!mimePattern.match(mime).hasMatch() || mimes.contains(mime))
             continue;
+        const bool video = mime.startsWith(QLatin1StringView("video/"));
+        int &kept = video ? videos : others;
+        if (kept >= (video ? kMaxSinkVideoTypes : kMaxSinkOtherTypes))
+            continue;
+        ++kept;
         mimes.append(mime);
     }
     return mimes;
