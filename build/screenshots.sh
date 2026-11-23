@@ -2,7 +2,6 @@
 # Renders the screenshots of the documentation into docs/images from a library of open films (tests/DocScene.h): see --help
 set -eu
 root=$(cd "$(dirname "$0")/.." && pwd)
-base=${KINEFIN_BUILD_IMAGE:-localhost/kinefin-build:fedora45}
 image=${KINEFIN_SHOTS_IMAGE:-localhost/kinefin-shots:fedora45}
 bdir=${KINEFIN_BUILD_DIR:-/buildtmp/dev}
 
