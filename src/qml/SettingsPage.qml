@@ -417,7 +417,7 @@ Kirigami.Page {
                                         textFormat: Text.PlainText
                                         color: Kirigami.Theme.disabledTextColor
                                         font: Kirigami.Theme.smallFont
-                                        text: i18n("Kinefin’s settings override this file, and Manual MPV Configuration overrides both")
+                                        text: i18n("Kinefin’s settings override this file and Manual MPV Configuration overrides both; added or changed lines apply at the next playback, removed ones after a restart")
                                     }
                                 }
                             }

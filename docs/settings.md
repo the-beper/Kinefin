@@ -126,7 +126,7 @@ Besides that setting, the profile's own `mpv.conf` is read from the profile fold
 - `script`, `scripts`, `load-scripts`, `include`, `input-conf`, `config`, `config-dir`, `profile`, `input-ipc-server`, `input-ipc-client`, `ytdl`, `ytdl-format`, `ytdl-raw-options` and `http-*` are refused, as are the options and values that mpv itself does not accept. That list guards against the obvious and is not a sandbox: the file is yours, and mpv runs the other lines as written. A refused line is reported with its line number and skipped, and the others apply.
 - The limits are 64 KiB, 1000 lines, 64 characters for an option name and 4096 for a value.
 
-The same rules apply to Manual MPV Configuration. Changes take effect at the next playback; removing a line restores the default only after a restart.
+The same rules apply to Manual MPV Configuration. Added or changed lines take effect at the next playback; removing a line restores the default only after a restart.
 
 ## Settings without a control
 

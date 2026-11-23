@@ -194,7 +194,7 @@ class JellyfinClient final : public QObject {
     bool setItemPlayed(const QString &itemId, bool played);
     // Takes back a Mark as Watched: back at `positionTicks`, the resume point the watched write cleared, and watched again only when `played` (a rewatch the server kept as played) (`POST /UserItems/{id}/UserData`, live-verified on 12.4). Shares the one-write-per-item rule of setItemPlayed; success emits itemPlayedUpdated(id, played) and then itemProgressUpdated, a failure itemPlayedUpdateFailed(id, played, status)
     bool restoreItemProgress(const QString &itemId, qint64 positionTicks, bool played = false);
-    // Reads the user data of items again after a `UserDataChanged` hint (a playback of this or another device, a write from another session) and reports what the server has through itemFavoriteUpdated, itemPlayedUpdated and itemProgressUpdated, favorite first, then played, then progress as an Undo does, so every model that follows the three signals shows it. The ids go in requests of `UserDataChunk` (`GET /Items?ids=`, which carries `UserData`); an id with a write of its own pending is left out, since that write's answer is newer. The server names an episode together with its season but not the series, so the series of the seasons and episodes that come back are read as well, once (a series page and a series card follow an episode that changed). A failed or invalid answer emits nothing and a 401 ends the session. Returns whether a request went out
+    // Reads the user data of items again after a `UserDataChanged` hint (a playback of this or another device, a write from another session) and reports what the server has through itemFavoriteUpdated, itemPlayedUpdated and itemProgressUpdated, favorite first, then played, then progress as an Undo does, then the unplayed count of a series or a season, so every model that follows these signals shows it. The ids go in requests of `UserDataChunk` (`GET /Items?ids=`, which carries `UserData`); an id with a write of its own pending is left out, since that write's answer is newer. The server names an episode together with its season but not the series, so the series of the seasons and episodes that come back are read as well, once (a series page and a series card follow an episode that changed). A failed or invalid answer emits nothing and a 401 ends the session. Returns whether a request went out
     bool refreshUserData(const QStringList &itemIds);
     static constexpr int UserDataChunk = 100;
     // Remote subtitle search and download through the server's provider plugin (`RemoteSearch/Subtitles`); false without the policy, an invalid id/language or a session. A 401 expires the session and emits no remote*Failed signal, because the shell signs out and closes the player
@@ -466,6 +466,8 @@ class JellyfinClient final : public QObject {
     void itemPlayedUpdateFailed(const QString &itemId, bool played, int httpStatus);
     // The saved position of an item the server confirmed, with its watched share (0 to 100)
     void itemProgressUpdated(const QString &itemId, qint64 positionTicks, double playedPercentage);
+    // How many episodes of a series or a season are not watched, as the server's user data says (a write's answer or a refresh); only series and seasons carry it
+    void itemUnplayedCountUpdated(const QString &itemId, int unplayedCount);
 
   private:
     bool requestUserData(const QStringList &itemIds, bool followSeries);

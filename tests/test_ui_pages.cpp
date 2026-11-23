@@ -10234,7 +10234,11 @@ class TestUiPages : public QObject {
         ui.clickCenter(link);
         QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("downloadRulesPage"));
         QTRY_VERIFY(ui.item(QStringLiteral("downloadRule_") + kSeriesId) != nullptr);
-        QVERIFY(!ui.item(QStringLiteral("settingsPage")));
+        // Settings stays below the page, the header still marks it, and Back returns to it
+        QVERIFY(ui.item(QStringLiteral("settingsPage")) != nullptr);
+        QCOMPARE(ui.window->property("currentSection").toString(), QStringLiteral("settings"));
+        QVERIFY(QMetaObject::invokeMethod(ui.window, "escapeBack"));
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("settingsPage"));
     }
 
     // A series or a season is downloaded by its episodes: one top-bar action with a menu, and a dialog that counts what the batch holds before anything is queued
@@ -10314,6 +10318,35 @@ class TestUiPages : public QObject {
         QObject *seasonMenu = season->findChild<QObject *>(QStringLiteral("downloadMenuAction"));
         QVERIFY(seasonMenu);
         QTRY_VERIFY(seasonMenu->property("visible").toBool());
+    }
+
+    // The dialog of a paused rule says so, and says where to switch it on
+    void theRuleDialogOfAPausedRuleSaysSo()
+    {
+        Ui ui(m_home->path());
+        ui.serveShow();
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        QVERIFY(ui.controller.downloads()->setSeriesRule(kSeriesId, QStringLiteral("Series"),
+                                                         QStringLiteral("nextN"), -1, 2));
+        QVERIFY(ui.controller.downloads()->setSeriesRuleEnabled(kSeriesId, false));
+        QQuickItem *series = openDetails(ui, kSeriesId);
+        QVERIFY(series);
+        QObject *action = series->findChild<QObject *>(QStringLiteral("automaticDownloadsAction"));
+        QObject *dialog = series->findChild<QObject *>(QStringLiteral("ruleDialog"));
+        QVERIFY(action);
+        QVERIFY(dialog);
+        QVERIFY(QMetaObject::invokeMethod(action, "trigger"));
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QVERIFY(dialog->property("paused").toBool());
+        QObject *note = dialog->findChild<QObject *>(QStringLiteral("ruleDialogPaused"));
+        QVERIFY(note);
+        QVERIFY(note->property("visible").toBool());
+        QVERIFY(QMetaObject::invokeMethod(dialog, "close"));
+        QTRY_VERIFY(!dialog->property("opened").toBool());
+        // Switched on, the note goes
+        QVERIFY(ui.controller.downloads()->setSeriesRuleEnabled(kSeriesId, true));
+        QTRY_VERIFY(!dialog->property("paused").toBool());
     }
 
     void reopeningTheRuleDialogShowsTheStoredKind()
@@ -12057,6 +12090,105 @@ class TestUiPages : public QObject {
         QTRY_COMPARE(updateFailed.size(), 1);
         QVERIFY(dialog->property("opened").toBool());
         QVERIFY(!dialog->property("saving").toBool());
+    }
+
+    // An overview or a genre list over the server's limits is warned about, and the dialog cannot be saved
+    void theEditMetadataDialogWarnsAboutTextThatIsTooLong()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *page = openDetails(ui, kMovieId);
+        QVERIFY(page);
+        QObject *edit = page->findChild<QObject *>(QStringLiteral("editMetadataAction"));
+        QVERIFY(edit);
+        QTRY_VERIFY(edit->property("visible").toBool());
+        QVERIFY(QMetaObject::invokeMethod(edit, "trigger"));
+        QQuickItem *name = nullptr;
+        QTRY_VERIFY((name = ui.item(QStringLiteral("editMetadataName"))) != nullptr);
+        QQuickItem *overview = ui.item(QStringLiteral("editMetadataOverview"));
+        QQuickItem *genres = ui.item(QStringLiteral("editMetadataGenres"));
+        QQuickItem *warning = ui.item(QStringLiteral("editMetadataInvalid"));
+        QObject *dialog = ui.popup(QStringLiteral("editMetadataDialog"));
+        QVERIFY(overview && genres && warning && dialog);
+        QVERIFY(!warning->isVisible());
+        name->setProperty("text", QStringLiteral("A new name"));
+        QTRY_VERIFY(dialog->property("acceptable").toBool());
+
+        overview->setProperty("text", QString(16385, QLatin1Char('x')));
+        QTRY_VERIFY(warning->isVisible());
+        QVERIFY(warning->property("text").toString().contains(QStringLiteral("16384")));
+        QVERIFY(!dialog->property("acceptable").toBool());
+        overview->setProperty("text", QStringLiteral("Short"));
+        QTRY_VERIFY(!warning->isVisible());
+        QTRY_VERIFY(dialog->property("acceptable").toBool());
+
+        QStringList many;
+        for (int i = 0; i < 21; ++i)
+            many << QStringLiteral("Genre %1").arg(i);
+        genres->setProperty("text", many.join(QStringLiteral(", ")));
+        QTRY_VERIFY(warning->isVisible());
+        QVERIFY(warning->property("text").toString().contains(QStringLiteral("at most 20 genres")));
+        QVERIFY(!dialog->property("acceptable").toBool());
+        genres->setProperty("text", many.mid(0, 20).join(QStringLiteral(", ")));
+        QTRY_VERIFY(!warning->isVisible());
+        QTRY_VERIFY(dialog->property("acceptable").toBool());
+    }
+
+    // The page names what it could not read: the seasons of a series, and a failed write of the watched state
+    void theDetailsPageSaysWhatFailedToLoadOrToSave()
+    {
+        Ui ui(m_home->path());
+        ui.serveShow();
+        ui.serveMovie();
+        ui.server.listingStatus.insert(QStringLiteral("Seasons"), 500);
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *series = openDetails(ui, kSeriesId);
+        QVERIFY(series);
+        QTRY_COMPARE(series->property("shownBox").toString(), QStringLiteral("seasons"));
+
+        QQuickItem *movie = openDetails(ui, kMovieId);
+        QVERIFY(movie);
+        QTRY_COMPARE(movie->property("shownBox").toString(), QString());
+        ui.server.playedWriteStatus = 500;
+        QObject *mark = movie->findChild<QObject *>(QStringLiteral("togglePlayedAction"));
+        QVERIFY(mark);
+        QTRY_VERIFY(mark->property("visible").toBool());
+        QVERIFY(QMetaObject::invokeMethod(mark, "trigger"));
+        QTRY_COMPARE(movie->property("shownBox").toString(), QStringLiteral("update"));
+    }
+
+    // A subtitle language that is not two or three letters is warned about
+    void theEditSubtitlesDialogWarnsAboutABadLanguageCode()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *page = openDetails(ui, kMovieId);
+        QVERIFY(page);
+        QObject *edit = page->findChild<QObject *>(QStringLiteral("editSubtitlesAction"));
+        QVERIFY(edit);
+        QTRY_VERIFY(edit->property("visible").toBool());
+        QVERIFY(QMetaObject::invokeMethod(edit, "trigger"));
+        QQuickItem *language = nullptr;
+        QTRY_VERIFY((language = ui.item(QStringLiteral("subtitleLanguage"))) != nullptr);
+        QQuickItem *warning = ui.item(QStringLiteral("subtitleLanguageInvalid"));
+        QObject *dialog = ui.popup(QStringLiteral("editSubtitlesDialog"));
+        QVERIFY(warning && dialog);
+        QVERIFY(!warning->isVisible());
+        QVERIFY(dialog->property("languageValid").toBool());
+        // Empty is fine, one letter is not, two are
+        language->setProperty("text", QStringLiteral("e"));
+        QTRY_VERIFY(!dialog->property("languageValid").toBool());
+        QTRY_VERIFY(warning->isVisible());
+        language->setProperty("text", QStringLiteral("en"));
+        QTRY_VERIFY(dialog->property("languageValid").toBool());
+        QTRY_VERIFY(!warning->isVisible());
+        language->setProperty("text", QString());
+        QVERIFY(dialog->property("languageValid").toBool());
     }
 
     void theDetailsPageIdentifiesAMovie()

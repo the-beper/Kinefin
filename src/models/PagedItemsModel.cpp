@@ -244,6 +244,12 @@ void PagedItemsModel::applyProgressState(const QString &itemId, qint64 positionT
     });
 }
 
+void PagedItemsModel::applyUnplayedCountState(const QString &itemId, int unplayedCount)
+{
+    updateResident(itemId,
+                   [unplayedCount](ItemSummary &item) { item.unplayedCount = unplayedCount; });
+}
+
 void PagedItemsModel::evictBeyondLimit(int keep)
 {
     while (m_residentOrder.size() > MaxResidentPages) {

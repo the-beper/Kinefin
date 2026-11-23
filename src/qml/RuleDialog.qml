@@ -19,6 +19,8 @@ Kirigami.PromptDialog {
     property int storedSeason: -1
     property string currentKind: "nextN"
     property int currentCount: 3
+    // The stored rule is paused: saving keeps it so, and the dialog says where to switch it on
+    property bool paused: false
 
     // The kind the radio buttons show; set from the stored rule each time the dialog opens, since the page's details may still have been loading at creation
     property string selectedKind: "nextN"
@@ -50,9 +52,18 @@ Kirigami.PromptDialog {
 
     Controls.Label {
         Layout.fillWidth: true
+        visible: !dialog.paused
         wrapMode: Text.Wrap
         textFormat: Text.PlainText
         text: i18n("Matching episodes are downloaded automatically")
+    }
+    MessageBox {
+        objectName: "ruleDialogPaused"
+        Layout.fillWidth: true
+        Layout.topMargin: Kirigami.Units.largeSpacing
+        visible: dialog.paused
+        type: Kirigami.MessageType.Information
+        text: i18n("These automatic downloads are paused: switch them on in the list of Automatic Downloads")
     }
     // A click breaks a radio button's own binding: the handler keeps them in step with the kind, also across reopenings
     onSelectedKindChanged: {

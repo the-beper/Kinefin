@@ -69,6 +69,8 @@ class PagedItemsModel : public QAbstractListModel {
     void applyPlayedState(const QString &itemId, bool played);
     // Sets the saved position of the resident rows of an item, as applyPlayedState does
     void applyProgressState(const QString &itemId, qint64 positionTicks, double playedPercentage);
+    // Sets the unplayed episode count of the resident rows of a series or a season
+    void applyUnplayedCountState(const QString &itemId, int unplayedCount);
     // Applies `change` to each resident row of an item and refreshes every role of it
     void updateResident(const QString &itemId, const std::function<void(ItemSummary &)> &change);
     bool pageInFlight() const { return m_inFlight >= 0; }

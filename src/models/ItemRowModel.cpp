@@ -34,6 +34,16 @@ ItemRowModel::ItemRowModel(JellyfinClient *client, bool landscape, QObject *pare
                     Q_EMIT dataChanged(row, row);
                 }
             });
+    connect(m_client, &JellyfinClient::itemUnplayedCountUpdated, this,
+            [this](const QString &id, int count) {
+                for (size_t i = 0; i < m_items.size(); ++i) {
+                    if (!sameItemId(m_items[i].id, id) || m_items[i].unplayedCount == count)
+                        continue;
+                    m_items[i].unplayedCount = count;
+                    const QModelIndex row = index(int(i));
+                    Q_EMIT dataChanged(row, row);
+                }
+            });
     connect(m_client, &JellyfinClient::itemProgressUpdated, this,
             [this](const QString &id, qint64 position, double percentage) {
                 for (size_t i = 0; i < m_items.size(); ++i) {

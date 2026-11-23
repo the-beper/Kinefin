@@ -18,6 +18,11 @@ PersonItemsModel::PersonItemsModel(JellyfinClient *client, QObject *parent)
                     if (m_open)
                         applyPlayedState(id, played);
                 });
+        connect(m_client, &JellyfinClient::itemUnplayedCountUpdated, this,
+                [this](const QString &id, int count) {
+                    if (m_open)
+                        applyUnplayedCountState(id, count);
+                });
         connect(m_client, &JellyfinClient::itemFavoriteUpdated, this,
                 [this](const QString &id, bool favorite) {
                     applyFavorite(id, favorite, FavoriteRole);

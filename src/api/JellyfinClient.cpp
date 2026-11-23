@@ -18,11 +18,22 @@
 #include <QUrlQuery>
 
 #include <algorithm>
+#include <cmath>
 
 Q_LOGGING_CATEGORY(apiLog, "kinefin.api")
 
 namespace Kinefin {
 namespace {
+// The unplayed episode count of a series or a season in a user data object: a whole number from 0 to 1,000,000, else -1
+int unplayedCountOf(const QJsonObject &userData)
+{
+    const QJsonValue value = userData.value(QStringLiteral("UnplayedItemCount"));
+    if (!value.isDouble())
+        return -1;
+    const double count = value.toDouble();
+    return count >= 0 && count <= 1'000'000 && count == std::floor(count) ? int(count) : -1;
+}
+
 constexpr int MaxResponseBytes = 1'048'576;
 constexpr int MaxPublicRedirects = 3;
 constexpr int MaxRecommendationCategories = 20;
@@ -1958,6 +1969,8 @@ bool JellyfinClient::setItemPlayed(const QString &itemId, bool played)
         // Jellyfin 12.4 answers 200 with UserItemDataDto; accept empty 204 too,
         // but never treat a 200 with a malformed/mismatching body as success.
         bool valid = finished->error() == QNetworkReply::NoError && status == 204;
+        // A series or a season says how many of its episodes are left
+        int unplayed = -1;
         if (status == 200 && finished->error() == QNetworkReply::NoError) {
             QJsonObject data;
             if (parseObject(finished, &data) && data.value(QStringLiteral("Played")).isBool()
@@ -1966,11 +1979,14 @@ bool JellyfinClient::setItemPlayed(const QString &itemId, bool played)
                 valid = id.isUndefined()
                         || (id.isString()
                             && QString(id.toString()).remove(QLatin1Char('-')).toLower() == key);
+                unplayed = unplayedCountOf(data);
             }
         }
         if (valid) {
             noteOwnWrite(key);
             Q_EMIT itemPlayedUpdated(itemId, played);
+            if (unplayed >= 0)
+                Q_EMIT itemUnplayedCountUpdated(itemId, unplayed);
         } else {
             Q_EMIT itemPlayedUpdateFailed(itemId, played, status);
         }
@@ -2130,6 +2146,9 @@ bool JellyfinClient::requestUserData(const QStringList &itemIds, bool followSeri
                     Q_EMIT itemProgressUpdated(id, qint64(position),
                                                percentage >= 0 && percentage <= 100 ? percentage
                                                                                     : 0);
+                const int unplayed = unplayedCountOf(state);
+                if (unplayed >= 0)
+                    Q_EMIT itemUnplayedCountUpdated(id, unplayed);
             }
             if (!series.isEmpty())
                 requestUserData(series, false);

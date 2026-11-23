@@ -79,6 +79,7 @@ Kirigami.ScrollablePage {
         ruleDialog.currentKind = row.kind;
         ruleDialog.storedSeason = row.seasonNumber;
         ruleDialog.currentCount = row.count;
+        ruleDialog.paused = !row.active;
         ruleDialog.open();
     }
 

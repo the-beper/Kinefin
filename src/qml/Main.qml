@@ -1278,6 +1278,9 @@ Kirigami.ApplicationWindow {
     readonly property string currentSection: {
         if (pageStack.currentItem?.objectName === "settingsPage")
             return "settings";
+        // The automatic downloads page opened from Settings belongs to it
+        if (pageStack.currentItem?.objectName === "downloadRulesPage" && pageStack.currentIndex > 0 && pageStack.get(pageStack.currentIndex - 1)?.objectName === "settingsPage")
+            return "settings";
         if (!signedIn)
             return "";
         for (let i = 0; i <= pageStack.currentIndex; ++i) {
@@ -1538,7 +1541,7 @@ Kirigami.ApplicationWindow {
         openTab("downloads");
     }
 
-    // The automatic download rules open above the Downloads tab, which a page elsewhere (the Settings link) gives way to after the question about unsaved changes; a page of them already open is brought back
+    // The automatic download rules open above the Downloads tab, which a page elsewhere gives way to after the question about unsaved changes; from Settings they open above it; a page of them already open is brought back
     function openDownloadRules() {
         if (!signedIn && !offline)
             return;
@@ -1548,6 +1551,11 @@ Kirigami.ApplicationWindow {
                 popTo(page);
                 return;
             }
+        }
+        // From Settings the page opens above it, and Back returns there
+        if (pageStack.currentItem?.objectName === "settingsPage") {
+            pageStack.push(Qt.resolvedUrl("DownloadRulesPage.qml"), { connection: connection });
+            return;
         }
         if (askBeforeLeaving(() => openDownloadRules()))
             return;

@@ -371,6 +371,7 @@ Kirigami.ScrollablePage {
         currentKind: page.seriesRule.kind ?? "nextN"
         storedSeason: page.seriesRule.seasonNumber ?? -1
         currentCount: page.seriesRule.count ?? 3
+        paused: page.seriesRule.enabled === false
     }
     readonly property Kirigami.Action favoriteAction: Kirigami.Action {
         objectName: "toggleFavoriteAction"

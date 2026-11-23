@@ -202,10 +202,20 @@ ItemDetailsModel::ItemDetailsModel(JellyfinClient *client, const QString &itemId
                         m_details.resumePositionTicks = 0;
                         if (playable())
                             m_details.playedPercentage = played ? 100 : 0;
-                        // The episodes of a series or a season changed under it: what hangs below it (seasons, the episode to go on with, the episode list) is read again, and after this model's own write its unplayed count is known only when none is left
+                        // The episodes of a series or a season changed under it: what hangs below it (seasons, the episode to go on with, the episode list) is read again, and after this model's own write the unplayed count is guessed (none left or not known) until the answer of the server brings the real one
                         const bool container = !playable();
                         if (container && m_playedBusy)
                             m_details.unplayedCount = played ? 0 : -1;
+                        // The season and the series above an episode or a season changed their counts with it: they are read again, so a series page or a series card below this page shows them
+                        if (m_playedBusy && m_client) {
+                            QStringList parents;
+                            for (const QString &parent : {m_details.seasonId, m_details.seriesId}) {
+                                if (!parent.isEmpty() && !parents.contains(parent))
+                                    parents.append(parent);
+                            }
+                            if (!parents.isEmpty())
+                                m_client->refreshUserData(parents);
+                        }
                         Q_EMIT detailsChanged();
                         // After this model's own write the episodes below changed without a signal of their own: all is read again; after a refresh of user data a season's episodes follow it in place and only its targets are asked again
                         if (container && m_below.kind() != ItemChildrenModel::None) {
@@ -220,6 +230,17 @@ ItemDetailsModel::ItemDetailsModel(JellyfinClient *client, const QString &itemId
                         m_playedError = false;
                         Q_EMIT playedWriteStateChanged();
                     }
+                });
+        // A series or a season says how many episodes are left: the facts line follows it
+        connect(m_client, &JellyfinClient::itemUnplayedCountUpdated, this,
+                [this](const QString &id, int count) {
+                    if (!m_details.valid
+                        || QString(id).remove(QLatin1Char('-')).toLower()
+                               != QString(m_itemId).remove(QLatin1Char('-')).toLower()
+                        || m_details.unplayedCount == count)
+                        return;
+                    m_details.unplayedCount = count;
+                    Q_EMIT detailsChanged();
                 });
         // The Undo of a Mark as Watched gives the resume point back
         connect(m_client, &JellyfinClient::itemProgressUpdated, this,
@@ -373,6 +394,7 @@ void ItemDetailsModel::onItemsReady(const QJsonArray &items, int, int channel)
         parsed.played = m_details.played;
         parsed.resumePositionTicks = m_details.resumePositionTicks;
         parsed.playedPercentage = m_details.playedPercentage;
+        parsed.unplayedCount = m_details.unplayedCount;
     }
     m_details = parsed;
     Q_EMIT detailsChanged();

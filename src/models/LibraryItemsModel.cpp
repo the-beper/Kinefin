@@ -209,6 +209,8 @@ LibraryItemsModel::LibraryItemsModel(JellyfinClient *client, int channel, QObjec
                 [this](const QString &id, qint64 position, double percentage) {
                     applyProgressState(id, position, percentage);
                 });
+        connect(m_client, &JellyfinClient::itemUnplayedCountUpdated, this,
+                [this](const QString &id, int count) { applyUnplayedCountState(id, count); });
         // A 401, a disconnect, a server switch and a sign-out all end with this signal
         connect(m_client, &JellyfinClient::credentialsCleared, this, [this] { clear(); });
     }

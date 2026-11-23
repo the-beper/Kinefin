@@ -161,11 +161,21 @@ class TestItemDetailsModel : public QObject {
         QTRY_COMPARE(f.server.listingRoutes.value(QStringLiteral("NextUp")).size(),
                      nextUpReads + 1);
 
+        // The answer of the server brings the real count, which wins over the guess of the model
+        f.server.playedWriteRawBody =
+            QByteArrayLiteral("{\"Played\":false,\"UnplayedItemCount\":12}");
         QVERIFY(details->togglePlayed());
         QTRY_VERIFY(!details->playedBusy());
         QCOMPARE(f.server.playedWrites.constLast().method, QByteArrayLiteral("DELETE"));
         QVERIFY(!details->played());
-        // Not known until the page reads the series again
+        QCOMPARE(details->unplayedCount(), 12);
+        f.server.playedWriteRawBody.clear();
+        // Without a count in the answer it is not known until the page reads the series again
+        QVERIFY(details->togglePlayed());
+        QTRY_VERIFY(!details->playedBusy());
+        QVERIFY(details->played());
+        QVERIFY(details->togglePlayed());
+        QTRY_VERIFY(!details->playedBusy());
         QCOMPARE(details->unplayedCount(), -1);
 
         const QString season = QStringLiteral("11aa22bb33cc44dd55ee66ff778899aa");
@@ -176,6 +186,47 @@ class TestItemDetailsModel : public QObject {
         QVERIFY(seasonDetails->togglePlayed());
         QTRY_VERIFY(!seasonDetails->playedBusy());
         QVERIFY(seasonDetails->played());
+    }
+
+    void theUnplayedCountFollowsTheUserData()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        const QString series = QStringLiteral("aa11bb22cc33dd44ee55ff6677889900");
+        f.server.itemsById.insert(series, fixtureItem(QStringLiteral("series_item")));
+        auto details = f.open(series);
+        QTRY_COMPARE(details->status(), ItemDetailsModel::Ready);
+        QSignalSpy changed(details.get(), &ItemDetailsModel::detailsChanged);
+        Q_EMIT f.client.itemUnplayedCountUpdated(series.toUpper(), 4);
+        QCOMPARE(details->unplayedCount(), 4);
+        QCOMPARE(changed.size(), 1);
+        // The same count again, and another item's, change nothing
+        Q_EMIT f.client.itemUnplayedCountUpdated(series, 4);
+        Q_EMIT f.client.itemUnplayedCountUpdated(QStringLiteral("bb11cc22dd33ee44ff5566778899aabb"),
+                                                 1);
+        QCOMPARE(changed.size(), 1);
+        QCOMPARE(details->unplayedCount(), 4);
+    }
+
+    // The season and the series above an episode are read again after its write, so their counts follow
+    void anEpisodeWriteReadsItsSeasonAndSeriesAgain()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        auto details = f.open(kEpisode);
+        QTRY_COMPARE(details->status(), ItemDetailsModel::Ready);
+        const QString season = details->seasonId();
+        const QString series = details->seriesId();
+        QVERIFY(!season.isEmpty() || !series.isEmpty());
+        const int before = f.server.itemsRoutes.size();
+        QVERIFY(details->togglePlayed());
+        QTRY_VERIFY(!details->playedBusy());
+        QTRY_VERIFY(f.server.itemsRoutes.size() > before);
+        const QString route = QString::fromUtf8(f.server.itemsRoutes.constLast());
+        if (!series.isEmpty())
+            QVERIFY(route.contains(series));
+        if (!season.isEmpty())
+            QVERIFY(route.contains(season));
     }
 
     void aCollectionCannotBeMarked()

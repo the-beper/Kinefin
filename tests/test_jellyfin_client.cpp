@@ -290,6 +290,59 @@ class TestJellyfinClient : public QObject {
         QCOMPARE(server.itemsRoutes.size(), 3);
     }
 
+    // A series or a season says how many episodes are left, in a refresh and in the answer of a write
+    void theUnplayedCountOfASeriesComesWithItsUserData()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        const auto row = [](const QString &id, double unplayed) {
+            return QJsonDocument(
+                       QJsonObject{{QStringLiteral("Id"), id},
+                                   {QStringLiteral("Type"), QStringLiteral("Series")},
+                                   {QStringLiteral("UserData"),
+                                    QJsonObject{{QStringLiteral("Played"), false},
+                                                {QStringLiteral("UnplayedItemCount"), unplayed}}}})
+                .toJson(QJsonDocument::Compact);
+        };
+        server.itemsById.insert(kItemA, row(kItemA, 7));
+        server.itemsById.insert(kItemB, row(kItemB, -3));
+        server.itemsById.insert(kItemC, row(kItemC, 1'000'001));
+        server.itemsById.insert(kDashedItem, row(kDashedItem, 2.5));
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        QSignalSpy counts(&client, &Kinefin::JellyfinClient::itemUnplayedCountUpdated);
+        QVERIFY(client.refreshUserData({kItemA, kItemB, kItemC, kDashedItem}));
+        QTRY_COMPARE(counts.size(), 1);
+        // A negative, a too large and a fractional count are not counts
+        QTest::qWait(200);
+        QCOMPARE(counts.size(), 1);
+        QCOMPARE(counts.constFirst().at(0).toString(), kItemA);
+        QCOMPARE(counts.constFirst().at(1).toInt(), 7);
+
+        // The answer of a watched write carries it too
+        server.playedWriteRawBody = QByteArrayLiteral("{\"Played\":true,\"UnplayedItemCount\":0}");
+        QVERIFY(client.setItemPlayed(kItemC, true));
+        QTRY_COMPARE(counts.size(), 2);
+        QCOMPARE(counts.constLast().at(0).toString(), kItemC);
+        QCOMPARE(counts.constLast().at(1).toInt(), 0);
+    }
+
+    // An expired session ends the session, as every other request does
+    void refreshUserDataEndsTheSessionOnA401()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        QSignalSpy cleared(&client, &Kinefin::JellyfinClient::credentialsCleared);
+        QSignalSpy played(&client, &Kinefin::JellyfinClient::itemPlayedUpdated);
+        server.denyListings = true;
+        QVERIFY(client.refreshUserData({kItemA}));
+        QTRY_COMPARE(cleared.size(), 1);
+        QVERIFY(!client.isAuthenticated());
+        QCOMPARE(played.size(), 0);
+    }
+
     void refreshUserDataAsksInChunksAndAFailureEmitsNothing()
     {
         FakeJellyfin server;

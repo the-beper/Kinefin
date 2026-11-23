@@ -258,7 +258,7 @@ ConnectionController::ConnectionController(const QString &profileId, const QStri
     // A library scan only wakes the rule scanner: LibraryChanged is a hint, never an item list
     connect(&m_socket, &JellyfinSocketClient::libraryChanged, this,
             [this] { m_downloads.scheduleRuleScan(); });
-    // A change of user data (this device's playback, another device, a write from another session) is a hint: the ids are read again in one round a second at most, and what reads back goes to the models through the client's three signals
+    // A change of user data (this device's playback, another device, a write from another session) is a hint: the ids are read again in one round a second at most, and what reads back goes to the models through the client's user data signals
     m_userDataRefresh.setSingleShot(true);
     m_userDataRefresh.setInterval(1000);
     connect(&m_socket, &JellyfinSocketClient::userDataChanged, this,
