@@ -76,7 +76,7 @@ The build script installs the org.kde runtime at commits recorded in `build/flat
 
 ## Translations
 
-Strings are `i18n()` calls (QML: plain `i18n()` injected with `KLocalization::setupLocalizedContext()` from `KF6::I18nQml`, requiring KF6 >= 6.8). When a file gains its first translatable string, add it to `po/POTFILES.in` in the same change (the extraction script fails otherwise), then regenerate `po/kinefin.pot` with `build/build-env.sh po/extract.sh` and fill `it.po` (`python3 scripts/po.py todo` lists the pending entries). `en.po` repeats the msgid. Catalogs are compiled by the CMake install (ECM PO); `po/extract.sh --check` must verify real source extraction, and `po.py status --strict` must report zero pending per language or the check fails.
+Strings are `i18n()` calls (QML: plain `i18n()` injected with `KLocalization::setupLocalizedContext()` from `KF6::I18nQml`). The project requires KF6 >= 6.24, the first Kirigami with `Kirigami.StyleHints` (the KDE 6.11 Flatpak runtime ships Kirigami 6.32). When a file gains its first translatable string, add it to `po/POTFILES.in` in the same change (the extraction script fails otherwise), then regenerate `po/kinefin.pot` with `build/build-env.sh po/extract.sh` and fill `it.po` (`python3 scripts/po.py todo` lists the pending entries). `en.po` repeats the msgid. Catalogs are compiled by the CMake install (ECM PO); `po/extract.sh --check` must verify real source extraction, and `po.py status --strict` must report zero pending per language or the check fails.
 
 `po/kinefin.pot` is generated: never edit it by hand.
 

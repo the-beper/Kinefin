@@ -8,7 +8,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_AUTOMOC ON)
 
-find_package(ECM 6.8.0 REQUIRED NO_MODULE)
+# 6.24 is the first Kirigami with Kirigami.StyleHints, which the list rows use
+find_package(ECM 6.24.0 REQUIRED NO_MODULE)
 set(CMAKE_MODULE_PATH ${ECM_MODULE_PATH})
 include(KDEInstallDirs6)
 include(KDECMakeSettings)
@@ -19,7 +20,7 @@ find_package(Qt6 6.6 REQUIRED COMPONENTS Core Gui Widgets Quick Qml QuickControl
 if(QT_KNOWN_POLICY_QTP0004)
     qt_policy(SET QTP0004 OLD)
 endif()
-find_package(KF6 6.8 REQUIRED COMPONENTS Config CoreAddons I18n DBusAddons Wallet)
+find_package(KF6 6.24 REQUIRED COMPONENTS Config CoreAddons I18n DBusAddons Wallet)
 # The KDE runtime 6.11 ships SDL 3.2; the gamepad input needs nothing but the library
 find_package(SDL3 3.2 REQUIRED CONFIG)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
@@ -155,6 +156,8 @@ add_library(kinefin_core STATIC
     src/settings/ProfileIdentity.h
     src/settings/ProfileIndex.cpp
     src/settings/ProfileIndex.h
+    src/settings/MpvConf.cpp
+    src/settings/MpvConf.h
     src/settings/ProfilePaths.cpp
     src/settings/ProfilePaths.h
     src/settings/ServerCredentials.cpp
@@ -178,6 +181,8 @@ add_library(kinefin_player STATIC
     src/player/BitrateFallback.h
     src/player/ClipExporter.cpp
     src/player/ClipExporter.h
+    src/player/MpvConfValidator.cpp
+    src/player/MpvConfValidator.h
     src/player/PlaybackEngine.cpp
     src/player/PlaybackEngine.h
     src/player/GroupPlayback.h
@@ -254,7 +259,7 @@ target_link_libraries(kinefin_cast PUBLIC Qt6::Core Qt6::Network KF6::I18n)
 target_link_libraries(kinefin_player PUBLIC kinefin_cast)
 
 # The QML module lives in a static library of its own so that the UI tests can import it like the application does
-foreach(page Main PlayerPage OsdButton MiniPlayer PictureInPictureWindow PlaybackInfoOverlay ShellHeader AboutDialog ShortcutsDialog DialogTitleBar RemoteSessionsDialog SyncPlayDialog MediaInfoDialog CastDialog CastTargetRow HomePage LibraryTile LibraryPage ResumeItemsPage PersonPage MediaCard CardMenu CardRow EpisodeRow ItemDetailsPage SearchPage QueuePage FilterDialog FilterChips GenreRailsView GenreRailsPage LibraryContent ItemListRow ItemRowGrid LoginPage UserPickerPage MessageBox ServersPage SettingsPage SettingRow UserPreferencesForm UserPreferencesSaveBar FavoritesPage FavoriteCard FavoritesBanners FavoritesSectionPage TopFade MediaListRow PlaylistsPage PlaylistPage PlaylistDialogs AddToPlaylistDialog AddToCollectionDialog CollectionDialogs EditMetadataDialog IdentifyDialog EditImagesDialog EditSubtitlesDialog PageToolbar PageBackButton FadeInOnShow PageTitle PlainToolTip PopupPlacement AutoScroll DownloadsPage RuleDialog SubtitleSearchDialog)
+foreach(page Main PlayerPage OsdButton MiniPlayer PictureInPictureWindow PlaybackInfoOverlay ShellHeader AboutDialog ShortcutsDialog DialogTitleBar RemoteSessionsDialog SyncPlayDialog MediaInfoDialog CastDialog CastTargetRow HomePage LibraryTile LibraryPage ResumeItemsPage PersonPage MediaCard CardMenu CardRow EpisodeRow ItemDetailsPage SearchPage QueuePage FilterDialog FilterChips GenreRailsView GenreRailsPage LibraryContent ItemListRow ItemRowGrid LoginPage UserPickerPage MessageBox ServersPage SettingsPage SettingRow UserPreferencesForm UserPreferencesSaveBar FavoritesPage FavoriteCard FavoritesBanners FavoritesSectionPage TopFade MediaListRow PlaylistsPage PlaylistPage PlaylistDialogs AddToPlaylistDialog AddToCollectionDialog CollectionDialogs EditMetadataDialog IdentifyDialog EditImagesDialog EditSubtitlesDialog PageToolbar PageBackButton FadeInOnShow PageTitle PlainToolTip PopupPlacement AutoScroll DownloadsPage DownloadRulesPage DownloadAllDialog RuleDialog SubtitleSearchDialog)
     set_source_files_properties(src/qml/${page}.qml PROPERTIES QT_RESOURCE_ALIAS ${page}.qml)
 endforeach()
 # The images the pages draw themselves, beside the QML files they belong to
@@ -312,6 +317,8 @@ qt_add_qml_module(kinefin_ui
         src/qml/SearchPage.qml
         src/qml/QueuePage.qml
         src/qml/DownloadsPage.qml
+        src/qml/DownloadRulesPage.qml
+        src/qml/DownloadAllDialog.qml
         src/qml/RuleDialog.qml
         src/qml/SubtitleSearchDialog.qml
         src/qml/FilterDialog.qml
@@ -792,6 +799,10 @@ if(BUILD_TESTING)
     add_executable(test_client_settings tests/test_client_settings.cpp)
     target_link_libraries(test_client_settings PRIVATE kinefin_core Qt6::Test)
     add_test(NAME client_settings COMMAND test_client_settings)
+
+    add_executable(test_mpv_conf tests/test_mpv_conf.cpp)
+    target_link_libraries(test_mpv_conf PRIVATE kinefin_player Qt6::Test)
+    add_test(NAME mpv_conf COMMAND test_mpv_conf)
 
     add_executable(test_settings_parity tests/test_settings_parity.cpp)
     target_compile_definitions(test_settings_parity PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
