@@ -41,6 +41,8 @@ class JellyfinSocketClient final : public QObject {
     ~JellyfinSocketClient() override;
 
     State state() const;
+    // The wall clock time (ms since the epoch) of the last frame or of the connection, 0 before the first: how long a gap in the events was, also across a suspend, which no monotonic clock counts
+    qint64 lastActivityMs() const { return m_lastActivityMs; }
 
     // Network back or an explicit user retry: the attempt counter resets and the next attempt opens at once, before the backoff timer. No-op unless the connection is currently between retries
     void reconnectNow();
@@ -101,6 +103,7 @@ class JellyfinSocketClient final : public QObject {
     QTimer m_connectTimer;
     QTimer m_deadPeerTimer;
     QTimer m_keepAliveTimer;
+    qint64 m_lastActivityMs = 0;
     QTimer m_reconnectTimer;
     QElapsedTimer m_uptime;
     int m_attempt = 0;

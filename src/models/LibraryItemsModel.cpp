@@ -781,6 +781,43 @@ void LibraryItemsModel::setGenreIds(const QStringList &ids)
     setFilterState(state);
 }
 
+void LibraryItemsModel::applyFilterSet(const LibraryFilterState &filters,
+                                       const QStringList &pendingTagHashes,
+                                       const QStringList &pendingRatingHashes)
+{
+    const LibraryFilterState filtersBefore = m_filters;
+    const QStringList tagsBefore = m_pendingTagHashes;
+    const QStringList ratingsBefore = m_pendingRatingHashes;
+    assignPending(pendingTagHashes, pendingRatingHashes);
+    assignFilters(filters);
+    // The facet lists are loaded already, as a rule: nothing would resolve the digests when they change no more
+    resolvePendingSelections();
+    // The same set again, once resolved, is the view the list has
+    if (m_filters == filtersBefore && m_pendingTagHashes == tagsBefore
+        && m_pendingRatingHashes == ratingsBefore)
+        return;
+    if (isOpen())
+        restartList();
+    Q_EMIT viewStateEdited();
+}
+
+QString LibraryItemsModel::filterKind() const
+{
+    if (!isOpen())
+        return {};
+    switch (scope()) {
+    case LibraryScope::Movies:
+        return QStringLiteral("movies");
+    case LibraryScope::Series:
+        return QStringLiteral("series");
+    case LibraryScope::Episodes:
+        return QStringLiteral("episodes");
+    case LibraryScope::Collections:
+        return QStringLiteral("collections");
+    }
+    return {};
+}
+
 void LibraryItemsModel::clearFilters()
 {
     const bool droppedPending = assignPending({}, {});

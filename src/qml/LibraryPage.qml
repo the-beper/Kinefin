@@ -195,6 +195,7 @@ Kirigami.Page {
 
         // Only one list is open at a time: the dialog follows it, and the chips of the page read from it. A page without a list has none to filter
         list: page.listModel ?? page.model
+        connection: page.connection
         favoritesFixed: page.subtab === "favorites"
     }
 

@@ -209,6 +209,244 @@ class TestBrowseStateStore : public QObject {
         QVERIFY(f.stored().contains("\"DateAdded\""));
     }
 
+    // Named filters: per user and kind, a name unique without regard to case, a limit, and the same file rules as the views
+    void savedFiltersRoundTripAndKeepTheirRules()
+    {
+        Fixture f;
+        using Result = BrowseStateStore::SaveResult;
+        using Rename = BrowseStateStore::RenameResult;
+        ViewState unwatched = state(QStringLiteral("SortName"), false, QStringLiteral("Unplayed"));
+        unwatched.is4K = true;
+        unwatched.tagHashes = {BrowseStateStore::hashText(QStringLiteral("Dutch"))};
+        const ViewState favorite =
+            state(QStringLiteral("SortName"), false, QStringLiteral("Favorites"));
+        {
+            auto store = f.open();
+            QCOMPARE(store->saveFilter(kServer, kUser, QStringLiteral("movies"),
+                                       QStringLiteral("Unwatched 4K"), unwatched, false),
+                     Result::Saved);
+            // A name is taken without regard to case, unless it is to be replaced
+            QCOMPARE(store->saveFilter(kServer, kUser, QStringLiteral("movies"),
+                                       QStringLiteral("unwatched 4k"), favorite, false),
+                     Result::Exists);
+            QCOMPARE(store->saveFilter(kServer, kUser, QStringLiteral("movies"),
+                                       QStringLiteral("unwatched 4k"), favorite, true),
+                     Result::Replaced);
+            // Another kind and another user have their own
+            QCOMPARE(store->saveFilter(kServer, kUser, QStringLiteral("series"),
+                                       QStringLiteral("unwatched 4k"), unwatched, false),
+                     Result::Saved);
+            QCOMPARE(store->saveFilter(kServer, kOtherUser, QStringLiteral("movies"),
+                                       QStringLiteral("unwatched 4k"), unwatched, false),
+                     Result::Saved);
+            store->flush();
+        }
+        auto store = f.open();
+        const auto movies = store->savedFilters(kServer, kUser, QStringLiteral("movies"));
+        QCOMPARE(movies.size(), 1);
+        QCOMPARE(movies.constFirst().name, QStringLiteral("unwatched 4k"));
+        QCOMPARE(movies.constFirst().state.statusFlags, QStringList{QStringLiteral("IsFavorite")});
+        QCOMPARE(store->savedFilters(kServer, kUser).size(), 2);
+        const auto series = store->savedFilter(kServer, kUser, QStringLiteral("series"),
+                                               QStringLiteral("UNWATCHED 4K"));
+        QVERIFY(series);
+        QCOMPARE(series->tagHashes, unwatched.tagHashes);
+        QVERIFY(!store->savedFilter(kServer, kUser, QStringLiteral("episodes"),
+                                    QStringLiteral("unwatched 4k")));
+        // The tag is a digest in the file, never its text
+        QVERIFY(!f.stored().contains("Dutch"));
+
+        // Rename keeps the set, a taken name refuses, a missing one is missing
+        QCOMPARE(store->saveFilter(kServer, kUser, QStringLiteral("movies"),
+                                   QStringLiteral("Second"), unwatched, false),
+                 Result::Saved);
+        QCOMPARE(store->renameSavedFilter(kServer, kUser, QStringLiteral("movies"),
+                                          QStringLiteral("Second"), QStringLiteral("UNWATCHED 4K")),
+                 Rename::Exists);
+        QCOMPARE(store->renameSavedFilter(kServer, kUser, QStringLiteral("movies"),
+                                          QStringLiteral("Second"), QStringLiteral("Third")),
+                 Rename::Renamed);
+        // The same name in another case is a rename of the same set
+        QCOMPARE(store->renameSavedFilter(kServer, kUser, QStringLiteral("movies"),
+                                          QStringLiteral("third"), QStringLiteral("THIRD")),
+                 Rename::Renamed);
+        QCOMPARE(store->renameSavedFilter(kServer, kUser, QStringLiteral("movies"),
+                                          QStringLiteral("none"), QStringLiteral("Other")),
+                 Rename::Missing);
+        QCOMPARE(store->renameSavedFilter(kServer, kUser, QStringLiteral("movies"),
+                                          QStringLiteral("THIRD"), QStringLiteral(" padded")),
+                 Rename::Invalid);
+        QVERIFY(
+            store->savedFilter(kServer, kUser, QStringLiteral("movies"), QStringLiteral("third")));
+        QVERIFY(store->removeSavedFilter(kServer, kUser, QStringLiteral("movies"),
+                                         QStringLiteral("third")));
+        QVERIFY(!store->removeSavedFilter(kServer, kUser, QStringLiteral("movies"),
+                                          QStringLiteral("third")));
+        QCOMPARE(store->savedFilters(kServer, kUser, QStringLiteral("movies")).size(), 1);
+    }
+
+    void savedFilterNamesKindsAndLimitsAreChecked()
+    {
+        Fixture f;
+        using Result = BrowseStateStore::SaveResult;
+        auto store = f.open();
+        const ViewState view = state(QStringLiteral("SortName"), false, QStringLiteral("Unplayed"));
+        const auto save = [&](const QString &kind, const QString &name) {
+            return store->saveFilter(kServer, kUser, kind, name, view, false);
+        };
+        const QString movies = QStringLiteral("movies");
+        QCOMPARE(save(movies, QString()), Result::Invalid);
+        QCOMPARE(save(movies, QStringLiteral(" padded")), Result::Invalid);
+        QCOMPARE(save(movies, QStringLiteral("padded ")), Result::Invalid);
+        QCOMPARE(save(movies, QStringLiteral("two\nlines")), Result::Invalid);
+        QCOMPARE(save(movies, QString(41, QLatin1Char('a'))), Result::Invalid);
+        QCOMPARE(save(movies, QString(40, QLatin1Char('a'))), Result::Saved);
+        QCOMPARE(save(QStringLiteral("tvshows"), QStringLiteral("kind")), Result::Invalid);
+        QCOMPARE(store->saveFilter(QStringLiteral("not an id"), kUser, movies,
+                                   QStringLiteral("server"), view, false),
+                 Result::Invalid);
+        // A state the store would not accept as a view is refused too, and so are more tags than a query carries
+        ViewState bad = view;
+        bad.sortKey = QStringLiteral("not a token!");
+        QCOMPARE(store->saveFilter(kServer, kUser, movies, QStringLiteral("bad"), bad, false),
+                 Result::Invalid);
+        ViewState manyTags = view;
+        for (int i = 0; i <= BrowseStateStore::MaxSavedHashes; ++i)
+            manyTags.tagHashes.append(hash(i + 1));
+        QCOMPARE(store->saveFilter(kServer, kUser, movies, QStringLiteral("tags"), manyTags, false),
+                 Result::Invalid);
+        // Fifty a user, then it is full; a replace of one that exists is still allowed
+        for (int i = 1; i < BrowseStateStore::MaxSavedFilters; ++i)
+            QCOMPARE(save(movies, QStringLiteral("set %1").arg(i)), Result::Saved);
+        QCOMPARE(save(movies, QStringLiteral("one too many")), Result::Full);
+        QCOMPARE(store->saveFilter(kServer, kUser, movies, QStringLiteral("set 1"), view, true),
+                 Result::Replaced);
+        // By kind and then by name, without regard to case
+        const auto names = store->savedFilters(kServer, kUser, movies);
+        QCOMPARE(names.size(), BrowseStateStore::MaxSavedFilters);
+        for (qsizetype i = 1; i < names.size(); ++i)
+            QVERIFY(names.at(i - 1).name.compare(names.at(i).name, Qt::CaseInsensitive) < 0);
+    }
+
+    void aBadSavedFilterInTheFileIsDroppedAlone()
+    {
+        Fixture f;
+        QJsonObject good = goodView(5);
+        good.insert(QStringLiteral("kind"), QStringLiteral("movies"));
+        good.insert(QStringLiteral("name"), QStringLiteral("Good"));
+        QJsonObject badKind = good;
+        badKind.insert(QStringLiteral("kind"), QStringLiteral("music"));
+        badKind.insert(QStringLiteral("name"), QStringLiteral("Bad kind"));
+        QJsonObject badName = good;
+        badName.insert(QStringLiteral("name"), QStringLiteral(" untrimmed"));
+        QJsonObject duplicate = good;
+        duplicate.insert(QStringLiteral("name"), QStringLiteral("GOOD"));
+        QJsonObject badView = good;
+        badView.insert(QStringLiteral("name"), QStringLiteral("Bad view"));
+        badView.insert(QStringLiteral("sortKey"), QStringLiteral("no way!"));
+        QJsonObject badSeq = good;
+        badSeq.insert(QStringLiteral("name"), QStringLiteral("Bad seq"));
+        badSeq.insert(QStringLiteral("seq"), -3);
+        const QJsonObject user{{QStringLiteral("savedFilters"),
+                                QJsonArray{good, badKind, badName, duplicate, badView, badSeq}}};
+        f.write(
+            QJsonDocument(
+                QJsonObject{{QStringLiteral("version"), 2},
+                            {QStringLiteral("nextSeq"), 100},
+                            {QStringLiteral("servers"),
+                             QJsonObject{{kServer, QJsonObject{{QStringLiteral("users"),
+                                                                QJsonObject{{kUser, user}}}}}}}})
+                .toJson(QJsonDocument::Compact));
+        auto store = f.open();
+        const auto saved = store->savedFilters(kServer, kUser);
+        QCOMPARE(saved.size(), 1);
+        QCOMPARE(saved.constFirst().name, QStringLiteral("Good"));
+        // A new set takes a number past the one read
+        QCOMPARE(store->saveFilter(kServer, kUser, QStringLiteral("movies"), QStringLiteral("Next"),
+                                   ViewState(), false),
+                 BrowseStateStore::SaveResult::Saved);
+    }
+
+    void aSetOverTheHashLimitIsNotLoadedAndTheSetsAloneNeverPassTheFileLimit()
+    {
+        Fixture f;
+        // A hand-edited file with a set past the limit of tags
+        QJsonObject over = goodView(5);
+        over.insert(QStringLiteral("kind"), QStringLiteral("movies"));
+        over.insert(QStringLiteral("name"), QStringLiteral("Over"));
+        QJsonArray hashes;
+        for (int i = 0; i <= BrowseStateStore::MaxSavedHashes; ++i)
+            hashes.append(hash(i + 1));
+        over.insert(QStringLiteral("tagHashes"), hashes);
+        const QJsonObject user{{QStringLiteral("savedFilters"), QJsonArray{over}}};
+        f.write(
+            QJsonDocument(
+                QJsonObject{{QStringLiteral("version"), 3},
+                            {QStringLiteral("nextSeq"), 100},
+                            {QStringLiteral("servers"),
+                             QJsonObject{{kServer, QJsonObject{{QStringLiteral("users"),
+                                                                QJsonObject{{kUser, user}}}}}}}})
+                .toJson(QJsonDocument::Compact));
+        QVERIFY(f.open()->savedFilters(kServer, kUser).isEmpty());
+
+        // Sets as large as they may be: a save that would take the sets past the file limit is refused, and nothing a person named is dropped
+        auto store = f.open();
+        ViewState big = state(QStringLiteral("SortName"), false, QStringLiteral("Unplayed"));
+        for (int i = 0; i < BrowseStateStore::MaxSavedHashes; ++i) {
+            big.tagHashes.append(hash(i + 1));
+            big.ratingHashes.append(hash(i + 101));
+        }
+        for (int i = 0; i < BrowseStateStore::MaxGenreIds; ++i)
+            big.genreIds.append(hex(i + 1));
+        for (int i = 0; i < BrowseStateStore::MaxYears; ++i)
+            big.years.append(1900 + i);
+        QStringList saved;
+        for (int i = 0; i < BrowseStateStore::MaxSavedFilters; ++i) {
+            const QString name = QStringLiteral("big %1").arg(i);
+            const auto result =
+                store->saveFilter(kServer, kUser, QStringLiteral("movies"), name, big, false);
+            if (result == BrowseStateStore::SaveResult::Full)
+                break;
+            QCOMPARE(result, BrowseStateStore::SaveResult::Saved);
+            saved << name;
+        }
+        QVERIFY(!saved.isEmpty());
+        store->flush();
+        QVERIFY(f.stored().size() <= BrowseStateStore::MaxFileBytes);
+        auto reopened = f.open();
+        QCOMPARE(reopened->savedFilters(kServer, kUser).size(), saved.size());
+        // A refused replace leaves the set it meant to replace
+        if (saved.size() < BrowseStateStore::MaxSavedFilters) {
+            QCOMPARE(store->saveFilter(kServer, kUser, QStringLiteral("movies"),
+                                       QStringLiteral("one more"), big, false),
+                     BrowseStateStore::SaveResult::Full);
+            QVERIFY(!store->savedFilter(kServer, kUser, QStringLiteral("movies"),
+                                        QStringLiteral("one more")));
+        }
+    }
+
+    void aFileOverTheSizeLimitLosesViewsBeforeTheSetsANameWasGiven()
+    {
+        Fixture f;
+        auto store = f.open();
+        ViewState big = state(QStringLiteral("SortName"), false, QStringLiteral("Unplayed"));
+        for (int i = 0; i < BrowseStateStore::MaxHashes; ++i) {
+            big.tagHashes.append(hash(i + 1));
+            big.ratingHashes.append(hash(i + 101));
+        }
+        for (int i = 0; i < BrowseStateStore::MaxViews; ++i)
+            store->setView(kServer, kUser, libraryScope(i + 1), big);
+        QVERIFY(store->saveFilter(
+                    kServer, kUser, QStringLiteral("movies"), QStringLiteral("Kept"),
+                    state(QStringLiteral("SortName"), false, QStringLiteral("Played")), false)
+                == BrowseStateStore::SaveResult::Saved);
+        store->flush();
+        QVERIFY(f.stored().size() <= BrowseStateStore::MaxFileBytes);
+        auto reopened = f.open();
+        QVERIFY(reopened->savedFilter(kServer, kUser, QStringLiteral("movies"),
+                                      QStringLiteral("Kept")));
+    }
+
     void fileIsPrivate()
     {
         Fixture f;
@@ -367,7 +605,7 @@ class TestBrowseStateStore : public QObject {
     void newerVersionRenamedBroken()
     {
         Fixture f;
-        const QByteArray bytes = fileFor({{kMovies, kLibrary}}, {}, 3);
+        const QByteArray bytes = fileFor({{kMovies, kLibrary}}, {}, 4);
         f.write(bytes);
         const QString aside = f.path + QStringLiteral(".broken");
         QFile old(aside);
@@ -385,7 +623,7 @@ class TestBrowseStateStore : public QObject {
     void aNewerFileThatCannotBeSetAsideIsNotOverwritten()
     {
         Fixture f;
-        const QByteArray bytes = fileFor({{kMovies, kLibrary}}, {}, 3);
+        const QByteArray bytes = fileFor({{kMovies, kLibrary}}, {}, 4);
         f.write(bytes);
         // A directory with a file in it blocks both the removal and the rename of the .broken name
         const QString aside = f.path + QStringLiteral(".broken");
@@ -557,7 +795,7 @@ class TestBrowseStateStore : public QObject {
         }
         QCOMPARE(
             QJsonDocument::fromJson(f.stored()).object().value(QStringLiteral("version")).toInt(),
-            2);
+            3);
         auto store = f.open();
         QVERIFY(holds(*store, kServer, kUser, scope, full));
         QVERIFY(holds(*store, kServer, kUser, QStringLiteral("tvshows/episodes"), other));
@@ -646,7 +884,7 @@ class TestBrowseStateStore : public QObject {
             store->flush();
         }
         const QJsonObject root = QJsonDocument::fromJson(f.stored()).object();
-        QCOMPARE(root.value(QStringLiteral("version")).toInt(), 2);
+        QCOMPARE(root.value(QStringLiteral("version")).toInt(), 3);
         // The counter went on from where it was: the edited view got 40, the others kept their number
         QCOMPARE(root.value(QStringLiteral("nextSeq")).toInteger(), 41);
         const QJsonObject views = root.value(QStringLiteral("servers"))

@@ -198,8 +198,8 @@ Rectangle {
         contentHeight: column.implicitHeight
         clip: true
         boundsBehavior: Flickable.StopAtBounds
-        // Reached with Tab, like the bars' controls, and only while the rows overflow: the player keeps the keys until then
-        activeFocusOnTab: scrollable
+        // Reached with Tab, like the bars' controls, and only while the rows overflow: the player keeps the keys until then. An item that has the focus cannot stop taking Tab (Qt warns), so it lets go of it once the focus has left
+        activeFocusOnTab: scrollable || activeFocus
         Accessible.role: Accessible.Pane
         Accessible.name: overlay.Accessible.name
         Controls.ScrollBar.vertical: Controls.ScrollBar {

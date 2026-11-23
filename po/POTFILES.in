@@ -38,6 +38,8 @@ src/qml/RuleDialog.qml
 src/qml/SubtitleSearchDialog.qml
 src/qml/FilterDialog.qml
 src/qml/FilterChips.qml
+src/qml/SavedFiltersDialog.qml
+src/qml/UploadSubtitleDialog.qml
 src/qml/GenreRailsView.qml
 src/qml/GenreRailsPage.qml
 src/qml/LibraryContent.qml

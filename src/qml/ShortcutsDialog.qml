@@ -57,8 +57,19 @@ Kirigami.Dialog {
         ["Up", i18nc("@item:intable shortcut action", "Skip Forward 1 Minute")],
         ["PgDown", i18nc("@item:intable shortcut action", "Previous Chapter")],
         ["PgUp", i18nc("@item:intable shortcut action", "Next Chapter")],
+        ["Ctrl+-", i18nc("@item:intable shortcut action", "Audio Earlier by 0.1 Second")],
+        ["Ctrl++", i18nc("@item:intable shortcut action", "Audio Later by 0.1 Second")],
+        ["Ctrl+0", i18nc("@item:intable shortcut action", "Reset the Audio Delay")],
+        ["Z", i18nc("@item:intable shortcut action", "Subtitles Earlier by 0.1 Second")],
+        ["X", i18nc("@item:intable shortcut action", "Subtitles Later by 0.1 Second")],
+        ["Shift+Z", i18nc("@item:intable shortcut action", "Subtitles Earlier by 0.5 Second")],
+        ["Shift+X", i18nc("@item:intable shortcut action", "Subtitles Later by 0.5 Second")],
         ["I", i18nc("@item:intable shortcut action", "Set the Clip Start")],
-        ["O", i18nc("@item:intable shortcut action", "Set the Clip End")]
+        ["O", i18nc("@item:intable shortcut action", "Set the Clip End")],
+        ["L", i18nc("@item:intable shortcut action", "Loop the Marked Part")],
+        [".", i18nc("@item:intable shortcut action", "Step One Frame Forward")],
+        [",", i18nc("@item:intable shortcut action", "Step One Frame Back")],
+        ["Shift+I", i18nc("@item:intable shortcut action", "Show or Hide Playback Info")]
     ]
     // The pad's labels are its own (A, B, X, Y or Cross, Circle, Square, Triangle); the dialog shows these groups only while a pad is connected
     readonly property var gamepadRows: [

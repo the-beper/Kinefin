@@ -49,8 +49,12 @@ void ItemChildrenModel::load(const ItemDetails &details)
         requestNextUp();
         break;
     case Season:
+        m_seasonFirstPending = true;
         requestEpisodes();
-        requestSeasonTarget(false);
+        // The list refuses a season with no valid series id without a word: no first page will come
+        if (m_episodes.status() == PagedItemsModel::Failed)
+            m_seasonFirstPending = false;
+        requestSeasonTarget(true);
         break;
     case BoxSet:
         requestItems();
@@ -66,6 +70,7 @@ void ItemChildrenModel::clear()
     m_itemId.clear();
     m_seriesId.clear();
     m_nextUpLoading = false;
+    m_seasonFirstPending = false;
     m_target = Target::None;
     setKind(None);
     m_seasons.setItems({});
@@ -199,7 +204,16 @@ void ItemChildrenModel::onSeasonsReady(const QJsonArray &items, int, int channel
 
 void ItemChildrenModel::onEpisodesReady(const QJsonArray &items, int, int channel)
 {
-    if (channel != m_channel || m_kind != Series || m_target != Target::SeriesFirst)
+    if (channel != m_channel)
+        return;
+    // The list's own first page answers for the season's first episode: it is the page the list asked for, and a later page is not looked at
+    if (m_kind == Season && m_seasonFirstPending) {
+        m_seasonFirstPending = false;
+        setFirstEpisode(firstPlayableEpisode(items));
+        updatePlayTargetsReady();
+        return;
+    }
+    if (m_kind != Series || m_target != Target::SeriesFirst)
         return;
     m_target = Target::None;
     setFirstEpisode(firstPlayableEpisode(items));
@@ -250,9 +264,13 @@ void ItemChildrenModel::onListingFailed(const QString &family, int, const QStrin
         return;
     if (family == QLatin1String("Seasons") && m_kind == Series && m_seasonsStatus == Loading)
         setSeasonsStatus(Failed);
-    else if ((family == QLatin1String("Episodes") && m_target == Target::SeriesFirst)
-             || (family == QLatin1String("Items")
-                 && (m_target == Target::SeasonFirst || m_target == Target::SeasonUnplayed))) {
+    else if (family == QLatin1String("Episodes") && m_kind == Season && m_seasonFirstPending) {
+        // The list shows its own failure; the first episode is a courtesy
+        m_seasonFirstPending = false;
+        setFirstEpisode({});
+    } else if ((family == QLatin1String("Episodes") && m_target == Target::SeriesFirst)
+               || (family == QLatin1String("Items")
+                   && (m_target == Target::SeasonFirst || m_target == Target::SeasonUnplayed))) {
         // The first episode and the one to go on with are courtesies: their failure leaves the buttons out
         const Target failed = m_target;
         m_target = Target::None;
@@ -299,7 +317,7 @@ void ItemChildrenModel::setItemsStatus(Status status)
 // Once the answers of the item are in, kept while the same item reloads (the old entries stay until the new ones replace them) and dropped by clear()
 void ItemChildrenModel::updatePlayTargetsReady()
 {
-    if (m_playTargetsReady || m_target != Target::None)
+    if (m_playTargetsReady || m_target != Target::None || m_seasonFirstPending)
         return;
     const bool settled = m_kind == Season
                          || (m_kind == Series && m_seasonsStatus != Idle

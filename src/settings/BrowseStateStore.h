@@ -53,6 +53,20 @@ class BrowseStateStore final : public QObject {
         bool operator==(const ViewState &) const = default;
     };
 
+    // The filters of a view kept under a name, per kind of list (`movies`, `series`, `episodes`, `collections`): the sort and the view options of the state are not used
+    struct SavedFilter {
+        QString kind;
+        QString name;
+        ViewState state;
+        qint64 seq = 0;
+    };
+    enum class SaveResult { Saved, Replaced, Exists, Full, Invalid };
+    enum class RenameResult { Renamed, Missing, Exists, Invalid };
+
+    static constexpr int MaxSavedFilters = 50;
+    static constexpr int MaxSavedNameLength = 40;
+    // Tags and ratings of one set: as many as a filter of the client may hold
+    static constexpr int MaxSavedHashes = 50;
     static constexpr int MaxViews = 200;
     static constexpr int MaxGenreIds = 64;
     static constexpr int MaxHashes = 64;
@@ -62,7 +76,8 @@ class BrowseStateStore final : public QObject {
     // A stored sequence number above this is a damaged file: counting on from it would overflow
     static constexpr qint64 MaxSeq = qint64(1) << 52;
     static constexpr qint64 MaxFileBytes = 256 * 1024;
-    static constexpr int FileVersion = 2;
+    // 3 added the saved filters: an older build sets the file aside instead of writing it back without them
+    static constexpr int FileVersion = 3;
 
     // The digest the store keeps a tag or rating by: SHA-256 of the UTF-8 text as is, lower case hex
     static QString hashText(const QString &text);
@@ -87,6 +102,20 @@ class BrowseStateStore final : public QObject {
     void setView(const QString &serverId, const QString &userId, const QString &scopeKey,
                  const ViewState &state);
 
+    // The saved filters of a user, of one kind or (an empty `kind`) of all, by kind and name. A name is one to forty characters without control characters or a space at either end, and is unique within its kind without regard to case; at most MaxSavedFilters per user; tags and ratings by digest, as the views keep them
+    QList<SavedFilter> savedFilters(const QString &serverId, const QString &userId,
+                                    const QString &kind = {}) const;
+    std::optional<ViewState> savedFilter(const QString &serverId, const QString &userId,
+                                         const QString &kind, const QString &name) const;
+    // Exists: the name is taken and `replace` is false; Full: MaxSavedFilters is reached; Invalid: an argument is not valid
+    SaveResult saveFilter(const QString &serverId, const QString &userId, const QString &kind,
+                          const QString &name, const ViewState &state, bool replace);
+    RenameResult renameSavedFilter(const QString &serverId, const QString &userId,
+                                   const QString &kind, const QString &name,
+                                   const QString &newName);
+    bool removeSavedFilter(const QString &serverId, const QString &userId, const QString &kind,
+                           const QString &name);
+
     // Drops everything stored for the server, every user's
     void forgetServer(const QString &serverId);
 
@@ -105,6 +134,7 @@ class BrowseStateStore final : public QObject {
     struct UserState {
         QHash<QString, QString> selection;
         QHash<QString, StoredView> views;
+        QList<SavedFilter> saved;
     };
     using Users = QHash<QString, UserState>;
 
@@ -114,8 +144,11 @@ class BrowseStateStore final : public QObject {
     const UserState *userState(const QString &serverId, const QString &userId) const;
     // Drops the view written longest ago; false when there is none
     bool evictOldest();
+    // Drops the saved filter made longest ago; false when there is none
+    bool evictOldestSaved();
     int viewCount() const;
-    QByteArray serialize() const;
+    // `withViews` false leaves the views out: what the saved filters alone weigh
+    QByteArray serialize(bool withViews = true) const;
 
     QString m_path;
     QHash<QString, Users> m_servers;

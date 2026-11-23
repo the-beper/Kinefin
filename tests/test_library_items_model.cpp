@@ -1312,6 +1312,65 @@ class TestLibraryItemsModel : public QObject {
         QVERIFY(!hasWire(route, "officialRatings"));
     }
 
+    // A saved set holds its tags and ratings by digest: it goes on a list as a view saved by an earlier session does, and the sort stays
+    void aSavedFilterSetResolvesItsDigestsAndKeepsTheSort()
+    {
+        const auto set = [] {
+            LibraryFilterState filters;
+            filters.played = PlayedState::Unplayed;
+            filters.genreIds = {kSciFi};
+            return filters;
+        };
+        // Before the facet lists have answered the list waits for them, with the sort of before
+        {
+            Fixture f;
+            QVERIFY(f.ok);
+            QVERIFY(
+                f.model.open(kMoviesLibrary, QStringLiteral("movies"), QStringLiteral("Movies")));
+            QCOMPARE(f.model.filterKind(), QStringLiteral("movies"));
+            f.model.setSortBy(QStringLiteral("DateCreated"));
+            QSignalSpy edits(&f.model, &LibraryItemsModel::viewStateEdited);
+            f.model.applyFilterSet(set(), {digestOf("restored-master")}, {digestOf("PG-13")});
+            QCOMPARE(edits.size(), 1);
+            QCOMPARE(f.model.filterState().played, PlayedState::Unplayed);
+            QCOMPARE(f.model.filterState().genreIds, QStringList{kSciFi});
+            QVERIFY(f.model.resolvingFacets());
+            QCOMPARE(f.model.sortBy(), QStringLiteral("DateCreated"));
+            QTRY_VERIFY(!f.model.resolvingFacets());
+            QTRY_COMPARE(f.model.status(), LibraryItemsModel::Ready);
+            QCOMPARE(f.model.filterState().tags, QStringList({QStringLiteral("restored-master")}));
+            QCOMPARE(f.model.filterState().officialRatings, QStringList({QStringLiteral("PG-13")}));
+            // The one request after the set is the resolved one, never a wider one first
+            const QByteArray route = f.server.itemsRoutes.constLast();
+            QCOMPARE(wireValue(route, "tags"), QStringLiteral("restored-master"));
+            QCOMPARE(wireValue(route, "sortBy"), QStringLiteral("DateCreated,SortName"));
+        }
+        // With the lists loaded the digests resolve at once: nothing would resolve them later
+        {
+            Fixture f;
+            QVERIFY(f.ok);
+            QVERIFY(
+                f.model.open(kMoviesLibrary, QStringLiteral("movies"), QStringLiteral("Movies")));
+            QTRY_COMPARE(f.model.status(), LibraryItemsModel::Ready);
+            QTRY_VERIFY(f.model.filterOptions()->available());
+            QTRY_COMPARE(f.model.filterOptions()->legacyStatus(),
+                         Kinefin::FilterOptionsModel::Ready);
+            f.model.applyFilterSet(set(), {digestOf("restored-master")}, {digestOf("PG-13")});
+            QVERIFY(!f.model.resolvingFacets());
+            QCOMPARE(f.model.filterState().tags, QStringList({QStringLiteral("restored-master")}));
+            QCOMPARE(f.model.filterState().officialRatings, QStringList({QStringLiteral("PG-13")}));
+            QTRY_COMPARE(f.model.status(), LibraryItemsModel::Ready);
+            // The same set again changes nothing
+            QSignalSpy edits(&f.model, &LibraryItemsModel::viewStateEdited);
+            f.model.applyFilterSet(set(), {digestOf("restored-master")}, {digestOf("PG-13")});
+            QCOMPARE(edits.size(), 0);
+        }
+        // A closed list has no kind
+        Fixture g;
+        LibraryItemsModel closed(&g.client, 91);
+        QVERIFY(closed.filterKind().isEmpty());
+    }
+
     void aRenamedTagIsDroppedWithoutAnEdit()
     {
         Fixture f;

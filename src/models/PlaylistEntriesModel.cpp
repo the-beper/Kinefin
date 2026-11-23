@@ -33,6 +33,27 @@ PlaylistEntriesModel::PlaylistEntriesModel(JellyfinClient *client, QObject *pare
             });
     connect(m_client, &JellyfinClient::playlistWriteFailed, this,
             &PlaylistEntriesModel::onWriteFailed);
+    // The check of a row follows what plays: the list is not read again after a playback
+    connect(m_client, &JellyfinClient::itemPlayedUpdated, this,
+            [this](const QString &id, bool played) {
+                for (size_t i = 0; i < m_rows.size(); ++i) {
+                    if (!sameItemId(m_rows[i].item.id, id))
+                        continue;
+                    applyPlayed(m_rows[i].item, played);
+                    const QModelIndex row = index(int(i));
+                    Q_EMIT dataChanged(row, row, {PlayedRole});
+                }
+            });
+    connect(m_client, &JellyfinClient::itemProgressUpdated, this,
+            [this](const QString &id, qint64 position, double percentage) {
+                for (size_t i = 0; i < m_rows.size(); ++i) {
+                    if (!sameItemId(m_rows[i].item.id, id))
+                        continue;
+                    applyProgress(m_rows[i].item, position, percentage);
+                    const QModelIndex row = index(int(i));
+                    Q_EMIT dataChanged(row, row, {PlayedRole});
+                }
+            });
     // The client drops the writes in flight with the session, with no answer
     connect(m_client, &JellyfinClient::credentialsCleared, this, [this] {
         m_playlistId.clear();

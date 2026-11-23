@@ -445,9 +445,10 @@ PlayerController::PlayerController(JellyfinClient &client, PlayQueue &queue,
             [this](const QString &itemId, const QJsonArray &segments) {
                 if (itemId != m_itemId || !active() || m_localPlayback)
                     return;
-                m_segments.clear();
+                QVariantList known;
                 for (const QJsonValue &segment : segments)
-                    m_segments.append(segment.toObject().toVariantMap());
+                    known.append(segment.toObject().toVariantMap());
+                setSegments(known);
                 for (const qint64 ticks : std::exchange(m_earlySeeks, {}))
                     keepIntrosAt(ticks);
                 updateSkip();
@@ -516,6 +517,11 @@ PlayerController::PlayerController(JellyfinClient &client, PlayQueue &queue,
     connect(&m_seriesPreferences, &SeriesPreferences::changed, this,
             &PlayerController::seriesChoicesChanged);
     connect(&m_engine, &PlaybackEngine::fileLoaded, this, [this] {
+        // mpv may not keep the points of a loop across a reopen of the same item
+        if (m_clipLooping) {
+            m_loopSet = false;
+            applyClipLoop();
+        }
         const qint64 resumeAt = m_resumeTicks;
         if (m_resumeTicks > 0) {
             const qint64 ticks = m_resumeTicks;
@@ -551,6 +557,10 @@ PlayerController::PlayerController(JellyfinClient &client, PlayQueue &queue,
                                }))
                 downloadSubtitle(*subtitle);
         }
+        // The subtitle files the viewer added by hand come back with the reopened item, in the Subtitles menu (not selected: the remembered choice decides)
+        for (const LocalSubtitle &file : std::as_const(m_addedSubtitles))
+            m_engine.mpvCommand(
+                {QStringLiteral("sub-add"), file.path, QStringLiteral("auto"), file.title});
         // A download's subtitle files join the tracks before the remembered choice is restored; `auto` leaves the choice to it
         if (m_localPlayback) {
             for (const LocalSubtitle &file : std::as_const(m_localSubtitles))
@@ -774,8 +784,7 @@ void PlayerController::onAccountLeaving()
 {
     // A streamed source needs the token: nothing outlives the account
     cancelClipExport();
-    m_clipStart = -1;
-    m_clipEnd = -1;
+    dropClipMarks();
     // The end-file comes after the local flag is gone: the position is stored now
     reportLocalPosition(false);
     m_pendingLocal = {};
@@ -1058,6 +1067,8 @@ bool PlayerController::startItem(const QString &id, qint64 resumeTicks, bool gro
     cancelSeriesRequest();
     m_seriesPlaylistWanted = false;
     m_groupItem = grouped;
+    // A loop does not run in a group: it ends here
+    applyClipLoop();
     m_awaitingGroup = false;
     m_groupAdvance.stop();
     m_mpvSettings.setSpeedHeld(grouped);
@@ -1078,7 +1089,7 @@ bool PlayerController::startItem(const QString &id, qint64 resumeTicks, bool gro
     m_loading = true;
     m_stopping = false;
     m_skipLabel.clear();
-    m_segments.clear();
+    setSegments({});
     m_source = PlaybackSource{};
     // The same item again (a repeat) keeps the aspect and the rate the user chose; a group plays at 1.0
     m_keptRate.reset();
@@ -1086,6 +1097,10 @@ bool PlayerController::startItem(const QString &id, qint64 resumeTicks, bool gro
         m_keptRate = m_engine.playbackRate();
     else
         m_mpvSettings.setAspectOverride({});
+    // A reopen of the same item (a quality, an audio or a subtitle choice, a retry) keeps what the viewer set for it; another item starts from the settings
+    if (!sameItem) {
+        resetForNextItem();
+    }
     m_externalSubtitles.clear();
     m_subtitleOptions.clear();
     dropPendingSubtitle();
@@ -1107,8 +1122,7 @@ bool PlayerController::startItem(const QString &id, qint64 resumeTicks, bool gro
     // Clips belong to the item that made them
     if (!sameItem) {
         cancelClipExport();
-        m_clipStart = -1;
-        m_clipEnd = -1;
+        dropClipMarks();
         m_localSourcePath.clear();
     }
     m_audioTracks.clear();
@@ -1267,8 +1281,7 @@ bool PlayerController::playLocalFile(const QString &path, const QString &itemId,
     reportLocalPosition(false);
     // Its clips are the file's own: the marks of the previous item do not carry over
     cancelClipExport();
-    m_clipStart = -1;
-    m_clipEnd = -1;
+    dropClipMarks();
     m_localSourcePath = path;
     m_pendingLocal.path = path;
     m_pendingLocal.itemId = itemId;
@@ -1367,7 +1380,8 @@ bool PlayerController::openLocal()
     m_errorText.clear();
     m_playlist.clear();
     m_queueIndex = -1;
-    m_segments.clear();
+    setSegments({});
+    resetForNextItem();
     m_trickplay.reset();
     m_trickplayInfo = {};
     m_itemChapters = request.chapters;
@@ -2161,7 +2175,9 @@ void PlayerController::updateUpNext()
         m_casting ? std::optional<qint64>{} : m_engine.knownPositionTicks();
     const qint64 duration = durationTicks();
     std::optional<UpNextWindow> window;
-    if (!m_itemId.isEmpty() && !m_loading && position && pendingAdvance(false) >= 0)
+    // A part that loops does not go on to the next item: the card would start it at the early advance
+    if (!m_itemId.isEmpty() && !m_loading && position && pendingAdvance(false) >= 0
+        && !m_clipLooping)
         window = upNextWindow(duration, m_segments);
     bool show = window && !m_upNextCancelled && *position >= window->showAt;
     if (show && window->advanceAt < duration && *position >= window->advanceAt) {
@@ -2454,8 +2470,7 @@ void PlayerController::clearCurrent()
     m_pendingSubtitleSecondary = false;
     m_pendingSecondaryFile.clear();
     cancelClipExport();
-    m_clipStart = -1;
-    m_clipEnd = -1;
+    dropClipMarks();
     m_localSourcePath.clear();
     dropFallback();
     m_fallback.reset();
@@ -2484,7 +2499,8 @@ void PlayerController::clearCurrent()
     m_resumeTicks = 0;
     m_skipLabel.clear();
     m_skipEnd = 0;
-    m_segments.clear();
+    setSegments({});
+    resetForNextItem();
     m_source = PlaybackSource{};
     m_keptRate.reset();
     m_mpvSettings.setAspectOverride({});
@@ -3381,6 +3397,7 @@ void PlayerController::markClipStart()
     if (!active())
         return;
     m_clipStart = positionTicks();
+    applyClipLoop();
     Q_EMIT clipMarkChanged(i18n("Clip start at %1", timeText(m_clipStart)));
     Q_EMIT changed();
 }
@@ -3390,6 +3407,7 @@ void PlayerController::markClipEnd()
     if (!active())
         return;
     m_clipEnd = positionTicks();
+    applyClipLoop();
     Q_EMIT clipMarkChanged(i18n("Clip end at %1", timeText(m_clipEnd)));
     Q_EMIT changed();
 }
@@ -3398,9 +3416,177 @@ void PlayerController::clearClip()
 {
     if (m_clipStart < 0 && m_clipEnd < 0)
         return;
+    dropClipMarks();
+    Q_EMIT changed();
+}
+
+void PlayerController::dropClipMarks()
+{
     m_clipStart = -1;
     m_clipEnd = -1;
+    applyClipLoop();
+}
+
+void PlayerController::applyClipLoop()
+{
+    // A mark that makes the range empty, a group and a renderer end the loop; the loop is the marks' while it runs
+    if (m_clipLooping && !canLoopClip())
+        m_clipLooping = false;
+    const bool looping = m_clipLooping;
+    if (!looping && !m_loopSet)
+        return;
+    m_loopSet = looping;
+    m_engine.setMpvProperty(QStringLiteral("ab-loop-a"),
+                            looping ? QVariant(double(m_clipStart) / TicksPerSecond)
+                                    : QVariant(QStringLiteral("no")));
+    m_engine.setMpvProperty(QStringLiteral("ab-loop-b"),
+                            looping ? QVariant(double(m_clipEnd) / TicksPerSecond)
+                                    : QVariant(QStringLiteral("no")));
+}
+
+void PlayerController::setClipLooping(bool looping)
+{
+    if (looping && !canLoopClip()) {
+        // The key has nothing to loop: it says what is missing
+        if (!m_clipLooping)
+            Q_EMIT clipMarkChanged(i18n("Mark a start and an end to loop the part"));
+        return;
+    }
+    if (looping == m_clipLooping)
+        return;
+    m_clipLooping = looping;
+    applyClipLoop();
+    Q_EMIT clipMarkChanged(looping ? i18n("Looping the marked part") : i18n("Loop off"));
     Q_EMIT changed();
+}
+
+void PlayerController::refreshEnhancements()
+{
+    QVariantList files;
+    QStringList active;
+    bool deband = false;
+    if (m_engine.isInitialized() && this->active() && !m_profileDataDir.isEmpty()) {
+        constexpr int MaxShaders = 32;
+        constexpr qint64 MaxShaderSize = 256 * 1024;
+        deband = m_engine.mpvProperty(QStringLiteral("deband")).toBool();
+        QStringList used;
+        for (const QVariant &entry : m_engine.mpvProperty(QStringLiteral("glsl-shaders")).toList())
+            used.append(entry.toString());
+        const QDir directory(m_profileDataDir + QStringLiteral("/shaders"));
+        const QFileInfoList entries =
+            directory.entryInfoList({QStringLiteral("*.glsl"), QStringLiteral("*.hook")},
+                                    QDir::Files | QDir::Readable, QDir::Name | QDir::IgnoreCase);
+        for (const QFileInfo &info : entries) {
+            if (files.size() >= MaxShaders)
+                break;
+            const QString file = info.fileName();
+            // A name with a control character would not survive mpv's option parser or a menu
+            // The separators of mpv's list option (`:` for paths, `,` for the rest) would split the name when it is removed again
+            if (info.size() > MaxShaderSize || std::ranges::any_of(file, [](QChar c) {
+                    return c.unicode() < 0x20 || c == QLatin1Char(':') || c == QLatin1Char(',');
+                }))
+                continue;
+            files.append(QVariantMap{{QStringLiteral("file"), file},
+                                     {QStringLiteral("name"), info.completeBaseName()}});
+            if (used.contains(info.absoluteFilePath()))
+                active.append(file);
+        }
+    }
+    if (deband == m_deband && files == m_shaders && active == m_activeShaders)
+        return;
+    m_deband = deband;
+    m_shaders = files;
+    m_activeShaders = active;
+    Q_EMIT enhancementsChanged();
+}
+
+void PlayerController::keepEnhancementBase()
+{
+    if (m_enhancementsTouched)
+        return;
+    m_enhancementsTouched = true;
+    m_debandBase = m_engine.mpvProperty(QStringLiteral("deband")).toBool();
+    m_shadersBase = m_engine.mpvProperty(QStringLiteral("glsl-shaders"));
+}
+
+void PlayerController::resetForNextItem()
+{
+    resetEnhancements();
+    resetDelays();
+    m_addedSubtitles.clear();
+}
+
+void PlayerController::resetDelays()
+{
+    if (m_audioDelay == 0 && m_subtitleDelay == 0)
+        return;
+    m_audioDelay = 0;
+    m_subtitleDelay = 0;
+    m_mpvSettings.setAudioOffset(0);
+    m_mpvSettings.setSubtitleOffset(0);
+    Q_EMIT changed();
+}
+
+void PlayerController::resetEnhancements()
+{
+    if (!m_enhancementsTouched)
+        return;
+    m_enhancementsTouched = false;
+    if (m_engine.isInitialized()) {
+        m_engine.setMpvProperty(QStringLiteral("deband"), m_debandBase);
+        m_engine.setMpvProperty(QStringLiteral("glsl-shaders"), m_shadersBase);
+    }
+    m_deband = false;
+    m_shaders.clear();
+    m_activeShaders.clear();
+    Q_EMIT enhancementsChanged();
+}
+
+void PlayerController::setDeband(bool on)
+{
+    if (!active() || m_casting)
+        return;
+    keepEnhancementBase();
+    m_engine.setMpvProperty(QStringLiteral("deband"), on);
+    refreshEnhancements();
+}
+
+void PlayerController::setShader(const QString &file, bool on)
+{
+    if (!active() || m_casting)
+        return;
+    refreshEnhancements();
+    // Only a file the menu lists: the name never reaches mpv as a path of its own making
+    const bool known = std::ranges::any_of(m_shaders, [&file](const QVariant &entry) {
+        return entry.toMap().value(QStringLiteral("file")).toString() == file;
+    });
+    if (!known)
+        return;
+    // Already as asked: another append would add a copy
+    if (m_activeShaders.contains(file) == on)
+        return;
+    keepEnhancementBase();
+    const QString path = QDir(m_profileDataDir + QStringLiteral("/shaders")).absoluteFilePath(file);
+    m_engine.mpvCommand({QStringLiteral("change-list"), QStringLiteral("glsl-shaders"),
+                         on ? QStringLiteral("append") : QStringLiteral("remove"), path});
+    refreshEnhancements();
+}
+
+// mpv pauses by itself after a step, but the session only knows the pauses it made: pausing first keeps the state, the reports and the buttons in step with it
+void PlayerController::frameStep()
+{
+    if (!active() || m_casting || grouped())
+        return;
+    pause();
+    m_engine.mpvCommand({QStringLiteral("frame-step")});
+}
+
+void PlayerController::frameBackStep()
+{
+    if (!active() || m_casting || grouped())
+        return;
+    pause();
+    m_engine.mpvCommand({QStringLiteral("frame-back-step")});
 }
 
 QString PlayerController::suggestedClipName(bool gif) const
@@ -3474,6 +3660,8 @@ bool PlayerController::saveClip(bool gif, const QUrl &destination)
     }
     // The server's external subtitle files mpv added come after the download's own
     request.subtitleFiles.append(m_loadedSubtitleOrder);
+    for (const LocalSubtitle &added : std::as_const(m_addedSubtitles))
+        request.subtitleFiles.append(added.path);
     request.subtitleStyle = m_mpvSettings.subtitleProperties();
     request.tlsVerify = m_mpvSettings.tlsVerify();
     request.tlsCaFile = m_mpvSettings.tlsCaFile();
@@ -3557,6 +3745,9 @@ std::optional<double> PlayerController::dumpClipCache(const QString &path)
     m_engine.setMpvProperty(QStringLiteral("ab-loop-b"), QStringLiteral("no"));
     if (loopCount.isValid())
         m_engine.setMpvProperty(QStringLiteral("ab-loop-count"), loopCount);
+    // A loop that ran over the marks goes on
+    m_loopSet = false;
+    applyClipLoop();
     // A start after the mark would cut the clip's first frames, an end well before the other mark its last ones: what they need left the cache. An end a frame short is the alignment's own, when B is a keyframe
     if (!dumped || alignedStart > start + 0.001 || alignedEnd < end - 0.5
         || QFileInfo(path).size() <= 0)
@@ -3624,9 +3815,29 @@ void PlayerController::onClipFailed(ClipExporter::Error error)
     Q_EMIT clipSaveFailed(error == ClipExporter::Error::NoSpace);
 }
 
+void PlayerController::setSegments(const QVariantList &segments)
+{
+    m_segments = segments;
+    QVariantList bands;
+    for (const QVariant &value : segments) {
+        const QVariantMap row = value.toMap();
+        bands.append(QVariantMap{{QStringLiteral("type"), row.value(QStringLiteral("type"))},
+                                 {QStringLiteral("startTicks"), row.value(QStringLiteral("start"))},
+                                 {QStringLiteral("endTicks"), row.value(QStringLiteral("end"))}});
+    }
+    std::ranges::sort(bands, [](const QVariant &a, const QVariant &b) {
+        return a.toMap().value(QStringLiteral("startTicks")).toLongLong()
+               < b.toMap().value(QStringLiteral("startTicks")).toLongLong();
+    });
+    if (bands == m_segmentBands)
+        return;
+    m_segmentBands = bands;
+    Q_EMIT segmentsChanged();
+}
+
 void PlayerController::refreshSegments()
 {
-    m_segments.clear();
+    setSegments({});
     m_skipLabel.clear();
     // The authenticated client owns MediaSegments requests; results for an older
     // item must not modify a new playback session.
@@ -3862,6 +4073,49 @@ void PlayerController::dropPendingSubtitle()
     m_client.cancelExternalSubtitle();
     m_pendingSubtitle.clear();
     m_pendingSubtitleSecondary = false;
+}
+
+bool PlayerController::canUploadAddedSubtitles() const
+{
+    return active() && !m_localPlayback && !m_casting && m_client.isAdministrator();
+}
+
+bool PlayerController::addSubtitleFile(const QUrl &file)
+{
+    constexpr qint64 MaxSubtitleBytes = 2LL * 1024 * 1024;
+    const auto refuse = [this](const QString &reason) {
+        Q_EMIT subtitleFileRefused(reason);
+        return false;
+    };
+    if (!active() || !m_engine.isInitialized())
+        return refuse(i18n("Nothing is playing to add a subtitle to"));
+    if (m_casting)
+        return refuse(i18n("A subtitle cannot be added while casting"));
+    if (!file.isLocalFile())
+        return refuse(i18n("Only a subtitle file on this computer can be added"));
+    const QFileInfo info(file.toLocalFile());
+    const QString suffix = info.suffix().toLower();
+    if (!info.isFile() || suffix.isEmpty()
+        || !QStringList{QStringLiteral("srt"), QStringLiteral("ass"), QStringLiteral("ssa"),
+                        QStringLiteral("vtt")}
+                .contains(suffix))
+        return refuse(i18n("The file is not an srt, ass, ssa, or vtt subtitle"));
+    if (!info.isReadable() || info.size() <= 0 || info.size() > MaxSubtitleBytes)
+        return refuse(i18n("The subtitle must be a readable file of at most 2 MiB"));
+    if (!m_subtitleDir.isValid())
+        return refuse(i18n("The subtitle could not be added"));
+    // A copy of its own: the original may go away or change while the item plays, and a reopen adds it again from here
+    const QString copy = m_subtitleDir.path() + QStringLiteral("/added-")
+                         + QString::number(++m_subtitleFileSeq) + QLatin1Char('.') + suffix;
+    if (!QFile::copy(info.absoluteFilePath(), copy))
+        return refuse(i18n("The subtitle could not be added"));
+    const QString title = info.completeBaseName();
+    m_addedSubtitles.append({copy, title, QString()});
+    m_engine.mpvCommand({QStringLiteral("sub-add"), copy, QStringLiteral("select"), title});
+    m_subtitlesOff = false;
+    QTimer::singleShot(250, this, &PlayerController::refreshTracks);
+    Q_EMIT subtitleFileAdded(title, QUrl::fromLocalFile(copy));
+    return true;
 }
 
 bool PlayerController::downloadSubtitle(int index, bool secondary)

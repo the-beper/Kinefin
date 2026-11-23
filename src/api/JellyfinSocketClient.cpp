@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "api/JellyfinSocketClient.h"
 
+#include <QDateTime>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonParseError>
@@ -242,6 +243,7 @@ void JellyfinSocketClient::onConnected(quint64 generation)
         return;
     m_connectTimer.stop();
     m_uptime.start();
+    m_lastActivityMs = QDateTime::currentMSecsSinceEpoch();
     enterState(State::Authenticated);
     restartDeadPeer();
     if (m_sessionsSubscribed)
@@ -355,6 +357,7 @@ void JellyfinSocketClient::onTextMessage(quint64 generation, const QString &text
     if (generation != m_generation)
         return;
     restartDeadPeer();
+    m_lastActivityMs = QDateTime::currentMSecsSinceEpoch();
     const QByteArray bytes = text.toUtf8();
     if (bytes.size() > kMaxFrameBytes) {
         ++m_oversizeFrames;

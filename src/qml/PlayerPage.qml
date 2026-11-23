@@ -116,11 +116,48 @@ Kirigami.Page {
         if (!page.Window.window?.popupOpen?.())
             page.forceActiveFocus(Qt.PopupFocusReason);
     }
+    // The name of the segment among `bands` that `ticks` falls in, empty when it falls in none
+    function segmentTitle(bands, ticks) {
+        for (const band of bands) {
+            if (ticks < band.startTicks || ticks >= band.endTicks)
+                continue;
+            switch (band.type) {
+            case "Intro": return i18nc("@info seek bar bubble: the part of the item the server marks as its intro", "Intro");
+            case "Recap": return i18nc("@info seek bar bubble: the part of the item the server marks as a recap", "Recap");
+            case "Outro": return i18nc("@info seek bar bubble: the part of the item the server marks as its outro", "Outro");
+            }
+        }
+        return "";
+    }
+    // A subtitle file of this computer for the item that plays: chosen here or dropped on the page
+    FileDialog {
+        id: subtitleFileDialog
+        objectName: "playerSubtitleFileDialog"
+        title: i18n("Choose a Subtitle")
+        nameFilters: [i18n("Subtitles (*.srt *.ass *.ssa *.vtt)")]
+        onAccepted: page.player.addSubtitleFile(selectedFile)
+    }
+    // Any drag of files is welcome (the player says what is wrong with a file, which a refused drag could not): one file at a time
+    DropArea {
+        objectName: "playerSubtitleDrop"
+        anchors.fill: parent
+        enabled: page.isShowing && !page.player.casting
+        onEntered: drag => { drag.accepted = drag.hasUrls; }
+        onDropped: drop => {
+            if (drop.urls.length === 1)
+                page.player.addSubtitleFile(drop.urls[0]);
+            else
+                page.Window.window.showPassiveNotification(i18n("Drop one subtitle file at a time"));
+            drop.accept();
+            page.wakeChrome();
+        }
+    }
     // The volume slider pops up centred above the speaker button
     function showVolume() {
         volumeCloser.stop();
         // The slider says the level: a wheel notice still showing has nothing left to add
         volumeNoticeTimer.stop();
+        volumeNotice.custom = "";
         // A long press on a touch screen has no hover to hold the bars: they stay their full time from here
         page.wakeChrome();
         volumePopup.open();
@@ -128,8 +165,10 @@ Kirigami.Page {
     function stepVolume(steps) {
         page.Window.window.stepVolume(steps);
         // The slider says the same level: the notice is only for when the wheel turns with the slider out of sight
-        if (!volumePopup.opened)
+        if (!volumePopup.opened) {
+            volumeNotice.custom = "";
             volumeNoticeTimer.restart();
+        }
         page.wakeChrome();
     }
     // The player commands of the keyboard: the shell runs them, in every mode, and the page only wakes its bars
@@ -144,6 +183,28 @@ Kirigami.Page {
     readonly property string fullScreenText: page.fullScreen ? i18nc("@action:button", "Exit Full Screen Mode") : i18nc("@action:button", "Full Screen Mode")
     // A delay in seconds with one decimal, as the locale writes it
     function delayText(seconds) { return Number(seconds).toLocaleString(Qt.locale(), "f", 1); }
+    // Sets the delay of the audio (`audio`) or of the subtitles to `seconds`, within ten seconds either way and in hundredths so that no run of tenths drifts, and says the new value over the picture. A renderer has no such delay: nothing happens while casting
+    function setDelay(audio, seconds) {
+        if (page.player.casting)
+            return;
+        const next = Math.round(Math.max(-10, Math.min(10, seconds)) * 100) / 100;
+        if (audio) {
+            page.player.adjustAudioDelay(next);
+            page.showNotice(i18n("Audio delay: %1 s", page.delayText(next)));
+        } else {
+            page.player.adjustSubtitleDelay(next);
+            page.showNotice(i18n("Subtitle delay: %1 s", page.delayText(next)));
+        }
+        page.wakeChrome();
+    }
+    function stepDelay(audio, step) {
+        page.setDelay(audio, (audio ? page.player.audioDelay : page.player.subtitleDelay) + step);
+    }
+    // A short line in the middle of the picture, which the volume wheel's percentage also uses
+    function showNotice(text) {
+        volumeNotice.custom = text;
+        volumeNoticeTimer.restart();
+    }
     function togglePlayback() { page.player.togglePause(); page.wakeChrome(); }
     function skipPrevious() { page.player.previous(); page.wakeChrome(); }
     function skipNext() { page.player.next(); page.wakeChrome(); }
@@ -194,7 +255,7 @@ Kirigami.Page {
         if (!page.isShowing || (event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)))
             return;
         // A held key repeats the seeks only: a toggle would flicker
-        if (event.isAutoRepeat && (event.key === Qt.Key_Space || event.key === Qt.Key_M || event.key === Qt.Key_F || event.key === Qt.Key_Menu || (event.key === Qt.Key_F10 && (event.modifiers & Qt.ShiftModifier)))) {
+        if (event.isAutoRepeat && (event.key === Qt.Key_Space || event.key === Qt.Key_M || event.key === Qt.Key_F || event.key === Qt.Key_L || (event.key === Qt.Key_I && (event.modifiers & Qt.ShiftModifier)) || event.key === Qt.Key_Menu || (event.key === Qt.Key_F10 && (event.modifiers & Qt.ShiftModifier)))) {
             event.accepted = true;
             return;
         }
@@ -202,7 +263,13 @@ Kirigami.Page {
         case Qt.Key_Space: page.playerAction("playpause"); break;
         case Qt.Key_M: page.playerAction("togglemute"); break;
         case Qt.Key_F: page.playerAction("togglefullscreen"); break;
-        case Qt.Key_I: page.player.markClipStart(); break;
+        // Shift+I shows or hides Playback Info (the entry of More Actions has none for a local file either); I alone marks the clip start
+        case Qt.Key_I:
+            if (!(event.modifiers & Qt.ShiftModifier))
+                page.player.markClipStart();
+            else if (!page.player.localPlayback)
+                page.playbackInfoShown = !page.playbackInfoShown;
+            break;
         case Qt.Key_O: page.player.markClipEnd(); break;
         case Qt.Key_Left: page.playerAction("rewind"); break;
         case Qt.Key_Right: page.playerAction("fastforward"); break;
@@ -222,6 +289,13 @@ Kirigami.Page {
         case Qt.Key_Plus:
         case Qt.Key_Equal: page.playerAction("volumeup"); break;
         case Qt.Key_Minus: page.playerAction("volumedown"); break;
+        // As mpv's own keys: L loops the marked part, the period steps a frame forward and the comma one back
+        case Qt.Key_L: page.player.setClipLooping(!page.player.clipLooping); break;
+        case Qt.Key_Period: page.player.frameStep(); break;
+        case Qt.Key_Comma: page.player.frameBackStep(); break;
+        // As mpv's own keys: Z moves the subtitles earlier and X later, Shift in steps of half a second (the audio delay is on Ctrl+- and Ctrl++, which are shortcuts of the window)
+        case Qt.Key_Z: page.stepDelay(false, event.modifiers & Qt.ShiftModifier ? -0.5 : -0.1); break;
+        case Qt.Key_X: page.stepDelay(false, event.modifiers & Qt.ShiftModifier ? 0.5 : 0.1); break;
         // The Menu key and Shift+F10 open the context menu at the centre of the video
         case Qt.Key_F10:
             if (!(event.modifiers & Qt.ShiftModifier))
@@ -234,6 +308,22 @@ Kirigami.Page {
         }
         page.wakeChrome();
         event.accepted = true;
+    }
+    // The audio delay, in tenths of a second: Ctrl+- earlier, Ctrl++ later, Ctrl+0 back to none
+    Shortcut {
+        sequences: ["Ctrl+-"]
+        enabled: page.isShowing && !page.player.casting
+        onActivated: page.stepDelay(true, -0.1)
+    }
+    Shortcut {
+        sequences: ["Ctrl++", "Ctrl+="]
+        enabled: page.isShowing && !page.player.casting
+        onActivated: page.stepDelay(true, 0.1)
+    }
+    Shortcut {
+        sequences: ["Ctrl+0"]
+        enabled: page.isShowing && !page.player.casting
+        onActivated: page.setDelay(true, 0)
     }
     Shortcut {
         sequences: [StandardKey.FullScreen]
@@ -436,19 +526,25 @@ Kirigami.Page {
         id: volumeNotice
         objectName: "playerVolumeNotice"
         anchors.centerIn: parent
+        // What a delay change says; empty for the volume's own text
+        property string custom: ""
         visible: volumeNoticeTimer.running
         color: "white"
-        text: i18nc("@info volume level", "Volume %1%", page.player.volume)
+        text: custom.length > 0 ? custom : i18nc("@info volume level", "Volume %1%", page.player.volume)
         textFormat: Text.PlainText
         background: Rectangle {
             color: Qt.alpha("black", 0.6)
             radius: Kirigami.Units.cornerRadius
         }
         padding: Kirigami.Units.largeSpacing
-        Accessible.ignored: true
+        // The volume's percentage repeats the slider; a delay change has nothing else to say it, so a screen reader is told
+        Accessible.ignored: custom.length === 0
+        Accessible.role: Accessible.AlertMessage
+        Accessible.name: text
         Timer {
             id: volumeNoticeTimer
             interval: 900
+            onTriggered: volumeNotice.custom = ""
         }
     }
     Connections {
@@ -973,6 +1069,31 @@ Kirigami.Page {
                             color: Kirigami.Theme.highlightColor
                             Accessible.ignored: true
                         }
+                        // The segments the server knows (Intro, Recap, Outro), translucent bands across the groove under the clip band and the chapter marks: the name is in the bubble, not in the colour
+                        Item {
+                            id: segmentBands
+                            // Read once here: the player notifies its duration with every position
+                            readonly property real duration: page.player.durationTicks
+                            anchors.fill: parent
+                            Accessible.ignored: true
+                            Repeater {
+                                model: page.player.segmentBands
+                                delegate: Rectangle {
+                                    required property var modelData
+                                    readonly property real startFraction: segmentBands.duration > 0 ? Math.min(1, modelData.startTicks / segmentBands.duration) : 0
+                                    readonly property real endFraction: segmentBands.duration > 0 ? Math.min(1, modelData.endTicks / segmentBands.duration) : 0
+                                    objectName: "playerSegmentBand"
+                                    visible: endFraction > startFraction
+                                    x: timeline.leftPadding + timeline.handle.width / 2 + (timeline.mirrored ? 1 - endFraction : startFraction) * (timeline.availableWidth - timeline.handle.width)
+                                    width: (endFraction - startFraction) * (timeline.availableWidth - timeline.handle.width)
+                                    y: Math.round(timeline.topPadding + (timeline.availableHeight - height) / 2)
+                                    height: Kirigami.Units.smallSpacing * 2
+                                    radius: Kirigami.Units.cornerRadius
+                                    color: Qt.alpha(Kirigami.Theme.textColor, 0.45)
+                                    Accessible.ignored: true
+                                }
+                            }
+                        }
                         // The marked clip range, a translucent band under the chapter marks
                         Rectangle {
                             objectName: "playerClipBand"
@@ -1041,6 +1162,8 @@ Kirigami.Page {
                             readonly property real ticks: Math.floor(seconds * 10000000)
                             readonly property int chapterIndex: page.player.chapterAt(ticks)
                             readonly property string chapterName: chapterIndex >= 0 && chapterIndex < page.chapters.length ? page.chapters[chapterIndex].name : ""
+                            // The segment the time falls in, by its name
+                            readonly property string segmentName: page.segmentTitle(page.player.segmentBands, ticks)
                             visible: timeline.pressed || (seekHover.hovered && timeline.enabled)
                             x: Math.round(Math.max(0, Math.min(middle - width / 2, timeline.width - width)))
                             y: -height - Kirigami.Units.smallSpacing
@@ -1063,6 +1186,16 @@ Kirigami.Page {
                                     maximumLineCount: 1
                                     elide: Text.ElideRight
                                     text: seekBubble.chapterName
+                                    Accessible.ignored: true
+                                }
+                                Controls.Label {
+                                    objectName: "playerSeekBubbleSegment"
+                                    Layout.alignment: Qt.AlignHCenter
+                                    visible: text.length > 0
+                                    color: "white"
+                                    opacity: 0.8
+                                    textFormat: Text.PlainText
+                                    text: seekBubble.segmentName
                                     Accessible.ignored: true
                                 }
                                 Kirigami.Heading {
@@ -1664,6 +1797,14 @@ Kirigami.Page {
                 onObjectRemoved: (index, object) => secondarySubtitlesMenu.removeItem(object)
             }
         }
+        Controls.MenuSeparator {}
+        Controls.MenuItem {
+            objectName: self.namePrefix + "AddFile"
+            text: i18n("Add Subtitle File…")
+            icon.name: "document-open"
+            enabled: !page.player.casting
+            onTriggered: subtitleFileDialog.open()
+        }
         Controls.MenuSeparator { visible: page.player.canManageSubtitles }
         Controls.MenuItem {
             objectName: self.namePrefix + "SearchOnline"
@@ -1830,13 +1971,54 @@ Kirigami.Page {
         Controls.Menu {
             title: i18n("AV Sync")
             icon.name: "settings-configure"
+            enabled: !page.player.casting
             Controls.MenuItem { text: i18n("Audio delay: %1 s", page.delayText(page.player.audioDelay)); enabled: false }
-            Controls.MenuItem { text: i18n("Audio earlier (−0.1 s)"); onTriggered: page.player.adjustAudioDelay(Math.max(-10, page.player.audioDelay - 0.1)) }
-            Controls.MenuItem { text: i18n("Audio later (+0.1 s)"); onTriggered: page.player.adjustAudioDelay(Math.min(10, page.player.audioDelay + 0.1)) }
+            Controls.MenuItem { text: i18n("Audio earlier (−0.1 s)"); onTriggered: page.stepDelay(true, -0.1) }
+            Controls.MenuItem { text: i18n("Audio later (+0.1 s)"); onTriggered: page.stepDelay(true, 0.1) }
+            Controls.MenuItem { text: i18n("Reset the Audio Delay"); enabled: page.player.audioDelay !== 0; onTriggered: page.setDelay(true, 0) }
             Controls.MenuSeparator {}
             Controls.MenuItem { text: i18n("Subtitle delay: %1 s", page.delayText(page.player.subtitleDelay)); enabled: false }
-            Controls.MenuItem { text: i18n("Subtitles earlier (−0.1 s)"); onTriggered: page.player.adjustSubtitleDelay(Math.max(-10, page.player.subtitleDelay - 0.1)) }
-            Controls.MenuItem { text: i18n("Subtitles later (+0.1 s)"); onTriggered: page.player.adjustSubtitleDelay(Math.min(10, page.player.subtitleDelay + 0.1)) }
+            Controls.MenuItem { text: i18n("Subtitles earlier (−0.1 s)"); onTriggered: page.stepDelay(false, -0.1) }
+            Controls.MenuItem { text: i18n("Subtitles later (+0.1 s)"); onTriggered: page.stepDelay(false, 0.1) }
+            Controls.MenuItem { text: i18n("Reset the Subtitle Delay"); enabled: page.player.subtitleDelay !== 0; onTriggered: page.setDelay(false, 0) }
+        }
+        // Debanding and the shaders of the profile's shaders folder, on or off while the picture plays; the entries are read again each time the menu opens
+        Controls.Menu {
+            id: enhancementMenu
+            objectName: moreRoot.namePrefix + "EnhancementMenu"
+            title: i18nc("@title:menu", "Video Enhancement")
+            icon.name: "video-display"
+            enabled: !page.player.casting
+            onAboutToShow: page.player.refreshEnhancements()
+            Controls.MenuItem {
+                objectName: moreRoot.namePrefix + "Deband"
+                text: i18nc("@action:inmenu", "Deband")
+                checkable: true
+                checked: page.player.deband
+                onTriggered: page.player.setDeband(!page.player.deband)
+            }
+            Controls.MenuSeparator {}
+            Controls.MenuItem {
+                objectName: moreRoot.namePrefix + "NoShaders"
+                text: i18nc("@info:status in a menu", "No shader files in the profile’s shaders folder")
+                visible: page.player.shaders.length === 0
+                enabled: false
+            }
+            Instantiator {
+                model: page.player.shaders
+                delegate: PlainMenuItem {
+                    required property var modelData
+                    required property int index
+                    objectName: moreRoot.namePrefix + "Shader_" + index
+                    plainText: modelData.name
+                    checkable: true
+                    checked: page.player.activeShaders.indexOf(modelData.file) >= 0
+                    onTriggered: page.player.setShader(modelData.file, page.player.activeShaders.indexOf(modelData.file) < 0)
+                }
+                // After the Deband entry, the separator and the hint
+                onObjectAdded: (index, object) => enhancementMenu.insertItem(index + 3, object)
+                onObjectRemoved: (index, object) => enhancementMenu.removeItem(object)
+            }
         }
         Controls.Menu {
             id: sleepMenu
@@ -1924,6 +2106,14 @@ Kirigami.Page {
                 text: i18n("Set End")
                 enabled: page.player.active
                 onTriggered: page.player.markClipEnd()
+            }
+            Controls.MenuItem {
+                objectName: moreRoot.namePrefix + "ClipLoop"
+                text: i18n("Loop the Marked Part")
+                checkable: true
+                checked: page.player.clipLooping
+                enabled: page.player.canLoopClip || page.player.clipLooping
+                onTriggered: page.player.setClipLooping(!page.player.clipLooping)
             }
             Controls.MenuSeparator {}
             // The marks in words, then the reason neither Save entry can be used

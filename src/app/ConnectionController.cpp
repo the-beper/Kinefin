@@ -4,6 +4,7 @@
 
 #include "api/MediaSourceSelection.h"
 
+#include <QDateTime>
 #include <QDesktopServices>
 #include <QEventLoop>
 #include <QHostAddress>
@@ -284,9 +285,38 @@ ConnectionController::ConnectionController(const QString &profileId, const QStri
             m_userDataRefresh.start();
     });
     connect(&m_client, &JellyfinClient::credentialsCleared, this, [this] {
+        m_removedFilter.reset();
         m_userDataPending.clear();
         m_userDataRefresh.stop();
+        m_socketLastSeenMs = 0;
+        m_socketWasUp = false;
     });
+    // The socket carries no replay: what changed while it was down is not told again, so a long gap asks the page in front to read its data once more (a short one is a network blip and keeps the scroll). The gap runs from the last frame the socket had, on the wall clock: the drop is noticed late (a silent one after the dead-peer window) and a suspend takes no time on a monotonic clock
+    connect(&m_socket, &JellyfinSocketClient::stateChanged, this,
+            [this](JellyfinSocketClient::State state) {
+                switch (state) {
+                case JellyfinSocketClient::State::Reconnecting:
+                    if (m_socketWasUp && m_socketLastSeenMs == 0)
+                        m_socketLastSeenMs = m_socket.lastActivityMs();
+                    break;
+                case JellyfinSocketClient::State::Authenticated: {
+                    const bool missed = m_socketLastSeenMs > 0
+                                        && QDateTime::currentMSecsSinceEpoch() - m_socketLastSeenMs
+                                               >= m_socketGapMs;
+                    m_socketLastSeenMs = 0;
+                    m_socketWasUp = true;
+                    if (missed)
+                        Q_EMIT serverEventsMissed();
+                    break;
+                }
+                case JellyfinSocketClient::State::Disconnected:
+                    m_socketLastSeenMs = 0;
+                    m_socketWasUp = false;
+                    break;
+                case JellyfinSocketClient::State::Connecting:
+                    break;
+                }
+            });
     m_offlineRefresh.setSingleShot(true);
     m_offlineRefresh.setInterval(1000);
     connect(&m_offlineRefresh, &QTimer::timeout, this, [this] { refreshOfflineAvailable(); });
@@ -1584,6 +1614,111 @@ void ConnectionController::holdUserDataRefresh(bool hold)
         m_userDataRefresh.stop();
     else if (!m_userDataPending.isEmpty())
         m_userDataRefresh.start();
+}
+
+QVariantList ConnectionController::savedFilters(const QString &kind) const
+{
+    QVariantList names;
+    for (const auto &saved : m_browse.savedFilters(m_client.serverId(), m_client.userId(), kind))
+        names.append(QVariantMap{{QStringLiteral("name"), saved.name}});
+    return names;
+}
+
+QString ConnectionController::saveFilters(const QString &kind, const QString &name,
+                                          const QVariantMap &filters, bool replace)
+{
+    LibraryItemsModel::ViewState view;
+    view.filters = LibraryItemsModel::filtersFromVariant(filters);
+    const auto result = m_browse.saveFilter(m_client.serverId(), m_client.userId(), kind,
+                                            name.trimmed(), toStored(view), replace);
+    using Result = BrowseStateStore::SaveResult;
+    if (result == Result::Saved || result == Result::Replaced) {
+        ++m_savedFiltersRevision;
+        Q_EMIT savedFiltersChanged();
+    }
+    switch (result) {
+    case Result::Saved:
+        return QStringLiteral("saved");
+    case Result::Replaced:
+        return QStringLiteral("replaced");
+    case Result::Exists:
+        return QStringLiteral("exists");
+    case Result::Full:
+        return QStringLiteral("full");
+    case Result::Invalid:
+        break;
+    }
+    return QStringLiteral("invalid");
+}
+
+bool ConnectionController::applySavedFilters(LibraryItemsModel *list, const QString &name)
+{
+    if (!list || !list->isOpen())
+        return false;
+    const auto stored =
+        m_browse.savedFilter(m_client.serverId(), m_client.userId(), list->filterKind(), name);
+    if (!stored)
+        return false;
+    const LibraryItemsModel::ViewState view = fromStored(*stored);
+    list->applyFilterSet(view.filters, view.pendingTagHashes, view.pendingRatingHashes);
+    return true;
+}
+
+QString ConnectionController::renameSavedFilters(const QString &kind, const QString &name,
+                                                 const QString &newName)
+{
+    const auto result = m_browse.renameSavedFilter(m_client.serverId(), m_client.userId(), kind,
+                                                   name, newName.trimmed());
+    using Result = BrowseStateStore::RenameResult;
+    if (result == Result::Renamed) {
+        ++m_savedFiltersRevision;
+        Q_EMIT savedFiltersChanged();
+        return QStringLiteral("renamed");
+    }
+    switch (result) {
+    case Result::Missing:
+        return QStringLiteral("missing");
+    case Result::Exists:
+        return QStringLiteral("exists");
+    default:
+        break;
+    }
+    return QStringLiteral("invalid");
+}
+
+bool ConnectionController::removeSavedFilters(const QString &kind, const QString &name)
+{
+    const auto saved = m_browse.savedFilters(m_client.serverId(), m_client.userId(), kind);
+    const auto found = std::find_if(saved.cbegin(), saved.cend(), [&name](const auto &entry) {
+        return entry.name.compare(name, Qt::CaseInsensitive) == 0;
+    });
+    if (found == saved.cend()
+        || !m_browse.removeSavedFilter(m_client.serverId(), m_client.userId(), kind, found->name))
+        return false;
+    m_removedFilter = *found;
+    m_removedFilterOwner = m_client.serverId() + QLatin1Char('/') + m_client.userId();
+    m_removedFilterAge.start();
+    ++m_savedFiltersRevision;
+    Q_EMIT savedFiltersChanged();
+    return true;
+}
+
+bool ConnectionController::undoRemoveSavedFilters()
+{
+    // An undo is for the moment of the notification: a set removed long ago is not brought back by a key
+    if (!m_removedFilter || !m_removedFilterAge.isValid() || m_removedFilterAge.hasExpired(15000))
+        return false;
+    const auto removed = std::exchange(m_removedFilter, std::nullopt);
+    if (std::exchange(m_removedFilterOwner, QString())
+        != m_client.serverId() + QLatin1Char('/') + m_client.userId())
+        return false;
+    const auto result = m_browse.saveFilter(m_client.serverId(), m_client.userId(), removed->kind,
+                                            removed->name, removed->state, false);
+    if (result != BrowseStateStore::SaveResult::Saved)
+        return false;
+    ++m_savedFiltersRevision;
+    Q_EMIT savedFiltersChanged();
+    return true;
 }
 
 void ConnectionController::reloadHome()

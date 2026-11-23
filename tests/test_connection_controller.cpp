@@ -463,6 +463,41 @@ class TestConnectionController : public QObject {
         QCOMPARE(reads(), 2);
     }
 
+    void aSocketGapLongEnoughAsksThePageToReadAgainAndAShortOneDoesNot()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        auto controller = makeController();
+        // The retry waits the gap that the test sets, so a drop is a gap of that length
+        controller->socket()->setTestTimings(0, 0, 0, 400, 400);
+        QVERIFY(signInFixtureUser(*controller, server));
+        QTRY_COMPARE(controller->socket()->state(),
+                     Kinefin::JellyfinSocketClient::State::Authenticated);
+        QSignalSpy missed(controller.get(), &ConnectionController::serverEventsMissed);
+
+        // Back within the limit: a network blip, the pages keep their scroll
+        controller->setTestSocketGap(60'000);
+        server.lastConnection()->kick();
+        QTRY_COMPARE_WITH_TIMEOUT(controller->socket()->state(),
+                                  Kinefin::JellyfinSocketClient::State::Reconnecting, 5000);
+        QTRY_COMPARE_WITH_TIMEOUT(controller->socket()->state(),
+                                  Kinefin::JellyfinSocketClient::State::Authenticated, 5000);
+        QCOMPARE(missed.size(), 0);
+
+        // Back after the limit: something may have changed in the meantime
+        controller->setTestSocketGap(100);
+        server.lastConnection()->kick();
+        QTRY_COMPARE_WITH_TIMEOUT(controller->socket()->state(),
+                                  Kinefin::JellyfinSocketClient::State::Reconnecting, 5000);
+        QTRY_COMPARE_WITH_TIMEOUT(controller->socket()->state(),
+                                  Kinefin::JellyfinSocketClient::State::Authenticated, 5000);
+        QCOMPARE(missed.size(), 1);
+
+        // A first connection is not a gap
+        controller->signOut();
+        QCOMPARE(missed.size(), 1);
+    }
+
     // A test runs only when asked, sends no credentials and says once that it ended
     void aServerTestSendsNoCredentialsAndReportsItsEnd()
     {
@@ -2067,7 +2102,7 @@ class TestConnectionController : public QObject {
             controller->movies()->setViewMode(QStringLiteral("list"));
         }
         const QJsonObject migrated = QJsonDocument::fromJson(browseBytes()).object();
-        QCOMPARE(migrated.value(QStringLiteral("version")).toInt(), 2);
+        QCOMPARE(migrated.value(QStringLiteral("version")).toInt(), 3);
         auto again = makeController();
         QVERIFY(signInWithLibraries(*again, server, 3));
         QVERIFY(again->openType(QStringLiteral("movies")));

@@ -27,6 +27,7 @@
   - [Jump between chapters](#jump-between-chapters)
   - [Choose a quality](#choose-a-quality)
   - [Save a clip or a GIF](#save-a-clip-or-a-gif)
+  - [Shaders and debanding](#shaders-and-debanding)
   - [Watch together with SyncPlay](#watch-together-with-syncplay)
   - [Control other sessions](#control-other-sessions)
 - [Download for offline use](#download-for-offline-use)
@@ -167,7 +168,7 @@ Home shows these rows:
 | Favorites | Up to 24 of your favorite movies and series in random order, a new pick at each load. **Show All** opens the Favorites tab |
 | Recently Added | One row per movie or series library. **Show All** opens that library, newest first |
 
-Progress, watched marks and favorites that change on the server, because you played something on another device or stopped playing here, show on the cards, the rows and the open details page about a second later, without a reload. While something plays in Kinefin the update waits until it stops.
+Progress, watched marks and favorites that change on the server, because you played something on another device or stopped playing here, show on the cards, the rows and the open details page about a second later, without a reload. While something plays in Kinefin the update waits until it stops. After the connection to the server was down for half a minute or more, Home and the page in front read their data again when it is back.
 
 Below the rows, under **Libraries**, is one tile per library. A tile of a movie or TV library opens its tab with that library selected, and a collections tile opens a library page.
 
@@ -214,6 +215,8 @@ To filter:
 | Years | Any number, with a search field | All |
 
 Type in the search field above the options to narrow them. The options you have checked stay listed whatever you type. A server can have thousands of tags, so Tags lists the ones you have checked first, then the first 300 tags of the server, and a line under the list says how many it leaves out: search to find the others.
+
+**Saved Filters…**, under the list of sections, keeps the filters you have chosen under a name and puts them back later. The dialog lists the sets saved for this kind of list (movies, series, episodes or collections): choose one to put it on the list, which closes both dialogs; the sort, the search and the view options stay. Type a name and press **Save** to keep the filters now chosen in the Filters dialog (a taken name asks to **Replace**), and use the pencil to rename a set in its row (Return keeps the name, Escape leaves it) or the bin to delete it, which the dialog offers to **Undo**. Up to 50 sets, saved on this device for your account; a tag or a rating is kept as a digest, not as text. The Favorites pages have none.
 
 A section that does not apply to the current list is left out. While the genres and tags (or the ratings and years) load or fail to load, one entry stands in for them with a busy or warning icon, and its pane has **Retry**. **Clear Filters** removes the filters of the current view only; search, sort and library stay. If a filter leaves nothing, the page says so and offers **Clear Filters**.
 
@@ -327,7 +330,7 @@ The video fills the window. Bars with the controls appear when you move the poin
 
 The top bar has **Back** (leaves the player, playback continues in the mini player), the title and episode line, and **Cast** and **Picture-in-Picture** buttons. In a SyncPlay group a group button also shows there.
 
-The bottom bar has the timeline with a thumbnail preview while you drag, **Previous** and **Next** (when there is one), **Pause** or **Resume**, a speaker button with a volume slider, **Audio**, **Subtitles**, **Full Screen Mode** and **More Actions**. The time at the left of the timeline is the current position. The one at the right toggles total and remaining time. A box above the timeline shows the time under the pointer, and the chapter there when the item has chapters; it also shows while you drag. **Ends at** shows the clock time the item ends at the current speed. **Skip Intro**, **Skip Recap** or **Skip Outro** appears during a segment the server knows.
+The bottom bar has the timeline with a thumbnail preview while you drag, **Previous** and **Next** (when there is one), **Pause** or **Resume**, a speaker button with a volume slider, **Audio**, **Subtitles**, **Full Screen Mode** and **More Actions**. The time at the left of the timeline is the current position. The one at the right toggles total and remaining time. A box above the timeline shows the time under the pointer, and the chapter there when the item has chapters; it also shows while you drag. **Ends at** shows the clock time the item ends at the current speed. **Skip Intro**, **Skip Recap** or **Skip Outro** appears during a segment the server knows, and the timeline marks each of them as a grey band; the box above the timeline names the segment under the pointer.
 
 A right click on the video, the Menu key or Shift+F10 open a context menu with the main actions. A single click on the video pauses or resumes, and a double click toggles full screen. The mouse wheel anywhere over the player changes the volume by 5.
 
@@ -341,6 +344,11 @@ A right click on the video, the Menu key or Shift+F10 open a context menu with t
 | Down, Up | Skip back, forward 1 minute |
 | PgDown, PgUp | Previous, next chapter |
 | I, O | Set the clip start, end |
+| L | Loop the marked part, or stop looping |
+| ., , | Step one frame forward, back; the playback pauses |
+| Shift+I | Show or hide Playback Info |
+| Ctrl+-, Ctrl++ | Audio earlier, later by 0.1 second; Ctrl+0 removes the audio delay |
+| Z, X | Subtitles earlier, later by 0.1 second; with Shift, by 0.5 second |
 | Escape | Close the open popup, cancel Up Next, leave full screen, then leave the player |
 | Return | Play the Up Next item now |
 
@@ -352,10 +360,11 @@ A right click on the video, the Menu key or Shift+F10 open a context menu with t
 | **Shuffle**, **Repeat** | Off, All or Current Item; Shuffle needs a queue of two or more |
 | **Playback Speed** | 0.5x to 4x; a speed between the steps, such as the one set as the default in the settings, shows as an extra checked entry |
 | **Aspect Ratio** | Auto, Zoom, Stretch, 4:3, 16:9, Widescreen for 4:3 Video, Original Size; applies to this item only |
-| **AV Sync** | Audio delay |
+| **AV Sync** | Audio delay and subtitle delay, in steps of 0.1 s up to 10 s either way, each with a reset; the keys above do the same, and a line over the picture says the new value. A delay is for the item that plays: the next item starts without one, and a casting renderer takes none |
 | **Quality** | See [Choose a quality](#choose-a-quality) |
 | **Chapters** | Jump to a chapter |
-| **Clip** | See [Save a clip or a GIF](#save-a-clip-or-a-gif) |
+| **Video Enhancement** | **Deband**, and the shader files you put in the profile's `shaders` folder, switched on and off while the picture plays; see [Shaders and debanding](#shaders-and-debanding) |
+| **Clip** | Set the start and the end, loop the marked part, save a clip or a GIF; see [Save a clip or a GIF](#save-a-clip-or-a-gif) |
 | **Sleep Timer** | Stops playback after 15 to 120 minutes, at the **End of Current Item** or at the **End of Queue** |
 | **Now Playing Queue** | A panel with the queue |
 | **Screenshot** | Saves the current frame |
@@ -426,7 +435,15 @@ You can save part of what plays as a video clip or a GIF.
 4. Choose the clip or the GIF.
 5. Pick a file in the save dialog.
 
+Once both marks are set, **Loop the Marked Part** in the same submenu (or L) plays the part over and over until you turn it off; moving a mark moves the loop, and clearing the clip, another item or stopping ends it. The loop is not available while casting or in a SyncPlay group. The period and comma keys step one frame forward and back to place a mark exactly.
+
 A clip lasts 1 to 60 seconds and a GIF 1 to 15 seconds. The clip is MP4 (H.264 and AAC), or WebM where H.264 encoding is not available. A progress card has **Cancel**. The clip uses the audio and subtitle tracks that play, with your subtitle style. HDR is refused, and so is a range of a stream that is no longer buffered ("The start of the clip is no longer buffered").
+
+### Shaders and debanding
+
+**Video Enhancement** in **More Actions** switches mpv's debanding and your own GLSL shaders on and off while a video plays. Put `.glsl` or `.hook` files in the `shaders` folder of the profile (`~/.local/share/kinefin/profiles/<profile>/shaders/`, under `~/.var/app/io.github.the_beper.Kinefin/` in the Flatpak). The menu lists up to 32 files of at most 256 KiB, by name, and reads the folder each time it opens. Kinefin ships no shaders.
+
+A choice applies to the item that plays and is forgotten when the next one starts: lines in `mpv.conf` (see [mpv Configuration](settings.md#mpv-configuration-other)) still decide what is on at the start. A shader that mpv cannot compile does not show an error in the menu: add `log-file=/some/path` to `mpv.conf` and read mpv's log there. The menu is not available while casting.
 
 ### Watch together with SyncPlay
 

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <QElapsedTimer>
 #include <QHash>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
@@ -234,10 +235,23 @@ class ConnectionController : public QObject {
     Q_INVOKABLE bool openLibrary(const QString &libraryId);
     // The details of one item for the page `owner`: the model is a child of `owner` and dies with it. Null unless signed in and `owner` exists
     Q_INVOKABLE Kinefin::ItemDetailsModel *createItemDetails(const QString &itemId, QObject *owner);
+    // Filters kept under a name, for the signed-in user and a kind of list (`LibraryItemsModel::filterKind`): `{name}` by name; `saveFilters` takes the filters of the dialog's draft (the format of `LibraryItemsModel::filters`) and answers `saved`, `replaced`, `exists` (the name is taken and `replace` is false), `full` or `invalid`; `applySavedFilters` puts a set on a list (the sort and the view options stay); `renameSavedFilters` answers `renamed`, `missing`, `exists` or `invalid`; `removeSavedFilters` keeps the one set removed last for `undoRemoveSavedFilters`
+    Q_PROPERTY(int savedFiltersRevision READ savedFiltersRevision NOTIFY savedFiltersChanged)
+    int savedFiltersRevision() const { return m_savedFiltersRevision; }
+    Q_INVOKABLE QVariantList savedFilters(const QString &kind) const;
+    Q_INVOKABLE QString saveFilters(const QString &kind, const QString &name,
+                                    const QVariantMap &filters, bool replace);
+    Q_INVOKABLE bool applySavedFilters(Kinefin::LibraryItemsModel *list, const QString &name);
+    Q_INVOKABLE QString renameSavedFilters(const QString &kind, const QString &name,
+                                           const QString &newName);
+    Q_INVOKABLE bool removeSavedFilters(const QString &kind, const QString &name);
+    Q_INVOKABLE bool undoRemoveSavedFilters();
     // Loads the home rows again (the libraries are kept)
     Q_INVOKABLE void reloadHome();
     // While something plays the server sends a UserDataChanged with every progress report: the ids wait and are read again once the playback is over. `hold` false lets them go at once
     Q_INVOKABLE void holdUserDataRefresh(bool hold);
+    // Test-only: the length of a socket gap that counts as one in which events were missed, in ms
+    void setTestSocketGap(qint64 ms) { m_socketGapMs = ms; }
     // Turns the Home Favorites row on or off (the Show on Home setting): off makes no request for it, and a change shows at once without reloading the other rows
     Q_INVOKABLE void setHomeFavoritesEnabled(bool enabled) { m_home.setFavoritesEnabled(enabled); }
     // Whether a library of this tab type ("movies" or "tvshows") is listed
@@ -332,6 +346,9 @@ class ConnectionController : public QObject {
     void quickConnectCodeChanged();
     void serversChanged();
     void offlineAvailableChanged();
+    void savedFiltersChanged();
+    // The server socket came back after a gap long enough for a user data change to have been missed: the page in front reads what it shows again
+    void serverEventsMissed();
     void serverReachabilityChanged();
     // A test of `address` (the saved URL, or the form's host and port) ended: `message` says what it found
     void serverTested(const QString &address, bool reachable, const QString &message);
@@ -478,6 +495,17 @@ class ConnectionController : public QObject {
     QTimer m_userDataRefresh;
     QSet<QString> m_userDataPending;
     bool m_userDataHeld = false;
+    int m_savedFiltersRevision = 0;
+    // The set removed last, for Undo
+    std::optional<BrowseStateStore::SavedFilter> m_removedFilter;
+    // The server and the user it was removed for: Undo restores it only to them
+    QString m_removedFilterOwner;
+    QElapsedTimer m_removedFilterAge;
+    // The last frame the socket had when it dropped after having been up (wall clock, ms), 0 while it is up or never was
+    qint64 m_socketLastSeenMs = 0;
+    bool m_socketWasUp = false;
+    static constexpr qint64 SocketGapMs = 30000;
+    qint64 m_socketGapMs = SocketGapMs;
     QString m_currentUserId;                   // the last value announced
     bool m_currentUserIsAdministrator = false; // the last value announced
     QString m_restoringUserId;                 // the saved user a restore in flight is for

@@ -142,6 +142,9 @@ class PlayerController final : public QObject {
     // Clip and GIF marks of the playing item, -1 when unset: the line the Clip menu states and the two Save entries
     Q_PROPERTY(qint64 clipStartTicks READ clipStartTicks NOTIFY changed)
     Q_PROPERTY(qint64 clipEndTicks READ clipEndTicks NOTIFY changed)
+    // Whether the marked part plays over and over (mpv's A-B loop), and whether it can: both marks set with the end after the start, no renderer, no group (a loop seeks, and every member would)
+    Q_PROPERTY(bool clipLooping READ clipLooping NOTIFY changed)
+    Q_PROPERTY(bool canLoopClip READ canLoopClip NOTIFY changed)
     Q_PROPERTY(QString clipLine READ clipLine NOTIFY changed)
     // Why neither Save entry can be used with the current range, empty when they can (route, HDR, length, encoder)
     Q_PROPERTY(QString clipReason READ clipReason NOTIFY changed)
@@ -159,6 +162,8 @@ class PlayerController final : public QObject {
     Q_PROPERTY(double clipProgress READ clipProgress NOTIFY clipStateChanged)
     // The chapters of the playing item, from the server: `name` (plain text, "Chapter N" when the server gives none), `startTicks` and `time` (as timeText shows it)
     Q_PROPERTY(QVariantList chapters READ chapters NOTIFY chaptersChanged)
+    // The Intro, Recap and Outro segments of the playing item for the seek bar: `type`, `startTicks` and `endTicks`, in the order they start; empty while they are not known
+    Q_PROPERTY(QVariantList segmentBands READ segmentBands NOTIFY segmentsChanged)
     // Notified only when the chapter changes, not with every position
     Q_PROPERTY(int currentChapter READ currentChapter NOTIFY currentChapterChanged)
     // The Up Next card: up near the end of an item whose end starts another one (never under Repeat One or for a lone item) until Cancel; `upNext` holds that item's `title`, `subtitle` (plain text) and `imageUrl`
@@ -244,6 +249,11 @@ class PlayerController final : public QObject {
     bool nightMode() const;
     qint64 clipStartTicks() const { return m_clipStart; }
     qint64 clipEndTicks() const { return m_clipEnd; }
+    bool clipLooping() const { return m_clipLooping; }
+    bool canLoopClip() const
+    {
+        return m_clipStart >= 0 && m_clipEnd > m_clipStart && active() && !m_casting && !grouped();
+    }
     QString clipLine() const;
     QString clipReason() const;
     QString clipLengthReason() const;
@@ -257,6 +267,7 @@ class PlayerController final : public QObject {
     QVariantList qualitySteps() const;
     double clipProgress() const { return m_clipProgress; }
     QVariantList chapters() const { return m_chapterList; }
+    QVariantList segmentBands() const { return m_segmentBands; }
     // The chapter playing now, -1 before the first or without chapters
     int currentChapter() const { return m_currentChapter; }
     bool upNextShown() const { return m_upNextShown; }
@@ -335,6 +346,21 @@ class PlayerController final : public QObject {
     Q_INVOKABLE void markClipStart();
     Q_INVOKABLE void markClipEnd();
     Q_INVOKABLE void clearClip();
+    // Plays the marked part again and again, or stops doing so; a mark that is moved moves the loop, and clearing the clip, another item and a stop end it
+    Q_INVOKABLE void setClipLooping(bool looping);
+    // One frame forward or back, which pauses (mpv's frame-step and frame-back-step); not while casting or in a group
+    Q_INVOKABLE void frameStep();
+    Q_INVOKABLE void frameBackStep();
+    // The Video Enhancement menu: debanding is mpv's own flag, and the shaders are the files of the profile's `shaders` folder (`.glsl` and `.hook`, readable files with links followed, at most 32 of at most 256 KiB), each `{file, name}`; `activeShaders` holds the files that mpv's `glsl-shaders` has. The two are apart so that switching a shader does not make a new list of entries. `refreshEnhancements()` reads them again (when the menu opens); a change applies at once, to this playback only: the next item starts from the settings again
+    Q_PROPERTY(bool deband READ deband NOTIFY enhancementsChanged)
+    Q_PROPERTY(QVariantList shaders READ shaders NOTIFY enhancementsChanged)
+    Q_PROPERTY(QStringList activeShaders READ activeShaders NOTIFY enhancementsChanged)
+    bool deband() const { return m_deband; }
+    QVariantList shaders() const { return m_shaders; }
+    QStringList activeShaders() const { return m_activeShaders; }
+    Q_INVOKABLE void refreshEnhancements();
+    Q_INVOKABLE void setDeband(bool on);
+    Q_INVOKABLE void setShader(const QString &file, bool on);
     // The file name the Save dialog proposes: the title and the start time, with the extension of the format
     Q_INVOKABLE QString suggestedClipName(bool gif) const;
     // The same name in the user's Videos folder, the starting point of the Save dialog
@@ -348,6 +374,10 @@ class PlayerController final : public QObject {
     Q_INVOKABLE void setQualityBitrate(qint64 bitsPerSecond);
     Q_INVOKABLE void skipSegment();
     Q_INVOKABLE bool downloadSubtitle(int index);
+    // Shows a subtitle file of this computer for the item that plays (a drop on the player, or the Subtitles menu's Add Subtitle File): an srt, ass, ssa or vtt file of at most 2 MiB, copied to the player's own folder and added to mpv and selected under its file name. For this item only; the answer comes as subtitleFileAdded or subtitleFileRefused, which says why in words
+    Q_INVOKABLE bool addSubtitleFile(const QUrl &file);
+    // Whether the subtitle file could be kept on the server too: the item is the server's and the user an administrator, the same as for Edit Subtitles
+    Q_INVOKABLE bool canUploadAddedSubtitles() const;
     // A server external text subtitle not loaded yet, downloaded and shown as the second one
     Q_INVOKABLE bool downloadSecondarySubtitle(int index);
     Q_INVOKABLE void previewAt(qint64 ticks);
@@ -452,6 +482,8 @@ class PlayerController final : public QObject {
     void seeked(qint64 ticks);
     void tracksChanged();
     void chaptersChanged();
+    void segmentsChanged();
+    void enhancementsChanged();
     void currentChapterChanged();
     void upNextChanged();
     void seriesChoicesChanged();
@@ -461,6 +493,9 @@ class PlayerController final : public QObject {
     void castStoppedElsewhere(const QString &deviceName);
     // A subtitle stream of the file is on its way: the server extracts it first, which can take minutes the first time
     void subtitleExtracting();
+    // A subtitle file was added to the item that plays: its title (the file name without the suffix) and the copy the player keeps, which an upload can read
+    void subtitleFileAdded(const QString &title, const QUrl &copy);
+    void subtitleFileRefused(const QString &reason);
     // A subtitle for the other slot is still on its way: one download runs at a time
     void subtitleBusy();
     // A mark was set: the shell shows where
@@ -572,6 +607,18 @@ class PlayerController final : public QObject {
     bool clipFromCache() const;
     // One of mpv's cached ranges holds both marks
     bool clipCached() const;
+    // Forgets the marks and ends the loop that ran over them
+    void dropClipMarks();
+    // Puts mpv's A-B loop where the marks and `m_clipLooping` say, and ends the loop when the marks no longer allow one
+    void applyClipLoop();
+    // Puts mpv's debanding and shaders back to what they were before the menu changed them
+    void resetEnhancements();
+    // The audio and subtitle delays go back to none: they are for the item they were set on
+    void resetDelays();
+    // What is for the item that plays and not for the next: the enhancements, the delays and the subtitle files added by hand
+    void resetForNextItem();
+    // Remembers what mpv has before the menu's first change
+    void keepEnhancementBase();
     // Writes the cached range of the marks to `path` and returns where it starts (at or before the start mark), nothing on failure
     std::optional<double> dumpClipCache(const QString &path);
     void dropClipDump();
@@ -595,6 +642,8 @@ class PlayerController final : public QObject {
     // The Intro segments around `ticks` are never skipped automatically: the user went there. Before the segments are known the position is kept for when they come
     void keepIntrosAt(qint64 ticks);
     void refreshSegments();
+    // The segments the skip button, the automatic skip and the Up Next card read, and the bands the seek bar draws from them
+    void setSegments(const QVariantList &segments);
     void updateSkip();
     QString memoryKey() const;
     void restoreTracks();
@@ -697,6 +746,16 @@ class PlayerController final : public QObject {
     ClipExporter m_clipExporter;
     qint64 m_clipStart = -1;
     qint64 m_clipEnd = -1;
+    bool m_deband = false;
+    QVariantList m_shaders;
+    QStringList m_activeShaders;
+    // What mpv had before the menu changed anything in this playback, put back when the next one starts
+    bool m_enhancementsTouched = false;
+    bool m_debandBase = false;
+    QVariant m_shadersBase;
+    bool m_clipLooping = false;
+    // Whether mpv's A and B hold the loop of the marks, so that a loop that is off leaves them alone
+    bool m_loopSet = false;
     QUrl m_clipDestination;
     double m_clipProgress = 0;
     bool m_clipGif = false;
@@ -720,6 +779,7 @@ class PlayerController final : public QObject {
     QVariantList m_subtitleTracks;
     QVariantList m_externalSubtitles;
     QVariantList m_segments;
+    QVariantList m_segmentBands;
     QStringList m_playlist;
     QString m_itemId;
     QString m_title;
@@ -811,6 +871,8 @@ class PlayerController final : public QObject {
     } m_pendingLocal;
     // The subtitle files of the download that plays, added to mpv once it loaded
     QList<LocalSubtitle> m_localSubtitles;
+    // The subtitle files the viewer added by hand to this item, added to mpv again when the item reopens
+    QList<LocalSubtitle> m_addedSubtitles;
     bool m_stopping = false;
     bool m_trackRestored = false;
     int m_selectedAudioId = 0;

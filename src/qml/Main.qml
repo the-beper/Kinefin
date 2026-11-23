@@ -818,6 +818,17 @@ Kirigami.ApplicationWindow {
         function onClipMarkChanged(text) {
             window.showPassiveNotification(text);
         }
+        function onSubtitleFileAdded(title, copy) {
+            // An administrator can keep it on the server too: the offer is the notification's action, for this item and this file
+            const itemId = window.player.itemId;
+            if (window.player.canUploadAddedSubtitles())
+                window.showPassiveNotification(i18n("Subtitle added"), "long", i18n("Upload…"), () => uploadSubtitleDialog.openFor(itemId, copy, title));
+            else
+                window.showPassiveNotification(i18n("Subtitle added"));
+        }
+        function onSubtitleFileRefused(reason) {
+            window.showPassiveNotification(reason, "long");
+        }
         function onClipSaveFailed(noSpace) {
             window.showPassiveNotification(noSpace ? i18n("The clip could not be saved: not enough free disk space. Free some space and try again") : i18n("The clip could not be saved. Try again"));
         }
@@ -1839,6 +1850,19 @@ Kirigami.ApplicationWindow {
                 if (window.remotePlayRequest === request)
                     window.remotePlayWaiting = false;
             });
+        }
+    }
+
+    // The socket was down long enough for a change to be missed: Home and the page in front read their data again (not under the full player: the end of the playback reloads Home and the page it returns to)
+    Connections {
+        target: window.connection
+        function onServerEventsMissed() {
+            if (!window.signedIn || window.playbackMode === "full")
+                return;
+            window.connection.reloadHome();
+            const page = window.pageStack.currentItem;
+            if (typeof page?.refreshPage === "function")
+                page.refreshPage();
         }
     }
 

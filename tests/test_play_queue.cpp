@@ -158,6 +158,29 @@ class TestPlayQueue : public QObject {
         QCOMPARE(f.name(0), QStringLiteral("Second"));
     }
 
+    void aRowFollowsTheWatchedStateOfItsItemWithoutSavingTheQueue()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        QVERIFY(f.addAndWait(kMovie, PlayQueue::Last));
+        const auto played = [&] {
+            return f.queue.data(f.queue.index(0), PlayQueue::PlayedRole).toBool();
+        };
+        QVERIFY(!played());
+        QSignalSpy changed(&f.queue, &QAbstractItemModel::dataChanged);
+        QSignalSpy edited(&f.queue, &PlayQueue::edited);
+        Q_EMIT f.client.itemPlayedUpdated(kMovie.toUpper(), true);
+        QVERIFY(played());
+        QCOMPARE(changed.size(), 1);
+        // A saved position is not watched to the end
+        Q_EMIT f.client.itemProgressUpdated(kMovie, 9'000'000'000, 40.0);
+        QVERIFY(!played());
+        // Another item changes nothing; none of it is an edit of the queue
+        Q_EMIT f.client.itemPlayedUpdated(kSeason, true);
+        QCOMPARE(changed.size(), 2);
+        QCOMPARE(edited.size(), 0);
+    }
+
     void addingAQueuedItemMovesItToTheNewPlace()
     {
         Fixture f;

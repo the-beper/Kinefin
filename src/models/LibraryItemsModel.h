@@ -37,6 +37,8 @@ class LibraryItemsModel final : public PagedItemsModel {
     Q_PROPERTY(bool episodeKindAvailable READ episodeKindAvailable NOTIFY libraryChanged)
     Q_PROPERTY(QString libraryName READ libraryName NOTIFY libraryChanged)
     Q_PROPERTY(QString libraryId READ libraryId NOTIFY libraryChanged)
+    // The kind of list that saved filters belong to: `movies`, `series`, `episodes` or `collections`; empty while the model is closed
+    Q_PROPERTY(QString filterKind READ filterKind NOTIFY libraryChanged)
     // The genre ids the grid is filtered by (any of them), chosen among `filterOptions`
     Q_PROPERTY(QStringList genreIds READ genreIds WRITE setGenreIds NOTIFY genreIdsChanged)
     // The values the filters can take: the genres, tags, official ratings and years of the open scope
@@ -198,6 +200,10 @@ class LibraryItemsModel final : public PagedItemsModel {
     Q_INVOKABLE void clearFilters();
     // Replaces every filter section and drops the pending tags and ratings in the same step: for a caller that starts from another view, like a genre rail's Show All
     Q_INVOKABLE void replaceFilters(const QVariantMap &filters);
+    // Replaces every filter section by a saved set, whose tags and ratings are known by digest only: they stay pending until the facet lists that hold their texts load, as in a view that an earlier session saved. The sort, the search and the view options stay
+    void applyFilterSet(const LibraryFilterState &filters, const QStringList &pendingTagHashes,
+                        const QStringList &pendingRatingHashes);
+    QString filterKind() const;
     // Held back while a saved tag or rating is pending: asks the failed facet source again instead of the list (nothing is sent before it resolves)
     void retry() override;
     // Asks for the list again from its first page, keeping the query and the view; nothing while it is closed

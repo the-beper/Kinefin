@@ -244,6 +244,56 @@ QJsonArray toJson(const QList<int> &years)
         array.append(year);
     return array;
 }
+
+QJsonObject viewToJson(const BrowseStateStore::ViewState &state)
+{
+    return QJsonObject{
+        {QStringLiteral("sortKey"), state.sortKey},
+        {QStringLiteral("descending"), state.descending},
+        {QStringLiteral("statusFlags"), QJsonArray::fromStringList(state.statusFlags)},
+        {QStringLiteral("features"), QJsonArray::fromStringList(state.features)},
+        {QStringLiteral("quality"), state.quality},
+        {QStringLiteral("is4K"), state.is4K},
+        {QStringLiteral("is3D"), state.is3D},
+        {QStringLiteral("videoTypes"), QJsonArray::fromStringList(state.videoTypes)},
+        {QStringLiteral("genreIds"), QJsonArray::fromStringList(state.genreIds)},
+        {QStringLiteral("tagHashes"), QJsonArray::fromStringList(state.tagHashes)},
+        {QStringLiteral("ratingHashes"), QJsonArray::fromStringList(state.ratingHashes)},
+        {QStringLiteral("years"), toJson(state.years)},
+        {QStringLiteral("seriesStatus"), QJsonArray::fromStringList(state.seriesStatus)},
+        {QStringLiteral("episodeKind"), state.episodeKind},
+        {QStringLiteral("viewMode"), state.viewMode},
+        {QStringLiteral("imageType"), state.imageType},
+        {QStringLiteral("showTitle"), state.showTitle},
+        {QStringLiteral("showYear"), state.showYear},
+        {QStringLiteral("cardLayout"), state.cardLayout}};
+}
+
+bool validSavedKind(const QString &kind)
+{
+    return kind == QLatin1String("movies") || kind == QLatin1String("series")
+           || kind == QLatin1String("episodes") || kind == QLatin1String("collections");
+}
+
+// The index of the set of this kind and name (the names compare without regard to case), or -1
+qsizetype findSaved(const QList<BrowseStateStore::SavedFilter> &list, const QString &kind,
+                    const QString &name)
+{
+    for (qsizetype i = 0; i < list.size(); ++i) {
+        if (list.at(i).kind == kind && list.at(i).name.compare(name, Qt::CaseInsensitive) == 0)
+            return i;
+    }
+    return -1;
+}
+
+// A name a person typed: one to forty characters, no control character, no space at either end
+bool validSavedName(const QString &name)
+{
+    return !name.isEmpty() && name.size() <= BrowseStateStore::MaxSavedNameLength
+           && name == name.trimmed() && std::none_of(name.cbegin(), name.cend(), [](QChar c) {
+                  return c.unicode() < 0x20 || c.unicode() == 0x7f;
+              });
+}
 } // namespace
 
 QString BrowseStateStore::hashText(const QString &text)
@@ -340,6 +390,153 @@ void BrowseStateStore::setView(const QString &serverId, const QString &userId,
     scheduleSave();
 }
 
+QList<BrowseStateStore::SavedFilter> BrowseStateStore::savedFilters(const QString &serverId,
+                                                                    const QString &userId,
+                                                                    const QString &kind) const
+{
+    const UserState *user = userState(serverId, userId);
+    QList<SavedFilter> list;
+    if (!user)
+        return list;
+    for (const SavedFilter &filter : user->saved) {
+        if (kind.isEmpty() || filter.kind == kind)
+            list.append(filter);
+    }
+    std::sort(list.begin(), list.end(), [](const SavedFilter &a, const SavedFilter &b) {
+        return a.kind == b.kind ? a.name.compare(b.name, Qt::CaseInsensitive) < 0 : a.kind < b.kind;
+    });
+    return list;
+}
+
+std::optional<BrowseStateStore::ViewState> BrowseStateStore::savedFilter(const QString &serverId,
+                                                                         const QString &userId,
+                                                                         const QString &kind,
+                                                                         const QString &name) const
+{
+    const UserState *user = userState(serverId, userId);
+    if (!user)
+        return std::nullopt;
+    const qsizetype at = findSaved(user->saved, kind, name);
+    if (at < 0)
+        return std::nullopt;
+    return user->saved.at(at).state;
+}
+
+BrowseStateStore::SaveResult BrowseStateStore::saveFilter(const QString &serverId,
+                                                          const QString &userId,
+                                                          const QString &kind, const QString &name,
+                                                          const ViewState &state, bool replace)
+{
+    if (!isValidJellyfinId(serverId) || !isValidJellyfinId(userId) || !validSavedKind(kind)
+        || !validSavedName(name) || !validView(state) || state.tagHashes.size() > MaxSavedHashes
+        || state.ratingHashes.size() > MaxSavedHashes)
+        return SaveResult::Invalid;
+    UserState &user = m_servers[serverId][userId];
+    const qsizetype at = findSaved(user.saved, kind, name);
+    SaveResult result = SaveResult::Saved;
+    std::optional<SavedFilter> replacedState;
+    if (at >= 0) {
+        if (!replace)
+            return SaveResult::Exists;
+        replacedState = user.saved.at(at);
+        user.saved.removeAt(at);
+        result = SaveResult::Replaced;
+    } else if (user.saved.size() >= MaxSavedFilters) {
+        return SaveResult::Full;
+    }
+    user.saved.append(SavedFilter{kind, name, state, m_nextSeq++});
+    // The views go first when the file is too big, but a set that a person named is never dropped to make room: the sets alone must fit
+    if (serialize(false).size() > MaxFileBytes) {
+        user.saved.removeLast();
+        // A replaced set is gone from the list: put it back as it was
+        if (result == SaveResult::Replaced && replacedState)
+            user.saved.insert(at, *replacedState);
+        if (user.selection.isEmpty() && user.views.isEmpty() && user.saved.isEmpty()) {
+            m_servers[serverId].remove(userId);
+            if (m_servers[serverId].isEmpty())
+                m_servers.remove(serverId);
+        }
+        return SaveResult::Full;
+    }
+    scheduleSave();
+    return result;
+}
+
+BrowseStateStore::RenameResult BrowseStateStore::renameSavedFilter(const QString &serverId,
+                                                                   const QString &userId,
+                                                                   const QString &kind,
+                                                                   const QString &name,
+                                                                   const QString &newName)
+{
+    if (!validSavedKind(kind) || !validSavedName(newName))
+        return RenameResult::Invalid;
+    const UserState *known = userState(serverId, userId);
+    if (!known)
+        return RenameResult::Missing;
+    const qsizetype at = findSaved(known->saved, kind, name);
+    if (at < 0)
+        return RenameResult::Missing;
+    const qsizetype other = findSaved(known->saved, kind, newName);
+    // Another case of the same name is a rename; another set with the name is a clash
+    if (other >= 0 && other != at)
+        return RenameResult::Exists;
+    if (known->saved.at(at).name == newName)
+        return RenameResult::Renamed;
+    m_servers[serverId][userId].saved[at].name = newName;
+    scheduleSave();
+    return RenameResult::Renamed;
+}
+
+bool BrowseStateStore::removeSavedFilter(const QString &serverId, const QString &userId,
+                                         const QString &kind, const QString &name)
+{
+    const UserState *known = userState(serverId, userId);
+    if (!known)
+        return false;
+    const qsizetype at = findSaved(known->saved, kind, name);
+    if (at < 0)
+        return false;
+    UserState &user = m_servers[serverId][userId];
+    user.saved.removeAt(at);
+    if (user.selection.isEmpty() && user.views.isEmpty() && user.saved.isEmpty()) {
+        m_servers[serverId].remove(userId);
+        if (m_servers[serverId].isEmpty())
+            m_servers.remove(serverId);
+    }
+    scheduleSave();
+    return true;
+}
+
+bool BrowseStateStore::evictOldestSaved()
+{
+    QString serverId;
+    QString userId;
+    qsizetype index = -1;
+    qint64 oldest = std::numeric_limits<qint64>::max();
+    for (auto server = m_servers.cbegin(); server != m_servers.cend(); ++server) {
+        for (auto user = server->cbegin(); user != server->cend(); ++user) {
+            for (qsizetype i = 0; i < user->saved.size(); ++i) {
+                if (index < 0 || user->saved.at(i).seq < oldest) {
+                    index = i;
+                    oldest = user->saved.at(i).seq;
+                    serverId = server.key();
+                    userId = user.key();
+                }
+            }
+        }
+    }
+    if (index < 0)
+        return false;
+    Users &users = m_servers[serverId];
+    UserState &user = users[userId];
+    user.saved.removeAt(index);
+    if (user.selection.isEmpty() && user.views.isEmpty() && user.saved.isEmpty())
+        users.remove(userId);
+    if (users.isEmpty())
+        m_servers.remove(serverId);
+    return true;
+}
+
 void BrowseStateStore::forgetServer(const QString &serverId)
 {
     if (!m_servers.remove(serverId))
@@ -382,7 +579,7 @@ bool BrowseStateStore::evictOldest()
     Users &users = m_servers[serverId];
     UserState &user = users[userId];
     user.views.remove(scope);
-    if (user.selection.isEmpty() && user.views.isEmpty())
+    if (user.selection.isEmpty() && user.views.isEmpty() && user.saved.isEmpty())
         users.remove(userId);
     if (users.isEmpty())
         m_servers.remove(serverId);
@@ -397,7 +594,7 @@ void BrowseStateStore::scheduleSave()
     m_saveTimer.start();
 }
 
-QByteArray BrowseStateStore::serialize() const
+QByteArray BrowseStateStore::serialize(bool withViews) const
 {
     QJsonObject servers;
     for (auto server = m_servers.cbegin(); server != m_servers.cend(); ++server) {
@@ -407,38 +604,23 @@ QByteArray BrowseStateStore::serialize() const
             for (auto entry = user->selection.cbegin(); entry != user->selection.cend(); ++entry)
                 selection.insert(entry.key(), entry.value());
             QJsonObject views;
-            for (auto view = user->views.cbegin(); view != user->views.cend(); ++view) {
-                const ViewState &state = view->state;
-                views.insert(
-                    view.key(),
-                    QJsonObject{
-                        {QStringLiteral("sortKey"), state.sortKey},
-                        {QStringLiteral("descending"), state.descending},
-                        {QStringLiteral("statusFlags"),
-                         QJsonArray::fromStringList(state.statusFlags)},
-                        {QStringLiteral("features"), QJsonArray::fromStringList(state.features)},
-                        {QStringLiteral("quality"), state.quality},
-                        {QStringLiteral("is4K"), state.is4K},
-                        {QStringLiteral("is3D"), state.is3D},
-                        {QStringLiteral("videoTypes"),
-                         QJsonArray::fromStringList(state.videoTypes)},
-                        {QStringLiteral("genreIds"), QJsonArray::fromStringList(state.genreIds)},
-                        {QStringLiteral("tagHashes"), QJsonArray::fromStringList(state.tagHashes)},
-                        {QStringLiteral("ratingHashes"),
-                         QJsonArray::fromStringList(state.ratingHashes)},
-                        {QStringLiteral("years"), toJson(state.years)},
-                        {QStringLiteral("seriesStatus"),
-                         QJsonArray::fromStringList(state.seriesStatus)},
-                        {QStringLiteral("episodeKind"), state.episodeKind},
-                        {QStringLiteral("viewMode"), state.viewMode},
-                        {QStringLiteral("imageType"), state.imageType},
-                        {QStringLiteral("showTitle"), state.showTitle},
-                        {QStringLiteral("showYear"), state.showYear},
-                        {QStringLiteral("cardLayout"), state.cardLayout},
-                        {QStringLiteral("seq"), view->seq}});
+            for (auto view = user->views.cbegin(); withViews && view != user->views.cend();
+                 ++view) {
+                QJsonObject entry = viewToJson(view->state);
+                entry.insert(QStringLiteral("seq"), view->seq);
+                views.insert(view.key(), entry);
+            }
+            QJsonArray saved;
+            for (const SavedFilter &filter : user->saved) {
+                QJsonObject entry = viewToJson(filter.state);
+                entry.insert(QStringLiteral("kind"), filter.kind);
+                entry.insert(QStringLiteral("name"), filter.name);
+                entry.insert(QStringLiteral("seq"), filter.seq);
+                saved.append(entry);
             }
             QJsonObject stored{{QStringLiteral("selection"), selection},
-                               {QStringLiteral("views"), views}};
+                               {QStringLiteral("views"), views},
+                               {QStringLiteral("savedFilters"), saved}};
             users.insert(user.key(), stored);
         }
         servers.insert(server.key(), QJsonObject{{QStringLiteral("users"), users}});
@@ -464,7 +646,8 @@ void BrowseStateStore::flush()
         return;
     }
     QByteArray data = serialize();
-    while (data.size() > MaxFileBytes && evictOldest())
+    // Views go first, the sets a person named last
+    while (data.size() > MaxFileBytes && (evictOldest() || evictOldestSaved()))
         data = serialize();
     if (writePrivateFile(m_path, data)) {
         m_saveFailing = false;
@@ -562,7 +745,24 @@ void BrowseStateStore::loadUsers(const QJsonObject &servers, int version, qint64
                 highest = std::max<qint64>(highest, seq.toInteger());
                 user.views.insert(scope, StoredView{*state, seq.toInteger()});
             }
-            if (!user.selection.isEmpty() || !user.views.isEmpty())
+            for (const QJsonValue &value : stored.value(QStringLiteral("savedFilters")).toArray()) {
+                const QJsonObject entry = value.toObject();
+                const QJsonValue seq = entry.value(QStringLiteral("seq"));
+                const QString kind = entry.value(QStringLiteral("kind")).toString();
+                const QString name = entry.value(QStringLiteral("name")).toString();
+                if (!validSavedKind(kind) || !validSavedName(name) || !seq.isDouble()
+                    || seq.toInteger() < 0 || seq.toInteger() > MaxSeq
+                    || user.saved.size() >= MaxSavedFilters
+                    || findSaved(user.saved, kind, name) >= 0)
+                    continue;
+                const std::optional<ViewState> state = readViewV2(entry);
+                if (!state || !validView(*state) || state->tagHashes.size() > MaxSavedHashes
+                    || state->ratingHashes.size() > MaxSavedHashes)
+                    continue;
+                highest = std::max<qint64>(highest, seq.toInteger());
+                user.saved.append(SavedFilter{kind, name, *state, seq.toInteger()});
+            }
+            if (!user.selection.isEmpty() || !user.views.isEmpty() || !user.saved.isEmpty())
                 m_servers[serverId].insert(userId, user);
         }
     }

@@ -52,6 +52,27 @@ PlayQueue::PlayQueue(JellyfinClient *client, QObject *parent)
     connect(m_client, &JellyfinClient::episodesReady, this, &PlayQueue::onEpisodes);
     connect(m_client, &JellyfinClient::playlistEntriesReady, this, &PlayQueue::onPlaylistEntries);
     connect(m_client, &JellyfinClient::listingFailed, this, &PlayQueue::onListingFailed);
+    // The check of a row follows what plays: a queue is not read again from the server, and an entry that was just watched must show as played (not a queue edit, so nothing is saved for it)
+    connect(m_client, &JellyfinClient::itemPlayedUpdated, this,
+            [this](const QString &id, bool played) {
+                for (size_t i = 0; i < m_items.size(); ++i) {
+                    if (!sameItemId(m_items[i].id, id))
+                        continue;
+                    applyPlayed(m_items[i], played);
+                    const QModelIndex row = index(int(i));
+                    Q_EMIT dataChanged(row, row, {PlayedRole});
+                }
+            });
+    connect(m_client, &JellyfinClient::itemProgressUpdated, this,
+            [this](const QString &id, qint64 position, double percentage) {
+                for (size_t i = 0; i < m_items.size(); ++i) {
+                    if (!sameItemId(m_items[i].id, id))
+                        continue;
+                    applyProgress(m_items[i], position, percentage);
+                    const QModelIndex row = index(int(i));
+                    Q_EMIT dataChanged(row, row, {PlayedRole});
+                }
+            });
     connect(m_client, &JellyfinClient::credentialsCleared, this, [this] {
         // What was edited is saved for the next sign-in of the same user; the stored file stays
         flush();

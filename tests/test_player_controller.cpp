@@ -10,9 +10,11 @@
 #include "player/PlaybackEngine.h"
 #include "player/PlayerController.h"
 #include "settings/ClientSettings.h"
+#include "settings/ProfilePaths.h"
 
 #include <MpvController>
 
+#include <QDir>
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonObject>
@@ -976,6 +978,48 @@ class TestPlayerController : public QObject {
         QTest::qWait(300);
         QVERIFY(chain.controller.positionTicks() < 19 * kSecond);
         QCOMPARE(chain.controller.skipLabel(), QStringLiteral("Skip Intro"));
+    }
+
+    void theSegmentBandsFollowTheServersSegmentsInTheirOrderAndGoWithTheItem()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        QVERIFY(chain.controller.playItem(kMovie, 0));
+        QVERIFY(chain.controller.segmentBands().isEmpty());
+        QSignalSpy changed(&chain.controller, &Kinefin::PlayerController::segmentsChanged);
+        // An answer for another item changes nothing
+        Q_EMIT chain.client.mediaSegmentsReady(episodeId(7),
+                                               QJsonArray{segment(QStringLiteral("Intro"), 1, 2)});
+        QVERIFY(chain.controller.segmentBands().isEmpty());
+        QCOMPARE(changed.size(), 0);
+        // The server's order is not the order of the bar: the bands come by start
+        Q_EMIT chain.client.mediaSegmentsReady(kMovie,
+                                               QJsonArray{segment(QStringLiteral("Outro"), 90, 100),
+                                                          segment(QStringLiteral("Intro"), 10, 20),
+                                                          segment(QStringLiteral("Recap"), 0, 8)});
+        QCOMPARE(changed.size(), 1);
+        const QVariantList bands = chain.controller.segmentBands();
+        QCOMPARE(bands.size(), 3);
+        const QStringList types{QStringLiteral("Recap"), QStringLiteral("Intro"),
+                                QStringLiteral("Outro")};
+        const QList<qint64> starts{0, 10 * kSecond, 90 * kSecond};
+        const QList<qint64> ends{8 * kSecond, 20 * kSecond, 100 * kSecond};
+        for (int i = 0; i < bands.size(); ++i) {
+            const QVariantMap band = bands.at(i).toMap();
+            QCOMPARE(band.value(QStringLiteral("type")).toString(), types.at(i));
+            QCOMPARE(band.value(QStringLiteral("startTicks")).toLongLong(), starts.at(i));
+            QCOMPARE(band.value(QStringLiteral("endTicks")).toLongLong(), ends.at(i));
+        }
+        // The same answer again is no change
+        Q_EMIT chain.client.mediaSegmentsReady(kMovie,
+                                               QJsonArray{segment(QStringLiteral("Outro"), 90, 100),
+                                                          segment(QStringLiteral("Intro"), 10, 20),
+                                                          segment(QStringLiteral("Recap"), 0, 8)});
+        QCOMPARE(changed.size(), 1);
+        // The item ends: the bar has nothing to draw
+        chain.controller.stop();
+        QVERIFY(chain.controller.segmentBands().isEmpty());
+        QCOMPARE(changed.size(), 2);
     }
 
     void introsStayWithoutTheSetting()
@@ -2352,6 +2396,238 @@ class TestPlayerController : public QObject {
         QCOMPARE(chain.controller.clipStartTicks(), -1);
         QCOMPARE(chain.controller.clipEndTicks(), -1);
         chain.controller.clearClip();
+    }
+
+    // The marked part loops through mpv's A-B loop: only with both marks, the marks move the loop, and clearing the clip, another item or a stop end it
+    void theMarkedPartLoopsAndTheLoopEndsWithTheMarks()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        const QString clip = QUrl(TestWav::writeWavClip(chain.dir, 30)).toLocalFile();
+        QVERIFY(!clip.isEmpty());
+        QVERIFY(chain.engine()->init({QStringLiteral("vo=null"), QStringLiteral("ao=null")}));
+        QVERIFY(chain.controller.playLocalFile(clip, kMovie, QStringLiteral("Local Movie"), {}));
+        QTRY_VERIFY(chain.controller.canSeek());
+        const auto loopA = [&] { return chain.engine()->mpvProperty(QStringLiteral("ab-loop-a")); };
+        const auto loopB = [&] { return chain.engine()->mpvProperty(QStringLiteral("ab-loop-b")); };
+        // No marks, no loop, and the key says what is missing
+        QVERIFY(!chain.controller.canLoopClip());
+        QSignalSpy refused(&chain.controller, &Kinefin::PlayerController::clipMarkChanged);
+        chain.controller.setClipLooping(true);
+        QVERIFY(!chain.controller.clipLooping());
+        QCOMPARE(refused.size(), 1);
+        QCOMPARE(refused.constFirst().constFirst().toString(),
+                 QStringLiteral("Mark a start and an end to loop the part"));
+        chain.playsAt(2.0, 30);
+        chain.controller.markClipStart();
+        QVERIFY(!chain.controller.canLoopClip());
+        chain.playsAt(8.0, 30);
+        chain.controller.markClipEnd();
+        QVERIFY(chain.controller.canLoopClip());
+        QVERIFY(!chain.controller.clipLooping());
+        QSignalSpy notices(&chain.controller, &Kinefin::PlayerController::clipMarkChanged);
+        chain.controller.setClipLooping(true);
+        QVERIFY(chain.controller.clipLooping());
+        QCOMPARE(notices.size(), 1);
+        QCOMPARE(loopA().toDouble(), 2.0);
+        QCOMPARE(loopB().toDouble(), 8.0);
+        // A moved mark moves the loop
+        chain.playsAt(9.0, 30);
+        chain.controller.markClipEnd();
+        QVERIFY(chain.controller.clipLooping());
+        QCOMPARE(loopB().toDouble(), 9.0);
+        // An end before the start leaves nothing to loop
+        chain.playsAt(1.0, 30);
+        chain.controller.markClipEnd();
+        QVERIFY(!chain.controller.clipLooping());
+        QVERIFY(!chain.controller.canLoopClip());
+        QVERIFY(loopA().toString() == QLatin1String("no") || !loopA().isValid()
+                || loopA().toString().isEmpty());
+        // The loop plays from A to B and starts over: past B it is back before it
+        chain.playsAt(8.0, 30);
+        chain.controller.markClipEnd();
+        chain.controller.setClipLooping(true);
+        QVERIFY(chain.controller.clipLooping());
+        chain.controller.clearClip();
+        QVERIFY(!chain.controller.clipLooping());
+        QCOMPARE(chain.controller.clipStartTicks(), -1);
+        // Another item brings none along
+        chain.playsAt(2.0, 30);
+        chain.controller.markClipStart();
+        chain.playsAt(8.0, 30);
+        chain.controller.markClipEnd();
+        chain.controller.setClipLooping(true);
+        QVERIFY(chain.controller.clipLooping());
+        QVERIFY(chain.controller.playItem(kOtherMovie, 0));
+        QVERIFY(!chain.controller.clipLooping());
+        QVERIFY(!chain.controller.canLoopClip());
+    }
+
+    // mpv runs the loop for real: a playback past B comes back to A
+    void aLoopedPlaybackComesBackToItsStart()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        const QString clip = QUrl(TestWav::writeWavClip(chain.dir, 30)).toLocalFile();
+        QVERIFY(!clip.isEmpty());
+        QVERIFY(chain.engine()->init({QStringLiteral("vo=null"), QStringLiteral("ao=null")}));
+        QVERIFY(chain.controller.playLocalFile(clip, kMovie, QStringLiteral("Local Movie"), {}));
+        QTRY_VERIFY(chain.controller.canSeek());
+        chain.playsAt(1.0, 30);
+        chain.controller.markClipStart();
+        chain.playsAt(3.0, 30);
+        chain.controller.markClipEnd();
+        chain.controller.setClipLooping(true);
+        QVERIFY(chain.controller.clipLooping());
+        chain.controller.seek(2 * kSecond);
+        // Reaching B at 3 s starts over at 1 s: the position was past 2.5 s and then drops below 2 s
+        QTRY_VERIFY_WITH_TIMEOUT(chain.controller.positionTicks() >= 25'000'000, 8000);
+        QTRY_VERIFY_WITH_TIMEOUT(chain.controller.positionTicks() < 20'000'000, 8000);
+        QVERIFY(chain.controller.clipLooping());
+    }
+
+    // One frame at a time: the step pauses a playback with a picture, and does nothing without a playback
+    void aFrameStepPauses()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        // Nothing plays: nothing to step
+        chain.controller.frameStep();
+        chain.controller.frameBackStep();
+        QVERIFY(!chain.controller.active());
+        const QString stream = makeTransportStream(chain.dir, 10);
+        QVERIFY(!stream.isEmpty());
+        QVERIFY(chain.engine()->init({QStringLiteral("vo=null"), QStringLiteral("ao=null")}));
+        QVERIFY(chain.controller.playLocalFile(stream, kMovie, QStringLiteral("Local Movie"), {}));
+        QTRY_VERIFY(chain.controller.canSeek());
+        QVERIFY(chain.controller.active());
+        QVERIFY(!chain.controller.paused());
+        chain.controller.frameStep();
+        QTRY_VERIFY_WITH_TIMEOUT(chain.controller.paused(), 5000);
+        // Another step moves a frame on (a frame of the stream's 25 a second) and stays paused
+        QTest::qWait(200);
+        const qint64 before = chain.controller.positionTicks();
+        chain.controller.frameStep();
+        QTRY_VERIFY_WITH_TIMEOUT(chain.controller.positionTicks() > before, 5000);
+        QVERIFY(chain.controller.positionTicks() - before < kSecond / 4);
+        QVERIFY(chain.controller.paused());
+    }
+
+    // Deband and the shaders of the profile's folder change mpv at once, only for files the folder lists, and the next item starts from what mpv had
+    void theEnhancementMenuChangesMpvAndTheNextItemStartsOver()
+    {
+        Chain chain({}, QStringLiteral("enhancing"));
+        QVERIFY(chain.ok);
+        const QString folder =
+            Kinefin::profileDataDirectory(QStringLiteral("enhancing")) + QStringLiteral("/shaders");
+        QVERIFY(QDir().mkpath(folder));
+        const auto write = [&folder](const QString &name, qint64 size) {
+            QFile file(folder + QLatin1Char('/') + name);
+            return file.open(QIODevice::WriteOnly)
+                   && file.write(QByteArray(int(size), 'x')) == size;
+        };
+        QVERIFY(write(QStringLiteral("b-sharpen.hook"), 40));
+        QVERIFY(write(QStringLiteral("A-film grain.glsl"), 40));
+        QVERIFY(write(QStringLiteral("notes.txt"), 10));
+        QVERIFY(write(QStringLiteral("huge.glsl"), 300 * 1024));
+        const QString clip = QUrl(TestWav::writeWavClip(chain.dir, 30)).toLocalFile();
+        QVERIFY(chain.engine()->init({QStringLiteral("vo=null"), QStringLiteral("ao=null")}));
+        QVERIFY(chain.controller.playLocalFile(clip, kMovie, QStringLiteral("Local Movie"), {}));
+        QTRY_VERIFY(chain.controller.canSeek());
+        const auto names = [&chain] {
+            QStringList list;
+            for (const QVariant &entry : chain.controller.shaders())
+                list << entry.toMap().value(QStringLiteral("name")).toString();
+            return list;
+        };
+        const auto activeFiles = [&chain] { return chain.controller.activeShaders(); };
+        // The folder as the menu lists it: shader files by name, the others and the big one left out
+        QSignalSpy changed(&chain.controller, &Kinefin::PlayerController::enhancementsChanged);
+        chain.controller.refreshEnhancements();
+        QCOMPARE(names(),
+                 (QStringList{QStringLiteral("A-film grain"), QStringLiteral("b-sharpen")}));
+        QVERIFY(!chain.controller.deband());
+        QVERIFY(activeFiles().isEmpty());
+        QCOMPARE(changed.size(), 1);
+        chain.controller.refreshEnhancements();
+        QCOMPARE(changed.size(), 1);
+
+        // Deband is mpv's flag
+        chain.controller.setDeband(true);
+        QVERIFY(chain.controller.deband());
+        QVERIFY(chain.engine()->mpvProperty(QStringLiteral("deband")).toBool());
+        // A shader goes on and off through mpv's list, and a name the folder does not list never reaches it
+        chain.controller.setShader(QStringLiteral("A-film grain.glsl"), true);
+        QCOMPARE(activeFiles(), QStringList{QStringLiteral("A-film grain.glsl")});
+        QCOMPARE(chain.engine()->mpvProperty(QStringLiteral("glsl-shaders")).toList().size(), 1);
+        chain.controller.setShader(QStringLiteral("b-sharpen.hook"), true);
+        QCOMPARE(activeFiles().size(), 2);
+        chain.controller.setShader(QStringLiteral("../escape.glsl"), true);
+        chain.controller.setShader(QStringLiteral("notes.txt"), true);
+        chain.controller.setShader(QStringLiteral("huge.glsl"), true);
+        QCOMPARE(chain.engine()->mpvProperty(QStringLiteral("glsl-shaders")).toList().size(), 2);
+        chain.controller.setShader(QStringLiteral("A-film grain.glsl"), false);
+        QCOMPARE(activeFiles(), QStringList{QStringLiteral("b-sharpen.hook")});
+
+        // The next item starts from what mpv had
+        QVERIFY(chain.controller.playItem(kOtherMovie, 0));
+        QVERIFY(!chain.controller.deband());
+        QVERIFY(!chain.engine()->mpvProperty(QStringLiteral("deband")).toBool());
+        QVERIFY(chain.engine()->mpvProperty(QStringLiteral("glsl-shaders")).toList().isEmpty());
+        QVERIFY(chain.controller.shaders().isEmpty());
+    }
+
+    // The delays and the enhancements are for the item they were set on: a reopen of it keeps them, another item starts without
+    void delaysAndEnhancementsSurviveAReopenAndNotAnotherItem()
+    {
+        Chain chain({}, QStringLiteral("reopening"));
+        QVERIFY(chain.ok);
+        const QString folder =
+            Kinefin::profileDataDirectory(QStringLiteral("reopening")) + QStringLiteral("/shaders");
+        QVERIFY(QDir().mkpath(folder));
+        const QString shader = folder + QStringLiteral("/base.glsl");
+        QFile file(shader);
+        QVERIFY(file.open(QIODevice::WriteOnly) && file.write("x") == 1);
+        file.close();
+        const QString clip = QUrl(TestWav::writeWavClip(chain.dir, 30)).toLocalFile();
+        // mpv starts with this shader and with debanding on, as an mpv.conf would leave it
+        QVERIFY(chain.engine()->init({QStringLiteral("vo=null"), QStringLiteral("ao=null"),
+                                      QStringLiteral("deband=yes"),
+                                      QStringLiteral("glsl-shaders=") + shader}));
+        QVERIFY(chain.controller.playItem(kMovie, 0));
+        Kinefin::PlaybackSource source;
+        source.itemId = kMovie;
+        source.mediaSourceId = QStringLiteral("c1b2a3d4e5f6071829304a5b6c7d8e9f");
+        source.playSessionId = QStringLiteral("s1");
+        source.method = Kinefin::PlaybackSource::Method::Direct;
+        source.url = QUrl(clip);
+        Q_EMIT chain.client.playbackInfoReady(source);
+        QTRY_VERIFY(chain.controller.canSeek());
+        chain.controller.refreshEnhancements();
+        QVERIFY(chain.controller.deband());
+        QCOMPARE(chain.controller.activeShaders(), QStringList{QStringLiteral("base.glsl")});
+        chain.controller.setDeband(false);
+        chain.controller.setShader(QStringLiteral("base.glsl"), false);
+        QVERIFY(!chain.controller.deband());
+        QVERIFY(chain.controller.activeShaders().isEmpty());
+        chain.controller.adjustAudioDelay(0.5);
+        chain.controller.adjustSubtitleDelay(-1.5);
+        QCOMPARE(chain.controller.audioDelay(), 0.5);
+
+        // The same item again (a quality or a track choice reopens it) keeps what was chosen
+        QVERIFY(chain.controller.playItem(kMovie, 0));
+        QCOMPARE(chain.controller.audioDelay(), 0.5);
+        QCOMPARE(chain.controller.subtitleDelay(), -1.5);
+        chain.controller.refreshEnhancements();
+        QVERIFY(!chain.controller.deband());
+        QVERIFY(chain.controller.activeShaders().isEmpty());
+
+        // Another item starts as the settings say: the delays are none, and mpv has its shader and debanding back
+        QVERIFY(chain.controller.playItem(kOtherMovie, 0));
+        QCOMPARE(chain.controller.audioDelay(), 0.0);
+        QCOMPARE(chain.controller.subtitleDelay(), 0.0);
+        QVERIFY(chain.engine()->mpvProperty(QStringLiteral("deband")).toBool());
+        QCOMPARE(chain.engine()->mpvProperty(QStringLiteral("glsl-shaders")).toList().size(), 1);
     }
 
     void clipLengthLimits()

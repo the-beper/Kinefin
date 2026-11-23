@@ -104,9 +104,10 @@ class ItemChildrenModel final : public QObject {
     Status m_itemsStatus = Idle;
     bool m_nextUpLoading = false;
     QVariantMap m_nextUp;
-    // A series' first episode is asked of its first season once the seasons are known; a season asks for its first episode and then for its first unplayed one, both as a listing of its episodes on the Items family
+    // A series' first episode is asked of its first season once the seasons are known; a season takes its first episode from the first page of its episode list, and asks for its first unplayed one (a listing of its episodes on the Items family, which a played write repeats after asking for the first one the same way)
     enum class Target { None, SeriesFirst, SeasonFirst, SeasonUnplayed };
     Target m_target = Target::None;
+    bool m_seasonFirstPending = false;
     QVariantMap m_firstEpisode;
     bool m_playTargetsReady = false;
     int m_itemsTotal = 0;

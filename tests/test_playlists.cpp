@@ -228,6 +228,34 @@ class TestPlaylists : public QObject {
         QTRY_COMPARE(entries.count(), 1);
     }
 
+    void aRowFollowsTheWatchedStateOfItsItem()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        const QStringList ids = f.movies(2);
+        const QString playlist =
+            f.server.seedPlaylist(QStringLiteral("Evening"), {ids.at(0), ids.at(1)});
+        PlaylistEntriesModel entries(&f.client);
+        QAbstractItemModelTester tester(&entries);
+        entries.load(playlist);
+        QTRY_COMPARE(entries.status(), PlaylistEntriesModel::Ready);
+        const auto played = [&](int row) {
+            return entries.data(entries.index(row, 0), PlaylistEntriesModel::PlayedRole).toBool();
+        };
+        QVERIFY(!played(0));
+        QSignalSpy changed(&entries, &QAbstractItemModel::dataChanged);
+        // The id of the user data signals has no dashes and may differ in case
+        Q_EMIT f.client.itemPlayedUpdated(ids.at(0).toUpper(), true);
+        QVERIFY(played(0));
+        QVERIFY(!played(1));
+        QCOMPARE(changed.size(), 1);
+        // A saved position is not watched to the end
+        Q_EMIT f.client.itemProgressUpdated(ids.at(0), 9'000'000'000, 40.0);
+        QVERIFY(!played(0));
+        Q_EMIT f.client.itemPlayedUpdated(ids.at(0), true);
+        QVERIFY(played(0));
+    }
+
     void entriesAreReadPageByPageUpToTheCap()
     {
         Fixture f;

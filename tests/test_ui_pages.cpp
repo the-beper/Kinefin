@@ -2253,11 +2253,17 @@ class PlayerStub : public QObject {
     Q_PROPERTY(double clipProgress MEMBER clipProgress NOTIFY changed)
     Q_PROPERTY(qint64 clipStartTicks MEMBER clipStartTicks NOTIFY changed)
     Q_PROPERTY(qint64 clipEndTicks MEMBER clipEndTicks NOTIFY changed)
+    Q_PROPERTY(bool deband MEMBER deband NOTIFY changed)
+    Q_PROPERTY(QVariantList shaders MEMBER shaders NOTIFY changed)
+    Q_PROPERTY(QStringList activeShaders MEMBER activeShaders NOTIFY changed)
+    Q_PROPERTY(bool clipLooping MEMBER clipLooping NOTIFY changed)
+    Q_PROPERTY(bool canLoopClip MEMBER canLoopClip NOTIFY changed)
     Q_PROPERTY(qint64 manualQualityCap MEMBER manualQualityCap NOTIFY changed)
     Q_PROPERTY(bool qualityAvailable MEMBER qualityAvailable NOTIFY changed)
     Q_PROPERTY(bool qualitySwitching MEMBER qualitySwitching NOTIFY changed)
     Q_PROPERTY(QVariantList qualitySteps MEMBER qualitySteps NOTIFY changed)
     Q_PROPERTY(QVariantList chapters MEMBER chapters NOTIFY chaptersChanged)
+    Q_PROPERTY(QVariantList segmentBands MEMBER segmentBands NOTIFY changed)
     Q_PROPERTY(int currentChapter MEMBER currentChapter NOTIFY changed)
     Q_PROPERTY(bool upNextShown MEMBER upNextShown NOTIFY changed)
     Q_PROPERTY(QVariantMap upNext MEMBER upNext NOTIFY changed)
@@ -2380,6 +2386,32 @@ class PlayerStub : public QObject {
         Q_EMIT changed();
     }
     Q_INVOKABLE void cancelClip() { record(QStringLiteral("cancelClip")); }
+    Q_INVOKABLE void setClipLooping(bool looping)
+    {
+        record(QStringLiteral("setClipLooping"), looping);
+        clipLooping = looping;
+        Q_EMIT changed();
+    }
+    Q_INVOKABLE void refreshEnhancements() { record(QStringLiteral("refreshEnhancements")); }
+    Q_INVOKABLE void setDeband(bool on)
+    {
+        record(QStringLiteral("setDeband"), on);
+        deband = on;
+        Q_EMIT changed();
+    }
+    Q_INVOKABLE void setShader(const QString &file, bool on)
+    {
+        record(
+            QStringLiteral("setShader"),
+            QString(file + QLatin1Char(' ') + (on ? QStringLiteral("on") : QStringLiteral("off"))));
+        if (on && !activeShaders.contains(file))
+            activeShaders.append(file);
+        if (!on)
+            activeShaders.removeAll(file);
+        Q_EMIT changed();
+    }
+    Q_INVOKABLE void frameStep() { record(QStringLiteral("frameStep")); }
+    Q_INVOKABLE void frameBackStep() { record(QStringLiteral("frameBackStep")); }
     Q_INVOKABLE void setQuality(qint64 cap)
     {
         record(QStringLiteral("setQuality"), cap);
@@ -2550,6 +2582,11 @@ class PlayerStub : public QObject {
     bool clipSavingGif = false;
     double clipProgress = 0;
     qint64 clipStartTicks = -1;
+    bool deband = false;
+    QVariantList shaders;
+    QStringList activeShaders;
+    bool clipLooping = false;
+    bool canLoopClip = false;
     qint64 clipEndTicks = -1;
     qint64 manualQualityCap = 0;
     bool qualityAvailable = false;
@@ -2557,6 +2594,7 @@ class PlayerStub : public QObject {
     QVariantList qualitySteps;
     QVariantMap info;
     QVariantList chapters;
+    QVariantList segmentBands;
     int currentChapter = -1;
     bool upNextShown = false;
     QVariantMap upNext;
@@ -5002,6 +5040,12 @@ class TestUiPages : public QObject {
                                                {QStringLiteral("TotalRecordCount"), 1}})
                          .toJson(QJsonDocument::Compact)};
         };
+        // The first episode of the season is the first of its list, which is the fake's own listing here
+        ui.server.listingRawBody.insert(
+            QStringLiteral("Episodes"),
+            QJsonDocument(QJsonObject{{QStringLiteral("Items"), QJsonArray{episode(1, 0)}},
+                                      {QStringLiteral("TotalRecordCount"), 1}})
+                .toJson(QJsonDocument::Compact));
         QVERIFY(ui.load());
         QObject *root = ui.engine.rootObjects().constFirst();
         QVERIFY(root->setProperty("player", QVariant::fromValue<QObject *>(&stub)));
@@ -5728,6 +5772,178 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(!movies->filtered());
     }
 
+    // Filters kept under a name: saved from the draft, put on the list from the dialog, renamed and deleted with an undo; a name is plain text and a taken one asks to replace
+    void theFilterDialogSavesAppliesRenamesAndDeletesFilters()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        auto *movies = ui.controller.movies();
+        QVERIFY(openFilterDialog(ui));
+        QObject *dialog = ui.popup(QStringLiteral("filterDialog"));
+        QVERIFY(dialog);
+        QQuickItem *button = nullptr;
+        QTRY_VERIFY((button = shownItem(ui, QStringLiteral("filterSavedButton"))) != nullptr);
+        QCOMPARE(movies->filterKind(), QStringLiteral("movies"));
+        QVERIFY(toggleOption(ui, QStringLiteral("played"), QStringLiteral("Unplayed")));
+
+        QObject *saved = ui.popup(QStringLiteral("savedFiltersDialog"));
+        QVERIFY(saved);
+        ui.clickCenter(button);
+        QTRY_VERIFY(saved->property("opened").toBool());
+        QQuickItem *empty = ui.item(QStringLiteral("savedFiltersEmpty"));
+        QVERIFY(empty && empty->isVisible());
+        QQuickItem *name = ui.item(QStringLiteral("savedFilterName"));
+        QQuickItem *save = ui.item(QStringLiteral("savedFilterSave"));
+        QVERIFY(name && save);
+        // Nothing is saved without a name
+        QVERIFY(!save->isEnabled());
+        QVERIFY(name->setProperty("text", QStringLiteral("  <b>Unwatched</b> & new  ")));
+        QTRY_VERIFY(save->isEnabled());
+        QVERIFY(QMetaObject::invokeMethod(save, "click"));
+        QTRY_VERIFY(!empty->isVisible());
+        const auto sets = [&] { return ui.controller.savedFilters(QStringLiteral("movies")); };
+        QCOMPARE(sets().size(), 1);
+        // The name is the text as typed, trimmed, and shown as plain text
+        const QString typed = QStringLiteral("<b>Unwatched</b> & new");
+        QCOMPARE(sets().constFirst().toMap().value(QStringLiteral("name")).toString(), typed);
+        QQuickItem *row = nullptr;
+        QTRY_VERIFY((row = ui.item(QStringLiteral("savedFilter_0"))) != nullptr);
+        QCOMPARE(row->property("modelData").toMap().value(QStringLiteral("name")).toString(),
+                 typed);
+        for (QQuickItem *label : allItems(row)) {
+            if (label->inherits("QQuickText") && label->isVisible())
+                QCOMPARE(label->property("textFormat").toInt(), int(Qt::PlainText));
+        }
+        QCOMPARE(name->property("text").toString(), QString());
+
+        // The same name again is taken: the box says so and Replace writes over it
+        QVERIFY(toggleOption(ui, QStringLiteral("played"), QStringLiteral("Unplayed")));
+        QVERIFY(toggleOption(ui, QStringLiteral("played"), QStringLiteral("Played")));
+        QVERIFY(name->setProperty("text", typed.toUpper()));
+        QTRY_VERIFY(save->isEnabled());
+        QVERIFY(QMetaObject::invokeMethod(save, "click"));
+        QQuickItem *problem = nullptr;
+        QTRY_VERIFY((problem = shownItem(ui, QStringLiteral("savedFiltersProblem"))) != nullptr);
+        QCOMPARE(sets().size(), 1);
+        QVERIFY(ui.clickButton(QStringLiteral("Replace")));
+        QTRY_VERIFY(!shownItem(ui, QStringLiteral("savedFiltersProblem")));
+        QCOMPARE(sets().size(), 1);
+
+        // A set goes on the list and both dialogs close; the sort and the rest stay
+        movies->setSortBy(QStringLiteral("DateCreated"));
+        QVERIFY(!movies->filtered());
+        // The rows are new after the write
+        QTRY_VERIFY((row = ui.item(QStringLiteral("savedFilter_0"))) != nullptr);
+        QVERIFY(QMetaObject::invokeMethod(row, "click"));
+        QTRY_VERIFY(!saved->property("visible").toBool());
+        QTRY_VERIFY(!dialog->property("visible").toBool());
+        QCOMPARE(movies->filterState().played, Kinefin::PlayedState::Played);
+        QCOMPARE(movies->sortBy(), QStringLiteral("DateCreated"));
+
+        // Rename, with the name checked
+        QVERIFY(openFilterDialog(ui));
+        QTRY_VERIFY((button = shownItem(ui, QStringLiteral("filterSavedButton"))) != nullptr);
+        ui.clickCenter(button);
+        QTRY_VERIFY(saved->property("opened").toBool());
+        QQuickItem *rename = nullptr;
+        QTRY_VERIFY((rename = ui.item(QStringLiteral("savedFilterRename_0"))) != nullptr);
+        QVERIFY(QMetaObject::invokeMethod(rename, "click"));
+        // The name turns into a field in its row: no dialog over the dialog
+        QQuickItem *field = nullptr;
+        QTRY_VERIFY((field = shownItem(ui, QStringLiteral("savedFilterRenameField"))) != nullptr);
+        QTRY_VERIFY(field->hasActiveFocus());
+        // A replace keeps the name as it was typed the second time
+        QCOMPARE(field->property("text").toString(), typed.toUpper());
+        // Escape ends the rename and leaves the dialog open
+        QTest::keyClick(ui.window, Qt::Key_Escape);
+        QTRY_VERIFY(!shownItem(ui, QStringLiteral("savedFilterRenameField")));
+        QVERIFY(saved->property("opened").toBool());
+        QCOMPARE(sets().constFirst().toMap().value(QStringLiteral("name")).toString(),
+                 typed.toUpper());
+        // F2 on the list starts it again; Return keeps the new name
+        QVERIFY(QMetaObject::invokeMethod(ui.item(QStringLiteral("savedFiltersList")),
+                                          "forceActiveFocus"));
+        QTest::keyClick(ui.window, Qt::Key_F2);
+        QTRY_VERIFY((field = shownItem(ui, QStringLiteral("savedFilterRenameField"))) != nullptr);
+        QVERIFY(field->setProperty("text", QStringLiteral("Seen already")));
+        QVERIFY(QMetaObject::invokeMethod(field, "accepted"));
+        QTRY_COMPARE(sets().constFirst().toMap().value(QStringLiteral("name")).toString(),
+                     QStringLiteral("Seen already"));
+        QTRY_VERIFY(!shownItem(ui, QStringLiteral("savedFilterRenameField")));
+
+        // Delete offers Undo in the dialog, which a modal dialog's keys can reach
+        QVERIFY(QMetaObject::invokeMethod(ui.item(QStringLiteral("savedFilterDelete_0")), "click"));
+        QTRY_VERIFY(sets().isEmpty());
+        QTRY_VERIFY(empty->isVisible());
+        QTRY_VERIFY(shownItem(ui, QStringLiteral("savedFiltersRemoved")) != nullptr);
+        QVERIFY(ui.clickButton(QStringLiteral("Undo")));
+        QTRY_COMPARE(sets().size(), 1);
+        QTRY_VERIFY(!shownItem(ui, QStringLiteral("savedFiltersRemoved")));
+        QCOMPARE(sets().constFirst().toMap().value(QStringLiteral("name")).toString(),
+                 QStringLiteral("Seen already"));
+        QVERIFY(!ui.controller.undoRemoveSavedFilters());
+    }
+
+    // The way into the saved filters is under the facet list: Down from the last facet and Up from it are its keys, and Tab goes from the list to the pane as before
+    void theSavedFiltersButtonIsReachedByTheArrowKeysAndNotByTab()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        QTRY_VERIFY(ui.controller.movies()->filterOptions()->available());
+        QVERIFY(openFilterDialog(ui));
+        QObject *dialog = ui.popup(QStringLiteral("filterDialog"));
+        QQuickItem *facetList = ui.item(QStringLiteral("filterFacetList"));
+        QQuickItem *button = nullptr;
+        QTRY_VERIFY((button = shownItem(ui, QStringLiteral("filterSavedButton"))) != nullptr);
+        QVERIFY(dialog && facetList);
+        QTRY_VERIFY(facetList->hasActiveFocus());
+        // On the last facet Down moves on to the button, and Up comes back to the list
+        QVERIFY(QMetaObject::invokeMethod(dialog, "openFacet",
+                                          Q_ARG(QVariant, QStringLiteral("years"))));
+        QVERIFY(QMetaObject::invokeMethod(facetList, "forceActiveFocus"));
+        QCOMPARE(currentFacetOf(ui), QStringLiteral("years"));
+        QTest::keyClick(ui.window, Qt::Key_Down);
+        QTRY_VERIFY(button->hasActiveFocus());
+        QCOMPARE(currentFacetOf(ui), QStringLiteral("years"));
+        QTest::keyClick(ui.window, Qt::Key_Up);
+        QTRY_VERIFY(facetList->hasActiveFocus());
+        // Tab goes to the pane, not to the button
+        QTest::keyClick(ui.window, Qt::Key_Tab);
+        QVERIFY(!button->hasActiveFocus());
+        QVERIFY(!facetList->hasActiveFocus());
+        // Return on the button opens the dialog, and Escape closes it alone
+        QVERIFY(QMetaObject::invokeMethod(button, "forceActiveFocus"));
+        QObject *saved = ui.popup(QStringLiteral("savedFiltersDialog"));
+        QVERIFY(saved);
+        QTest::keyClick(ui.window, Qt::Key_Return);
+        QTRY_VERIFY(saved->property("opened").toBool());
+        QTest::keyClick(ui.window, Qt::Key_Escape);
+        QTRY_VERIFY(!saved->property("visible").toBool());
+        QVERIFY(dialog->property("opened").toBool());
+    }
+
+    // The Favorites pages filter the session's snapshot and keep nothing: their dialog has no saved filters
+    void theFavoritesFilterDialogHasNoSavedFilters()
+    {
+        Ui ui(m_home->path());
+        auto data = std::make_shared<FavoritesData>();
+        data->byLibrary[kMovies] =
+            favoritesOfType(QStringLiteral("Movie"), QStringLiteral("Movie"), 101, 3);
+        serveFavorites(ui, data);
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(1000));
+        QVERIFY(ui.signIn());
+        QVERIFY(openFavorites(ui));
+        QTRY_VERIFY(favoritesRowShows(ui, QStringLiteral("Movie")));
+        QVERIFY(openFilterDialog(ui));
+        QTRY_VERIFY(shownItem(ui, QStringLiteral("filterFacetList")) != nullptr);
+        QQuickItem *button = ui.item(QStringLiteral("filterSavedButton"));
+        QVERIFY(button);
+        QVERIFY(!button->isVisible());
+    }
+
     // The dialog opens on its facet list: Up and Down change the facet, Tab or Right go into the pane, Shift+Tab or Left come back, Space switches a value and Return applies from anywhere
     void theFilterDialogKeysMoveBetweenFacetsAndValues()
     {
@@ -6399,6 +6615,11 @@ class TestUiPages : public QObject {
         QVERIFY(!list->isVisible());
         QVERIFY(!shownItem(ui, QStringLiteral("filterBack")));
         const qreal height = dialog->property("height").toReal();
+        // A facet row says that it opens in place of the list
+        QQuickItem *genresRow = nullptr;
+        QTRY_VERIFY((genresRow = shownItem(ui, QStringLiteral("filterFacet_genres"))) != nullptr);
+        const QQuickItem *chevron = Ui::itemIn(genresRow, QStringLiteral("filterFacetChevron"));
+        QVERIFY(chevron && chevron->isVisible());
 
         // A click on a facet opens it in the place of the list, with the search field focused
         QQuickItem *genres = nullptr;
@@ -6450,6 +6671,17 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(shownItem(ui, QStringLiteral("filterFacetList")) != nullptr);
         QTRY_VERIFY(shownItem(ui, QStringLiteral("filterOptionsList")) != nullptr);
         QVERIFY(!shownItem(ui, QStringLiteral("filterBack")));
+        // Both panes show: no arrow on the rows, and the values have the name of their facet over them
+        QQuickItem *wideRow = nullptr;
+        QTRY_VERIFY((wideRow = shownItem(ui, QStringLiteral("filterFacet_genres"))) != nullptr);
+        const QQuickItem *wideChevron = Ui::itemIn(wideRow, QStringLiteral("filterFacetChevron"));
+        QVERIFY(wideChevron && !wideChevron->isVisible());
+        QQuickItem *heading = nullptr;
+        QTRY_VERIFY((heading = shownItem(ui, QStringLiteral("filterPaneHeading"))) != nullptr);
+        const QQuickItem *current = ui.item(QStringLiteral("filterFacet_") + currentFacetOf(ui));
+        QVERIFY(current);
+        QVERIFY(!heading->property("text").toString().isEmpty());
+        QCOMPARE(heading->property("text").toString(), current->property("text").toString());
     }
 
     // Both dialogs that use the shared title bar have the same room at the start of the bar and around the close button
@@ -8435,6 +8667,33 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(detailRequests() > afterMenu);
     }
 
+    void aSocketGapReadsTheDetailsPageAgainButNotWhileSomethingPlays()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("details")));
+        QQuickItem *page = ui.item(QStringLiteral("itemDetailsPage"));
+        QVERIFY(page);
+        const auto detailRequests = [&ui] {
+            return std::count_if(
+                ui.server.itemsRoutes.cbegin(), ui.server.itemsRoutes.cend(),
+                [](const QByteArray &route) { return route.contains("Chapters"); });
+        };
+        QTest::qWait(300);
+        const auto before = detailRequests();
+        // The socket is back after a long gap: the page in front reads what it shows again
+        QMetaObject::invokeMethod(&ui.controller, "serverEventsMissed");
+        QTRY_VERIFY(detailRequests() > before);
+
+        // While something plays the end of the playback does it
+        const auto afterGap = detailRequests();
+        ui.window->setProperty("playbackMode", QStringLiteral("full"));
+        QMetaObject::invokeMethod(&ui.controller, "serverEventsMissed");
+        QTest::qWait(300);
+        QCOMPARE(detailRequests(), afterGap);
+        ui.window->setProperty("playbackMode", QStringLiteral("none"));
+    }
+
     void theMenuButtonUsesTheStyleOfTheHeaderButtonsAndNamesItself()
     {
         Ui ui(m_home->path());
@@ -8778,6 +9037,12 @@ class TestUiPages : public QObject {
         QVERIFY(QMetaObject::invokeMethod(more, "click"));
         QObject *moveUp = more->findChild<QObject *>(QStringLiteral("syncPlayQueueUp"));
         QVERIFY(moveUp);
+        // The menu sits beside its button, inside the window
+        QObject *queueMenu = moveUp->property("menu").value<QObject *>();
+        QVERIFY(queueMenu);
+        QTRY_VERIFY(queueMenu->property("opened").toBool());
+        QTRY_VERIFY2(popupProblem(queueMenu, more, ui.window).isEmpty(),
+                     qPrintable(popupProblem(queueMenu, more, ui.window)));
         QVERIFY(QMetaObject::invokeMethod(moveUp, "click"));
         QTRY_COMPARE(syncPlayRequests(ui, QStringLiteral("MovePlaylistItem")), 1);
         QCOMPARE(lastSyncPlayBody(ui, QStringLiteral("MovePlaylistItem"))
@@ -9228,7 +9493,7 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(dialog->property("opened").toBool());
         // The opening animation moves the dialog; a binding loop shows as a warning (the harness fails the test on any)
         QTest::qWait(500);
-        const QString lastRow = QStringLiteral("Next Chapter");
+        const QString lastRow = QStringLiteral("Show or Hide Playback Info");
         QQuickItem *label = nullptr;
         for (QQuickItem *candidate : ui.itemsWithText(lastRow)) {
             if (candidate->isVisible() && candidate->inherits("QQuickText"))
@@ -9962,6 +10227,69 @@ class TestUiPages : public QObject {
         QTRY_COMPARE(ui.rootTab(), QStringLiteral("favorites"));
     }
 
+    // A download played offline whose item the server saw played later, without a watched mark: the page asks which state stays
+    void theDownloadsPageAsksWhichStateStaysAfterAWatchedConflict_data()
+    {
+        QTest::addColumn<bool>("keepServer");
+        QTest::newRow("keep the server's state") << true;
+        QTest::newRow("mark as watched") << false;
+    }
+
+    void theDownloadsPageAsksWhichStateStaysAfterAWatchedConflict()
+    {
+        QFETCH(bool, keepServer);
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        ui.serveMovie();
+        QJsonObject movie = QJsonDocument::fromJson(ui.server.itemsById.value(kMovieId)).object();
+        QJsonArray sources = movie.value(QStringLiteral("MediaSources")).toArray();
+        QJsonObject source = sources.first().toObject();
+        source.insert(QStringLiteral("Size"), 64 * 1024);
+        source.insert(QStringLiteral("ETag"), QStringLiteral("etag-1"));
+        sources.replace(0, source);
+        movie.insert(QStringLiteral("MediaSources"), sources);
+        ui.server.itemsById.insert(kMovieId, QJsonDocument(movie).toJson(QJsonDocument::Compact));
+        QVERIFY(QMetaObject::invokeMethod(ui.shellAction(QStringLiteral("downloadsTabAction")),
+                                          "trigger"));
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("downloadsPage"));
+        QVERIFY(ui.controller.downloads()->downloadItem(kMovieId));
+        QTRY_COMPARE_WITH_TIMEOUT(ui.controller.downloads()->downloadState(kMovieId),
+                                  QStringLiteral("completed"), scaled(10000));
+        QQuickItem *box = ui.item(QStringLiteral("downloadsOutboxConflicts"));
+        QVERIFY(box);
+        QVERIFY(!box->isVisible());
+
+        // Played offline; meanwhile the server saw a later play that did not mark it as watched
+        ui.controller.downloads()->updateLocalProgress(ui.controller.playbackClient().serverId(),
+                                                       ui.controller.playbackClient().userId(),
+                                                       kMovieId, 600000000, true);
+        movie.insert(QStringLiteral("UserData"),
+                     QJsonObject{{QStringLiteral("Played"), false},
+                                 {QStringLiteral("LastPlayedDate"),
+                                  QStringLiteral("2099-01-01T00:00:00Z")}});
+        ui.server.itemsById.insert(kMovieId, QJsonDocument(movie).toJson(QJsonDocument::Compact));
+        ui.controller.downloads()->reconcileOutbox();
+        QTRY_VERIFY_WITH_TIMEOUT(box->isVisible(), scaled(10000));
+        QTRY_VERIFY(ui.showsText(QStringLiteral("was played on another device"), false));
+        QVERIFY(ui.showsText(QStringLiteral("Arcturus (2012)"), false));
+        QVERIFY(ui.server.playedWrites.isEmpty());
+        // The conflicted event is not sent and is still counted: it waits for the answer
+        QCOMPARE(ui.controller.downloads()->pendingSyncCount(), 1);
+
+        QVERIFY(ui.clickButton(keepServer ? QStringLiteral("Keep Server State")
+                                          : QStringLiteral("Mark as Watched")));
+        QTRY_VERIFY(!box->isVisible());
+        QVERIFY(ui.controller.downloads()->outboxConflicts().isEmpty());
+        QTRY_COMPARE_WITH_TIMEOUT(ui.controller.downloads()->pendingSyncCount(), 0, scaled(10000));
+        if (keepServer) {
+            QTest::qWait(300);
+            QVERIFY(ui.server.playedWrites.isEmpty());
+        } else {
+            QTRY_COMPARE_WITH_TIMEOUT(ui.server.playedWrites.size(), 1, scaled(10000));
+        }
+    }
+
     void theDownloadsTabDownloadsAnItem()
     {
         Ui ui(m_home->path());
@@ -10032,11 +10360,20 @@ class TestUiPages : public QObject {
         // At most two trailing controls: the primary action and the menu, each with a distinct name
         QCOMPARE(ui.itemsStartingWith(QStringLiteral("downloadPlay_")).size(), 1);
         QVERIFY(ui.itemsStartingWith(QStringLiteral("downloadRemove_")).isEmpty());
+        // In a window at its least height the menu still hangs from its button, inside the window
+        const int low = ui.window->minimumHeight();
+        ui.window->resize(1000, low);
+        QTRY_COMPARE(ui.window->height(), low);
         ui.clickCenter(more);
         QQuickItem *remove = nullptr;
         QTRY_VERIFY((remove = ui.item(QStringLiteral("downloadDelete_") + kMovieId)) != nullptr
                     && remove->isVisible());
         QVERIFY(remove->isEnabled());
+        QObject *rowMenu = remove->property("menu").value<QObject *>();
+        QVERIFY(rowMenu);
+        QTRY_VERIFY(rowMenu->property("opened").toBool());
+        QTRY_VERIFY2(popupProblem(rowMenu, more, ui.window).isEmpty(),
+                     qPrintable(popupProblem(rowMenu, more, ui.window)));
         QObject *dialog =
             ui.currentDetails()->findChild<QObject *>(QStringLiteral("downloadsPageRemoveDialog"));
         QVERIFY(dialog);
@@ -16690,6 +17027,57 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(itemHasFocus(ui, QStringLiteral("favoritesRowList_Series")));
     }
 
+    // The toolbar above the rows stays put while the rows scroll: Up from the second row goes to the first one, which comes back into view
+    void upFromTheSecondFavoritesRowReachesTheFirstOneScrolledOutOfView()
+    {
+        Ui ui(m_home->path());
+        auto data = std::make_shared<FavoritesData>();
+        data->byLibrary[kMovies] =
+            favoritesOfType(QStringLiteral("Movie"), QStringLiteral("Movie"), 101, 6);
+        data->byLibrary[kSeries] =
+            QJsonArray{favoriteJson(3, QStringLiteral("Series"), QStringLiteral("Xray"), 2003),
+                       favoriteJson(4, QStringLiteral("Season"), QStringLiteral("Whiskey"), 2004),
+                       favoriteJson(5, QStringLiteral("Episode"), QStringLiteral("Victor"), 2005)};
+        data->byLibrary[kCollections] =
+            QJsonArray{favoriteJson(6, QStringLiteral("BoxSet"), QStringLiteral("Aardvark"), 2006)};
+        serveFavorites(ui, data);
+        ui.serveViews({{kMovies, QStringLiteral("Movies"), QStringLiteral("movies")},
+                       {kSeries, QStringLiteral("Series"), QStringLiteral("tvshows")},
+                       {kCollections, QStringLiteral("Collections"), QStringLiteral("boxsets")}});
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(1000));
+        QVERIFY(ui.signIn());
+        QVERIFY(openFavorites(ui));
+        for (const QString &type : {QStringLiteral("Movie"), QStringLiteral("Series"),
+                                    QStringLiteral("Season"), QStringLiteral("Episode")})
+            QTRY_VERIFY2(favoritesRowShows(ui, type) && favoritesRowCards(ui, type) > 0,
+                         qPrintable(type));
+        QQuickItem *first = favoritesRowList(ui, QStringLiteral("Movie"));
+        QQuickItem *second = favoritesRowList(ui, QStringLiteral("Series"));
+        QVERIFY(first && second);
+        // Scrolled until the first row is fully above the page's viewport
+        QQuickItem *flickable = nullptr;
+        for (QQuickItem *parent = second->parentItem(); parent && !flickable;
+             parent = parent->parentItem()) {
+            if (parent->inherits("QQuickFlickable") && !parent->inherits("QQuickItemView"))
+                flickable = parent;
+        }
+        QVERIFY(flickable);
+        const QRectF viewport = sceneRect(flickable);
+        QVERIFY(flickable->property("contentHeight").toReal() > flickable->height());
+        const qreal shift = sceneRect(first).bottom() - viewport.top() + 4;
+        flickable->setProperty("contentY", flickable->property("contentY").toReal() + shift);
+        QTRY_VERIFY(sceneRect(first).bottom() < viewport.top());
+        QVERIFY(second->isVisible());
+        QVERIFY(sceneRect(second).bottom() > viewport.top());
+        QVERIFY(QMetaObject::invokeMethod(second, "forceActiveFocus"));
+        QTRY_VERIFY(second->hasActiveFocus());
+        QTest::keyClick(ui.window, Qt::Key_Up);
+        QTRY_VERIFY2(first->hasActiveFocus(),
+                     qPrintable(Ui::describe(ui.window->activeFocusItem())));
+        QTRY_VERIFY(sceneRect(first).bottom() > viewport.top());
+    }
+
     void aFavoritesRowShowsAtMost24CardsAndShowAllOnlyAboveThat()
     {
         Ui ui(m_home->path());
@@ -18812,6 +19200,118 @@ class TestUiPages : public QObject {
         QVERIFY(!entryAt(more, chaptersRow)->isEnabled());
     }
 
+    void playerSegmentsAreBandsOnTheTimelineAndNamedInTheBubble_data()
+    {
+        QTest::addColumn<bool>("rightToLeft");
+        QTest::newRow("left to right") << false;
+        QTest::newRow("right to left") << true;
+    }
+
+    void playerSegmentsAreBandsOnTheTimelineAndNamedInTheBubble()
+    {
+        QFETCH(bool, rightToLeft);
+        const Qt::LayoutDirection direction = QGuiApplication::layoutDirection();
+        QGuiApplication::setLayoutDirection(rightToLeft ? Qt::RightToLeft : Qt::LeftToRight);
+        const auto restoreDirection =
+            qScopeGuard([direction] { QGuiApplication::setLayoutDirection(direction); });
+        PlayerStub stub;
+        // Of the stub's two hours (7200 s): a recap from minute 10 to 15, an intro from minute 30 to 40, an outro from minute 90 to 100
+        const auto band = [](const QString &type, qint64 from, qint64 to) {
+            return QVariantMap{{QStringLiteral("type"), type},
+                               {QStringLiteral("startTicks"), from * 10'000'000},
+                               {QStringLiteral("endTicks"), to * 10'000'000}};
+        };
+        stub.segmentBands = {band(QStringLiteral("Recap"), 600, 900),
+                             band(QStringLiteral("Intro"), 1800, 2400),
+                             band(QStringLiteral("Outro"), 5400, 6000)};
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(1000));
+        QVERIFY(ui.signIn());
+        QQuickItem *page = openPlayer(ui, stub);
+        QVERIFY(page);
+        page->findChild<QObject *>(QStringLiteral("playerChromeTimer"))
+            ->setProperty("interval", 600000);
+        QQuickItem *timeline = ui.item(QStringLiteral("playbackTimeline"));
+        QVERIFY(timeline);
+        const auto shownBands = [timeline] {
+            QList<QQuickItem *> shown;
+            for (QQuickItem *item : allItems(timeline)) {
+                if (item->objectName() == QLatin1String("playerSegmentBand") && item->isVisible())
+                    shown.append(item);
+            }
+            std::sort(shown.begin(), shown.end(),
+                      [](const QQuickItem *a, const QQuickItem *b) { return a->x() < b->x(); });
+            return shown;
+        };
+        QTRY_COMPARE(shownBands().size(), 3);
+        // The row has its width once the window has laid it out
+        QTRY_VERIFY(timeline->width() > 600);
+        const auto *handle = timeline->property("handle").value<QQuickItem *>();
+        QVERIFY(handle && handle->width() > 0);
+        const qreal grooveStart = timeline->property("leftPadding").toReal() + handle->width() / 2;
+        const qreal span = timeline->property("availableWidth").toReal() - handle->width();
+        const bool mirrored = timeline->property("mirrored").toBool();
+        QCOMPARE(mirrored, rightToLeft);
+        // Each band covers its seconds of the groove, from its start edge, and the groove's height; the bands are out of the accessibility tree
+        const QList<std::pair<qreal, qreal>> seconds{{600, 900}, {1800, 2400}, {5400, 6000}};
+        const QList<QQuickItem *> bands = shownBands();
+        for (int i = 0; i < 3; ++i) {
+            // The bands are sorted by x: mirrored, the last one in time comes first
+            const auto [from, to] = seconds.at(mirrored ? 2 - i : i);
+            const QQuickItem *item = bands.at(i);
+            const qreal left = mirrored ? 1 - to / 7200 : from / 7200;
+            QVERIFY2(qAbs(item->x() - (grooveStart + span * left)) <= 1,
+                     qPrintable(QString::number(i)));
+            QVERIFY2(qAbs(item->width() - span * (to - from) / 7200) <= 1,
+                     qPrintable(QString::number(i)));
+            QVERIFY(item->height() > 0
+                    && item->height() <= timeline->property("availableHeight").toReal());
+            QVERIFY2(qAbs(item->y() + item->height() / 2
+                          - (timeline->property("topPadding").toReal()
+                             + timeline->property("availableHeight").toReal() / 2))
+                         <= 1,
+                     qPrintable(QString::number(i)));
+        }
+        QQuickItem *container = bands.constFirst()->parentItem();
+        QVERIFY(QQmlProperty(container, QStringLiteral("Accessible.ignored"), qmlContext(container))
+                    .read()
+                    .toBool());
+
+        // The bubble names the segment under the pointer, as plain text, and has no line where there is none
+        QQuickItem *label = ui.item(QStringLiteral("playerSeekBubbleSegment"));
+        QVERIFY(label);
+        QCOMPARE(label->property("textFormat").toInt(), int(Qt::PlainText));
+        const auto hoverAtSecond = [&](qreal second) {
+            const qreal along = second / 7200;
+            const QPoint at =
+                timeline
+                    ->mapToScene(QPointF(grooveStart + span * (mirrored ? 1 - along : along),
+                                         timeline->height() / 2))
+                    .toPoint();
+            QTest::mouseMove(ui.window, at + QPoint(1, 1));
+            QTest::mouseMove(ui.window, at);
+        };
+        hoverAtSecond(750);
+        QTRY_COMPARE(label->property("text").toString(), QStringLiteral("Recap"));
+        QVERIFY(label->isVisible());
+        hoverAtSecond(2100);
+        QTRY_COMPARE(label->property("text").toString(), QStringLiteral("Intro"));
+        hoverAtSecond(3000);
+        QTRY_COMPARE(label->property("text").toString(), QString());
+        QVERIFY(!label->isVisible());
+        hoverAtSecond(5700);
+        QTRY_COMPARE(label->property("text").toString(), QStringLiteral("Outro"));
+
+        // A new item has none, and the bars hold nothing
+        stub.segmentBands.clear();
+        Q_EMIT stub.changed();
+        QTRY_COMPARE(shownBands().size(), 0);
+        hoverAtSecond(2100);
+        QTRY_COMPARE(label->property("text").toString(), QString());
+    }
+
     void playerSeekBubble_data()
     {
         QTest::addColumn<bool>("rightToLeft");
@@ -19307,6 +19807,99 @@ class TestUiPages : public QObject {
         QVERIFY(Ui::closeMenu(list));
     }
 
+    // The main menu hangs from its button, which sits at the end of the bar: its end edge is the button's in either reading direction, and in a window at its least height it still does not cover the button or leave the window
+    void theMainMenuStaysByItsButtonInAShortWindowInBothReadingDirections_data()
+    {
+        QTest::addColumn<bool>("rightToLeft");
+        QTest::newRow("left to right") << false;
+        QTest::newRow("right to left") << true;
+    }
+
+    void theMainMenuStaysByItsButtonInAShortWindowInBothReadingDirections()
+    {
+        QFETCH(bool, rightToLeft);
+        const Qt::LayoutDirection direction = QGuiApplication::layoutDirection();
+        QGuiApplication::setLayoutDirection(rightToLeft ? Qt::RightToLeft : Qt::LeftToRight);
+        const auto restoreDirection =
+            qScopeGuard([direction] { QGuiApplication::setLayoutDirection(direction); });
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        const int low = ui.window->minimumHeight();
+        ui.window->resize(1000, low);
+        QTRY_COMPARE(ui.window->height(), low);
+        QQuickItem *button = ui.item(QStringLiteral("mainMenuButton"));
+        QObject *menu = ui.popup(QStringLiteral("mainMenu"));
+        QVERIFY(button && menu);
+        QVERIFY(QMetaObject::invokeMethod(button, "click"));
+        QTRY_VERIFY(menu->property("opened").toBool());
+        QTRY_VERIFY2(popupProblem(menu, button, ui.window).isEmpty(),
+                     qPrintable(popupProblem(menu, button, ui.window)));
+        // The menu is wider than the room between the button and the window's start edge, so it hangs from the button's far edge: the right edge in left to right, the left one mirrored
+        const QRectF rect = popupRect(menu);
+        const QRectF anchor = sceneRect(button);
+        QVERIFY2(qAbs((rightToLeft ? rect.left() - anchor.left() : rect.right() - anchor.right()))
+                     <= 2,
+                 qPrintable(QStringLiteral("popup %1..%2, button %3..%4")
+                                .arg(rect.left())
+                                .arg(rect.right())
+                                .arg(anchor.left())
+                                .arg(anchor.right())));
+        QVERIFY(Ui::closeMenu(menu));
+    }
+
+    // The list of the library selector and of a language box of the preferences opens beside its box and inside the window, in a window at its least height
+    void theListsOfTheLibrarySelectorAndThePreferencesBoxesStayByTheirBox()
+    {
+        Ui ui(m_home->path());
+        ui.server.generatedItemTotal = 30;
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("moviesTwoLibraries")));
+        const int low = ui.window->minimumHeight();
+        ui.window->resize(1000, low);
+        QTRY_COMPARE(ui.window->height(), low);
+        QQuickItem *selector = nullptr;
+        QTRY_VERIFY((selector = ui.item(QStringLiteral("librarySelector"))) != nullptr);
+        QTRY_VERIFY(selector->isVisible());
+        QObject *list = selector->property("popup").value<QObject *>();
+        QVERIFY(list);
+        QVERIFY(QMetaObject::invokeMethod(list, "open"));
+        QTRY_VERIFY(list->property("opened").toBool());
+        QTRY_VERIFY2(popupProblem(list, selector, ui.window).isEmpty(),
+                     qPrintable(popupProblem(list, selector, ui.window)));
+        QVERIFY(Ui::closeMenu(list));
+
+        QVERIFY(openPreferences(ui) != nullptr);
+        QQuickItem *row = ui.item(QStringLiteral("prefSubtitleLanguage"));
+        QVERIFY(row);
+        QQuickItem *box = nullptr;
+        for (QQuickItem *candidate : allItems(row)) {
+            if (candidate->inherits("QQuickComboBox"))
+                box = candidate;
+        }
+        QVERIFY(box);
+        // The page scrolls until the box is at the bottom edge: the least room below it
+        QQuickItem *flickable = nullptr;
+        for (QQuickItem *parent = box->parentItem(); parent && !flickable;
+             parent = parent->parentItem()) {
+            if (parent->inherits("QQuickFlickable") && !parent->inherits("QQuickItemView"))
+                flickable = parent;
+        }
+        QVERIFY(flickable);
+        const qreal excess = sceneRect(box).bottom() - (ui.window->height() - 24);
+        if (excess > 0)
+            flickable->setProperty("contentY", flickable->property("contentY").toReal() + excess);
+        QTest::qWait(150);
+        QTRY_VERIFY(box->isVisible());
+        QObject *cultures = box->property("popup").value<QObject *>();
+        QVERIFY(cultures);
+        QVERIFY(QMetaObject::invokeMethod(cultures, "open"));
+        QTRY_VERIFY(cultures->property("opened").toBool());
+        QTRY_VERIFY2(popupProblem(cultures, box, ui.window).isEmpty(),
+                     qPrintable(popupProblem(cultures, box, ui.window)));
+        QVERIFY(Ui::closeMenu(cultures));
+    }
+
     void theMenuOfAUserTileNeverCoversItsButton()
     {
         Ui ui(m_home->path());
@@ -19551,6 +20144,21 @@ class TestUiPages : public QObject {
         QQuickItem *saveGif = clip->findChild<QQuickItem *>(QStringLiteral("playerClipSaveGif"));
         QQuickItem *clear = clip->findChild<QQuickItem *>(QStringLiteral("playerClipClear"));
         QVERIFY(line && saveVideo && saveGif && clear);
+        // The marked part loops from here when both marks are set and nothing forbids it
+        QQuickItem *loop = clip->findChild<QQuickItem *>(QStringLiteral("playerClipLoop"));
+        QVERIFY(loop);
+        QVERIFY(loop->property("checkable").toBool());
+        QVERIFY(!loop->isEnabled());
+        stub.canLoopClip = true;
+        Q_EMIT stub.changed();
+        QTRY_VERIFY(loop->isEnabled());
+        QVERIFY(!loop->property("checked").toBool());
+        QVERIFY(QMetaObject::invokeMethod(loop, "click"));
+        QVERIFY(stub.calls.contains(QStringLiteral("setClipLooping true")));
+        QTRY_VERIFY(loop->property("checked").toBool());
+        QVERIFY(QMetaObject::invokeMethod(loop, "click"));
+        QVERIFY(stub.calls.contains(QStringLiteral("setClipLooping false")));
+        QTRY_VERIFY(!loop->property("checked").toBool());
         // The range in words, both Save entries offered
         QCOMPARE(line->property("text").toString(), QStringLiteral("00:10 to 00:20 (10 s)"));
         QVERIFY(!line->isEnabled());
@@ -19758,6 +20366,18 @@ class TestUiPages : public QObject {
         QVERIFY(dialog);
         QTRY_VERIFY(dialog->property("opened").toBool());
         QTRY_COMPARE(stub.remoteSearches, QStringList{QStringLiteral("eng")});
+
+        // The language list opens beside its box, inside the window
+        QQuickItem *languageBox =
+            dialog->findChild<QQuickItem *>(QStringLiteral("subtitleLanguageBox"));
+        QVERIFY(languageBox);
+        QObject *languages = languageBox->property("popup").value<QObject *>();
+        QVERIFY(languages);
+        QVERIFY(QMetaObject::invokeMethod(languages, "open"));
+        QTRY_VERIFY(languages->property("opened").toBool());
+        QTRY_VERIFY2(popupProblem(languages, languageBox, ui.window).isEmpty(),
+                     qPrintable(popupProblem(languages, languageBox, ui.window)));
+        QVERIFY(Ui::closeMenu(languages));
 
         // The no-provider answer is explained, and an empty answer is not mistaken for a pending one
         auto label = [dialog](const char *name) {
@@ -20130,6 +20750,29 @@ class TestUiPages : public QObject {
         QVERIFY(QMetaObject::invokeMethod(down, "click"));
         QTRY_COMPARE(ui.server.playlistItemIds(evening), (QStringList{films.at(2), films.at(1)}));
         QTRY_VERIFY(!refused->isVisible());
+        QTRY_COMPARE(page->property("loading").toBool(), false);
+        // Remove from Playlist… names the video and asks first: Cancel keeps it, Remove takes it away
+        const auto openRowMenu = [&] {
+            return QMetaObject::invokeMethod(page, "openMenu",
+                                             Q_ARG(QVariant, QVariant::fromValue<QObject *>(ui.item(
+                                                                 QStringLiteral("playlistRow_0")))),
+                                             Q_ARG(QVariant, 0), Q_ARG(QVariant, 0));
+        };
+        QVERIFY(openRowMenu());
+        QTRY_VERIFY(remove->property("visible").toBool());
+        QVERIFY(QMetaObject::invokeMethod(remove, "click"));
+        QTRY_VERIFY(removeDialog->property("opened").toBool());
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Remove Film 3 from this playlist?"), false));
+        QVERIFY(QMetaObject::invokeMethod(removeDialog, "close"));
+        QTRY_VERIFY(!removeDialog->property("visible").toBool());
+        QCOMPARE(ui.server.playlistItemIds(evening), (QStringList{films.at(2), films.at(1)}));
+        QVERIFY(openRowMenu());
+        QTRY_VERIFY(remove->property("visible").toBool());
+        QVERIFY(QMetaObject::invokeMethod(remove, "click"));
+        QTRY_VERIFY(removeDialog->property("opened").toBool());
+        QVERIFY(QMetaObject::invokeMethod(removeConfirm, "trigger"));
+        QTRY_COMPARE(ui.server.playlistItemIds(evening), (QStringList{films.at(1)}));
+        QTRY_VERIFY(!removeDialog->property("visible").toBool());
         QTRY_COMPARE(page->property("loading").toBool(), false);
         // Rename… asks for the new name, filled with the old one, and the page takes it
         QObject *renameAction = page->findChild<QObject *>(QStringLiteral("renamePlaylistAction"));
@@ -21576,6 +22219,358 @@ class TestUiPages : public QObject {
         QObject *infoTimer = overlay->findChild<QObject *>(QStringLiteral("playbackInfoTimer"));
         QVERIFY(infoTimer);
         QVERIFY(!infoTimer->property("running").toBool());
+    }
+
+    // The panel has a scrolling area of its own that takes Tab, and its keys move it only when the rows overflow: otherwise they go on to the player
+    void playerPlaybackInfoScrollsWithTheKeysOnlyWhenTheRowsOverflow()
+    {
+        PlayerStub stub;
+        stub.info = {{QStringLiteral("playMethod"), QStringLiteral("Transcode")},
+                     {QStringLiteral("streamType"), QStringLiteral("HLS")},
+                     {QStringLiteral("protocol"), QStringLiteral("https")},
+                     {QStringLiteral("hwdec"), QStringLiteral("vaapi")},
+                     {QStringLiteral("targetVideoCodec"), QStringLiteral("h264")},
+                     {QStringLiteral("targetAudioCodec"), QStringLiteral("aac")},
+                     {QStringLiteral("transcodeReasons"),
+                      QStringList{QStringLiteral("VideoCodecNotSupported"),
+                                  QStringLiteral("AudioChannelsNotSupported")}},
+                     {QStringLiteral("container"), QStringLiteral("mkv")},
+                     {QStringLiteral("videoCodec"), QStringLiteral("hevc")},
+                     {QStringLiteral("videoProfile"), QStringLiteral("Main 10")},
+                     {QStringLiteral("videoRange"), QStringLiteral("HDR10")},
+                     {QStringLiteral("audioCodec"), QStringLiteral("eac3")},
+                     {QStringLiteral("audioChannels"), 6}};
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(1000));
+        QVERIFY(ui.signIn());
+        QQuickItem *page = openPlayer(ui, stub);
+        QVERIFY(page);
+        QObject *timer = page->findChild<QObject *>(QStringLiteral("playerChromeTimer"));
+        QVERIFY(timer);
+        timer->setProperty("interval", 60000);
+        QQuickItem *overlay = ui.item(QStringLiteral("playbackInfoOverlay"));
+        QVERIFY(overlay);
+        QVERIFY(page->setProperty("playbackInfoShown", true));
+        QTRY_VERIFY(overlay->isVisible());
+        QTRY_VERIFY(ui.item(QStringLiteral("playbackInfoSection_media")));
+        QQuickItem *flick = nullptr;
+        for (QQuickItem *item : allItems(overlay)) {
+            if (item->inherits("QQuickFlickable"))
+                flick = item;
+        }
+        QVERIFY(flick);
+
+        // A window that is short for the rows: the area scrolls and takes Tab
+        ui.window->resize(1000, 320);
+        QTRY_VERIFY(flick->property("scrollable").toBool());
+        QVERIFY(flick->property("activeFocusOnTab").toBool());
+        QVERIFY(QMetaObject::invokeMethod(flick, "forceActiveFocus"));
+        QTRY_VERIFY(flick->hasActiveFocus());
+        stub.calls.clear();
+        QCOMPARE(flick->property("contentY").toReal(), 0.0);
+        QTest::keyClick(ui.window, Qt::Key_Down);
+        QVERIFY(flick->property("contentY").toReal() > 0);
+        const qreal line = flick->property("contentY").toReal();
+        QTest::keyClick(ui.window, Qt::Key_Down);
+        QVERIFY(flick->property("contentY").toReal() > line);
+        QTest::keyClick(ui.window, Qt::Key_Up);
+        QCOMPARE(flick->property("contentY").toReal(), line);
+        QTest::keyClick(ui.window, Qt::Key_PageDown);
+        QVERIFY(flick->property("contentY").toReal() > line);
+        QTest::keyClick(ui.window, Qt::Key_PageUp);
+        QTest::keyClick(ui.window, Qt::Key_Up);
+        QCOMPARE(flick->property("contentY").toReal(), 0.0);
+        // The panel took every one of them: the player did not seek or change the chapter
+        QVERIFY2(stub.calls.isEmpty(), qPrintable(stub.calls.join(QLatin1Char(','))));
+
+        // A window tall enough for all of it while the area has the focus: its keys are the player's, and it stops taking Tab once the focus has left
+        ui.window->resize(1000, 1600);
+        QTRY_VERIFY(!flick->property("scrollable").toBool());
+        QVERIFY(flick->hasActiveFocus());
+        QTest::keyClick(ui.window, Qt::Key_Down);
+        QTRY_VERIFY(stub.calls.contains(QStringLiteral("seekRelative -60")));
+        QCOMPARE(flick->property("contentY").toReal(), 0.0);
+        QTest::keyClick(ui.window, Qt::Key_Tab);
+        QTRY_VERIFY(!flick->hasActiveFocus());
+        QTRY_VERIFY(!flick->property("activeFocusOnTab").toBool());
+    }
+
+    // The Video Enhancement submenu: Deband, then one entry per shader file with its name as plain text, read again each time it opens; none says so
+    void playerEnhancementMenuListsTheShadersAndSwitchesThem()
+    {
+        PlayerStub stub;
+        const QString hostile = QStringLiteral("<b>Grain</b> &Sharpen");
+        stub.shaders = {QVariantMap{{QStringLiteral("file"), QStringLiteral("a.glsl")},
+                                    {QStringLiteral("name"), hostile}},
+                        QVariantMap{{QStringLiteral("file"), QStringLiteral("b.hook")},
+                                    {QStringLiteral("name"), QStringLiteral("Upscale")}}};
+        stub.activeShaders = {QStringLiteral("a.glsl")};
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(openPlayer(ui, stub));
+        QObject *more = ui.popup(QStringLiteral("playerMoreMenu"));
+        QObject *menu = ui.popup(QStringLiteral("playerEnhancementMenu"));
+        QVERIFY(more && menu);
+        QVERIFY(QMetaObject::invokeMethod(more, "open"));
+        QTRY_VERIFY(more->property("opened").toBool());
+        QQuickItem *entry = nullptr;
+        for (QQuickItem *item : ui.menuItems(QStringLiteral("playerMoreMenu"))) {
+            if (item->property("subMenu").value<QObject *>() == menu) {
+                entry = item;
+                break;
+            }
+        }
+        QVERIFY(entry);
+        QCOMPARE(entry->property("text").toString(), QStringLiteral("Video Enhancement"));
+        stub.calls.clear();
+        QVERIFY(QMetaObject::invokeMethod(entry, "click"));
+        QTRY_VERIFY(menu->property("opened").toBool());
+        // The menu asked the player to read the folder and the flag again
+        QVERIFY(stub.calls.contains(QStringLiteral("refreshEnhancements")));
+        QQuickItem *deband = menu->findChild<QQuickItem *>(QStringLiteral("playerDeband"));
+        QVERIFY(deband && deband->property("checkable").toBool());
+        QVERIFY(!deband->property("checked").toBool());
+        QQuickItem *none = menu->findChild<QQuickItem *>(QStringLiteral("playerNoShaders"));
+        QVERIFY(none);
+        QVERIFY(!none->isVisible());
+        QQuickItem *grain = nullptr;
+        QQuickItem *upscale = nullptr;
+        QTRY_VERIFY((grain = menu->findChild<QQuickItem *>(QStringLiteral("playerShader_0")))
+                    != nullptr);
+        QTRY_VERIFY((upscale = menu->findChild<QQuickItem *>(QStringLiteral("playerShader_1")))
+                    != nullptr);
+        // The names are plain text, the active one is checked, and the entries come after the Deband entry
+        QCOMPARE(grain->property("plainText").toString(), hostile);
+        QCOMPARE(upscale->property("plainText").toString(), QStringLiteral("Upscale"));
+        QVERIFY(grain->property("checked").toBool());
+        QVERIFY(!upscale->property("checked").toBool());
+        QVERIFY(grain->y() > deband->y() && upscale->y() > grain->y());
+        // Each one changes the player and shows what it answers
+        stub.calls.clear();
+        QVERIFY(QMetaObject::invokeMethod(deband, "click"));
+        QCOMPARE(stub.calls, QStringList{QStringLiteral("setDeband true")});
+        QTRY_VERIFY(deband->property("checked").toBool());
+        QVERIFY(QMetaObject::invokeMethod(upscale, "click"));
+        QVERIFY(stub.calls.contains(QStringLiteral("setShader b.hook on")));
+        // Switching one keeps the entries and moves the checks
+        QTRY_VERIFY(upscale->property("checked").toBool());
+        QVERIFY(QMetaObject::invokeMethod(grain, "click"));
+        QVERIFY(stub.calls.contains(QStringLiteral("setShader a.glsl off")));
+        QTRY_VERIFY(!grain->property("checked").toBool());
+        QVERIFY(upscale->property("checked").toBool());
+        QCOMPARE(menu->findChild<QQuickItem *>(QStringLiteral("playerShader_0")), grain);
+        // A folder with nothing in it says so
+        stub.shaders.clear();
+        Q_EMIT stub.changed();
+        QTRY_VERIFY(none->isVisible());
+        QTRY_VERIFY(!menu->findChild<QQuickItem *>(QStringLiteral("playerShader_0")));
+        // Not while casting
+        stub.casting = true;
+        Q_EMIT stub.changed();
+        QTRY_VERIFY(!menu->property("enabled").toBool());
+    }
+
+    // L loops the marked part, the period and the comma step a frame, Shift+I shows Playback Info and I alone still marks the start
+    void playerLoopFrameStepAndInfoKeys()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *page = openPlayer(ui, stub);
+        QVERIFY(page);
+        page->findChild<QObject *>(QStringLiteral("playerChromeTimer"))
+            ->setProperty("interval", 600000);
+        const auto press = [&](Qt::Key key, Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
+            stub.calls.clear();
+            QTest::keyClick(ui.window, key, modifiers);
+        };
+        press(Qt::Key_L);
+        QCOMPARE(stub.calls, QStringList{QStringLiteral("setClipLooping true")});
+        press(Qt::Key_L);
+        QCOMPARE(stub.calls, QStringList{QStringLiteral("setClipLooping false")});
+        press(Qt::Key_Period);
+        QCOMPARE(stub.calls, QStringList{QStringLiteral("frameStep")});
+        press(Qt::Key_Comma);
+        QCOMPARE(stub.calls, QStringList{QStringLiteral("frameBackStep")});
+        // I alone marks the start; with Shift it toggles Playback Info instead
+        press(Qt::Key_I);
+        QCOMPARE(stub.calls, QStringList{QStringLiteral("markClipStart")});
+        QVERIFY(!page->property("playbackInfoShown").toBool());
+        press(Qt::Key_I, Qt::ShiftModifier);
+        QVERIFY(stub.calls.isEmpty());
+        QVERIFY(page->property("playbackInfoShown").toBool());
+        press(Qt::Key_I, Qt::ShiftModifier);
+        QVERIFY(!page->property("playbackInfoShown").toBool());
+        // A file on this device has no Playback Info: the key leaves it alone
+        stub.localPlayback = true;
+        Q_EMIT stub.changed();
+        press(Qt::Key_I, Qt::ShiftModifier);
+        QVERIFY(stub.calls.isEmpty());
+        QVERIFY(!page->property("playbackInfoShown").toBool());
+    }
+
+    // Z and X step the subtitle delay, Shift in half seconds, Ctrl+- and Ctrl++ the audio delay and Ctrl+0 clears it; each says the new value over the picture, the limits are ten seconds, and a renderer takes none of it
+    void playerDelayKeysStepTheDelaysAndSayTheValue()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *page = openPlayer(ui, stub);
+        QVERIFY(page);
+        page->findChild<QObject *>(QStringLiteral("playerChromeTimer"))
+            ->setProperty("interval", 600000);
+        QQuickItem *notice = ui.item(QStringLiteral("playerVolumeNotice"));
+        QVERIFY(notice && !notice->isVisible());
+        const auto said = [&](const QString &label, double seconds) {
+            return QStringLiteral("%1: %2 s").arg(label, QLocale().toString(seconds, 'f', 1));
+        };
+        const auto press = [&](Qt::Key key, Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
+            stub.calls.clear();
+            QTest::keyClick(ui.window, key, modifiers);
+        };
+
+        // The subtitles: Z earlier, X later, and the notice says where the delay is now
+        stub.subtitleDelay = 0.3;
+        Q_EMIT stub.changed();
+        press(Qt::Key_X);
+        QCOMPARE(stub.calls, QStringList{QStringLiteral("adjustSubtitleDelay 0.4")});
+        QTRY_VERIFY(notice->isVisible());
+        QCOMPARE(notice->property("text").toString(), said(QStringLiteral("Subtitle delay"), 0.4));
+        QCOMPARE(notice->property("textFormat").toInt(), int(Qt::PlainText));
+        press(Qt::Key_Z);
+        QCOMPARE(stub.calls, QStringList{QStringLiteral("adjustSubtitleDelay 0.2")});
+        press(Qt::Key_X, Qt::ShiftModifier);
+        QCOMPARE(stub.calls, QStringList{QStringLiteral("adjustSubtitleDelay 0.8")});
+        press(Qt::Key_Z, Qt::ShiftModifier);
+        QCOMPARE(stub.calls, QStringList{QStringLiteral("adjustSubtitleDelay -0.2")});
+
+        // The audio: Ctrl+- earlier, Ctrl++ and Ctrl+= later, Ctrl+0 back to none
+        stub.audioDelay = 0.3;
+        Q_EMIT stub.changed();
+        press(Qt::Key_Minus, Qt::ControlModifier);
+        QCOMPARE(stub.calls, QStringList{QStringLiteral("adjustAudioDelay 0.2")});
+        QCOMPARE(notice->property("text").toString(), said(QStringLiteral("Audio delay"), 0.2));
+        press(Qt::Key_Plus, Qt::ControlModifier);
+        QCOMPARE(stub.calls, QStringList{QStringLiteral("adjustAudioDelay 0.4")});
+        press(Qt::Key_Equal, Qt::ControlModifier);
+        QCOMPARE(stub.calls, QStringList{QStringLiteral("adjustAudioDelay 0.4")});
+        press(Qt::Key_0, Qt::ControlModifier);
+        QCOMPARE(stub.calls, QStringList{QStringLiteral("adjustAudioDelay 0")});
+        QCOMPARE(notice->property("text").toString(), said(QStringLiteral("Audio delay"), 0));
+        // Ten seconds either way is the end
+        stub.audioDelay = 9.95;
+        stub.subtitleDelay = -9.8;
+        Q_EMIT stub.changed();
+        press(Qt::Key_Plus, Qt::ControlModifier);
+        QCOMPARE(stub.calls, QStringList{QStringLiteral("adjustAudioDelay 10")});
+        press(Qt::Key_Z, Qt::ShiftModifier);
+        QCOMPARE(stub.calls, QStringList{QStringLiteral("adjustSubtitleDelay -10")});
+
+        // The notice goes away by itself, and the volume has its own words again
+        QTRY_VERIFY_WITH_TIMEOUT(!notice->isVisible(), 5000);
+        QVERIFY(QMetaObject::invokeMethod(page, "stepVolume", Q_ARG(QVariant, 1)));
+        QTRY_VERIFY(notice->isVisible());
+        QVERIFY2(notice->property("text").toString().startsWith(QStringLiteral("Volume")),
+                 qPrintable(notice->property("text").toString()));
+        QTRY_VERIFY_WITH_TIMEOUT(!notice->isVisible(), 5000);
+
+        // A renderer has no such delay
+        stub.casting = true;
+        Q_EMIT stub.changed();
+        press(Qt::Key_X);
+        press(Qt::Key_Plus, Qt::ControlModifier);
+        QTest::qWait(200);
+        QVERIFY(!stub.calls.contains(QStringLiteral("adjustSubtitleDelay 0.1")));
+        QVERIFY2(stub.calls.isEmpty(), qPrintable(stub.calls.join(QLatin1Char(','))));
+        QVERIFY(!notice->isVisible());
+    }
+
+    // The delay entries of the AV Sync menu say the delay as the language writes it, and move it a step at a time within ten seconds
+    void playerDelayEntriesUseTheLocaleAndStayWithinTenSeconds()
+    {
+        const QLocale previous;
+        QLocale::setDefault(QLocale(QLocale::Italian, QLocale::Italy));
+        const auto restore = qScopeGuard([&previous] { QLocale::setDefault(previous); });
+        PlayerStub stub;
+        stub.audioDelay = 0.5;
+        stub.subtitleDelay = -1.5;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *page = openPlayer(ui, stub);
+        QVERIFY(page);
+        QObject *timer = page->findChild<QObject *>(QStringLiteral("playerChromeTimer"));
+        QVERIFY(timer);
+        timer->setProperty("interval", 60000);
+        QObject *menu = ui.popup(QStringLiteral("playerMoreMenu"));
+        QVERIFY(menu);
+        ui.clickCenter(ui.item(QStringLiteral("playerMoreButton")));
+        QTRY_VERIFY(menu->property("opened").toBool());
+        const auto entry = [menu](const QString &prefix) -> QObject * {
+            for (QObject *child : menu->findChildren<QObject *>()) {
+                if (child->property("text").toString().startsWith(prefix))
+                    return child;
+            }
+            return nullptr;
+        };
+        const auto text = [&entry](const QString &prefix) {
+            QObject *found = entry(prefix);
+            return found ? found->property("text").toString() : QStringLiteral("<no entry>");
+        };
+        // A decimal comma with one digit, and the minus sign of the language
+        QCOMPARE(text(QStringLiteral("Audio delay:")), QStringLiteral("Audio delay: 0,5 s"));
+        QCOMPARE(text(QStringLiteral("Subtitle delay:")),
+                 QStringLiteral("Subtitle delay: %1 s").arg(QLocale().toString(-1.5, 'f', 1)));
+        QVERIFY(!entry(QStringLiteral("Audio delay:"))->property("enabled").toBool());
+        // The steps go to the player as numbers, not as text
+        stub.calls.clear();
+        QObject *later = entry(QStringLiteral("Audio later"));
+        QObject *earlier = entry(QStringLiteral("Audio earlier"));
+        QVERIFY(later && earlier);
+        QVERIFY(QMetaObject::invokeMethod(later, "click"));
+        QVERIFY(QMetaObject::invokeMethod(earlier, "click"));
+        QObject *subtitlesLater = entry(QStringLiteral("Subtitles later"));
+        QVERIFY(subtitlesLater);
+        QVERIFY(QMetaObject::invokeMethod(subtitlesLater, "click"));
+        QCOMPARE(stub.calls, (QStringList{QStringLiteral("adjustAudioDelay 0.6"),
+                                          QStringLiteral("adjustAudioDelay 0.4"),
+                                          QStringLiteral("adjustSubtitleDelay -1.4")}));
+        // Ten seconds either way is the end
+        stub.calls.clear();
+        stub.audioDelay = 9.95;
+        stub.changed();
+        QVERIFY(QMetaObject::invokeMethod(later, "click"));
+        stub.audioDelay = -9.95;
+        stub.changed();
+        QVERIFY(QMetaObject::invokeMethod(earlier, "click"));
+        QCOMPARE(stub.calls, (QStringList{QStringLiteral("adjustAudioDelay 10"),
+                                          QStringLiteral("adjustAudioDelay -10")}));
+        QTRY_COMPARE(text(QStringLiteral("Audio delay:")),
+                     QStringLiteral("Audio delay: %1 s").arg(QLocale().toString(-9.95, 'f', 1)));
+        // Reset puts a delay back to none, and is off when there is none
+        QObject *resetAudio = entry(QStringLiteral("Reset the Audio Delay"));
+        QObject *resetSubtitles = entry(QStringLiteral("Reset the Subtitle Delay"));
+        QVERIFY(resetAudio && resetSubtitles);
+        QVERIFY(resetAudio->property("enabled").toBool());
+        stub.calls.clear();
+        QVERIFY(QMetaObject::invokeMethod(resetAudio, "click"));
+        QVERIFY(QMetaObject::invokeMethod(resetSubtitles, "click"));
+        QCOMPARE(stub.calls, (QStringList{QStringLiteral("adjustAudioDelay 0"),
+                                          QStringLiteral("adjustSubtitleDelay 0")}));
+        stub.audioDelay = 0;
+        stub.subtitleDelay = 0;
+        Q_EMIT stub.changed();
+        QTRY_VERIFY(!resetAudio->property("enabled").toBool());
+        QVERIFY(!resetSubtitles->property("enabled").toBool());
     }
 
     void playerPlaybackInfoSaysItWaitsWhileThereIsNothingToShow()
