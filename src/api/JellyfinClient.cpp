@@ -932,12 +932,13 @@ QUrlQuery listingQuery(const ItemQuery &query, const QString &userId)
             wire.addQueryItem(QStringLiteral("excludeItemTypes"), query.excludeItemTypes);
         if (!query.mediaTypes.isEmpty())
             wire.addQueryItem(QStringLiteral("mediaTypes"), query.mediaTypes);
+        // Comma-joined like studioIds: 12.4 ignores a '|' between genre ids
         if (!query.genreIds.isEmpty())
             wire.addQueryItem(QStringLiteral("genreIds"), query.genreIds.join(QLatin1Char(',')));
         if (!query.personIds.isEmpty())
             wire.addQueryItem(QStringLiteral("personIds"), query.personIds.join(QLatin1Char(',')));
         addLibraryFilterParameters(wire, query);
-        // The episodes the server only knows of (missing and unaired ones) have no media: a listing of episodes leaves them out, unless a filter asks for them
+        // The episodes the server only knows of (missing and unaired ones) have no media: a listing of episodes leaves them out, unless a filter asks for them. The server applies the filter before it pages, so totals and pages count real episodes only; Latest and NextUp never list them and need no filter
         if (!query.isMissing && !query.isUnaired && asksForEpisodes(query.includeItemTypes))
             wire.addQueryItem(QStringLiteral("isMissing"), QStringLiteral("false"));
         if (!query.searchTerm.isEmpty())
@@ -2749,6 +2750,7 @@ QString reportRoute(PlaybackReport::Kind kind)
     return QStringLiteral("/Sessions/Playing/Stopped");
 }
 
+// Only a Stopped is retried, once, after m_reportRetryDelay (2 s), on these statuses (0 is no HTTP answer at all). A Start is never retried: a second one counts as a second play
 bool retryableStatus(int status)
 {
     return status == 0 || status == 502 || status == 503 || status == 504;
@@ -2864,6 +2866,7 @@ QUrl JellyfinClient::downloadUrl(const QString &itemId) const
 {
     if (m_state != State::Authenticated || !isValidJellyfinId(itemId))
         return {};
+    // Never `/Items/{id}/File`: that route skips the download policy, the CanDownload check and the activity log
     return endpoint(QStringLiteral("/Items/") + itemId + QStringLiteral("/Download"));
 }
 

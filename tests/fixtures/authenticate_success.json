@@ -1,6 +1,6 @@
 {
   "User": {
-    "Name": "bepi",
+    "Name": "demo",
     "Id": "d5ed5d4e2e5447b58e9f2b6f7bd5c96a",
     "PrimaryImageTag": "tag-avatar-1",
     "Policy": {
@@ -19,7 +19,7 @@
   "SessionInfo": {
     "Id": "a0b1c2d3e4f5",
     "UserId": "d5ed5d4e2e5447b58e9f2b6f7bd5c96a",
-    "UserName": "bepi",
+    "UserName": "demo",
     "Client": "Kinefin",
     "DeviceName": "kinefin-desktop"
   }

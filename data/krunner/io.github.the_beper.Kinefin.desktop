@@ -4,7 +4,7 @@
 Type=Service
 Name=Kinefin
 Name[it]=Kinefin
-Comment=Find movies and TV series on your Jellyfin server while Kinefin is open; what you type is sent to that server
+Comment=Find movies and shows on your Jellyfin server while Kinefin is open; what you type is sent to that server
 Comment[it]=Trova film e serie TV sul tuo server Jellyfin mentre Kinefin è aperto; quello che digiti viene inviato a quel server
 Icon=io.github.the_beper.Kinefin
 X-KDE-PluginInfo-Name=io.github.the_beper.Kinefin

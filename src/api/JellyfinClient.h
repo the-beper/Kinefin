@@ -116,7 +116,7 @@ class JellyfinClient final : public QObject {
     enum class PlaylistOp { Create, Add, Remove, Move, Rename, Delete };
     Q_ENUM(PlaylistOp)
 
-    // No limit: the same value as the profile's MaxStaticBitrate
+    // No limit: the same value as the profile's MaxStaticBitrate. The server's default (8 Mbps) would transcode most files
     static constexpr qint64 DefaultMaxStreamingBitrate = 1'000'000'000;
 
     explicit JellyfinClient(QObject *parent = nullptr);
@@ -265,7 +265,7 @@ class JellyfinClient final : public QObject {
     // size. Superseded image requests never update the currently playing item.
     bool fetchTrickplayTile(const QString &itemId, const QString &mediaSourceId, int width,
                             int tileIndex);
-    // Queues one report for the server, one request at a time and in order (an old session's Stopped always precedes a new session's Start). A newer Progress replaces a queued one, a Stopped drops the queued Progress, only a Stopped is retried (once). Reports never emit a failure signal: playback must not depend on them. Returns false, without a request, when not authenticated or the report is invalid. A 401 expires the session and drops the queue; disconnectFromServer() drops it silently
+    // Queues one report for the server, one request at a time and in order (an old session's Stopped always precedes a new session's Start: a Stopped clears the now-playing state of the whole device session). A newer Progress replaces a queued one, a Stopped drops the queued Progress, only a Stopped is retried (once). Reports never emit a failure signal: playback must not depend on them. Returns false, without a request, when not authenticated or the report is invalid. A 401 expires the session and drops the queue; disconnectFromServer() drops it silently
     bool reportPlayback(const PlaybackReport &report);
     bool hasPendingPlaybackReports() const;
     // For tests; the default is 2 s

@@ -15,7 +15,7 @@ Item {
     property bool backShown: false
     // The page's name; server text for a playlist or a library, so plain text only. Empty for none
     property string title: ""
-    // A fade from the row's background over the top of the content under it, for content that starts right at the row (the page sets the row's `z` above its content)
+    // A fade from the row's background over the top of the content under it, for content that starts right at the row (the page sets the row's `z` above its content). The details page uses it instead of a TopFade inside its list, which raced the seasons row's asynchronous cards
     property bool fadeBelow: false
     // Names for the tests, as the pages had them before the row was shared
     property alias toolbarObjectName: toolbar.objectName

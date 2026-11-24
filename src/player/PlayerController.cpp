@@ -1815,7 +1815,7 @@ void PlayerController::acceptFallback(const PlaybackSource &source)
     const bool relist = m_seriesPlaylistWanted || !m_seriesListItem.isEmpty();
     // A manual pick may come while paused: the new stream opens paused too
     const bool paused = m_session.state() == PlaybackSession::State::Paused;
-    // The same item again at the same position: the stop reports the old stream, the reopen the new one
+    // The same item again at the same position: the stop reports the old stream, the reopen the new one. That Stopped then Start costs one extra play count on the server per step (up to `BitrateFallback::MaxSteps`); reporting the new ids as Progress instead would need `DELETE /Videos/ActiveEncodings` to close the old job, which is unverified on 12.4
     if (!startItem(m_itemId, at, false))
         return;
     m_reopenPaused = paused;
@@ -3689,6 +3689,7 @@ void PlayerController::setShader(const QString &file, bool on)
     if (m_activeShaders.contains(file) == on)
         return;
     keepEnhancementBase();
+    // A shader mpv cannot compile is not reported: libmpv's log messages do not reach the app, as mpvqt does not forward them
     const QString path = QDir(m_profileDataDir + QStringLiteral("/shaders")).absoluteFilePath(file);
     m_engine.mpvCommand({QStringLiteral("change-list"), QStringLiteral("glsl-shaders"),
                          on ? QStringLiteral("append") : QStringLiteral("remove"), path});

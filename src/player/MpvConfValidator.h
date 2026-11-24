@@ -5,6 +5,6 @@
 #include "settings/MpvConf.h"
 
 namespace Kinefin {
-// Asks libmpv whether it knows each option and accepts its value, on a throw-away handle that is never started: nothing reaches the player. The entries libmpv refuses come back as problems (`UnknownOption` for a name it does not have, `BadValue` for a value it does not take); the others are not mentioned
+// Asks libmpv whether it knows each option and accepts its value, on a throw-away handle that is never started: nothing reaches the player. The entries libmpv refuses come back as problems (`UnknownOption` for a name it does not have, `BadValue` for a value it does not take); the others are not mentioned. It cannot judge `vo`, `ao` and `hwdec`: libmpv takes any text for them and fails only when the output opens
 QList<MpvConfProblem> validateMpvConf(const QList<MpvConfEntry> &entries);
 } // namespace Kinefin

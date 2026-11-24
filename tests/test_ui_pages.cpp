@@ -1002,7 +1002,7 @@ QJsonObject preferencesConfiguration()
 QByteArray preferencesUser(const QJsonObject &configuration)
 {
     return QJsonDocument(QJsonObject{{QStringLiteral("Id"), kSignedInUserId},
-                                     {QStringLiteral("Name"), QStringLiteral("bepi")},
+                                     {QStringLiteral("Name"), QStringLiteral("demo")},
                                      {QStringLiteral("Policy"),
                                       QJsonObject{{QStringLiteral("IsAdministrator"), false}}},
                                      {QStringLiteral("Configuration"), configuration}})

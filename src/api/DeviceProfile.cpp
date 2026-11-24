@@ -71,6 +71,7 @@ QJsonArray codecProfiles(const DeviceProfileOptions &options)
     const QString width = QStringLiteral("Width");
 
     QJsonArray profiles;
+    // Upstream's rule kept as is: 12.4 compares the enum exactly, so only a source whose range type is plain DOVI (profile 5) fails it and the DOVIWith* types never match
     if (options.forceTranscodeDovi)
         profiles.append(
             videoCodecProfile({condition(notEquals, rangeType, QStringLiteral("DOVI"))}));

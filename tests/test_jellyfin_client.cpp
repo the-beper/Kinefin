@@ -4013,7 +4013,7 @@ class TestJellyfinClient : public QObject {
         QCOMPARE(server.usersMeRequests, 1);
         QVERIFY(server.lastUsersMeAuth.contains(kTokenField));
         QCOMPARE(user.constFirst().constFirst().value<QJsonObject>().value(QStringLiteral("Name")),
-                 QJsonValue(QStringLiteral("bepi")));
+                 QJsonValue(QStringLiteral("demo")));
 
         const QJsonObject configuration{
             {QStringLiteral("AudioLanguagePreference"), QStringLiteral("ita")},
@@ -4066,7 +4066,7 @@ class TestJellyfinClient : public QObject {
         Kinefin::JellyfinClient client;
         QVERIFY(login(client, server));
         const QByteArray raw =
-            R"({"Id":"d5ed5d4e2e5447b58e9f2b6f7bd5c96a","Name":"bepi","Future":{"Deep":[1,null,{"X":true}]},
+            R"({"Id":"d5ed5d4e2e5447b58e9f2b6f7bd5c96a","Name":"demo","Future":{"Deep":[1,null,{"X":true}]},
                 "PrimaryImageTag":null,
                 "Configuration":{"AudioLanguagePreference":null,"SubtitleMode":"FutureMode",
                 "OrderedViews":[],"GroupedFolders":null,"NewField":{"a":[1,2]}}})";

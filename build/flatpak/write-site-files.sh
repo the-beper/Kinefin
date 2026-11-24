@@ -20,7 +20,7 @@ cat > "$site/kinefin.flatpakrepo" <<REPO
 Title=Kinefin
 Url=$url/repo/
 Homepage=https://github.com/the-beper/Kinefin
-Comment=Browse Jellyfin movies and TV series on KDE Plasma
+Comment=Browse Jellyfin movies and shows on KDE Plasma
 Description=Kinefin is a native KDE Plasma client for browsing movie and TV libraries on Jellyfin servers.
 Icon=$url/icon.svg
 GPGKey=$key

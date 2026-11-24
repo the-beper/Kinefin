@@ -36,7 +36,7 @@
 #include <QWebSocketProtocol>
 #include <QtTest>
 
-// Opt-in live checks against a real Jellyfin server: the websocket live steps and the reporting live checks. Every slot SKIPs unless the environment provides the server, so `ctest` under check.sh runs this file as a plain skip everywhere else. Bring: KINEFIN_LIVE_BASE_URL (e.g. http://192.168.1.251:8096), KINEFIN_LIVE_USER, KINEFIN_LIVE_PASSWORD. The sessionsRoleVisibility slot additionally takes, when an admin account may be used for the comparison: KINEFIN_LIVE_ADMIN_USER/PASSWORD. The access token never leaves the process: prints carry names, ids, routes, statuses and raw frames only, and every login uses its own throw-away device id
+// Opt-in live checks against a real Jellyfin server: the websocket live steps and the reporting live checks. Every slot SKIPs unless the environment provides the server, so `ctest` under check.sh runs this file as a plain skip everywhere else. Bring: KINEFIN_LIVE_BASE_URL (e.g. http://192.168.1.10:8096), KINEFIN_LIVE_USER, KINEFIN_LIVE_PASSWORD. The sessionsRoleVisibility slot additionally takes, when an admin account may be used for the comparison: KINEFIN_LIVE_ADMIN_USER/PASSWORD. The access token never leaves the process: prints carry names, ids, routes, statuses and raw frames only, and every login uses its own throw-away device id
 class TestJellyfinLive : public QObject {
     Q_OBJECT
 

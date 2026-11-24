@@ -103,7 +103,7 @@ bool waitForState(ConnectionController &controller, State state)
 QByteArray meBody(const QString &userId, const QJsonObject &configuration)
 {
     return QJsonDocument(QJsonObject{{QStringLiteral("Id"), userId},
-                                     {QStringLiteral("Name"), QStringLiteral("bepi")},
+                                     {QStringLiteral("Name"), QStringLiteral("demo")},
                                      {QStringLiteral("Policy"),
                                       QJsonObject{{QStringLiteral("IsAdministrator"), false}}},
                                      {QStringLiteral("Configuration"), configuration}})

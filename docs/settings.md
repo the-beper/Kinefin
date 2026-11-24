@@ -10,6 +10,7 @@
 - [Downloads (`downloads`)](#downloads-downloads)
 - [mpv Configuration (`other`)](#mpv-configuration-other)
 - [Settings without a control](#settings-without-a-control)
+- [Not carried over from Jellyfin Desktop](#not-carried-over-from-jellyfin-desktop)
 
 Open the Settings page from the main menu, **Settings**, or press Ctrl+,. Its categories come in this order: General, Audio, Video, Subtitles, Library, Downloads and mpv Configuration, then User while you are signed in. The User category holds your preferences stored on the Jellyfin server and is not part of this reference. Each category groups its settings into cards; the card name is in parentheses in the Setting column below.
 
@@ -145,3 +146,20 @@ These settings have no control on the Settings page. Some are kept for compatibi
 | `video.audio_delay.50hz` | `0` | A number, in milliseconds | Audio delay used when the screen refresh rate is within 0.5 Hz of 50 Hz. |
 | `video.debug.force_vo` | `""` | An mpv video output name, or empty | Overrides the mpv `vo` option, for debugging. |
 | `state.geometry` | `""` | `x,y,width,height` | Window geometry, saved when a windowed window closes and restored at the next start. On Wayland only the size returns, because a client cannot place its window. |
+
+## Not carried over from Jellyfin Desktop
+
+Jellyfin Desktop has these settings and Kinefin does not. A configuration copied from Jellyfin Desktop can still contain them, and they have no effect.
+
+| Setting | Why |
+| --- | --- |
+| `alwaysOnTop` | Kinefin's main window never asks the compositor to stay on top. The picture-in-picture window does. |
+| `enableMPV` | In Jellyfin Desktop it falls back to the HTML5 player. mpv is Kinefin's only player. |
+| `useOpenGL` | A Windows switch between GL and X11 handling. It means nothing in a Qt 6 app that picks Wayland or X11 itself. |
+| `refreshrate.auto_switch`, `refreshrate.delay`, `refreshrate.avoid_25hz_30hz` | Kinefin does not switch the display mode ([why](architecture.md#decisions)), so there is no mode to choose or wait for. |
+| `exclusive` | Audio exclusive mode. Jellyfin Desktop does not offer it on Linux either. |
+| `checkForUpdates` | Kinefin makes no update check. The Flatpak updates through its repository. |
+| `hdmi_poweron`, `system` section | OpenELEC only: HDMI power-on and service management (LIRC, Samba, SSH). |
+| `appleremote` section | Input from a macOS remote. |
+| `userWebClient`, `path.startupurl_desktop`, `path.startupurl_extension` | Which web client page to load, the bundled one or your own build. Kinefin loads no web client. |
+| Allow Browser Zoom (`allowBrowserZoom`) | Zooms the embedded web page. Kinefin is native and has no page to zoom. |

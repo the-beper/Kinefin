@@ -175,6 +175,7 @@ void PlayerSettings::applyAudio()
     m_engine.setMpvProperty(QStringLiteral("audio-device"), device);
     const bool normalize = v("normalize").toBool();
     m_engine.setMpvProperty(QStringLiteral("audio-normalize-downmix"), mpvBool(normalize));
+    // Not a setting: a constant kept for parity with upstream's downmix
     m_engine.setMpvProperty(QStringLiteral("audio-swresample-o"),
                             QStringLiteral("surround_mix_level=1"));
     m_engine.setMpvProperty(QStringLiteral("audio-channels"), type == QLatin1String("spdif")
@@ -223,6 +224,7 @@ void PlayerSettings::applyAudioChain()
     // `af add` appends: the night filter runs before the AC-3 re-encoder
     m_engine.mpvCommand({QStringLiteral("af"), QStringLiteral("remove"), QStringLiteral("@night")});
     m_engine.mpvCommand({QStringLiteral("af"), QStringLiteral("remove"), QStringLiteral("@ac3")});
+    // dynaudnorm rather than loudnorm (its dynamic mode upsamples to 192 kHz and buffers 3 s) or acompressor, which stays the fallback if dynaudnorm proves too slow
     if (night)
         m_engine.mpvCommand({QStringLiteral("af"), QStringLiteral("add"),
                              QStringLiteral("@night:lavfi-dynaudnorm=f=200:g=11:p=0.25:m=3")});
@@ -325,6 +327,7 @@ void PlayerSettings::applyAspect(bool reset)
     else if (aspect == QLatin1String("force_16_9_if_4_3")) {
         const QVariantMap decoded =
             m_engine.mpvProperty(QStringLiteral("video-dec-params")).toMap();
+        // A tolerance of 0.1 around 4/3, upstream's
         if (std::abs(decoded.value(QStringLiteral("aspect")).toDouble() - 4.0 / 3) <= 0.1)
             m_engine.setMpvProperty(QStringLiteral("video-aspect-override"),
                                     QStringLiteral("16:9"));
@@ -363,6 +366,7 @@ QList<std::pair<QString, QVariant>> PlayerSettings::subtitleProperties() const
                                + mpvBool(v("ass_scale_border_and_shadow").toBool()))});
     properties.append({QStringLiteral("sub-ass-override"), v("ass_style_override").toString()});
     const int size = v("size").toInt();
+    // The size setting is relative to 32, upstream's constant
     const double scale = size > 0 ? size / 32.0 : 1.0;
     properties.append({QStringLiteral("sub-scale"), scale});
     // Unknown to 0.41, where `sub-scale` covers both; 0.42 sizes the second subtitle alone
@@ -379,6 +383,7 @@ QList<std::pair<QString, QVariant>> PlayerSettings::subtitleProperties() const
         properties.append({QStringLiteral("sub-border-size"), border});
     const QString bg = v("background_color").toString();
     const QString alpha = v("background_transparency").toString();
+    // mpv reads #AARRGGBB: the alpha goes in right after the #
     if (QRegularExpression(QStringLiteral("^#[0-9a-fA-F]{6}$")).match(bg).hasMatch()
         && QRegularExpression(QStringLiteral("^[0-9a-fA-F]{2}$")).match(alpha).hasMatch())
         properties.append(
@@ -390,6 +395,7 @@ QList<std::pair<QString, QVariant>> PlayerSettings::subtitleProperties() const
         properties.append({QStringLiteral("sub-align-x"), align});
     const QString vertical = placement.value(1, align).trimmed().toLower();
     if (vertical == QLatin1String("top") || vertical == QLatin1String("bottom")) {
+        // Upstream's values: 100 is the bottom edge of the sub-pos scale and 10 sits near the top
         properties.append({QStringLiteral("sub-pos"), vertical == QLatin1String("top") ? 10 : 100});
         // The second subtitle takes the opposite edge, at the top by default
         properties.append(

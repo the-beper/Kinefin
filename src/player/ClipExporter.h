@@ -37,9 +37,7 @@ struct ClipRequest {
     bool decodeFromFileStart = false;
 };
 
-// A clip or GIF encoded in its own libmpv instance, so playback goes on untouched: every encoding
-// option is set before `mpv_initialize`, the source is read once between the marks, the result is
-// written to `<staging>.part` and renamed on success
+// A clip or GIF encoded in its own libmpv instance, so playback goes on untouched: every encoding option is set before `mpv_initialize`, the source is read once between the marks, the result is written to `<staging>.part` and renamed on success. A second instance because encoding options are init-only and mpvqt initializes the playback instance at once; never the system ffmpeg, since the access token would appear in its argv
 class ClipExporter final : public QObject {
     Q_OBJECT
   public:

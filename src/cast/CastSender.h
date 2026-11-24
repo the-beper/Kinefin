@@ -36,9 +36,9 @@ class CastSender final : public CastRenderer {
         int launchTimeoutMs = 10'000;
         // From the LOAD to a PLAYING with a position above 0; a LOAD that carries a text track gets 180 s more, the device fetches the track first and the server may need minutes to extract it
         int startTimeoutMs = 30'000;
-        // The reply PLAYING at position 0 that is not followed by a moving position
+        // The reply PLAYING at position 0 that is not followed by a moving position: how a decode failure shows (HEVC on a Nest Hub), with no LOAD_FAILED and no error
         int stuckMs = 10'000;
-        // A media GET_STATUS this often while a media session exists
+        // A media GET_STATUS this often while a media session exists: a Nest Hub sends no periodic position, only the replies to commands carry one
         int statusPollMs = 5000;
         // positionChanged() this often while playing
         int positionTickMs = 1000;

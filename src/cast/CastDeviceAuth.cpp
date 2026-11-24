@@ -332,6 +332,7 @@ CastAuthVerdict runChecks(const CastTrust &trust, const QByteArray &nonce,
         || X509_STORE_CTX_set_purpose(context.get(), X509_PURPOSE_SSL_CLIENT) != 1)
         return verdictOf(CastAuthResult::BadChain,
                          QStringLiteral("the chain check could not start: ") + opensslError());
+    // Times are not checked: Google's intermediate certificate expired on 2025-03-09 and broke Google's own apps, while the pinned roots run to 2032 (Eureka) and 2034 (Cast)
     X509_VERIFY_PARAM_set_flags(X509_STORE_CTX_get0_param(context.get()),
                                 X509_V_FLAG_NO_CHECK_TIME);
     // auth_level stays at its default of -1, which skips the key and signature strength checks: SHA-1 signed chains verify unless the build itself refuses SHA-1 signatures

@@ -201,6 +201,7 @@ Kirigami.Page {
         }
         page.wakeChrome();
     }
+    // A positive audio step plays the audio later, measured on mpv whatever its manual says
     function stepDelay(audio, step) {
         page.setDelay(audio, (audio ? page.player.audioDelay : page.player.subtitleDelay) + step);
     }
@@ -1106,6 +1107,7 @@ Kirigami.Page {
                                     y: Math.round(timeline.topPadding + (timeline.availableHeight - height) / 2)
                                     height: Kirigami.Units.smallSpacing * 2
                                     radius: Kirigami.Units.cornerRadius
+                                    // The text colour, not neutralTextColor, which Breeze paints orange so that a band reads as a warning
                                     color: Qt.alpha(Kirigami.Theme.textColor, 0.45)
                                     Accessible.ignored: true
                                 }

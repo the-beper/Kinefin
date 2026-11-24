@@ -44,6 +44,7 @@ QVariant cardRoleData(const ItemSummary &item, int role)
         // A season of a series without season folders is Virtual too
         return item.virtualItem && item.type == QLatin1String("Episode");
     case SeriesProgressRole: {
+        // May disagree with what the user has watched for virtual or missing episodes and for Season 0: the counts are the server's own
         if (!series || item.recursiveItemCount <= 0 || item.unplayedCount < 0)
             return qreal(-1);
         const int watched = std::max(0, item.recursiveItemCount - item.unplayedCount);

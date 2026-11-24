@@ -7,7 +7,7 @@
     <name>the-beper</name>
   </developer>
   <name>Kinefin</name>
-  <summary>Watch Jellyfin movies and TV series</summary>
+  <summary>Watch Jellyfin movies and shows</summary>
   <description>
     <p>Kinefin is a native KDE Plasma client for Jellyfin media servers. Its interface follows your Plasma theme, it talks to the server directly instead of embedding a web browser, and mpv plays the video.</p>
     <ul>
@@ -18,7 +18,6 @@
       <li>Watch together with SyncPlay, and control other Jellyfin sessions</li>
       <li>Use the media keys, the Plasma media controls, and KRunner search</li>
     </ul>
-    <p>Your sign-in is kept in KWallet. Music and audiobooks are not supported. Kinefin is an independent client and needs access to a Jellyfin server.</p>
   </description>
   <launchable type="desktop-id">io.github.the_beper.Kinefin.desktop</launchable>
   <screenshots>

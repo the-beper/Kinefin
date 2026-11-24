@@ -304,7 +304,7 @@ SourceSelection selectPlaybackSource(const QJsonObject &response, const QString 
         return failure(QStringLiteral("Invalid playback response"));
     const QString playSessionId = session.toString();
 
-    // Live and other sources that must be opened first are out of scope (movies and TV series only)
+    // Live and other sources that must be opened first are out of scope (movies and shows only)
     QList<QJsonObject> candidates;
     for (const QJsonValue &value : sources.toArray()) {
         const QJsonObject source = value.toObject();

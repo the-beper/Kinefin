@@ -94,7 +94,7 @@ QString singleLine(const QString &name)
     return clean.simplified();
 }
 
-// The libraries a tab lists: movies and TV series
+// The libraries a tab lists: movies and shows
 QString tabOf(const QString &collectionType)
 {
     return collectionType == QLatin1String("movies") || collectionType == QLatin1String("tvshows")
@@ -1843,7 +1843,7 @@ void ConnectionController::setImageOrigin(std::shared_ptr<ImageOrigin> origin)
 
 void ConnectionController::setIgnoreCertificateErrors(bool ignore)
 {
-    // As in the client: no probe connection accepted with an invalid certificate outlives the option
+    // As in the client: no probe connection accepted with an invalid certificate outlives the option. mpv does not go through here: PlayerSettings follows the same ClientSettings value on its own
     if (m_ignoreCertificateErrors && !ignore)
         m_probeNetwork.clearConnectionCache();
     m_ignoreCertificateErrors = ignore;

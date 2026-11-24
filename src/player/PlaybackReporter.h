@@ -16,7 +16,7 @@
 namespace Kinefin {
 class JellyfinClient;
 
-// Turns the state of the one PlaybackSession into server reports: Start when the stream opened, Progress every interval (also while paused, the server ends a silent session after five minutes) and at once on pause and resume, one Stopped when the session stops. It reads the session and the player, never changes them: a failed report does not touch playback
+// Turns the state of the one PlaybackSession into server reports: Start when the stream opened, Progress every interval (also while paused, the server ends a silent session after five minutes) and at once on pause and resume, one Stopped when the session stops. On 12.4 a Stopped does not write the position it carries, so the resume point comes from the Progress reports. It reads the session and the player, never changes them: a failed report does not touch playback
 class PlaybackReporter final : public QObject {
     Q_OBJECT
 

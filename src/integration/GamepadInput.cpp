@@ -10,6 +10,7 @@
 #include <QDebug>
 #include <QGuiApplication>
 
+// Only the SDL 3.2 API: the KDE runtime ships 3.2.30 while the build image has 3.4, so a call that exists only since 3.4 builds on the image and fails the Flatpak build
 #include <SDL3/SDL.h>
 
 namespace Kinefin {
