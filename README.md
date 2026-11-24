@@ -93,7 +93,7 @@ Opening that file in Discover works too. It adds Kinefin's signed repository as 
 A signed bundle is also available. The [user guide](docs/user-guide.md#install-and-update) covers it, updating, uninstalling and the signing key.
 
 > [!NOTE]
-> The first release has not been published, so the remote and the download do not exist yet. Until then, build the bundle with `build/flatpak/build-flatpak.sh` (see [CONTRIBUTING.md](CONTRIBUTING.md#flatpak)). Kinefin is tested against a fake server and, at the API level, against Jellyfin 12.4; acceptance on a Plasma desktop against a real server is still pending for most features.
+> Kinefin is in pre-release. It is tested against a fake server and, at the API level, against Jellyfin 12.4; acceptance on a Plasma desktop against a real server is still pending for most features.
 
 ## Getting started
 

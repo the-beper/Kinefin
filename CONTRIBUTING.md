@@ -95,7 +95,7 @@ Action labels follow the KDE HIG ellipsis rule ([Text and labels](https://develo
 
 ## Releasing
 
-A release publishes the app to Kinefin's signed Flatpak repository and attaches the signed bundle, `PROVENANCE.json` and `SHA256SUMS` to a GitHub release. The release workflow has not yet run from a real tag. The channel (URL, remote, branch), the job table, the signing setup and the recovery procedures are in the [release tooling](build/release/README.md#signed-flatpak-repository); the open steps before and after the first tag are in the [first-release checklist](build/release/FIRST_RELEASE.md).
+A release publishes the app to Kinefin's signed Flatpak repository and attaches the signed bundle, `PROVENANCE.json` and `SHA256SUMS` to a GitHub release. The channel (URL, remote, branch), the job table, the signing setup and the recovery procedures are in the [release tooling](build/release/README.md#signed-flatpak-repository); the checks before every tag and the gates for 1.0.0 are in the [release checklist](build/release/FIRST_RELEASE.md).
 
 1. Run `python3 -I build/release/preflight.py` for the offline source gates, then `build/build-env.sh build/check.sh` for the native/container checks. The release-script simulation and the real-client repository test are described under [Flatpak](#flatpak).
 2. Prepare the version with `build/release/version-bump.sh [--dry-run] [--date YYYY-MM-DD] X.Y.Z` (`--dry-run` prints the diff, `--date` sets a release date other than today, UTC); review and commit CMake and AppStream together.

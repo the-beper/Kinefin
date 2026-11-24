@@ -79,9 +79,6 @@ The [settings reference](settings.md) lists every setting with its default. Wher
 
 Kinefin has no Flathub listing yet. It comes from its own signed Flatpak repository, `https://the-beper.github.io/Kinefin`.
 
-> [!NOTE]
-> The first release has not been published, so the repository and the bundle below do not exist yet. Until then, build the bundle with `build/flatpak/build-flatpak.sh` (see [CONTRIBUTING.md](../CONTRIBUTING.md#flatpak)).
-
 ### Install from the repository
 
 Run:
