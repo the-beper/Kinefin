@@ -150,6 +150,10 @@ class PlanningConsistency(unittest.TestCase):
             "build/build-env.sh", "build/check.sh", "build/ci/changes.sh",
             "build/flatpak/build-flatpak.sh", "build/flatpak/test-flatpak.sh", "po/extract.sh",
             "scripts/testing/run_portable_checks.sh",
+            "build/release/simulate.sh", "build/release/export-flatpak-commits.sh", "build/release/prepare-flatpak-repo.sh",
+            "build/release/sign-flatpak-repo.sh", "build/release/finish-flatpak-repo.sh",
+            "build/flatpak/publish-repo.sh", "build/flatpak/write-site-files.sh",
+            "build/release/testdata/fake-flatpak", "build/release/testdata/fake-gh", "build/release/testdata/fake-ostree",
         )
         for name in scripts:
             with self.subTest(script=name):

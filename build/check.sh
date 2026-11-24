@@ -41,6 +41,9 @@ python3 -m unittest discover -s scripts -p 'test_po.py' -v
 step "Portable planning/CI and fixture contracts"
 python3 -m unittest discover -s tests -p 'test_*.py' -v
 
+step "Release simulation"
+build/release/simulate.sh
+
 step "REUSE license coverage"
 reuse lint
 

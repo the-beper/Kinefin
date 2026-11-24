@@ -1,0 +1,254 @@
+#!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Kinefin contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""A stand-in for the flatpak CLI, for build/release/simulate.sh. It does not know OSTree: it uses the directory layout of testdata/fake-ostree and real GnuPG for the signatures, so a wrong key, a missing signature or a missing step shows up the way it would for a client:
+
+  build-sign        signs the commit of a ref (objects/<id>.commitmeta, a detached signature of <id>.commit)
+  build-update-repo unless --no-update-appstream it adds the appstream refs (a new commit, signed only with --gpg-sign); it writes summary and summary.idx, and their .sig files with --gpg-sign (without it the old ones go, as ostree does)
+  remote-add        imports the --gpg-import key into a keyring of its own, under $FLATPAK_USER_DIR
+  remote-ls         verifies summary.sig with that keyring
+  install           verifies the .commitmeta of the ref's commit with that keyring
+  build-bundle      writes a tar with the id, content and signature of the commit of an app ref, the --gpg-keys file and the --runtime-repo URL
+  install --bundle  puts the commit of a bundle into $FLATPAK_USER_DIR/repo (a fake-ostree repository) under a remote of its own with the key of the bundle, after verifying the signature with that key
+
+Every call is logged with the value of FLATPAK_USER_DIR. Knobs for the simulation: FAKE_FLATPAK_LEAK copies key material into the repository, FAKE_FLATPAK_BUNDLE_COMMIT puts another commit into the bundle, FAKE_FLATPAK_BUNDLE_KEY another key, FAKE_FLATPAK_BUNDLE_NOSIG leaves the signature out, FAKE_FLATPAK_INSTALL_NO_VERIFY makes install accept a bundle without checking its signature.
+"""
+import hashlib
+import io
+import os
+import subprocess
+import sys
+import tarfile
+import time
+from typing import NoReturn
+
+LOG = os.environ.get("FAKE_FLATPAK_LOG")
+APPSTREAM_REFS = ("appstream/x86_64", "appstream2/x86_64")
+
+
+def die(message: str, code: int = 1) -> NoReturn:
+    print("fake-flatpak: " + message, file=sys.stderr)
+    sys.exit(code)
+
+
+def log(line: str) -> None:
+    if LOG:
+        with open(LOG, "a") as f:
+            f.write("%s [FLATPAK_USER_DIR=%s]\n" % (line, os.environ.get("FLATPAK_USER_DIR", "")))
+            if os.environ.get("GH_TOKEN"):
+                f.write("SAW GH_TOKEN in the environment of flatpak\n")
+
+
+def options(args: list[str]) -> tuple[dict[str, str], list[str]]:
+    opts: dict[str, str] = {}
+    positional: list[str] = []
+    for arg in args:
+        if arg.startswith("--"):
+            key, _, value = arg[2:].partition("=")
+            opts[key] = value
+        elif arg.startswith("-"):
+            continue
+        else:
+            positional.append(arg)
+    return opts, positional
+
+
+def obj(repo: str, commit: str, ext: str) -> str:
+    """Where ostree keeps an object of an archive repository: objects/<first two digits>/<the rest><ext>."""
+    return os.path.join(repo, "objects", commit[:2], commit[2:] + ext)
+
+
+def read(path: str) -> str:
+    with open(path) as f:
+        return f.read().strip()
+
+
+def refs_of(repo: str, prefixes: tuple[str, ...] = ("app/",)) -> list[tuple[str, str]]:
+    base = os.path.join(repo, "refs", "heads")
+    found = []
+    for root, _, files in os.walk(base):
+        for name in files:
+            ref = os.path.relpath(os.path.join(root, name), base)
+            if ref.startswith(prefixes):
+                found.append((ref, read(os.path.join(root, name))))
+    return sorted(found)
+
+
+def add_appstream(repo: str, key: str | None, home: str | None) -> None:
+    """What the real tool does for the appstream refs: a new commit when the data changed, signed with --gpg-sign."""
+    body = "appstream of " + " ".join("%s=%s" % pair for pair in refs_of(repo))
+    for ref in APPSTREAM_REFS:
+        path = os.path.join(repo, "refs", "heads", ref)
+        parent = read(path) if os.path.isfile(path) else "-"
+        if parent != "-":
+            with open(obj(repo, parent, ".commit")) as f:
+                if f.read().split("\n")[1] == body:
+                    continue
+        content = "parent=%s\n%s\nbinding=%s\ndate=%d\nsubject=Update\n" % (parent, body, ref, time.time())
+        commit = hashlib.sha256(content.encode()).hexdigest()  # as in ostree: the id is the checksum of the commit object
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        os.makedirs(os.path.dirname(obj(repo, commit, ".commit")), exist_ok=True)
+        with open(obj(repo, commit, ".commit"), "w") as f:
+            f.write(content)
+        with open(path, "w") as f:
+            f.write(commit + "\n")
+        if key:
+            gpg_sign(key, home, obj(repo, commit, ".commit"), obj(repo, commit, ".commitmeta"))
+
+
+def gpg_sign(key: str, home: str | None, source: str, target: str) -> None:
+    cmd = ["gpg", "--batch", "--yes", "--quiet", "--pinentry-mode", "error", "--local-user", key, "--detach-sign", "-o", target, source]
+    if home:
+        cmd[1:1] = ["--homedir", home]
+    if subprocess.run(cmd).returncode != 0:
+        die("signing %s failed" % source)
+
+
+def gpg_verify(home: str, signature: str, source: str) -> bool:
+    if not os.path.isfile(signature):
+        return False
+    done = subprocess.run(["gpg", "--homedir", home, "--batch", "--status-fd", "1", "--verify", signature, source],
+                          capture_output=True, text=True)
+    return done.returncode == 0 and "[GNUPG:] VALIDSIG" in done.stdout
+
+
+def client_home() -> str:
+    return os.path.join(os.environ["FLATPAK_USER_DIR"], "gnupg")
+
+
+def remote_url(name: str) -> str:
+    return read(os.path.join(os.environ["FLATPAK_USER_DIR"], "remote-" + name))
+
+
+def install_bundle(path: str) -> None:
+    """Like flatpak with a bundle and no remote: a remote named <app>-origin is made in the repository of the installation, with the key of the bundle as its only key."""
+    with tarfile.open(path) as bundle:
+        members = {m.name: bundle.extractfile(m).read() for m in bundle.getmembers()}
+    if "keys.gpg" not in members:
+        die("install: the bundle has no GPG key and there is no remote to verify it with")
+    ref = members["ref"].decode()
+    commit_id = members["commit-id"].decode()
+    if hashlib.sha256(members["commit"]).hexdigest() != commit_id:
+        die("install: the commit of the bundle does not hash to its id")
+    repo = os.path.join(os.environ["FLATPAK_USER_DIR"], "repo")
+    remote = ref.split("/")[1] + "-origin"
+    home = os.path.join(repo, "gk-" + hashlib.sha256(remote.encode()).hexdigest()[:8])  # the keyring name fake-ostree uses for a remote
+    os.makedirs(home, mode=0o700, exist_ok=True)
+    key_file = os.path.join(home, "bundle-key.gpg")
+    with open(key_file, "wb") as f:
+        f.write(members["keys.gpg"])
+    if subprocess.run(["gpg", "--homedir", home, "--batch", "--quiet", "--import", key_file]).returncode != 0:
+        die("install: cannot import the key of the bundle")
+    os.makedirs(os.path.dirname(obj(repo, commit_id, ".commit")), exist_ok=True)
+    with open(obj(repo, commit_id, ".commit"), "wb") as f:
+        f.write(members["commit"])
+    if "commitmeta" in members:
+        with open(obj(repo, commit_id, ".commitmeta"), "wb") as f:
+            f.write(members["commitmeta"])
+    if not os.environ.get("FAKE_FLATPAK_INSTALL_NO_VERIFY") and not gpg_verify(home, obj(repo, commit_id, ".commitmeta"), obj(repo, commit_id, ".commit")):
+        die("install: the commit of the bundle is not signed by the key in the bundle")
+    ref_path = os.path.join(repo, "refs", "remotes", remote, ref)
+    os.makedirs(os.path.dirname(ref_path), exist_ok=True)
+    with open(ref_path, "w") as f:
+        f.write(commit_id + "\n")
+    with open(os.path.join(repo, "remote-" + remote), "w") as f:
+        f.write("file://bundle\n")
+
+
+def main() -> None:
+    args = sys.argv[1:]
+    command, (opts, positional) = args[0], options(args[1:])
+    log(" ".join(args))
+    if command == "build-sign":
+        repo, app_id, branch = positional[0], positional[1], positional[2]
+        ref = "app/%s/%s/%s" % (app_id, opts.get("arch", "x86_64"), branch)
+        path = os.path.join(repo, "refs", "heads", ref)
+        if not os.path.isfile(path):
+            die("build-sign: no ref " + ref)
+        commit = read(path)
+        gpg_sign(opts["gpg-sign"], opts.get("gpg-homedir"), obj(repo, commit, ".commit"), obj(repo, commit, ".commitmeta"))
+    elif command == "build-update-repo":
+        repo = positional[0]
+        if "no-update-appstream" not in opts:
+            add_appstream(repo, opts.get("gpg-sign"), opts.get("gpg-homedir"))
+        leak = os.environ.get("FAKE_FLATPAK_LEAK")  # a tool that copies a secret into the site, to see the check catch it
+        if leak == "stray":  # into a file of its own
+            with open(os.path.join(repo, "leak.txt"), "w") as f:
+                f.write("-----BEGIN PGP PRIVATE KEY BLOCK-----\n")
+        if leak == "link":  # a symbolic link
+            os.symlink("/etc/passwd", os.path.join(repo, "leak-link"))
+        if leak == "inplace":  # over the start of an existing file, which keeps its name and size
+            with open(os.path.join(repo, "config"), "r+") as f:
+                size = len(f.read())
+                f.seek(0)
+                f.write(("-----BEGIN PGP PRIVATE KEY BLOCK-----\n" + " " * size)[:size])
+        for _ref, commit in refs_of(repo):  # flatpak writes xa.reachable beside every head, signed or not (the tool of the CI image)
+            if not os.path.exists(obj(repo, commit, ".commitmeta2")):
+                with open(obj(repo, commit, ".commitmeta2"), "w") as f:
+                    f.write("xa.reachable\n")
+        summary = "".join("%s %s\n" % pair for pair in refs_of(repo, ("app/", "appstream")))
+        if leak == "summary":  # into the summary
+            summary += "-----BEGIN PGP PRIVATE KEY BLOCK-----\n"
+        for name in ("summary", "summary.idx"):
+            with open(os.path.join(repo, name), "w") as f:
+                f.write(summary)
+            if "gpg-sign" in opts:
+                gpg_sign(opts["gpg-sign"], opts.get("gpg-homedir"), os.path.join(repo, name), os.path.join(repo, name + ".sig"))
+            elif os.path.exists(os.path.join(repo, name + ".sig")):
+                os.remove(os.path.join(repo, name + ".sig"))
+    elif command == "remote-add":
+        name, url = positional[0], positional[1]
+        home = client_home()
+        os.makedirs(home, mode=0o700, exist_ok=True)
+        if "gpg-import" in opts:
+            done = subprocess.run(["gpg", "--homedir", home, "--batch", "--quiet", "--import", opts["gpg-import"]])
+            if done.returncode != 0:
+                die("remote-add: cannot import the key")
+        with open(os.path.join(os.environ["FLATPAK_USER_DIR"], "remote-" + name), "w") as f:
+            f.write(url + "\n")
+    elif command == "remote-ls":
+        repo = remote_url(positional[0])
+        if not repo.startswith("file://"):
+            die("remote-ls: only file:// remotes", 99)
+        repo = repo[len("file://"):]
+        if not gpg_verify(client_home(), os.path.join(repo, "summary.sig"), os.path.join(repo, "summary")):
+            die("remote-ls: the summary is not signed by a key of the remote")
+        for ref, _ in refs_of(repo):
+            print(ref)
+    elif command == "install" and "bundle" in opts:
+        install_bundle(positional[0])
+    elif command == "install":
+        repo = remote_url(positional[0])[len("file://"):]
+        ref = positional[1]
+        path = os.path.join(repo, "refs", "heads", ref)
+        if not os.path.isfile(path):
+            die("install: no ref " + ref)
+        commit = read(path)
+        if not gpg_verify(client_home(), obj(repo, commit, ".commitmeta"), obj(repo, commit, ".commit")):
+            die("install: the commit of %s is not signed by a key of the remote" % ref)
+    elif command == "build-bundle":
+        repo, target, app_id, branch = positional[:4]
+        ref = "app/%s/%s/%s" % (app_id, opts.get("arch", "x86_64"), branch)
+        commit = os.environ.get("FAKE_FLATPAK_BUNDLE_COMMIT") or read(os.path.join(repo, "refs", "heads", ref))
+        keys = os.environ.get("FAKE_FLATPAK_BUNDLE_KEY") or opts.get("gpg-keys")
+        members = {"ref": ref.encode(), "commit-id": commit.encode()}
+        with open(obj(repo, commit, ".commit"), "rb") as f:
+            members["commit"] = f.read()
+        if os.path.isfile(obj(repo, commit, ".commitmeta")) and not os.environ.get("FAKE_FLATPAK_BUNDLE_NOSIG"):
+            with open(obj(repo, commit, ".commitmeta"), "rb") as f:
+                members["commitmeta"] = f.read()
+        if keys:
+            with open(keys, "rb") as f:
+                members["keys.gpg"] = f.read()
+        if "runtime-repo" in opts:
+            members["runtime-repo"] = opts["runtime-repo"].encode()
+        with tarfile.open(target, "w") as bundle:
+            for name, data in sorted(members.items()):
+                info = tarfile.TarInfo(name)
+                info.size = len(data)
+                bundle.addfile(info, io.BytesIO(data))
+    else:
+        die("unsupported command: " + command, 99)
+
+
+main()
