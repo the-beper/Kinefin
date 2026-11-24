@@ -19,6 +19,10 @@
 
 #include <QApplication>
 #include <QClipboard>
+#include <QDBusConnection>
+#include <QDBusMessage>
+#include <QDBusReply>
+#include <QDBusUnixFileDescriptor>
 #include <QDateTime>
 #include <QDir>
 #include <QElapsedTimer>
@@ -51,8 +55,14 @@
 
 #include <algorithm>
 #include <array>
+#include <cerrno>
 #include <cmath>
+#include <cstdio>
 #include <functional>
+
+#include <fcntl.h>
+#include <poll.h>
+#include <unistd.h>
 
 using Kinefin::ConnectionController;
 
@@ -1563,6 +1573,69 @@ QQuickItem *buttonLabelled(QQuickItem *root, const QString &label)
             return candidate;
     }
     return nullptr;
+}
+
+// The active window as KWin draws it, title bar, shadow and rounded corners included, at the output's scale: a window cannot draw its own server-side decoration, so build/screenshots.sh runs the documentation shots inside a nested KWin
+QImage kwinActiveWindowShot()
+{
+    int pipeEnds[2];
+    if (pipe2(pipeEnds, O_CLOEXEC) != 0)
+        return {};
+    QDBusMessage answer;
+    {
+        // The message holds a duplicate of the write end: it has to be gone before the read can see the end of the pixels
+        QDBusMessage call = QDBusMessage::createMethodCall(
+            QStringLiteral("org.kde.KWin.ScreenShot2"), QStringLiteral("/org/kde/KWin/ScreenShot2"),
+            QStringLiteral("org.kde.KWin.ScreenShot2"), QStringLiteral("CaptureActiveWindow"));
+        call << QVariantMap{{QStringLiteral("include-decoration"), true},
+                            {QStringLiteral("include-shadow"), true},
+                            {QStringLiteral("native-resolution"), true}}
+             << QVariant::fromValue(QDBusUnixFileDescriptor(pipeEnds[1]));
+        // KWin answers with the size and format first and writes the pixels to the pipe afterwards, so the blocking call cannot fill the pipe
+        answer = QDBusConnection::sessionBus().call(call, QDBus::Block, scaled(10000));
+    }
+    ::close(pipeEnds[1]);
+    const QDBusReply<QVariantMap> reply(answer);
+    QByteArray pixels;
+    if (reply.isValid()) {
+        char buffer[65536];
+        pollfd readable{pipeEnds[0], POLLIN, 0};
+        for (;;) {
+            const int ready = ::poll(&readable, 1, scaled(10000));
+            if (ready < 0 && errno == EINTR)
+                continue;
+            if (ready <= 0)
+                break;
+            const ssize_t n = ::read(pipeEnds[0], buffer, sizeof buffer);
+            if (n < 0 && errno == EINTR)
+                continue;
+            if (n <= 0)
+                break;
+            pixels.append(buffer, n);
+        }
+    } else {
+        std::fprintf(stderr, "KWin screenshot: %s\n", qPrintable(reply.error().message()));
+    }
+    ::close(pipeEnds[0]);
+    const QVariantMap meta = reply.value();
+    const int width = meta.value(QStringLiteral("width")).toInt();
+    const int height = meta.value(QStringLiteral("height")).toInt();
+    const int stride = meta.value(QStringLiteral("stride")).toInt();
+    // KWin sends one of the 32-bit formats (RGBA8888 premultiplied as of KWin 6.8); anything else is refused rather than read with a wrong layout
+    const auto format = QImage::Format(meta.value(QStringLiteral("format")).toInt());
+    const QList<QImage::Format> known{
+        QImage::Format_RGBA8888_Premultiplied, QImage::Format_RGBA8888, QImage::Format_RGBX8888,
+        QImage::Format_ARGB32_Premultiplied,   QImage::Format_ARGB32,   QImage::Format_RGB32};
+    if (!known.contains(format) || width <= 0 || height <= 0 || stride < width * 4
+        || pixels.size() < qsizetype(stride) * height) {
+        std::fprintf(stderr,
+                     "KWin screenshot: unexpected image %dx%d, stride %d, format %d, %lld bytes\n",
+                     width, height, stride, int(format), qlonglong(pixels.size()));
+        return {};
+    }
+    return QImage(reinterpret_cast<const uchar *>(pixels.constData()), width, height, stride,
+                  format)
+        .copy();
 }
 
 // Saves the fixture server with a session (the list holds the servers of saved users), then switches back to the Servers page with it listed
@@ -14119,7 +14192,7 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(ui.window->cursor().shape() != Qt::IBeamCursor);
     }
 
-    // KINEFIN_DOC_SHOTS=<directory inside the checkout>: renders the pages the documentation shows against a library of the open films of Blender (DocScene.h, artwork in tests/assets/doc) and saves one PNG per page; unset, it skips. build/screenshots.sh runs it on a virtual X server with Mesa's software GL, since the offscreen platform draws neither the Kirigami shaders (icons of the OSD, portraits) nor ShadowedRectangle
+    // KINEFIN_DOC_SHOTS=<directory inside the checkout>: renders the pages the documentation and the software centres show against a library of the open films of Blender (DocScene.h, artwork in tests/assets/doc) and saves one PNG per page; unset, it skips. build/screenshots.sh runs it on the Wayland platform inside a nested KWin, which draws the window decoration and shadow the shots take from it; on any other platform the shot is the window's own content
     void documentationScreenshotsWhenRequested()
     {
         const QString shots = qEnvironmentVariable("KINEFIN_DOC_SHOTS");
@@ -14128,6 +14201,12 @@ class TestUiPages : public QObject {
         QDir directory(shots);
         QVERIFY(QDir().mkpath(directory.absolutePath()));
         using namespace DocScene;
+        const bool fromKWin = QGuiApplication::platformName() == QLatin1String("wayland");
+        // The app id of a Wayland window is the desktop file name, from which KWin takes the icon of the title bar
+        QGuiApplication::setDesktopFileName(QStringLiteral("io.github.the_beper.Kinefin"));
+        // Flathub asks for a window of at most 1000 by 700: a software centre shrinks the picture, and a smaller window keeps its text readable
+        const int shotWidth = 1000;
+        const int shotHeight = 625;
         Ui ui(m_home->path());
         ui.serveMovie();
         ui.serveShow();
@@ -14300,18 +14379,26 @@ class TestUiPages : public QObject {
         PlayerStub stub;
         QVERIFY(ui.engine.rootObjects().constFirst()->setProperty(
             "player", QVariant::fromValue<QObject *>(&stub)));
-        ui.window->resize(1280, 960);
+        ui.window->resize(shotWidth, shotHeight);
         QVERIFY(qWaitForScaled(
-            [&] { return ui.window->width() == 1280 && ui.window->height() == 960; }, 3000));
+            [&] { return ui.window->width() == shotWidth && ui.window->height() == shotHeight; },
+            3000));
         QVERIFY(ui.signIn());
         // An item of no size that takes the keyboard focus, so that no row of a list shows as current
         auto *focusSink = new QQuickItem(ui.window->contentItem());
+        // Null: the pointer leaves the window, so a page shows nothing hovered; the player keeps it at the top, where it shows the controls and touches none
+        QPoint pointer;
         const auto shot = [&](const QString &name) {
             // No pointer over a card and no focused row: a page as it is when nothing is touched
-            QTest::mouseMove(ui.window, QPoint(680, 21));
+            if (pointer.isNull()) {
+                QEvent leave(QEvent::Leave);
+                QCoreApplication::sendEvent(ui.window, &leave);
+            } else {
+                QTest::mouseMove(ui.window, pointer);
+            }
             focusSink->forceActiveFocus(Qt::OtherFocusReason);
             QTest::qWait(1200);
-            const QImage image = ui.window->grabWindow();
+            const QImage image = fromKWin ? kwinActiveWindowShot() : ui.window->grabWindow();
             QVERIFY2(!image.isNull(), qPrintable(name));
             QVERIFY2(image.save(directory.filePath(name + QStringLiteral(".png")), "PNG", 0),
                      qPrintable(name));
@@ -14334,12 +14421,7 @@ class TestUiPages : public QObject {
         ui.clickCenter(card);
         QTRY_VERIFY(ui.item(QStringLiteral("itemDetailsPage")) != nullptr);
         QTRY_VERIFY(ui.showsText(QStringLiteral("Cast and Crew")));
-        // Taller, so that the names under the portraits of the cast are in the picture
-        ui.window->resize(1280, 1040);
-        QVERIFY(qWaitForScaled([&] { return ui.window->height() == 1040; }, 3000));
         shot(QStringLiteral("details"));
-        ui.window->resize(1280, 960);
-        QVERIFY(qWaitForScaled([&] { return ui.window->height() == 960; }, 3000));
         // The shows: the grid asks for the same listing, now of the series
         QVERIFY(ui.clickTab(QStringLiteral("Home")));
         QTRY_VERIFY(ui.item(QStringLiteral("libraryCard_") + kSeries) != nullptr);
@@ -14382,8 +14464,7 @@ class TestUiPages : public QObject {
                                track(5, QStringLiteral("English (forced)"), false)};
         stub.chapters = {};
         stub.segmentBands = {};
-        ui.window->resize(1280, 720);
-        QVERIFY(qWaitForScaled([&] { return ui.window->height() == 720; }, 3000));
+        pointer = QPoint(shotWidth / 2, 21);
         QQuickItem *player = openPlayer(ui, stub);
         QVERIFY(player);
         player->findChild<QObject *>(QStringLiteral("playerChromeTimer"))
