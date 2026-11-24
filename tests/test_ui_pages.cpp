@@ -13072,6 +13072,9 @@ class TestUiPages : public QObject {
         QQuickItem *grid = ui.item(QStringLiteral("libraryGrid"));
         QVERIFY(grid);
         QTRY_VERIFY(grid->hasActiveFocus());
+        // The stick only scrolls a grid that has more than a screen to show: the steps must wait for the whole library
+        QTRY_VERIFY(grid->property("count").toInt() == 30
+                    && grid->property("contentHeight").toReal() > grid->height());
         const int index = grid->property("currentIndex").toInt();
         const qreal before = grid->property("contentY").toReal();
         Kinefin::RemoteInputServer input(QString(), QStringLiteral("test"));
