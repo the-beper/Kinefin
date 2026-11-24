@@ -5,9 +5,10 @@ FROM registry.fedoraproject.org/fedora:45
 #   - Gamepad input is SDL3 (`SDL3-devel`, 3.4.x); SDL2 in Fedora is a compat shim over SDL3.
 #   - `clang-tools-extra` provides the clang-format used by the .clang-format style gate in check.sh.
 #   - `ccache` is picked up by check.sh when present (CI keeps its cache between runs).
+#   - `diffutils` (`cmp`, `diff`) is used by the release scripts and their simulation; the base image does not have it.
 # - There is no mpvqt package: dev builds compile the pinned mpvqt tarball as a CMake subproject (VERSION pins in the root CMakeLists.txt), release builds the same from the Flathub manifest.
 RUN dnf install -y --setopt=install_weak_deps=False \
-        gcc gcc-c++ make cmake ninja-build pkgconf-pkg-config git ccache \
+        gcc gcc-c++ make cmake ninja-build pkgconf-pkg-config git ccache diffutils \
         clang-tools-extra cppcheck reuse \
         dbus-devel dbus-daemon libxml2 desktop-file-utils appstream gettext curl \
         mpv-devel SDL3-devel \
