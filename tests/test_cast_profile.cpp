@@ -59,7 +59,7 @@ QJsonObject audioLimits()
 QJsonObject transcode()
 {
     return {{QStringLiteral("Type"), QStringLiteral("Video")},
-            {QStringLiteral("Container"), QStringLiteral("mp4")},
+            {QStringLiteral("Container"), QStringLiteral("mkv")},
             {QStringLiteral("Protocol"), QStringLiteral("http")},
             {QStringLiteral("Context"), QStringLiteral("Streaming")},
             {QStringLiteral("VideoCodec"), QStringLiteral("h264")},
@@ -310,11 +310,11 @@ class TestCastProfile : public QObject {
         QTest::newRow("avi") << QStringLiteral("avi") << false << QString();
         QTest::newRow("unrecognised list") << QStringLiteral("mov,m4a") << false << QString();
         QTest::newRow("empty") << QString() << false << QString();
-        QTest::newRow("transcode mp4") << QStringLiteral("mp4") << true << mp4;
-        QTest::newRow("transcode mkv") << QStringLiteral("mkv") << true << mp4;
-        QTest::newRow("transcode webm") << QStringLiteral("webm") << true << mp4;
-        QTest::newRow("transcode ts") << QStringLiteral("ts") << true << mp4;
-        QTest::newRow("transcode empty") << QString() << true << mp4;
+        QTest::newRow("transcode mp4") << QStringLiteral("mp4") << true << mkv;
+        QTest::newRow("transcode mkv") << QStringLiteral("mkv") << true << mkv;
+        QTest::newRow("transcode webm") << QStringLiteral("webm") << true << mkv;
+        QTest::newRow("transcode ts") << QStringLiteral("ts") << true << mkv;
+        QTest::newRow("transcode empty") << QString() << true << mkv;
     }
     void castMimeForAContainer()
     {

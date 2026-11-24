@@ -103,7 +103,18 @@ Kirigami.ApplicationWindow {
     // The bar with the menus and the Home tab; it spans the window above the pages
     header: ShellHeader {
         id: shellHeader
-        visible: !window.playbackPageShowing && !window.startupVisible
+        // Its height resizes the page row, and Kirigami jumps to the end of a slide on a resize: it follows the player page only once the row settled (headerShown), then grows or shrinks and fades
+        property real reveal: window.headerShown ? 1 : 0
+        Behavior on reveal {
+            NumberAnimation {
+                duration: Kirigami.Units.shortDuration
+                easing.type: Easing.OutCubic
+            }
+        }
+        height: Math.round(implicitHeight * reveal)
+        opacity: reveal
+        clip: reveal < 1
+        visible: reveal > 0 && !window.startupVisible
 
         shell: window
     }
@@ -218,18 +229,32 @@ Kirigami.ApplicationWindow {
             popTo(target, true);
     }
 
-    // A back that only moves the index (Esc, the header button, the toolbar back button) leaves the
-    // page it leaves in the stack, hidden above the current one and still counted, with its models
-    // alive. Kirigami's own popHiddenPages option took such pages once the row settled, but it also
-    // ran while a push was still placing its page mid-slide, and popped the page it had just
-    // received. So the leftovers are taken here, deferred to the next turn of the event loop: by
-    // then every push has landed and every unwind has taken the pages it was removing, and pages
-    // above the current index can only be leftovers a back left behind
-    function popLeftoverPages() {
-        Qt.callLater(() => {
-            while (pageStack.currentIndex >= 0 && pageStack.currentIndex < pageStack.depth - 1)
-                pageStack.pop(pageStack.get(pageStack.currentIndex));
-        });
+    // A back that only moves the index (Esc, the header button, the toolbar back button) leaves the page it leaves in the stack, hidden above the current one and still counted, with its models alive. Kirigami's own popHiddenPages option took such pages once the row settled, but it also ran while a push was still placing its page mid-slide, and popped the page it had just received. So the leftovers are taken here, at least a turn of the event loop later: by then every push has landed and every unwind has taken the pages it was removing, and pages above the current index can only be leftovers a back left behind. They go only once the row stopped moving, and the header follows the page in front only then: a page taken mid-slide vanishes from the crossfade that still shows it, and the header's resize ends the slide. The first check always waits once more (Kirigami starts a slide only at the next polish, which a busy turn can delay past the timer), later ones wait while the row moves, and the eighth settles whatever the row does, so a slide that never reports its end cannot keep the header or the leftovers
+    property int pageRowSettleTries: 0
+    function settlePageRow() {
+        ++pageRowSettleTries;
+        if (pageRowSettleTries < 8 && (pageRowSettleTries === 1 || pageStack.columnView.moving)) {
+            pageRowSettle.restart();
+            return;
+        }
+        headerShown = !playbackPageShowing;
+        let popped = false;
+        while (pageStack.currentIndex >= 0 && pageStack.currentIndex < pageStack.depth - 1) {
+            pageStack.pop(pageStack.get(pageStack.currentIndex));
+            popped = true;
+        }
+        // Kirigami hands the keyboard to its column row when it takes a page out: the page in front, which already had it, takes it back (a dialog, a popup or the header keep theirs)
+        if (popped && (!activeFocusItem || (focusIsIn(pageStack.columnView) && !focusIsIn(pageStack.currentItem))))
+            Qt.callLater(focusCurrentPage);
+    }
+    function settlePageRowLater() {
+        pageRowSettleTries = 0;
+        pageRowSettle.restart();
+    }
+    Timer {
+        id: pageRowSettle
+        interval: Math.max(1, window.pageStack.columnView.scrollDuration)
+        onTriggered: window.settlePageRow()
     }
 
     // Esc ends a running autoscroll and nothing more, else it goes back like Alt+Left except on the first page; an open dialog takes the key first
@@ -376,8 +401,8 @@ Kirigami.ApplicationWindow {
             // A page opened above the page still waiting to fade in shows at once
             if (window.tabMotionQueued && window.pageStack.currentIndex > window.tabMotionIndex)
                 window.finishTabMotion();
-            // A page a Back left hidden above the current one is taken once the stack settles
-            window.popLeftoverPages();
+            // A page a Back left hidden above the current one is taken, and the header follows the page in front, once the stack settles
+            window.settlePageRowLater();
             // The search page leaving the stack takes its term with it: the header box empties with the page.
             // A page Back just left stays above the current one until the slide ends, and is not a page in the stack any more
             if (window.searchPageIndex() < 0 && window.connection.search.term.length > 0)
@@ -541,6 +566,8 @@ Kirigami.ApplicationWindow {
     }
 
     readonly property bool playbackPageShowing: pageStack.currentItem?.objectName === "playerPage"
+    // Whether the header shows: off while the player page is in front, switched by settlePageRow() once the page row stopped moving
+    property bool headerShown: true
 
     // How the playback shows: "none" while nothing plays, "full" while the player page is in front, "mini" while it goes on under another page, "pip" while it shows in its own window. The C++ side knows nothing of it
     property string playbackMode: "none"
@@ -576,6 +603,43 @@ Kirigami.ApplicationWindow {
                     return;
                 window.showPassiveNotification(i18n("The video could not be shown in its own window"));
                 window.expandPlayer();
+            }
+
+            // Moved into another window (picture in picture and back) the item has no picture until its new render context is ready and mpv drew into it: black covers it until `ready`, waits a moment for the player to give the new context its video track, then fades out, with a fallback in case `ready` never comes
+            readonly property var hostWindow: Window.window
+            onHostWindowChanged: {
+                windowCoverFade.stop();
+                windowCover.opacity = 1;
+                windowCoverFallback.restart();
+            }
+            onReady: {
+                windowCoverFallback.stop();
+                windowCoverFade.restart();
+            }
+            Rectangle {
+                id: windowCover
+                anchors.fill: parent
+                color: "black"
+                opacity: 0
+                visible: opacity > 0
+            }
+            SequentialAnimation {
+                id: windowCoverFade
+                PauseAnimation {
+                    duration: Kirigami.Units.longDuration
+                }
+                NumberAnimation {
+                    target: windowCover
+                    property: "opacity"
+                    to: 0
+                    duration: Kirigami.Units.shortDuration
+                    easing.type: Easing.OutCubic
+                }
+            }
+            Timer {
+                id: windowCoverFallback
+                interval: Kirigami.Units.humanMoment
+                onTriggered: windowCoverFade.restart()
             }
         }
         onLoaded: window.placeVideo()
@@ -763,7 +827,7 @@ Kirigami.ApplicationWindow {
         }
     }
 
-    // The player page in front gives way to the mini player, or ends the playback when there is nothing playing (an error shown, an item that ended); Home asks for its rows again once the page is gone, since positions change while something plays
+    // The player page in front gives way to the mini player, or ends the playback when there is nothing playing (an error shown, an item that ended); Home asks for its rows again once the playback is over, since positions change while something plays (a playback that goes on in the mini player or picture in picture reloads them when it ends)
     onPlaybackPageShowingChanged: {
         if (playbackPageShowing) {
             if (playbackMode === "pip")
@@ -779,10 +843,10 @@ Kirigami.ApplicationWindow {
                 endPlayback();
         }
         restoreVisibilityAfterPlayer();
-        if (signedIn) {
+        if (signedIn && playbackMode === "none") {
             connection.reloadHome();
             // The details page under the player has not seen the position or the watched state change: the stop event also updates it in place, this covers a socket that was down. Other pages follow the same event in place, a reload would reset their scroll
-            if (playbackMode === "none" && pageStack.currentItem?.objectName === "itemDetailsPage")
+            if (pageStack.currentItem?.objectName === "itemDetailsPage")
                 pageStack.currentItem.refreshPage();
         }
     }

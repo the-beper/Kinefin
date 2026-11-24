@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Kinefin contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
-// The home rows against the fake server: one row per kind and movie or series library on its own listing channel, hidden when empty, failures and retries per row, episodes listed under their series, wide images for landscape rows and untrusted entries
+// The home rows against the fake server: one row per kind and movie or series library on its own listing channel, hidden when empty, failures and retries per row, reloads that keep the rows until their replies, episodes listed under their series, wide images for landscape rows and untrusted entries
 #include "FakeJellyfin.h"
 
 #include "api/JellyfinClient.h"
@@ -13,6 +13,8 @@
 #include <QJsonArray>
 #include <QSignalSpy>
 #include <QtTest/QtTest>
+
+#include <algorithm>
 
 using Kinefin::HomeRowsModel;
 using Kinefin::ItemRowModel;
@@ -528,14 +530,83 @@ class TestHomeRowsModel : public QObject {
         QTRY_VERIFY(f.allSettled());
         f.rows.reload();
         QCOMPARE(f.rows.rowCount(), 4);
-        QCOMPARE(f.status(0), int(HomeRowsModel::Loading));
-        QTRY_VERIFY(f.allSettled());
-        QCOMPARE(f.server.listingRoutes.value(QStringLiteral("Resume")).size(), 2);
+        QCOMPARE(f.status(0), int(HomeRowsModel::Ready));
+        QTRY_COMPARE(f.server.listingRoutes.value(QStringLiteral("Resume")).size(), 2);
         f.client.disconnectFromServer();
         QCOMPARE(f.rows.rowCount(), 0);
         // Not signed in: a load has nothing to ask
         f.rows.load(libraries());
         QTRY_VERIFY(f.status(0) == int(HomeRowsModel::Failed));
+    }
+
+    // A reload with the same rows keeps every row ready with its items until the reply: no reset, no loading state, the same item models, and items with the same ids are updated in place
+    void aReloadKeepsTheRowsUntilTheirRepliesReplaceThem()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        QAbstractItemModelTester tester(&f.rows);
+        f.rows.load(libraries());
+        QTRY_VERIFY(f.allSettled());
+        ItemRowModel *resume = f.items(0);
+        QCOMPARE(resume->count(), 2);
+        QSignalSpy rowsReset(&f.rows, &QAbstractItemModel::modelReset);
+        QSignalSpy itemsReset(resume, &QAbstractItemModel::modelReset);
+        QSignalSpy itemsChanged(resume, &QAbstractItemModel::dataChanged);
+        QSignalSpy failed(&f.client, &Kinefin::JellyfinClient::listingFailed);
+
+        // In flight: the row still shows what it had
+        f.server.heldFamilies.insert(QStringLiteral("Resume"));
+        f.rows.reload();
+        QTRY_COMPARE(f.server.listingRoutes.value(QStringLiteral("Resume")).size(), 2);
+        QCOMPARE(f.status(0), int(HomeRowsModel::Ready));
+        QVERIFY(f.shown(0));
+        QCOMPARE(f.items(0), resume);
+        QCOMPARE(resume->count(), 2);
+
+        // The reply replaces the items in the same model
+        f.server.heldFamilies.clear();
+        const QJsonObject one{
+            {QStringLiteral("Id"), QStringLiteral("f0e1d2c3b4a5968778695a4b3c2d1e0f")},
+            {QStringLiteral("Name"), QStringLiteral("One")}};
+        f.server.listingRawBody.insert(QStringLiteral("Resume"), Fixture::envelope({one}));
+        f.rows.reload();
+        QTRY_COMPARE(resume->count(), 1);
+        QCOMPARE(f.status(0), int(HomeRowsModel::Ready));
+        QCOMPARE(f.rows.data(f.rows.index(0), HomeRowsModel::CountRole).toInt(), 1);
+        QCOMPARE(itemsReset.size(), 1);
+
+        // The same item again, with another name: updated in place
+        QJsonObject renamed = one;
+        renamed.insert(QStringLiteral("Name"), QStringLiteral("Renamed"));
+        f.server.listingRawBody.insert(QStringLiteral("Resume"), Fixture::envelope({renamed}));
+        itemsChanged.clear();
+        f.rows.reload();
+        QTRY_COMPARE(resume->data(resume->index(0), ItemRowModel::NameRole).toString(),
+                     QStringLiteral("Renamed"));
+        QVERIFY(!itemsChanged.isEmpty());
+        QCOMPARE(itemsReset.size(), 1);
+
+        // A refresh that fails keeps the items
+        f.server.listingStatus.insert(QStringLiteral("Resume"), 500);
+        f.rows.reload();
+        QTRY_VERIFY(!failed.isEmpty());
+        QCOMPARE(f.status(0), int(HomeRowsModel::Ready));
+        QCOMPARE(resume->count(), 1);
+        QCOMPARE(f.items(0), resume);
+
+        // A refresh that empties the row hides it, without a reset of the rows
+        f.server.listingStatus.remove(QStringLiteral("Resume"));
+        f.server.listingRawBody.insert(QStringLiteral("Resume"), Fixture::envelope({}));
+        QSignalSpy rowsChanged(&f.rows, &QAbstractItemModel::dataChanged);
+        f.rows.reload();
+        QTRY_COMPARE(resume->count(), 0);
+        QVERIFY(!f.shown(0));
+        QCOMPARE(f.status(0), int(HomeRowsModel::Ready));
+        QVERIFY(
+            std::any_of(rowsChanged.cbegin(), rowsChanged.cend(), [](const QList<QVariant> &args) {
+                return args.at(0).toModelIndex().row() == 0;
+            }));
+        QCOMPARE(rowsReset.size(), 0);
     }
 
     // The played and the progress signals of a refresh of user data come in bursts: the rows reload once, and a position moves Continue Watching too

@@ -33,6 +33,8 @@ constexpr qsizetype kMaxSessionIdChars = 256;
 constexpr qsizetype kMaxTitleChars = 512;
 constexpr qsizetype kMaxTrackNameChars = 128;
 constexpr qsizetype kMaxLanguageChars = 35;
+// The device's state names are short; a longer one is cut in the log
+constexpr qsizetype kMaxLoggedStatusChars = 32;
 constexpr int kReconnectSearchMs = 3000;
 // The channel is aborted this long after its CLOSE frames were written, so that the peer reads them first
 constexpr int kCloseGraceMs = 250;
@@ -232,6 +234,7 @@ bool CastSender::load(const CastLoad &request)
     m_loadStartSec = request.direct ? static_cast<double>(request.startMs) / 1000.0 : 0.0;
     m_rate = 1.0;
     m_started = false;
+    m_loggedStatus.clear();
     m_transport.reset();
     m_sessionId.clear();
     m_transportId.clear();
@@ -843,6 +846,7 @@ void CastSender::handleEntry(const QJsonObject &entry, quint32 requestId)
             return;
         adoptSession(id);
     }
+    logStatus(entry, state, reason);
 
     if (reply && !idle)
         m_loadInFlight = false;
@@ -863,6 +867,22 @@ void CastSender::handleEntry(const QJsonObject &entry, quint32 requestId)
         applyPosition(entry);
         setTransport(Transport::Paused);
     }
+}
+
+// Once per change of state or idle reason of our session, with the device's own duration of the stream at that moment (a FINISHED long before the item's end then shows how much the device had fetched)
+void CastSender::logStatus(const QJsonObject &entry, const QString &state, const QString &reason)
+{
+    const QString status =
+        state.left(kMaxLoggedStatusChars) + QLatin1Char('/') + reason.left(kMaxLoggedStatusChars);
+    if (status == m_loggedStatus)
+        return;
+    m_loggedStatus = status;
+    const QJsonValue duration =
+        entry.value(QLatin1String("media")).toObject().value(QLatin1String("duration"));
+    qCDebug(senderLog).nospace() << "media status " << status << " at "
+                                 << entry.value(QLatin1String("currentTime")).toDouble(-1)
+                                 << " s, device duration "
+                                 << (duration.isDouble() ? duration.toDouble() : -1.0) << " s";
 }
 
 void CastSender::handleIdle(const QString &reason, bool loading)
@@ -1047,6 +1067,7 @@ bool CastSender::reload(const QUrl &url, qint64 startMs, const QUrl &subtitleUrl
     m_mediaSessionId = 0;
     m_phase = Phase::Loading;
     m_started = false;
+    m_loggedStatus.clear();
     m_transport.reset();
     m_offsetMs = startMs;
     m_baseMs = startMs;

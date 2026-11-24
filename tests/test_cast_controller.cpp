@@ -470,7 +470,7 @@ class TestCastController : public QObject {
         QCOMPARE(controller.mimeFor(cast, mkv, false), Kinefin::castMime(mkv, false));
         QCOMPARE(controller.mimeFor(cast, mkv, false), QStringLiteral("video/x-matroska"));
         QCOMPARE(controller.mimeFor(cast, mkv, true), Kinefin::castMime(mkv, true));
-        QCOMPARE(controller.mimeFor(cast, mkv, true), QStringLiteral("video/mp4"));
+        QCOMPARE(controller.mimeFor(cast, mkv, true), QStringLiteral("video/x-matroska"));
         QCOMPARE(controller.mimeFor(cast, avi, false), Kinefin::castMime(avi, false));
         QVERIFY(controller.mimeFor(cast, avi, false).isEmpty());
 

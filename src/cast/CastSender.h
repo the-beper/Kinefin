@@ -151,6 +151,7 @@ class CastSender final : public CastRenderer {
     void onMediaMessage(const QJsonObject &json);
     void handleMediaStatus(const QJsonObject &json);
     void handleEntry(const QJsonObject &entry, quint32 requestId);
+    void logStatus(const QJsonObject &entry, const QString &state, const QString &reason);
     void handleIdle(const QString &reason, bool loading);
     void handlePlaying(const QJsonObject &entry);
     void adoptSession(qint64 id);
@@ -228,6 +229,8 @@ class CastSender final : public CastRenderer {
     double m_rate = 1.0;
     // PLAYING with a moving position or PAUSED seen since the load
     bool m_started = false;
+    // The state and idle reason of the last media status logged: a buffering device sends several statuses a second
+    QString m_loggedStatus;
 
     QString m_sessionId;
     QString m_transportId;

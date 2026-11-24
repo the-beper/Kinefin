@@ -50,7 +50,7 @@ class HomeRowsModel final : public QAbstractListModel {
     void load(const QVariantList &libraries, bool unplayedOnly = false);
     // Turns the Favorites row (right after Next Up) on or off, off by default: while off no request is made for it. Switching with the rows loaded adds the row and requests it, or removes it, and leaves the other rows alone
     void setFavoritesEnabled(bool enabled);
-    // Loads everything again for the libraries of the last load()
+    // Loads everything again for the libraries of the last load(); when the rows stay the same, a ready row keeps its items and status until its reply replaces them (a failed refresh keeps them too) and the model is not reset
     Q_INVOKABLE void reload();
     // Asks for one failed row again
     Q_INVOKABLE void retry(int row);
@@ -68,8 +68,12 @@ class HomeRowsModel final : public QAbstractListModel {
         Status status = Idle;
         int channel = FixedChannel;
         ItemRowModel *items = nullptr;
+        // A ready row asked again: it stays Ready until the reply
+        bool refreshing = false;
     };
 
+    bool sameLayout(const std::vector<Row> &rows) const;
+    ItemRowModel *itemsFor(Kind kind);
     Row favoritesRow();
     void request(int row);
     void deliver(Kind kind, int channel, const QJsonArray &items);

@@ -7,6 +7,9 @@
 #include <QDate>
 #include <QMap>
 
+#include <algorithm>
+#include <utility>
+
 namespace Kinefin {
 namespace {
 bool hasRecentlyAdded(const QString &collectionType)
@@ -59,11 +62,10 @@ void HomeRowsModel::load(const QVariantList &libraries, bool unplayedOnly)
 void HomeRowsModel::reload()
 {
     std::vector<Row> rows;
-    rows.push_back(
-        {ContinueWatching, {}, {}, Idle, FixedChannel, new ItemRowModel(m_client, true, this)});
-    rows.push_back({NextUp, {}, {}, Idle, FixedChannel, new ItemRowModel(m_client, true, this)});
+    rows.push_back({ContinueWatching, {}, {}, Idle, FixedChannel, nullptr, false});
+    rows.push_back({NextUp, {}, {}, Idle, FixedChannel, nullptr, false});
     if (m_favorites)
-        rows.push_back(favoritesRow());
+        rows.push_back({Favorites, {}, {}, Idle, FavoritesChannel, nullptr, false});
     else if (m_client)
         m_client->releaseListingChannel(FavoritesChannel);
     int index = 0;
@@ -73,9 +75,16 @@ void HomeRowsModel::reload()
         if (!hasRecentlyAdded(library.value(QStringLiteral("collectionType")).toString()))
             continue;
         rows.push_back({RecentlyAdded, id, library.value(QStringLiteral("name")).toString(), Idle,
-                        FirstLatestChannel + index++,
-                        new ItemRowModel(m_client, false, this, false)});
+                        FirstLatestChannel + index++, nullptr, false});
     }
+    // The same rows are asked again in place: each keeps what it shows until its reply replaces it, so a refresh after a playback neither rebuilds the page nor shows the loading state
+    if (sameLayout(rows)) {
+        for (int row = 0; row < int(m_rows.size()); ++row)
+            request(row);
+        return;
+    }
+    for (Row &row : rows)
+        row.items = itemsFor(row.kind);
     // One reset swaps the rows; the old models go after it. A late reply of the previous load finds its channel re-requested (the client aborts the old request when a new one takes the channel) or no row at all
     beginResetModel();
     std::vector<Row> old = std::move(m_rows);
@@ -87,9 +96,32 @@ void HomeRowsModel::reload()
         request(row);
 }
 
+bool HomeRowsModel::sameLayout(const std::vector<Row> &rows) const
+{
+    return std::equal(rows.begin(), rows.end(), m_rows.begin(), m_rows.end(),
+                      [](const Row &a, const Row &b) {
+                          return a.kind == b.kind && a.channel == b.channel
+                                 && a.libraryId == b.libraryId && a.libraryName == b.libraryName;
+                      });
+}
+
+ItemRowModel *HomeRowsModel::itemsFor(Kind kind)
+{
+    switch (kind) {
+    case ContinueWatching:
+    case NextUp:
+        return new ItemRowModel(m_client, true, this);
+    case Favorites:
+        return new ItemRowModel(m_client, false, this);
+    case RecentlyAdded:
+        break;
+    }
+    return new ItemRowModel(m_client, false, this, false);
+}
+
 HomeRowsModel::Row HomeRowsModel::favoritesRow()
 {
-    return {Favorites, {}, {}, Idle, FavoritesChannel, new ItemRowModel(m_client, false, this)};
+    return {Favorites, {}, {}, Idle, FavoritesChannel, itemsFor(Favorites), false};
 }
 
 void HomeRowsModel::setFavoritesEnabled(bool enabled)
@@ -157,7 +189,11 @@ void HomeRowsModel::request(int row)
     const Kind kind = m_rows[size_t(row)].kind;
     const int channel = m_rows[size_t(row)].channel;
     const QString libraryId = m_rows[size_t(row)].libraryId;
-    setStatus(row, Loading);
+    const bool refreshing = m_rows[size_t(row)].status == Ready;
+    if (refreshing)
+        m_rows[size_t(row)].refreshing = true;
+    else
+        setStatus(row, Loading);
     bool started = false;
     if (m_client) {
         switch (kind) {
@@ -191,7 +227,11 @@ void HomeRowsModel::request(int row)
             break;
         }
     }
-    if (!started)
+    if (started)
+        return;
+    if (refreshing)
+        m_rows[size_t(row)].refreshing = false;
+    else
         setStatus(row, Failed);
 }
 
@@ -207,10 +247,19 @@ int HomeRowsModel::rowFor(Kind kind, int channel) const
 void HomeRowsModel::deliver(Kind kind, int channel, const QJsonArray &items)
 {
     const int row = rowFor(kind, channel);
-    if (row < 0 || m_rows[size_t(row)].status != Loading)
+    if (row < 0)
         return;
-    m_rows[size_t(row)].items->setItems(items);
-    setStatus(row, Ready);
+    Row &entry = m_rows[size_t(row)];
+    if (entry.status != Loading && !entry.refreshing)
+        return;
+    const bool refreshed = std::exchange(entry.refreshing, false);
+    entry.items->setItems(items);
+    if (!refreshed) {
+        setStatus(row, Ready);
+        return;
+    }
+    const QModelIndex changed = index(row);
+    Q_EMIT dataChanged(changed, changed, {CountRole, ShownRole});
 }
 
 void HomeRowsModel::fail(const QString &family, int channel)
@@ -227,7 +276,12 @@ void HomeRowsModel::fail(const QString &family, int channel)
     else
         return;
     const int row = rowFor(kind, channel);
-    if (row >= 0 && m_rows[size_t(row)].status == Loading)
+    if (row < 0)
+        return;
+    // A refresh that fails leaves the row with what it showed
+    if (std::exchange(m_rows[size_t(row)].refreshing, false))
+        return;
+    if (m_rows[size_t(row)].status == Loading)
         setStatus(row, Failed);
 }
 

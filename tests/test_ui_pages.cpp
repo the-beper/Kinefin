@@ -2837,7 +2837,7 @@ bool revealCard(const Ui &ui, QQuickItem *card)
 }
 
 namespace {
-// Plays the fixture movie through the shell on a stub player; the player page once it is in front and its focus is set, or null. The stub must outlive the window, so it is declared before the Ui
+// Plays the fixture movie through the shell on a stub player; the player page once it is in front, its focus is set and the header has gone (it goes once the slide settled), or null. The stub must outlive the window, so it is declared before the Ui
 QQuickItem *openPlayer(Ui &ui, PlayerStub &stub)
 {
     QObject *root = ui.engine.rootObjects().constFirst();
@@ -2851,7 +2851,8 @@ QQuickItem *openPlayer(Ui &ui, PlayerStub &stub)
     const bool ready = qWaitForScaled([&] {
         page = ui.currentDetails();
         return page && page->objectName() == QStringLiteral("playerPage")
-               && page->property("isShowing").toBool() && ui.window->activeFocusItem() == page;
+               && page->property("isShowing").toBool() && ui.window->activeFocusItem() == page
+               && !ui.shellHeader()->isVisible();
     });
     return ready ? page : nullptr;
 }
@@ -18318,6 +18319,42 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(!mini->isVisible());
         QTRY_VERIFY(ui.item(QStringLiteral("videoRenderer")) == nullptr);
         QCOMPARE(ui.window->property("playbackMode").toString(), QStringLiteral("none"));
+    }
+
+    void theHeaderFollowsThePlayerPageOnceTheRowSettled()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *header = ui.shellHeader();
+        QVERIFY(header);
+        QTRY_VERIFY(header->isVisible());
+        const int depth = ui.stackDepth();
+        // openPlayer returns once the header has gone, so the player page has the whole window
+        QQuickItem *page = openPlayer(ui, stub);
+        QVERIFY(page);
+        QCOMPARE(header->height(), 0.0);
+        QTRY_COMPARE(page->mapToScene(QPointF(0, 0)).y(), 0.0);
+        // Back under the mini player: the header comes back whole, the player page leaves the stack and Home keeps the keyboard
+        QVERIFY(chooseShowMiniPlayer(ui));
+        QTRY_VERIFY(header->isVisible() && header->opacity() == 1.0
+                    && qAbs(header->height() - header->implicitHeight()) < 0.5);
+        QTRY_COMPARE(ui.stackDepth(), depth);
+        QQuickItem *home = ui.currentDetails();
+        QCOMPARE(home->objectName(), QStringLiteral("homePage"));
+        QTRY_VERIFY(ui.window->activeFocusItem()
+                    && (ui.window->activeFocusItem() == home
+                        || home->isAncestorOf(ui.window->activeFocusItem())));
+        // Expanded again and left at once, before the row settled: the header ends where the page in front wants it
+        QVERIFY(QMetaObject::invokeMethod(ui.window, "showPlayerPage"));
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("playerPage"));
+        QVERIFY(QMetaObject::invokeMethod(ui.window, "escapeBack"));
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("homePage"));
+        QTRY_COMPARE(ui.stackDepth(), depth);
+        QTRY_VERIFY(header->isVisible() && header->opacity() == 1.0
+                    && qAbs(header->height() - header->implicitHeight()) < 0.5);
     }
 
     void miniPlayerKeepsThePageFocus()

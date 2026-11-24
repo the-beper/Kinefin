@@ -1799,7 +1799,7 @@ class TestPlayerController : public QObject {
         QCOMPARE(refused.value(QStringLiteral("contentType")).toString(),
                  QStringLiteral("video/x-matroska"));
         QCOMPARE(again.value(QStringLiteral("contentType")).toString(),
-                 QStringLiteral("video/mp4"));
+                 QStringLiteral("video/x-matroska"));
         QVERIFY(again.value(QStringLiteral("contentId"))
                     .toString()
                     .contains(QStringLiteral("master.m3u8")));
@@ -1847,7 +1847,7 @@ class TestPlayerController : public QObject {
                      .toObject()
                      .value(QStringLiteral("contentType"))
                      .toString(),
-                 QStringLiteral("video/mp4"));
+                 QStringLiteral("video/x-matroska"));
         // The stuck attempt never played: one Start, no Stopped for it
         QCOMPARE(startReports(chain), 1);
         QCOMPARE(stoppedReports(chain), 0);
@@ -2042,7 +2042,7 @@ class TestPlayerController : public QObject {
         const QJsonObject first = nthLoad(rig.device, 0);
         const QJsonObject firstMedia = first.value(QStringLiteral("media")).toObject();
         QCOMPARE(firstMedia.value(QStringLiteral("contentType")).toString(),
-                 QStringLiteral("video/mp4"));
+                 QStringLiteral("video/x-matroska"));
         QVERIFY(firstMedia.value(QStringLiteral("contentId"))
                     .toString()
                     .contains(QStringLiteral("StartTimeTicks=0")));

@@ -696,7 +696,7 @@ Devices appear only while the **Cast** dialog is open. DLNA renderers and Google
 
 The device fetches the video from the server itself, so the server must be reachable from the device by IP address or a public name. Google Cast devices ignore the network's DNS: when an `http` server is named by a host name that resolves to a private address, Kinefin gives the device that IP instead and it plays. An `https` server named by a name the device cannot resolve fails, because the certificate would not match an IP. An `http` server behind a name-based reverse proxy fails too, because the device sends the IP as the Host header.
 
-The device model sets what plays. Above these limits the server transcodes to H.264 in MP4:
+The device model sets what plays. Above these limits the server transcodes to H.264 in Matroska (tested on a Nest Hub; untested on a Chromecast and a Chromecast Ultra):
 
 | Device | Plays without transcoding |
 |---|---|

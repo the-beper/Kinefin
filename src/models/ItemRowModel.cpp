@@ -4,6 +4,8 @@
 
 #include <QJsonValue>
 
+#include <algorithm>
+
 namespace Kinefin {
 
 ItemRowModel::ItemRowModel(JellyfinClient *client, bool landscape, QObject *parent,
@@ -65,6 +67,16 @@ void ItemRowModel::setItems(const QJsonArray &items)
         ItemSummary summary = parseItemSummary(value.toObject());
         if (summary.valid)
             parsed.push_back(std::move(summary));
+    }
+    // The same items in the same order are updated in place: the cards stay, with their images and the row's scroll position
+    const bool sameItems =
+        std::equal(parsed.begin(), parsed.end(), m_items.begin(), m_items.end(),
+                   [](const ItemSummary &a, const ItemSummary &b) { return a.id == b.id; });
+    if (sameItems) {
+        m_items = std::move(parsed);
+        if (!m_items.empty())
+            Q_EMIT dataChanged(index(0), index(count() - 1));
+        return;
     }
     const bool countChangedNow = parsed.size() != m_items.size();
     beginResetModel();

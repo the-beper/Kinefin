@@ -2804,7 +2804,7 @@ void PlayerController::seekLocally(qint64 ticks)
             return;
         const qint64 target = durationTicks() > 0 ? std::min(ticks, durationTicks()) : ticks;
         keepIntrosAt(target);
-        // A transcode seeks as the server's own DLNA control does: the same stream asked from another start, under the same play session; a run of seeks reloads it once, at the last target
+        // A transcode seeks as the server's own DLNA control does: the same stream asked from another start, under a new play session id (see withStartTicks); a run of seeks reloads it once, at the last target
         bool moved = true;
         if (m_source.method == PlaybackSource::Method::Transcode) {
             m_castSeekTarget = target;

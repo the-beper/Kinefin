@@ -1794,7 +1794,6 @@ Kirigami.Page {
         Controls.MenuItem {
             objectName: self.namePrefix + "AddFile"
             text: i18n("Add Subtitle File…")
-            icon.name: "document-open"
             enabled: !page.player.casting
             onTriggered: subtitleFileDialog.open()
         }
@@ -1802,7 +1801,6 @@ Kirigami.Page {
         Controls.MenuItem {
             objectName: self.namePrefix + "SearchOnline"
             text: i18n("Search Online Subtitles…")
-            icon.name: "search"
             visible: page.player.canManageSubtitles && !page.player.localPlayback
             enabled: !page.player.casting
             onTriggered: subtitleSearchDialog.open()

@@ -154,10 +154,11 @@ QJsonArray directPlayProfiles(const Model &model)
     return profiles;
 }
 
+// Matroska, not MP4: on a Nest Hub Jellyfin's progressive fragmented MP4 (chunked, no Range) stopped growing after about 35 MB, ended there with FINISHED and had no sound, while the same transcode in Matroska played on with sound (seen live); Matroska is untested on the other models
 QJsonObject transcodingProfile()
 {
     return {{QStringLiteral("Type"), QStringLiteral("Video")},
-            {QStringLiteral("Container"), QStringLiteral("mp4")},
+            {QStringLiteral("Container"), QStringLiteral("mkv")},
             {QStringLiteral("Protocol"), QStringLiteral("http")},
             {QStringLiteral("Context"), QStringLiteral("Streaming")},
             {QStringLiteral("VideoCodec"), QStringLiteral("h264")},
@@ -198,7 +199,7 @@ QJsonObject castDeviceProfile(const QString &model, bool burnInSubtitles, bool t
 QString castMime(const QString &container, bool transcode)
 {
     if (transcode)
-        return QStringLiteral("video/mp4");
+        return QStringLiteral("video/x-matroska");
     for (const QString &token : container.split(QLatin1Char(','), Qt::SkipEmptyParts)) {
         const QString name = token.trimmed().toLower();
         if (name == QLatin1StringView("mp4") || name == QLatin1StringView("m4v"))
