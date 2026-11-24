@@ -50,7 +50,7 @@ mkdir -m 700 "$GNUPGHOME"
 
 rel=$repo_root/build/release
 app_id=io.github.the_beper.Kinefin
-total=22
+total=23
 n=0
 passed=0
 failed=0
@@ -208,6 +208,7 @@ job_sign_key() { # <key name>: unpack, then the step with the secret
     if [ "$rc" -eq 0 ]; then job_sign_step "${1:-a}"; fi
 }
 job_finish() {
+    rm -f "$w/finish.gho"
     EXPECT_PREPARED_SHA256=$(out_of "$w/prepare.gho" prepared_sha256)
     EXPECT_SIGNLIST_SHA256=$(out_of "$w/prepare.gho" signlist_sha256)
     EXPECT_SIGNED_SHA256=$(out_of "$w/sign.gho" signed_sha256)
@@ -215,6 +216,13 @@ job_finish() {
     EXPECT_BASE_SHA=$(out_of "$w/prepare.gho" base_sha)
     export EXPECT_PREPARED_SHA256 EXPECT_SIGNLIST_SHA256 EXPECT_SIGNED_SHA256 EXPECT_REFS_SHA256 EXPECT_BASE_SHA
     run env GITHUB_OUTPUT="$w/finish.gho" "$rel/finish-flatpak-repo.sh" "$w/prepared/prepared.tar" "$w/prepared/sign-list.txt" "$w/signed-repo/signed-repo.tar" "$w/commits/refs.txt" "$w/signed"
+}
+job_bundle() { # the check-bundle job: the bundle with the hash finish reported, the build's refs.txt with the hash build-flatpak reported, no other output of the jobs before
+    rm -f "$w/bundle.gho"
+    : > "$FAKE_FLATPAK_LOG"
+    run env -u EXPECT_PREPARED_SHA256 -u EXPECT_SIGNLIST_SHA256 -u EXPECT_SIGNED_SHA256 -u EXPECT_BASE_SHA GITHUB_OUTPUT="$w/bundle.gho" \
+        EXPECT_FLATPAK_SHA256="${1-$(out_of "$w/finish.gho" flatpak_sha256)}" EXPECT_REFS_SHA256="${2-$(sha256_of "$w/commits/refs.txt")}" \
+        "$rel/check-flatpak-bundle.sh" "${3-$w/signed/Kinefin-x86_64.flatpak}" "$w/commits/refs.txt"
 }
 job_sign() { # <key name>
     job_check
@@ -1329,7 +1337,7 @@ for foreign in runtime/org.example.Other/x86_64/stable app/org.example.Other/x86
 done
 end_case "foreign refs: a runtime, another app, another branch or arch in refs.txt is refused by prepare, --check and --unpack, and the sign list and the repository accept the app ref only"
 
-# the signed bundle carries the signed listed commit, and a key or a commit that is not the pinned one is refused
+# finish builds the signed bundle without installing it; check-flatpak-bundle.sh installs it as a user would, and a key or a commit that is not the pinned one is refused
 make_world 41
 build_jobs
 job_sign
@@ -1339,39 +1347,79 @@ app_ref=app/$app_id/x86_64/stable
 listed_commit=$(awk -F'\t' -v r="$app_ref" '$1 == r { print $2 }' "$w/prepared/sign-list.txt")
 check "finish wrote the bundle" test -s "$bundle"
 check "it was built for x86_64 with the key and the Flathub runtime repository, into scratch space" file_has "$FAKE_FLATPAK_LOG" "^build-bundle --arch=x86_64 --gpg-keys=[^ ]* --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo [^ ]* $RUNNER_TEMP/finish\.[^/]*/bundle-out/Kinefin-x86_64.flatpak $app_id stable \["
-check "finish installed it without deploying, into a scratch user installation" file_has "$FAKE_FLATPAK_LOG" "^install --user --noninteractive -y --no-deploy --no-deps --no-related --bundle $RUNNER_TEMP/finish\.[^/]*/bundle-out/Kinefin-x86_64.flatpak \[FLATPAK_USER_DIR=$RUNNER_TEMP/finish\.[^/]*/bundle-client\]$"
+check "finish did not install it" not file_has "$FAKE_FLATPAK_LOG" "^install .*--bundle"
+job_bundle
+check "check-flatpak-bundle accepts the honest bundle" rc_is 0
+check "(and says what it checked)" out_has "the bundle installs with only its embedded key, at the listed app commit $listed_commit"
+check "it installed the bundle into a scratch user installation, deploying it" file_has "$FAKE_FLATPAK_LOG" "^install --user --noninteractive -y --no-deps --no-related --bundle $bundle \[FLATPAK_USER_DIR=$RUNNER_TEMP/bundle\.[^/]*/client\]$"
+check "(and asked flatpak for the installed commit)" file_has "$FAKE_FLATPAK_LOG" "^info --user --show-commit $app_id \[FLATPAK_USER_DIR=$RUNNER_TEMP/bundle\.[^/]*/client\]$"
+check "(and pulled the installed commit with signature checks into a scratch repository)" file_has "$FAKE_OSTREE_LOG" "^pull-local --remote=pinned --gpg-verify $RUNNER_TEMP/bundle\.[^/]*/client/repo $listed_commit$"
+check "it writes no GITHUB_OUTPUT" not test -e "$w/bundle.gho"
+check "(and leaves the output of finish as it was, and no scratch directory)" same "$(find "$w/signed" -type f -printf '%f\n' | LC_ALL=C sort | tr '\n' ' ') $(sha256_of "$bundle") $(no_leftovers && echo clean)" "Kinefin-x86_64.flatpak site.tar  $(out_of "$w/finish.gho" flatpak_sha256) clean"
 rm -rf "$w/user"
 mkdir "$w/user"
 run env FLATPAK_USER_DIR="$w/user" flatpak install --user -y --no-deploy --no-deps --bundle "$bundle"
 user_remote=$(ostree --repo="$w/user/repo" remote list)
 check "the bundle carries the listed app commit, the one the build made" same "$(ostree --repo="$w/user/repo" rev-parse "$user_remote:$app_ref") $listed_commit" "$(awk -F'\t' -v r="$app_ref" '$1 == r { print $2 }' "$w/commits/refs.txt") $listed_commit"
-finish_refused() { # <what> <message>: finish ran with a knob set, which the caller resets; nothing may be left in the output directory
-    check "finish refuses $1" rc_is 1
+bundle_refused() { # <what> <message>: the check ran with a bundle or a knob that is not the honest one; the caller resets the knobs
+    check "check-flatpak-bundle refuses $1" rc_is 1
     check "(the message says so)" out_has "$2"
-    check "(no site was written)" not test -e "$w/signed/site.tar"
-    check "(and no bundle)" not test -e "$w/signed/Kinefin-x86_64.flatpak"
+    check "(it writes no GITHUB_OUTPUT)" not test -e "$w/bundle.gho"
+    check "(and leaves no scratch directory)" no_leftovers
 }
-rm -rf "$w/signed"
 FAKE_FLATPAK_BUNDLE_KEY=$keys/b/pub.asc
 job_finish
 FAKE_FLATPAK_BUNDLE_KEY=
-finish_refused "a bundle with another key than the one that signed the commit (flatpak refuses it)" "does not install with only the key embedded in it"
-rm -rf "$w/signed"
+check "finish does not install the bundle, so it writes one with another key" rc_is 0
+job_bundle
+bundle_refused "a bundle with another key than the one that signed the commit (flatpak refuses it)" "does not install with only the key embedded in it"
 FAKE_FLATPAK_BUNDLE_NOSIG=1
-FAKE_FLATPAK_INSTALL_NO_VERIFY=1
 job_finish
 FAKE_FLATPAK_BUNDLE_NOSIG=
+FAKE_FLATPAK_INSTALL_NO_VERIFY=1
+job_bundle
 FAKE_FLATPAK_INSTALL_NO_VERIFY=
-finish_refused "a bundle whose commit carries no signature, though the client accepted it" "is not signed by the pinned key"
-rm -rf "$w/signed"
+bundle_refused "a bundle whose commit carries no signature, though the client accepted it" "is not signed by the pinned key"
 FAKE_FLATPAK_BUNDLE_COMMIT=$published_commit
 job_finish
 FAKE_FLATPAK_BUNDLE_COMMIT=
-finish_refused "a bundle with a signed commit other than the listed one" "installs the commit $published_commit, not the listed app commit $listed_commit"
+job_bundle
+bundle_refused "a bundle with a signed commit other than the listed one" "installs the commit $published_commit, not the listed app commit $listed_commit"
 job_finish
-check "finish accepts the honest run again" rc_is 0
-check "(and writes the bundle then)" test -s "$bundle"
-end_case "signed bundle: it carries the listed commit; another key, no signature and another commit are refused, with nothing left in the output directory"
+job_bundle
+check "check-flatpak-bundle accepts the honest run again" rc_is 0
+end_case "signed bundle: finish does not install it, check-flatpak-bundle does and writes nothing; it carries the listed commit; another key, no signature and another commit are refused"
+
+# check-flatpak-bundle trusts neither the bundle nor refs.txt until their hashes match what finish and build-flatpak reported
+bundle=$w/signed/Kinefin-x86_64.flatpak
+cp "$bundle" "$w/tampered.flatpak"
+printf '\0' >> "$w/tampered.flatpak"
+job_bundle "$(out_of "$w/finish.gho" flatpak_sha256)" "$(sha256_of "$w/commits/refs.txt")" "$w/tampered.flatpak"
+check "check-flatpak-bundle refuses a bundle whose hash differs from EXPECT_FLATPAK_SHA256, though flatpak would install it" rc_is 1
+check "(the message says so)" out_has "the bundle is not the one the earlier job produced"
+check "(flatpak was never called)" test ! -s "$FAKE_FLATPAK_LOG"
+check "(and nothing was written)" not test -e "$w/bundle.gho"
+job_bundle "$(sha256_of "$w/tampered.flatpak")" "$(sha256_of "$w/commits/refs.txt")" "$w/tampered.flatpak"
+check "(the tampered bundle does install, so the hash was the only thing against it)" rc_is 0
+job_bundle 0
+check "check-flatpak-bundle refuses an EXPECT_FLATPAK_SHA256 that is not the hash of the bundle" rc_is 1
+check "(flatpak was never called)" test ! -s "$FAKE_FLATPAK_LOG"
+job_bundle "$(out_of "$w/finish.gho" flatpak_sha256)" 0
+check "check-flatpak-bundle refuses an EXPECT_REFS_SHA256 that is not the hash of refs.txt" rc_is 1
+check "(the message names refs.txt)" out_has "refs.txt is not the one the earlier job produced"
+check "(flatpak was never called)" test ! -s "$FAKE_FLATPAK_LOG"
+run env -u EXPECT_FLATPAK_SHA256 "$rel/check-flatpak-bundle.sh" "$bundle" "$w/commits/refs.txt"
+check "check-flatpak-bundle refuses to run without EXPECT_FLATPAK_SHA256" rc_fails
+run env EXPECT_FLATPAK_SHA256="$(sha256_of "$bundle")" EXPECT_REFS_SHA256="$(sha256_of "$w/commits/refs.txt")" "$rel/check-flatpak-bundle.sh" "$bundle"
+check "check-flatpak-bundle refuses a call with one argument" rc_is 2
+use_secret a
+job_bundle
+drop_secret
+check "check-flatpak-bundle refuses to run with the secret in its environment" rc_is 2
+check "(the message says so)" out_has "must run without the secret"
+check "(flatpak was never called)" test ! -s "$FAKE_FLATPAK_LOG"
+check "(and no scratch directory is left)" no_leftovers
+end_case "check-flatpak-bundle: a bundle that is not the one finish hashed, a refs.txt that is not the build's, a missing hash, a missing argument and the secret are refused before flatpak runs"
 
 # the first release: there is no gh-pages yet, up to finish
 make_world 18
@@ -1388,6 +1436,8 @@ job_sign
 check "sign accepts the first release" rc_is 0
 check "(and reports no base)" file_has "$w/sign.out" "built on gh-pages -"
 check "finish wrote the site and the bundle" test -s "$w/signed/site.tar" -a -s "$w/signed/Kinefin-x86_64.flatpak"
+job_bundle
+check "check-flatpak-bundle accepts the bundle of the first release" rc_is 0
 check "the site has the summary and its signature" tar -tf "$w/signed/site.tar" ./repo/summary ./repo/summary.sig > /dev/null
 end_case "first release: no gh-pages, base -: prepare, check, sign and finish accept it"
 

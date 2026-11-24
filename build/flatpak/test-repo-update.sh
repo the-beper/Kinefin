@@ -9,8 +9,8 @@ usage: test-repo-update.sh [<built repository>]
   1. release 1 is made as the first release is, on an empty pages directory: export-flatpak-commits.sh, prepare-flatpak-repo.sh, sign-flatpak-repo.sh (--check, --unpack, --sign), finish-flatpak-repo.sh; it is pushed as gh-pages and a client installs it from its .flatpakrepo
   2. release 2 goes through the same scripts on top of release 1 (a changed tree and changed appstream data); a gh-pages with a ref moved under its signed summary is refused
   3. the same URL serves a release 2 whose commit is signed by another key: the update is refused on the signature; then the real one: the update reaches the new commit, whose parent is the installed one, without static deltas
-  4. the signed bundle of finish-flatpak-repo.sh installs into a user installation that knows no remote, at the listed commit; a bundle with the right key embedded installs, one with another key is refused on the signature
-  5. ostree pull-local --gpg-verify, with a remote that knows only the pinned key, refuses an unsigned commit and a commit signed by another key on the signature, and accepts the listed one
+  4. the signed bundle of finish-flatpak-repo.sh goes through check-flatpak-bundle.sh, as the check-bundle job runs it: it installs into a user installation that knows no remote, at the listed commit, signed by the pinned key; a bundle with the right key embedded passes, one with another key embedded and one whose commit is signed by another key (with that key embedded) are refused
+  5. ostree pull-local --gpg-verify, the check of check-flatpak-bundle.sh, with a remote that knows only the pinned key, refuses an unsigned commit and a commit signed by another key on the signature, and accepts the listed one
   6. the served .flatpakref installs with a real client (its Homepage, Icon and RuntimeRepo fields are accepted)
   the built repository must have no object over 100 MiB, GitHub's limit for a push
   needs flatpak, ostree, gpg, git, python3, curl and diffutils (cmp, diff), no D-Bus, no bwrap, no network and no real key; CI runs it on ubuntu-24.04
@@ -89,8 +89,8 @@ printf '#!/bin/sh\ncat "%s/gh.json"\n' "$work" > "$work/bin/gh"
 chmod +x "$work/bin/gh"
 echo '[]' > "$work/gh.json"
 
-# one release the way the workflow makes it: the export of the build job, then prepare, check, sign (the key only in its own step) and finish
-release() { # release N PAGES-DIR: the commits of PAGES-DIR/repo end up as $work/rN/site, the unpacked site, and $work/rN/signed/Kinefin-x86_64.flatpak
+# one release the way the workflow makes it: the export of the build job, then prepare, check, sign (the key only in its own step), finish and the check of the bundle
+release() { # release N PAGES-DIR: the commits of PAGES-DIR/repo end up as $work/rN/site, the unpacked site, and $work/rN/signed/Kinefin-x86_64.flatpak, which passed check-flatpak-bundle.sh
     r=$work/r$1
     mkdir "$r" "$r/ci"
     "$root/build/release/export-flatpak-commits.sh" "$2" "$r/commits"
@@ -108,8 +108,10 @@ release() { # release N PAGES-DIR: the commits of PAGES-DIR/repo end up as $work
     FLATPAK_GPG_PRIVATE_KEY=$(GNUPGHOME=$work/key-a gpg --batch --pinentry-mode loopback --passphrase '' --armor --export-secret-keys "$fpr_a") \
         GITHUB_OUTPUT=$r/ci/sign.out "$root/build/release/sign-flatpak-repo.sh" --sign "$r/signwork" "$r/signed-repo"
     EXPECT_PREPARED_SHA256=$prepared_sha EXPECT_SIGNLIST_SHA256=$signlist_sha EXPECT_BASE_SHA=$base EXPECT_REFS_SHA256=$refs_sha \
-        EXPECT_SIGNED_SHA256=$(sed -n 's/^signed_sha256=//p' "$r/ci/sign.out") \
+        EXPECT_SIGNED_SHA256=$(sed -n 's/^signed_sha256=//p' "$r/ci/sign.out") GITHUB_OUTPUT=$r/ci/finish.out \
         "$root/build/release/finish-flatpak-repo.sh" "$r/prepared/prepared.tar" "$r/prepared/sign-list.txt" "$r/signed-repo/signed-repo.tar" "$r/commits/refs.txt" "$r/signed"
+    EXPECT_FLATPAK_SHA256=$(sed -n 's/^flatpak_sha256=//p' "$r/ci/finish.out") EXPECT_REFS_SHA256=$refs_sha \
+        "$root/build/release/check-flatpak-bundle.sh" "$r/signed/Kinefin-x86_64.flatpak" "$r/commits/refs.txt"
     mkdir "$r/site"
     tar -xf "$r/signed/site.tar" -C "$r/site"
 }
@@ -121,7 +123,7 @@ flatpak build-commit-from --src-repo="$built" --src-ref="$ref" --no-update-summa
 release 1 "$work/pages1"
 s1=$work/r1/site
 c1=$(ostree --repo="$s1/repo" rev-parse "$ref")
-echo "ok: release 1 went through the pipeline on an empty pages directory, commit $c1"
+echo "ok: release 1 went through the pipeline on an empty pages directory, commit $c1, and its bundle passed check-flatpak-bundle.sh"
 
 # publishing: gh-pages gets the site, and the build job of release 2 clones it
 git -C "$s1" init -q --initial-branch=gh-pages
@@ -160,7 +162,7 @@ c2=$(ostree --repo="$s2/repo" rev-parse "$ref")
 [ "$c2" != "$c1" ] || fail "the new commit is the old one"
 [ "$(ostree --repo="$s2/repo" rev-parse "$c2^")" = "$c1" ] || fail "the new commit does not have the old one as its parent"
 grep -q '^appstream' "$work/r2/prepared/sign-list.txt" || fail "the sign list of release 2 has no appstream line"
-echo "ok: release 2 went through the pipeline, commit $c2 on top of $c1, with appstream commits to sign"
+echo "ok: release 2 went through the pipeline, commit $c2 on top of $c1, with appstream commits to sign, and its bundle passed check-flatpak-bundle.sh"
 
 # a gh-pages as an attacker could write it, refs/heads/X moved to another commit and the signed summary left as it was
 # ostree takes the commit of a ref from the verified summary, so a pull alone would not notice: prepare compares the refs
@@ -229,39 +231,38 @@ update || fail "the update to the repository signed the new way failed"
 if tail -n +"$((before + 1))" "$work/http.log" | grep -q '/repo/deltas/'; then fail "the client asked for a static delta, and the site has none"; fi
 echo "ok: the client updated from $c1 to $c2 (child of $c1), without static deltas"
 
-# the bundles, each in a user installation of its own that knows no remote
+# bundles made by hand, each through the script of the check-bundle job (a user installation of its own that knows no remote), with the hash of the bundle and the refs.txt of release 2
 bundle=$work/r2/signed/Kinefin-x86_64.flatpak
 [ -f "$bundle" ] || fail "finish-flatpak-repo.sh wrote no bundle"
-bundle_install() { dir=$1; shift; FLATPAK_USER_DIR=$dir flatpak install --user --noninteractive -y --no-deps --no-related "$@"; }
-bundle_commit() { FLATPAK_USER_DIR=$1 flatpak info --user --show-commit "$id"; }
-# the commit of the listed ref in the OSTree repository of a bundle installation, which is what finish-flatpak-repo.sh reads, whether or not the app was deployed
-bundle_repo_commit() {
-    remote=$(ostree --repo="$1/repo" remote list)
-    [ "$remote" = kinefin-origin ] || fail "the installation $1 has the remotes '$remote', not only the one made from the bundle"
-    ostree --repo="$1/repo" rev-parse "$remote:$ref"
+bundle_check() { # bundle_check BUNDLE
+    EXPECT_FLATPAK_SHA256=$(sha256sum "$1" | cut -d' ' -f1) EXPECT_REFS_SHA256=$(sha256sum "$work/r2/commits/refs.txt" | cut -d' ' -f1) \
+        "$root/build/release/check-flatpak-bundle.sh" "$1" "$work/r2/commits/refs.txt"
 }
-bundle_install "$work/bundle-nodeploy" --no-deploy --bundle "$bundle" > "$work/bundle-nodeploy.log" 2>&1 || { cat "$work/bundle-nodeploy.log"; fail "the signed bundle does not install with --no-deploy and only the key embedded in it"; }
-[ "$(bundle_repo_commit "$work/bundle-nodeploy")" = "$c2" ] || fail "--no-deploy --bundle did not pull the listed commit $c2 into the installation"
+# flatpak deploys a bundle even with --no-deploy, which is why check-flatpak-bundle.sh has a job of its own
+FLATPAK_USER_DIR=$work/bundle-nodeploy flatpak install --user --noninteractive -y --no-deps --no-related --no-deploy --bundle "$bundle" > "$work/bundle-nodeploy.log" 2>&1 || { cat "$work/bundle-nodeploy.log"; fail "the signed bundle does not install with --no-deploy and only the key embedded in it"; }
 if [ -d "$work/bundle-nodeploy/app/$id" ]; then deployed=deployed; else deployed="not deployed"; fi
-echo "note: --no-deploy --bundle leaves the app $deployed (flatpak $(flatpak --version | cut -d' ' -f2)); the job that runs finish-flatpak-repo.sh must hold no write or signing permission either way"
-bundle_install "$work/bundle-client" --bundle "$bundle" > "$work/bundle-install.log" 2>&1 || { cat "$work/bundle-install.log"; fail "the signed bundle does not install with only the key embedded in it"; }
-[ "$(bundle_commit "$work/bundle-client")" = "$c2" ] || fail "the bundle installed the commit $(bundle_commit "$work/bundle-client"), not $c2"
-echo "ok: the signed bundle installs with only its embedded key, at the listed commit $c2"
+echo "note: --no-deploy --bundle leaves the app $deployed (flatpak $(flatpak --version | cut -d' ' -f2)); check-flatpak-bundle.sh runs in a job that holds no write, signing or attestation permission either way"
 
-# the same command with key A embedded installs, with key B it is refused on the signature
+# the same command with key A embedded passes, with key B it is refused by flatpak on the signature
 flatpak build-bundle --arch=x86_64 --gpg-keys="$work/key-a/public.gpg" "$s2/repo" "$work/bundle-a.flatpak" "$id" stable
-bundle_install "$work/bundle-a-client" --bundle "$work/bundle-a.flatpak" > "$work/bundle-a-install.log" 2>&1 || { cat "$work/bundle-a-install.log"; fail "a bundle with the right key embedded does not install"; }
-[ "$(bundle_commit "$work/bundle-a-client")" = "$c2" ] || fail "the bundle with the right key installed another commit than $c2"
+bundle_check "$work/bundle-a.flatpak" > "$work/bundle-a-check.log" 2>&1 || { cat "$work/bundle-a-check.log"; fail "a bundle with the right key embedded does not pass check-flatpak-bundle.sh"; }
 flatpak build-bundle --arch=x86_64 --gpg-keys="$work/key-b/public.gpg" "$s2/repo" "$work/bundle-b.flatpak" "$id" stable
-if bundle_install "$work/bundle-b-client" --bundle "$work/bundle-b.flatpak" > "$work/bundle-b-install.log" 2>&1; then
-    cat "$work/bundle-b-install.log"
-    fail "a bundle with another key embedded was installed"
+if bundle_check "$work/bundle-b.flatpak" > "$work/bundle-b-check.log" 2>&1; then
+    cat "$work/bundle-b-check.log"
+    fail "a bundle with another key embedded passed check-flatpak-bundle.sh"
 fi
-if bundle_commit "$work/bundle-b-client" > /dev/null 2>&1; then fail "the refused bundle left the app installed"; fi
-refused_on_signature "$work/bundle-b-install.log" "a bundle with another key embedded" "GPG signatures found, but none are in trusted keyring"
-echo "ok: a bundle with the signer's key embedded installs, one with another key is refused on its signature"
+grep -qF "does not install with only the key embedded in it" "$work/bundle-b-check.log" || { cat "$work/bundle-b-check.log"; fail "check-flatpak-bundle.sh refused a bundle with another key embedded, but not on the install"; }
+refused_on_signature "$work/bundle-b-check.log" "a bundle with another key embedded" "GPG signatures found, but none are in trusted keyring"
+# a commit signed by key B with key B embedded installs (the bundle is consistent), and only the pinned key refuses it
+flatpak build-bundle --arch=x86_64 --gpg-keys="$work/key-b/public.gpg" "$work/s3/repo" "$work/bundle-s3.flatpak" "$id" stable
+if bundle_check "$work/bundle-s3.flatpak" > "$work/bundle-s3-check.log" 2>&1; then
+    cat "$work/bundle-s3-check.log"
+    fail "a bundle whose commit is signed by another key passed check-flatpak-bundle.sh"
+fi
+grep -qF "is not signed by the pinned key" "$work/bundle-s3-check.log" || { cat "$work/bundle-s3-check.log"; fail "check-flatpak-bundle.sh refused a commit signed by another key, but not as unsigned by the pinned key"; }
+echo "ok: check-flatpak-bundle.sh passes a bundle with the signer's key embedded, refuses one with another key embedded on its signature, and one whose commit the pinned key did not sign"
 
-# the check finish-flatpak-repo.sh relies on: pull-local with the signature checks on, into a repository whose only remote knows the pinned key
+# the check check-flatpak-bundle.sh relies on: pull-local with the signature checks on, into a repository whose only remote knows the pinned key
 pinned_repo() {
     ostree --repo="$1" init --mode=archive
     ostree --repo="$1" remote add --set=gpg-verify=true --gpg-import="$work/key-a/public.gpg" pinned "file://$work/nowhere"

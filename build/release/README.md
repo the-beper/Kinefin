@@ -15,22 +15,20 @@ stable Kinefin release. It does **not** create a tag, publish, push, or install
 anything. Run it from any directory in a local checkout:
 
 ```sh
-build/release/version-bump.sh --dry-run --date 2026-11-11 0.0.2
-build/release/version-bump.sh --date 2026-11-11 0.0.2
+build/release/version-bump.sh [--dry-run] [--date YYYY-MM-DD] X.Y.Z
 ```
 
-Replace `0.0.2` and the sample date with the intended version and release date.
-The date option is optional (it defaults to today's UTC date). Versions are
-strict, stable `X.Y.Z` numbers without a `v` prefix or leading zeroes; each bump
-must increase the version in `CMakeLists.txt`. A new, dated `<release>` entry is
+`--date` is optional (it defaults to today's UTC date). Versions are strict,
+stable `X.Y.Z` numbers without a `v` prefix or leading zeroes; each bump must
+increase the version in `CMakeLists.txt`. A new, dated `<release>` entry is
 prepended to the AppStream release history. Invalid XML, a duplicate or newer
 AppStream release, and malformed input abort without modifying either file.
 
 Review and commit both `CMakeLists.txt` and
 `data/io.github.the_beper.Kinefin.metainfo.xml` together. After the release
 gates pass and the commit is on `main`, tag that exact commit as `vX.Y.Z`; the
-release workflow checks the tag against the CMake version. Other first-release gates
-(Flatpak build-image digest, runtime pins, artwork, manual checks) remain
+release workflow checks the tag against the CMake version. Other first-release
+gates (Flatpak build-image digest, runtime pins, artwork, manual checks) remain
 separate and are **not** handled by this script.
 
 Portable regression tests:
@@ -51,7 +49,9 @@ Replace the example tag with the version being released. The check requires an
 exact match between the tag, `project(kinefin VERSION ...)` and the **newest**
 AppStream `<release>` entry, validates its date and rejects duplicate or
 out-of-order release history. It does not change files or require GitHub access.
-The workflow also checks that the tagged commit is on `main`. The current
+The workflow also checks that the tagged commit is on `main` and that the tag
+is the newest `vX.Y.Z` tag (`--require-newest`, which reads `git tag -l 'v*'`
+and ignores other names). The current
 `0.0.1` skeleton has no AppStream release entry and therefore is **not**
 release-ready until `version-bump.sh` has prepared the first release.
 
@@ -92,6 +92,109 @@ python3 -m unittest discover -s tests -p 'test_release_image_pin.py' -v
 This guard is independent of the KDE runtime commit pins in
 `build/flatpak/build-flatpak.sh`; those still need their own release review.
 
+## Signed Flatpak repository
+
+A release publishes the app commit to an OSTree repository and attaches a
+signed bundle to the GitHub release. The channel is:
+
+- URL: `https://the-beper.github.io/Kinefin`, served by GitHub Pages from the
+  `gh-pages` branch.
+- Flatpak remote: `kinefin`; Flatpak branch: `stable`.
+- Site files: `kinefin.flatpakref`, `kinefin.flatpakrepo`, `icon.svg` and the
+  repository under `repo/`.
+
+Releases below 1.0.0 are pre-releases that are never "latest"; from 1.0.0 a
+release is the latest. Do not link `releases/latest` anywhere: it does not
+resolve while only pre-releases exist.
+
+The commits are signed with an ed25519 key without expiry, user id "Kinefin
+Flatpak repository"; the fingerprint is in the
+[user guide](../../docs/user-guide.md#check-the-signature). The public part is
+`build/flatpak/signing-key.asc`. The private key exists only as the secret
+`FLATPAK_GPG_PRIVATE_KEY` of the environment `release-signing` and in the
+maintainer's offline copy.
+
+| Job | Does | Permissions |
+| --- | --- | --- |
+| `validate` | tag, CMake, AppStream, main ancestry, newest tag | contents: read |
+| `ci-gate` | waits for the green CI run of the commit on main | contents, actions: read |
+| `build-flatpak` | pinned image (by digest), builds on an anonymous clone of gh-pages, smoke test, exports the unsigned commits | contents, packages: read |
+| `prepare-flatpak` | unsigned repository on top of gh-pages, summary, appstream, list of refs to sign; no secret | contents: read |
+| `check-flatpak` | a second keyless job checks what prepare made | contents: read |
+| `sign-flatpak` | the only job with the signing key: environment `release-signing` (a maintainer approves it), secret `FLATPAK_GPG_PRIVATE_KEY` | contents: read |
+| `finish-flatpak` | checks the signed repository with a client (no deploy), writes the signed bundle `Kinefin-x86_64.flatpak` (public key embedded) and the site archive | contents: read |
+| `check-bundle` | the only job that installs (deploys) the signed bundle, in a scratch user installation with only the key embedded in the bundle; checks that the installed commit is the listed app commit and is signed by the pinned key; passes nothing on, it only passes or fails (`check-flatpak-bundle.sh`) | contents: read |
+| `attest-flatpak` | needs `check-bundle`; checks the bundle hash and attests it (Sigstore, `actions/attest`) | contents: read, id-token: write, attestations: write, artifact-metadata: write |
+| `verify` | attestation, `PROVENANCE.json`, `SHA256SUMS` | contents, attestations: read |
+| `publish` | the only job that writes: draft release, three assets, pushes the site to gh-pages (the old head is kept as `gh-pages-previous`), waits until Pages serves the new summary, then publishes the release; refuses when a published release with a higher `vX.Y.Z` version exists | contents: write, attestations: read |
+
+Every signing step accepts only the app ref
+`app/io.github.the_beper.Kinefin/x86_64/stable` and the appstream refs, so a
+compromised build job cannot get a runtime or another app signed. The signed
+commit is the smoke-tested one: signatures are detached, so signing does not
+change the commit id.
+
+The local simulation and the real-client test of these scripts are described in
+[CONTRIBUTING.md](../../CONTRIBUTING.md#flatpak).
+
+### First publication
+
+The prerequisites are listed in [FIRST_RELEASE.md](FIRST_RELEASE.md). Pages is
+not enabled before the first publication, because there is no `gh-pages` branch
+yet. The first `publish` job pushes it, its Pages wait fails and the release
+stays a draft. Then enable Pages from `gh-pages` (root) and re-run the failed
+job:
+
+```sh
+gh api -X POST repos/the-beper/Kinefin/pages -f 'source[branch]=gh-pages' -f 'source[path]=/'
+```
+
+Never create `gh-pages` by hand: a branch without a signed repository makes
+`prepare-flatpak` fail. The checks to run with a real client after the first
+two releases are in [FIRST_RELEASE.md](FIRST_RELEASE.md).
+
+### Maintainer procedures
+
+Short cases:
+
+| Situation | Action |
+| --- | --- |
+| Approve a release | Approve the `sign-flatpak` deployment of `release-signing` in the run |
+| Interrupted publish | "Re-run failed jobs": every step resumes (draft, assets, gh-pages push, Pages wait) |
+| Exit 3 in prepare, check, finish or publish | gh-pages moved since the build: "Re-run all jobs". This relies on GitHub replacing the artifacts of a re-run job's previous attempt; that has not been tested |
+| Three tags pushed quickly | The newest-tag rule (the tag must be the newest `vX.Y.Z` tag) refuses the older ones: cut the next version |
+| Old run re-run after a newer release | `publish` refuses (a published release with a higher version exists), so an old run cannot downgrade clients: cut the next version |
+| Lost key | No automated path |
+| New build image | After reviewing the Images run on main: `gh variable set KINEFIN_RELEASE_FLATPAK_DIGEST --body sha256:<digest>` |
+
+Bad release. Clients that already updated keep the bad commit, so the fix is a
+new version:
+
+1. `git fetch origin gh-pages-previous`
+2. `git push --force origin origin/gh-pages-previous:gh-pages`
+3. `gh release edit vX.Y.Z --draft=true`
+4. Fix forward and cut the next version.
+
+Never re-run the bad run's publish job afterwards: it would push the bad site
+again.
+
+The `gh-pages` branch deleted. `prepare-flatpak` refuses to run. Either:
+
+1. Take the commit from the `gh-pages is now <commit>` log line.
+2. `git fetch origin <commit>`
+3. `git push --force origin <commit>:gh-pages`
+
+or re-run the publish job of the newest release's run only, while its
+artifacts exist (14 days).
+
+Leaked key:
+
+1. Delete the environment secret at once.
+2. Make a new key and re-sign gh-pages.
+3. Update the `GPGKey` of both site files and `signing-key.asc` in one change.
+4. Every installed client then runs
+   `flatpak remote-modify --gpg-import=<new key> kinefin`.
+
 ## Restartable GitHub publication
 
 The `publish` job in `.github/workflows/release.yml` runs
@@ -100,10 +203,11 @@ verification gates pass. The job checks out the tagged source commit because
 this helper is part of the repository; `GITHUB_REPOSITORY` and `GH_TOKEN` come
 from GitHub Actions.
 
-The release now contains three assets: `Kinefin-x86_64.flatpak`,
+The release contains three assets: `Kinefin-x86_64.flatpak` (signed),
 `PROVENANCE.json` and `SHA256SUMS`. The build job provides the **actual**
-image digest it pulled and the bundle's SHA-256 as job outputs. The downstream
-`verify` job compares the downloaded bundle with that SHA-256 before writing
+image digest it pulled; `finish-flatpak` provides the SHA-256 of the bundle it
+built. The downstream `verify` job compares the downloaded bundle with that
+SHA-256 before writing
 a deterministic `PROVENANCE.json`. This record names the release tag, exact
 source commit, GitHub repository and Actions run ID, pinned GHCR image digest,
 and the resulting bundle's SHA-256 and byte size. `SHA256SUMS` includes the
@@ -117,9 +221,9 @@ mismatched draft assets. All three remote asset SHA-256 digests and sizes must
 match before publication. A missing remote digest fails closed.
 
 `PROVENANCE.json` is **self-reported release metadata, not a cryptographically
-signed attestation**. Separately, the build job signs a SLSA provenance
-attestation for the exact Flatpak bytes with GitHub Actions' OIDC identity and
-stores it in GitHub's attestation service. Both `verify` and `publish` check
+signed attestation**. Separately, the `attest-flatpak` job signs a SLSA
+provenance attestation for the exact Flatpak bytes with GitHub Actions' OIDC
+identity and stores it in GitHub's attestation service. Both `verify` and `publish` check
 that signature and the trusted repository, tag, source commit and signer
 workflow. A missing or invalid attestation blocks publication. This does
 not substitute for CI branch protection or an independent reproducible build.
@@ -133,6 +237,15 @@ remains unpublished on failure. GitHub release `target_commitish` is not
 reliable evidence of a pre-existing tag's target and is not used. Protect
 release tags against force-pushes: no sequence of API queries can prevent a
 tag from changing in the instant after the final check.
+
+The site comes from the workflow through `SITE_TAR`, `EXPECT_SITE_SHA256`,
+`SITE_BASE_SHA` and `SITE_URL`; `REPO_REMOTE` is optional. After the assets
+match, the publisher pushes the site to `gh-pages` (the old
+head stays as `gh-pages-previous`; a push is skipped when the tree is
+unchanged, and a moved base exits with 3), waits until Pages serves the new
+summary, and only then publishes the release: as a pre-release, never "latest",
+for a 0.x version, as the latest from 1.0.0. The draft lookup goes through the
+release list, because the by-tag endpoint does not show drafts.
 
 An interrupted upload or publication can be retried by rerunning the job with
 its original artifacts. A release that is already published is treated as
@@ -181,7 +294,7 @@ Compare the bundle's SHA-256 against an independently trusted checksum and
 verify the origin of the release before installation. The check does not inspect
 Flatpak contents or perform reproducible-build verification.
 
-The release workflow now runs this same offline audit with its independently
+The release workflow runs this same offline audit with its independently
 known build inputs before uploading the three assets. Offline tests:
 
 ```sh
@@ -190,7 +303,7 @@ python3 -m unittest discover -s tests -p 'test_release_assets_audit.py' -v
 
 ## Verify the GitHub-signed Flatpak attestation
 
-The release **build-flatpak** job uses the SHA-pinned `actions/attest` action to
+The release **attest-flatpak** job uses the SHA-pinned `actions/attest` action to
 create a Sigstore-signed SLSA provenance attestation for the Flatpak bundle.
 GitHub stores this attestation **separately** from the three files on the
 release page; it is not included in `SHA256SUMS`. Both **verify** and **publish**

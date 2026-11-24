@@ -126,12 +126,12 @@ class ReleaseImagePinTest(unittest.TestCase):
 
     def test_workflow_requires_pin_before_build(self) -> None:
         workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
-        build = workflow.split("  build-flatpak:\n", 1)[1].split("  verify:\n", 1)[0]
+        build = workflow.split("  build-flatpak:\n", 1)[1].split("  prepare-flatpak:\n", 1)[0]
         self.assertIn("vars.KINEFIN_RELEASE_FLATPAK_DIGEST", build)
         self.assertIn("id: pull", build)
         self.assertIn("run: |\n          build/release/pull-pinned-image.sh", build)
         self.assertLess(build.index("build/release/pull-pinned-image.sh"),
-                        build.index("run: build/flatpak/build-flatpak.sh"))
+                        build.index("build/flatpak/build-flatpak.sh"))
         self.assertLess(build.index("build/release/pull-pinned-image.sh"),
                         build.index('printf \'digest=%s\\n\' "$KINEFIN_RELEASE_FLATPAK_DIGEST"'))
         self.assertNotIn("podman pull ghcr.io/the-beper/kinefin-flatpak:fedora45", build)

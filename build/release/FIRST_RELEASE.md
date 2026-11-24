@@ -2,11 +2,22 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 # First release: final acceptance checklist
 
-The release channel decision is **Flathub as the eventual app repository**, with
-an independently downloadable Flatpak bundle on GitHub Releases. Kinefin does
-not maintain its own signed OSTree remote. The checked-in Flatpak manifest
-retains its local `type: dir` source for CI; the Flathub candidate is generated
-from the exact tag and commit by `prepare_flathub.py`.
+The release channel, the job table and the recovery procedures are in the
+[release tooling README](README.md#signed-flatpak-repository). Flathub follows
+after 1.0.0. The checked-in Flatpak manifest retains its local `type: dir`
+source for CI; the Flathub candidate is generated from the exact tag and
+commit by `prepare_flathub.py`.
+
+Check these prerequisites before the first tag:
+
+- [ ] The signing key exists and its public part is committed as
+  `build/flatpak/signing-key.asc`.
+- [ ] The environment `release-signing` has a required reviewer and a
+  deployment tag policy `v*`.
+- [ ] The secret `FLATPAK_GPG_PRIVATE_KEY` exists only in that environment.
+- [ ] The tag ruleset and the `main` ruleset are active.
+- [ ] The approved image digest is set (see below).
+- [ ] The repository is public.
 
 This file is an **operational checklist**, not a claim of release verification.
 Do not tag a stable release or submit to Flathub until the live gates below
@@ -49,9 +60,9 @@ Choose a stable version only after acceptance. Version preparation changes
 CMake and AppStream together; never leave a half-bumped commit:
 
 ```sh
-build/release/version-bump.sh --dry-run --date YYYY-MM-DD X.Y.Z
-build/release/version-bump.sh --date YYYY-MM-DD X.Y.Z
-# Review the two changed files, commit, and get CI green on main.
+build/release/version-bump.sh [--dry-run] [--date YYYY-MM-DD] X.Y.Z
+# Run it with --dry-run first, review the two changed files, commit, and
+# get CI green on main.
 ```
 
 When that commit is clean, tagged and checked out, run the stricter checks:
@@ -72,12 +83,21 @@ working tree is dirty, or the release metadata is inconsistent.
   commit. Do not move an existing release tag.
 - [ ] Confirm `release.yml` is **green from that real tag**: immutable image
   pull, build, installed permission/icon checks, smoke test with
-  `KINEFIN_EXPECT_VERSION=X.Y.Z`, signed attestation, provenance and checksums,
-  GitHub draft publication and final tag recheck.
+  `KINEFIN_EXPECT_VERSION=X.Y.Z`, the approved `sign-flatpak` deployment,
+  the `check-bundle` install check, signed attestation, provenance and
+  checksums, GitHub draft publication and final tag recheck.
+- [ ] Enable Pages after the first publication, as described in
+  [First publication](README.md#first-publication).
+- [ ] After v0.1.0, with a real client: install from
+  `https://the-beper.github.io/Kinefin/kinefin.flatpakref` and check the
+  `GPGKey` bytes of the site files against `build/flatpak/signing-key.asc`.
+- [ ] After v0.2.0: `flatpak remote-info --log kinefin io.github.the_beper.Kinefin`
+  shows the commit of v0.1.0 as the parent.
 - [ ] Download all three public assets (`Kinefin-x86_64.flatpak`,
   `PROVENANCE.json`, `SHA256SUMS`) on a separate machine. Verify the source
   commit and independent digest with `verify_release_assets.py`, and run
-  `verify_attestation.py` to authenticate the build signer.
+  `verify_attestation.py` to authenticate the build signer. The bundle must
+  also install on its own, without the remote.
 - [ ] Install and launch the downloaded Flatpak on a KDE Plasma Wayland host.
   Confirm icon, desktop protocol, localization, first-run login, library
   browsing, video playback and quit/reopen; preserve anonymized evidence.

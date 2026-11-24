@@ -666,6 +666,48 @@ class ReleasePublishTest(unittest.TestCase):
         self.publish()
         self.assertFalse(self.gh.release["draft"])
 
+    def test_tag_older_than_a_published_release_is_refused_before_any_write(self) -> None:
+        for newer in ("v1.2.4", "v1.3.0", "v2.0.0", "v1.10.0"):
+            self.gh = FakeGitHub()
+            self.gh.others = [{"tag_name": newer, "draft": False, "prerelease": False, "assets": []}]
+            with self.assertRaisesRegex(sut.ReleasePublishError, f"older than the published release {newer}.*next version"):
+                self.publish()
+            self.assertIsNone(self.gh.release)
+            self.assertFalse(self.asset_calls("create"))
+            self.assertFalse(self.asset_calls("upload"))
+            self.assertFalse(self.asset_calls("edit"))
+            self.assertNotIn(("site",), self.gh.calls)
+            self.assertFalse(self.site_pushed)
+
+    def test_refusal_to_roll_back_exits_1_from_main(self) -> None:
+        self.gh.others = [{"tag_name": "v1.2.4", "draft": False, "prerelease": False, "assets": []}]
+        code, message = self.run_main()
+        self.assertEqual(code, 1)
+        self.assertIn("older than the published release v1.2.4", message)
+        self.assertFalse(self.asset_calls("create"))
+
+    def test_other_releases_do_not_stop_a_publication(self) -> None:
+        self.gh.others = [
+            {"tag_name": "v1.2.4", "draft": True, "prerelease": False, "assets": []},
+            {"tag_name": "v1.2.2", "draft": False, "prerelease": False, "assets": []},
+            {"tag_name": "v1.2.3-rc1", "draft": False, "prerelease": True, "assets": []},
+            {"tag_name": "nightly", "draft": False, "prerelease": True, "assets": []},
+            {"tag_name": "v9.9", "draft": False, "prerelease": False, "assets": []},
+            {"tag_name": "v9.9.9.9", "draft": False, "prerelease": False, "assets": []},
+            {"tag_name": "9.9.9", "draft": False, "prerelease": False, "assets": []},
+        ]
+        self.publish()
+        self.assertFalse(self.gh.release["draft"])
+        self.assertTrue(self.site_pushed)
+
+    def test_republishing_the_newest_tag_is_not_a_rollback(self) -> None:
+        self.gh.release = {
+            "tag_name": "v1.2.3", "draft": False,
+            "assets": [self.gh.asset(self.bundle), self.gh.asset(self.provenance), self.gh.asset(self.sums)],
+        }
+        self.gh.others = [{"tag_name": "v1.2.2", "draft": False, "prerelease": False, "assets": []}]
+        self.assertIn("already published", self.publish())
+
     def test_release_lists_with_several_pages_and_duplicates(self) -> None:
         self.gh.others = [{"tag_name": f"v0.0.{n}", "draft": False, "prerelease": True, "assets": []} for n in range(5)]
         self.publish()

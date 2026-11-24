@@ -10,8 +10,10 @@ gh-pages first). A 0.x release is a pre-release and never the latest release;
 from 1.0.0 on it is the latest. This script can resume a draft after an
 interrupted upload or Pages wait, and finishes the site and the flags of a
 release that was published by hand, but never changes the assets of a published
-release. Check the remote tag target against the exact workflow commit before
-any write and again immediately before publication.
+release. A tag older than a published release is refused before anything is
+written, so a re-run of an old run cannot roll the repository back. Check the
+remote tag target against the exact workflow commit before any write and again
+immediately before publication.
 
 Exit status: 0 published; 1 failure (the release stays a draft, unless it was
 already published or the failure came after the publication edit); 3 gh-pages
@@ -235,8 +237,8 @@ def is_prerelease(tag: str) -> bool:
     return int(tag[1:].split(".")[0]) == 0
 
 
-def find_release(tag: str, repo: str, runner: GhRunner) -> dict | None:
-    """Look the release up in the paginated list: the by-tag endpoint does not show drafts."""
+def list_releases(repo: str, runner: GhRunner) -> list:
+    """The paginated release list: the by-tag endpoint does not show drafts."""
     output = runner("api", "--paginate", f"repos/{repo}/releases?per_page=100")
     # gh prints one JSON array per page, back to back
     decoder = json.JSONDecoder()
@@ -254,6 +256,10 @@ def find_release(tag: str, repo: str, runner: GhRunner) -> dict | None:
             releases.extend(page)
     except (ValueError, TypeError) as error:
         raise ReleasePublishError("GitHub returned invalid release list JSON") from error
+    return releases
+
+
+def pick_release(tag: str, releases: list) -> dict | None:
     found = [release for release in releases if isinstance(release, dict) and release.get("tag_name") == tag]
     if len(found) > 1:
         raise ReleasePublishError(f"{len(found)} releases have the tag {tag}; manual review required")
@@ -265,6 +271,30 @@ def find_release(tag: str, repo: str, runner: GhRunner) -> dict | None:
     if not isinstance(release.get("assets"), list):
         raise ReleasePublishError("GitHub release asset list is missing")
     return release
+
+
+def find_release(tag: str, repo: str, runner: GhRunner) -> dict | None:
+    return pick_release(tag, list_releases(repo, runner))
+
+
+def tag_version(name: object) -> tuple[int, ...] | None:
+    if not isinstance(name, str) or not TAG_RE.fullmatch(name):
+        return None
+    return tuple(int(part) for part in name[1:].split("."))
+
+
+def require_newest(tag: str, releases: list) -> None:
+    """Refuse a tag older than a published release: a re-run of the failed jobs of an old run would put its version on top of the current repository and offer it to every client."""
+    mine = tag_version(tag)
+    published = [
+        release["tag_name"] for release in releases
+        if isinstance(release, dict) and release.get("draft") is not True and tag_version(release.get("tag_name")) is not None
+    ]
+    newer = [name for name in published if tag_version(name) > mine]
+    if newer:
+        raise ReleasePublishError(
+            f"{tag} is older than the published release {max(newer, key=tag_version)}: publishing it would roll the repository back; cut the next version instead"
+        )
 
 
 def get_release(tag: str, repo: str, runner: GhRunner) -> dict:
@@ -344,7 +374,9 @@ def publish(
 
     prerelease = is_prerelease(tag)
     # A re-run resumes the release it finds; GitHub may accept a second draft for the same tag, so create only when there is none
-    release = find_release(tag, repo, runner)
+    releases = list_releases(repo, runner)
+    require_newest(tag, releases)
+    release = pick_release(tag, releases)
     if release is None:
         try:
             runner(

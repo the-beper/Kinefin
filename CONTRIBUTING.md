@@ -12,7 +12,7 @@ This page covers building, checking, packaging and the working rules. The [archi
 | `build/desktop-check.sh` | Reads a running Plasma session and reports on MPRIS, the screen and suspend inhibitions, KWallet and KRunner (`--act` also controls the player; run it with Kinefin open and a video playing) |
 | `build/screenshots.sh` | Renders the screenshots of `docs/images`, light, and `docs/images/dark` (README and user guide) from a library of the CC BY open films of Blender (`tests/DocScene.h`, artwork in `tests/assets/doc`), in a build-image layer with the Breeze Qt style and a virtual X server (`build/screenshots/Containerfile`); run it after a change of the look and commit the new PNGs |
 | `build/flatpak/` | The Flatpak image (`Containerfile`), the manifest (`io.github.the_beper.Kinefin.yml`), and its build/test scripts |
-| `build/release/` | Version bump, Flatpak source/runtime/permission/Action gates, Flathub manifest generator, artifact verification, attestation checks, release publisher and first-release checklist |
+| `build/release/` | Version bump, Flatpak source/runtime/permission/Action gates, Flathub manifest generator, artifact verification, attestation checks, signed-repository scripts, release publisher and first-release checklist |
 | `data/` | Desktop file, AppStream metainfo and icons (`icons/hicolor`: the scalable SVG source and the 128/256 px PNG renders) |
 | `po/` | Gettext: `LINGUAS`, `POTFILES.in`, `extract.sh`, per-language catalogs |
 | `docs/` | The user guide, the settings reference and the architecture overview |
@@ -78,6 +78,8 @@ The build script installs the org.kde runtime at commits recorded in `build/flat
 
 The `repo-update` CI job (after `flatpak`, on a plain `ubuntu-24.04` runner, so with Ubuntu's own flatpak and ostree) runs `build/flatpak/test-repo-update.sh` against the repository the `flatpak` job built (`dist/flatpak-repo`). With a real flatpak and ostree, throwaway keys and a local web server, it makes a first and a second release through the release scripts and checks that an installed client updates, that a commit signed by another key is refused, that the signed bundle installs with only its embedded key while a bundle with another key is refused, and that the served `.flatpakref` installs. Locally, after a Flatpak build, run it in the Flatpak image: `podman run --rm --security-opt label=disable -v "$PWD:$PWD" -w "$PWD" localhost/kinefin-flatpak:fedora45 build/flatpak/test-repo-update.sh dist/flatpak-repo` (rebuild the image first when its `Containerfile` changed).
 
+`build/build-env.sh build/release/simulate.sh` runs the release scripts against fake tools (`check.sh` includes it, and CI also runs it with Ubuntu's dash).
+
 ## Translations
 
 Strings are `i18n()` calls (QML: plain `i18n()` injected with `KLocalization::setupLocalizedContext()` from `KF6::I18nQml`). The project requires KF6 >= 6.24, the first Kirigami with `Kirigami.StyleHints` (the KDE 6.11 Flatpak runtime ships Kirigami 6.32). When a file gains its first translatable string, add it to `po/POTFILES.in` in the same change (the extraction script fails otherwise), then regenerate `po/kinefin.pot` with `build/build-env.sh po/extract.sh` and fill `it.po` (`python3 scripts/po.py todo` lists the pending entries). `en.po` repeats the msgid. Catalogs are compiled by the CMake install (ECM PO); `po/extract.sh --check` must verify real source extraction, and `po.py status --strict` must report zero pending per language or the check fails.
@@ -93,15 +95,15 @@ Action labels follow the KDE HIG ellipsis rule ([Text and labels](https://develo
 
 ## Releasing
 
-Source preparation is implemented; first-release acceptance is not closed. Do not tag or publish before the required v1 features, real Jellyfin/Plasma rounds and packaging gates pass. The authoritative instructions are [release tooling](build/release/README.md) and the [first-release checklist](build/release/FIRST_RELEASE.md).
+A release publishes the app to Kinefin's signed Flatpak repository and attaches the signed bundle, `PROVENANCE.json` and `SHA256SUMS` to a GitHub release. The release workflow has not yet run from a real tag. The channel (URL, remote, branch), the job table, the signing setup and the recovery procedures are in the [release tooling](build/release/README.md#signed-flatpak-repository); the open steps before and after the first tag are in the [first-release checklist](build/release/FIRST_RELEASE.md).
 
-1. Run `python3 -I build/release/preflight.py` for the offline source gates, then `build/build-env.sh build/check.sh` for the native/container checks.
-2. When v1 acceptance is complete, prepare the version with `build/release/version-bump.sh --dry-run --date YYYY-MM-DD X.Y.Z` and `build/release/version-bump.sh --date YYYY-MM-DD X.Y.Z`; review and commit CMake and AppStream together.
-3. Review the rebuilt Flatpak image from the Images workflow and set the repository variable `KINEFIN_RELEASE_FLATPAK_DIGEST` to its approved `sha256:` digest. Verify KDE SDK/Platform commits against Flathub availability.
-4. Only after green CI on the intended `main` commit, create the protected `vX.Y.Z` tag. The release workflow validates the tag, builds and smokes the bundle, verifies signed attestations and provenance, and publishes the three checked release assets. This workflow has **not yet been verified end to end from a real tag**.
-5. Review the generated commit-pinned Flathub manifest separately. Submission to Flathub is a manual, independent review; the GitHub release workflow does not submit it.
+1. Run `python3 -I build/release/preflight.py` for the offline source gates, then `build/build-env.sh build/check.sh` for the native/container checks. The release-script simulation and the real-client repository test are described under [Flatpak](#flatpak).
+2. Prepare the version with `build/release/version-bump.sh [--dry-run] [--date YYYY-MM-DD] X.Y.Z` (`--dry-run` prints the diff, `--date` sets a release date other than today, UTC); review and commit CMake and AppStream together.
+3. Review the rebuilt Flatpak image from the Images workflow and set the repository variable `KINEFIN_RELEASE_FLATPAK_DIGEST` to its approved `sha256:` digest.
+4. After green CI on the intended `main` commit, push the protected `vX.Y.Z` tag. The workflow builds, signs and publishes; a maintainer approves the `sign-flatpak` deployment of the `release-signing` environment, the only place that holds the signing key.
+5. Review the generated commit-pinned Flathub manifest separately. Submission to Flathub is a manual, independent review that is planned for after 1.0.0; the release workflow does not submit it.
 
-Source checks and the 128px/256px icon are present, but they do not replace a build on the pinned image, a real host review or a maintainer decision to release.
+These checks do not replace a build on the pinned image, a real host review or a maintainer decision to release.
 
 ## How to work here
 

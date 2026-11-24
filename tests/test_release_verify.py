@@ -196,7 +196,7 @@ class ReleaseVerifyTest(unittest.TestCase):
 
     def test_github_workflow_runs_verifier_before_any_release_build(self) -> None:
         workflow = (SOURCE / ".github/workflows/release.yml").read_text(encoding="utf-8")
-        check = workflow.index('python3 -I build/release/verify_release.py "$RELEASE_TAG"')
+        check = workflow.index('python3 -I build/release/verify_release.py "$RELEASE_TAG" --require-newest')
         build = workflow.index("  build-flatpak:")
         self.assertLess(check, build)
         self.assertIn('git merge-base --is-ancestor "$GITHUB_SHA" origin/main', workflow)

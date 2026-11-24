@@ -130,12 +130,15 @@ class ReleaseProvenanceTest(unittest.TestCase):
 
     def test_workflow_passes_exact_build_image_and_hash_to_verify(self) -> None:
         workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
-        build = workflow.split("  build-flatpak:\n", 1)[1].split("  verify:\n", 1)[0]
+        build = workflow.split("  build-flatpak:\n", 1)[1].split("  prepare-flatpak:\n", 1)[0]
+        finish = workflow.split("  finish-flatpak:\n", 1)[1].split("  attest-flatpak:\n", 1)[0]
         verify = workflow.split("  verify:\n", 1)[1].split("  publish:\n", 1)[0]
         self.assertIn("image_digest: ${{ steps.pull.outputs.digest }}", build)
         self.assertIn('printf \'digest=%s\\n\' "$KINEFIN_RELEASE_FLATPAK_DIGEST" >> "$GITHUB_OUTPUT"', build)
         self.assertIn("RELEASE_IMAGE_DIGEST: ${{ needs.build-flatpak.outputs.image_digest }}", verify)
-        self.assertIn("EXPECT_SHA256_FLATPAK: ${{ needs.build-flatpak.outputs.flatpak_sha256 }}", verify)
+        self.assertIn("flatpak_sha256: ${{ steps.finish.outputs.flatpak_sha256 }}", finish)
+        self.assertIn("EXPECT_SHA256_FLATPAK: ${{ needs.finish-flatpak.outputs.flatpak_sha256 }}", verify)
+        self.assertNotIn("flatpak_sha256", build)
         self.assertIn("actions/checkout@", verify)
         self.assertIn("--commit \"$RELEASE_COMMIT\"", verify)
         self.assertIn("--run-id \"$RELEASE_RUN_ID\"", verify)

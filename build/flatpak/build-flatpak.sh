@@ -1,7 +1,6 @@
 #!/bin/sh
 # Builds an OSTree repository (dist/flatpak-repo, or $KINEFIN_FLATPAK_REPO) and dist/Kinefin-x86_64.flatpak inside a throw-away rootless podman container. The runtimes live in the podman volume "kinefin-flatpak" and the flatpak-builder state (module cache, sources, ccache) in the volume "kinefin-flatpak-state", or in the host directory $KINEFIN_FLATPAK_STATE_DIR that CI caches between runs; nothing lands on the host otherwise.
 # Usage: build/flatpak/build-flatpak.sh [flatpak-builder options...]
-# TODO (first release): port KuickShare's prepare/sign/finish pipeline (a signed OSTree repository on GitHub Pages) if the Flatpak is ever self-hosted; until then Flathub is the only repository and the bundle goes to the GitHub release as an asset.
 set -eu
 root=$(cd "$(dirname "$0")/../.." && pwd)
 image=localhost/kinefin-flatpak:fedora45

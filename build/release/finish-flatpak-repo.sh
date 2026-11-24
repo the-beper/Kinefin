@@ -25,6 +25,7 @@ usage() {
     cat >&2 <<'EOF'
 usage: finish-flatpak-repo.sh <prepared.tar> <sign-list.txt> <signed-repo.tar> <refs.txt> <out-dir>
   writes <out-dir>/site.tar and <out-dir>/Kinefin-x86_64.flatpak, only when every check passed
+  builds the bundle but does not install it: check-flatpak-bundle.sh does, in a job of its own
 environment: EXPECT_PREPARED_SHA256 EXPECT_SIGNLIST_SHA256 EXPECT_SIGNED_SHA256 EXPECT_REFS_SHA256 EXPECT_BASE_SHA SITE_URL GITHUB_SHA GITHUB_REPOSITORY (or PAGES_REMOTE)
   optional: RUNNER_TEMP, SIGNING_PUBKEY (default build/flatpak/signing-key.asc), KINEFIN_ROOT
   GITHUB_OUTPUT receives site_sha256 flatpak_sha256 base_sha
@@ -124,7 +125,7 @@ mkdir "$tmp/expected"
 GPG_KEY_B64=$want_gpgkey "$tools/build/flatpak/write-site-files.sh" "$tmp/expected" "$SITE_URL"
 diff -r -x repo "$site" "$tmp/expected" > "$tmp/site.diff" 2>&1 || { sed 's/^/    /' "$tmp/site.diff" >&2; fail "the files of the site outside repo/ are not the ones publish-repo.sh writes"; }
 
-# check it as a client would: only the public key, a keyring of its own
+# check it as a client would: only the public key, a keyring of its own. A remote install honours --no-deploy, a bundle install does not (see check-flatpak-bundle.sh)
 FLATPAK_USER_DIR=$tmp/client
 export FLATPAK_USER_DIR
 mkdir "$FLATPAK_USER_DIR"
@@ -147,9 +148,7 @@ rm -rf "$old"
 mv "$new" "$old"
 rm -rf "$old/tmp"
 mkdir "$old/tmp"
-# The bundle of the release is made from the signed repository, in scratch space until every check below has passed: its public key travels in it (--gpg-keys), so installing it checks the signature of the commit, and the runtime comes from Flathub
-app_commit=$(awk -F'\t' -v r="$app_ref" '$1 == r { print $2 }' "$signlist")
-printf '%s\n' "$app_commit" | grep -Eq '^[0-9a-f]{64}$' || fail "the sign list has no commit for $app_ref"
+# The bundle of the release is made from the signed repository, in scratch space until the repository has been checked again below: its public key travels in it (--gpg-keys). Installing it is check-flatpak-bundle.sh, in a job of its own, because flatpak deploys a bundle even with --no-deploy
 mkdir "$tmp/bundle-out"
 bundle=$tmp/bundle-out/Kinefin-x86_64.flatpak
 (cd "$old" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 -r sha256sum > "$tmp/files.pre-bundle")
@@ -161,22 +160,6 @@ check_repo_entries "$old"
 check_repo_paths "$old"
 (cd "$old" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 -r sha256sum > "$tmp/files.post-bundle")
 cmp -s "$tmp/files.pre-bundle" "$tmp/files.post-bundle" || fail "flatpak build-bundle changed the repository"
-# The bundle as a user gets it, in a user installation of its own with no key but the one inside it; flatpak may deploy a bundle despite --no-deploy (exports, host triggers), so the job that runs this script must hold no write, signing or attestation permission
-FLATPAK_USER_DIR=$tmp/bundle-client
-export FLATPAK_USER_DIR
-mkdir "$FLATPAK_USER_DIR"
-flatpak install --user --noninteractive -y --no-deploy --no-deps --no-related --bundle "$bundle" > "$tmp/bundle-install.log" 2>&1 || { sed 's/^/    /' "$tmp/bundle-install.log" >&2; fail "the bundle does not install with only the key embedded in it"; }
-# What was installed is read from the OSTree repository of that installation, and its signature is checked again explicitly against the pinned key
-bundle_repo=$FLATPAK_USER_DIR/repo
-bundle_remote=$(ostree --repo="$bundle_repo" remote list) || fail "cannot list the remotes of the bundle installation"
-{ [ -n "$bundle_remote" ] && [ "$(printf '%s\n' "$bundle_remote" | wc -l)" -eq 1 ]; } || fail "the bundle installation has no remote or more than one"
-installed=$(ostree --repo="$bundle_repo" rev-parse "$bundle_remote:$app_ref") || fail "the bundle installation has no $app_ref"
-[ "$installed" = "$app_commit" ] || fail "the bundle installs the commit $installed, not the listed app commit $app_commit"
-# The commit of the bundle must carry a signature of the pinned key: it is pulled into a scratch repository whose only remote knows that key alone, with signature checks on, so the exit status decides and no output (which the build's commit message could imitate) is parsed
-ostree --repo="$tmp/bundle-chk" init --mode=archive
-ostree --repo="$tmp/bundle-chk" remote add --set=gpg-verify=true --gpg-import="$tmp/public.gpg" pinned "file://$tmp/nowhere"
-ostree --repo="$tmp/bundle-chk" pull-local --remote=pinned --gpg-verify "$bundle_repo" "$installed" > "$tmp/bundle-verify.log" 2>&1 || { sed 's/^/    /' "$tmp/bundle-verify.log" >&2; fail "the commit of the bundle is not signed by the pinned key $want_fpr"; }
-echo "$me: the bundle installs with only its embedded key, at the listed app commit $app_commit, signed by $want_fpr"
 mv "$bundle" "$out/Kinefin-x86_64.flatpak"
 tar --sort=name --owner=0 --group=0 --numeric-owner --exclude=./.git -C "$site" -cf "$out/site.tar" .
 site_sha=$(sha256sum "$out/site.tar" | cut -d' ' -f1)

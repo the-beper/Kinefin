@@ -40,6 +40,7 @@ usage: sign-flatpak-repo.sh --check <prepared.tar> <sign-list.txt> <refs.txt> <o
   --check and --unpack refuse to run with FLATPAK_GPG_PRIVATE_KEY set, --sign needs it (the armored secret key, no passphrase)
 environment of --check: EXPECT_PREPARED_SHA256 EXPECT_SIGNLIST_SHA256 EXPECT_HEADS_SHA256 EXPECT_REFS_SHA256 EXPECT_BASE_SHA GITHUB_SHA GITHUB_REPOSITORY (or PAGES_REMOTE)
 environment of --unpack: EXPECT_CHECKED_SHA256 EXPECT_SIGNLIST_SHA256 EXPECT_REFS_SHA256 EXPECT_HEADS_SHA256
+environment of --sign: FLATPAK_GPG_PRIVATE_KEY
   optional: RUNNER_TEMP, SIGNING_PUBKEY (default build/flatpak/signing-key.asc), KINEFIN_ROOT
   GITHUB_OUTPUT receives checked_sha256 (--check) or signed_sha256 (--sign)
 exit: 0 ok, 1 a check failed, 2 key or input problem, 3 stale base

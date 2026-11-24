@@ -152,16 +152,15 @@ class SignedReleaseAttestationTest(unittest.TestCase):
 
     def test_release_workflow_attests_and_verifies_before_publication(self) -> None:
         workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
-        build = workflow.split("  build-flatpak:\n", 1)[1].split("  verify:\n", 1)[0]
+        attest = workflow.split("  attest-flatpak:\n", 1)[1].split("  verify:\n", 1)[0]
         verify = workflow.split("  verify:\n", 1)[1].split("  publish:\n", 1)[0]
         publish = workflow.split("  publish:\n", 1)[1]
-        pin = re.search(r"uses: actions/attest@([0-9a-f]{40}) # v4\.2\.2", build)
+        pin = re.search(r"uses: actions/attest@([0-9a-f]{40}) # v4\.2\.2", attest)
         self.assertIsNotNone(pin)
-        self.assertIn("subject-path: dist/Kinefin-x86_64.flatpak", build)
-        self.assertLess(build.index("- name: Hash"), build.index("- name: Attest the built Flatpak"))
-        self.assertLess(build.index("- name: Attest the built Flatpak"), build.index("name: asset-flatpak"))
+        self.assertIn("subject-path: asset-flatpak/Kinefin-x86_64.flatpak", attest)
+        self.assertLess(attest.index("sha256sum -c -"), attest.index("uses: actions/attest@"))
         for permission in ("id-token: write", "attestations: write", "artifact-metadata: write"):
-            self.assertIn(permission, build)
+            self.assertIn(permission, attest)
         for job, later in ((verify, "Record build provenance"), (publish, "Publish only after")):
             self.assertIn("attestations: read", job)
             self.assertIn("GH_TOKEN: ${{ github.token }}", job)

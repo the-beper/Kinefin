@@ -10,9 +10,11 @@
   install           verifies the .commitmeta of the ref's commit with that keyring
   build-bundle      writes a tar with the id, content and signature of the commit of an app ref, the --gpg-keys file and the --runtime-repo URL
   install --bundle  puts the commit of a bundle into $FLATPAK_USER_DIR/repo (a fake-ostree repository) under a remote of its own with the key of the bundle, after verifying the signature with that key
+  info --show-commit prints the commit of an installed app (the head recorded under that remote), and fails when none is installed
 
 Every call is logged with the value of FLATPAK_USER_DIR. Knobs for the simulation: FAKE_FLATPAK_LEAK copies key material into the repository, FAKE_FLATPAK_BUNDLE_COMMIT puts another commit into the bundle, FAKE_FLATPAK_BUNDLE_KEY another key, FAKE_FLATPAK_BUNDLE_NOSIG leaves the signature out, FAKE_FLATPAK_INSTALL_NO_VERIFY makes install accept a bundle without checking its signature.
 """
+import glob
 import hashlib
 import io
 import os
@@ -217,6 +219,11 @@ def main() -> None:
             print(ref)
     elif command == "install" and "bundle" in opts:
         install_bundle(positional[0])
+    elif command == "info" and "show-commit" in opts:
+        heads = sorted(glob.glob(os.path.join(os.environ["FLATPAK_USER_DIR"], "repo", "refs", "remotes", "*", "app", positional[0], "*", "*")))
+        if not heads:
+            die("info: %s is not installed" % positional[0])
+        print(read(heads[0]))
     elif command == "install":
         repo = remote_url(positional[0])[len("file://"):]
         ref = positional[1]

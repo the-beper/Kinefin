@@ -84,17 +84,16 @@ The screenshots follow your browser's light or dark mode. They show the open fil
 
 Kinefin is packaged only as a Flatpak, for Linux on x86-64 with Plasma 6 on Wayland.
 
-1. Download [`Kinefin-x86_64.flatpak`](https://github.com/the-beper/Kinefin/releases/latest/download/Kinefin-x86_64.flatpak) from the latest release.
-2. Install it:
+```sh
+flatpak install https://the-beper.github.io/Kinefin/kinefin.flatpakref
+```
 
-   ```sh
-   flatpak install Kinefin-x86_64.flatpak
-   ```
+Opening that file in Discover works too. It adds Kinefin's signed repository as the remote `kinefin`, and Discover or `flatpak update` then bring new versions. The KDE runtime comes from [Flathub](https://flathub.org/setup), which must be set up.
 
-The KDE runtime comes from [Flathub](https://flathub.org/setup), which must be set up. Updating and uninstalling are in the [user guide](docs/user-guide.md#install-and-update).
+A signed bundle is also available. The [user guide](docs/user-guide.md#install-and-update) covers it, updating, uninstalling and the signing key.
 
 > [!NOTE]
-> No release has been published yet, so the download link does not work. Until the first one, build the bundle with `build/flatpak/build-flatpak.sh` (see [CONTRIBUTING.md](CONTRIBUTING.md#flatpak)). Kinefin is tested against a fake server and, at the API level, against Jellyfin 12.4; acceptance on a Plasma desktop against a real server is still pending for most features.
+> The first release has not been published, so the remote and the download do not exist yet. Until then, build the bundle with `build/flatpak/build-flatpak.sh` (see [CONTRIBUTING.md](CONTRIBUTING.md#flatpak)). Kinefin is tested against a fake server and, at the API level, against Jellyfin 12.4; acceptance on a Plasma desktop against a real server is still pending for most features.
 
 ## Getting started
 
