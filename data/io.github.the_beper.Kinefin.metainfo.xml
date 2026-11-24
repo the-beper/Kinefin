@@ -7,18 +7,46 @@
     <name>the-beper</name>
   </developer>
   <name>Kinefin</name>
-  <summary>Browse Jellyfin movies and TV series on KDE Plasma</summary>
+  <summary>Watch Jellyfin movies and TV series</summary>
   <description>
-    <p>Kinefin is a native KDE Plasma client for browsing movie and TV libraries on Jellyfin servers. It uses Kirigami and a direct Jellyfin API connection instead of embedding a browser.</p>
-    <p>Organize and explore your media with familiar desktop controls:</p>
+    <p>Kinefin is a native KDE Plasma client for Jellyfin media servers. Its interface follows your Plasma theme, it talks to the server directly instead of embedding a web browser, and mpv plays the video.</p>
     <ul>
-      <li>Browse films, series, seasons and episodes with library filters and search</li>
-      <li>Switch between saved users and servers, and manage favorites</li>
-      <li>Review items, playback queues and remote playback sessions</li>
+      <li>Browse your movie and TV libraries with filters and sorting, search them, and keep favorites, playlists, and a play queue</li>
+      <li>Play with chapters, Skip Intro, Up Next, and your choice of audio and subtitle tracks, and keep watching in a mini player or a picture-in-picture window while you browse</li>
+      <li>Cast to smart TVs and players over DLNA, and to Chromecast and Nest Hub devices over Google Cast</li>
+      <li>Download movies and episodes for offline viewing, one at a time or with a rule per series</li>
+      <li>Watch together with SyncPlay, and control other Jellyfin sessions</li>
+      <li>Use the media keys, the Plasma media controls, and KRunner search</li>
     </ul>
-    <p>Kinefin is an independent client and requires access to a Jellyfin server.</p>
+    <p>Your sign-in is kept in KWallet. Music and audiobooks are not supported. Kinefin is an independent client and needs access to a Jellyfin server.</p>
   </description>
   <launchable type="desktop-id">io.github.the_beper.Kinefin.desktop</launchable>
+  <screenshots>
+    <screenshot type="default">
+      <caption>Home with Continue Watching, Next Up, and Recently Added</caption>
+      <image type="source" width="1280" height="960">https://raw.githubusercontent.com/the-beper/Kinefin/main/docs/images/home.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>A movie library with filters and sorting</caption>
+      <image type="source" width="1280" height="960">https://raw.githubusercontent.com/the-beper/Kinefin/main/docs/images/library.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>The details page of a movie</caption>
+      <image type="source" width="1280" height="1040">https://raw.githubusercontent.com/the-beper/Kinefin/main/docs/images/details.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>A series with its next episode and seasons</caption>
+      <image type="source" width="1280" height="960">https://raw.githubusercontent.com/the-beper/Kinefin/main/docs/images/series.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>The player with its controls</caption>
+      <image type="source" width="1280" height="720">https://raw.githubusercontent.com/the-beper/Kinefin/main/docs/images/player.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Choosing subtitles in the player</caption>
+      <image type="source" width="1280" height="720">https://raw.githubusercontent.com/the-beper/Kinefin/main/docs/images/player-subtitles.png</image>
+    </screenshot>
+  </screenshots>
   <url type="homepage">https://github.com/the-beper/Kinefin</url>
   <url type="bugtracker">https://github.com/the-beper/Kinefin/issues</url>
   <url type="vcs-browser">https://github.com/the-beper/Kinefin</url>

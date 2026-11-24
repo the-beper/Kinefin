@@ -75,15 +75,17 @@ The [settings reference](settings.md) lists every setting with its default. Wher
 
 Kinefin has no Flathub listing yet. It is installed from a Flatpak bundle, `Kinefin-x86_64.flatpak`.
 
-To install the bundle for your user:
+To install the bundle:
 
 1. Open a terminal in the folder that holds the bundle.
-2. Run `flatpak install --user --bundle Kinefin-x86_64.flatpak`.
+2. Run `flatpak install Kinefin-x86_64.flatpak`.
 3. Start Kinefin from the application launcher, or run `flatpak run io.github.the_beper.Kinefin`.
 
-To update, run the same command with `--reinstall` added: `flatpak install --user --reinstall --bundle Kinefin-x86_64.flatpak`. Your servers, settings and downloads under `~/.var/app/io.github.the_beper.Kinefin/` are kept.
+The bundle needs the KDE runtime, which comes from [Flathub](https://flathub.org/setup): set up the Flathub remote first if your system does not have it.
 
-Kinefin checks for a new release a few seconds after it starts. When one exists, a dialog asks whether to open the release page in your browser. Nothing is installed automatically. To turn the check off, switch off **Check For Updates** in **Settings**, **General**. While it is on, **Check for Updates** in **About Kinefin** checks at once.
+New versions are published on the [releases page](https://github.com/the-beper/Kinefin/releases). To update, download the new bundle and run the install command with `--reinstall` added: `flatpak install --reinstall Kinefin-x86_64.flatpak`. Your servers, settings and downloads under `~/.var/app/io.github.the_beper.Kinefin/` are kept.
+
+To uninstall, run `flatpak uninstall io.github.the_beper.Kinefin`. That keeps your data; add `--delete-data` to remove the servers, settings, downloads and logs as well. The access tokens are in KWallet, not in that folder: sign out of each user before you uninstall, or delete the `Kinefin` folder of your wallet in KWalletManager afterwards.
 
 A second launch does not open a second window. It raises the running one.
 

@@ -24,6 +24,7 @@ podman pull "$image"
 podman tag "$image" localhost/kinefin-flatpak:fedora45
 
 if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+    # shellcheck disable=SC2016 # the backticks are Markdown code in the step summary, not a command substitution
     printf 'Flatpak release build image: `%s`\n' "$image" >> "$GITHUB_STEP_SUMMARY"
 fi
 printf 'Using Flatpak build image %s\n' "$image"

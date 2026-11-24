@@ -65,7 +65,7 @@ The directories build into static libraries (`kinefin_core`, `kinefin_player`, `
 | `src/cast/` (shared) | Cast to devices: `CastController` drives the active device through the `CastRenderer` interface; `CastNetwork` (the interfaces a multicast search uses) and `StreamProbe` (the token-less probe of a direct-play URL) |
 | `src/cast/` (DLNA) | SSDP discovery, device descriptions, SOAP control of a renderer |
 | `src/cast/` (Google Cast) | `Mdns` discovery, `CastChannel` (the Cast V2 channel and its heartbeat), `CastDeviceAuth` (device authentication on libcrypto), `CastProto` (CASTV2 framing and protobuf), `CastSender` (the Default Media Receiver session), `CastProfile` (the device profile by model) |
-| `src/integration/` | Plasma and desktop integration: MPRIS, the KRunner runner, screensaver and suspend inhibition, the remote-control socket, `jellyfin://` links, gamepads (SDL3) with spatial navigation, the update check |
+| `src/integration/` | Plasma and desktop integration: MPRIS, the KRunner runner, screensaver and suspend inhibition, the remote-control socket, `jellyfin://` links, gamepads (SDL3) with spatial navigation |
 | `src/app/` | Glue between C++ and QML: `ConnectionController`, QML singletons and helpers, the mpv video item |
 | `src/qml/` | The interface, one file per page, dialog or reusable control |
 | `tests/` | QtTest suites against a fake Jellyfin server (`FakeJellyfin.h`); `test_ui_pages` loads the real `Main.qml` offscreen; `test_jellyfin_live` runs against a real server when the `KINEFIN_LIVE_*` variables are set. The UI tests fail on any QML warning |

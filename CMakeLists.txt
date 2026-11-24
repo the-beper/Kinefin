@@ -146,8 +146,6 @@ add_library(kinefin_core STATIC
     src/player/PlaybackReporter.h
     src/player/PlaybackSession.cpp
     src/integration/LinkRouter.cpp
-    src/integration/UpdateChecker.cpp
-    src/integration/UpdateChecker.h
     src/settings/BrowseStateStore.cpp
     src/settings/BrowseStateStore.h
     src/settings/ClientSettings.cpp
@@ -375,7 +373,6 @@ qt_add_qml_module(kinefin_ui
         src/qml/icons/critic-rotten.svg
     SOURCES
         src/app/ClientSettingsQml.h
-        src/app/UpdateCheckerQml.h
         src/app/ConnectionController.cpp
         src/app/ConnectionController.h
         src/app/DownloadsController.cpp
@@ -451,7 +448,7 @@ target_link_libraries(kinefin PRIVATE
     KF6::CoreAddons KF6::I18n KF6::I18nQml KF6::DBusAddons
 )
 target_include_directories(kinefin PRIVATE src/app)
-# A development Flatpak names itself after its build time in About (build/flatpak/build-flatpak.sh writes the file for the length of the build); the version the update check and the server see stays PROJECT_VERSION
+# A development Flatpak names itself after its build time in About (build/flatpak/build-flatpak.sh writes the file for the length of the build); the version the server sees stays PROJECT_VERSION
 set(KINEFIN_DISPLAY_VERSION "${PROJECT_VERSION}")
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/build/flatpak/build-id")
     file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/build/flatpak/build-id" KINEFIN_DISPLAY_VERSION LIMIT_COUNT 1 REGEX "^[0-9.]+$")
@@ -668,11 +665,6 @@ if(BUILD_TESTING)
     add_executable(test_jellyfin_live tests/test_jellyfin_live.cpp)
     target_link_libraries(test_jellyfin_live PRIVATE kinefin_player kinefin_core Qt6::Test Qt6::Network Qt6::WebSockets)
     add_test(NAME jellyfin_live COMMAND test_jellyfin_live)
-
-    add_executable(test_update_checker tests/test_update_checker.cpp)
-    target_compile_definitions(test_update_checker PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
-    target_link_libraries(test_update_checker PRIVATE kinefin_core Qt6::Test Qt6::Network)
-    add_test(NAME update_checker COMMAND test_update_checker)
 
     add_executable(test_link_router tests/test_link_router.cpp)
     target_link_libraries(test_link_router PRIVATE kinefin_core Qt6::Test)

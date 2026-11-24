@@ -1,77 +1,132 @@
 # Kinefin
 
-A native KDE Plasma 6 client for Jellyfin servers: Kirigami interface, its own REST client and a libmpv playback engine, without WebEngine. It browses movies and TV series (Home, library tabs with filters, Favorites, search, details, a play queue), plays them with mpv or on a TV or player over DLNA or Google Cast, downloads them for offline playback, can control the server's remote sessions and searches from KRunner; music and audiobooks are not built yet. It builds and runs as a Flatpak, but acceptance against a real Jellyfin server on a Plasma desktop is still pending for most v1 features; this is **not yet a release-ready client**.
+<p align="center">
+  <img src="data/icons/hicolor/scalable/apps/io.github.the_beper.Kinefin.svg" width="112" alt="Kinefin icon" />
+</p>
 
-## Screenshots
+<p align="center">
+  <b>Native KDE Plasma 6 client for Jellyfin servers.</b><br>
+  Browse your movies and TV series, play them with mpv, cast them to a TV and keep them for offline viewing, in a Kirigami interface that follows your Plasma theme.
+</p>
+
+<p align="center">
+  <a href="https://github.com/the-beper/Kinefin/releases"><img src="https://img.shields.io/badge/Download-Flatpak-3b7086?logo=flatpak&logoColor=white" alt="Flatpak" /></a>
+  <a href="https://github.com/the-beper/Kinefin/actions/workflows/ci.yml"><img src="https://github.com/the-beper/Kinefin/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <img src="https://img.shields.io/badge/License-GPL--3.0--or--later-blue" alt="License" />
+</p>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/dark/home.png">
   <img alt="Home with the libraries, Continue Watching, Next Up and Recently Added" src="docs/images/home.png">
 </picture>
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/dark/library.png">
-  <img alt="The Movies tab, a grid of posters" src="docs/images/library.png">
-</picture>
+## Why
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/dark/series.png">
-  <img alt="The page of a series with its Next Up episode and seasons" src="docs/images/series.png">
-</picture>
+Jellyfin Desktop, the official desktop client, shows the Jellyfin web interface in a Qt WebEngine window and plays the video with mpv. The app looks and behaves like the website, not like the rest of a Plasma desktop.
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/dark/player.png">
-  <img alt="The player with its controls" src="docs/images/player.png">
-</picture>
+Kinefin is written for Plasma instead. The interface is Kirigami and follows the KDE HIG and your color scheme, it talks to the server through its own client for the Jellyfin REST API, and libmpv plays the video. No browser engine is loaded. Where a client setting maps to mpv, Kinefin keeps Jellyfin Desktop's name, default and values, so the playback behaves the same.
 
-The pictures show a library of the open films of the Blender Foundation and Blender Studio, with their posters and frames, rendered by `build/screenshots.sh` in the Breeze style of Plasma, in the light and the dark color scheme (the page shows the one your browser asks for). The artwork is licensed CC BY; the film in the player is *Tears of Steel* (CC BY 3.0, Blender Foundation | mango.blender.org).
+## What it does
 
-<details>
-<summary>Credits of the artwork</summary>
+### Browse
 
-| Film | File on Wikimedia Commons | License |
-| --- | --- | --- |
-| Elephants Dream | [ElephantsDreamPoster.jpg](https://commons.wikimedia.org/wiki/File:ElephantsDreamPoster.jpg) | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
-| Big Buck Bunny | [Big buck bunny poster big.jpg](https://commons.wikimedia.org/wiki/File:Big_buck_bunny_poster_big.jpg) | [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/) |
-| Sintel | [Sintel poster.jpg](https://commons.wikimedia.org/wiki/File:Sintel_poster.jpg) | [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/) |
-| Tears of Steel (poster) | [Tos-poster.png](https://commons.wikimedia.org/wiki/File:Tos-poster.png) | [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/) |
-| Tears of Steel (frame) | [Tears of Steel frame 08 4a.jpg](https://commons.wikimedia.org/wiki/File:Tears_of_Steel_frame_08_4a.jpg) | [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/) |
-| Tears of Steel (frame) | [Tears of Steel frame 01 2a.jpg](https://commons.wikimedia.org/wiki/File:Tears_of_Steel_frame_01_2a.jpg) | [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/) |
-| Tears of Steel (frame of the player) | [Tears of Steel frame 09 1a.jpg](https://commons.wikimedia.org/wiki/File:Tears_of_Steel_frame_09_1a.jpg) | [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/) |
-| Cosmos Laundromat | [CosmosLaundromatPoster.jpg](https://commons.wikimedia.org/wiki/File:CosmosLaundromatPoster.jpg) | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
-| Spring | [Spring2019AlphaPosterBlender.jpg](https://commons.wikimedia.org/wiki/File:Spring2019AlphaPosterBlender.jpg) | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
-| Coffee Run | [Coffee Run-movie poster.png](https://commons.wikimedia.org/wiki/File:Coffee_Run-movie_poster.png) | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
-| Sprite Fright | [Sprite Fright-movie poster.jpg](https://commons.wikimedia.org/wiki/File:Sprite_Fright-movie_poster.jpg) | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
-| Charge | [Charge-movie poster.jpg](https://commons.wikimedia.org/wiki/File:Charge-movie_poster.jpg) | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
+- Home with Continue Watching, Next Up, Favorites and Recently Added; Movies and Shows tabs with filters, saved filter sets, sort orders and grid or list views.
+- Details pages for movies, series, seasons and episodes, with the audio and subtitle track chosen before you play. Search, Favorites, video playlists and a play queue.
+- Several servers, and several users per server. Sign in with a password or Quick Connect; the access token is kept in KWallet, never in a file.
 
-The posters and frames are scaled or cropped copies of the files above; the screenshots in `docs/images` are derived from them and carry the same licenses.
+### Play
 
-</details>
+- Direct play or server transcoding, chapters, Skip Intro and the other media segments, Up Next, and a quality cap that also lowers itself on a slow connection.
+- Audio and subtitle tracks, a second subtitle line, subtitle files of your own, and subtitle search through the server's OpenSubtitles plugin.
+- A mini player and a picture-in-picture window while you browse. Clips and GIFs, debanding and your own GLSL shaders.
+- Audio passthrough, hardware decoding and subtitle styling with Jellyfin Desktop's settings, and your own `mpv.conf` on top.
 
-## Building
+### On other screens and with other people
 
-Everything that needs Qt, KF6 or ECM runs in a Podman container; see [CONTRIBUTING.md](CONTRIBUTING.md).
+- Cast to DLNA renderers (smart TVs, network players) and Google Cast devices (Chromecast, Nest Hub), with no Google account.
+- SyncPlay groups, control of the server's other sessions, and control of Kinefin from other Jellyfin clients.
 
-```sh
-build/build-env.sh build/check.sh
-```
+### Offline
 
-## KRunner
+- Downloads of the original files, one item at a time, a whole season at once or by a rule per series. Offline playback, with the watched state sent to the server when you are back online, and export to a folder.
 
-While Kinefin is open and signed in, KRunner can find movies, series, episodes and collections on the server; the plugin is off by default, and the [user guide](docs/user-guide.md#search-from-krunner) explains how to turn it on and what it sends.
+### Plasma integration
+
+- MPRIS (media keys and the Plasma media controls), KRunner search, and the screen kept on while a video plays.
+- Keyboard shortcuts throughout, and an experimental gamepad mode.
+- English and Italian interface.
+
+### Not included
+
+- Music and audiobooks: their libraries show on Home but stay disabled until the movie and TV features are complete.
+- Server administration: **Admin Dashboard** opens the server's web interface in your browser.
+
+## Gallery
+
+<table>
+  <tr>
+    <td><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/dark/library.png"><img alt="The Movies tab, a grid of posters" src="docs/images/library.png"></picture></td>
+    <td><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/dark/filters.png"><img alt="The Filters dialog, with its sections on the left" src="docs/images/filters.png"></picture></td>
+  </tr>
+  <tr>
+    <td><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/dark/series.png"><img alt="The page of a series, with its Next Up episode and seasons" src="docs/images/series.png"></picture></td>
+    <td><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/dark/season.png"><img alt="The page of a season, with its episodes" src="docs/images/season.png"></picture></td>
+  </tr>
+  <tr>
+    <td><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/dark/details.png"><img alt="The details page of a movie, with the track selectors" src="docs/images/details.png"></picture></td>
+    <td><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/dark/player.png"><img alt="The player with its controls" src="docs/images/player.png"></picture></td>
+  </tr>
+</table>
+
+The screenshots follow your browser's light or dark mode. They show the open films of the Blender Foundation and Blender Studio (CC BY), rendered by `build/screenshots.sh` in the Breeze style; [THIRD_PARTY.md](THIRD_PARTY.md#documentation-artwork) credits the artwork.
+
+## Install
+
+Kinefin is packaged only as a Flatpak, for Linux on x86-64 with Plasma 6 on Wayland.
+
+1. Download [`Kinefin-x86_64.flatpak`](https://github.com/the-beper/Kinefin/releases/latest/download/Kinefin-x86_64.flatpak) from the latest release.
+2. Install it:
+
+   ```sh
+   flatpak install Kinefin-x86_64.flatpak
+   ```
+
+The KDE runtime comes from [Flathub](https://flathub.org/setup), which must be set up. Updating and uninstalling are in the [user guide](docs/user-guide.md#install-and-update).
+
+> [!NOTE]
+> No release has been published yet, so the download link does not work. Until the first one, build the bundle with `build/flatpak/build-flatpak.sh` (see [CONTRIBUTING.md](CONTRIBUTING.md#flatpak)). Kinefin is tested against a fake server and, at the API level, against Jellyfin 12.4; acceptance on a Plasma desktop against a real server is still pending for most features.
+
+## Getting started
+
+1. Start Kinefin, enter your server's address on the **Servers** page and press **Connect**.
+2. Sign in with your password, or choose Quick Connect and confirm the code from a Jellyfin client that is already signed in.
+3. Pick something on **Home**, **Movies** or **Shows** and press **Play**.
+
+Ctrl+, opens the settings, and Ctrl+Shift+/ lists the keyboard shortcuts.
 
 ## Documentation
 
-The [user guide](docs/user-guide.md) explains how to use Kinefin, the [settings reference](docs/settings.md) lists every setting with its default, and the [architecture overview](docs/architecture.md) is where contributors start.
+| Page | For |
+| --- | --- |
+| [User guide](docs/user-guide.md) | Install and update, signing in, browsing, playback, downloads, casting, KRunner, keyboard and gamepad, troubleshooting, where the files are |
+| [Settings reference](docs/settings.md) | Every setting with its key, default and values |
+| [Architecture](docs/architecture.md) | The code map, the invariants and the decisions, for contributors |
+| [Contributing](CONTRIBUTING.md) | Building, checks, the Flatpak, translations, releases |
+| [Security](SECURITY.md) | Reporting a vulnerability, the threat model |
+| [Third-party components](THIRD_PARTY.md) | What Kinefin uses and bundles, with the licenses |
 
-## Release preparation
+To report a problem, [open an issue](https://github.com/the-beper/Kinefin/issues/new/choose): the form asks for the version, your system and the log. Security problems go through a private report, as [SECURITY.md](SECURITY.md) describes.
 
-The first-release tooling and remaining acceptance requirements are documented in the [first-release checklist](build/release/FIRST_RELEASE.md); see also [release tooling](build/release/README.md). A passing offline preflight is not permission to publish a release.
+## Credits
 
-```sh
-python3 -I build/release/preflight.py
-```
+Kinefin is a clean-room client of the Jellyfin API: no code comes from jellyfin-web or Jellyfin Desktop. It plays through [mpv](https://mpv.io) with KDE's [mpvqt](https://invent.kde.org/libraries/mpvqt), and its interface is built on [Kirigami](https://develop.kde.org/frameworks/kirigami/) and KDE Frameworks.
 
 ## License
 
-GPL-3.0-or-later, see [LICENSE](LICENSE). Jellyfin is a trademark of the Jellyfin project; Kinefin is an independent, clean-room client.
+GPL-3.0-or-later. See [LICENSE](LICENSE), and [THIRD_PARTY.md](THIRD_PARTY.md) for the third-party code and data it uses.
+
+*Kinefin is an independent open-source project, not affiliated with or endorsed by the Jellyfin project or Google.*
+
+## AI disclosure
+
+Generative AI assisted me in writing the code and drafting the documentation.

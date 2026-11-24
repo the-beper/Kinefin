@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Kinefin contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
-// The sample library of the documentation screenshots: the open films of the Blender Foundation and Blender Studio (CC BY, credits in the README) with their posters and frames from tests/assets/doc, so that no cover is drawn here and no personal data is in the pictures
+// The sample library of the documentation screenshots: the open films of the Blender Foundation and Blender Studio (CC BY, credits in THIRD_PARTY.md) with their posters and frames from tests/assets/doc, so that no cover is drawn here and no personal data is in the pictures
 #pragma once
 
 #include <QBuffer>

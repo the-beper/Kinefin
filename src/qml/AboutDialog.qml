@@ -11,22 +11,8 @@ Kirigami.Dialog {
     id: dialog
     objectName: "aboutDialogContent"
 
-    // The owner of the update checker sets them and runs the check
-    property bool updateChecksEnabled: false
-    property bool checking: false
     // A development build's time, shown in place of the version when set
     property string displayVersion: ""
-    // What the last manual check found: "", "checking", "upToDate", "failed" or "available" (with updateVersion)
-    property string updateStatus: ""
-    property string updateVersion: ""
-    signal checkForUpdatesRequested()
-    signal updateDetailsRequested()
-
-    // A result of an earlier visit is stale; a check that still runs keeps its status
-    onAboutToShow: {
-        if (!checking)
-            updateStatus = "";
-    }
 
     // The AboutData singleton is registered by code, so no qmltypes describe it
     // qmllint disable unresolved-type missing-property
@@ -116,14 +102,14 @@ Kirigami.Dialog {
                     Controls.Label {
                         text: dialog.aboutData.shortDescription
                         textFormat: Text.PlainText
-                        opacity: 0.7
+                        color: Kirigami.Theme.disabledTextColor
                         wrapMode: Text.Wrap
                         Layout.fillWidth: true
                     }
                     Controls.Label {
                         text: dialog.aboutData.copyrightStatement
                         textFormat: Text.PlainText
-                        opacity: 0.7
+                        color: Kirigami.Theme.disabledTextColor
                         wrapMode: Text.Wrap
                         Layout.fillWidth: true
                     }
@@ -132,8 +118,8 @@ Kirigami.Dialog {
 
             Kirigami.Separator {
                 Layout.fillWidth: true
-                Layout.topMargin: Kirigami.Units.smallSpacing * 2
-                Layout.bottomMargin: Kirigami.Units.smallSpacing * 2
+                Layout.topMargin: Kirigami.Units.largeSpacing
+                Layout.bottomMargin: Kirigami.Units.largeSpacing
             }
             Entry {
                 objectName: "aboutHomepageEntry"
@@ -150,50 +136,11 @@ Kirigami.Dialog {
                 title: i18n("License: GPL v3")
                 url: "https://www.gnu.org/licenses/gpl-3.0.html"
             }
-            Controls.Button {
-                objectName: "aboutCheckUpdatesButton"
-                Layout.alignment: Qt.AlignLeft
-                Layout.topMargin: Kirigami.Units.smallSpacing * 2
-                visible: dialog.updateChecksEnabled
-                enabled: !dialog.checking
-                icon.name: "view-refresh-symbolic"
-                text: i18nc("@action:button", "Check for Updates")
-                onClicked: dialog.checkForUpdatesRequested()
-            }
-            Controls.Label {
-                objectName: "aboutUpdateStatus"
-                Layout.fillWidth: true
-                visible: dialog.updateChecksEnabled && text.length > 0
-                wrapMode: Text.Wrap
-                textFormat: Text.PlainText
-                text: {
-                    switch (dialog.updateStatus) {
-                    case "checking":
-                        return i18n("Checking for updates…");
-                    case "upToDate":
-                        return i18n("Kinefin is up to date");
-                    case "failed":
-                        return i18n("Could not check for updates. Check the internet connection");
-                    case "available":
-                        return i18n("Kinefin %1 is available", dialog.updateVersion);
-                    default:
-                        return "";
-                    }
-                }
-            }
-            Controls.Button {
-                objectName: "aboutViewUpdateButton"
-                Layout.alignment: Qt.AlignLeft
-                visible: dialog.updateChecksEnabled && dialog.updateStatus === "available"
-                icon.name: "download"
-                text: i18nc("@action:button", "View Update")
-                onClicked: dialog.updateDetailsRequested()
-            }
             Controls.Label {
                 Layout.fillWidth: true
-                Layout.topMargin: Kirigami.Units.smallSpacing * 2
+                Layout.topMargin: Kirigami.Units.largeSpacing
                 text: i18n("Built with Qt and KDE Frameworks")
-                opacity: 0.7
+                color: Kirigami.Theme.disabledTextColor
                 wrapMode: Text.Wrap
             }
         }

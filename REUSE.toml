@@ -37,7 +37,7 @@ precedence = "override"
 SPDX-FileCopyrightText = "2025 Vlad Zahorodnii"
 SPDX-License-Identifier = "MIT"
 
-# Posters and frames of the open films of the Blender Foundation and Blender Studio, for the documentation screenshots (credits in README.md)
+# Posters and frames of the open films of the Blender Foundation and Blender Studio, for the documentation screenshots (credits in THIRD_PARTY.md)
 [[annotations]]
 path = ["tests/assets/doc/poster-big-buck-bunny.jpg"]
 precedence = "override"
