@@ -277,6 +277,7 @@ Kirigami.ApplicationWindow {
     // What a remote control asks for besides the keys it sends: the player commands reach the player in every mode, the full page or the mini player
     function popupOpen() {
         for (const item of window.overlay?.children ?? []) {
+            // A visible tooltip counts as a popup too: QML cannot tell its popup item from a menu's, so a middle click or a remote Back while a tooltip shows does nothing
             if (item.visible && String(item).startsWith("QQuickPopupItem"))
                 return true;
         }

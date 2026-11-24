@@ -254,7 +254,7 @@ bool KRunnerProvider::registerOnBus()
         qWarning("KRunner is off: the object path is taken");
         return false;
     }
-    // The wildcard plugin file matches an owned subname: never queue or hand the name over
+    // The plugin file names the service with a wildcard because KRunner calls a plain name on every query, as D-Bus activation could start it, while a wildcard with no owner ends the query without a call: nothing is called while Kinefin is closed. It matches an owned subname: never queue or hand the name over
     const QDBusReply<QDBusConnectionInterface::RegisterServiceReply> reply =
         m_bus.interface()->registerService(QString::fromLatin1(ServiceName),
                                            QDBusConnectionInterface::DontQueueService,

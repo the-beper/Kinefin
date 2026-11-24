@@ -29,7 +29,7 @@ class DlnaRenderer final : public CastRenderer {
   public:
     // No PLAYING this long after a load is a refusal of the stream
     static constexpr int StartTimeoutMs = 30'000;
-    // PLAYING this long without the position moving is a refusal of a direct play's stream
+    // PLAYING this long without the position moving is a refusal of a direct play's stream: a renderer that cannot fetch the URL stays PLAYING at 0 and reports no error
     static constexpr int StallTimeoutMs = 20'000;
     // The token-less range probe of a direct play
     static constexpr int ProbeTimeoutMs = 5000;

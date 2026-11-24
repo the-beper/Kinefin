@@ -10,7 +10,7 @@
 namespace Kinefin {
 class PlayerController;
 
-// Keeps the screen on while the player plays (opening, loading and buffering included), through org.freedesktop.ScreenSaver: one Inhibit when playback starts, the UnInhibit when it pauses or stops, and on destruction. A desktop without the service is warned about once
+// Keeps the screen on while the player plays (opening, loading and buffering included), through org.freedesktop.ScreenSaver: one Inhibit when playback starts, the UnInhibit when it pauses or stops, and on destruction. A desktop without the service is warned about once. The logind `idle` inhibitor is deliberately not held, as upstream relies on this one alone; suspending during a cast is SuspendInhibitor's
 class ScreenSaverInhibitor final : public QObject {
     Q_OBJECT
   public:

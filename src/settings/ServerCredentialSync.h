@@ -15,9 +15,9 @@ namespace Kinefin {
 class JellyfinClient;
 class TokenStore;
 
-// The key of one user's token on one server in the TokenStore
+// The key of one user's token on one server in the TokenStore: `<profile>/<serverId>/<userId>`, in the KWallet folder of the app
 QString serverTokenKey(const QString &profileId, const QString &serverId, const QString &userId);
-// The key one token per server used before several users per server were kept: read once to migrate, removed by every forget
+// The key one token per server used before several users per server were kept: `<profile>/<serverId>`, read once to migrate, removed by every forget. The migration is one-way, done at the first restore of the user that owns it once the per-user key is written: an older build does not see the per-user keys
 QString legacyServerTokenKey(const QString &profileId, const QString &serverId);
 
 // Removes the tokens of every user of every server recorded in the profile's `servers.json` from `store`, under both key forms; `done(ok)` runs once, from the event loop, with ok false when any removal failed. Nothing to remove is a success

@@ -62,7 +62,7 @@ QByteArray userBody(const QString &id, const QJsonObject &configuration)
 {
     return QJsonDocument(
                QJsonObject{{text("Id"), id},
-                           {text("Name"), text("bepi")},
+                           {text("Name"), text("demo")},
                            {text("Policy"), QJsonObject{{text("IsAdministrator"), false}}},
                            {text("FutureUserField"), 1},
                            {text("Configuration"), configuration}})

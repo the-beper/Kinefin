@@ -1421,7 +1421,7 @@ class FakeJellyfin {
             } else {
                 const QJsonObject me{
                     {QStringLiteral("Id"), QStringLiteral("d5ed5d4e2e5447b58e9f2b6f7bd5c96a")},
-                    {QStringLiteral("Name"), QStringLiteral("bepi")},
+                    {QStringLiteral("Name"), QStringLiteral("demo")},
                     {QStringLiteral("Policy"), policyOf(nullptr)},
                     {QStringLiteral("Configuration"), QJsonObject()}};
                 respond(socket, 200, QJsonDocument(me).toJson(QJsonDocument::Compact));

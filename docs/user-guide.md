@@ -44,6 +44,7 @@
 - [Use the keyboard or a gamepad](#use-the-keyboard-or-a-gamepad)
   - [Keyboard](#keyboard)
   - [Gamepad (experimental)](#gamepad-experimental)
+- [Control Kinefin from a script](#control-kinefin-from-a-script)
 - [Troubleshooting](#troubleshooting)
   - [The server is not reachable](#the-server-is-not-reachable)
   - [Kinefin asks for the password again](#kinefin-asks-for-the-password-again)
@@ -61,15 +62,15 @@
 
 ## What Kinefin is
 
-Kinefin is a native KDE Plasma 6 client for Jellyfin media servers. The interface is built with Kirigami and the video is played by libmpv. It does not embed the Jellyfin web client.
+Kinefin is a native KDE Plasma client for Jellyfin media servers. The interface is built with Kirigami and the video is played by libmpv. It does not embed the Jellyfin web client.
 
 It needs:
 
 - A Jellyfin server you can sign in to. Kinefin is tested with Jellyfin 12.4.
-- Plasma 6 on Wayland.
+- Plasma on Wayland.
 - Flatpak, the only way Kinefin is packaged.
 
-Kinefin covers movies and TV series. Music and audiobooks are not built yet: those libraries show on Home but stay disabled with "Not supported yet".
+Kinefin covers movies and shows. Music and audiobooks are not built yet: those libraries show on Home but stay disabled with "Not supported yet".
 
 Server administration is not part of Kinefin. If you are an administrator, **Admin Dashboard** in the main menu opens the server's web interface in your browser. User management, library management, plugins and Live TV setup happen there.
 
@@ -119,10 +120,10 @@ Write the address without `https://` or `http://`, a path or a user name. The pa
 
 Without a scheme, Kinefin tries HTTPS first and falls back to HTTP:
 
-| You enter | Order tried |
-| --- | --- |
-| `server.example` | `https` on 443, `https` on 8920, `http` on 8096, `http` on 80 |
-| `server.example` and port `9000` | `https` on 9000, then `http` on 9000 |
+| You enter                        | Order tried                                                   |
+| -------------------------------- | ------------------------------------------------------------- |
+| `server.example`                 | `https` on 443, `https` on 8920, `http` on 8096, `http` on 80 |
+| `server.example` and port `9000` | `https` on 9000, then `http` on 9000                          |
 
 A saved server keeps the exact address that worked and is never retried on another scheme.
 
@@ -149,11 +150,11 @@ Kinefin never stores your password. The access token is kept in KWallet.
 
 Each user you sign in as is saved with the server. What happens at the next start depends on how many users are saved:
 
-| Saved users | Result |
-| --- | --- |
-| One, remembered | Signs in without a prompt |
-| One, set to **Ask for Password** | Password prompt |
-| Two or more | The user picker, a grid of avatars, with **Add User** as the last tile |
+| Saved users                      | Result                                                                 |
+| -------------------------------- | ---------------------------------------------------------------------- |
+| One, remembered                  | Signs in without a prompt                                              |
+| One, set to **Ask for Password** | Password prompt                                                        |
+| Two or more                      | The user picker, a grid of avatars, with **Add User** as the last tile |
 
 In the picker, arrows move, Return or Space chooses, and a lock badge marks a user without a stored token. The Menu key, a right click or the overflow button opens **Ask for Password** and **Remove User…**. **Switch Server**, at the top of the page, goes back to the **Servers** page.
 
@@ -161,11 +162,11 @@ In the picker, arrows move, Return or Space chooses, and a lock badge marks a us
 
 The main menu, opened from the avatar at the right end of the header, has the account actions:
 
-| Action | Effect |
-| --- | --- |
-| **Switch User** | Opens the picker and keeps the current user's token and queue |
-| **Sign Out** | After confirmation, deletes the user's session and queue on this computer; the server session is not ended |
-| **Switch Server** | Returns to the **Servers** page and keeps the session |
+| Action            | Effect                                                                                                     |
+| ----------------- | ---------------------------------------------------------------------------------------------------------- |
+| **Switch User**   | Opens the picker and keeps the current user's token and queue                                              |
+| **Sign Out**      | After confirmation, deletes the user's session and queue on this computer; the server session is not ended |
+| **Switch Server** | Returns to the **Servers** page and keeps the session                                                      |
 
 **Remove User…** and removing a server delete the saved session the same way. Downloads stay on disk and come back when that user signs in to that server again.
 
@@ -186,12 +187,12 @@ A middle click on a page that scrolls starts autoscroll: a marker shows where yo
 
 Home shows these rows:
 
-| Row | Content |
-| --- | --- |
-| Continue Watching | Items with a saved position. **Show All** opens the whole list |
-| Next Up | The next episode of series you follow |
-| Favorites | Up to 24 of your favorite movies and series in random order, a new pick at each load. **Show All** opens the Favorites tab |
-| Recently Added | One row per movie or series library. **Show All** opens that library, newest first |
+| Row               | Content                                                                                                                    |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Continue Watching | Items with a saved position. **Show All** opens the whole list                                                             |
+| Next Up           | The next episode of series you follow                                                                                      |
+| Favorites         | Up to 24 of your favorite movies and series in random order, a new pick at each load. **Show All** opens the Favorites tab |
+| Recently Added    | One row per movie or series library. **Show All** opens that library, newest first                                         |
 
 Progress, watched marks and favorites that change on the server, because you played something on another device or stopped playing here, show on the cards, the rows and the open details page about a second later, without a reload. While something plays in Kinefin the update waits until it stops. After the connection to the server was down for half a minute or more, Home and the page in front read their data again when it is back.
 
@@ -236,18 +237,18 @@ To filter:
   <img alt="The Filters dialog on the Movies tab, with its sections on the left" src="images/filters.png">
 </picture>
 
-| Section | Options | Applies to |
-| --- | --- | --- |
-| Status | Played or Unplayed, Resumable, Favorites | Resumable: movies only |
-| Features | Subtitles, Trailer, Special features, Theme song, Theme video | Movies, series and episodes |
-| Video Quality | HD or SD, 4K, 3D | Movies and episodes |
-| Video Type | Blu-ray, DVD | Movies and episodes |
-| Series Status | Continuing, Ended, Unreleased | Series |
-| Episodes | All, Specials, Missing, Unaired | Episodes |
-| Genres | Any number, with a search field | All |
-| Tags | Any number, with a search field | All |
-| Ratings | Any number, with a search field | All |
-| Years | Any number, with a search field | All |
+| Section       | Options                                                       | Applies to                  |
+| ------------- | ------------------------------------------------------------- | --------------------------- |
+| Status        | Played or Unplayed, Resumable, Favorites                      | Resumable: movies only      |
+| Features      | Subtitles, Trailer, Special features, Theme song, Theme video | Movies, series and episodes |
+| Video Quality | HD or SD, 4K, 3D                                              | Movies and episodes         |
+| Video Type    | Blu-ray, DVD                                                  | Movies and episodes         |
+| Series Status | Continuing, Ended, Unreleased                                 | Series                      |
+| Episodes      | All, Specials, Missing, Unaired                               | Episodes                    |
+| Genres        | Any number, with a search field                               | All                         |
+| Tags          | Any number, with a search field                               | All                         |
+| Ratings       | Any number, with a search field                               | All                         |
+| Years         | Any number, with a search field                               | All                         |
 
 Type in the search field above the options to narrow them. The options you have checked stay listed whatever you type. A server can have thousands of tags, so Tags lists the ones you have checked first, then the first 300 tags of the server, and a line under the list says how many it leaves out: search to find the others.
 
@@ -263,12 +264,12 @@ Sort keys differ by list: movies have 10 (Name, Random, Community Rating, Critic
 
 **View Options** has:
 
-| Option | Values |
-| --- | --- |
-| Layout | Grid View or List View |
-| Image type | Poster, Banner, Disc, Logo, Thumbnail |
-| Show Title, Show Year | On or off |
-| Card Layout | Off hides the text under each card |
+| Option                | Values                                |
+| --------------------- | ------------------------------------- |
+| Layout                | Grid View or List View                |
+| Image type            | Poster, Banner, Disc, Logo, Thumbnail |
+| Show Title, Show Year | On or off                             |
+| Card Layout           | Off hides the text under each card    |
 
 The grid scrolls continuously. **Return to Top** sits at the right end of the toolbar. Going back from an item restores your scroll position.
 
@@ -276,15 +277,15 @@ The grid scrolls continuously. **Return to Top** sits at the right end of the to
 
 Sub-tabs sit in the toolbar of **Movies** and **Shows**. The main tab is always there. Each other one is a switch in **Settings**, **Library**.
 
-| Sub-tab | In | Shows |
-| --- | --- | --- |
-| Suggestions | Movies, Shows | Server recommendations |
-| Favorites | Movies, Shows | Favorite movies or series of the chosen library |
-| Collections | Movies, Shows | Collections of all libraries |
-| Genres | Movies, Shows | One rail per genre; **Show All** opens that genre in the grid |
-| Upcoming | Shows | Episodes yet to air |
-| Networks | Shows | Series grouped by network |
-| Episodes | Shows | All episodes of the chosen library |
+| Sub-tab     | In            | Shows                                                         |
+| ----------- | ------------- | ------------------------------------------------------------- |
+| Suggestions | Movies, Shows | Server recommendations                                        |
+| Favorites   | Movies, Shows | Favorite movies or series of the chosen library               |
+| Collections | Movies, Shows | Collections of all libraries                                  |
+| Genres      | Movies, Shows | One rail per genre; **Show All** opens that genre in the grid |
+| Upcoming    | Shows         | Episodes yet to air                                           |
+| Networks    | Shows         | Series grouped by network                                     |
+| Episodes    | Shows         | All episodes of the chosen library                            |
 
 Suggestions in **Shows** and Collections in both tabs ignore the library selector and cover all libraries. Which sub-tabs are on by default is in the [settings reference](settings.md#library-library).
 
@@ -292,11 +293,11 @@ Suggestions in **Shows** and Collections in both tabs ignore the library selecto
 
 When the server knows a series from a metadata provider such as TMDb, it can list episodes it has no file for: **Missing** ones that have aired and **Unaired** ones that premiere later. Kinefin leaves them out of its lists and never plays, queues or downloads them, with these exceptions:
 
-| Where | What shows |
-| --- | --- |
+| Where                                                                 | What shows                                                                                        |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
 | A season, with **Show missing episodes** on in **Settings**, **User** | Dimmed rows with a Missing or Unaired mark, from the next time the season loads; they do not open |
-| The **Upcoming** sub-tab | The unaired episodes; a card opens the series |
-| The **Missing** and **Unaired** filters of the **Episodes** sub-tab | The episodes you ask for; their page has no Play or Download |
+| The **Upcoming** sub-tab                                              | The unaired episodes; a card opens the series                                                     |
+| The **Missing** and **Unaired** filters of the **Episodes** sub-tab   | The episodes you ask for; their page has no Play or Download                                      |
 
 ### Item details
 
@@ -307,16 +308,16 @@ When the server knows a series from a metadata provider such as TMDb, it can lis
 
 Selecting a card opens the details page: a hero with the backdrop, logo, a facts line (year, rating, runtime, end time) and **Play** or **Resume**. Under it come media badges (resolution, HDR, codecs, subtitle count), the overview, the credits, the cast and the related rows. The toolbar keeps **Cast…**, **Download**, the favorite toggle, **Mark as Watched** or **Mark as Unwatched**, and **Show Media Info**. The overflow menu (the **⋮** button) holds:
 
-| Entry | Contains | Shown |
-| --- | --- | --- |
-| **Play Trailer** | | When the server has one |
-| **Play Next**, **Add to Queue** | | Queueable items |
-| **Add to Playlist…** | | Movies, episodes and videos |
-| **Add to Collection…** | | Movies and series |
-| **Stop Automatic Downloads** | | Series and seasons, only while a rule exists |
-| **Edit** | **Edit Metadata…**, **Identify…**, **Edit Images…**, **Edit Subtitles…**, **Refresh Metadata** | Administrators |
-| **Copy Stream URL** | | When the item has a source |
-| **Delete Media…** | | Last entry, when the server allows deletion |
+| Entry                           | Contains                                                                                       | Shown                                        |
+| ------------------------------- | ---------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| **Play Trailer**                |                                                                                                | When the server has one                      |
+| **Play Next**, **Add to Queue** |                                                                                                | Queueable items                              |
+| **Add to Playlist…**            |                                                                                                | Movies, episodes and videos                  |
+| **Add to Collection…**          |                                                                                                | Movies and series                            |
+| **Stop Automatic Downloads**    |                                                                                                | Series and seasons, only while a rule exists |
+| **Edit**                        | **Edit Metadata…**, **Identify…**, **Edit Images…**, **Edit Subtitles…**, **Refresh Metadata** | Administrators                               |
+| **Copy Stream URL**             |                                                                                                | When the item has a source                   |
+| **Delete Media…**               |                                                                                                | Last entry, when the server allows deletion  |
 
 **Show Media Info**, a button in the toolbar of the page, opens a dialog with the container, size, bit rate and streams of each source, and **Copy** puts the text on the clipboard.
 
@@ -369,12 +370,12 @@ To add to it, use **Play Next** (top of the queue) or **Add to Queue** (end) on 
 
 The **Queue** button in the header opens the page. Its toolbar has **Resume Queue**, **Play From Here**, **Undo** and **Clear Queue** (with confirmation). In the list:
 
-| Key | Action |
-| --- | --- |
-| Return | Open the item |
-| Ctrl+Up, Ctrl+Down | Move the item |
-| Delete | Remove the item |
-| Ctrl+Z | Undo the last change |
+| Key                | Action               |
+| ------------------ | -------------------- |
+| Return             | Open the item        |
+| Ctrl+Up, Ctrl+Down | Move the item        |
+| Delete             | Remove the item      |
+| Ctrl+Z             | Undo the last change |
 
 The row menu offers **Move Up**, **Move Down**, **Remove** and **Go to Item**. Dragging rows is not supported.
 
@@ -399,42 +400,42 @@ The bottom bar has the timeline with a thumbnail preview while you drag, **Previ
 
 A right click on the video, the Menu key or Shift+F10 open a context menu with the main actions. A single click on the video pauses or resumes, and a double click toggles full screen. The mouse wheel anywhere over the player changes the volume by 5.
 
-| Key | Action |
-| --- | --- |
-| Space | Play or pause |
-| M | Mute or unmute |
-| +, - | Volume up, down |
-| F, F11 | Toggle full screen |
-| Left, Right | Skip back, forward 10 seconds |
-| Down, Up | Skip back, forward 1 minute |
-| PgDown, PgUp | Previous, next chapter |
-| I, O | Set the clip start, end |
-| L | Loop the marked part, or stop looping |
-| ., , | Step one frame forward, back; the playback pauses |
-| Shift+I | Show or hide Playback Info |
-| Ctrl+-, Ctrl++ | Audio earlier, later by 0.1 second; Ctrl+0 removes the audio delay |
-| Z, X | Subtitles earlier, later by 0.1 second; with Shift, by 0.5 second |
-| Escape | Close the open popup, cancel Up Next, leave full screen, then leave the player |
-| Return | Play the Up Next item now |
+| Key            | Action                                                                         |
+| -------------- | ------------------------------------------------------------------------------ |
+| Space          | Play or pause                                                                  |
+| M              | Mute or unmute                                                                 |
+| +, -           | Volume up, down                                                                |
+| F, F11         | Toggle full screen                                                             |
+| Left, Right    | Skip back, forward 10 seconds                                                  |
+| Down, Up       | Skip back, forward 1 minute                                                    |
+| PgDown, PgUp   | Previous, next chapter                                                         |
+| I, O           | Set the clip start, end                                                        |
+| L              | Loop the marked part, or stop looping                                          |
+| ., ,           | Step one frame forward, back; the playback pauses                              |
+| Shift+I        | Show or hide Playback Info                                                     |
+| Ctrl+-, Ctrl++ | Audio earlier, later by 0.1 second; Ctrl+0 removes the audio delay             |
+| Z, X           | Subtitles earlier, later by 0.1 second; with Shift, by 0.5 second              |
+| Escape         | Close the open popup, cancel Up Next, leave full screen, then leave the player |
+| Return         | Play the Up Next item now                                                      |
 
 **More Actions** holds the rest:
 
-| Entry | Use |
-| --- | --- |
-| **Show Mini Player** | Docks the video and leaves the page |
-| **Shuffle**, **Repeat** | Off, All or Current Item; Shuffle needs a queue of two or more |
-| **Playback Speed** | 0.5x to 4x; a speed between the steps, such as the one set as the default in the settings, shows as an extra checked entry |
-| **Aspect Ratio** | Auto, Zoom, Stretch, 4:3, 16:9, Widescreen for 4:3 Video, Original Size; applies to this item only |
-| **AV Sync** | Audio delay and subtitle delay, in steps of 0.1 s up to 10 s either way, each with a reset; the keys above do the same, and a line over the picture says the new value. A delay is for the item that plays: the next item starts without one, and a casting renderer takes none |
-| **Quality** | See [Choose a quality](#choose-a-quality) |
-| **Chapters** | Jump to a chapter |
-| **Video Enhancement** | **Deband**, and the shader files you put in the profile's `shaders` folder, switched on and off while the picture plays; see [Shaders and debanding](#shaders-and-debanding) |
-| **Clip** | Set the start and the end, loop the marked part, save a clip or a GIF; see [Save a clip or a GIF](#save-a-clip-or-a-gif) |
-| **Sleep Timer** | Stops playback after 15 to 120 minutes, at the **End of Current Item** or at the **End of Queue** |
-| **Now Playing Queue** | A panel with the queue |
-| **Screenshot** | Saves the current frame |
-| **Keep Controls Visible** | Keeps the bars up |
-| **Forget Series Choices** | Clears what Kinefin remembered for this series |
+| Entry                     | Use                                                                                                                                                                                                                                                                             |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Show Mini Player**      | Docks the video and leaves the page                                                                                                                                                                                                                                             |
+| **Shuffle**, **Repeat**   | Off, All or Current Item; Shuffle needs a queue of two or more                                                                                                                                                                                                                  |
+| **Playback Speed**        | 0.5x to 4x; a speed between the steps, such as the one set as the default in the settings, shows as an extra checked entry                                                                                                                                                      |
+| **Aspect Ratio**          | Auto, Zoom, Stretch, 4:3, 16:9, Widescreen for 4:3 Video, Original Size; applies to this item only                                                                                                                                                                              |
+| **AV Sync**               | Audio delay and subtitle delay, in steps of 0.1 s up to 10 s either way, each with a reset; the keys above do the same, and a line over the picture says the new value. A delay is for the item that plays: the next item starts without one, and a casting renderer takes none |
+| **Quality**               | See [Choose a quality](#choose-a-quality)                                                                                                                                                                                                                                       |
+| **Chapters**              | Jump to a chapter                                                                                                                                                                                                                                                               |
+| **Video Enhancement**     | **Deband**, and the shader files you put in the profile's `shaders` folder, switched on and off while the picture plays; see [Shaders and debanding](#shaders-and-debanding)                                                                                                    |
+| **Clip**                  | Set the start and the end, loop the marked part, save a clip or a GIF; see [Save a clip or a GIF](#save-a-clip-or-a-gif)                                                                                                                                                        |
+| **Sleep Timer**           | Stops playback after 15 to 120 minutes, at the **End of Current Item** or at the **End of Queue**                                                                                                                                                                               |
+| **Now Playing Queue**     | A panel with the queue                                                                                                                                                                                                                                                          |
+| **Screenshot**            | Saves the current frame                                                                                                                                                                                                                                                         |
+| **Keep Controls Visible** | Keeps the bars up                                                                                                                                                                                                                                                               |
+| **Forget Series Choices** | Clears what Kinefin remembered for this series                                                                                                                                                                                                                                  |
 
 The Audio menu ends with **Night Mode**, which raises quiet dialogue and lowers loud scenes. It is the same switch as in **Settings**, **Audio**.
 
@@ -538,7 +539,7 @@ The main menu's **Remote Sessions** opens a dialog listing the other sessions on
 
 Other Jellyfin clients can also control Kinefin while you are signed in. They can send navigation keys, volume, mute, track and quality choices, and **Play**. A remote **Play** of one video plays it. Several videos become the saved queue. Remote navigation keys are ignored while a text field or a dialog has focus. Remote text messages are not shown.
 
-MPRIS is supported: media keys and the Plasma media controls see the current item, and `Next` and `Previous` follow the queue or the series.
+MPRIS is supported: media keys and the Plasma media controls see the current item, and `Next` and `Previous` follow the queue or the series. Any program on your session bus can read the title, the series and episode label, the item id and the artwork. The server address, your user name, the stream URL and the access token are never published.
 
 While playback runs, Kinefin keeps the screen from blanking. Opening and buffering count as playing.
 
@@ -558,11 +559,11 @@ The Downloads page has an active section and a completed one. Each row has one m
 
 Each series can have one rule. To set it, open the series or one of its seasons and choose **Download**, then **Automatic Downloads…** (**Edit Automatic Downloads…** once the series has a rule). A rule adds unwatched, already aired episodes only:
 
-| Rule | Behaviour |
-| --- | --- |
+| Rule                                         | Behaviour                                                                       |
+| -------------------------------------------- | ------------------------------------------------------------------------------- |
 | **Next episodes**, with **Episodes:** 1 to 3 | Downloads the next unwatched episodes as playback advances or the queue empties |
-| **Whole season**, offered from a season page | Downloads every episode of that season |
-| **New episodes** | Downloads new episodes of an airing series |
+| **Whole season**, offered from a season page | Downloads every episode of that season                                          |
+| **New episodes**                             | Downloads new episodes of an airing series                                      |
 
 New episodes are looked for at sign-in, every 6 hours and when the server reports a library change. **Stop Automatic Downloads**, on the series page, removes the rule.
 
@@ -620,22 +621,22 @@ Ctrl+Shift+/ opens the shortcuts dialog, which lists the keys below and, while a
 
 ### Keyboard
 
-| Key | Action |
-| --- | --- |
-| Ctrl+Q | Quit |
-| Escape, Alt+Left | Go back |
-| Ctrl+F | Search |
-| Ctrl+R | Refresh |
-| Ctrl+1 to Ctrl+6 | Tab by position |
-| Ctrl+PgUp, Ctrl+PgDown, Ctrl+[, Ctrl+], Ctrl+Shift+Tab, Ctrl+Tab | Previous or next tab, wrapping |
-| Menu, Shift+F10 | Open the item menu |
-| Ctrl+Z | Undo the last change on the Queue page |
-| Ctrl+Up, Ctrl+Down, Delete | Move or remove a queue or playlist item |
-| F2 | Rename a playlist |
-| Ctrl+S | Save user preferences |
-| Ctrl+, | Settings |
-| Ctrl+Shift+P | Expand the player |
-| Ctrl+Shift+/ | Show keyboard shortcuts |
+| Key                                                              | Action                                  |
+| ---------------------------------------------------------------- | --------------------------------------- |
+| Ctrl+Q                                                           | Quit                                    |
+| Escape, Alt+Left                                                 | Go back                                 |
+| Ctrl+F                                                           | Search                                  |
+| Ctrl+R                                                           | Refresh                                 |
+| Ctrl+1 to Ctrl+6                                                 | Tab by position                         |
+| Ctrl+PgUp, Ctrl+PgDown, Ctrl+[, Ctrl+], Ctrl+Shift+Tab, Ctrl+Tab | Previous or next tab, wrapping          |
+| Menu, Shift+F10                                                  | Open the item menu                      |
+| Ctrl+Z                                                           | Undo the last change on the Queue page  |
+| Ctrl+Up, Ctrl+Down, Delete                                       | Move or remove a queue or playlist item |
+| F2                                                               | Rename a playlist                       |
+| Ctrl+S                                                           | Save user preferences                   |
+| Ctrl+,                                                           | Settings                                |
+| Ctrl+Shift+P                                                     | Expand the player                       |
+| Ctrl+Shift+/                                                     | Show keyboard shortcuts                 |
 
 The player keys are in [Control playback](#control-playback). Quit has no menu entry: use Ctrl+Q or close the window.
 
@@ -645,21 +646,58 @@ The player keys are in [Control playback](#control-playback). Quit has no menu e
 
 Kinefin reads SDL3 gamepads and shows no notice when one connects or leaves. The D-pad moves the focus by position on screen; the left stick scrolls without moving it, and in the full player it seeks like the D-pad. Button names follow the pad: the dialog shows A, B, X, Y or Cross, Circle, Square, Triangle.
 
-| Button | Browsing | In the player |
-| --- | --- | --- |
-| D-pad | Move the focus | Skip 10 seconds or 1 minute |
-| Left stick | Scroll | Skip 10 seconds or 1 minute |
-| South (A, Cross) | Open or activate | Play or pause, or start Up Next |
-| East (B, Circle) | Go back | Cancel Up Next, leave full screen, or go back |
-| West (X, Square) | Open the item menu | Open the player menu |
-| North (Y, Triangle) | Play or pause | Play or pause |
-| Start | Open the main menu | Toggle full screen |
-| Select | Expand the player | Expand the player |
-| Shoulder buttons | Previous or next tab | Previous or next item |
-| Triggers | Previous or next chapter | Previous or next chapter |
-| Right stick | Volume up or down | Volume up or down |
+| Button              | Browsing                 | In the player                                 |
+| ------------------- | ------------------------ | --------------------------------------------- |
+| D-pad               | Move the focus           | Skip 10 seconds or 1 minute                   |
+| Left stick          | Scroll                   | Skip 10 seconds or 1 minute                   |
+| South (A, Cross)    | Open or activate         | Play or pause, or start Up Next               |
+| East (B, Circle)    | Go back                  | Cancel Up Next, leave full screen, or go back |
+| West (X, Square)    | Open the item menu       | Open the player menu                          |
+| North (Y, Triangle) | Play or pause            | Play or pause                                 |
+| Start               | Open the main menu       | Toggle full screen                            |
+| Select              | Expand the player        | Expand the player                             |
+| Shoulder buttons    | Previous or next tab     | Previous or next item                         |
+| Triggers            | Previous or next chapter | Previous or next chapter                      |
+| Right stick         | Volume up or down        | Volume up or down                             |
 
 The pad only works while a Kinefin window has focus. To turn gamepad input off, switch off **Gamepad (Experimental)** in **Settings**, **General**, or set `sdlEnabled=false` in the `[main]` group of `kinefin.conf` while Kinefin is closed; Kinefin then never opens an input device. The mapping is fixed: buttons cannot be remapped. [Where Kinefin keeps its files](#where-kinefin-keeps-its-files) has the folder.
+
+If the Flatpak does not see your pad, check two things: the Flatpak version must be 1.15.6 or later (the sandbox gets `/dev/input` through `--device=input`, which older versions ignore), and your user must be able to read the pad's device node, which the desktop session normally grants when the pad is plugged in.
+
+## Control Kinefin from a script
+
+You can send actions to a running profile through a Unix socket: it takes the same actions as a remote or a keyboard. It is made for a home-automation script or a macro pad, and it takes no text and no settings.
+
+| Item       | Value                                                                                                                                                                                                      |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Path       | `$XDG_RUNTIME_DIR/app/io.github.the_beper.Kinefin/kinefin-<profile>`, the same in the Flatpak and a native build                                                                                           |
+| Format     | One JSON object per line: `{"client": "...", "source": "...", "keycode": "playpause"}`. Only `keycode` is required, and each string is at most 64 characters. `client` and `source` appear only in the log |
+| On connect | Kinefin sends one line, `{"version":"<version>","builddate":""}`, and nothing after it                                                                                                                     |
+| Limits     | 4 KiB per line, 4 clients, 50 lines a second; a client that exceeds one is disconnected                                                                                                                    |
+| Access     | Same user only: the folder and the socket are private, and Kinefin checks the user of every client                                                                                                         |
+
+A profile id too long for the path gets no socket (the path holds 107 bytes, so with `/run/user/1000` an id longer than 52 characters is too long). Kinefin logs a warning and runs normally. Keys go to the focused Kinefin window, or to the main window when none has focus; a keycode that is not in the table is ignored.
+
+| Keycode                                                                                | Action                                                                                                            |
+| -------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `up`, `down`, `left`, `right`                                                          | The arrow key. An arrow the focused control does not use moves the focus to the nearest control in that direction |
+| `select`                                                                               | Return: presses the focused control                                                                               |
+| `menu`                                                                                 | The Menu key: opens the item menu                                                                                 |
+| `back`                                                                                 | Escape, which closes a popup or a menu; the page's Back runs when nothing takes it                                |
+| `scrollup`, `scrolldown`, `scrollleft`, `scrollright`                                  | Scroll the view under the focus; in the full player they act like the arrows                                      |
+| `home`                                                                                 | Go to Home                                                                                                        |
+| `playpause`, `play`, `pause`, `stop`, `next`, `previous`, `fastforward`, `rewind`      | The player command                                                                                                |
+| `volumeup`, `volumedown`, `togglemute`                                                 | Volume and mute                                                                                                   |
+| `togglefullscreen`, `host:fullscreen`                                                  | Toggle full screen                                                                                                |
+| `previoustab`, `nexttab`, `previouschapter`, `nextchapter`, `mainmenu`, `expandplayer` | The gamepad actions: previous or next tab, chapter, the main menu and Expand Player                               |
+
+With `socat`, this sends play or pause to the default profile:
+
+```sh
+printf '{"keycode":"playpause"}\n' | socat - UNIX-CONNECT:"$XDG_RUNTIME_DIR/app/io.github.the_beper.Kinefin/kinefin-default"
+```
+
+Flatpak shares that folder with the host, so a script outside the sandbox can use the same path.
 
 ## Troubleshooting
 
@@ -714,12 +752,12 @@ The device fetches the video from the server itself, so the server must be reach
 
 The device model sets what plays. Above these limits the server transcodes to H.264 in Matroska (tested on a Nest Hub; untested on a Chromecast and a Chromecast Ultra):
 
-| Device | Plays without transcoding |
-|---|---|
-| Nest Hub | H.264 up to 720p60 in MP4 or Matroska, VP9 up to 720p60 in WebM |
-| Nest Hub Max | H.264 up to 720p30 in MP4 or Matroska, VP9 up to 720p30 in WebM |
-| Chromecast Ultra | H.264 up to 1080p60 in MP4, HEVC and VP9 up to 4K |
-| Other models | H.264 up to 1080p30 in MP4 |
+| Device           | Plays without transcoding                                       |
+| ---------------- | --------------------------------------------------------------- |
+| Nest Hub         | H.264 up to 720p60 in MP4 or Matroska, VP9 up to 720p60 in WebM |
+| Nest Hub Max     | H.264 up to 720p30 in MP4 or Matroska, VP9 up to 720p30 in WebM |
+| Chromecast Ultra | H.264 up to 1080p60 in MP4, HEVC and VP9 up to 4K               |
+| Other models     | H.264 up to 1080p30 in MP4                                      |
 
 If the player says Kinefin could not verify that the device is a Google Cast device, nothing was sent to it: play on this computer or pick another device.
 
@@ -735,14 +773,14 @@ Only KWin keeps the window on top; see [Keep watching while you browse](#keep-wa
 
 Everything is per profile. A profile is a separate set of servers, users and settings. The default profile is `default`.
 
-| What | Location |
-| --- | --- |
-| Profile list | `~/.config/kinefin/profiles.json` |
-| Data, per profile | `~/.local/share/kinefin/profiles/<id>/` |
-| Cache, per profile | `~/.cache/kinefin/profiles/<id>/` |
-| Log | `~/.local/share/kinefin/profiles/<id>/logs/kinefin.log` |
-| Downloads | `~/.local/share/kinefin/profiles/<id>/downloads/` |
-| Clips staging | `~/.local/share/kinefin/profiles/<id>/clips/` |
+| What               | Location                                                |
+| ------------------ | ------------------------------------------------------- |
+| Profile list       | `~/.config/kinefin/profiles.json`                       |
+| Data, per profile  | `~/.local/share/kinefin/profiles/<id>/`                 |
+| Cache, per profile | `~/.cache/kinefin/profiles/<id>/`                       |
+| Log                | `~/.local/share/kinefin/profiles/<id>/logs/kinefin.log` |
+| Downloads          | `~/.local/share/kinefin/profiles/<id>/downloads/`       |
+| Clips staging      | `~/.local/share/kinefin/profiles/<id>/clips/`           |
 
 In the Flatpak these paths are under `~/.var/app/io.github.the_beper.Kinefin/`.
 
@@ -750,4 +788,12 @@ The data folder also holds the settings (`kinefin.conf`), the server records (`s
 
 The log holds the newest 10 sessions: `kinefin.log` and `kinefin.log.1` to `.9`. Access tokens are never written to it. `--log-level` on the command line raises or lowers its detail for one run.
 
-The `--profile`, `--create-profile`, `--list-profiles`, `--set-default-profile` and `--delete-profile` options manage profiles; `--help` describes them.
+The `--profile`, `--create-profile`, `--list-profiles`, `--set-default-profile` and `--delete-profile` options manage profiles; `--help` describes them. A profile id is 1 to 64 characters from `A-Z`, `a-z`, `0-9` and `_`. The commands exit with:
+
+| Code | Meaning                                                                                                                                                             |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0    | Success                                                                                                                                                             |
+| 1    | The work failed: a profile that does not exist for `--set-default-profile` or `--delete-profile`, or the default profile or a profile in use for `--delete-profile` |
+| 2    | A wrong combination of options, or an unknown profile given to `--profile`                                                                                          |
+
+If `profiles.json` is not valid (bad JSON, an invalid or duplicate id, a default that is not listed), Kinefin renames it to `profiles.json.broken` and starts with one `default` profile; the profile folders are left alone.

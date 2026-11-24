@@ -22,7 +22,7 @@ body:
     attributes:
       label: System
       description: Fedora (or other distro) and Plasma versions, Flatpak or not, and the Jellyfin server version you connected to.
-      placeholder: "Fedora 45, Plasma 6.x, Flatpak, Jellyfin 12.4"
+      placeholder: "Fedora 45, Plasma 6.5, Flatpak, Jellyfin 12.4"
   - type: textarea
     id: logs
     attributes:

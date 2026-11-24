@@ -61,6 +61,25 @@ The gates that need no build (metainfo, catalogs, Python tests, REUSE) run befor
 
 `tests/shell_smoke.py` starts the binary offscreen five times (Servers, then Settings, About, the sign-in page and Home through the `KINEFIN_START_PAGE` start-up hook; the sign-in page and Home open without a session) and fails on any QML problem. Run it before proposing a commit. Shell scripts (`build/`, `scripts/`, `po/`) are shellcheck-clean (`--severity=warning`); C++ code follows the Qt-like style of `.clang-format` (LLVM base with explicit knobs: the image's clang-format has no `Qt` preset). Run `clang-format -i <files>` before proposing, because the image gate fails on drift. `.editorconfig` governs the non-C++ text files.
 
+### UI tests
+
+Running one `test_ui_pages` function and the screenshot tour (`visualTourWhenRequested`) are under [Building](#building). Kirigami and Qt Quick behaviours that have failed these tests offscreen:
+
+- Two `Shortcut`s with the same sequence are ambiguous and neither fires, and Kirigami templates register their own (the stock `NavigationTabBar` takes Ctrl+PgUp, Ctrl+PgDown, Ctrl+[, Ctrl+], Ctrl+Tab and Ctrl+Shift+Tab). Do not add a probe shortcut on a sequence already in use.
+- A popup with `CloseOnEscape` (the default) blocks the window's shortcuts while it is `visible`. `opened` turns false when the exit transition starts and `visible` when it ends, so wait for `visible` before pressing a key.
+- A `MenuItem` of a closed `Menu` reports `visible` false: open the menu first.
+- Pages outside the viewport are disabled, so a page sliding back in ignores `click()` for its first frame while `invokeMethod` still returns true. Wait until the target is `enabled` (`clickCenter` does), and never click mid-slide: a press on the page below makes that page current.
+- `ScrollablePage` hands the focus to its scroll view after creation, and `forceActiveFocus()` does not take it back.
+
+Debugging:
+
+- The QML is embedded in `kinefin_ui`: `touch` an edited `.qml` before rebuilding, or the old copy runs.
+- Print probes with `fprintf(stderr, …)`: a `qWarning` or `console.warn` lands in the warning list and fails the run.
+- To find which item claims a key, send a fresh `QKeyEvent(QEvent::ShortcutOverride, …)` with `setAccepted(false)` to each item of the focus chain and read `isAccepted()`; an event filter on the window sees the event before delivery, so its flag says nothing. If a KeyPress is delivered at all, the shortcut map found no unambiguous match.
+- Offscreen renders ignore `QT_SCALE_FACTOR`: a scaled or dark render needs the desktop.
+
+### KWallet host test
+
 `tests/test_kwallet_host.cpp` runs against the session's real KWallet and is skipped unless `KINEFIN_TEST_KWALLET=1`. Run it against the session bus from the build container, after a build in `/buildtmp/dev`:
 
 ```sh

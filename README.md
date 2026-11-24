@@ -5,8 +5,8 @@
 </p>
 
 <p align="center">
-  <b>Native KDE Plasma 6 client for Jellyfin servers.</b><br>
-  Browse your movies and TV series, play them with mpv, cast them to a TV and keep them for offline viewing, in a Kirigami interface that follows your Plasma theme.
+  <b>Native KDE Plasma client for Jellyfin servers.</b><br>
+  Browse your movies and shows, play them with mpv, cast them to a TV and keep them for offline viewing, in a Kirigami interface that follows your Plasma theme.
 </p>
 
 <p align="center">
@@ -43,7 +43,7 @@ Kinefin is written for Plasma instead. The interface is Kirigami and follows the
 
 ### On other screens and with other people
 
-- Cast to DLNA renderers (smart TVs, network players) and Google Cast devices (Chromecast, Nest Hub), with no Google account.
+- Cast to DLNA renderers and Google Cast devices.
 - SyncPlay groups, control of the server's other sessions, and control of Kinefin from other Jellyfin clients.
 
 ### Offline
@@ -58,7 +58,7 @@ Kinefin is written for Plasma instead. The interface is Kirigami and follows the
 
 ### Not included
 
-- Music and audiobooks: their libraries show on Home but stay disabled until the movie and TV features are complete.
+- Music and audiobooks: their libraries show on Home but stay disabled for now. Both are planned (see the [TODO](TODO.md)).
 - Server administration: **Admin Dashboard** opens the server's web interface in your browser.
 
 ## Gallery
@@ -82,18 +82,13 @@ The screenshots follow your browser's light or dark mode. They show the open fil
 
 ## Install
 
-Kinefin is packaged only as a Flatpak, for Linux on x86-64 with Plasma 6 on Wayland.
+Kinefin is packaged only as a Flatpak, for Linux on x86-64 with Plasma on Wayland.
 
 ```sh
 flatpak install https://the-beper.github.io/Kinefin/kinefin.flatpakref
 ```
 
-Opening that file in Discover works too. It adds Kinefin's signed repository as the remote `kinefin`, and Discover or `flatpak update` then bring new versions. The KDE runtime comes from [Flathub](https://flathub.org/setup), which must be set up.
-
 A signed bundle is also available. The [user guide](docs/user-guide.md#install-and-update) covers it, updating, uninstalling and the signing key.
-
-> [!NOTE]
-> Kinefin is in pre-release. It is tested against a fake server and, at the API level, against Jellyfin 12.4; acceptance on a Plasma desktop against a real server is still pending for most features.
 
 ## Getting started
 
@@ -105,14 +100,14 @@ Ctrl+, opens the settings, and Ctrl+Shift+/ lists the keyboard shortcuts.
 
 ## Documentation
 
-| Page | For |
-| --- | --- |
-| [User guide](docs/user-guide.md) | Install and update, signing in, browsing, playback, downloads, casting, KRunner, keyboard and gamepad, troubleshooting, where the files are |
-| [Settings reference](docs/settings.md) | Every setting with its key, default and values |
-| [Architecture](docs/architecture.md) | The code map, the invariants and the decisions, for contributors |
-| [Contributing](CONTRIBUTING.md) | Building, checks, the Flatpak, translations, releases |
-| [Security](SECURITY.md) | Reporting a vulnerability, the threat model |
-| [Third-party components](THIRD_PARTY.md) | What Kinefin uses and bundles, with the licenses |
+| Page                                     | For                                                                                                                                         |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| [User guide](docs/user-guide.md)         | Install and update, signing in, browsing, playback, downloads, casting, KRunner, keyboard and gamepad, troubleshooting, where the files are |
+| [Settings reference](docs/settings.md)   | Every setting with its key, default and values                                                                                              |
+| [Architecture](docs/architecture.md)     | The code map, the invariants and the decisions, for contributors                                                                            |
+| [Contributing](CONTRIBUTING.md)          | Building, checks, the Flatpak, translations, releases                                                                                       |
+| [Security](SECURITY.md)                  | Reporting a vulnerability, the threat model                                                                                                 |
+| [Third-party components](THIRD_PARTY.md) | What Kinefin uses and bundles, with the licenses                                                                                            |
 
 To report a problem, [open an issue](https://github.com/the-beper/Kinefin/issues/new/choose): the form asks for the version, your system and the log. Security problems go through a private report, as [SECURITY.md](SECURITY.md) describes.
 
@@ -124,7 +119,7 @@ Kinefin is a clean-room client of the Jellyfin API: no code comes from jellyfin-
 
 GPL-3.0-or-later. See [LICENSE](LICENSE), and [THIRD_PARTY.md](THIRD_PARTY.md) for the third-party code and data it uses.
 
-*Kinefin is an independent open-source project, not affiliated with or endorsed by the Jellyfin project or Google.*
+_Kinefin is an independent open-source project, not affiliated with or endorsed by the Jellyfin project or Google._
 
 ## AI disclosure
 

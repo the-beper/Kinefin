@@ -538,6 +538,7 @@ bool DownloadsController::downloadItemForRule(const QString &itemId, const QStri
         return false;
     ItemQuery query;
     query.itemIds = {itemId};
+    // CanDownload is opt-in: the server leaves it out of an item unless the fields ask for it
     query.fields = {QStringLiteral("MediaSources"), QStringLiteral("CanDownload")};
     const int channel = m_nextChannel++;
     if (!m_client->fetchItems(query, channel))
@@ -1558,6 +1559,7 @@ void DownloadsController::onOutboxItemsReady(const QJsonArray &items, int channe
         return;
     }
     m_outboxWrites.insert(event->itemId);
+    // `POST /UserPlayedItems/{itemId}`, never `Sessions/Playing/Stopped`, which needs a live play session
     if (!m_client->setItemPlayed(event->itemId, true))
         m_outboxWrites.remove(event->itemId);
 }

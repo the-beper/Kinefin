@@ -329,7 +329,7 @@ class DownloadTransfer::Worker final : public QObject {
         QObject::connect(m_reply, &QNetworkReply::finished, this, [this] { replyFinished(); });
     }
 
-    // The response's validator for a later If-Range: the ETag, else Last-Modified
+    // The response's validator for a later If-Range: the ETag, else Last-Modified. 12.4 sends no ETag on the Download route, so Last-Modified is the one in practice
     QString responseValidator() const
     {
         const QString etag = QString::fromLatin1(m_reply->rawHeader("ETag"));

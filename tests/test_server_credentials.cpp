@@ -22,11 +22,11 @@ class TestServerCredentials : public QObject {
     {
         ServerCredential entry;
         entry.serverId = serverId;
-        entry.url = QStringLiteral("http://192.168.1.251:8096");
+        entry.url = QStringLiteral("http://192.168.1.10:8096");
         entry.userId = QStringLiteral("9c7d46e083324909");
         entry.deviceId = QStringLiteral("kinefin-fiddle-") + serverId;
         entry.deviceName = QStringLiteral("Kinefin test");
-        entry.username = QStringLiteral("kinefin-live");
+        entry.username = QStringLiteral("demo");
         entry.imageTag = QStringLiteral("tag-1");
         entry.askPassword = serverId == QLatin1String("b");
         entry.remembered = serverId != QLatin1String("b");

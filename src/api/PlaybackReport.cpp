@@ -57,7 +57,7 @@ std::optional<QJsonObject> playbackReportBody(const PlaybackReport &report)
 
 const QStringList &supportedGeneralCommands()
 {
-    // PlayState, Play and PlayNext name the Playstate and Play messages, which arrive as their own types
+    // PlayState, Play and PlayNext name the Playstate and Play messages, which arrive as their own types. Every name must be one the server's GeneralCommandType knows: 12.4 answers 400 to a Capabilities body with a single unknown name and the session is left without commands
     static const QStringList commands{QStringLiteral("MoveUp"),
                                       QStringLiteral("MoveDown"),
                                       QStringLiteral("MoveLeft"),

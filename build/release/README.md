@@ -135,6 +135,54 @@ change the commit id.
 The local simulation and the real-client test of these scripts are described in
 [CONTRIBUTING.md](../../CONTRIBUTING.md#flatpak).
 
+### One-time setup
+
+A repository admin does this once, in this order, before the first tag. The
+`gh api` payloads follow GitHub's REST documentation and have not been run.
+
+1. Generate the signing key in a throwaway `GNUPGHOME`, with no expiry (an
+   installed client does not refresh the key), and commit the public part as
+   `build/flatpak/signing-key.asc`:
+
+   ```sh
+   export GNUPGHOME=$(mktemp -d)
+   gpg --batch --pinentry-mode loopback --passphrase '' --quick-gen-key 'Kinefin Flatpak repository' ed25519 sign never
+   fpr=$(gpg --list-keys --with-colons | awk -F: '$1=="fpr"{print $10; exit}')
+   gpg --armor --export "$fpr" > build/flatpak/signing-key.asc
+   ```
+
+   Keep an offline copy of the private key (`gpg --armor --export-secret-keys`).
+2. Create the environment `release-signing` before anything refers to it: a
+   job that names a missing environment makes GitHub create it without
+   protection. It needs you as its required reviewer and a deployment policy
+   limited to the tag pattern `v*`:
+
+   ```sh
+   gh api -X PUT repos/the-beper/Kinefin/environments/release-signing --input - <<<"{\"prevent_self_review\":false,\"reviewers\":[{\"type\":\"User\",\"id\":$(gh api user --jq .id)}],\"deployment_branch_policy\":{\"protected_branches\":false,\"custom_branch_policies\":true}}"
+   gh api -X POST repos/the-beper/Kinefin/environments/release-signing/deployment-branch-policies -f name='v*' -f type=tag
+   ```
+3. Store the private key as the secret `FLATPAK_GPG_PRIVATE_KEY` of that
+   environment only, then destroy the temporary keyring.
+   `gh secret list` must show no repository-level secret of that name:
+
+   ```sh
+   gpg --armor --export-secret-keys "$fpr" | gh secret set FLATPAK_GPG_PRIVATE_KEY --env release-signing
+   gpgconf --kill all; rm -rf "$GNUPGHOME"
+   ```
+4. Create a ruleset for `refs/tags/v*` that blocks update, deletion and
+   non-fast-forward and lets only admins create tags (a moved tag races the
+   publisher's final tag check), and a ruleset for `main` that requires the
+   `required` check of GitHub Actions and blocks force-push and deletion. Keep
+   the default `GITHUB_TOKEN` read-only.
+5. Enable Pages from `gh-pages` only after the first `publish` job has pushed
+   the branch, as described in [First publication](#first-publication).
+
+GitHub Pages sites are limited to 1 GB and pushed files to 100 MB (GitHub's
+documentation; not checked here). The size of Kinefin's repository objects has
+not been measured against that limit. Flathub, when it comes, is a second
+remote for the same app id `io.github.the_beper.Kinefin`, and moving users
+from one remote to the other is a separate decision.
+
 ### First publication
 
 The prerequisites are listed in [FIRST_RELEASE.md](FIRST_RELEASE.md). Pages is

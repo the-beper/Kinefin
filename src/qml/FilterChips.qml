@@ -5,7 +5,7 @@ import QtQuick.Controls as Controls
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 
-// The filters of a list as chips with a remove button each, and Clear Filters for all of them (not the search, the sort or the library). The dialog builds the chips from the filters of its model and takes one off; the bar shows only while the list has a chip or still resolves saved filters
+// The filters of a list as chips with a remove button each, and Clear Filters for all of them (not the search, the sort or the library). The dialog builds the chips from the filters of its model and takes one off; the bar shows only while the list has a chip or still resolves saved filters. The chips are not `Kirigami.Chip`: it reads the text format of its label by guessing, and these labels are server text
 Flow {
     id: bar
     objectName: "filterChips"

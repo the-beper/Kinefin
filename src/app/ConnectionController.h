@@ -491,7 +491,7 @@ class ConnectionController : public QObject {
     QTimer m_offlineRefresh;
     static constexpr int UserDataPendingMax = 10000;
     static constexpr int UserDataRound = 500;
-    // The ids a UserDataChanged named, normalized, until the next round reads them again: a burst is one round of at most UserDataRound ids, the rest wait for the next
+    // The ids a UserDataChanged named, normalized, until the next round reads them again: a burst is one round of at most UserDataRound ids, the rest wait for the next, and a round starts once a second at most. The event is a hint, never data: it names the item and its season, never the series, and the answer is always read over REST
     QTimer m_userDataRefresh;
     QSet<QString> m_userDataPending;
     bool m_userDataHeld = false;

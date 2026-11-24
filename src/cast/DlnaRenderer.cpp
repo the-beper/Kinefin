@@ -149,6 +149,7 @@ void DlnaRenderer::abortProbe()
 
 void DlnaRenderer::startTransport()
 {
+    // Never empty metadata: a Fire TV renderer refuses SetAVTransportURI without a DIDL item with HTTP 500
     const QString metadata = didlItem(m_title, m_url.toString(QUrl::FullyEncoded), m_mime);
     Command setUri =
         avTransportCommand(QStringLiteral("SetAVTransportURI"),

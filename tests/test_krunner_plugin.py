@@ -14,8 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PLUGIN = ROOT / "data" / "krunner" / "io.github.the_beper.Kinefin.desktop"
 SOURCE = ROOT / "src" / "integration" / "KRunnerProvider.h"
 
-# What Flatpak keeps of an exported runner description (flatpak-dir.c, 1.18.4) plus the one key it
-# drops on purpose and this file still carries, so a native install starts off like the Flatpak
+# Flatpak exports a runner description only from 1.16, and that version already forces EnabledByDefault off; since 1.18.4 an exported file keeps only the allowlisted keys of flatpak-dir.c, which are listed here plus EnabledByDefault, which Flatpak drops on purpose and this file still carries so a native install starts off like the Flatpak
 ALLOWED_KEYS = {
     "Type",
     "Name",

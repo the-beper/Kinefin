@@ -266,6 +266,7 @@ bool CastSender::load(const CastLoad &request)
 void CastSender::prepare()
 {
     QHostAddress literal;
+    // Only an http name is turned into an address: an https server stays as named, and an http server behind a name-based reverse proxy fails because the device then sends the IP as Host
     const bool named = m_originalBase.scheme() == QLatin1String("http") && !m_baseHost.isEmpty()
                        && !literal.setAddress(hostWithoutBrackets(m_originalBase));
     if (!named) {
