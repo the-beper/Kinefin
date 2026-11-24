@@ -23,28 +23,32 @@
   <launchable type="desktop-id">io.github.the_beper.Kinefin.desktop</launchable>
   <screenshots>
     <screenshot type="default">
-      <caption>Home with Continue Watching, Next Up, and Recently Added</caption>
-      <image type="source" width="1280" height="960">https://raw.githubusercontent.com/the-beper/Kinefin/main/docs/images/home.png</image>
-    </screenshot>
-    <screenshot>
       <caption>A movie library with filters and sorting</caption>
-      <image type="source" width="1280" height="960">https://raw.githubusercontent.com/the-beper/Kinefin/main/docs/images/library.png</image>
+      <image type="source" width="2260" height="1582" scale="2">https://raw.githubusercontent.com/the-beper/Kinefin/main/docs/images/library.png</image>
     </screenshot>
     <screenshot>
       <caption>The details page of a movie</caption>
-      <image type="source" width="1280" height="1040">https://raw.githubusercontent.com/the-beper/Kinefin/main/docs/images/details.png</image>
-    </screenshot>
-    <screenshot>
-      <caption>A series with its next episode and seasons</caption>
-      <image type="source" width="1280" height="960">https://raw.githubusercontent.com/the-beper/Kinefin/main/docs/images/series.png</image>
+      <image type="source" width="2260" height="1582" scale="2">https://raw.githubusercontent.com/the-beper/Kinefin/main/docs/images/details.png</image>
     </screenshot>
     <screenshot>
       <caption>The player with its controls</caption>
-      <image type="source" width="1280" height="720">https://raw.githubusercontent.com/the-beper/Kinefin/main/docs/images/player.png</image>
+      <image type="source" width="2260" height="1582" scale="2">https://raw.githubusercontent.com/the-beper/Kinefin/main/docs/images/player.png</image>
     </screenshot>
     <screenshot>
-      <caption>Choosing subtitles in the player</caption>
-      <image type="source" width="1280" height="720">https://raw.githubusercontent.com/the-beper/Kinefin/main/docs/images/player-subtitles.png</image>
+      <caption>A series with its next episode</caption>
+      <image type="source" width="2260" height="1582" scale="2">https://raw.githubusercontent.com/the-beper/Kinefin/main/docs/images/series.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Home with libraries, Continue Watching, and Next Up</caption>
+      <image type="source" width="2260" height="1582" scale="2">https://raw.githubusercontent.com/the-beper/Kinefin/main/docs/images/home.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>The subtitle menu in the player</caption>
+      <image type="source" width="2260" height="1582" scale="2">https://raw.githubusercontent.com/the-beper/Kinefin/main/docs/images/player-subtitles.png</image>
+    </screenshot>
+    <screenshot environment="plasma:dark">
+      <caption>A movie library in the dark color scheme</caption>
+      <image type="source" width="2260" height="1582" scale="2">https://raw.githubusercontent.com/the-beper/Kinefin/main/docs/images/dark/library.png</image>
     </screenshot>
   </screenshots>
   <url type="homepage">https://github.com/the-beper/Kinefin</url>

@@ -693,7 +693,7 @@ if(BUILD_TESTING)
 
     add_executable(test_ui_pages tests/test_ui_pages.cpp)
     target_compile_definitions(test_ui_pages PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}" TRANSLATION_DOMAIN="kinefin")
-    target_link_libraries(test_ui_pages PRIVATE kinefin_ui kinefin_uiplugin kinefin_integration kinefin_core Qt6::Test Qt6::Gui Qt6::Widgets Qt6::Quick Qt6::QuickControls2 Qt6::Qml KF6::I18n KF6::I18nQml)
+    target_link_libraries(test_ui_pages PRIVATE kinefin_ui kinefin_uiplugin kinefin_integration kinefin_core Qt6::Test Qt6::DBus Qt6::Gui Qt6::Widgets Qt6::Quick Qt6::QuickControls2 Qt6::Qml KF6::I18n KF6::I18nQml)
     # The UI tests take minutes in one process: the test functions are dealt out to shards that run side by side under `ctest -j`. Functions with a `_data` sibling are the slow ones and go first so no shard gets two of them
     set(KINEFIN_UI_SHARDS 6)
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS tests/test_ui_pages.cpp)
