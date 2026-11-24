@@ -79,6 +79,8 @@ Kirigami.Page {
     // The lock keeps the bars up until it is opened again
     property bool osdLocked: false
     // What else keeps the bars up whatever the timer says: the lock, a pause, the pointer on a bar, a drag of the timeline
+    // A cast from its choice of a device on: casting is false while the server negotiates the stream for the device, also between two items of a cast
+    readonly property bool castActive: page.player.casting || page.player.castTargetId.length > 0
     readonly property bool barsHeld: osdLocked || page.player.paused || page.player.casting || pointerOnBars || timeline.pressed
     // The pointer in the window over a bar, its controls or its shade, read from the one hover of the page: it follows every move and ends when the pointer leaves the window
     readonly property bool pointerOnBars: pointer.hovered && osd.visible && (pointer.point.position.y < topBar.height || pointer.point.position.y > page.height - bottomBar.height)
@@ -386,19 +388,31 @@ Kirigami.Page {
         anchors.centerIn: parent
         width: Math.min(parent.width - Kirigami.Units.gridUnit * 2, Kirigami.Units.gridUnit * 24)
         spacing: Kirigami.Units.largeSpacing
-        visible: page.player.casting
+        visible: page.castActive
         Kirigami.Theme.colorSet: Kirigami.Theme.Complementary
         Kirigami.Theme.inherit: false
-        Kirigami.Icon {
+        // The busy indicator takes the icon's place while the device opens the stream, so nothing moves when it starts
+        Item {
             Layout.alignment: Qt.AlignHCenter
             implicitWidth: Kirigami.Units.iconSizes.huge
             implicitHeight: Kirigami.Units.iconSizes.huge
-            source: "video-television"
+            Kirigami.Icon {
+                anchors.fill: parent
+                source: "video-television"
+                visible: !page.player.loading
+            }
+            Controls.BusyIndicator {
+                objectName: "playerCastBusy"
+                anchors.centerIn: parent
+                running: visible
+                visible: page.player.loading
+            }
         }
         Controls.Label {
+            objectName: "playerCastStatus"
             Layout.fillWidth: true
             horizontalAlignment: Text.AlignHCenter
-            text: i18nc("@info:status %1 is a device name", "Playing on %1", page.player.castTargetName)
+            text: page.player.loading ? i18nc("@info:status %1 is a device name", "Opening on %1…", page.player.castTargetName) : i18nc("@info:status %1 is a device name", "Playing on %1", page.player.castTargetName)
             textFormat: Text.PlainText
             wrapMode: Text.Wrap
             color: Kirigami.Theme.textColor
@@ -559,16 +573,17 @@ Kirigami.Page {
         }
     }
 
-    // The loading and error overlay stays visible when the bars hide
+    // The loading and error overlay stays visible when the bars hide; a cast says that it is opening in its own view
     ColumnLayout {
+        objectName: "playerLoadingOverlay"
         anchors.centerIn: parent
-        visible: page.player.loading || !!page.player.errorText
+        visible: (page.player.loading && !page.castActive) || !!page.player.errorText
         spacing: Kirigami.Units.largeSpacing
         FadeInOnShow {}
         Controls.BusyIndicator {
             Layout.alignment: Qt.AlignHCenter
             running: visible
-            visible: page.player.loading
+            visible: page.player.loading && !page.castActive
         }
         Controls.Label {
             color: "white"

@@ -179,7 +179,7 @@ class CastSender final : public CastRenderer {
 
     void fail(Failure failure);
     void endedByDevice();
-    void stoppedByDevice();
+    void stoppedByDevice(const char *reason);
     void finishSession();
     void freezePosition();
 

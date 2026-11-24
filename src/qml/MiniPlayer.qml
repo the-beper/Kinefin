@@ -122,7 +122,7 @@ Item {
             anchors.centerIn: parent
             width: parent.width - mini.margin * 2
             spacing: Kirigami.Units.smallSpacing
-            visible: !!mini.player?.casting
+            visible: !!mini.player?.casting || !!mini.player?.castTargetId
             Kirigami.Theme.colorSet: Kirigami.Theme.Complementary
             Kirigami.Theme.inherit: false
             Kirigami.Icon {
@@ -134,7 +134,7 @@ Item {
             Controls.Label {
                 Layout.fillWidth: true
                 horizontalAlignment: Text.AlignHCenter
-                text: i18nc("@info:status %1 is a device name", "Playing on %1", mini.player?.castTargetName ?? "")
+                text: mini.player?.loading ? i18nc("@info:status %1 is a device name", "Opening on %1…", mini.player?.castTargetName ?? "") : i18nc("@info:status %1 is a device name", "Playing on %1", mini.player?.castTargetName ?? "")
                 textFormat: Text.PlainText
                 wrapMode: Text.Wrap
                 maximumLineCount: 2

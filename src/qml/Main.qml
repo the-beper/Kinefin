@@ -568,6 +568,8 @@ Kirigami.ApplicationWindow {
             objectName: "videoRenderer"
             anchors.fill: parent
             player: window.player
+            // The last frame of the local playback stays on the item while a cast plays or has failed: the black behind it shows instead; transparent rather than hidden, so that the item keeps its surface
+            opacity: window.player?.casting || window.player?.castTargetId || window.player?.canContinueHere ? 0 : 1
             // The picture-in-picture window could not render the video: it goes back to the full player, playing on
             onRendererFailed: {
                 if (window.playbackMode !== "pip")

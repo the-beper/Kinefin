@@ -12194,6 +12194,63 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(!button->isVisible());
     }
 
+    void theCastViewSaysItIsOpeningAndTheLoadingOverlayStaysOut()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *page = openPlayer(ui, stub);
+        QVERIFY(page);
+        QQuickItem *overlay = Ui::itemIn(page, QStringLiteral("playerLoadingOverlay"));
+        QQuickItem *view = Ui::itemIn(page, QStringLiteral("playerCastView"));
+        QQuickItem *status = Ui::itemIn(page, QStringLiteral("playerCastStatus"));
+        QQuickItem *busy = Ui::itemIn(page, QStringLiteral("playerCastBusy"));
+        QQuickItem *video = ui.item(QStringLiteral("videoRenderer"));
+        QVERIFY(overlay && view && status && busy && video);
+        // Opening on this computer: the overlay alone, over the picture
+        stub.loading = true;
+        Q_EMIT stub.changed();
+        QTRY_VERIFY(overlay->isVisible());
+        QVERIFY(!view->isVisible());
+        QCOMPARE(video->opacity(), 1.0);
+        // The server negotiates the stream for a device, also between two items of a cast: the cast view says so already, and neither the overlay nor the last frame shows
+        stub.castTargetId = QStringLiteral("uuid:tv");
+        stub.castTargetName = QStringLiteral("Living room");
+        Q_EMIT stub.changed();
+        QTRY_VERIFY(view->isVisible());
+        QVERIFY(!overlay->isVisible());
+        QTRY_COMPARE(video->opacity(), 0.0);
+        QCOMPARE(status->property("text").toString(), QStringLiteral("Opening on Living room…"));
+        QVERIFY(busy->isVisible());
+        // The device opens the stream, then plays
+        stub.casting = true;
+        Q_EMIT stub.changed();
+        QTRY_VERIFY(!overlay->isVisible());
+        QVERIFY(busy->isVisible());
+        stub.loading = false;
+        Q_EMIT stub.changed();
+        QTRY_COMPARE(status->property("text").toString(), QStringLiteral("Playing on Living room"));
+        QVERIFY(!busy->isVisible());
+        QVERIFY(!overlay->isVisible());
+        QVERIFY(view->isVisible());
+        // A failure of the device is the overlay's again, still over black
+        stub.casting = false;
+        stub.castTargetId.clear();
+        stub.errorText = QStringLiteral("The device stopped responding.");
+        stub.canContinueHere = true;
+        Q_EMIT stub.changed();
+        QTRY_VERIFY(overlay->isVisible());
+        QVERIFY(!view->isVisible());
+        QCOMPARE(video->opacity(), 0.0);
+        // Back on this computer the picture shows again
+        stub.errorText.clear();
+        stub.canContinueHere = false;
+        Q_EMIT stub.changed();
+        QTRY_COMPARE(video->opacity(), 1.0);
+    }
+
     void theCastDialogListsThisComputerFirstAndShowsNamesLiterally()
     {
         PlayerStub stub;
@@ -12439,6 +12496,10 @@ class TestUiPages : public QObject {
         int found = 0;
         QVERIFY(ui.notPlainText(QStringLiteral("Playing on <b>Living</b> room"), &found).isEmpty());
         QCOMPARE(found, 1);
+        // Until the device plays, it says that the device opens the stream
+        stub.loading = true;
+        Q_EMIT stub.changed();
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Opening on <b>Living</b> room…")));
     }
 
     void upFromTheGridFirstRowReachesTheControlAbove()

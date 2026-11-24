@@ -462,8 +462,7 @@ void CastSender::onChannelOpened()
     } else if (m_phase == Phase::Reconnecting && m_resume == Resume::Opening) {
         // Another device on the old address, or the same address and a different device: nothing is sent to it
         if (m_channel->authenticatedLeafHash() != m_firstLeaf) {
-            qCWarning(senderLog) << "another device answered the reconnect";
-            stoppedByDevice();
+            stoppedByDevice("another device answered the reconnect");
             return;
         }
         m_info.address = m_candidateAddress;
@@ -531,7 +530,7 @@ void CastSender::onVirtualConnectionClosed(const QString &source)
     if (m_phase == Phase::Stopping)
         proceedStop();
     else if (m_phase == Phase::Loading || m_phase == Phase::Active)
-        stoppedByDevice();
+        stoppedByDevice("the app closed its connection");
 }
 
 void CastSender::sendLaunch()
@@ -640,7 +639,7 @@ void CastSender::onReceiverMessage(const QJsonObject &json)
                 return app.appId == kAmbientApp;
             });
         if (!ours && !onlyAmbient)
-            stoppedByDevice();
+            stoppedByDevice("our session is not in the receiver status");
         break;
     }
     case Phase::Reconnecting:
@@ -764,7 +763,7 @@ void CastSender::onMediaMessage(const QJsonObject &json)
     } else if (type == QLatin1String("LOAD_CANCELLED")) {
         // The cancellation of an older load of ours is expected when we replace one; ours being cancelled is another sender's doing
         if (m_loadInFlight && requestId != 0 && requestId == m_loadRequestId)
-            stoppedByDevice();
+            stoppedByDevice("the load was cancelled");
     }
 }
 
@@ -837,7 +836,7 @@ void CastSender::handleEntry(const QJsonObject &entry, quint32 requestId)
         if (id < m_mediaSessionId)
             return;
         if ((idle && reason == QLatin1String("INTERRUPTED")) || (hasContent && !ours)) {
-            stoppedByDevice();
+            stoppedByDevice("another media session took over");
             return;
         }
         if (!hasContent)
@@ -881,8 +880,7 @@ void CastSender::handleIdle(const QString &reason, bool loading)
         fail(Failure::Refused);
     } else if (reason == QLatin1String("CANCELLED") || reason == QLatin1String("INTERRUPTED")) {
         // Our own STOP is handled in Stopping and our own reload before this point
-        qCInfo(senderLog) << "the media was cancelled or interrupted by another sender";
-        stoppedByDevice();
+        stoppedByDevice("the media was cancelled or interrupted");
     }
 }
 
@@ -1275,7 +1273,7 @@ void CastSender::handleResumeReceiverStatus(const QList<App> &apps)
         return;
     }
     // Our session is gone: another sender or the device's own controls ended it
-    stoppedByDevice();
+    stoppedByDevice("our session is gone after the reconnect");
 }
 
 void CastSender::handleResumeMediaStatus(const QJsonObject &json)
@@ -1309,7 +1307,7 @@ void CastSender::handleResumeMediaStatus(const QJsonObject &json)
     }
     // The device plays something else or nothing
     if (reply)
-        stoppedByDevice();
+        stoppedByDevice("the device plays something else after the reconnect");
 }
 
 void CastSender::fail(Failure failure)
@@ -1335,11 +1333,12 @@ void CastSender::endedByDevice()
         return;
     // A truncated file or a transcode whose encoder died finishes early: the device gave up, the item did not end
     if (m_durationMs > 0 && m_durationMs - positionMs() > kEndToleranceMs) {
-        qCWarning(senderLog) << "the device finished long before the end, started:" << m_started;
-        if (m_started)
-            stoppedByDevice();
-        else
+        if (m_started) {
+            stoppedByDevice("the device finished long before the end");
+        } else {
+            qCWarning(senderLog) << "the device finished long before the end, before it started";
             fail(Failure::Refused);
+        }
         return;
     }
     if (m_durationMs > 0)
@@ -1350,10 +1349,12 @@ void CastSender::endedByDevice()
     Q_EMIT ended();
 }
 
-void CastSender::stoppedByDevice()
+void CastSender::stoppedByDevice(const char *reason)
 {
     if (m_phase == Phase::Idle || m_phase == Phase::Stopping)
         return;
+    qCInfo(senderLog) << "stopped by the device:" << reason << "while" << phaseName(m_phase) << "at"
+                      << positionMs() << "ms";
     freezePosition();
     finishSession();
     Q_EMIT stopped();
