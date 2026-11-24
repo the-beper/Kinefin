@@ -3,8 +3,9 @@ FROM registry.fedoraproject.org/fedora:45
 # The Flatpak builder and smoke test run here. Python 3 validates the installed
 # bundle metadata against the reviewed sandbox policy before launching Kinefin.
 # The scripts still require rootless podman on the host.
+# `diffutils` (`cmp`, `diff`) is used by the release scripts that test-repo-update.sh runs; the base image does not have it.
 RUN dnf install -y --setopt=install_weak_deps=False \
-        flatpak flatpak-builder ostree squashfs-tools curl git dbus-daemon python3 \
+        flatpak flatpak-builder ostree squashfs-tools curl git dbus-daemon python3 diffutils \
     && dnf clean all
 
 # Links the ghcr.io package to the repository, so the workflows can pull it with GITHUB_TOKEN.

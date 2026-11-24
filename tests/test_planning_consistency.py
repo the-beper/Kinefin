@@ -152,7 +152,7 @@ class PlanningConsistency(unittest.TestCase):
             "scripts/testing/run_portable_checks.sh",
             "build/release/simulate.sh", "build/release/export-flatpak-commits.sh", "build/release/prepare-flatpak-repo.sh",
             "build/release/sign-flatpak-repo.sh", "build/release/finish-flatpak-repo.sh",
-            "build/flatpak/publish-repo.sh", "build/flatpak/write-site-files.sh",
+            "build/flatpak/publish-repo.sh", "build/flatpak/write-site-files.sh", "build/flatpak/test-repo-update.sh",
             "build/release/testdata/fake-flatpak", "build/release/testdata/fake-gh", "build/release/testdata/fake-ostree",
         )
         for name in scripts:
