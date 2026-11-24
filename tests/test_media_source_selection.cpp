@@ -782,6 +782,57 @@ class TestMediaSourceSelection : public QObject {
         QVERIFY(castSubtitleUrl(base, item, source, 3, -1).isEmpty());
     }
 
+    void castFrameSizeUrlLandsBothSidesOnMultiplesOf16_data()
+    {
+        QTest::addColumn<QString>("query");
+        QTest::addColumn<int>("width");
+        QTest::addColumn<int>("height");
+        QTest::addColumn<QString>("expected");
+        const QString encode =
+            QStringLiteral("TranscodeReasons=VideoCodecNotSupported%2CVideoResolutionNotSupported");
+        const QString caps = QStringLiteral("MaxWidth=1280&MaxHeight=720&");
+        // Gone Girl: the server made 1280x532, and 1152x480 showed no purple line on a Nest Hub
+        QTest::newRow("2.40 scaled by width")
+            << caps + encode << 1920 << 800
+            << QStringLiteral("MaxHeight=720&") + encode + QStringLiteral("&MaxWidth=1152");
+        QTest::newRow("2.39 scaled by width")
+            << caps + encode << 1920 << 804
+            << QStringLiteral("MaxHeight=720&") + encode + QStringLiteral("&MaxWidth=1072");
+        QTest::newRow("4:3-ish scaled by height")
+            << caps + encode << 1424 << 1080
+            << QStringLiteral("MaxWidth=1280&") + encode + QStringLiteral("&MaxHeight=704");
+        QTest::newRow("under the caps, encoded again")
+            << caps + encode << 1280 << 534
+            << QStringLiteral("MaxHeight=720&") + encode + QStringLiteral("&MaxWidth=1152");
+        QTest::newRow("no caps") << encode << 1920 << 804
+                                 << encode + QStringLiteral("&MaxWidth=1568");
+        QTest::newRow("no caps, already fits") << encode << 1920 << 800 << encode;
+        // Left as the server wrote it
+        QTest::newRow("16:9 already fits") << caps + encode << 1920 << 1080 << caps + encode;
+        QTest::newRow("4:3 already fits") << caps + encode << 1440 << 1080 << caps + encode;
+        QTest::newRow("video copied")
+            << caps + QStringLiteral("TranscodeReasons=AudioCodecNotSupported") << 1920 << 800
+            << caps + QStringLiteral("TranscodeReasons=AudioCodecNotSupported");
+        QTest::newRow("anamorphic")
+            << caps + encode + QStringLiteral("%2CAnamorphicVideoNotSupported") << 1920 << 800
+            << caps + encode + QStringLiteral("%2CAnamorphicVideoNotSupported");
+        QTest::newRow("no reasons") << caps.chopped(1) << 1920 << 800 << caps.chopped(1);
+        QTest::newRow("no size within a quarter") << caps + encode << 100 << 37 << caps + encode;
+        QTest::newRow("unknown source size") << caps + encode << 0 << 800 << caps + encode;
+    }
+    void castFrameSizeUrlLandsBothSidesOnMultiplesOf16()
+    {
+        QFETCH(QString, query);
+        QFETCH(int, width);
+        QFETCH(int, height);
+        QFETCH(QString, expected);
+        const QUrl url(QStringLiteral("http://jf.example/videos/x/stream.mkv?") + query);
+        const QUrl sized = Kinefin::castFrameSizeUrl(url, width, height);
+        QCOMPARE(sized.query(QUrl::FullyEncoded), expected);
+        QCOMPARE(sized.path(), url.path());
+        QCOMPARE(sized.host(), url.host());
+    }
+
     void textSubtitleCodecsAreTheOnesTheServerConvertsToWebVtt()
     {
         for (const QString &codec :

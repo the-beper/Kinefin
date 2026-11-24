@@ -21,6 +21,7 @@
 #include <QJsonObject>
 #include <QSignalSpy>
 #include <QTemporaryDir>
+#include <QUrlQuery>
 #include <QtTest/QtTest>
 #include <mpv/client.h>
 #include <functional>
@@ -2027,6 +2028,70 @@ class TestPlayerController : public QObject {
             QVERIFY(!load.contains(QStringLiteral("activeTrackIds")));
             chain.controller.stopCasting();
         }
+    }
+
+    void aTranscodeCastBringsInItsTextTrackOnceTheServerAnsweredIt()
+    {
+        QVERIFY(castPki().isValid());
+        CastRig rig(castPki());
+        Chain chain;
+        QVERIFY(chain.ok);
+        // The server is still extracting the track from the file
+        chain.server.holdSubtitleDownload = true;
+        QVERIFY(castsWithSubtitle(chain, rig,
+                                  playbackInfoWithSubtitle(QStringLiteral("playbackinfo_transcode"),
+                                                           QStringLiteral("subrip"), true)));
+        QCOMPARE(rig.device.count(kCastMediaNs, kLoad), 1);
+        QVERIFY(!nthLoad(rig.device, 0)
+                     .value(QStringLiteral("media"))
+                     .toObject()
+                     .contains(QStringLiteral("tracks")));
+        QTRY_COMPARE(chain.server.heldSubtitleCount(), 1);
+
+        // Answered: the stream is asked again from where the device is, with the track counted from the same start
+        chain.server.releaseSubtitleDownloads();
+        QTRY_COMPARE(rig.device.count(kCastMediaNs, kLoad), 2);
+        const QJsonObject media = nthLoad(rig.device, 1).value(QStringLiteral("media")).toObject();
+        const QUrlQuery query(QUrl(media.value(QStringLiteral("contentId")).toString()));
+        QVERIFY(query.hasQueryItem(QStringLiteral("StartTimeTicks")));
+        const qint64 ticks = query.queryItemValue(QStringLiteral("StartTimeTicks")).toLongLong();
+        const QJsonArray tracks = media.value(QStringLiteral("tracks")).toArray();
+        QCOMPARE(tracks.size(), 1);
+        QCOMPARE(tracks.at(0).toObject().value(QStringLiteral("trackContentId")).toString(),
+                 subtitleRoute(chain, ticks));
+        QTest::qWait(600);
+        QCOMPARE(rig.device.count(kCastMediaNs, kLoad), 2);
+        chain.controller.stopCasting();
+    }
+
+    void aPausedTranscodeCastTakesItsTextTrackAtTheResume()
+    {
+        QVERIFY(castPki().isValid());
+        CastRig rig(castPki());
+        Chain chain;
+        QVERIFY(chain.ok);
+        chain.server.holdSubtitleDownload = true;
+        QVERIFY(castsWithSubtitle(chain, rig,
+                                  playbackInfoWithSubtitle(QStringLiteral("playbackinfo_transcode"),
+                                                           QStringLiteral("subrip"), true)));
+        QTRY_COMPARE(chain.server.heldSubtitleCount(), 1);
+        chain.controller.pause();
+        QTRY_VERIFY(chain.controller.paused());
+        // A LOAD plays at once: the reload that brings in the track would undo the pause
+        chain.server.releaseSubtitleDownloads();
+        QTest::qWait(900);
+        QCOMPARE(rig.device.count(kCastMediaNs, kLoad), 1);
+        QVERIFY(chain.controller.paused());
+        chain.controller.resume();
+        QTRY_COMPARE(rig.device.count(kCastMediaNs, kLoad), 2);
+        QCOMPARE(nthLoad(rig.device, 1)
+                     .value(QStringLiteral("media"))
+                     .toObject()
+                     .value(QStringLiteral("tracks"))
+                     .toArray()
+                     .size(),
+                 1);
+        chain.controller.stopCasting();
     }
 
     void aTranscodeCastSeeksByReloadingWithTheTrackAtTheNewStart()

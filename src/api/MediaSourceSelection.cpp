@@ -7,6 +7,8 @@
 #include <QRegularExpression>
 #include <QUrlQuery>
 
+#include <algorithm>
+
 namespace Kinefin {
 namespace {
 SourceSelection failure(const QString &reason)
@@ -371,6 +373,68 @@ QUrl castSubtitleUrl(const QUrl &serverBase, const QString &itemId, const QStrin
         serverBase, QStringLiteral("/Videos/") + itemId + QLatin1Char('/') + mediaSourceId
                         + QStringLiteral("/Subtitles/") + QString::number(index) + QLatin1Char('/')
                         + QString::number(startTicks) + QStringLiteral("/Stream.vtt"));
+}
+
+namespace {
+// The server's TranscodeReasons (TranscodeReason.cs) under which it encodes the video again instead of copying it
+bool reencodesVideo(const QStringList &reasons)
+{
+    static const QStringList others{
+        QStringLiteral("SubtitleCodecNotSupported"), QStringLiteral("RefFramesNotSupported"),
+        QStringLiteral("InterlacedVideoNotSupported"),
+        QStringLiteral("ContainerBitrateExceedsLimit"), QStringLiteral("UnknownVideoStreamInfo")};
+    return std::any_of(reasons.cbegin(), reasons.cend(), [](const QString &reason) {
+        return reason.startsWith(QLatin1String("Video")) || others.contains(reason);
+    });
+}
+
+// The server scales the source by side / sourceSide and rounds the other side (to nearest or down, then down to even): a remainder under 1 over a multiple of 16 lands on that multiple whatever the rounding
+bool otherSideFits(qint64 side, qint64 sourceSide, qint64 sourceOther)
+{
+    return (sourceOther * side) % (16 * sourceSide) < sourceSide;
+}
+} // namespace
+
+QUrl castFrameSizeUrl(const QUrl &url, int sourceWidth, int sourceHeight)
+{
+    if (sourceWidth <= 0 || sourceHeight <= 0)
+        return url;
+    const QUrlQuery query(url);
+    const QStringList reasons =
+        query.queryItemValue(QStringLiteral("TranscodeReasons"), QUrl::FullyDecoded)
+            .split(QLatin1Char(','), Qt::SkipEmptyParts);
+    if (reasons.contains(QLatin1String("AnamorphicVideoNotSupported")) || !reencodesVideo(reasons))
+        return url;
+    const auto cap = [&query](const QString &key, qint64 source) {
+        bool ok = false;
+        const int value = query.queryItemValue(key).toInt(&ok);
+        return ok && value > 0 ? std::min<qint64>(value, source) : source;
+    };
+    const qint64 maxWidth = cap(QStringLiteral("MaxWidth"), sourceWidth);
+    const qint64 maxHeight = cap(QStringLiteral("MaxHeight"), sourceHeight);
+    // The side whose cap is the tighter one is the side the server scales by
+    const bool byWidth = maxWidth * sourceHeight <= maxHeight * sourceWidth;
+    const qint64 side = byWidth ? maxWidth : maxHeight;
+    const qint64 sourceSide = byWidth ? sourceWidth : sourceHeight;
+    const qint64 sourceOther = byWidth ? sourceHeight : sourceWidth;
+    if (side % 16 == 0 && otherSideFits(side, sourceSide, sourceOther))
+        return url;
+    for (qint64 candidate = side / 16 * 16; candidate >= 16 && candidate * 4 >= side * 3;
+         candidate -= 16) {
+        if (!otherSideFits(candidate, sourceSide, sourceOther))
+            continue;
+        const QString key = byWidth ? QStringLiteral("MaxWidth") : QStringLiteral("MaxHeight");
+        QUrlQuery kept;
+        for (const auto &[name, value] : query.queryItems(QUrl::FullyEncoded)) {
+            if (name.compare(key, Qt::CaseInsensitive) != 0)
+                kept.addQueryItem(name, value);
+        }
+        kept.addQueryItem(key, QString::number(candidate));
+        QUrl sized(url);
+        sized.setQuery(kept.query(QUrl::FullyEncoded), QUrl::StrictMode);
+        return sized;
+    }
+    return url;
 }
 
 } // namespace Kinefin

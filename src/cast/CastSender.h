@@ -34,7 +34,7 @@ class CastSender final : public CastRenderer {
         CastChannel::Options channel;
         // From the LAUNCH to a RECEIVER_STATUS with our app and its transportId
         int launchTimeoutMs = 10'000;
-        // From the LOAD to a PLAYING with a position above 0; a load with a text track gets 180 s more, the device fetches the track first and the server may need minutes to extract it
+        // From the LOAD to a PLAYING with a position above 0; a LOAD that carries a text track gets 180 s more, the device fetches the track first and the server may need minutes to extract it
         int startTimeoutMs = 30'000;
         // The reply PLAYING at position 0 that is not followed by a moving position
         int stuckMs = 10'000;
@@ -152,6 +152,8 @@ class CastSender final : public CastRenderer {
     void handleMediaStatus(const QJsonObject &json);
     void handleEntry(const QJsonObject &entry, quint32 requestId);
     void logStatus(const QJsonObject &entry, const QString &state, const QString &reason);
+    bool trackInLoad() const;
+    void announceWarmTrack();
     void handleIdle(const QString &reason, bool loading);
     void handlePlaying(const QJsonObject &entry);
     void adoptSession(qint64 id);
@@ -231,6 +233,10 @@ class CastSender final : public CastRenderer {
     bool m_started = false;
     // The state and idle reason of the last media status logged: a buffering device sends several statuses a second
     QString m_loggedStatus;
+    // The server answered the text track of this load (its warm-up request)
+    bool m_trackWarm = false;
+    // The last LOAD went out without the text track, which comes with a reload once it is warm
+    bool m_trackLeftOut = false;
 
     QString m_sessionId;
     QString m_transportId;

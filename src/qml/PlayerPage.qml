@@ -20,6 +20,8 @@ Kirigami.Page {
     readonly property Item videoSlot: slot
     title: player?.title || i18n("Now Playing")
     padding: 0
+    // The page reaches up under the shell header, which stays in the layout (a resize of the page row during the slide would end Kirigami's slide) and fades out while this page is in front: the video, the bars and the overlays span the whole window, and the heights below are the content item's (availableHeight)
+    topPadding: page.Window.window?.header?.visible ? -page.Window.window.header.height : 0
     // The video fills the page and the bars float above it: the page row's toolbar would be a strip that never hides
     globalToolBarStyle: Kirigami.ApplicationHeaderStyle.None
     readonly property bool isShowing: page.Window.window?.pageStack.currentItem === page
@@ -83,7 +85,7 @@ Kirigami.Page {
     readonly property bool castActive: page.player.casting || page.player.castTargetId.length > 0
     readonly property bool barsHeld: osdLocked || page.player.paused || page.player.casting || pointerOnBars || timeline.pressed
     // The pointer in the window over a bar, its controls or its shade, read from the one hover of the page: it follows every move and ends when the pointer leaves the window
-    readonly property bool pointerOnBars: pointer.hovered && osd.visible && (pointer.point.position.y < topBar.height || pointer.point.position.y > page.height - bottomBar.height)
+    readonly property bool pointerOnBars: pointer.hovered && osd.visible && (pointer.point.position.y < topBar.height || pointer.point.position.y > page.availableHeight - bottomBar.height)
     // Once nothing holds them, the bars get their full time again before they go
     onBarsHeldChanged: if (!barsHeld && showChrome) chromeTimer.restart()
     // The volume slider keeps the bars up only while the pointer is on it or on the speaker, or drags it: one opened by the keyboard or a long press goes with the bars
@@ -304,7 +306,7 @@ Kirigami.Page {
                 return;
         // fall through
         case Qt.Key_Menu:
-            page.showContextMenu(page.width / 2, page.height / 2);
+            page.showContextMenu(page.width / 2, page.availableHeight / 2);
             break;
         default: return;
         }
@@ -1368,7 +1370,7 @@ Kirigami.Page {
         anchors.leftMargin: Kirigami.Units.largeSpacing
         anchors.topMargin: osd.wanted ? topRow.y + topRow.implicitHeight + Kirigami.Units.largeSpacing : Kirigami.Units.largeSpacing
         width: Math.min(Kirigami.Units.gridUnit * 30, page.width - Kirigami.Units.largeSpacing * 2)
-        maximumHeight: page.height - anchors.topMargin - bottomBar.height
+        maximumHeight: page.availableHeight - anchors.topMargin - bottomBar.height
         Behavior on anchors.topMargin {
             NumberAnimation { duration: Kirigami.Units.longDuration; easing.type: Easing.OutCubic }
         }
@@ -1634,7 +1636,7 @@ Kirigami.Page {
         // Where the bottom bar's controls start: the panel sits above them, since More Actions (a button of the bar) opens it and it must not cover that button
         readonly property real controlsTop: bottomBar.y + controls.y
         width: Math.min(page.width, Kirigami.Units.gridUnit * 27)
-        height: Math.max(0, Math.min(page.height * 0.75, Kirigami.Units.gridUnit * 32, controlsTop - Kirigami.Units.smallSpacing))
+        height: Math.max(0, Math.min(page.availableHeight * 0.75, Kirigami.Units.gridUnit * 32, controlsTop - Kirigami.Units.smallSpacing))
         x: page.width - width
         y: controlsTop - Kirigami.Units.smallSpacing - height
         closePolicy: Controls.Popup.CloseOnEscape | Controls.Popup.CloseOnPressOutside

@@ -95,6 +95,8 @@ class CastRenderer : public QObject {
     // The device stopped on its own, or another sender took it
     void stopped();
     void failed(Kinefin::CastRenderer::Failure failure);
+    // The text track a transcode was loaded without can be fetched at once now: a reload brings it in
+    void textTrackReady();
 };
 
 } // namespace Kinefin

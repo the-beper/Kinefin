@@ -2837,7 +2837,7 @@ bool revealCard(const Ui &ui, QQuickItem *card)
 }
 
 namespace {
-// Plays the fixture movie through the shell on a stub player; the player page once it is in front, its focus is set and the header has gone (it goes once the slide settled), or null. The stub must outlive the window, so it is declared before the Ui
+// Plays the fixture movie through the shell on a stub player; the player page once it is in front, its focus is set and the header has faded out with the slide, or null. The stub must outlive the window, so it is declared before the Ui
 QQuickItem *openPlayer(Ui &ui, PlayerStub &stub)
 {
     QObject *root = ui.engine.rootObjects().constFirst();
@@ -2852,7 +2852,7 @@ QQuickItem *openPlayer(Ui &ui, PlayerStub &stub)
         page = ui.currentDetails();
         return page && page->objectName() == QStringLiteral("playerPage")
                && page->property("isShowing").toBool() && ui.window->activeFocusItem() == page
-               && !ui.shellHeader()->isVisible();
+               && ui.shellHeader()->opacity() == 0.0;
     });
     return ready ? page : nullptr;
 }
@@ -3025,13 +3025,17 @@ bool chooseShowMiniPlayer(Ui &ui)
 // Plays the fixture movie, leaves the player by the Show Mini Player entry of More Actions and waits for the mini player; it, or null
 QQuickItem *openMiniPlayer(Ui &ui, PlayerStub &stub)
 {
+    const int depth = ui.stackDepth();
     QQuickItem *page = openPlayer(ui, stub);
     if (!page || !chooseShowMiniPlayer(ui))
         return nullptr;
     QQuickItem *mini = nullptr;
-    // Shown and at rest: it fades in rising a little, and its buttons are where a click lands only then
-    const bool shown = qWaitForScaled(
-        [&] { return (mini = shownMiniPlayer(ui)) != nullptr && mini->opacity() == 1.0; });
+    // Shown and at rest: it fades in rising a little, and its buttons are where a click lands only then; the header back at full opacity means the slide ended, and the stack back at its depth that the player page left it once the row settled
+    const bool shown = qWaitForScaled([&] {
+        return (mini = shownMiniPlayer(ui)) != nullptr && mini->opacity() == 1.0
+               && ui.shellHeader()->isVisible() && ui.shellHeader()->opacity() == 1.0
+               && ui.stackDepth() == depth;
+    });
     return shown ? mini : nullptr;
 }
 
@@ -18321,7 +18325,27 @@ class TestUiPages : public QObject {
         QCOMPARE(ui.window->property("playbackMode").toString(), QStringLiteral("none"));
     }
 
-    void theHeaderFollowsThePlayerPageOnceTheRowSettled()
+    void dialogsOfTheHeaderOpenUsableOverThePlayer()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(openPlayer(ui, stub));
+        // The header is disabled under the player; the dialogs it holds open from the player all the same
+        QVERIFY(!ui.shellHeader()->isEnabled());
+        QVERIFY(QMetaObject::invokeMethod(ui.window, "openSyncPlay"));
+        QObject *dialog = ui.popup(QStringLiteral("syncPlayDialog"));
+        QVERIFY(dialog);
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QVERIFY(dialog->property("enabled").toBool());
+        auto *content = dialog->property("contentItem").value<QQuickItem *>();
+        QVERIFY(content);
+        QVERIFY(content->isEnabled());
+    }
+
+    void theHeaderFadesWithThePlayerPageSlide()
     {
         PlayerStub stub;
         Ui ui(m_home->path());
@@ -18330,31 +18354,97 @@ class TestUiPages : public QObject {
         QVERIFY(ui.signIn());
         QQuickItem *header = ui.shellHeader();
         QVERIFY(header);
-        QTRY_VERIFY(header->isVisible());
+        QTRY_VERIFY(header->isVisible() && header->opacity() == 1.0);
+        const qreal headerHeight = header->height();
+        QVERIFY(headerHeight > 0);
+        QCOMPARE(headerHeight, header->implicitHeight());
         const int depth = ui.stackDepth();
-        // openPlayer returns once the header has gone, so the player page has the whole window
-        QQuickItem *page = openPlayer(ui, stub);
-        QVERIFY(page);
-        QCOMPARE(header->height(), 0.0);
-        QTRY_COMPARE(page->mapToScene(QPointF(0, 0)).y(), 0.0);
-        // Back under the mini player: the header comes back whole, the player page leaves the stack and Home keeps the keyboard
+        QObject *root = ui.engine.rootObjects().constFirst();
+        auto *column = root->property("pageStack")
+                           .value<QObject *>()
+                           ->property("columnView")
+                           .value<QObject *>();
+        QVERIFY(column);
+        // The push slides the row step by step while the header fades against the arriving player, and the header keeps its height all along (a resize of the row would end the slide at once)
+        QVERIFY(root->setProperty("player", QVariant::fromValue<QObject *>(&stub)));
+        QVariant shown;
+        QVERIFY(QMetaObject::invokeMethod(root, "playItem", Q_RETURN_ARG(QVariant, shown),
+                                          Q_ARG(QVariant, kMovieId), Q_ARG(QVariant, 0)));
+        QVERIFY(shown.toBool());
+        struct Sample {
+            qreal contentX;
+            qreal opacity;
+            bool moving;
+        };
+        const auto sampleSlide = [&] {
+            QList<Sample> samples;
+            QElapsedTimer clock;
+            clock.start();
+            while (clock.elapsed() < 1500) {
+                samples.append({column->property("contentX").toReal(), header->opacity(),
+                                column->property("moving").toBool()});
+                if (header->height() != headerHeight)
+                    return QList<Sample>();
+                QTest::qWait(10);
+            }
+            return samples;
+        };
+        // The header only ever fades one way during a slide: a step back would be a flash
+        const auto oneWay = [](const QList<Sample> &samples, bool out) {
+            for (qsizetype i = 1; i < samples.size(); ++i) {
+                const qreal step = samples.at(i).opacity - samples.at(i - 1).opacity;
+                if (out ? step > 1e-9 : step < -1e-9)
+                    return false;
+            }
+            return true;
+        };
+        const auto halfway = [](const QList<Sample> &samples, qreal from, qreal to) {
+            return std::any_of(samples.cbegin(), samples.cend(), [from, to](const Sample &s) {
+                return s.moving && s.contentX > std::min(from, to)
+                       && s.contentX < std::max(from, to) && s.opacity > 0 && s.opacity < 1;
+            });
+        };
+        const QList<Sample> pushed = sampleSlide();
+        QVERIFY2(!pushed.isEmpty(), "the header changed its height during the slide");
+        QQuickItem *page = ui.currentDetails();
+        QTRY_VERIFY((page = ui.currentDetails())
+                    && page->objectName() == QStringLiteral("playerPage")
+                    && header->opacity() == 0.0);
+        const qreal endX = column->property("contentX").toReal();
+        QVERIFY(endX > 0);
+        QVERIFY2(halfway(pushed, 0, endX),
+                 "no frame of the slide had the row between its ends with the header half faded");
+        QVERIFY(oneWay(pushed, true));
+        // At rest the header is still there, transparent and disabled, and the player's video spans the window across its band
+        QCOMPARE(header->height(), headerHeight);
+        QCOMPARE(header->opacity(), 0.0);
+        QVERIFY(!header->isEnabled());
+        const auto *slot = page->property("videoSlot").value<QQuickItem *>();
+        QVERIFY(slot);
+        QCOMPARE(sceneRect(slot).top(), 0.0);
+        QCOMPARE(sceneRect(slot).height(), qreal(ui.window->height()));
+        // Back under the mini player: the header comes back with Home, the player page leaves the stack and Home keeps the keyboard
         QVERIFY(chooseShowMiniPlayer(ui));
-        QTRY_VERIFY(header->isVisible() && header->opacity() == 1.0
-                    && qAbs(header->height() - header->implicitHeight()) < 0.5);
+        const QList<Sample> back = sampleSlide();
+        QVERIFY2(!back.isEmpty(), "the header changed its height during the slide back");
+        QVERIFY2(halfway(back, endX, 0), "no frame of the slide back had the header half faded");
+        QVERIFY(oneWay(back, false));
+        QTRY_VERIFY(header->opacity() == 1.0 && header->isEnabled());
+        QCOMPARE(header->height(), headerHeight);
         QTRY_COMPARE(ui.stackDepth(), depth);
         QQuickItem *home = ui.currentDetails();
         QCOMPARE(home->objectName(), QStringLiteral("homePage"));
         QTRY_VERIFY(ui.window->activeFocusItem()
                     && (ui.window->activeFocusItem() == home
                         || home->isAncestorOf(ui.window->activeFocusItem())));
-        // Expanded again and left at once, before the row settled: the header ends where the page in front wants it
+        // Expanded again and left at once, before the row settled: the header ends opaque with Home in front
         QVERIFY(QMetaObject::invokeMethod(ui.window, "showPlayerPage"));
         QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("playerPage"));
         QVERIFY(QMetaObject::invokeMethod(ui.window, "escapeBack"));
         QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("homePage"));
         QTRY_COMPARE(ui.stackDepth(), depth);
-        QTRY_VERIFY(header->isVisible() && header->opacity() == 1.0
-                    && qAbs(header->height() - header->implicitHeight()) < 0.5);
+        QTRY_VERIFY(header->opacity() == 1.0 && header->isEnabled());
+        QCOMPARE(header->height(), headerHeight);
     }
 
     void miniPlayerKeepsThePageFocus()
@@ -22323,14 +22413,16 @@ class TestUiPages : public QObject {
         const QPoint at(ui.window->width() / 3, ui.window->height() / 3);
         QTest::mouseClick(ui.window, Qt::RightButton, Qt::NoModifier, at);
         QTRY_VERIFY(menu->property("opened").toBool());
-        // At the pointer
-        const QPointF origin = page->mapFromScene(QPointF(at));
+        // At the pointer, in the coordinates of the item the menu belongs to (the page's content, which reaches up under the header)
+        const auto *frame = menu->property("parent").value<QQuickItem *>();
+        QVERIFY(frame);
+        const QPointF origin = frame->mapFromScene(QPointF(at));
         QVERIFY(qAbs(menu->property("x").toReal() - origin.x()) <= 1);
         // At the pointer, moved up only as far as a menu taller than the room below it must go to stay in the window
         const qreal top = menu->property("y").toReal();
         QVERIFY2(qAbs(top - origin.y()) <= 1
                      || (top < origin.y()
-                         && top + menu->property("height").toReal() <= page->height() + 1),
+                         && top + menu->property("height").toReal() <= frame->height() + 1),
                  qPrintable(QStringLiteral("menu at %1, pointer at %2").arg(top).arg(origin.y())));
         // The right click neither pauses nor arms the single click's wait
         QTest::qWait(400);
@@ -22421,15 +22513,18 @@ class TestUiPages : public QObject {
         QVERIFY(menu);
         const std::pair<Qt::Key, Qt::KeyboardModifiers> keys[] = {{Qt::Key_Menu, Qt::NoModifier},
                                                                   {Qt::Key_F10, Qt::ShiftModifier}};
+        // The centre of the item the menu belongs to: the page's content, which spans the window
+        const auto *frame = menu->property("parent").value<QQuickItem *>();
+        QVERIFY(frame);
         for (const auto &[key, modifiers] : keys) {
             QTest::keyClick(ui.window, key, modifiers);
             QTRY_VERIFY(menu->property("opened").toBool());
-            QVERIFY(qAbs(menu->property("x").toReal() - page->width() / 2) <= 1);
+            QVERIFY(qAbs(menu->property("x").toReal() - frame->width() / 2) <= 1);
             // At the centre, moved up only as far as a menu taller than the room below it must go to stay in the window
             const qreal top = menu->property("y").toReal();
-            QVERIFY2(qAbs(top - page->height() / 2) <= 1
-                         || (top < page->height() / 2
-                             && top + menu->property("height").toReal() <= page->height() + 1),
+            QVERIFY2(qAbs(top - frame->height() / 2) <= 1
+                         || (top < frame->height() / 2
+                             && top + menu->property("height").toReal() <= frame->height() + 1),
                      qPrintable(QString::number(top)));
             QVERIFY(Ui::closeMenu(menu));
         }

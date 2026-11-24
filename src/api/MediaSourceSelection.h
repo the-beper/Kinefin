@@ -84,6 +84,9 @@ struct SourceSelection {
 // The token-free WebVTT route of the subtitle stream `index` of a media source, with the cues counted from `startTicks` (a transcode that starts there): `/Videos/{item}/{source}/Subtitles/{index}/{startTicks}/Stream.vtt` under the server's base. Empty for an invalid id, a negative index or start
 [[nodiscard]] QUrl castSubtitleUrl(const QUrl &serverBase, const QString &itemId,
                                    const QString &mediaSourceId, int index, qint64 startTicks);
+
+// A transcode URL for a Google Cast device whose frame is a multiple of 16 on both sides: a Nest Hub shows the padding rows of a hardware-encoded frame that is not (a purple line under a 1280x532 transcode, gone at 1152x480). When `TranscodeReasons` say the video is encoded again (not copied, not anamorphic), the cap of the side the server scales by (MaxWidth or MaxHeight, the source size without one) goes down to the largest multiple of 16, at most a quarter lower, that also lands the other side on a multiple of 16; `url` as it is otherwise
+[[nodiscard]] QUrl castFrameSizeUrl(const QUrl &url, int sourceWidth, int sourceHeight);
 } // namespace Kinefin
 
 Q_DECLARE_METATYPE(Kinefin::PlaybackSource)

@@ -536,7 +536,7 @@ class TestCastController : public QObject {
         QCOMPARE(controller.durationMs().value_or(0), qint64(600000));
         QCOMPARE(rig.device.count(kMediaNs, kLoad), 1);
 
-        // A transcode seeks by loading again: the second LOAD carries the text track of the new start
+        // A transcode seeks by loading again; a text track the server never answered stays out of its LOAD (the sender tests cover the track once answered)
         const qsizetype playsBefore = playingSpy.size();
         const QUrl second(kBase + QStringLiteral("/transcode.mp4?DeviceId=abc&StartTimeTicks=1"));
         const QUrl track(kBase + QStringLiteral("/Videos/1/2/Subtitles/3/300000/Stream.vtt"));
@@ -545,10 +545,7 @@ class TestCastController : public QObject {
         const QJsonObject media = rig.device.lastLoad().value(QLatin1String("media")).toObject();
         QCOMPARE(media.value(QLatin1String("contentId")).toString(),
                  second.toString(QUrl::FullyEncoded));
-        const QJsonObject newTrack =
-            media.value(QLatin1String("tracks")).toArray().at(0).toObject();
-        QCOMPARE(newTrack.value(QLatin1String("trackContentId")).toString(),
-                 track.toString(QUrl::FullyEncoded));
+        QVERIFY(!media.contains(QLatin1String("tracks")));
         QTRY_VERIFY(controller.isPlaying());
         QTRY_VERIFY(playingSpy.size() > playsBefore);
         QTRY_VERIFY(controller.positionMs().value_or(0) >= 300000);

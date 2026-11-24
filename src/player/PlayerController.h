@@ -578,6 +578,7 @@ class PlayerController final : public QObject {
     void castFailed(const QString &message);
     void onCastPosition();
     void onCastVolume();
+    void onCastTextTrackReady();
     // `pick` false answers whether a step exists without drawing the random index of shuffle
     int nextIndex(int direction, bool pick = true) const;
     // Whether the end of this item moves on in the playlist: the saved queue always does, the episodes of a series with the user's autoplay preference or an explicit repeat mode
@@ -676,9 +677,11 @@ class PlayerController final : public QObject {
     // The renderer refused the direct play of this item: it is asked once more as a transcode
     bool m_castTranscodeOnly = false;
     bool m_castFailed = false;
-    // A run of seeks on a transcode reloads it once, at the last target
+    // A run of seeks on a transcode reloads it once, at the last target; a negative target is where the device is when the reload goes out
     QTimer m_castSeek;
     qint64 m_castSeekTarget = 0;
+    // The text track of a paused transcode cast became ready: the reload that brings it in waits for the resume, since a LOAD plays at once
+    bool m_castTrackPending = false;
     QString m_castTarget;
     QString m_castName;
     qint64 m_castPositionMs = 0;

@@ -329,10 +329,22 @@ PlayerController::PlayerController(JellyfinClient &client, PlayQueue &queue,
     m_castSeek.setSingleShot(true);
     m_castSeek.setInterval(400);
     connect(&m_castSeek, &QTimer::timeout, this, [this] {
-        if (m_casting && m_source.method == PlaybackSource::Method::Transcode)
-            m_cast->reload(withStartTicks(m_source.url, m_castSeekTarget, true),
-                           m_castSeekTarget / 10'000,
-                           castTextTrack(m_castSeekTarget).value_or(CastTextTrack{}).url);
+        // Every reload carries a text track that is ready
+        m_castTrackPending = false;
+        if (!m_casting || m_source.method != PlaybackSource::Method::Transcode)
+            return;
+        // The reload for the track alone would undo a pause made meanwhile: it waits for the resume
+        if (m_castSeekTarget < 0 && m_session.state() == PlaybackSession::State::Paused) {
+            m_castTrackPending = true;
+            return;
+        }
+        // A negative target is where the device is now (a reload that brings in the text track)
+        const qint64 target =
+            m_castSeekTarget >= 0
+                ? m_castSeekTarget
+                : std::max<qint64>(0, m_cast->positionMs().value_or(m_castPositionMs)) * 10'000;
+        m_cast->reload(withStartTicks(m_source.url, target, true), target / 10'000,
+                       castTextTrack(target).value_or(CastTextTrack{}).url);
     });
     connect(m_cast, &CastController::playing, this, &PlayerController::onCastPlaying);
     connect(m_cast, &CastController::paused, this, &PlayerController::onCastPaused);
@@ -342,6 +354,7 @@ PlayerController::PlayerController(JellyfinClient &client, PlayQueue &queue,
     connect(m_cast, &CastController::failed, this, &PlayerController::onCastFailed);
     connect(m_cast, &CastController::positionChanged, this, &PlayerController::onCastPosition);
     connect(m_cast, &CastController::volumeChanged, this, &PlayerController::onCastVolume);
+    connect(m_cast, &CastController::textTrackReady, this, &PlayerController::onCastTextTrackReady);
     connect(m_cast, &CastController::targetsChanged, this, &PlayerController::changed);
     m_observerId = m_session.addObserver(
         [this](PlaybackSession::State from, PlaybackSession::State to) { onState(from, to); });
@@ -955,6 +968,7 @@ bool PlayerController::playItemOn(const QString &udn, const QString &id, qint64 
 void PlayerController::closeCast(bool stopRenderer)
 {
     m_castSeek.stop();
+    m_castTrackPending = false;
     if (!m_casting)
         return;
     // Still casting while the session closes: the Stopped carries the renderer's position and method
@@ -1953,6 +1967,12 @@ void PlayerController::startCast(const PlaybackSource &source)
     }
     m_loading = false;
     m_source = source;
+    m_castTrackPending = false;
+    // A Google Cast device (the renderer that takes a text track) gets a transcoded frame of a size it shows whole; the seeks reload this URL too
+    if (transcode && m_cast->takesTextTrack(m_castTarget)) {
+        if (const StreamSummary *video = pickStream(m_source.media.source, u"Video"))
+            m_source.url = castFrameSizeUrl(m_source.url, video->width, video->height);
+    }
     m_subtitleOptions.clear();
     m_externalSubtitles.clear();
     m_audioTracks.clear();
@@ -1972,7 +1992,7 @@ void PlayerController::startCast(const PlaybackSource &source)
     const QString title = m_title.isEmpty() ? source.media.source.name : m_title;
     // The renderer counts a transcode's position from its start: the start is put in the URL, whatever the server wrote there
     CastLoad request;
-    request.url = transcode ? withStartTicks(source.url, m_resumeTicks) : source.url;
+    request.url = transcode ? withStartTicks(m_source.url, m_resumeTicks) : m_source.url;
     request.mime = mime;
     request.title = title;
     request.subtitle = m_subtitle;
@@ -2006,6 +2026,8 @@ void PlayerController::onCastPlaying()
         break;
     case PlaybackSession::State::Paused:
         m_session.resume();
+        if (std::exchange(m_castTrackPending, false))
+            onCastTextTrackReady();
         break;
     case PlaybackSession::State::Buffering:
         m_session.bufferRecovered();
@@ -2115,6 +2137,21 @@ void PlayerController::onCastPosition()
     updateChapters();
     updateSkip();
     Q_EMIT changed();
+}
+
+// A transcode went out without its text track while the server was still extracting it: the stream is asked again from where the device is, with the track
+void PlayerController::onCastTextTrackReady()
+{
+    if (!m_casting || m_source.method != PlaybackSource::Method::Transcode)
+        return;
+    if (m_session.state() == PlaybackSession::State::Paused) {
+        m_castTrackPending = true;
+        return;
+    }
+    // A seek on its way keeps its target: its reload carries the track too
+    if (!m_castSeek.isActive())
+        m_castSeekTarget = -1;
+    m_castSeek.start();
 }
 
 void PlayerController::onCastVolume()

@@ -100,6 +100,7 @@ class CastController final : public QObject {
     void failed(Kinefin::CastRenderer::Failure failure);
     void positionChanged();
     void volumeChanged();
+    void textTrackReady();
 
   private:
     void fetchRenderer(const SsdpResponse &response);

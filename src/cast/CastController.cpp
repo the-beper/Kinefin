@@ -403,6 +403,10 @@ void CastController::connectRenderer(CastRenderer *renderer)
         clearActive();
         Q_EMIT failed(failure);
     });
+    connect(renderer, &CastRenderer::textTrackReady, this, [this, renderer] {
+        if (renderer == m_active)
+            Q_EMIT textTrackReady();
+    });
 }
 
 void CastController::setActive(CastRenderer *renderer)

@@ -15,6 +15,7 @@
 #include <QUrlQuery>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <limits>
 #include <memory>
@@ -41,10 +42,11 @@ constexpr int kCloseGraceMs = 250;
 constexpr double kMaxPlaybackRate = 4.0;
 // A FINISHED this far before the duration is not the end of the item
 constexpr qint64 kEndToleranceMs = 10'000;
-// The server's first extraction of a text track from a large file took 142 to 159 s
+// The server's first extraction of a text track from a large file took 142 to 262 s; a direct play whose track takes longer fails and is asked again as a transcode, which waits for no track
 constexpr int kTrackStartExtraMs = 180'000;
 constexpr qint64 kWarmupMaxBytes = 2 * 1024 * 1024;
-constexpr int kWarmupTimeoutMs = 240'000;
+// The first extraction of a text track from a 35 GB file took 262 s; a transcode plays without the track meanwhile
+constexpr int kWarmupTimeoutMs = 600'000;
 
 const QString kReceiverId = QString(kCastPlatformId);
 const QString kReceiverNs = QString(kCastNsReceiver);
@@ -235,6 +237,8 @@ bool CastSender::load(const CastLoad &request)
     m_rate = 1.0;
     m_started = false;
     m_loggedStatus.clear();
+    m_trackWarm = false;
+    m_trackLeftOut = false;
     m_transport.reset();
     m_sessionId.clear();
     m_transportId.clear();
@@ -379,6 +383,7 @@ void CastSender::warmTrack(const QUrl &url)
     request.setAttribute(QNetworkRequest::CookieSaveControlAttribute, QNetworkRequest::Manual);
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
                          QNetworkRequest::ManualRedirectPolicy);
+    request.setTransferTimeout(std::chrono::milliseconds::zero());
     QNetworkReply *reply = m_network.get(request);
     m_warmup = reply;
     const auto received = std::make_shared<qint64>(0);
@@ -388,11 +393,38 @@ void CastSender::warmTrack(const QUrl &url)
             reply->abort();
     });
     QTimer::singleShot(kWarmupTimeoutMs, reply, [reply] { reply->abort(); });
-    connect(reply, &QNetworkReply::finished, this, [this, reply] {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, received] {
         reply->deleteLater();
-        if (reply == m_warmup)
-            m_warmup = nullptr;
+        if (reply != m_warmup)
+            return;
+        m_warmup = nullptr;
+        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        // A track over the cap was answered as well: it was cut here, not by the server
+        const bool answered =
+            status >= 200 && status < 300
+            && (reply->error() == QNetworkReply::NoError || *received > kWarmupMaxBytes);
+        if (!answered) {
+            qCInfo(senderLog) << "the text track did not load, status" << status;
+            return;
+        }
+        m_trackWarm = true;
+        announceWarmTrack();
     });
+}
+
+// m_trackLeftOut goes false only with a LOAD that carries the track (sendLoad): a track that got warm during a reconnect is announced once the session is back
+void CastSender::announceWarmTrack()
+{
+    if (!m_trackWarm || !m_trackLeftOut || (m_phase != Phase::Loading && m_phase != Phase::Active))
+        return;
+    qCInfo(senderLog) << "the text track is ready, the stream is asked again with it";
+    Q_EMIT textTrackReady();
+}
+
+// A device waits for a text track before it plays, and on a transcode it cannot get back the stream it stopped reading meanwhile (the server stops the job), so a transcode takes the track only once the server answered it
+bool CastSender::trackInLoad() const
+{
+    return !m_trackUrl.isEmpty() && (m_direct || m_trackWarm);
 }
 
 void CastSender::abortWarmup()
@@ -683,6 +715,7 @@ bool CastSender::sendLoad()
         return false;
     m_loadRequestId = id;
     m_loadInFlight = true;
+    m_trackLeftOut = !m_trackUrl.isEmpty() && !trackInLoad();
     return true;
 }
 
@@ -706,7 +739,7 @@ QJsonObject CastSender::loadBody() const
     body.insert(QStringLiteral("sessionId"), m_sessionId);
     body.insert(QStringLiteral("autoplay"), true);
     body.insert(QStringLiteral("currentTime"), m_loadStartSec);
-    if (!m_trackUrl.isEmpty()) {
+    if (trackInLoad()) {
         const QString language =
             m_trackLanguage.isEmpty() ? QStringLiteral("und") : m_trackLanguage;
         const QJsonObject track{{QStringLiteral("trackId"), 1},
@@ -1202,7 +1235,7 @@ void CastSender::proceedStop()
 
 int CastSender::startDeadlineMs() const
 {
-    return m_options.startTimeoutMs + (m_trackUrl.isEmpty() ? 0 : kTrackStartExtraMs);
+    return m_options.startTimeoutMs + (trackInLoad() ? kTrackStartExtraMs : 0);
 }
 
 void CastSender::announceOwnStop()
@@ -1324,6 +1357,7 @@ void CastSender::handleResumeMediaStatus(const QJsonObject &json)
         if (!m_started)
             m_startTimer.start(startDeadlineMs());
         handleEntry(entry, 0);
+        announceWarmTrack();
         return;
     }
     // The device plays something else or nothing

@@ -6,14 +6,17 @@
 
 #include <QElapsedTimer>
 #include <QMetaEnum>
+#include <QPointer>
 #include <QSignalSpy>
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QUrl>
 #include <QtTest/QtTest>
 
+#include <algorithm>
 #include <functional>
 #include <memory>
+#include <utility>
 
 using Kinefin::CastLoad;
 using Kinefin::CastSender;
@@ -68,7 +71,7 @@ class FakeMedia : public QObject {
     int status = 206;
     // The request is read and never answered
     bool hold = false;
-    // The requests for a .vtt path are read and never answered
+    // The requests for a .vtt path are read and answered only by releaseTracks()
     bool holdTracks = false;
     int requests = 0;
     // The connections that ended, whoever ended them
@@ -88,8 +91,31 @@ class FakeMedia : public QObject {
         ++requests;
         const QByteArray received = buffer.left(end);
         heads.append(received);
-        if (hold || (holdTracks && received.left(received.indexOf("\r\n")).contains(".vtt")))
+        if (hold)
             return;
+        if (holdTracks && received.left(received.indexOf("\r\n")).contains(".vtt")) {
+            heldTracks.append(socket);
+            return;
+        }
+        answer(socket);
+    }
+
+  public:
+    // Answers the track requests held so far, as the server does once it extracted the track
+    void releaseTracks()
+    {
+        holdTracks = false;
+        for (const QPointer<QTcpSocket> &socket : std::exchange(heldTracks, {})) {
+            if (socket)
+                answer(socket);
+        }
+    }
+
+  private:
+    QList<QPointer<QTcpSocket>> heldTracks;
+
+    void answer(QTcpSocket *socket)
+    {
         QByteArray head = "HTTP/1.1 ";
         head.append(QByteArray::number(status));
         head.append(" Probe\r\n");
@@ -608,7 +634,7 @@ class TestCastSender : public QObject {
         QVERIFY(!statesOf(rig.spy->states).contains(Transport::Playing));
     }
 
-    void aTextTrackIsWarmedAndGivesTheLoadMoreTime()
+    void aDirectLoadTakesItsTextTrackAndMoreTime()
     {
         Rig rig(*m_pki);
         QVERIFY(rig.listening);
@@ -618,27 +644,119 @@ class TestCastSender : public QObject {
         CastSender::Options options = rig.options(*m_pki);
         options.startTimeoutMs = 300;
         rig.start(options);
-        CastLoad request = rig.request(false);
+        CastLoad request = rig.request();
         request.track.url =
             QUrl(rig.urlFor(QStringLiteral("/Videos/1/2/Subtitles/3/0/Stream.vtt")));
         QVERIFY(rig.sender->load(request));
-        // The server is asked for the track at once, with no credential, and for nothing else
-        QTRY_COMPARE(rig.media.requests, 1);
+        // The server is asked for the track at once, with no credential, beside the range probe
         const QByteArray path("/Videos/1/2/Subtitles/3/0/Stream.vtt");
-        QVERIFY(
-            rig.media.heads.constFirst().startsWith(QByteArray("GET ").append(path).append(" ")));
+        QTRY_VERIFY(std::any_of(
+            rig.media.heads.cbegin(), rig.media.heads.cend(), [&](const QByteArray &head) {
+                return head.startsWith(QByteArray("GET ").append(path).append(" "));
+            }));
         QVERIFY(rig.media.credentialFree());
         QTRY_COMPARE(rig.device.count(kMediaNs, kLoad), 1);
+        // A direct stream can be fetched again, so the device may wait for the track: it is in the LOAD
+        QVERIFY(rig.device.lastLoad()
+                    .value(QLatin1String("media"))
+                    .toObject()
+                    .contains(QLatin1String("tracks")));
         // Without a track these options end the load after 300 ms
         QTest::qWait(900);
         QVERIFY(rig.spy->failed.isEmpty());
-        QCOMPARE(rig.media.requests, 1);
-        QCOMPARE(rig.media.disconnects, 0);
 
         QVERIFY(rig.sender->stop());
-        QTRY_COMPARE(rig.media.disconnects, 1);
         QTRY_COMPARE(rig.spy->stopped.size(), 1);
         QVERIFY(rig.spy->failed.isEmpty());
+    }
+
+    void aTranscodeTakesItsTextTrackOnlyOnceTheServerAnsweredIt()
+    {
+        Rig rig(*m_pki);
+        QVERIFY(rig.listening);
+        // The server extracts the track for a long time
+        rig.media.holdTracks = true;
+        rig.start(rig.options(*m_pki));
+        QSignalSpy ready(rig.sender.get(), &Kinefin::CastRenderer::textTrackReady);
+        CastLoad request = rig.request(false);
+        request.track.url =
+            QUrl(rig.urlFor(QStringLiteral("/Videos/1/2/Subtitles/3/0/Stream.vtt")));
+        QVERIFY(playing(rig, request));
+        QCOMPARE(rig.device.count(kMediaNs, kLoad), 1);
+        const QJsonObject first = rig.device.lastLoad();
+        QVERIFY(!first.value(QLatin1String("media")).toObject().contains(QLatin1String("tracks")));
+        QVERIFY(!first.contains(QLatin1String("activeTrackIds")));
+        QVERIFY(ready.isEmpty());
+
+        // Answered: the sender asks for a reload, whose LOAD carries the track
+        rig.media.releaseTracks();
+        QTRY_COMPARE(ready.size(), 1);
+        const QUrl track(
+            rig.urlFor(QStringLiteral("/Videos/1/2/Subtitles/3/400000000/Stream.vtt")));
+        QVERIFY(rig.sender->reload(QUrl(rig.urlFor(QStringLiteral(
+                                       "/transcode.mp4?DeviceId=abc&StartTimeTicks=400000000"))),
+                                   40000, track));
+        QTRY_COMPARE(rig.device.count(kMediaNs, kLoad), 2);
+        const QJsonArray tracks = rig.device.lastLoad()
+                                      .value(QLatin1String("media"))
+                                      .toObject()
+                                      .value(QLatin1String("tracks"))
+                                      .toArray();
+        QCOMPARE(tracks.size(), 1);
+        QCOMPARE(tracks.at(0).toObject().value(QLatin1String("trackContentId")).toString(),
+                 track.toString(QUrl::FullyEncoded));
+        QCOMPARE(ready.size(), 1);
+        QVERIFY(rig.spy->failed.isEmpty());
+    }
+
+    void aTranscodeLeavesOutATrackTheServerRefuses()
+    {
+        Rig rig(*m_pki);
+        QVERIFY(rig.listening);
+        // A transcode has no range probe: the one request to the server is the track's
+        rig.media.status = 404;
+        rig.start(rig.options(*m_pki));
+        QSignalSpy ready(rig.sender.get(), &Kinefin::CastRenderer::textTrackReady);
+        CastLoad request = rig.request(false);
+        request.track.url = QUrl(rig.urlFor(QStringLiteral("/sub.vtt")));
+        QVERIFY(playing(rig, request));
+        QTRY_COMPARE(rig.media.requests, 1);
+        QTest::qWait(200);
+        QVERIFY(!rig.device.lastLoad()
+                     .value(QLatin1String("media"))
+                     .toObject()
+                     .contains(QLatin1String("tracks")));
+        QVERIFY(ready.isEmpty());
+        // A reload leaves it out too
+        QVERIFY(rig.sender->reload(
+            QUrl(rig.urlFor(QStringLiteral("/transcode.mp4?DeviceId=abc&StartTimeTicks=1"))), 0,
+            request.track.url));
+        QTRY_COMPARE(rig.device.count(kMediaNs, kLoad), 2);
+        QVERIFY(!rig.device.lastLoad()
+                     .value(QLatin1String("media"))
+                     .toObject()
+                     .contains(QLatin1String("tracks")));
+        QVERIFY(ready.isEmpty());
+        QVERIFY(rig.spy->failed.isEmpty());
+    }
+
+    void aTranscodeTakesATrackTheServerAnsweredBeforeTheLoad()
+    {
+        Rig rig(*m_pki);
+        QVERIFY(rig.listening);
+        rig.start(rig.options(*m_pki));
+        QSignalSpy ready(rig.sender.get(), &Kinefin::CastRenderer::textTrackReady);
+        CastLoad request = rig.request(false);
+        request.track.url = QUrl(rig.urlFor(QStringLiteral("/sub.vtt")));
+        // The track is answered while the channel opens and the app starts
+        QVERIFY(rig.sender->load(request));
+        QTRY_COMPARE(rig.device.count(kMediaNs, kLoad), 1);
+        QVERIFY(rig.device.lastLoad()
+                    .value(QLatin1String("media"))
+                    .toObject()
+                    .contains(QLatin1String("tracks")));
+        QTest::qWait(100);
+        QVERIFY(ready.isEmpty());
     }
 
     void aFailureCutsTheTrackRequest()

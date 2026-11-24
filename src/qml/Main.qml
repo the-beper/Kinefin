@@ -96,6 +96,8 @@ Kirigami.ApplicationWindow {
     pageStack.globalToolBar.style: Kirigami.ApplicationHeaderStyle.ToolBar
     // One page at a time: the default switches to side-by-side columns from 40 grid units, which pushes the pages beyond the window
     pageStack.columnView.columnResizeMode: Kirigami.ColumnView.SingleColumn
+    // The player page reaches up out of its column into the header band (PlayerPage's topPadding); no other page draws outside its column
+    pageStack.columnView.clip: false
     // The tab switch slides the whole row: Kirigami binds the transform and the opacity of every page, so a page is never the target
     pageStack.transform: Translate { id: tabShift }
     pageStack.globalToolBar.showNavigationButtons: Kirigami.ApplicationHeaderStyle.ShowBackButton
@@ -103,18 +105,12 @@ Kirigami.ApplicationWindow {
     // The bar with the menus and the Home tab; it spans the window above the pages
     header: ShellHeader {
         id: shellHeader
-        // Its height resizes the page row, and Kirigami jumps to the end of a slide on a resize: it follows the player page only once the row settled (headerShown), then grows or shrinks and fades
-        property real reveal: window.headerShown ? 1 : 0
-        Behavior on reveal {
-            NumberAnimation {
-                duration: Kirigami.Units.shortDuration
-                easing.type: Easing.OutCubic
-            }
-        }
-        height: Math.round(implicitHeight * reveal)
-        opacity: reveal
-        clip: reveal < 1
-        visible: reveal > 0 && !window.startupVisible
+        // It never leaves the layout, since any resize of the page row ends Kirigami's slide at once: the player page reaches up under it, and it fades with the player page's slide and lets the clicks through to it while the player is in front
+        opacity: window.headerOpacity
+        enabled: !window.playbackPageShowing
+        // Covered by the player, it is not read out over it either
+        Accessible.ignored: window.playbackPageShowing
+        visible: !window.startupVisible
 
         shell: window
     }
@@ -229,7 +225,7 @@ Kirigami.ApplicationWindow {
             popTo(target, true);
     }
 
-    // A back that only moves the index (Esc, the header button, the toolbar back button) leaves the page it leaves in the stack, hidden above the current one and still counted, with its models alive. Kirigami's own popHiddenPages option took such pages once the row settled, but it also ran while a push was still placing its page mid-slide, and popped the page it had just received. So the leftovers are taken here, at least a turn of the event loop later: by then every push has landed and every unwind has taken the pages it was removing, and pages above the current index can only be leftovers a back left behind. They go only once the row stopped moving, and the header follows the page in front only then: a page taken mid-slide vanishes from the crossfade that still shows it, and the header's resize ends the slide. The first check always waits once more (Kirigami starts a slide only at the next polish, which a busy turn can delay past the timer), later ones wait while the row moves, and the eighth settles whatever the row does, so a slide that never reports its end cannot keep the header or the leftovers
+    // A back that only moves the index (Esc, the header button, the toolbar back button) leaves the page it leaves in the stack, hidden above the current one and still counted, with its models alive. Kirigami's own popHiddenPages option took such pages once the row settled, but it also ran while a push was still placing its page mid-slide, and popped the page it had just received. So the leftovers are taken here, at least a turn of the event loop later: by then every push has landed and every unwind has taken the pages it was removing, and pages above the current index can only be leftovers a back left behind. They go only once the row stopped moving: a page taken mid-slide vanishes from the crossfade that still shows it. The first check always waits once more (Kirigami starts a slide only at the next polish, which a busy turn can delay past the timer), later ones wait while the row moves, and the eighth settles whatever the row does, so a slide that never reports its end cannot keep the leftovers
     property int pageRowSettleTries: 0
     function settlePageRow() {
         ++pageRowSettleTries;
@@ -237,7 +233,6 @@ Kirigami.ApplicationWindow {
             pageRowSettle.restart();
             return;
         }
-        headerShown = !playbackPageShowing;
         let popped = false;
         while (pageStack.currentIndex >= 0 && pageStack.currentIndex < pageStack.depth - 1) {
             pageStack.pop(pageStack.get(pageStack.currentIndex));
@@ -401,7 +396,10 @@ Kirigami.ApplicationWindow {
             // A page opened above the page still waiting to fade in shows at once
             if (window.tabMotionQueued && window.pageStack.currentIndex > window.tabMotionIndex)
                 window.finishTabMotion();
-            // A page a Back left hidden above the current one is taken, and the header follows the page in front, once the stack settles
+            // The header fades out with a player page that comes to the front and back in with the page that takes its place
+            window.leftPlayerPage = window.shownPageIsPlayer;
+            window.shownPageIsPlayer = window.pageStack.currentItem?.objectName === "playerPage";
+            // A page a Back left hidden above the current one is taken once the stack settles
             window.settlePageRowLater();
             // The search page leaving the stack takes its term with it: the header box empties with the page.
             // A page Back just left stays above the current one until the slide ends, and is not a page in the stack any more
@@ -566,8 +564,18 @@ Kirigami.ApplicationWindow {
     }
 
     readonly property bool playbackPageShowing: pageStack.currentItem?.objectName === "playerPage"
-    // Whether the header shows: off while the player page is in front, switched by settlePageRow() once the page row stopped moving
-    property bool headerShown: true
+    // Whether the page in front is the player page, and whether the page before it was, set as the page in front changes
+    property bool shownPageIsPlayer: false
+    property bool leftPlayerPage: false
+    // Kirigami fades the page that comes to the front in over its slide: the header fades out against an arriving player page and in with the page that replaces one, and is opaque at rest away from the player
+    readonly property real headerOpacity: {
+        const page = pageStack.currentItem;
+        if (!page)
+            return 1;
+        if (playbackPageShowing)
+            return 1 - page.opacity;
+        return leftPlayerPage ? page.opacity : 1;
+    }
 
     // How the playback shows: "none" while nothing plays, "full" while the player page is in front, "mini" while it goes on under another page, "pip" while it shows in its own window. The C++ side knows nothing of it
     property string playbackMode: "none"
