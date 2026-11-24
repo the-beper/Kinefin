@@ -1,9 +1,10 @@
 # SPDX-FileCopyrightText: 2026 Kinefin contributors
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Release gate regression tests without GitHub, Qt, Git tags or a Flatpak build."""
+"""Release gate regression tests without GitHub, Qt or a Flatpak build."""
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -34,11 +35,20 @@ class ReleaseVerifyTest(unittest.TestCase):
         self.cmake = self.root / "CMakeLists.txt"
         self.meta = self.root / METAINFO
 
-    def run_verify(self, tag: str) -> subprocess.CompletedProcess[str]:
+    def run_verify(self, tag: str, *flags: str) -> subprocess.CompletedProcess[str]:
+        # A checkout without a repository of its own must not find one above it
+        env = {**os.environ, "GIT_CEILING_DIRECTORIES": str(self.root.parent)}
         return subprocess.run(
-            [sys.executable, "-I", str(self.root / "build/release/verify_release.py"), tag],
-            cwd=self.root.parent, capture_output=True, text=True, timeout=10, check=False,
+            [sys.executable, "-I", str(self.root / "build/release/verify_release.py"), tag, *flags],
+            cwd=self.root.parent, capture_output=True, text=True, timeout=10, check=False, env=env,
         )
+
+    def init_repository(self, *tags: str) -> None:
+        git = ["git", "-C", str(self.root), "-c", "user.name=test", "-c", "user.email=test@example.com"]
+        for command in (["init", "--quiet"], ["commit", "--quiet", "--allow-empty", "-m", "base"]):
+            subprocess.run([*git, *command], check=True, capture_output=True, timeout=30)
+        for tag in tags:
+            subprocess.run([*git, "tag", tag], check=True, capture_output=True, timeout=30)
 
     def bump(self, version: str) -> None:
         result = subprocess.run(
@@ -140,6 +150,49 @@ class ReleaseVerifyTest(unittest.TestCase):
         self.assert_rejected("v0.0.2", "invalid stable release version")
         self.cmake.write_text(saved + "\nproject(kinefin VERSION 0.0.2 LANGUAGES CXX)\n", encoding="utf-8")
         self.assert_rejected("v0.0.2", "expected exactly one project")
+
+    def assert_newest_check(self, tag: str, accepted: bool, message: str = "") -> None:
+        result = self.run_verify(tag, "--require-newest")
+        if accepted:
+            self.assertEqual(result.returncode, 0, result.stderr)
+        else:
+            self.assertNotEqual(result.returncode, 0, result.stdout)
+            self.assertIn(message, result.stderr)
+
+    def test_older_tag_than_newest_is_refused(self) -> None:
+        self.bump("0.9.0")
+        self.init_repository("v0.9.0", "v0.10.0", "v1.0.0")
+        self.assert_newest_check("v0.9.0", False, "the newest release tag is v1.0.0, not v0.9.0")
+        self.bump("1.0.0")
+        self.assert_newest_check("v1.0.0", True)
+
+    def test_prerelease_style_tags_do_not_count(self) -> None:
+        self.bump("1.0.0")
+        self.init_repository("v1.0.0", "v2.0.0-rc1", "v01.0.0", "vfoo", "v3.0", "v1.0.0.1", "v9.9.9-beta")
+        self.assert_newest_check("v1.0.0", True)
+
+    def test_zero_major_release_passes(self) -> None:
+        self.bump("0.2.0")
+        self.init_repository("v0.1.0", "v0.2.0")
+        self.assert_newest_check("v0.2.0", True)
+
+    def test_newest_is_compared_numerically(self) -> None:
+        self.bump("0.10.0")
+        self.init_repository("v0.9.0", "v0.10.0")
+        self.assert_newest_check("v0.10.0", True)
+
+    def test_tag_missing_from_local_tags_fails_closed(self) -> None:
+        self.bump("0.2.0")
+        self.init_repository("v0.1.0")
+        self.assert_newest_check("v0.2.0", False, "not among the local tags")
+
+    def test_checkout_without_git_fails_closed(self) -> None:
+        self.bump("0.2.0")
+        self.assert_newest_check("v0.2.0", False, "could not list the Git tags")
+
+    def test_newest_is_only_checked_when_asked(self) -> None:
+        self.bump("0.2.0")
+        self.assertEqual(self.run_verify("v0.2.0").returncode, 0)
 
     def test_github_workflow_runs_verifier_before_any_release_build(self) -> None:
         workflow = (SOURCE / ".github/workflows/release.yml").read_text(encoding="utf-8")

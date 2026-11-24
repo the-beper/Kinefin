@@ -4,10 +4,18 @@
 """Publish only a fully verified Kinefin GitHub release, safely on retries.
 
 GitHub's release creation, asset uploads and publication are separate requests.
-Keep the release as a draft until all three assets match local SHA256 digests.
-This script can resume a draft after an interrupted upload, but never changes
-an already-published release. Check the remote tag target against the exact
-workflow commit before any write and again immediately before publication.
+Keep the release as a draft until all three assets match local SHA256 digests
+and Pages serves the new Flatpak repository (publish_site.py pushes it to
+gh-pages first). A 0.x release is a pre-release and never the latest release;
+from 1.0.0 on it is the latest. This script can resume a draft after an
+interrupted upload or Pages wait, and finishes the site and the flags of a
+release that was published by hand, but never changes the assets of a published
+release. Check the remote tag target against the exact workflow commit before
+any write and again immediately before publication.
+
+Exit status: 0 published; 1 failure (the release stays a draft, unless it was
+already published or the failure came after the publication edit); 3 gh-pages
+moved since the site was built (re-run all jobs).
 """
 
 from __future__ import annotations
@@ -21,7 +29,13 @@ from pathlib import Path
 import re
 import subprocess
 import sys
-from typing import Callable
+import tempfile
+import time
+from typing import Callable, Mapping
+
+# Python -I does not include the script's directory on sys.path
+sys.path.append(str(Path(__file__).resolve().parent))
+import publish_site  # noqa: E402
 
 
 BUNDLE = "Kinefin-x86_64.flatpak"
@@ -37,10 +51,17 @@ SUMS_RE = re.compile(
 IMAGE_RE = re.compile(r"ghcr\.io/the-beper/kinefin-flatpak@sha256:[0-9a-f]{64}\Z")
 RUN_RE = re.compile(r"[1-9][0-9]*\Z")
 COMMIT_RE = re.compile(r"[0-9a-f]{40}\Z")
+SITE_URL_RE = re.compile(r"https://[A-Za-z0-9][A-Za-z0-9.-]*(?::[0-9]+)?(?:/[A-Za-z0-9._~-]+)*\Z")
+LIST_WAIT_SECONDS = 60
+LIST_POLL_SECONDS = 3
 
 
 class ReleasePublishError(Exception):
     """The release must remain unpublished."""
+
+
+class GitHubNotFound(ReleasePublishError):
+    """GitHub answered HTTP 404."""
 
 
 @dataclass(frozen=True)
@@ -147,7 +168,9 @@ def gh(*args: str) -> str:
         raise ReleasePublishError(f"could not run GitHub CLI: {error}") from error
     if process.returncode:
         message = process.stderr.strip() or f"exit status {process.returncode}"
-        raise ReleasePublishError(f"gh {' '.join(args[:2])} failed: {message}")
+        # gh prints "gh: Not Found (HTTP 404)" and exits 1
+        error = GitHubNotFound if "(HTTP 404)" in message else ReleasePublishError
+        raise error(f"gh {' '.join(args[:2])} failed: {message}")
     return process.stdout
 
 
@@ -208,17 +231,71 @@ def require_release_commit(tag: str, repo: str, expected_commit: str, runner: Gh
         )
 
 
-def get_release(tag: str, repo: str, runner: GhRunner) -> dict:
-    output = runner("api", f"repos/{repo}/releases/tags/{tag}")
+def is_prerelease(tag: str) -> bool:
+    return int(tag[1:].split(".")[0]) == 0
+
+
+def find_release(tag: str, repo: str, runner: GhRunner) -> dict | None:
+    """Look the release up in the paginated list: the by-tag endpoint does not show drafts."""
+    output = runner("api", "--paginate", f"repos/{repo}/releases?per_page=100")
+    # gh prints one JSON array per page, back to back
+    decoder = json.JSONDecoder()
+    releases: list = []
+    position = 0
     try:
-        data = json.loads(output)
+        while True:
+            while position < len(output) and output[position].isspace():
+                position += 1
+            if position >= len(output):
+                break
+            page, position = decoder.raw_decode(output, position)
+            if not isinstance(page, list):
+                raise ValueError("page is not a list")
+            releases.extend(page)
     except (ValueError, TypeError) as error:
-        raise ReleasePublishError("GitHub returned invalid release JSON") from error
-    if not isinstance(data, dict) or data.get("tag_name") != tag or type(data.get("draft")) is not bool:
-        raise ReleasePublishError("GitHub returned a release with the wrong tag or draft state")
-    if not isinstance(data.get("assets"), list):
+        raise ReleasePublishError("GitHub returned invalid release list JSON") from error
+    found = [release for release in releases if isinstance(release, dict) and release.get("tag_name") == tag]
+    if len(found) > 1:
+        raise ReleasePublishError(f"{len(found)} releases have the tag {tag}; manual review required")
+    if not found:
+        return None
+    release = found[0]
+    if type(release.get("draft")) is not bool or type(release.get("prerelease")) is not bool:
+        raise ReleasePublishError("GitHub returned a release without a draft or pre-release state")
+    if not isinstance(release.get("assets"), list):
         raise ReleasePublishError("GitHub release asset list is missing")
-    return data
+    return release
+
+
+def get_release(tag: str, repo: str, runner: GhRunner) -> dict:
+    release = find_release(tag, repo, runner)
+    if release is None:
+        raise ReleasePublishError(f"release {tag} is not in the release list")
+    return release
+
+
+def wait_for_release(tag: str, repo: str, runner: GhRunner, sleep: Callable[[float], None]) -> dict:
+    """A draft that was just created can take a moment to show up in the list."""
+    polls = LIST_WAIT_SECONDS // LIST_POLL_SECONDS
+    for poll in range(polls + 1):
+        release = find_release(tag, repo, runner)
+        if release is not None:
+            return release
+        if poll < polls:
+            sleep(LIST_POLL_SECONDS)
+    raise ReleasePublishError(f"the new draft {tag} is not in the release list after {LIST_WAIT_SECONDS}s")
+
+
+def require_latest_state(tag: str, repo: str, prerelease: bool, runner: GhRunner) -> None:
+    """A 0.x release must not be the latest release (none at all is fine); from 1.0.0 on it must be."""
+    try:
+        latest = github_json(runner, f"repos/{repo}/releases/latest", "latest release").get("tag_name")
+    except GitHubNotFound:
+        latest = None
+    if prerelease and latest == tag:
+        raise ReleasePublishError(f"pre-release {tag} is the latest release")
+    if not prerelease and latest != tag:
+        raise ReleasePublishError(f"the latest release is {latest}, not {tag}")
 
 
 def missing_or_mismatched(release: dict, assets: dict[str, Asset]) -> list[str]:
@@ -245,7 +322,9 @@ def missing_or_mismatched(release: dict, assets: dict[str, Asset]) -> list[str]:
 def publish(
     tag: str, directory: Path, repo: str, expected_commit: str,
     expected_run_id: str, expected_image_digest: str, runner: GhRunner = gh,
+    *, site: Callable[[], None], sleep: Callable[[float], None] = time.sleep,
 ) -> str:
+    """Verify the assets, run site() (push gh-pages, wait for Pages), then publish; until then the release is a draft."""
     if not TAG_RE.fullmatch(tag):
         raise ReleasePublishError("release tag must be stable vX.Y.Z")
     if not REPO_RE.fullmatch(repo) or ".." in repo or repo.endswith("."):
@@ -263,24 +342,19 @@ def publish(
     # Refuse even creating a draft if the released tag is not the built commit.
     require_release_commit(tag, repo, expected_commit, runner)
 
-    # A re-run cannot create the same release twice. Attempt an unpublished
-    # draft first; if it exists already, fetch its state and resume safely.
-    create_error: ReleasePublishError | None = None
-    try:
-        runner(
-            "release", "create", tag, "--draft", "--verify-tag", "--generate-notes",
-            "--title", f"Kinefin {tag[1:]}", "--repo", repo,
-        )
-    except ReleasePublishError as error:
-        create_error = error
-    try:
-        release = get_release(tag, repo, runner)
-    except ReleasePublishError as error:
-        if create_error is not None:
-            raise ReleasePublishError(
-                f"could not create draft ({create_error}) or find existing release ({error})"
-            ) from error
-        raise
+    prerelease = is_prerelease(tag)
+    # A re-run resumes the release it finds; GitHub may accept a second draft for the same tag, so create only when there is none
+    release = find_release(tag, repo, runner)
+    if release is None:
+        try:
+            runner(
+                "release", "create", tag, "--draft", "--verify-tag", "--generate-notes",
+                *(["--prerelease"] if prerelease else []),
+                "--title", f"Kinefin {tag[1:]}", "--repo", repo,
+            )
+        except ReleasePublishError as error:
+            raise ReleasePublishError(f"could not create draft: {error}") from error
+        release = wait_for_release(tag, repo, runner, sleep)
 
     differences = missing_or_mismatched(release, assets)
     if release["draft"] is False:
@@ -288,33 +362,74 @@ def publish(
             raise ReleasePublishError(
                 "published release assets differ from local artifacts; refusing to change published assets"
             )
-        return f"Release {tag} already published; all three assets verified"
+        outcome = f"Release {tag} was already published; all three assets verified"
+    else:
+        if differences:
+            runner(
+                "release", "upload", tag,
+                *(str(assets[name].path) for name in differences),
+                "--clobber", "--repo", repo,
+            )
 
-    if differences:
-        runner(
-            "release", "upload", tag,
-            *(str(assets[name].path) for name in differences),
-            "--clobber", "--repo", repo,
-        )
+        # GitHub computes immutable SHA256 digests for uploaded release assets.
+        # Do not publish if any digest is missing, differs or is still processing.
+        checked = get_release(tag, repo, runner)
+        if checked["draft"] is not True:
+            raise ReleasePublishError("release became published before asset verification")
+        unverified = missing_or_mismatched(checked, assets)
+        if unverified:
+            raise ReleasePublishError(f"release remains draft: unverified assets: {', '.join(unverified)}")
+        outcome = f"Published release {tag}; all three assets match local SHA256 digests"
 
-    # GitHub computes immutable SHA256 digests for uploaded release assets.
-    # Do not publish if any digest is missing, differs or is still processing.
-    checked = get_release(tag, repo, runner)
-    if checked["draft"] is not True:
-        raise ReleasePublishError("release became published before asset verification")
-    unverified = missing_or_mismatched(checked, assets)
-    if unverified:
-        raise ReleasePublishError(f"release remains draft: unverified assets: {', '.join(unverified)}")
-
-    # Re-check after uploads: a force-pushed tag must not cause publishing a
-    # valid bundle against a different revision. Tag protection is still
-    # required to avoid a race between this query and the release edit.
+    # Nothing goes to gh-pages for a tag that moved during the uploads
     require_release_commit(tag, repo, expected_commit, runner)
-    runner("release", "edit", tag, "--draft=false", "--repo", repo)
+    # A release that was published by hand gets its site too
+    site()
+
+    # Re-check after uploads and the Pages wait: a force-pushed tag must not cause publishing a valid bundle against a different revision; tag protection is still required to avoid a race between this query and the release edit
+    require_release_commit(tag, repo, expected_commit, runner)
+    # The wait is long: an asset replaced meanwhile must not go public
+    before_edit = get_release(tag, repo, runner)
+    if before_edit["draft"] is not release["draft"] or missing_or_mismatched(before_edit, assets):
+        raise ReleasePublishError("the release changed while the repository was being published; refusing publication")
+    runner(
+        "release", "edit", tag, "--draft=false",
+        f"--prerelease={str(prerelease).lower()}", f"--latest={str(not prerelease).lower()}", "--repo", repo,
+    )
     final = get_release(tag, repo, runner)
-    if final["draft"] is not False or missing_or_mismatched(final, assets):
+    if final["draft"] is not False or final["prerelease"] is not prerelease or missing_or_mismatched(final, assets):
         raise ReleasePublishError("release publication state or asset digests could not be confirmed")
-    return f"Published release {tag}; all three assets match local SHA256 digests"
+    require_latest_state(tag, repo, prerelease, runner)
+    kind = "a pre-release, not the latest release" if prerelease else "the latest release"
+    return f"{outcome}; Pages serves the repository; {tag} is {kind}"
+
+
+def site_step(tag: str, environ: Mapping[str, str], repo: str, scratch: Path) -> Callable[[], None]:
+    """Validate the site inputs now, before any request, and return the step that pushes gh-pages and waits for Pages."""
+    archive = Path(environ.get("SITE_TAR", ""))
+    expected = environ.get("EXPECT_SITE_SHA256", "")
+    base = environ.get("SITE_BASE_SHA", "")
+    url = environ.get("SITE_URL", "")
+    remote = environ.get("REPO_REMOTE") or f"https://github.com/{repo}.git"
+    if not environ.get("SITE_TAR") or archive.is_symlink() or not archive.is_file():
+        raise ReleasePublishError("SITE_TAR must be the site archive of the finish job")
+    if not publish_site.DIGEST_RE.fullmatch(expected):
+        raise ReleasePublishError("EXPECT_SITE_SHA256 must be a lowercase SHA-256 digest")
+    if hash_file(archive) != expected:
+        raise ReleasePublishError("the site archive is not the one the finish job produced")
+    if base != "-" and not COMMIT_RE.fullmatch(base):
+        raise ReleasePublishError("SITE_BASE_SHA must be - or a full commit id")
+    if not SITE_URL_RE.fullmatch(url):
+        raise ReleasePublishError("SITE_URL must be an https URL without a trailing slash")
+    if not publish_site.REMOTE_RE.fullmatch(remote):
+        raise ReleasePublishError("REPO_REMOTE must be an https or file URL")
+    site_dir = scratch / "site"
+
+    def step() -> None:
+        publish_site.publish(archive, expected, None if base == "-" else base, remote, tag, site_dir)
+        publish_site.wait_served(site_dir, url)
+
+    return step
 
 
 def main() -> int:
@@ -323,13 +438,19 @@ def main() -> int:
     parser.add_argument("assets_dir", type=Path, help="directory containing bundle, PROVENANCE.json and SHA256SUMS")
     args = parser.parse_args()
     try:
-        message = publish(
-            args.tag, args.assets_dir, os.environ.get("GITHUB_REPOSITORY", ""),
-            os.environ.get("RELEASE_COMMIT", ""),
-            os.environ.get("GITHUB_RUN_ID", ""),
-            os.environ.get("RELEASE_IMAGE_DIGEST", ""),
-        )
-    except (ReleasePublishError, OSError) as error:
+        with tempfile.TemporaryDirectory(prefix="kinefin-release.") as scratch:
+            repo = os.environ.get("GITHUB_REPOSITORY", "")
+            message = publish(
+                args.tag, args.assets_dir, repo,
+                os.environ.get("RELEASE_COMMIT", ""),
+                os.environ.get("GITHUB_RUN_ID", ""),
+                os.environ.get("RELEASE_IMAGE_DIGEST", ""),
+                site=site_step(args.tag, os.environ, repo, Path(scratch)),
+            )
+    except publish_site.StaleBase as error:
+        print(f"release-publish: {error}", file=sys.stderr)
+        return 3
+    except (ReleasePublishError, publish_site.SitePublishError, OSError) as error:
         print(f"release-publish: {error}", file=sys.stderr)
         return 1
     print(message)

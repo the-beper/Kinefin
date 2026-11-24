@@ -13,6 +13,7 @@ import argparse
 from datetime import date
 from pathlib import Path
 import re
+import subprocess
 import sys
 import xml.etree.ElementTree as ET
 
@@ -34,6 +35,31 @@ def version_tuple(raw: str) -> tuple[int, int, int]:
     if not STABLE_VERSION.fullmatch(raw):
         raise ReleaseError(f"invalid stable release version {raw!r}; expected X.Y.Z without leading zeroes")
     return tuple(int(part) for part in raw.split("."))
+
+
+def require_newest(tag: str, root: Path = ROOT) -> None:
+    """Fail unless tag is among the checkout's local vX.Y.Z tags and is the highest of them."""
+    try:
+        listing = subprocess.run(
+            ["git", "-C", str(root), "tag", "-l", "v*"],
+            capture_output=True, text=True, timeout=30, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise ReleaseError(f"could not list the Git tags: {error}") from error
+    if listing.returncode:
+        raise ReleaseError(f"could not list the Git tags: {listing.stderr.strip() or listing.returncode}")
+    versions = {
+        name: version_tuple(name[1:]) for name in listing.stdout.splitlines()
+        if name.startswith("v") and STABLE_VERSION.fullmatch(name[1:])
+    }
+    if tag not in versions:
+        raise ReleaseError(f"tag {tag} is not among the local tags; the checkout must fetch the tags")
+    newest = max(versions, key=versions.__getitem__)
+    if versions[tag] != versions[newest]:
+        raise ReleaseError(
+            f"the newest release tag is {newest}, not {tag}: a release is never made below an existing one "
+            "(cut the next version instead)"
+        )
 
 
 def validate(tag: str, cmake: str, metainfo: str) -> tuple[str, str]:
@@ -96,6 +122,7 @@ def validate(tag: str, cmake: str, metainfo: str) -> tuple[str, str]:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Check release tag against CMake and AppStream metadata")
     parser.add_argument("tag", help="release Git tag, e.g. v1.2.3")
+    parser.add_argument("--require-newest", action="store_true", help="also require the tag to be the highest local vX.Y.Z tag")
     args = parser.parse_args()
     try:
         version, released = validate(
@@ -103,6 +130,8 @@ def main() -> int:
             CMAKE.read_text(encoding="utf-8"),
             METAINFO.read_text(encoding="utf-8"),
         )
+        if args.require_newest:
+            require_newest(args.tag)
     except (ReleaseError, OSError, UnicodeError) as error:
         print(f"release-verify: {error}", file=sys.stderr)
         return 1
