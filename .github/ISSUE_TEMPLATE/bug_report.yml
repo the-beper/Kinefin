@@ -14,7 +14,7 @@ body:
     attributes:
       label: Kinefin version
       description: Help → About.
-      placeholder: "0.1.0"
+      placeholder: "0.9.0"
     validations:
       required: true
   - type: input

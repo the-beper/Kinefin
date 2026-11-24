@@ -65,18 +65,19 @@ class PreflightTests(unittest.TestCase):
         with self.assertRaisesRegex(preflight.PreflightError, "cannot finish"):
             preflight.verify(runner=missing)
 
-    def test_cli_without_tag_works_on_checked_in_skeleton(self):
+    def test_cli_without_tag_works_on_the_checkout(self):
         process = subprocess.run([sys.executable, "-I", str(ROOT / "build/release/preflight.py")],
                                  cwd=ROOT, capture_output=True, text=True, timeout=30)
         self.assertEqual(process.returncode, 0, process.stderr)
         self.assertIn("Offline release-source checks passed", process.stdout)
 
-    def test_cli_fails_on_unbumped_release_metadata(self):
+    def test_cli_fails_on_a_tag_that_is_not_the_checkout_version(self):
         process = subprocess.run([sys.executable, "-I", str(ROOT / "build/release/preflight.py"),
                                   "--tag", "v0.0.1"],
                                  cwd=ROOT, capture_output=True, text=True, timeout=30)
         self.assertNotEqual(process.returncode, 0)
-        self.assertIn("release-preflight", process.stderr)
+        self.assertIn("does not match CMake version", process.stderr)
+        self.assertIn("release-preflight: verify_release.py failed", process.stderr)
 
     def test_packaged_icon_checks_are_in_flatpak_smoke(self):
         smoke = (ROOT / "build/flatpak/test-flatpak.sh").read_text()

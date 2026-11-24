@@ -11,7 +11,7 @@ python3 -I build/release/preflight.py
 ```
 
 `build/release/version-bump.sh` prepares the two versioned source files for a
-stable Kinefin release. It does **not** create a tag, publish, push, or install
+Kinefin release. It does **not** create a tag, publish, push, or install
 anything. Run it from any directory in a local checkout:
 
 ```sh
@@ -42,18 +42,16 @@ python3 -m unittest discover -s tests -p 'test_release_version_bump.py' -v
 Before creating a `vX.Y.Z` tag, run the same check as the release workflow:
 
 ```sh
-python3 -I build/release/verify_release.py v0.0.2
+python3 -I build/release/verify_release.py vX.Y.Z
 ```
 
-Replace the example tag with the version being released. The check requires an
+`vX.Y.Z` is the version being released. The check requires an
 exact match between the tag, `project(kinefin VERSION ...)` and the **newest**
 AppStream `<release>` entry, validates its date and rejects duplicate or
 out-of-order release history. It does not change files or require GitHub access.
 The workflow also checks that the tagged commit is on `main` and that the tag
 is the newest `vX.Y.Z` tag (`--require-newest`, which reads `git tag -l 'v*'`
-and ignores other names). The current
-`0.0.1` skeleton has no AppStream release entry and therefore is **not**
-release-ready until `version-bump.sh` has prepared the first release.
+and ignores other names).
 
 Run its portable regression tests with:
 
@@ -355,8 +353,8 @@ Kinefin's checkout is allowed **only** in the local/CI manifest.
 ```sh
 python3 -I build/release/verify_flatpak_sources.py
 python3 -I build/release/verify_flatpak_sources.py \
-  --manifest dist/flathub/v0.0.2/io.github.the_beper.Kinefin.yml \
-  --flathub-tag v0.0.2 --flathub-commit "$(git rev-parse HEAD)"
+  --manifest dist/flathub/vX.Y.Z/io.github.the_beper.Kinefin.yml \
+  --flathub-tag vX.Y.Z --flathub-commit "$(git rev-parse HEAD)"
 python3 -m unittest discover -s tests -p 'test_flatpak_sources.py' -v
 ```
 
@@ -398,9 +396,9 @@ remote Git reference in the checked-in manifest. Once a stable release tag
 exists and its commit is checked out, generate the Flathub variant instead:
 
 ```sh
-python3 -I build/release/prepare_flathub.py v0.0.2
+python3 -I build/release/prepare_flathub.py vX.Y.Z
 # or inspect the transformed YAML without writing a file:
-python3 -I build/release/prepare_flathub.py --dry-run v0.0.2
+python3 -I build/release/prepare_flathub.py --dry-run vX.Y.Z
 ```
 
 The helper requires a **clean checkout at the exact tag commit**, matching
@@ -430,7 +428,7 @@ fail-closed, **offline** audit before building or submitting a Flathub manifest:
 ```sh
 python3 -I build/release/verify_flatpak_permissions.py
 python3 -I build/release/verify_flatpak_permissions.py \
-  --manifest dist/flathub/v0.0.2/io.github.the_beper.Kinefin.yml
+  --manifest dist/flathub/vX.Y.Z/io.github.the_beper.Kinefin.yml
 python3 -m unittest discover -s tests -p 'test_flatpak_sandbox_permissions.py' -v
 ```
 

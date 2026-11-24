@@ -20,21 +20,14 @@ Check these prerequisites before the first tag:
 - [ ] The repository is public.
 
 This file is an **operational checklist**, not a claim of release verification.
-Do not tag a stable release or submit to Flathub until the live gates below
-have evidence. In particular, a green offline preflight does not compensate
-for unfinished native playback, missing host acceptance, or unverified runtime
-commits.
+Releases below 1.0.0 are pre-releases: they need the checks under "Before
+every tag", and 1.0.0 also needs the gates under "Before 1.0.0". Do not tag
+1.0.0 or submit to Flathub until those gates have evidence. A green offline
+preflight does not compensate for missing host acceptance or unverified
+runtime commits.
 
-## Before tagging (local + GitHub)
+## Before every tag (local + GitHub)
 
-- [ ] Implement and validate all v1 movie/TV features, including the player
-  wired to the UI. Every feature described in `docs/user-guide.md` must work
-  and have test evidence; edit the guide rather than ship a description of
-  something that does not work yet.
-- [ ] Perform the real Jellyfin 12.4 and KDE Plasma Wayland host acceptance
-  rounds, including KWallet, resume, remote control, playback reporting,
-  subtitles, online/offline transitions and actual screen-reader/keyboard
-  behavior. Save redacted logs and screenshots; never upload tokens.
 - [ ] Review the final icon at small and large sizes and confirm that the
   AppStream/desktop description matches what actually works. The source icon
   is `data/icons/hicolor/scalable/apps/io.github.the_beper.Kinefin.svg`;
@@ -56,8 +49,10 @@ The source-only checks can be run *before* a tag exists:
 python3 -I build/release/preflight.py
 ```
 
-Choose a stable version only after acceptance. Version preparation changes
-CMake and AppStream together; never leave a half-bumped commit:
+Pre-releases use 0.x versions; choose 1.0.0 only after the gates under
+"Before 1.0.0".
+Version preparation changes CMake and AppStream together; never leave a
+half-bumped commit:
 
 ```sh
 build/release/version-bump.sh [--dry-run] [--date YYYY-MM-DD] X.Y.Z
@@ -77,6 +72,17 @@ Both commands are **read-only**; the tagged preflight dry-runs the generated
 Flathub manifest and fails if the tag does not point to the current HEAD, the
 working tree is dirty, or the release metadata is inconsistent.
 
+## Before 1.0.0
+
+- [ ] Implement and validate all v1 movie/TV features, including the player
+  wired to the UI. Every feature described in `docs/user-guide.md` must work
+  and have test evidence; edit the guide rather than ship a description of
+  something that does not work yet.
+- [ ] Perform the real Jellyfin 12.4 and KDE Plasma Wayland host acceptance
+  rounds, including KWallet, resume, remote control, playback reporting,
+  subtitles, online/offline transitions and actual screen-reader/keyboard
+  behavior. Save redacted logs and screenshots; never upload tokens.
+
 ## Release and installation review
 
 - [ ] Create/push a protected `vX.Y.Z` tag pointing at the accepted `main`
@@ -88,11 +94,12 @@ working tree is dirty, or the release metadata is inconsistent.
   checksums, GitHub draft publication and final tag recheck.
 - [ ] Enable Pages after the first publication, as described in
   [First publication](README.md#first-publication).
-- [ ] After v0.1.0, with a real client: install from
+- [ ] After the first pre-release, with a real client: install from
   `https://the-beper.github.io/Kinefin/kinefin.flatpakref` and check the
   `GPGKey` bytes of the site files against `build/flatpak/signing-key.asc`.
-- [ ] After v0.2.0: `flatpak remote-info --log kinefin io.github.the_beper.Kinefin`
-  shows the commit of v0.1.0 as the parent.
+- [ ] After the second pre-release:
+  `flatpak remote-info --log kinefin io.github.the_beper.Kinefin` shows the
+  commit of the first one as the parent.
 - [ ] Download all three public assets (`Kinefin-x86_64.flatpak`,
   `PROVENANCE.json`, `SHA256SUMS`) on a separate machine. Verify the source
   commit and independent digest with `verify_release_assets.py`, and run

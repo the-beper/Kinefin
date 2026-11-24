@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -15,6 +16,8 @@ from pathlib import Path
 
 SOURCE = Path(__file__).resolve().parents[1]
 METAINFO = "data/io.github.the_beper.Kinefin.metainfo.xml"
+sys.path.insert(0, str(SOURCE / "tests"))
+from release_skeleton import reset_to_skeleton  # noqa: E402
 
 
 class ReleaseVerifyTest(unittest.TestCase):
@@ -32,6 +35,7 @@ class ReleaseVerifyTest(unittest.TestCase):
             target = self.root / name
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(SOURCE / name, target)
+        reset_to_skeleton(self.root)
         self.cmake = self.root / "CMakeLists.txt"
         self.meta = self.root / METAINFO
 
@@ -68,6 +72,16 @@ class ReleaseVerifyTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0, (tag, result.stdout, result.stderr))
         self.assertIn(message, result.stderr)
         self.assertEqual((self.cmake.read_bytes(), self.meta.read_bytes()), original)
+
+    def test_the_checkout_version_is_its_newest_release(self) -> None:
+        # The fixtures reset their copies to the skeleton, so only this test reads the real files: a mismatch would otherwise surface after the tag is pushed
+        version = re.search(r"^project\(kinefin VERSION ([0-9.]+) ", (SOURCE / "CMakeLists.txt").read_text(encoding="utf-8"), re.MULTILINE)
+        self.assertIsNotNone(version)
+        result = subprocess.run(
+            [sys.executable, "-I", str(SOURCE / "build/release/verify_release.py"), f"v{version.group(1)}"],
+            cwd=SOURCE, capture_output=True, text=True, timeout=10, check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_skeleton_without_release_history_is_not_releasable(self) -> None:
         self.assert_rejected("v0.0.1", "exactly one releases block")

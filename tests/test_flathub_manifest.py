@@ -13,6 +13,9 @@ from pathlib import Path
 
 
 SOURCE = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(SOURCE / "tests"))
+from release_skeleton import reset_to_skeleton  # noqa: E402
+
 APP_ID = "io.github.the_beper.Kinefin"
 MANIFEST = f"build/flatpak/{APP_ID}.yml"
 FILES = (
@@ -32,6 +35,7 @@ class FlathubManifestTest(unittest.TestCase):
             path = self.root / file
             path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(SOURCE / file, path)
+        reset_to_skeleton(self.root)
         self.git("init", "-q", "-b", "main")
         self.git("config", "user.name", "Kinefin release test")
         self.git("config", "user.email", "release-test@example.invalid")

@@ -50,7 +50,10 @@
   <url type="homepage">https://github.com/the-beper/Kinefin</url>
   <url type="bugtracker">https://github.com/the-beper/Kinefin/issues</url>
   <url type="vcs-browser">https://github.com/the-beper/Kinefin</url>
-  <!-- TODO(first release): decide about donations/help URLs; the <releases> block is written by build/release/version-bump.sh (one <release> per version) and is empty until then. -->
+  <url type="help">https://github.com/the-beper/Kinefin/blob/main/docs/user-guide.md</url>
+  <releases>
+    <release version="0.9.0" date="2026-11-24" />
+  </releases>
   <content_rating type="oars-1.1"/>
   <requires>
     <control>keyboard</control>

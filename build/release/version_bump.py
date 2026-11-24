@@ -29,11 +29,6 @@ METAINFO = ROOT / "data/io.github.the_beper.Kinefin.metainfo.xml"
 VERSION_RE = re.compile(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\Z")
 PROJECT_RE = re.compile(r"^project\(kinefin VERSION ([0-9.]+) LANGUAGES CXX\)$", re.MULTILINE)
 RELEASE_OPEN = "  <releases>\n"
-RELEASE_PLACEHOLDER = (
-    "  <!-- TODO(first release): decide about donations/help URLs; the <releases> block "
-    "is written by build/release/version-bump.sh (one <release> per version) "
-    "and is empty until then. -->\n"
-)
 
 
 class BumpError(Exception):
@@ -99,12 +94,6 @@ def updated_contents(cmake: str, metainfo: str, version: str, released: str) -> 
             raise BumpError("cannot insert AppStream releases: content_rating anchor not found")
         block = RELEASE_OPEN + entry + "  </releases>\n"
         new_meta = metainfo.replace(anchor, block + anchor, 1)
-    # This old comment describes an empty release list, so update it on first bump.
-    new_meta = new_meta.replace(
-        RELEASE_PLACEHOLDER,
-        "  <!-- TODO(first release): decide about donations/help URLs. "
-        "Release entries are managed by build/release/version-bump.sh. -->\n",
-    )
     try:
         verify = ET.fromstring(new_meta)
     except ET.ParseError as error:

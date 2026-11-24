@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -13,6 +14,8 @@ import xml.etree.ElementTree as ET
 
 
 SOURCE = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(SOURCE / "tests"))
+from release_skeleton import reset_to_skeleton  # noqa: E402
 
 
 class VersionBumpTest(unittest.TestCase):
@@ -29,6 +32,7 @@ class VersionBumpTest(unittest.TestCase):
             destination = self.root / name
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(SOURCE / name, destination)
+        reset_to_skeleton(self.root)
         self.cmake = self.root / "CMakeLists.txt"
         self.meta = self.root / "data/io.github.the_beper.Kinefin.metainfo.xml"
         self.script = self.root / "build/release/version-bump.sh"
