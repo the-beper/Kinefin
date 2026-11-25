@@ -29,6 +29,7 @@ jobs:
       code: ${{ steps.changes.outputs.code }}
       packaging: ${{ steps.changes.outputs.packaging }}
       images: ${{ steps.changes.outputs.images }}
+      release: ${{ steps.changes.outputs.release }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -110,7 +111,7 @@ jobs:
       KINEFIN_TEST_TIMEOUT_SCALE: 3
       # The compiler cache lives outside the checkout (the REUSE gate scans it); the source and build paths are the same on every run, so the hashes match
       CCACHE_DIR: /buildtmp/ccache
-      CCACHE_MAXSIZE: 1200M
+      CCACHE_MAXSIZE: 2G
       CCACHE_COMPRESS: "1"
       CCACHE_BASEDIR: ${{ github.workspace }}
       CCACHE_NOHASHDIR: "1"
@@ -135,8 +136,8 @@ jobs:
             ccache-fedora45-${{ hashFiles('build/Containerfile') }}-
             ccache-fedora45-
 
-      - name: Checks
-        run: build/check.sh
+      - name: Build, tests and qmllint
+        run: build/check.sh build
 
       # Also after failing tests: the compiled objects are worth keeping
       - name: Save the compiler cache
@@ -153,6 +154,35 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 -I build/ci/prune_caches.py ccache-fedora45- 2
+
+  # What needs no build (format, cppcheck, metainfo, catalogs, the Python tests, the release simulation, REUSE) runs beside the build instead of before it
+  gates:
+    needs: [changes, images]
+    # As in `check`
+    if: >-
+      !cancelled() && needs.changes.result == 'success'
+      && contains(fromJSON('["success", "skipped"]'), needs.images.result)
+      && needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read
+    env:
+      # The release scripts' simulation runs when this pull request changes what it exercises, and on every other event
+      KINEFIN_RELEASE_SIMULATION: ${{ needs.changes.outputs.release }}
+    container:
+      image: ghcr.io/the-beper/kinefin-build:fedora45
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Gates
+        run: build/check.sh gates
 
   flatpak:
     needs: [changes, images]
@@ -287,7 +317,7 @@ jobs:
 
   required:
     if: always()
-    needs: [changes, images, check, flatpak, repo-update]
+    needs: [changes, images, gates, check, flatpak, repo-update]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions: {}
@@ -304,6 +334,7 @@ jobs:
           # job -> the `changes` output that makes it mandatory (None: always)
           flag_of = {
               "images": "images",
+              "gates": "code",
               "check": "code",
               "flatpak": "packaging",
               "repo-update": "packaging",

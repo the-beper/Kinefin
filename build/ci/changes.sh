@@ -5,6 +5,7 @@ out=${GITHUB_OUTPUT:-/dev/stdout}
 code=false
 packaging=false
 images=false
+release=false
 
 # Prose and templates never need a build, except the settings reference, which test_settings_parity reads
 is_doc() {
@@ -23,6 +24,14 @@ is_packaging() {
     return 1
 }
 
+# What the simulation of the release scripts exercises: the release and Flatpak scripts and the workflows that call them
+is_release() {
+    case $1 in
+        build/release/* | build/flatpak/* | .github/workflows/ci.yml | .github/workflows/release.yml) return 0 ;;
+    esac
+    return 1
+}
+
 # The paths that make ci.yml publish the build images (images.yml) on a push to main: the jobs that run in those images wait for that
 is_image_input() {
     case $1 in
@@ -34,6 +43,7 @@ is_image_input() {
 if [ "${EVENT_NAME:-}" != pull_request ]; then
     code=true
     packaging=true
+    release=true
     # Only a push to main publishes the images, and only when it changed one of those paths: judge by the pushed range, as GitHub's path filter does. After a force-push (or a new branch) the previous head is not in the checkout, so the range is unknown: images=maybe publishes them to be safe
     if [ "${EVENT_NAME:-}" = push ]; then
         if [ -z "${BEFORE_SHA:-}" ] || ! git cat-file -e "${BEFORE_SHA}^{commit}" 2>/dev/null; then
@@ -52,6 +62,7 @@ elif [ -z "${BASE_SHA:-}" ] || ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/n
     echo "changes.sh: base commit '${BASE_SHA:-}' not available, running everything" >&2
     code=true
     packaging=true
+    release=true
 else
     files=$(git -c core.quotePath=false diff --name-only "$BASE_SHA" HEAD)
     echo "Changed files:"
@@ -60,6 +71,7 @@ else
     while IFS= read -r f; do
         [ -n "$f" ] || continue
         is_doc "$f" && continue
+        if is_release "$f"; then release=true; fi
         code=true
         if is_packaging "$f"; then packaging=true; fi
     done <<EOF
@@ -70,4 +82,5 @@ fi
 echo "code=$code" >>"$out"
 echo "packaging=$packaging" >>"$out"
 echo "images=$images" >>"$out"
-echo "code=$code packaging=$packaging images=$images"
+echo "release=$release" >>"$out"
+echo "code=$code packaging=$packaging images=$images release=$release"

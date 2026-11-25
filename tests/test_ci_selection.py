@@ -72,6 +72,36 @@ class ChangeSelection(unittest.TestCase):
         self.git("commit", "-qm", "test")
         self.assertIn("code=true packaging=false", self.selection())
 
+    def test_release_simulation_runs_only_for_release_inputs(self) -> None:
+        self.write("src/player/PlaybackSession.cpp", "// changed\n")
+        self.git("add", ".")
+        self.git("commit", "-qm", "cpp")
+        self.assertIn("release=false", self.selection())
+        self.write("build/release/simulate.sh", "#!/bin/sh\n")
+        self.git("add", ".")
+        self.git("commit", "-qm", "release script")
+        self.assertIn("release=true", self.selection())
+
+    def test_release_workflow_and_flatpak_scripts_are_release_inputs(self) -> None:
+        for path in ("build/flatpak/publish-repo.sh", ".github/workflows/release.yml",
+                     ".github/workflows/ci.yml"):
+            with self.subTest(path=path):
+                self.write(path, "# changed\n")
+                self.git("add", ".")
+                self.git("commit", "-qm", path)
+                self.assertIn("release=true", self.selection())
+                self.git("reset", "-q", "--hard", self.base)
+
+    def test_docs_of_the_release_tooling_are_no_release_input(self) -> None:
+        self.write("build/release/README.md", "# notes\n")
+        self.git("add", ".")
+        self.git("commit", "-qm", "docs")
+        self.assertIn("release=false", self.selection())
+
+    def test_every_other_event_runs_the_release_simulation(self) -> None:
+        self.assertIn("release=true", self.selection(event="push"))
+        self.assertIn("release=true", self.selection(base="unknown"))
+
     def test_unknown_base_runs_all_jobs(self) -> None:
         self.assertIn("code=true packaging=true", self.selection(base="unknown"))
 
@@ -136,7 +166,7 @@ class ChangeSelection(unittest.TestCase):
         subprocess.run(["sh", str(SCRIPT)], cwd=self.repo, env=env, text=True,
                        capture_output=True, check=True, timeout=15)
         self.assertEqual(out.read_text().splitlines(),
-                         ["code=true", "packaging=true", "images=maybe"])
+                         ["code=true", "packaging=true", "images=maybe", "release=true"])
 
     def test_outputs_file_gets_the_images_flag(self) -> None:
         before = self.head()
@@ -147,7 +177,7 @@ class ChangeSelection(unittest.TestCase):
         subprocess.run(["sh", str(SCRIPT)], cwd=self.repo, env=env, text=True,
                        capture_output=True, check=True, timeout=15)
         self.assertEqual(out.read_text().splitlines(),
-                         ["code=true", "packaging=true", "images=true"])
+                         ["code=true", "packaging=true", "images=true", "release=true"])
 
 
 if __name__ == "__main__":
