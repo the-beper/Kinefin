@@ -83,10 +83,10 @@ QByteArray remoteImagesBodyOf(int count, int total)
 {
     QJsonArray images;
     for (int i = 0; i < count; ++i)
-        images.append(QJsonObject{
-            {QStringLiteral("ProviderName"), QStringLiteral("TheMovieDb")},
-            {QStringLiteral("Url"),
-             QStringLiteral("https://image.tmdb.org/t/p/original/p%1.jpg").arg(i)}});
+        images.append(
+            QJsonObject{{QStringLiteral("ProviderName"), QStringLiteral("TheMovieDb")},
+                        {QStringLiteral("Url"),
+                         QStringLiteral("https://image.tmdb.org/t/p/original/p%1.jpg").arg(i)}});
     return QJsonDocument(QJsonObject{{QStringLiteral("Images"), images},
                                      {QStringLiteral("TotalRecordCount"), total}})
         .toJson(QJsonDocument::Compact);
@@ -648,9 +648,9 @@ class TestJellyfinClient : public QObject {
         // Not https, and a host that is no provider
         QVERIFY(thumbnail(1).isEmpty());
         QVERIFY(thumbnail(2).isEmpty());
-        QCOMPARE(thumbnail(3),
-                 QStringLiteral(
-                     "https://assets.fanart.tv/preview/movies/603/movieposter/poster-d.jpg"));
+        QCOMPARE(
+            thumbnail(3),
+            QStringLiteral("https://assets.fanart.tv/preview/movies/603/movieposter/poster-d.jpg"));
         // No thumbnail of its own: the image itself stands in, as it is on a provider domain
         QCOMPARE(thumbnail(4), QStringLiteral("https://image.tmdb.org/t/p/original/poster-e.jpg"));
         for (int row = 0; row < images.size(); ++row) {
@@ -667,18 +667,17 @@ class TestJellyfinClient : public QObject {
         Kinefin::JellyfinClient client;
         QVERIFY(login(client, server));
         QSignalSpy ready(&client, &Kinefin::JellyfinClient::remoteImagesReady);
-        QVERIFY(client.fetchRemoteImages(kPlayItem, QStringLiteral("Primary"), 0, 30, {}, true,
-                                         91002));
+        QVERIFY(
+            client.fetchRemoteImages(kPlayItem, QStringLiteral("Primary"), 0, 30, {}, true, 91002));
         QTRY_COMPARE(ready.size(), 1);
         const QVariantList images = ready.constFirst().at(3).toList();
         QCOMPARE(images.size(), 5);
         const QVariantMap first = images.at(0).toMap();
-        QCOMPARE(first.keys(),
-                 (QStringList{QStringLiteral("height"), QStringLiteral("language"),
-                              QStringLiteral("offerId"), QStringLiteral("provider"),
-                              QStringLiteral("rating"), QStringLiteral("ratingType"),
-                              QStringLiteral("thumbnailUrl"), QStringLiteral("voteCount"),
-                              QStringLiteral("width")}));
+        QCOMPARE(first.keys(), (QStringList{QStringLiteral("height"), QStringLiteral("language"),
+                                            QStringLiteral("offerId"), QStringLiteral("provider"),
+                                            QStringLiteral("rating"), QStringLiteral("ratingType"),
+                                            QStringLiteral("thumbnailUrl"),
+                                            QStringLiteral("voteCount"), QStringLiteral("width")}));
         QCOMPARE(first.value(QStringLiteral("provider")).toString(), QStringLiteral("TheMovieDb"));
         QCOMPARE(first.value(QStringLiteral("width")).toInt(), 2000);
         QCOMPARE(first.value(QStringLiteral("height")).toInt(), 3000);
@@ -707,6 +706,41 @@ class TestJellyfinClient : public QObject {
             offers.insert(image.toMap().value(QStringLiteral("offerId")).toUInt());
         QCOMPARE(offers.size(), images.size());
         QVERIFY(!offers.contains(0));
+    }
+
+    void aCountOfLikesIsNotAScore()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        QSignalSpy ready(&client, &Kinefin::JellyfinClient::remoteImagesReady);
+        const auto image = [](const QString &ratingType, double rating) {
+            return QJsonObject{
+                {QStringLiteral("ProviderName"), QStringLiteral("Fanart")},
+                {QStringLiteral("Url"), QStringLiteral("https://assets.fanart.tv/fanart/a.jpg")},
+                {QStringLiteral("RatingType"), ratingType},
+                {QStringLiteral("CommunityRating"), rating}};
+        };
+        server.remoteImagesBody =
+            QJsonDocument(QJsonObject{{QStringLiteral("Images"),
+                                       QJsonArray{image(QStringLiteral("Likes"), 57.9),
+                                                  image(QStringLiteral("Likes"), 5e9),
+                                                  image(QStringLiteral("Score"), 57.9)}},
+                                      {QStringLiteral("TotalRecordCount"), 3}})
+                .toJson(QJsonDocument::Compact);
+        QVERIFY(client.fetchRemoteImages(kPlayItem, QStringLiteral("Primary"), 0, 30, {}, false,
+                                         91030));
+        QTRY_COMPARE(ready.size(), 1);
+        const QVariantList images = ready.constFirst().at(3).toList();
+        QCOMPARE(images.size(), 3);
+        const auto rating = [&images](int row) {
+            return images.at(row).toMap().value(QStringLiteral("rating")).toDouble();
+        };
+        // A whole count of likes, held to a bound; a score stays within 10
+        QCOMPARE(rating(0), 57.0);
+        QCOMPARE(rating(1), 1e6);
+        QCOMPARE(rating(2), 10.0);
     }
 
     void remoteImagesHandNoUrlToTheCaller()
@@ -745,7 +779,8 @@ class TestJellyfinClient : public QObject {
         QTRY_COMPARE(ready.size(), 1);
         QCOMPARE(ready.constFirst().at(2).toInt(), 30);
         // The page is cut to MaxRemoteImagesPerPage and the provider name is percent-encoded in full
-        QByteArray expected = path + "type=Backdrop&startIndex=30&limit=30&includeAllLanguages=true";
+        QByteArray expected =
+            path + "type=Backdrop&startIndex=30&limit=30&includeAllLanguages=true";
         expected += "&providerName=The%2BMovie%26Db";
         QCOMPARE(server.remoteImageRoutes.constFirst(), expected);
         QVERIFY(client.fetchRemoteImages(kPlayItem, QStringLiteral("Primary"), 0, 12, {}, false,
@@ -757,8 +792,8 @@ class TestJellyfinClient : public QObject {
         // Refused without a request: an id that is none, a type that is none, a negative start, no page, a provider name past the cap
         const QString primary = QStringLiteral("Primary");
         const QString tooLong(Kinefin::MaxRemoteImageNameChars + 1, QLatin1Char('x'));
-        QVERIFY(!client.fetchRemoteImages(QStringLiteral("bad/id"), primary, 0, 30, {}, false,
-                                          91004));
+        QVERIFY(
+            !client.fetchRemoteImages(QStringLiteral("bad/id"), primary, 0, 30, {}, false, 91004));
         QVERIFY(!client.fetchRemoteImages(kPlayItem, QStringLiteral("NotAType"), 0, 30, {}, false,
                                           91004));
         QVERIFY(!client.fetchRemoteImages(kPlayItem, primary, -1, 30, {}, false, 91004));
@@ -886,8 +921,8 @@ class TestJellyfinClient : public QObject {
         server.remoteImagesBody = remoteImagesBodyOf(Kinefin::MaxRemoteImagesPerPage, 1000);
         // 34 pages of 30 images: 1020 offers, of which the oldest 20 are dropped
         for (int page = 1; page <= 34; ++page) {
-            QVERIFY(client.fetchRemoteImages(kPlayItem, QStringLiteral("Primary"), 0, 30, {},
-                                             false, 91007));
+            QVERIFY(client.fetchRemoteImages(kPlayItem, QStringLiteral("Primary"), 0, 30, {}, false,
+                                             91007));
             QTRY_COMPARE(ready.size(), page);
         }
         const auto offerAt = [&ready](int page, int row) { return offerOf(ready.at(page), row); };
@@ -991,6 +1026,277 @@ class TestJellyfinClient : public QObject {
         QTRY_COMPARE(images.size(), 1);
         QVERIFY(client.fetchRemoteImageProviders(kPlayItem, 91010));
         QTRY_COMPARE(providers.size(), 1);
+    }
+
+    void itemImagesListOnlyWhatTheEditorCanAddress()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        QSignalSpy ready(&client, &Kinefin::JellyfinClient::itemImagesReady);
+        QVERIFY(!client.fetchItemImages(QStringLiteral("bad/id"), 91020));
+        QVERIFY(client.fetchItemImages(kPlayItem, 91020));
+        QTRY_COMPARE(ready.size(), 1);
+        QCOMPARE(ready.constFirst().at(0).toString(), kPlayItem);
+        QCOMPARE(ready.constFirst().at(2).toInt(), 91020);
+        QCOMPARE(server.itemImageRoutes.size(), 1);
+        QCOMPARE(server.itemImageRoutes.constFirst(),
+                 "/jellyfin/Items/" + kPlayItem.toLatin1() + "/Images");
+        // The chapter image, the unknown type and the backdrop without an index are dropped
+        const QVariantList images = ready.constFirst().at(1).toList();
+        QCOMPARE(images.size(), 6);
+        const auto field = [&images](int row, const char *name) {
+            return images.at(row).toMap().value(QString::fromLatin1(name));
+        };
+        QCOMPARE(field(0, "imageType").toString(), QStringLiteral("Primary"));
+        QCOMPARE(field(0, "imageIndex").toInt(), -1);
+        QCOMPARE(field(0, "imageTag").toString(),
+                 QStringLiteral("aaaa1111aaaa1111aaaa1111aaaa1111"));
+        QCOMPARE(field(0, "width").toInt(), 2000);
+        QCOMPARE(field(0, "height").toInt(), 3000);
+        QCOMPARE(field(0, "size").toLongLong(), 482113LL);
+        QCOMPARE(field(2, "imageType").toString(), QStringLiteral("Backdrop"));
+        QCOMPARE(field(2, "imageIndex").toInt(), 1);
+        QCOMPARE(field(5, "imageType").toString(), QStringLiteral("Box"));
+        // The path of the file on the server never reaches the caller
+        for (const QVariant &image : images)
+            QVERIFY(!image.toMap().contains(QStringLiteral("path")));
+    }
+
+    void itemImageEntriesAreValidated()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        QSignalSpy ready(&client, &Kinefin::JellyfinClient::itemImagesReady);
+        const QJsonArray odd{
+            QJsonObject{{QStringLiteral("ImageType"), QStringLiteral("Logo")},
+                        {QStringLiteral("ImageTag"), QStringLiteral("not a tag/../")},
+                        {QStringLiteral("Width"), -5},
+                        {QStringLiteral("Height"), 1e12},
+                        {QStringLiteral("Size"), -1}},
+            QJsonObject{{QStringLiteral("ImageType"), QStringLiteral("Backdrop")},
+                        {QStringLiteral("ImageIndex"), Kinefin::MaxImageIndex + 1}},
+            QJsonObject{{QStringLiteral("ImageType"), QStringLiteral("Backdrop")},
+                        {QStringLiteral("ImageIndex"), 1.5}},
+            QJsonObject{{QStringLiteral("ImageType"), QStringLiteral("Backdrop")},
+                        {QStringLiteral("ImageIndex"), QStringLiteral("2")}},
+            QJsonObject{{QStringLiteral("ImageType"), QStringLiteral("Screenshot")},
+                        {QStringLiteral("ImageIndex"), Kinefin::MaxImageIndex}}};
+        server.itemImagesBody = QJsonDocument(odd).toJson(QJsonDocument::Compact);
+        QVERIFY(client.fetchItemImages(kPlayItem, 91021));
+        QTRY_COMPARE(ready.size(), 1);
+        const QVariantList images = ready.constFirst().at(1).toList();
+        QCOMPARE(images.size(), 2);
+        const QVariantMap logo = images.at(0).toMap();
+        QCOMPARE(logo.value(QStringLiteral("imageTag")).toString(), QString());
+        QCOMPARE(logo.value(QStringLiteral("width")).toInt(), 0);
+        QCOMPARE(logo.value(QStringLiteral("height")).toInt(), 65535);
+        QCOMPARE(logo.value(QStringLiteral("size")).toLongLong(), 0LL);
+        QCOMPARE(images.at(1).toMap().value(QStringLiteral("imageType")).toString(),
+                 QStringLiteral("Screenshot"));
+        QCOMPARE(images.at(1).toMap().value(QStringLiteral("imageIndex")).toInt(),
+                 Kinefin::MaxImageIndex);
+
+        // An entry that is no object makes the list malformed: nothing is delivered
+        QSignalSpy failed(&client, &Kinefin::JellyfinClient::listingFailed);
+        server.itemImagesBody = QByteArrayLiteral("[7]");
+        QVERIFY(client.fetchItemImages(kPlayItem, 91021));
+        QTRY_COMPARE(failed.size(), 1);
+        QCOMPARE(ready.size(), 1);
+
+        // The list is capped
+        QJsonArray many;
+        for (int i = 0; i < Kinefin::MaxItemImages + 20; ++i)
+            many.append(QJsonObject{{QStringLiteral("ImageType"), QStringLiteral("Logo")}});
+        server.itemImagesBody = QJsonDocument(many).toJson(QJsonDocument::Compact);
+        QVERIFY(client.fetchItemImages(kPlayItem, 91021));
+        QTRY_COMPARE(ready.size(), 2);
+        QCOMPARE(ready.constLast().at(1).toList().size(), Kinefin::MaxItemImages);
+    }
+
+    void itemImageFailuresAreListingFailures()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        QSignalSpy ready(&client, &Kinefin::JellyfinClient::itemImagesReady);
+        QSignalSpy failed(&client, &Kinefin::JellyfinClient::listingFailed);
+        QSignalSpy expired(&client, &Kinefin::JellyfinClient::sessionExpired);
+        server.itemImagesStatus = 500;
+        QVERIFY(client.fetchItemImages(kPlayItem, 91022));
+        QTRY_COMPARE(failed.size(), 1);
+        QCOMPARE(failed.constFirst().at(0).toString(), QStringLiteral("ItemImages"));
+        QCOMPARE(failed.constFirst().at(1).toInt(), 500);
+        QCOMPARE(failed.constFirst().at(3).toInt(), 91022);
+        // An object where the list belongs is no list
+        server.itemImagesStatus = 200;
+        server.itemImagesBody = QByteArrayLiteral("{\"Images\":[]}");
+        QVERIFY(client.fetchItemImages(kPlayItem, 91022));
+        QTRY_COMPARE(failed.size(), 2);
+        QCOMPARE(ready.size(), 0);
+        QVERIFY(client.isAuthenticated());
+        server.itemImagesStatus = 401;
+        QVERIFY(client.fetchItemImages(kPlayItem, 91022));
+        QTRY_COMPARE(expired.size(), 1);
+        QVERIFY(!client.isAuthenticated());
+        QVERIFY(!client.fetchItemImages(kPlayItem, 91022));
+    }
+
+    void itemImagesNeedAnAdministrator()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        server.administrator = false;
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        QVERIFY(!client.isAdministrator());
+        QVERIFY(!client.fetchItemImages(kPlayItem, 91023));
+        QVERIFY(!client.moveImage(kPlayItem, QStringLiteral("Backdrop"), 0, 1));
+        QTest::qWait(100);
+        QVERIFY(server.itemImageRoutes.isEmpty());
+        QVERIFY(server.imageMoves.isEmpty());
+    }
+
+    void releaseListingChannelDropsItemImages()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        QSignalSpy ready(&client, &Kinefin::JellyfinClient::itemImagesReady);
+        QSignalSpy failed(&client, &Kinefin::JellyfinClient::listingFailed);
+        server.holdItemImages = true;
+        QVERIFY(client.fetchItemImages(kPlayItem, 91024));
+        QTRY_COMPARE(server.itemImageRoutes.size(), 1);
+        client.releaseListingChannel(91024);
+        server.holdItemImages = false;
+        server.releaseHeld();
+        QTest::qWait(200);
+        QCOMPARE(ready.size(), 0);
+        QCOMPARE(failed.size(), 0);
+        // The released channel is usable again
+        QVERIFY(client.fetchItemImages(kPlayItem, 91024));
+        QTRY_COMPARE(ready.size(), 1);
+    }
+
+    void movingAnImageSendsBothIndexes()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        QSignalSpy updated(&client, &Kinefin::JellyfinClient::itemImageUpdated);
+        QSignalSpy failed(&client, &Kinefin::JellyfinClient::itemImageUpdateFailed);
+        const QString backdrop = QStringLiteral("Backdrop");
+        // Refused without a request: a type with one image, equal or out of range indexes, a bad id
+        QVERIFY(!client.moveImage(kPlayItem, QStringLiteral("Primary"), 0, 1));
+        QVERIFY(!client.moveImage(kPlayItem, backdrop, 1, 1));
+        QVERIFY(!client.moveImage(kPlayItem, backdrop, -1, 1));
+        QVERIFY(!client.moveImage(kPlayItem, backdrop, 0, -1));
+        QVERIFY(!client.moveImage(kPlayItem, backdrop, 0, Kinefin::MaxImageIndex + 1));
+        QVERIFY(!client.moveImage(kPlayItem, QStringLiteral("NotAType"), 0, 1));
+        QVERIFY(!client.moveImage(QStringLiteral("bad/id"), backdrop, 0, 1));
+        QTest::qWait(100);
+        QVERIFY(server.imageMoves.isEmpty());
+
+        QVERIFY(client.moveImage(kPlayItem, backdrop, 2, 0));
+        // The indexes of the type change under a write: nothing else of it goes while one is in flight
+        QVERIFY(!client.moveImage(kPlayItem, backdrop, 1, 0));
+        QVERIFY(!client.deleteImage(kPlayItem, backdrop, 2));
+        QVERIFY(!client.deleteImage(kPlayItem, backdrop, 0));
+        QTRY_COMPARE(updated.size(), 1);
+        QCOMPARE(updated.constFirst().at(0).toString(), kPlayItem);
+        QCOMPARE(updated.constFirst().at(1).toString(), backdrop);
+        QCOMPARE(updated.constFirst().at(2).toInt(), 0);
+        QCOMPARE(server.imageMoves.size(), 1);
+        const QByteArray images = "/jellyfin/Items/" + kPlayItem.toLatin1() + "/Images/";
+        QCOMPARE(server.imageMoves.constFirst(), images + "Backdrop/2/Index?newIndex=0");
+        // The lock is gone with the answer, and a screenshot moves the same way
+        QVERIFY(client.moveImage(kPlayItem, QStringLiteral("Screenshot"), 0, 3));
+        QTRY_COMPARE(updated.size(), 2);
+        QVERIFY(server.imageMoves.constLast().endsWith("/Images/Screenshot/0/Index?newIndex=3"));
+        // The dashed spelling of the id is the same item
+        QVERIFY(client.moveImage(QStringLiteral("c7dd3b1a-c7dd-3b1a-9d42-f2ab74f8a1b9"), backdrop,
+                                 0, 1));
+        QVERIFY(!client.moveImage(kPlayItem, backdrop, 5, 6));
+        QTRY_COMPARE(updated.size(), 3);
+
+        server.imageWriteStatus = 403;
+        QVERIFY(client.moveImage(kPlayItem, backdrop, 4, 1));
+        QTRY_COMPARE(failed.size(), 1);
+        QCOMPARE(failed.constFirst().at(1).toString(), backdrop);
+        // A failure names the image that did not move
+        QCOMPARE(failed.constFirst().at(2).toInt(), 4);
+        QCOMPARE(failed.constFirst().at(3).toInt(), 403);
+        QCOMPARE(updated.size(), 3);
+
+        QSignalSpy expired(&client, &Kinefin::JellyfinClient::sessionExpired);
+        server.imageWriteStatus = 401;
+        QVERIFY(client.moveImage(kPlayItem, backdrop, 1, 0));
+        QTRY_COMPARE(expired.size(), 1);
+        QCOMPARE(failed.size(), 1);
+    }
+
+    void backdropsAreAddedByAppendingAndDeletedByIndex()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(login(client, server));
+        QTemporaryDir dir;
+        const QString image = dir.filePath(QStringLiteral("backdrop.png"));
+        QFile imageFile(image);
+        QVERIFY(imageFile.open(QIODevice::WriteOnly));
+        imageFile.write(QByteArray::fromHex("89504e470d0a1a0a00000000"));
+        imageFile.close();
+        QSignalSpy updated(&client, &Kinefin::JellyfinClient::itemImageUpdated);
+        const QUrl file = QUrl::fromLocalFile(image);
+        const QString backdrop = QStringLiteral("Backdrop");
+        // Without an index the server adds the image after the others, as the web client's upload does
+        QVERIFY(client.uploadImage(kPlayItem, backdrop, -1, file));
+        QTRY_COMPARE(updated.size(), 1);
+        const QByteArray images = "/jellyfin/Items/" + kPlayItem.toLatin1() + "/Images/";
+        QVERIFY(server.imageUploads.constLast().startsWith(QByteArray(images + "Backdrop|")));
+        QVERIFY(client.uploadImage(kPlayItem, backdrop, 12, file));
+        QTRY_COMPARE(updated.size(), 2);
+        QVERIFY(server.imageUploads.constLast().contains("/Images/Backdrop/12|"));
+        // Only an upload may append: a delete names its image, a type with one image takes no index, an index is capped
+        QVERIFY(!client.deleteImage(kPlayItem, backdrop, -1));
+        QVERIFY(!client.uploadImage(kPlayItem, QStringLiteral("Logo"), 0, file));
+        QVERIFY(!client.uploadImage(kPlayItem, backdrop, Kinefin::MaxImageIndex + 1, file));
+        QVERIFY(client.deleteImage(kPlayItem, QStringLiteral("Screenshot"), 3));
+        QTRY_COMPARE(updated.size(), 3);
+        QVERIFY(server.imageDeletes.constLast().endsWith("/Images/Screenshot/3"));
+        QVERIFY(client.deleteImage(kPlayItem, QStringLiteral("Box"), -1));
+        QTRY_COMPARE(updated.size(), 4);
+        QVERIFY(server.imageDeletes.constLast().endsWith("/Images/Box"));
+    }
+
+    void imageUrlsPickOneImageOfATypeByQuery()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QVERIFY(prepare(client, server));
+        const QUrl base = client.serverUrl();
+        const QString backdrop = QStringLiteral("Backdrop");
+        const QUrl indexed =
+            client.imageUrl(kPlayItem, backdrop, 512, QStringLiteral("abc123"), 90, {}, 2);
+        QVERIFY(indexed.isValid());
+        QCOMPARE(QUrlQuery(indexed).queryItemValue(QStringLiteral("imageIndex")),
+                 QStringLiteral("2"));
+        // The path is the one of every image, so the fetcher's allowlist takes it as it is
+        QVERIFY(indexed.path().endsWith(QStringLiteral("/Images/Backdrop")));
+        QVERIFY(Kinefin::JellyfinClient::isServerImageUrl(base, indexed));
+        QVERIFY(!QUrlQuery(client.imageUrl(kPlayItem, backdrop, 512, QStringLiteral("abc123")))
+                     .hasQueryItem(QStringLiteral("imageIndex")));
+        QVERIFY(client.imageUrl(kPlayItem, backdrop, 512, {}, 90, {}, -2).isEmpty());
+        QVERIFY(client.imageUrl(kPlayItem, backdrop, 512, {}, 90, {}, Kinefin::MaxImageIndex + 1)
+                    .isEmpty());
     }
 
     void trickplayMetadataAndTileAreAuthenticated()

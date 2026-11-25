@@ -6,6 +6,7 @@
 #include "RemoteCommands.h"
 #include "models/CollectionsModel.h"
 #include "models/DownloadsModel.h"
+#include "models/EditImagesModel.h"
 #include "models/FavoritesModel.h"
 #include "models/FavoritesSectionModel.h"
 #include "models/FilterOptionsModel.h"
@@ -21,6 +22,7 @@
 #include "models/PlaylistEntriesModel.h"
 #include "models/PlaylistsController.h"
 #include "models/RecommendationRowsModel.h"
+#include "models/RemoteImagesModel.h"
 #include "models/RemoteSessionsModel.h"
 #include "models/ResumeItemsModel.h"
 #include "models/SearchModel.h"
@@ -87,6 +89,20 @@ struct ItemDetailsModelForeign {
     Q_GADGET
     QML_FOREIGN(Kinefin::ItemDetailsModel)
     QML_NAMED_ELEMENT(ItemDetailsModel)
+    QML_UNCREATABLE("Created by the application")
+};
+
+struct EditImagesModelForeign {
+    Q_GADGET
+    QML_FOREIGN(Kinefin::EditImagesModel)
+    QML_NAMED_ELEMENT(EditImagesModel)
+    QML_UNCREATABLE("Created by the application")
+};
+
+struct RemoteImagesModelForeign {
+    Q_GADGET
+    QML_FOREIGN(Kinefin::RemoteImagesModel)
+    QML_NAMED_ELEMENT(RemoteImagesModel)
     QML_UNCREATABLE("Created by the application")
 };
 

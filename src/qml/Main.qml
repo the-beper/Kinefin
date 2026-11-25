@@ -106,6 +106,9 @@ Kirigami.ApplicationWindow {
 
     // The width the sidebar takes inline (0 in a Compact window and while there is nothing to choose from), which the player page reaches out over
     readonly property real sidebarWidth: shellSidebar.inlineWidth
+    // Signed out (the server and sign-in pages) the window has no rail and no bar: the main menu button stands alone in the top corner, so that Settings, About and Switch Server stay in reach
+    readonly property bool cornerMenu: !startupVisible && !navigation.navigable && !offline
+    readonly property Item cornerMenuSlot: cornerSlot
     // Where the header's menu button stands while the sidebar shows, and the SyncPlay group menu the sidebar's entry opens: both belong to the header
     readonly property Item sidebarUserSlot: shellSidebar.userSlot
     readonly property bool groupMenuOpened: shellHeader.groupMenuOpened
@@ -129,11 +132,26 @@ Kirigami.ApplicationWindow {
         // Covered by the player, it is not read out over it either
         Accessible.ignored: window.playbackPageShowing
         // Signed out (the server and sign-in pages) there is nothing for it to hold: no sections to open, no search, no queue
-        visible: !window.startupVisible && window.sidebarWidth === 0 && (navigation.navigable || window.offline)
+        visible: !window.startupVisible && window.sidebarWidth === 0 && !window.cornerMenu
 
         shell: window
         navigation: navigation
         onNavigationRequested: shellSidebar.openDrawer()
+    }
+
+    // The corner of a window with no bar: the header's menu button moves in here. Above the pages, below the startup cover
+    RowLayout {
+        id: cornerSlot
+        objectName: "cornerMenuSlot"
+
+        z: 3
+        visible: window.cornerMenu
+        anchors {
+            top: parent.top
+            right: parent.right
+            topMargin: Kirigami.Units.smallSpacing
+            rightMargin: Kirigami.Units.largeSpacing
+        }
     }
 
     // The rail down the leading edge of the window, from its top, and in a Compact window the drawer the header's button opens. It fades out with the header while the player is in front
@@ -230,6 +248,13 @@ Kirigami.ApplicationWindow {
                 onClicked: window.connection.cancel()
             }
         }
+    }
+
+    // Set by the keys (and by a gamepad or a remote) and cleared by a click or a touch: the focus ring of cards and rows shows only while it is true, so a page that opens with a current item lights nothing until the user moves
+    property bool keyboardDriven: false
+    InputModality {
+        objectName: "inputModality"
+        target: window
     }
 
     // The back button of the mouse goes back like Esc; the missing forward button is a deliberate exception
@@ -1619,6 +1644,24 @@ Kirigami.ApplicationWindow {
         if (fromPage)
             popTo(fromPage);
         pageStack.push(Qt.resolvedUrl("PlaylistPage.qml"), { connection: connection, shell: window, playlistId: playlistId, name: name ?? "" });
+    }
+
+    // The images of an item (administrators only) open above the details page that asks, the pages above it giving way; `itemName` is the name the page shows for the item
+    function openEditImages(itemId, itemName, fromPage) {
+        if (connection.state !== ConnectionController.Authenticated || !connection.currentUserIsAdministrator)
+            return;
+        if (fromPage)
+            popTo(fromPage);
+        pageStack.push(Qt.resolvedUrl("EditImagesPage.qml"), { connection: connection, itemId: itemId, itemName: itemName ?? "" });
+    }
+
+    // The images the providers offer for an item, for the type `imageType`, open above the Edit Images page that asks, which stays below as it is
+    function openRemoteImages(itemId, itemName, imageType, fromPage) {
+        if (connection.state !== ConnectionController.Authenticated || !connection.currentUserIsAdministrator)
+            return;
+        if (fromPage)
+            popTo(fromPage);
+        pageStack.push(Qt.resolvedUrl("RemoteImagesPage.qml"), { connection: connection, itemId: itemId, itemName: itemName ?? "", imageType: imageType, replaces: fromPage?.imageModel?.replaces(imageType) ?? false });
     }
 
     PlaylistDialogs {

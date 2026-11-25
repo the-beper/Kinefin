@@ -47,7 +47,6 @@ ALLOWED_ARGS = frozenset({
     "--device=input",
     "--own-name=org.mpris.MediaPlayer2.Kinefin.*",
     "--talk-name=org.freedesktop.ScreenSaver",
-    "--system-talk-name=org.freedesktop.NetworkManager",
     "--talk-name=org.kde.kwalletd6",
     "--talk-name=org.freedesktop.portal.Desktop",
 })

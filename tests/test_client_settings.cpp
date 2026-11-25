@@ -97,6 +97,34 @@ class TestClientSettings : public QObject {
         QVERIFY(settings.isDefault(QStringLiteral("video"), QStringLiteral("cache")));
     }
 
+    // The early reader of the interface scale (src/app/EarlyUiScale.cpp) reads this key before the application exists
+    void theInterfaceScaleKeepsToItsSixChoices()
+    {
+        const auto *definition =
+            Kinefin::findSetting(QStringLiteral("main"), QStringLiteral("uiScale"));
+        QVERIFY(definition && !definition->hidden && !definition->label.isEmpty());
+        QCOMPARE(QString::fromUtf8(definition->group.untranslatedText()),
+                 QStringLiteral("Application"));
+        QCOMPARE(definition->defaultValue, 100);
+        QList<int> choices;
+        for (const auto &option : definition->options)
+            choices.append(option.value.toInt());
+        QCOMPARE(choices, (QList<int>{100, 110, 125, 150, 175, 200}));
+        {
+            ClientSettings settings(path());
+            QCOMPARE(settings.value(QStringLiteral("main"), QStringLiteral("uiScale")), 100);
+            QVERIFY(settings.setValue(QStringLiteral("main"), QStringLiteral("uiScale"), 150));
+            QVERIFY(!settings.setValue(QStringLiteral("main"), QStringLiteral("uiScale"), 130));
+            QVERIFY(!settings.setValue(QStringLiteral("main"), QStringLiteral("uiScale"),
+                                       QStringLiteral("175")));
+        }
+        QVERIFY(readAll(path()).contains("uiScale=150"));
+        ClientSettings reopened(path());
+        QCOMPARE(reopened.value(QStringLiteral("main"), QStringLiteral("uiScale")), 150);
+        QVERIFY(reopened.setValue(QStringLiteral("main"), QStringLiteral("uiScale"), 100));
+        QVERIFY(!readAll(path()).contains("uiScale"));
+    }
+
     void invalidWritesAreRefused()
     {
         ClientSettings settings(path());

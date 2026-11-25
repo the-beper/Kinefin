@@ -17,8 +17,6 @@ finish-args:
   - --own-name=org.mpris.MediaPlayer2.Kinefin.*
   # Inhibit the screensaver while playing, and release it otherwise (org.freedesktop.ScreenSaver).
   - --talk-name=org.freedesktop.ScreenSaver
-  # The download policy observes the read-only Metered property. No NM control actions
-  - --system-talk-name=org.freedesktop.NetworkManager
   # The access tokens live in the user's KWallet (KWalletTokenStore): the daemon is the only way to them from the sandbox, and there is no plaintext fallback.
   - --talk-name=org.kde.kwalletd6
   # Portals: the browser links (server web UI, externallinks) and the folder picker of the download export (a per-folder Document-portal grant, never a --filesystem=home).

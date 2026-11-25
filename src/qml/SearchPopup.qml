@@ -30,9 +30,14 @@ Controls.Popup {
     readonly property bool placeholderShown: placeholderState === SearchModel.Empty || placeholderState === SearchModel.TooShort || placeholderState === SearchModel.NoResults
     readonly property real maximumHeight: parent ? parent.height * 0.8 : 0
     // The height of the empty states, which every state keeps at least, so that the popup does not resize at each keystroke
-    readonly property real minimumBodyHeight: Kirigami.Units.gridUnit * 10
+    readonly property real minimumBodyHeight: Kirigami.Units.gridUnit * 18
     // The room of the results and their scroll bar around the content
-    readonly property real bodyMargin: Kirigami.Units.largeSpacing
+    readonly property real bodyMargin: Kirigami.Units.gridUnit
+    // The rail keeps the leading edge: the popup stands in the area of the page, never over the entries
+    readonly property real railWidth: parent?.Window.window?.sidebarWidth ?? 0
+    readonly property real areaWidth: Math.max(0, (parent?.width ?? 0) - railWidth)
+    // The area starts after the rail, which is on the right in a mirrored layout
+    readonly property real areaStart: Qt.application.layoutDirection === Qt.RightToLeft ? 0 : railWidth
 
     // The control that had the keyboard when the popup opened, which gets it back when the popup closes without a choice
     property Item focusBefore: null
@@ -67,9 +72,9 @@ Controls.Popup {
     closePolicy: Controls.Popup.CloseOnEscape | Controls.Popup.CloseOnPressOutside
     // The border takes one pixel of the popup, the content the rest
     padding: 1
-    width: Math.max(0, Math.min((parent?.width ?? 0) - Kirigami.Units.gridUnit * 2, Kirigami.Units.gridUnit * 52))
+    width: Math.max(0, Math.min(areaWidth - Kirigami.Units.gridUnit * 2, Kirigami.Units.gridUnit * 52))
     height: Math.min(implicitHeight, maximumHeight)
-    x: Math.round(((parent?.width ?? 0) - width) / 2)
+    x: areaStart + Math.round((areaWidth - width) / 2)
     y: Math.round((parent?.height ?? 0) * 0.1)
 
 
@@ -100,11 +105,18 @@ Controls.Popup {
             focusLost();
     }
 
-    background: Rectangle {
+    // The page under the popup dims, and the shadow sets the popup off from it
+    Controls.Overlay.modal: Rectangle {
+        color: Qt.rgba(0, 0, 0, 0.35)
+    }
+    background: Kirigami.ShadowedRectangle {
         color: Kirigami.Theme.backgroundColor
         radius: Kirigami.Units.cornerRadius
         border.width: 1
         border.color: Qt.alpha(Kirigami.Theme.textColor, 0.3)
+        shadow.size: Kirigami.Units.gridUnit * 1.5
+        shadow.yOffset: Kirigami.Units.smallSpacing
+        shadow.color: Qt.rgba(0, 0, 0, 0.5)
     }
 
     contentItem: ColumnLayout {
@@ -133,7 +145,7 @@ Controls.Popup {
             id: field
             objectName: "searchField"
             Layout.fillWidth: true
-            Layout.margins: Kirigami.Units.largeSpacing
+            Layout.margins: Kirigami.Units.gridUnit
             focus: true
             // The shell owns Ctrl+F: the field's own sequence would make it ambiguous
             focusSequences: []
@@ -203,7 +215,7 @@ Controls.Popup {
                 x: popup.bodyMargin
                 y: popup.bodyMargin
                 width: results.width - popup.bodyMargin * 2
-                spacing: Kirigami.Units.largeSpacing
+                spacing: Kirigami.Units.gridUnit
 
                 MessageBox {
                     visible: popup.searchState === SearchModel.AllFailed

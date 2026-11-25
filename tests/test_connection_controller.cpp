@@ -2253,6 +2253,62 @@ class TestConnectionController : public QObject {
         QVERIFY(first);
     }
 
+    void editImagesModelsAreOwnedByTheirPageAndNeedAnAdministrator()
+    {
+        const QString id = QStringLiteral("f0e1d2c3b4a5968778695a4b3c2d1e0f");
+        for (const bool administrator : {false, true}) {
+            FakeJellyfin server;
+            server.administrator = administrator;
+            QVERIFY(server.listen());
+            auto controller = makeController();
+            QObject page;
+            // Not signed in: nothing is created
+            QVERIFY(controller->createEditImages(id, &page) == nullptr);
+            QVERIFY(controller->createRemoteImages(id, QStringLiteral("Primary"), &page)
+                    == nullptr);
+            controller->connectTo(address(server));
+            QTRY_VERIFY(controller->state() == ConnectionController::NeedsLogin);
+            controller->login(QStringLiteral("fixture-user"), QStringLiteral("fixture-password"));
+            QTRY_VERIFY(controller->state() == ConnectionController::Authenticated);
+            if (!administrator) {
+                QVERIFY(controller->createEditImages(id, &page) == nullptr);
+                QVERIFY(controller->createRemoteImages(id, QStringLiteral("Primary"), &page)
+                        == nullptr);
+                QVERIFY(!controller->moveImage(id, QStringLiteral("Backdrop"), 0, 1));
+                continue;
+            }
+            QVERIFY(controller->createEditImages(QStringLiteral("bad id"), &page) == nullptr);
+            QVERIFY(controller->createEditImages(id, nullptr) == nullptr);
+            QVERIFY(controller->createRemoteImages(QStringLiteral("bad id"),
+                                                   QStringLiteral("Primary"), &page)
+                    == nullptr);
+            QVERIFY(controller->createRemoteImages(id, QStringLiteral("Primary"), nullptr)
+                    == nullptr);
+            QPointer<Kinefin::EditImagesModel> list = controller->createEditImages(id, &page);
+            QPointer<Kinefin::RemoteImagesModel> offers =
+                controller->createRemoteImages(id, QStringLiteral("Backdrop"), &page);
+            QPointer<Kinefin::EditImagesModel> other = controller->createEditImages(id, &page);
+            QVERIFY(list && offers && other);
+            QCOMPARE(list->parent(), &page);
+            QCOMPARE(offers->parent(), &page);
+            QCOMPARE(offers->imageType(), QStringLiteral("Backdrop"));
+            // Every model has a listing channel of its own, above the ranges of the other consumers
+            QVERIFY(list->channel() >= Kinefin::EditImagesModel::FirstChannel);
+            QVERIFY(list->channel() < Kinefin::ItemDetailsModel::FirstChannel);
+            QVERIFY(list->channel() != offers->channel());
+            QVERIFY(list->channel() != other->channel());
+            QVERIFY(offers->channel() != other->channel());
+            // The model lives exactly as long as its page
+            auto *owner = new QObject;
+            QPointer<Kinefin::RemoteImagesModel> owned =
+                controller->createRemoteImages(id, QStringLiteral("Primary"), owner);
+            QVERIFY(owned);
+            delete owner;
+            QVERIFY(!owned);
+            QVERIFY(list && offers);
+        }
+    }
+
     void wrongPasswordReturnsToSignInWithAFixedMessage()
     {
         FakeJellyfin server;

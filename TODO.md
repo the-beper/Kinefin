@@ -8,6 +8,7 @@
 
 - Music
 - Audiobooks
+- Edit Images for people
 - Seerr support
 - HDR output on HDR screens
 - ARM64 builds

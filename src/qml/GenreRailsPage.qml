@@ -7,6 +7,10 @@ Kirigami.ScrollablePage {
     id: page
     objectName: "genreRailsPage"
 
+    // The darker View background on every page: a page without a list (a plain flickable) would get the lighter Window one, and the sections would not match
+    Kirigami.Theme.colorSet: Kirigami.Theme.View
+    Kirigami.Theme.inherit: false
+
     required property ConnectionController connection
 
     readonly property var rails: connection.genreRails

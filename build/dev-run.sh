@@ -51,7 +51,7 @@ if [ -n "$shots" ]; then
         -v "$root/tmp/shots:/shots" \
         -v kinefin-buildtmp:/buildtmp \
         -e XDG_RUNTIME_DIR=/tmp/kinefin-dev/run -e QT_QPA_PLATFORM=offscreen \
-        -e HOME=/tmp/kinefin-dev/home -e QT_STYLE_OVERRIDE=Breeze -e QT_QPA_PLATFORMTHEME=kde \
+        -e HOME=/tmp/kinefin-dev/home -e LANG=C.UTF-8 -e QT_STYLE_OVERRIDE=Breeze -e QT_QPA_PLATFORMTHEME=kde -e QT_FONT_DPI -e QT_SCALE_FACTOR \
         -e KINEFIN_DEV_SHOTS=/shots -e "KINEFIN_DEV_STEPS=$shots" -e "KINEFIN_DEV_SIZE=${KINEFIN_DEV_SIZE:-1280x800}" \
         "$@"
 fi
@@ -61,5 +61,5 @@ exec podman run --rm -i --userns=keep-id --network=host --security-opt label=dis
     -v "$runtime/$display:/host-run/$display" \
     -v kinefin-buildtmp:/buildtmp \
     -e XDG_RUNTIME_DIR=/tmp/kinefin-dev/run -e WAYLAND_DISPLAY="/host-run/$display" -e QT_QPA_PLATFORM=wayland \
-    -e HOME=/tmp/kinefin-dev/home -e QT_STYLE_OVERRIDE=Breeze -e QT_QPA_PLATFORMTHEME=kde \
+    -e HOME=/tmp/kinefin-dev/home -e LANG=C.UTF-8 -e QT_STYLE_OVERRIDE=Breeze -e QT_QPA_PLATFORMTHEME=kde -e QT_FONT_DPI -e QT_SCALE_FACTOR \
     "$@"

@@ -33,10 +33,13 @@ Kirigami.Dialog {
     readonly property bool acceptable: newName.length > 0 && changed && overviewValid
                                        && genresValid
 
+    // One size in every state: the overview takes the room the other fields leave, and the dialog must not move when a warning shows. The room the window leaves is a limit too, and the opening animation starts the dialog two grid units lower, so it must not reach the window edge while it moves
+    readonly property real totalHeight: Math.min(Kirigami.Units.gridUnit * 28, absoluteMaximumHeight - Kirigami.Units.gridUnit * 4)
+    readonly property real bodyHeight: Math.max(Kirigami.Units.gridUnit * 8, totalHeight - implicitHeaderHeight - implicitFooterHeight)
+
     title: i18n("Edit Metadata")
-    preferredWidth: Kirigami.Units.gridUnit * 30 - Kirigami.Units.largeSpacing * 2
+    preferredWidth: Kirigami.Units.gridUnit * 30
     standardButtons: Kirigami.Dialog.Cancel
-    padding: Kirigami.Units.largeSpacing
     customFooterActions: [
         Kirigami.Action {
             objectName: "editMetadataSave"
@@ -100,60 +103,123 @@ Kirigami.Dialog {
         genresField.text = details.genres.join(", ");
     }
 
-    Kirigami.FormLayout {
-        Layout.fillWidth: true
+    Item {
+        implicitHeight: dialog.bodyHeight
 
-        Controls.TextField {
-            id: nameField
-            objectName: "editMetadataName"
-            Kirigami.FormData.label: i18nc("@label:textbox", "Name:")
-            Layout.fillWidth: true
-            maximumLength: 512
-            Accessible.name: i18n("Name")
-        }
-        Controls.TextArea {
-            id: overviewField
-            objectName: "editMetadataOverview"
-            Kirigami.FormData.label: i18nc("@label:textbox", "Overview:")
-            Layout.fillWidth: true
-            // FormLayout copies only the width: the field carries its own height, fixed so a long text neither moves Year nor resizes the dialog
-            height: Kirigami.Units.gridUnit * 6
-            implicitHeight: Kirigami.Units.gridUnit * 6
-            wrapMode: Text.Wrap
-            Accessible.name: i18n("Overview")
-        }
-        Controls.SpinBox {
-            id: yearField
-            objectName: "editMetadataYear"
-            Kirigami.FormData.label: i18nc("@label:spinbox", "Year:")
-            from: 0
-            to: 9999
-            Accessible.name: i18n("Year")
-        }
-        Controls.TextField {
-            id: ratingField
-            objectName: "editMetadataRating"
-            Kirigami.FormData.label: i18nc("@label:textbox", "Official rating:")
-            Layout.fillWidth: true
-            maximumLength: 64
-            Accessible.name: i18n("Official rating")
-        }
-        Controls.TextField {
-            id: genresField
-            objectName: "editMetadataGenres"
-            Kirigami.FormData.label: i18nc("@label:textbox", "Genres:")
-            Layout.fillWidth: true
-            placeholderText: i18n("Drama, Thriller")
-            Accessible.name: i18n("Genres")
-        }
-        // One box at a time: the overview first
-        MessageBox {
-            objectName: "editMetadataInvalid"
-            Layout.fillWidth: true
-            Layout.topMargin: Kirigami.Units.largeSpacing
-            visible: !dialog.overviewValid || !dialog.genresValid
-            type: Kirigami.MessageType.Warning
-            text: !dialog.overviewValid ? i18n("The overview is limited to 16384 characters") : i18n("Use at most 20 genres, each of 128 characters at most")
+        ColumnLayout {
+            anchors {
+                fill: parent
+                margins: Kirigami.Units.largeSpacing * 2
+            }
+            spacing: Kirigami.Units.largeSpacing
+
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: Kirigami.Units.smallSpacing
+
+                Controls.Label {
+                    text: i18nc("@label:textbox", "Name:")
+                }
+                Controls.TextField {
+                    id: nameField
+                    objectName: "editMetadataName"
+                    Layout.fillWidth: true
+                    maximumLength: 512
+                    Accessible.name: i18n("Name")
+                }
+            }
+
+            ColumnLayout {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                spacing: Kirigami.Units.smallSpacing
+
+                Controls.Label {
+                    text: i18nc("@label:textbox", "Overview:")
+                }
+                // The text scrolls inside the box: a long overview neither moves the fields under it nor resizes the dialog
+                Controls.ScrollView {
+                    objectName: "editMetadataOverviewBox"
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    Layout.preferredHeight: Kirigami.Units.gridUnit * 4
+                    Layout.minimumHeight: Kirigami.Units.gridUnit * 4
+
+                    Controls.TextArea {
+                        id: overviewField
+                        objectName: "editMetadataOverview"
+                        wrapMode: Text.Wrap
+                        Accessible.name: i18n("Overview")
+                        // Tab leaves the field instead of typing a tab
+                        KeyNavigation.priority: KeyNavigation.BeforeItem
+                        KeyNavigation.tab: yearField
+                        KeyNavigation.backtab: nameField
+                    }
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Kirigami.Units.largeSpacing
+
+                ColumnLayout {
+                    Layout.alignment: Qt.AlignTop
+                    spacing: Kirigami.Units.smallSpacing
+
+                    Controls.Label {
+                        text: i18nc("@label:spinbox", "Year:")
+                    }
+                    Controls.SpinBox {
+                        id: yearField
+                        objectName: "editMetadataYear"
+                        from: 0
+                        to: 9999
+                        Accessible.name: i18n("Year")
+                    }
+                }
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    Layout.alignment: Qt.AlignTop
+                    spacing: Kirigami.Units.smallSpacing
+
+                    Controls.Label {
+                        text: i18nc("@label:textbox", "Official rating:")
+                    }
+                    Controls.TextField {
+                        id: ratingField
+                        objectName: "editMetadataRating"
+                        Layout.fillWidth: true
+                        maximumLength: 64
+                        Accessible.name: i18n("Official rating")
+                    }
+                }
+            }
+
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: Kirigami.Units.smallSpacing
+
+                Controls.Label {
+                    text: i18nc("@label:textbox", "Genres:")
+                }
+                Controls.TextField {
+                    id: genresField
+                    objectName: "editMetadataGenres"
+                    Layout.fillWidth: true
+                    placeholderText: i18n("Drama, Thriller")
+                    Accessible.name: i18n("Genres")
+                }
+            }
+
+            // One box at a time: the overview first
+            MessageBox {
+                objectName: "editMetadataInvalid"
+                Layout.fillWidth: true
+                Layout.topMargin: Kirigami.Units.largeSpacing
+                visible: !dialog.overviewValid || !dialog.genresValid
+                type: Kirigami.MessageType.Warning
+                text: !dialog.overviewValid ? i18n("The overview is limited to 16384 characters") : i18n("Use at most 20 genres, each of 128 characters at most")
+            }
         }
     }
 }

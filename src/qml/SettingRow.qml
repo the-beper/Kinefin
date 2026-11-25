@@ -74,6 +74,7 @@ Loader {
             enabled: !row.disabled
             Accessible.name: row.accessibleLabel
             text: row.label
+            description: row.key === "uiScale" ? i18n("Takes effect the next time Kinefin starts") : ""
             model: row.options
             textRole: "text"
             valueRole: "value"

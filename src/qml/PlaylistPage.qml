@@ -10,6 +10,10 @@ Kirigami.ScrollablePage {
     id: page
     objectName: "playlistPage"
 
+    // The darker View background on every page: a page without a list (a plain flickable) would get the lighter Window one, and the sections would not match
+    Kirigami.Theme.colorSet: Kirigami.Theme.View
+    Kirigami.Theme.inherit: false
+
     required property ConnectionController connection
     // The window shell counts the pages: the entries stop reading with the last
     required property var shell
@@ -302,6 +306,8 @@ Kirigami.ScrollablePage {
             atStart: list.atYBeginning
         }
         objectName: "playlistEntries"
+        // Room under the bar: the rows scroll up to its line, but open clear of it
+        topMargin: Kirigami.Units.largeSpacing * 2
 
         model: page.entries
         activeFocusOnTab: true

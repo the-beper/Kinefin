@@ -110,7 +110,7 @@ Controls.ItemDelegate {
     readonly property bool alternate: Kirigami.StyleHints.useAlternateBackgroundColor && index % 2 === 1
 
     background: Rectangle {
-        readonly property bool ring: row.highlighted || (row.visualFocus && row.focusVisible)
+        readonly property bool ring: (row.highlighted || (row.visualFocus && row.focusVisible)) && (row.Window.window?.keyboardDriven ?? true)
         color: row.hovered ? Qt.alpha(Kirigami.Theme.highlightColor, 0.15) : (row.alternate ? Kirigami.Theme.alternateBackgroundColor : "transparent")
         radius: Kirigami.Units.cornerRadius
         border.width: ring ? 2 : 0

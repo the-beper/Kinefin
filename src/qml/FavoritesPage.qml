@@ -10,6 +10,10 @@ Kirigami.ScrollablePage {
     id: page
     objectName: "favoritesPage"
 
+    // The darker View background on every page: a page without a list (a plain flickable) would get the lighter Window one, and the sections would not match
+    Kirigami.Theme.colorSet: Kirigami.Theme.View
+    Kirigami.Theme.inherit: false
+
     required property ConnectionController connection
     // The window shell counts the pages: the scan stops with the last one
     required property var shell

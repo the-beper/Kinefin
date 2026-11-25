@@ -9,6 +9,10 @@ Kirigami.ScrollablePage {
     id: page
     objectName: "homePage"
 
+    // The darker View background on every page: a page without a list (a plain flickable) would get the lighter Window one, and the sections would not match
+    Kirigami.Theme.colorSet: Kirigami.Theme.View
+    Kirigami.Theme.inherit: false
+
     required property ConnectionController connection
 
     // The row toolbar is ToolBar everywhere (Main.qml): this page keeps its identity and actions in the top bar instead

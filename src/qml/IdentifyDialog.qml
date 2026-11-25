@@ -20,11 +20,23 @@ Kirigami.Dialog {
     property string problem: ""
     property int problemType: Kirigami.MessageType.Error
 
+    // One size in every state: the matches take the room the search leaves, and the dialog must not move while it searches or when the answer comes. The room the window leaves is a limit too, and the opening animation starts the dialog two grid units lower, so it must not reach the window edge while it moves
+    readonly property real totalHeight: Math.min(Kirigami.Units.gridUnit * 28, absoluteMaximumHeight - Kirigami.Units.gridUnit * 4)
+    readonly property real bodyHeight: Math.max(Kirigami.Units.gridUnit * 8, totalHeight - implicitHeaderHeight - implicitFooterHeight)
+
     title: i18n("Identify")
-    preferredWidth: Kirigami.Units.gridUnit * 30 - Kirigami.Units.largeSpacing * 2
-    maximumHeight: absoluteMaximumHeight - Kirigami.Units.gridUnit * 4
+    preferredWidth: Kirigami.Units.gridUnit * 30
     standardButtons: Kirigami.Dialog.Cancel
-    padding: Kirigami.Units.largeSpacing
+    customFooterActions: [
+        Kirigami.Action {
+            id: applyAction
+            objectName: "identifyApply"
+            text: i18nc("@action:button", "Apply Match")
+            icon.name: "dialog-ok-apply"
+            enabled: list.currentIndex >= 0 && !dialog.searching
+            onTriggered: dialog.applyResult(list.currentIndex)
+        }
+    ]
 
     header: DialogTitleBar {
         title: dialog.title
@@ -46,8 +58,9 @@ Kirigami.Dialog {
 
     // Return in the list hands the focus to the Apply button, which is what overwrites the item's metadata
     function focusApply() {
-        if (applyButton.enabled)
-            applyButton.forceActiveFocus(Qt.TabFocusReason);
+        const button = customFooterButton(applyAction);
+        if (button?.enabled)
+            button.forceActiveFocus(Qt.TabFocusReason);
     }
 
     function applyResult(index) {
@@ -102,166 +115,199 @@ Kirigami.Dialog {
         return itemId.toLowerCase().replace(/-/g, "") === dialog.details.itemId.toLowerCase().replace(/-/g, "");
     }
 
-    ColumnLayout {
-        Layout.fillWidth: true
+    // The search on top, the matches in the room that is left
+    Item {
+        implicitHeight: dialog.bodyHeight
 
-        Kirigami.FormLayout {
-            Layout.fillWidth: true
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 0
 
-            Controls.TextField {
-                id: nameField
-                objectName: "identifyName"
-                Kirigami.FormData.label: i18nc("@label:textbox", "Name:")
+            ColumnLayout {
                 Layout.fillWidth: true
-                maximumLength: 512
-                Accessible.name: i18n("Name")
-                onAccepted: dialog.search()
-            }
-            Controls.SpinBox {
-                id: yearField
-                objectName: "identifyYear"
-                Kirigami.FormData.label: i18nc("@label:spinbox", "Year:")
-                from: 0
-                to: 9999
-                Accessible.name: i18n("Year")
-            }
-        }
+                Layout.margins: Kirigami.Units.largeSpacing * 2
+                spacing: Kirigami.Units.largeSpacing
 
-        Controls.Button {
-            objectName: "identifySearch"
-            Layout.alignment: Qt.AlignRight
-            text: i18nc("@action:button", "Search")
-            icon.name: "edit-find"
-            enabled: !dialog.searching && nameField.text.trim().length > 0
-            onClicked: dialog.search()
-        }
+                GridLayout {
+                    Layout.fillWidth: true
+                    columns: 3
+                    columnSpacing: Kirigami.Units.largeSpacing
+                    rowSpacing: Kirigami.Units.smallSpacing
 
-        MessageBox {
-            objectName: "identifyProblem"
-            Layout.fillWidth: true
-            visible: dialog.problem.length > 0
-            type: dialog.problemType
-            text: dialog.problem
-        }
-
-        Controls.BusyIndicator {
-            Layout.alignment: Qt.AlignHCenter
-            running: dialog.searching
-            visible: dialog.searching
-        }
-
-        ListView {
-            id: list
-            objectName: "identifyResults"
-            Layout.fillWidth: true
-            // As tall as the matches, within a bound: a short search leaves no empty panel, a long one scrolls
-            Layout.preferredHeight: Math.min(contentHeight, Kirigami.Units.gridUnit * 12)
-            visible: list.count > 0
-            clip: true
-            model: dialog.results
-            keyNavigationEnabled: true
-            activeFocusOnTab: true
-            currentIndex: -1
-            Accessible.role: Accessible.List
-            Accessible.name: i18n("Matches")
-            Keys.onReturnPressed: dialog.focusApply()
-            Keys.onEnterPressed: dialog.focusApply()
-            Controls.ScrollBar.vertical: Controls.ScrollBar {
-                policy: Controls.ScrollBar.AsNeeded
-            }
-
-            delegate: Controls.ItemDelegate {
-                id: row
-
-                required property int index
-                required property var modelData
-
-                objectName: "identifyRow_" + index
-                width: ListView.view.width
-                focusPolicy: Qt.NoFocus
-                // The selected match stays marked while the focus is on Apply
-                highlighted: ListView.isCurrentItem
-                Accessible.name: row.modelData.name
-                onClicked: {
-                    list.currentIndex = row.index;
-                    list.forceActiveFocus(Qt.MouseFocusReason);
+                    Controls.Label {
+                        Layout.row: 0
+                        Layout.column: 0
+                        text: i18nc("@label:textbox", "Name:")
+                    }
+                    Controls.Label {
+                        Layout.row: 0
+                        Layout.column: 1
+                        text: i18nc("@label:spinbox", "Year:")
+                    }
+                    Controls.TextField {
+                        id: nameField
+                        objectName: "identifyName"
+                        Layout.row: 1
+                        Layout.column: 0
+                        Layout.fillWidth: true
+                        maximumLength: 512
+                        Accessible.name: i18n("Name")
+                        onAccepted: dialog.search()
+                    }
+                    Controls.SpinBox {
+                        id: yearField
+                        objectName: "identifyYear"
+                        Layout.row: 1
+                        Layout.column: 1
+                        from: 0
+                        to: 9999
+                        Accessible.name: i18n("Year")
+                    }
+                    Controls.Button {
+                        objectName: "identifySearch"
+                        Layout.row: 1
+                        Layout.column: 2
+                        text: i18nc("@action:button", "Search")
+                        icon.name: "edit-find"
+                        enabled: !dialog.searching && nameField.text.trim().length > 0
+                        onClicked: dialog.search()
+                    }
                 }
 
-                PlainToolTip {
-                    visible: row.hovered && resultName.truncated
-                    text: row.modelData.name
+                MessageBox {
+                    objectName: "identifyProblem"
+                    Layout.fillWidth: true
+                    visible: dialog.problem.length > 0
+                    type: dialog.problemType
+                    text: dialog.problem
                 }
+            }
 
-                contentItem: RowLayout {
-                    spacing: Kirigami.Units.largeSpacing
+            Kirigami.Separator {
+                Layout.fillWidth: true
+            }
 
-                    // The provider's artwork, when the server gave an https URL on a known provider domain
-                    Rectangle {
-                        Layout.preferredWidth: Kirigami.Units.gridUnit * 3
-                        Layout.preferredHeight: Kirigami.Units.gridUnit * 4.5
-                        color: Kirigami.Theme.alternateBackgroundColor
-                        radius: Kirigami.Units.smallSpacing
-                        border.width: 1
-                        border.color: Qt.alpha(Kirigami.Theme.textColor, 0.2)
-                        clip: true
+            Item {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
 
-                        Image {
-                            id: resultPoster
-                            anchors.fill: parent
-                            asynchronous: true
-                            fillMode: Image.PreserveAspectCrop
-                            sourceSize.width: width * Screen.devicePixelRatio
-                            source: row.modelData.imageUrl
-                        }
-                        Kirigami.Icon {
-                            anchors.centerIn: parent
-                            visible: resultPoster.status !== Image.Ready
-                            width: Kirigami.Units.iconSizes.large
-                            height: width
-                            source: "video-x-generic"
-                            opacity: 0.7
-                        }
+                ListView {
+                    id: list
+                    objectName: "identifyResults"
+
+                    // The room of the vertical scroll bar, so that it does not cover the end of a row
+                    readonly property real barRoom: bar.size < 1 ? bar.implicitWidth : 0
+
+                    anchors.fill: parent
+                    visible: list.count > 0
+                    clip: true
+                    model: dialog.results
+                    keyNavigationEnabled: true
+                    activeFocusOnTab: true
+                    currentIndex: -1
+                    Accessible.role: Accessible.List
+                    Accessible.name: i18n("Matches")
+                    Keys.onReturnPressed: dialog.focusApply()
+                    Keys.onEnterPressed: dialog.focusApply()
+                    Controls.ScrollBar.vertical: Controls.ScrollBar {
+                        id: bar
+                        policy: Controls.ScrollBar.AsNeeded
                     }
 
-                    ColumnLayout {
-                        spacing: 0
+                    delegate: Controls.ItemDelegate {
+                        id: row
 
-                        Controls.Label {
-                            id: resultName
-                            Layout.fillWidth: true
-                            elide: Text.ElideRight
-                            maximumLineCount: 1
-                            textFormat: Text.PlainText
+                        required property int index
+                        required property var modelData
+
+                        objectName: "identifyRow_" + index
+                        width: list.width - list.barRoom
+                        focusPolicy: Qt.NoFocus
+                        // The selected match stays marked while the focus is on Apply
+                        highlighted: ListView.isCurrentItem
+                        Accessible.name: row.modelData.name
+                        onClicked: {
+                            list.currentIndex = row.index;
+                            list.forceActiveFocus(Qt.MouseFocusReason);
+                        }
+
+                        PlainToolTip {
+                            visible: row.hovered && resultName.truncated
                             text: row.modelData.name
                         }
-                        Controls.Label {
-                            Layout.fillWidth: true
-                            elide: Text.ElideRight
-                            maximumLineCount: 1
-                            opacity: 0.7
-                            textFormat: Text.PlainText
-                            text: {
-                                const parts = [];
-                                if (row.modelData.year > 0)
-                                    parts.push(String(row.modelData.year));
-                                if (row.modelData.provider.length > 0)
-                                    parts.push(row.modelData.provider);
-                                return parts.join(" · ");
+
+                        contentItem: RowLayout {
+                            spacing: Kirigami.Units.largeSpacing
+
+                            // The provider's artwork, when the server gave an https URL on a known provider domain
+                            Rectangle {
+                                Layout.preferredWidth: Kirigami.Units.gridUnit * 3
+                                Layout.preferredHeight: Kirigami.Units.gridUnit * 4.5
+                                color: Kirigami.Theme.alternateBackgroundColor
+                                radius: Kirigami.Units.smallSpacing
+                                border.width: 1
+                                border.color: Qt.alpha(Kirigami.Theme.textColor, 0.2)
+                                clip: true
+
+                                Image {
+                                    id: resultPoster
+                                    anchors.fill: parent
+                                    asynchronous: true
+                                    fillMode: Image.PreserveAspectCrop
+                                    sourceSize.width: width * Screen.devicePixelRatio
+                                    source: row.modelData.imageUrl
+                                }
+                                Kirigami.Icon {
+                                    anchors.centerIn: parent
+                                    visible: resultPoster.status !== Image.Ready
+                                    width: Kirigami.Units.iconSizes.large
+                                    height: width
+                                    source: "video-x-generic"
+                                    opacity: 0.7
+                                }
+                            }
+
+                            ColumnLayout {
+                                spacing: 0
+
+                                Controls.Label {
+                                    id: resultName
+                                    Layout.fillWidth: true
+                                    elide: Text.ElideRight
+                                    maximumLineCount: 1
+                                    textFormat: Text.PlainText
+                                    text: row.modelData.name
+                                }
+                                Controls.Label {
+                                    Layout.fillWidth: true
+                                    elide: Text.ElideRight
+                                    maximumLineCount: 1
+                                    opacity: 0.7
+                                    textFormat: Text.PlainText
+                                    text: {
+                                        const parts = [];
+                                        if (row.modelData.year > 0)
+                                            parts.push(String(row.modelData.year));
+                                        if (row.modelData.provider.length > 0)
+                                            parts.push(row.modelData.provider);
+                                        return parts.join(" · ");
+                                    }
+                                }
                             }
                         }
                     }
                 }
-            }
-        }
 
-        Controls.Button {
-            id: applyButton
-            objectName: "identifyApply"
-            Layout.alignment: Qt.AlignRight
-            text: i18nc("@action:button", "Apply Match")
-            icon.name: "dialog-ok-apply"
-            enabled: list.currentIndex >= 0 && !dialog.searching
-            onClicked: dialog.applyResult(list.currentIndex)
+                Controls.BusyIndicator {
+                    anchors.centerIn: parent
+                    running: dialog.searching
+                    visible: dialog.searching
+                }
+            }
+
+            Kirigami.Separator {
+                Layout.fillWidth: true
+            }
         }
     }
 }

@@ -9,6 +9,10 @@ Kirigami.Page {
     id: page
     objectName: "libraryPage"
 
+    // The darker View background on every page: a page without a list (a plain flickable) would get the lighter Window one, and the sections would not match
+    Kirigami.Theme.colorSet: Kirigami.Theme.View
+    Kirigami.Theme.inherit: false
+
     required property LibraryItemsModel model
     required property ConnectionController connection
     // The name comes from the server: the page title renders it as plain text
@@ -582,6 +586,8 @@ Kirigami.Page {
         Kirigami.Separator {
             objectName: "libraryToolbarSeparator"
             Layout.fillWidth: true
+            // Over the last pixel of the row, where PageToolbar has it: the bars of the pages have the same height
+            Layout.topMargin: -height
             visible: toolbarRow.visible
             Accessible.ignored: true
         }

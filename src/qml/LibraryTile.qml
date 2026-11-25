@@ -26,7 +26,7 @@ Kirigami.AbstractCard {
 
     // The focus ring the keyboard and the pad show: the style's own highlight fills the card, which would hide the image
     background: Rectangle {
-        readonly property bool ring: tile.visualFocus
+        readonly property bool ring: tile.visualFocus && (tile.Window.window?.keyboardDriven ?? true)
         color: tile.pressed ? Qt.alpha(Kirigami.Theme.highlightColor, 0.3) : (tile.hovered ? Qt.alpha(Kirigami.Theme.highlightColor, 0.15) : "transparent")
         radius: Kirigami.Units.cornerRadius
         border.width: ring ? 2 : 0

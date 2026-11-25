@@ -6,7 +6,7 @@ import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 import org.kde.kirigamiaddons.components as Components
 
-// The bar of a window without the sidebar: a Compact window (narrower than `compactLimit`), and a window with nothing to choose from (signed out, or offline with only Downloads). It has the search button, which opens the search popup, the one menu button (the account avatar) and, in Compact, the button that opens the sections in a drawer; the queue and the SyncPlay group fold into the menu. With the sidebar showing, the bar is hidden: its menu button, its menus, its dialogs and its actions stay here, and the button stands at the foot of the sidebar
+// The bar of a window without the sidebar: a Compact window (narrower than `compactLimit`), and an offline window with only Downloads to choose from (a signed-out window has no bar: the menu button stands alone in the top corner). It has the search button, which opens the search popup, the one menu button (the account avatar) and, in Compact, the button that opens the sections in a drawer; the queue and the SyncPlay group fold into the menu. With the sidebar showing, the bar is hidden: its menu button, its menus, its dialogs and its actions stay here, and the button stands at the foot of the sidebar
 Item {
     id: root
     objectName: "shellHeader"
@@ -135,7 +135,7 @@ Item {
 
             // Framed in the bar like the buttons of the pages, bare in the rail like its entries
             flat: root.inSidebar
-            parent: root.inSidebar ? (root.shell.sidebarUserSlot ?? rightCluster) : rightCluster
+            parent: root.inSidebar ? (root.shell.sidebarUserSlot ?? rightCluster) : root.shell.cornerMenu ? (root.shell.cornerMenuSlot ?? rightCluster) : rightCluster
             Layout.alignment: Qt.AlignHCenter | Qt.AlignVCenter
             // In the rail the hit area is as wide as the other entries, and the avatar stays in the middle of it
             Layout.fillWidth: root.inSidebar
@@ -195,7 +195,7 @@ Item {
                     }
                     Kirigami.Icon {
                         visible: !root.signedIn
-                        source: "open-menu-symbolic"
+                        source: "view-more-symbolic"
                         color: Kirigami.Theme.textColor
                         Layout.preferredWidth: Kirigami.Units.iconSizes.smallMedium
                         Layout.preferredHeight: Kirigami.Units.iconSizes.smallMedium

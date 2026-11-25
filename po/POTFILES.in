@@ -24,7 +24,9 @@ src/qml/AddToCollectionDialog.qml
 src/qml/CollectionDialogs.qml
 src/qml/EditMetadataDialog.qml
 src/qml/IdentifyDialog.qml
-src/qml/EditImagesDialog.qml
+src/qml/EditImagesPage.qml
+src/qml/RemoteImagesPage.qml
+src/qml/ImageTypes.qml
 src/qml/EditSubtitlesDialog.qml
 src/qml/RemoteSessionsDialog.qml
 src/qml/SyncPlayDialog.qml

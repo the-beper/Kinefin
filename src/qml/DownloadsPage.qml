@@ -11,6 +11,10 @@ Kirigami.ScrollablePage {
     id: page
     objectName: "downloadsPage"
 
+    // The darker View background on every page: a page without a list (a plain flickable) would get the lighter Window one, and the sections would not match
+    Kirigami.Theme.colorSet: Kirigami.Theme.View
+    Kirigami.Theme.inherit: false
+
     required property ConnectionController connection
 
     readonly property DownloadsController downloads: connection.downloads
@@ -225,6 +229,8 @@ Kirigami.ScrollablePage {
     ListView {
         id: list
         objectName: "downloadsList"
+        // Room under the bar: the rows scroll up to its line, but open clear of it
+        topMargin: Kirigami.Units.largeSpacing * 2
 
         // On the view, not in its content: the shadow stays under the toolbar while the rows scroll
         TopShadow {
@@ -310,7 +316,7 @@ Kirigami.ScrollablePage {
                     return point.x >= page.sideMargin && point.x <= row.width - page.sideMargin;
                 }
             }
-            highlighted: ListView.isCurrentItem && ListView.view.activeFocus
+            highlighted: ListView.isCurrentItem && ListView.view.activeFocus && (ListView.view.Window.window?.keyboardDriven ?? true)
             // The style's row background reads this hint, not Kirigami.Theme.useAlternateBackgroundColor, and the row's index
             Kirigami.StyleHints.useAlternateBackgroundColor: true
             // Only a downloaded row acts on a click: no hover feedback elsewhere
@@ -593,9 +599,9 @@ Kirigami.ScrollablePage {
                 Accessible.ignored: true
             }
         }
-        // The label starts at the same distance from the left edge as its text does from the top: the content row centres it vertically
-        leftPadding: topPadding + footerCount.y
-        rightPadding: leftPadding
+        // The page margin on both sides, as the bars at the top have it
+        leftPadding: Kirigami.Units.largeSpacing
+        rightPadding: Kirigami.Units.largeSpacing
 
         contentItem: RowLayout {
             spacing: Kirigami.Units.largeSpacing
@@ -606,7 +612,7 @@ Kirigami.ScrollablePage {
                 Layout.fillWidth: true
                 textFormat: Text.PlainText
                 elide: Text.ElideRight
-                text: i18np("%1 download", "%1 downloads", page.downloadsModel.count)
+                text: page.downloadsModel.count > 0 ? i18np("%1 download", "%1 downloads", page.downloadsModel.count) : i18nc("@info status line under the list of downloads, with none", "No downloads")
             }
             Controls.Label {
                 objectName: "downloadsFooterSpeed"

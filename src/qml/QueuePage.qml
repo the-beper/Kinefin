@@ -9,6 +9,10 @@ Kirigami.ScrollablePage {
     id: page
     objectName: "queuePage"
 
+    // The darker View background on every page: a page without a list (a plain flickable) would get the lighter Window one, and the sections would not match
+    Kirigami.Theme.colorSet: Kirigami.Theme.View
+    Kirigami.Theme.inherit: false
+
     required property ConnectionController connection
 
     readonly property PlayQueue queue: connection.queue
@@ -179,6 +183,8 @@ Kirigami.ScrollablePage {
     ListView {
         id: list
         objectName: "queueList"
+        // Room under the bar: the rows scroll up to its line, but open clear of it
+        topMargin: Kirigami.Units.largeSpacing * 2
 
         // On the view, not in its content: the fade stays under the toolbar while the rows scroll
         TopShadow {

@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Kinefin contributors
 # SPDX-License-Identifier: GPL-3.0-or-later
 cmake_minimum_required(VERSION 3.25)
-project(kinefin VERSION 0.9.0 LANGUAGES CXX)
+project(kinefin VERSION 0.9.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -48,6 +48,8 @@ FetchContent_MakeAvailable(mpvqt)
 unset(BUILD_SHARED_LIBS)
 
 add_library(kinefin_core STATIC
+    src/app/EarlyUiScale.cpp
+    src/app/EarlyUiScale.h
     src/app/Logging.cpp
     src/app/Logging.h
     src/app/ProfileCommands.cpp
@@ -131,6 +133,10 @@ add_library(kinefin_core STATIC
     src/models/CollectionsModel.h
     src/models/RemoteSessionsModel.cpp
     src/models/RemoteSessionsModel.h
+    src/models/EditImagesModel.cpp
+    src/models/EditImagesModel.h
+    src/models/RemoteImagesModel.cpp
+    src/models/RemoteImagesModel.h
     src/models/ItemSummary.h
     src/models/LibraryItemsModel.cpp
     src/models/LibraryItemsModel.h
@@ -283,7 +289,7 @@ qt_add_resources(kinefin_cast "cast_roots"
 target_link_libraries(kinefin_player PUBLIC kinefin_cast)
 
 # The QML module lives in a static library of its own so that the UI tests can import it like the application does
-foreach(page Main PlayerPage OsdButton MiniPlayer PictureInPictureWindow PlaybackInfoOverlay ShellHeader ShellNavigation ShellSidebar AboutDialog ShortcutsDialog DialogTitleBar RemoteSessionsDialog SyncPlayDialog MediaInfoDialog CastDialog CastTargetRow HomePage LibraryTile LibraryPage ResumeItemsPage PersonPage MediaCard CardMenu CardRow EpisodeRow ItemDetailsPage SearchPopup QueuePage FilterDialog FilterChips GenreRailsView GenreRailsPage LibraryContent ItemListRow ItemRowGrid LoginPage UserPickerPage MessageBox ServersPage SettingsPage SettingRow UserPreferencesForm UserPreferencesSaveBar FavoritesPage FavoriteCard FavoritesBanners FavoritesSectionPage TopShadow MediaListRow PlaylistsPage PlaylistPage PlaylistDialogs AddToPlaylistDialog AddToCollectionDialog CollectionDialogs EditMetadataDialog IdentifyDialog EditImagesDialog EditSubtitlesDialog PageToolbar PageBackButton FadeInOnShow PageTitle PlainToolTip PopupPlacement AutoScroll DownloadsPage DownloadRulesPage DownloadAllDialog RuleDialog SubtitleSearchDialog SavedFiltersDialog UploadSubtitleDialog PlainMenuItem PlaceholderSectionPage)
+foreach(page Main PlayerPage OsdButton MiniPlayer PictureInPictureWindow PlaybackInfoOverlay ShellHeader ShellNavigation ShellSidebar AboutDialog ShortcutsDialog DialogTitleBar RemoteSessionsDialog SyncPlayDialog MediaInfoDialog CastDialog CastTargetRow HomePage LibraryTile LibraryPage ResumeItemsPage PersonPage MediaCard CardMenu CardRow EpisodeRow ItemDetailsPage SearchPopup QueuePage FilterDialog FilterChips GenreRailsView GenreRailsPage LibraryContent ItemListRow ItemRowGrid LoginPage UserPickerPage MessageBox ServersPage SettingsPage SettingRow UserPreferencesForm UserPreferencesSaveBar FavoritesPage FavoriteCard FavoritesBanners FavoritesSectionPage TopShadow MediaListRow PlaylistsPage PlaylistPage PlaylistDialogs AddToPlaylistDialog AddToCollectionDialog CollectionDialogs EditMetadataDialog IdentifyDialog EditImagesPage RemoteImagesPage ImageTypes EditSubtitlesDialog PageToolbar PageBackButton FadeInOnShow PageTitle PlainToolTip PopupPlacement AutoScroll DownloadsPage DownloadRulesPage DownloadAllDialog RuleDialog SubtitleSearchDialog SavedFiltersDialog UploadSubtitleDialog PlainMenuItem PlaceholderSectionPage)
     set_source_files_properties(src/qml/${page}.qml PROPERTIES QT_RESOURCE_ALIAS ${page}.qml)
 endforeach()
 # The images the pages draw themselves, beside the QML files they belong to
@@ -294,6 +300,8 @@ qt_add_library(kinefin_ui STATIC)
 qt_add_qml_module(kinefin_ui
     URI org.kde.kinefin
     VERSION 1.0
+    # The import path of the build tree is its root: Qt wants the module's own folder to end in its URI
+    OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/org/kde/kinefin
     QML_FILES
         src/qml/Main.qml
         src/qml/PlayerPage.qml
@@ -333,7 +341,9 @@ qt_add_qml_module(kinefin_ui
         src/qml/CollectionDialogs.qml
         src/qml/EditMetadataDialog.qml
         src/qml/IdentifyDialog.qml
-        src/qml/EditImagesDialog.qml
+        src/qml/EditImagesPage.qml
+        src/qml/RemoteImagesPage.qml
+        src/qml/ImageTypes.qml
         src/qml/EditSubtitlesDialog.qml
         src/qml/MediaCard.qml
         src/qml/CardMenu.qml
@@ -384,6 +394,8 @@ qt_add_qml_module(kinefin_ui
         src/app/EpisodeLabelQml.h
         src/app/ImageNetworkFactory.cpp
         src/app/ImageNetworkFactory.h
+        src/app/InputModality.cpp
+        src/app/InputModality.h
         src/app/ModelsQml.h
         src/app/MiddleButtonWatcher.cpp
         src/app/MiddleButtonWatcher.h
@@ -682,6 +694,10 @@ if(BUILD_TESTING)
     target_link_libraries(test_profile_index PRIVATE kinefin_core Qt6::Test)
     add_test(NAME profile_index COMMAND test_profile_index)
 
+    add_executable(test_early_ui_scale tests/test_early_ui_scale.cpp)
+    target_link_libraries(test_early_ui_scale PRIVATE kinefin_core Qt6::Test)
+    add_test(NAME early_ui_scale COMMAND test_early_ui_scale)
+
     add_executable(test_profile_identity tests/test_profile_identity.cpp)
     target_link_libraries(test_profile_identity PRIVATE kinefin_core Qt6::Test)
     add_test(NAME profile_identity COMMAND test_profile_identity)
@@ -844,6 +860,11 @@ if(BUILD_TESTING)
     target_compile_definitions(test_remote_sessions_model PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(test_remote_sessions_model PRIVATE kinefin_core Qt6::Test Qt6::Network)
     add_test(NAME remote_sessions_model COMMAND test_remote_sessions_model)
+
+    add_executable(test_edit_images_models tests/test_edit_images_models.cpp)
+    target_compile_definitions(test_edit_images_models PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    target_link_libraries(test_edit_images_models PRIVATE kinefin_core Qt6::Test Qt6::Network)
+    add_test(NAME edit_images_models COMMAND test_edit_images_models)
 
     add_executable(test_resume_items_model tests/test_resume_items_model.cpp)
     target_compile_definitions(test_resume_items_model PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")

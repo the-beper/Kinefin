@@ -10,6 +10,10 @@ Kirigami.ScrollablePage {
     id: page
     objectName: "downloadRulesPage"
 
+    // The darker View background on every page: a page without a list (a plain flickable) would get the lighter Window one, and the sections would not match
+    Kirigami.Theme.colorSet: Kirigami.Theme.View
+    Kirigami.Theme.inherit: false
+
     required property ConnectionController connection
 
     readonly property DownloadsController downloads: connection.downloads
@@ -111,6 +115,8 @@ Kirigami.ScrollablePage {
     ListView {
         id: list
         objectName: "downloadRulesList"
+        // Room under the bar: the rows scroll up to its line, but open clear of it
+        topMargin: Kirigami.Units.largeSpacing * 2
 
         // On the view, not in its content: the shadow stays under the toolbar while the rows scroll
         TopShadow {
@@ -154,7 +160,7 @@ Kirigami.ScrollablePage {
 
             objectName: "downloadRule_" + seriesId
             width: list.width
-            highlighted: ListView.isCurrentItem && ListView.view.activeFocus
+            highlighted: ListView.isCurrentItem && ListView.view.activeFocus && (ListView.view.Window.window?.keyboardDriven ?? true)
             // The style's row background reads this hint, not Kirigami.Theme.useAlternateBackgroundColor, and the row's index
             Kirigami.StyleHints.useAlternateBackgroundColor: true
             hoverEnabled: false

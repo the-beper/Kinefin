@@ -9,6 +9,12 @@ Kirigami.ScrollablePage {
     id: page
     objectName: "serversPage"
 
+    // The darker View background on every page: a page without a list (a plain flickable) would get the lighter Window one, and the pages would not match
+    Kirigami.Theme.colorSet: Kirigami.Theme.View
+    Kirigami.Theme.inherit: false
+    // The lone menu button stands in the top corner over the page: the content starts below it
+    topPadding: Kirigami.Units.gridUnit * 2
+
     required property ConnectionController connection
 
     // The row toolbar is ToolBar everywhere (Main.qml): the pre-signin screens keep their identity in the top bar instead

@@ -177,7 +177,7 @@ Controls.ItemDelegate {
 
     // The default delegate background paints the focus ring as a filled highlight; here the ring is only a border, and only once the user moves
     background: Rectangle {
-        readonly property bool ring: card.highlighted || (card.visualFocus && card.focusVisible)
+        readonly property bool ring: (card.highlighted || (card.visualFocus && card.focusVisible)) && (card.Window.window?.keyboardDriven ?? true)
         color: card.hovered ? Qt.alpha(Kirigami.Theme.highlightColor, 0.15) : "transparent"
         radius: Kirigami.Units.cornerRadius
         border.width: ring ? 2 : 0

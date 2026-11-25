@@ -413,6 +413,7 @@ Item {
             // A window as short as the minimum with a large font cannot show every entry: the column scrolls, and the entries below it stay in reach
             Flickable {
                 id: entriesView
+                objectName: "sidebarEntriesView"
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 Layout.minimumHeight: 0
@@ -420,6 +421,20 @@ Item {
                 contentHeight: sidebarEntries.implicitHeight
                 clip: true
                 boundsBehavior: Flickable.StopAtBounds
+
+                // The bar says that more entries lie below, and is the pointer's way to them besides the wheel
+                QQC2.ScrollBar.vertical: QQC2.ScrollBar {
+                    objectName: "sidebarScrollBar"
+                    policy: QQC2.ScrollBar.AsNeeded
+                }
+
+                // A bare flickable moves a few pixels a notch: a notch moves about an entry
+                Kirigami.WheelHandler {
+                    target: entriesView
+                    filterMouseEvents: true
+                    keyNavigationEnabled: false
+                    verticalStepSize: Kirigami.Units.gridUnit * 3
+                }
 
                 // The keyboard brings the entry it moved to into view
                 function reveal(item) {

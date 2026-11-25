@@ -10,6 +10,10 @@ Kirigami.ScrollablePage {
     id: page
     objectName: "playlistsPage"
 
+    // The darker View background on every page: a page without a list (a plain flickable) would get the lighter Window one, and the sections would not match
+    Kirigami.Theme.colorSet: Kirigami.Theme.View
+    Kirigami.Theme.inherit: false
+
     required property ConnectionController connection
     // The window shell counts the pages: the list stops reading with the last
     required property var shell
@@ -102,6 +106,8 @@ Kirigami.ScrollablePage {
             atStart: grid.atYBeginning
         }
         objectName: "playlistsGrid"
+        // Room under the bar: the rows scroll up to its line, but open clear of it
+        topMargin: Kirigami.Units.largeSpacing * 2
 
         // Poster tiles of about ten grid units, at least one to a row
         readonly property real usableWidth: Math.max(0, width - leftMargin)

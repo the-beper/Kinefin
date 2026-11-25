@@ -62,11 +62,10 @@ def own_properties(text: str, start: int) -> str:
 class PlanningConsistency(unittest.TestCase):
     def test_mpris_and_sandbox_scope(self) -> None:
         manifest = content("build/flatpak/io.github.the_beper.Kinefin.yml")
-        self.assertIn("--system-talk-name=org.freedesktop.NetworkManager", manifest)
+        self.assertNotIn("--system-talk-name", manifest)
         self.assertIn("--own-name=org.mpris.MediaPlayer2.Kinefin.*", manifest)
         self.assertIn("--talk-name=org.kde.kwalletd6", manifest)
         self.assertNotIn("  - --filesystem=home", manifest)
-        self.assertNotIn("  - --system-talk-name=org.freedesktop.Avahi", manifest)
 
     def test_jellyfin_uri_handler_is_declared_consistently(self) -> None:
         desktop = content("data/io.github.the_beper.Kinefin.desktop")

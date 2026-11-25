@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Kinefin contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/ConnectionController.h"
+#include "app/EarlyUiScale.h"
 #include "app/ImageNetworkFactory.h"
 #include "app/InputFilter.h"
 #include "app/Logging.h"
@@ -67,15 +68,27 @@ void applyPlatformOption(int argc, char **argv)
     }
 }
 
+// Qt reads QT_SCALE_FACTOR only while QApplication is constructed, so the interface scale of the profile is applied here; a variable that is already set wins
+void applyInterfaceScale(int argc, char **argv)
+{
+    if (qEnvironmentVariableIsSet("QT_SCALE_FACTOR"))
+        return;
+    QStringList arguments;
+    for (int i = 1; i < argc; ++i)
+        arguments << QString::fromLocal8Bit(argv[i]);
+    const int percent = Kinefin::startupUiScalePercent(arguments);
+    if (percent > 100)
+        qputenv("QT_SCALE_FACTOR", QByteArray::number(percent / 100.0));
+}
+
 #ifdef KINEFIN_DEV_AUTOLOGIN
 // Tokens stay in memory in a dev run of build/dev-run.sh, so its throw-away profile never asks a wallet to open
 class DevTokenStore final : public Kinefin::TokenStore {
   public:
     void read(const QString &key, ReadDone done) override
     {
-        QTimer::singleShot(0, this, [this, key, done] {
-            done(m_tokens.contains(key), m_tokens.value(key));
-        });
+        QTimer::singleShot(
+            0, this, [this, key, done] { done(m_tokens.contains(key), m_tokens.value(key)); });
     }
     void write(const QString &key, const QString &token, Done done) override
     {
@@ -103,6 +116,7 @@ int main(int argc, char *argv[])
     // mpvqt uses QQuickFramebufferObject, which requires Qt Quick's OpenGL graphics API. Select it before any QQuickWindow is constructed
     QQuickWindow::setGraphicsApi(QSGRendererInterface::OpenGL);
     applyPlatformOption(argc, argv);
+    applyInterfaceScale(argc, argv);
     QApplication app(argc, argv);
     // org.kde.desktop needs QApplication; an environment variable naming another style wins
     if (qEnvironmentVariableIsEmpty("QT_QUICK_CONTROLS_STYLE"))
@@ -477,14 +491,15 @@ int main(int argc, char *argv[])
         if (size.size() == 2 && size.at(0).toInt() > 0 && size.at(1).toInt() > 0)
             window->resize(size.at(0).toInt(), size.at(1).toInt());
         QDir().mkpath(directory);
-        const QHash<QString, QString> sections{{QStringLiteral("home"), QStringLiteral("homeTabAction")},
-                                               {QStringLiteral("movies"), QStringLiteral("moviesTabAction")},
-                                               {QStringLiteral("shows"), QStringLiteral("tvShowsTabAction")},
-                                               {QStringLiteral("music"), QStringLiteral("musicTabAction")},
-                                               {QStringLiteral("audiobooks"), QStringLiteral("audiobooksTabAction")},
-                                               {QStringLiteral("favorites"), QStringLiteral("favoritesTabAction")},
-                                               {QStringLiteral("playlists"), QStringLiteral("playlistsTabAction")},
-                                               {QStringLiteral("downloads"), QStringLiteral("downloadsTabAction")}};
+        const QHash<QString, QString> sections{
+            {QStringLiteral("home"), QStringLiteral("homeTabAction")},
+            {QStringLiteral("movies"), QStringLiteral("moviesTabAction")},
+            {QStringLiteral("shows"), QStringLiteral("tvShowsTabAction")},
+            {QStringLiteral("music"), QStringLiteral("musicTabAction")},
+            {QStringLiteral("audiobooks"), QStringLiteral("audiobooksTabAction")},
+            {QStringLiteral("favorites"), QStringLiteral("favoritesTabAction")},
+            {QStringLiteral("playlists"), QStringLiteral("playlistsTabAction")},
+            {QStringLiteral("downloads"), QStringLiteral("downloadsTabAction")}};
         auto index = std::make_shared<qsizetype>(0);
         auto walk = std::make_shared<std::function<void()>>();
         *walk = [window, steps, sections, directory, index, walk, showItem] {
@@ -503,7 +518,8 @@ int main(int argc, char *argv[])
             }
             QTimer::singleShot(4000, window, [window, step, directory, index, walk] {
                 QString name = step;
-                name.replace(QRegularExpression(QStringLiteral("[^A-Za-z0-9_-]")), QStringLiteral("_"));
+                name.replace(QRegularExpression(QStringLiteral("[^A-Za-z0-9_-]")),
+                             QStringLiteral("_"));
                 window->grabWindow().save(QStringLiteral("%1/%2-%3.png")
                                               .arg(directory)
                                               .arg(*index + 1, 2, 10, QLatin1Char('0'))

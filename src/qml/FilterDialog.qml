@@ -58,27 +58,15 @@ Kirigami.Dialog {
     readonly property bool escapeUsed: pane.text !== "" || (narrow && facetOpen)
     // The same height whatever the facet: the room the window leaves is a limit too, and the opening animation starts the dialog two grid units lower, so it must not reach the window edge while it moves
     readonly property real totalHeight: Math.min(Kirigami.Units.gridUnit * 26, absoluteMaximumHeight - Kirigami.Units.gridUnit * 4)
-    readonly property real bodyHeight: Math.max(Kirigami.Units.gridUnit * 8, totalHeight - implicitHeaderHeight - implicitFooterHeight)
+    readonly property real bodyHeight: Math.max(Kirigami.Units.gridUnit * 8, totalHeight - implicitHeaderHeight)
+    // The width of the facet list, and of the room under it for Saved Filters: both rows of the body use it, so the line between the facets and their values runs unbroken from the title bar to the bottom edge
+    readonly property real facetColumnWidth: Kirigami.Units.gridUnit * 10
 
     title: i18n("Filters")
     preferredWidth: Kirigami.Units.gridUnit * 32
-    // Closing drops the choices not applied: Cancel says so
-    standardButtons: Kirigami.Dialog.Cancel
-    customFooterActions: [
-        Kirigami.Action {
-            objectName: "filterClearAction"
-            text: i18n("Clear")
-            icon.name: "edit-clear-all"
-            enabled: !dialog.draftIsEmpty
-            onTriggered: dialog.draft = dialog.emptyFilters()
-        },
-        Kirigami.Action {
-            objectName: "filterApplyAction"
-            text: i18n("Apply")
-            icon.name: "dialog-ok-apply"
-            onTriggered: dialog.apply()
-        }
-    ]
+    // The buttons are in the body (the last row), level with Saved Filters, instead of in a footer of their own
+    standardButtons: Kirigami.Dialog.NoButton
+    footer: null
 
     header: DialogTitleBar {
         title: dialog.title
@@ -721,74 +709,70 @@ Kirigami.Dialog {
 
         Keys.onEscapePressed: event => dialog.handleEscape(event)
 
+        // The Clear and Apply of the button row at the bottom
+        Kirigami.Action {
+            id: clearAction
+            objectName: "filterClearAction"
+            text: i18n("Clear")
+            icon.name: "edit-clear-all"
+            enabled: !dialog.draftIsEmpty
+            onTriggered: dialog.draft = dialog.emptyFilters()
+        }
+        Kirigami.Action {
+            id: applyAction
+            objectName: "filterApplyAction"
+            text: i18n("Apply")
+            icon.name: "dialog-ok-apply"
+            onTriggered: dialog.apply()
+        }
+
         RowLayout {
-            anchors.fill: parent
+            anchors {
+                left: parent.left
+                right: parent.right
+                top: parent.top
+                bottom: buttonRow.top
+            }
             spacing: 0
 
-            // The facet list (rows only while the dialog shows), and under it the way into the saved filters
-            ColumnLayout {
+            // The facet list (rows only while the dialog shows)
+            DialogList {
+                id: facetList
+                objectName: "filterFacetList"
+
                 Layout.fillHeight: true
                 Layout.fillWidth: dialog.narrow
-                Layout.preferredWidth: Kirigami.Units.gridUnit * 10
+                Layout.preferredWidth: dialog.facetColumnWidth
                 visible: !dialog.narrow || !dialog.facetOpen
-                spacing: 0
+                currentIndex: dialog.facetIndex
+                model: dialog.built ? dialog.facets : []
+                Accessible.name: i18nc("@info accessible name of the list of filter categories", "Filter categories")
 
-                DialogList {
-                    id: facetList
-                    objectName: "filterFacetList"
-
-                    Layout.fillHeight: true
-                    Layout.fillWidth: true
-                    currentIndex: dialog.facetIndex
-                    model: dialog.built ? dialog.facets : []
-                    Accessible.name: i18nc("@info accessible name of the list of filter categories", "Filter categories")
-
-                    Keys.onShortcutOverride: event => dialog.keepEscape(event)
-                    Keys.onUpPressed: dialog.moveFacet(-1)
-                    // Down from the last facet reaches the way into the saved filters, which Tab leaves out: Tab goes from the list to the pane
-                    Keys.onDownPressed: {
-                        if (dialog.savedKind.length > 0 && dialog.facetIndex === dialog.facets.length - 1)
-                            savedButton.forceActiveFocus(Qt.TabFocusReason);
-                        else
-                            dialog.moveFacet(1);
-                    }
-                    Keys.onReturnPressed: dialog.apply()
-                    Keys.onEnterPressed: dialog.apply()
-                    Keys.onSpacePressed: dialog.enterPane()
-                    // Right goes into the pane, as Tab does (Left in a right-to-left layout)
-                    Keys.onRightPressed: if (!dialog.rtl) dialog.enterPane()
-                    Keys.onLeftPressed: if (dialog.rtl) dialog.enterPane()
-
-                    delegate: FacetRow {
-                        anchors.left: parent?.left
-                        anchors.right: parent?.right
-                        anchors.rightMargin: facetList.barRoom
-                    }
+                Keys.onShortcutOverride: event => dialog.keepEscape(event)
+                Keys.onUpPressed: dialog.moveFacet(-1)
+                // Down from the last facet reaches the way into the saved filters, which Tab leaves out: Tab goes from the list to the pane
+                Keys.onDownPressed: {
+                    if (dialog.savedKind.length > 0 && dialog.facetIndex === dialog.facets.length - 1)
+                        savedButton.forceActiveFocus(Qt.TabFocusReason);
+                    else
+                        dialog.moveFacet(1);
                 }
+                Keys.onReturnPressed: dialog.apply()
+                Keys.onEnterPressed: dialog.apply()
+                Keys.onSpacePressed: dialog.enterPane()
+                // Right goes into the pane, as Tab does (Left in a right-to-left layout)
+                Keys.onRightPressed: if (!dialog.rtl) dialog.enterPane()
+                Keys.onLeftPressed: if (dialog.rtl) dialog.enterPane()
 
-                Kirigami.Separator {
-                    Layout.fillWidth: true
-                    visible: dialog.savedKind.length > 0
-                }
-
-                Controls.ToolButton {
-                    id: savedButton
-                    objectName: "filterSavedButton"
-                    Layout.fillWidth: true
-                    visible: dialog.savedKind.length > 0
-                    text: i18nc("@action:button", "Saved Filters…")
-                    icon.name: "bookmark-new"
-                    // Not a stop of Tab, which goes from the facet list to the pane: Down from the last facet and Up from here are the keys
-                    focusPolicy: Qt.ClickFocus
-                    onClicked: savedFilters.open()
-                    Keys.onUpPressed: facetList.forceActiveFocus(Qt.BacktabFocusReason)
-                    Keys.onReturnPressed: savedFilters.open()
-                    Keys.onEnterPressed: savedFilters.open()
-                    Keys.onShortcutOverride: event => dialog.keepEscape(event)
+                delegate: FacetRow {
+                    anchors.left: parent?.left
+                    anchors.right: parent?.right
+                    anchors.rightMargin: facetList.barRoom
                 }
             }
 
             Kirigami.Separator {
+                objectName: "filterFacetSeparator"
                 Layout.fillHeight: true
                 visible: !dialog.narrow
             }
@@ -984,6 +968,88 @@ Kirigami.Dialog {
                     opacity: 0.7
                     textFormat: Text.PlainText
                     text: dialog.note
+                }
+            }
+        }
+
+        // The last row: Saved Filters under the facet list and the buttons under the values, with the line between them running through
+        RowLayout {
+            id: buttonRow
+
+            anchors {
+                left: parent.left
+                right: parent.right
+                bottom: parent.bottom
+            }
+            spacing: 0
+
+            Item {
+                Layout.fillHeight: true
+                Layout.preferredWidth: dialog.narrow ? savedButton.implicitWidth + Kirigami.Units.largeSpacing * 2 : dialog.facetColumnWidth
+                visible: !dialog.narrow || (!dialog.facetOpen && dialog.savedKind.length > 0)
+
+                Controls.ToolButton {
+                    id: savedButton
+                    objectName: "filterSavedButton"
+
+                    anchors {
+                        left: parent.left
+                        leftMargin: Kirigami.Units.largeSpacing
+                        verticalCenter: parent.verticalCenter
+                    }
+                    visible: dialog.savedKind.length > 0
+                    text: i18nc("@action:button", "Saved Filters…")
+                    icon.name: "bookmark-new"
+                    // A narrow window has no room for the text beside the three buttons
+                    display: dialog.narrow ? Controls.AbstractButton.IconOnly : Controls.AbstractButton.TextBesideIcon
+                    Controls.ToolTip.text: text
+                    Controls.ToolTip.visible: (hovered || visualFocus) && display === Controls.AbstractButton.IconOnly
+                    Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
+                    // Not a stop of Tab, which goes from the facet list to the pane: Down from the last facet and Up from here are the keys
+                    focusPolicy: Qt.ClickFocus
+                    onClicked: savedFilters.open()
+                    Keys.onUpPressed: facetList.forceActiveFocus(Qt.BacktabFocusReason)
+                    Keys.onReturnPressed: savedFilters.open()
+                    Keys.onEnterPressed: savedFilters.open()
+                    Keys.onShortcutOverride: event => dialog.keepEscape(event)
+                }
+            }
+
+            Kirigami.Separator {
+                objectName: "filterButtonsSeparator"
+                Layout.fillHeight: true
+                visible: !dialog.narrow
+            }
+
+            Item {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                implicitWidth: buttons.implicitWidth + Kirigami.Units.largeSpacing * 2
+                implicitHeight: buttons.implicitHeight + Kirigami.Units.largeSpacing * 2
+
+                // Closing drops the choices not applied: Cancel says so
+                Controls.DialogButtonBox {
+                    id: buttons
+
+                    anchors {
+                        left: parent.left
+                        right: parent.right
+                        margins: Kirigami.Units.largeSpacing
+                        verticalCenter: parent.verticalCenter
+                    }
+                    standardButtons: Controls.DialogButtonBox.Cancel
+                    padding: 0
+                    background: null
+                    // Nothing answers while the dialog fades in or out
+                    enabled: dialog.opened
+                    onRejected: dialog.reject()
+
+                    Controls.Button {
+                        action: clearAction
+                    }
+                    Controls.Button {
+                        action: applyAction
+                    }
                 }
             }
         }

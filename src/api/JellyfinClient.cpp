@@ -458,22 +458,48 @@ bool validProviderIds(const QVariantMap &ids)
 
 constexpr qint64 MaxImageBytes = 20LL * 1024 * 1024;
 
-// The image types Jellyfin accepts here; a backdrop has an index, every other type none
-bool validImageTarget(const QString &type, int index)
+// The image types the editor writes
+bool isEditableImageType(const QString &type)
 {
-    static const QStringList types{QStringLiteral("Primary"), QStringLiteral("Backdrop"),
-                                   QStringLiteral("Logo"),    QStringLiteral("Banner"),
-                                   QStringLiteral("Thumb"),   QStringLiteral("Disc"),
-                                   QStringLiteral("Art")};
-    if (!types.contains(type))
+    static const QStringList types{
+        QStringLiteral("Primary"), QStringLiteral("Backdrop"),  QStringLiteral("Logo"),
+        QStringLiteral("Banner"),  QStringLiteral("Thumb"),     QStringLiteral("Disc"),
+        QStringLiteral("Art"),     QStringLiteral("Box"),       QStringLiteral("BoxRear"),
+        QStringLiteral("Menu"),    QStringLiteral("Screenshot")};
+    return types.contains(type);
+}
+
+// A backdrop and a screenshot hold several images told apart by an index, every other type holds one
+bool imageTypeHasIndex(const QString &type)
+{
+    return type == QLatin1String("Backdrop") || type == QLatin1String("Screenshot");
+}
+
+// A write on an image of a type with several images moves the others: while one is out, no other write on that type of the item goes out, since the server's order of the two would decide which image it touches
+bool imageWriteInFlight(const QSet<QString> &pending, const QString &itemId, const QString &type)
+{
+    if (!imageTypeHasIndex(type))
         return false;
-    return type == QLatin1String("Backdrop") ? index >= 0 && index <= 9 : index == -1;
+    const QString prefix = itemId + QLatin1Char('|') + type + QLatin1Char('|');
+    return std::ranges::any_of(pending,
+                               [&prefix](const QString &key) { return key.startsWith(prefix); });
+}
+
+// The image types Jellyfin accepts here; `appending` lets a type with several images take -1, which a write sends without an index (the server adds the image after the others)
+bool validImageTarget(const QString &type, int index, bool appending = false)
+{
+    if (!isEditableImageType(type))
+        return false;
+    if (!imageTypeHasIndex(type))
+        return index == -1;
+    return (index >= 0 && index <= MaxImageIndex) || (appending && index == -1);
 }
 
 constexpr int MaxRemoteImageOffers = 1000;
 constexpr int MaxRemoteImageUrlChars = 2048;
 const QString remoteImagesFamily = QStringLiteral("RemoteImages");
 const QString remoteImageProvidersFamily = QStringLiteral("RemoteImageProviders");
+const QString itemImagesFamily = QStringLiteral("ItemImages");
 
 QString normalizedItemId(const QString &itemId)
 {
@@ -541,13 +567,44 @@ bool remoteImageEntry(const QJsonObject &object, QString *url, QVariantMap *entr
     entry->insert(QStringLiteral("height"), clampedCount(field(QLatin1String("Height")), 65535));
     entry->insert(QStringLiteral("language"),
                   remoteImageLanguage(field(QLatin1String("Language"))));
+    // A score is out of 10, a count of likes is a whole number held to what a page can show
+    const double rating = field(QLatin1String("CommunityRating")).toDouble();
+    const bool likes = ratingType == QLatin1String("Likes");
     entry->insert(QStringLiteral("rating"),
-                  qBound(0.0, field(QLatin1String("CommunityRating")).toDouble(), 10.0));
+                  likes ? qBound(0.0, std::floor(rating), 1e6) : qBound(0.0, rating, 10.0));
     entry->insert(QStringLiteral("voteCount"),
                   clampedCount(field(QLatin1String("VoteCount")), std::numeric_limits<int>::max()));
-    const bool knownRatingType =
-        ratingType == QLatin1String("Score") || ratingType == QLatin1String("Likes");
+    const bool knownRatingType = ratingType == QLatin1String("Score") || likes;
     entry->insert(QStringLiteral("ratingType"), knownRatingType ? ratingType : QString());
+    return true;
+}
+
+// One ImageInfo of an item's image list as the caller sees it. False for an entry the editor cannot address: a type it does not write (the chapter images of a movie go this way) or a type with several images that has no valid index. The file path of the server is never copied
+bool itemImageEntry(const QJsonObject &object, QVariantMap *entry)
+{
+    const QString type = object.value(QLatin1String("ImageType")).toString();
+    if (!isEditableImageType(type))
+        return false;
+    int index = -1;
+    if (imageTypeHasIndex(type)) {
+        const QJsonValue value = object.value(QLatin1String("ImageIndex"));
+        const double raw = value.toDouble(-1);
+        if (!value.isDouble() || raw != std::floor(raw) || raw < 0 || raw > MaxImageIndex)
+            return false;
+        index = int(raw);
+    }
+    const QString tag = object.value(QLatin1String("ImageTag")).toString();
+    const bool validTag = !tag.isEmpty() && isValidImageTagToken(tag);
+    const int width = clampedCount(object.value(QLatin1String("Width")), 65535);
+    const int height = clampedCount(object.value(QLatin1String("Height")), 65535);
+    const double size = std::floor(object.value(QLatin1String("Size")).toDouble());
+    entry->clear();
+    entry->insert(QStringLiteral("imageType"), type);
+    entry->insert(QStringLiteral("imageIndex"), index);
+    entry->insert(QStringLiteral("imageTag"), validTag ? tag : QString());
+    entry->insert(QStringLiteral("width"), width);
+    entry->insert(QStringLiteral("height"), height);
+    entry->insert(QStringLiteral("size"), qlonglong(qBound(0.0, size, 1e13)));
     return true;
 }
 
@@ -2408,12 +2465,14 @@ void JellyfinClient::waitForSavedSubtitle(const QString &itemId, const QString &
 }
 
 QUrl JellyfinClient::imageUrl(const QString &itemId, const QString &imageType, int maxWidth,
-                              const QString &tag, int quality, const QString &format) const
+                              const QString &tag, int quality, const QString &format,
+                              int imageIndex) const
 {
     if (m_base.isEmpty() || !isValidJellyfinId(itemId) || !isValidImageTypeToken(imageType)
         || maxWidth <= 0 || maxWidth > 4096 || quality < 1 || quality > 100
         || (!format.isEmpty() && !isValidImageFormatToken(format))
-        || (!tag.isEmpty() && !isValidImageTagToken(tag)))
+        || (!tag.isEmpty() && !isValidImageTagToken(tag)) || imageIndex < -1
+        || imageIndex > MaxImageIndex)
         return {};
     QUrl url =
         endpoint(QStringLiteral("/Items/") + itemId + QStringLiteral("/Images/") + imageType);
@@ -2424,6 +2483,8 @@ QUrl JellyfinClient::imageUrl(const QString &itemId, const QString &imageType, i
         wire.addQueryItem(QStringLiteral("tag"), tag);
     if (!format.isEmpty())
         wire.addQueryItem(QStringLiteral("format"), format);
+    if (imageIndex >= 0)
+        wire.addQueryItem(QStringLiteral("imageIndex"), QString::number(imageIndex));
     url.setQuery(wire);
     return url;
 }
@@ -3314,11 +3375,12 @@ bool JellyfinClient::uploadImage(const QString &itemId, const QString &imageType
                                  const QUrl &fileUrl)
 {
     if (!isAuthenticated() || !isAdministrator() || !isValidJellyfinId(itemId)
-        || !validImageTarget(imageType, index) || !fileUrl.isLocalFile())
+        || !validImageTarget(imageType, index, true) || !fileUrl.isLocalFile())
         return false;
     const QString key = QString(itemId).remove(QLatin1Char('-')).toLower() + QLatin1Char('|')
                         + imageType + QLatin1Char('|') + QString::number(index);
-    if (m_imagePending.contains(key))
+    if (m_imagePending.contains(key)
+        || imageWriteInFlight(m_imagePending, normalizedItemId(itemId), imageType))
         return false;
     QFile file(fileUrl.toLocalFile());
     if (!file.open(QIODevice::ReadOnly) || file.size() <= 0 || file.size() > MaxImageBytes)
@@ -3359,7 +3421,8 @@ bool JellyfinClient::deleteImage(const QString &itemId, const QString &imageType
         return false;
     const QString key = QString(itemId).remove(QLatin1Char('-')).toLower() + QLatin1Char('|')
                         + imageType + QLatin1Char('|') + QString::number(index);
-    if (m_imagePending.contains(key))
+    if (m_imagePending.contains(key)
+        || imageWriteInFlight(m_imagePending, normalizedItemId(itemId), imageType))
         return false;
     QUrl url =
         endpoint(QStringLiteral("/Items/") + itemId + QStringLiteral("/Images/") + imageType);
@@ -3379,6 +3442,70 @@ bool JellyfinClient::deleteImage(const QString &itemId, const QString &imageType
             Q_EMIT itemImageUpdated(itemId, imageType, index);
         else
             Q_EMIT itemImageUpdateFailed(itemId, imageType, index, status);
+    });
+    return true;
+}
+
+bool JellyfinClient::moveImage(const QString &itemId, const QString &imageType, int index,
+                               int newIndex)
+{
+    if (!isAuthenticated() || !isAdministrator() || !isValidJellyfinId(itemId)
+        || !imageTypeHasIndex(imageType) || !validImageTarget(imageType, index)
+        || !validImageTarget(imageType, newIndex) || index == newIndex)
+        return false;
+    const QString prefix =
+        normalizedItemId(itemId) + QLatin1Char('|') + imageType + QLatin1Char('|');
+    if (imageWriteInFlight(m_imagePending, normalizedItemId(itemId), imageType))
+        return false;
+    QUrl url = endpoint(QStringLiteral("/Items/") + itemId + QStringLiteral("/Images/") + imageType
+                        + QLatin1Char('/') + QString::number(index) + QStringLiteral("/Index"));
+    QUrlQuery query;
+    query.addQueryItem(QStringLiteral("newIndex"), QString::number(newIndex));
+    url.setQuery(query);
+    const QString key = prefix + QString::number(index);
+    m_imagePending.insert(key);
+    QNetworkReply *reply = postEmpty(m_network, requestFor(url, true));
+    attach(reply, m_generation,
+           [this, itemId, imageType, index, newIndex, key](QNetworkReply *finished) {
+               m_imagePending.remove(key);
+               const int status =
+                   finished->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+               if (status == 401) {
+                   invalidateSession();
+                   return;
+               }
+               if (status == 204 && finished->error() == QNetworkReply::NoError)
+                   Q_EMIT itemImageUpdated(itemId, imageType, newIndex);
+               else
+                   Q_EMIT itemImageUpdateFailed(itemId, imageType, index, status);
+           });
+    return true;
+}
+
+bool JellyfinClient::fetchItemImages(const QString &itemId, int channel)
+{
+    if (m_state != State::Authenticated || !isAdministrator() || !isValidJellyfinId(itemId))
+        return false;
+    const QString key = listingKey(itemImagesFamily, channel);
+    const quint64 serial = supersedeListing(key);
+    const QUrl url = endpoint(QStringLiteral("/Items/") + itemId + QStringLiteral("/Images"));
+    QNetworkReply *reply = m_network.get(requestFor(url, true));
+    m_listingReplies.insert(key, reply);
+    attach(reply, m_generation, [this, key, itemId, channel, serial](QNetworkReply *finished) {
+        if (listingSuperseded(key, serial))
+            return;
+        QJsonArray entries;
+        if (!listingArray(finished, itemImagesFamily, channel, &entries))
+            return;
+        QVariantList images;
+        for (const QJsonValue &entry : entries) {
+            if (images.size() >= MaxItemImages)
+                break;
+            QVariantMap image;
+            if (entry.isObject() && itemImageEntry(entry.toObject(), &image))
+                images.append(image);
+        }
+        Q_EMIT itemImagesReady(itemId, images, channel);
     });
     return true;
 }
@@ -3500,14 +3627,14 @@ bool JellyfinClient::downloadRemoteImage(const QString &itemId, const QString &t
                                          quint32 offerId)
 {
     if (!isAuthenticated() || !isAdministrator() || !isValidJellyfinId(itemId)
-        || !isValidImageTypeToken(type))
+        || !isEditableImageType(type))
         return false;
     const QString item = normalizedItemId(itemId);
     const auto offer = m_remoteImageOffers.constFind(offerId);
     if (offer == m_remoteImageOffers.constEnd() || offer->itemId != item || offer->type != type)
         return false;
     const QString key = item + QLatin1Char('|') + type + QStringLiteral("|-1");
-    if (m_imagePending.contains(key))
+    if (m_imagePending.contains(key) || imageWriteInFlight(m_imagePending, item, type))
         return false;
     QUrl url =
         endpoint(QStringLiteral("/Items/") + itemId + QStringLiteral("/RemoteImages/Download"));
@@ -3844,7 +3971,8 @@ void JellyfinClient::releaseListingChannel(int channel)
           QStringLiteral("Episodes"), QStringLiteral("Genres"), QStringLiteral("Filters"),
           QStringLiteral("FiltersLegacy"), QStringLiteral("MovieRecommendations"),
           QStringLiteral("Suggestions"), QStringLiteral("Upcoming"), QStringLiteral("Studios"),
-          QStringLiteral("PlaylistEntries"), remoteImagesFamily, remoteImageProvidersFamily}) {
+          QStringLiteral("PlaylistEntries"), remoteImagesFamily, remoteImageProvidersFamily,
+          itemImagesFamily}) {
         const QString key = listingKey(family, channel);
         if (!m_listingSerials.contains(key))
             continue;

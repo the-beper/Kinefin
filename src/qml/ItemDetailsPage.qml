@@ -9,6 +9,10 @@ Kirigami.ScrollablePage {
     id: page
     objectName: "itemDetailsPage"
 
+    // The darker View background on every page: a page without a list (a plain flickable) would get the lighter Window one, and the sections would not match
+    Kirigami.Theme.colorSet: Kirigami.Theme.View
+    Kirigami.Theme.inherit: false
+
     required property ConnectionController connection
     required property string itemId
 
@@ -232,8 +236,8 @@ Kirigami.ScrollablePage {
         icon.name: "edit-image"
         visible: page.details.status === ItemDetailsModel.Ready
                  && page.connection.currentUserIsAdministrator
-                 && ["Movie", "Series", "Episode", "Season"].indexOf(page.details.type) >= 0
-        onTriggered: editImagesDialog.open()
+                 && ["Movie", "Series", "Episode", "Season", "BoxSet"].indexOf(page.details.type) >= 0
+        onTriggered: page.Window.window.openEditImages(page.details.itemId, page.details.name, page)
     }
     readonly property Kirigami.Action editSubtitlesAction: Kirigami.Action {
         objectName: "editSubtitlesAction"
@@ -774,6 +778,11 @@ Kirigami.ScrollablePage {
             if (page.sameId(itemId, page.details.itemId))
                 page.Window.window.showPassiveNotification(i18n("The metadata could not be saved: check the connection to the server and try again"));
         }
+        // The poster, the backdrop and the logo follow what the Edit Images pages above this one write
+        function onItemImageUpdated(itemId, imageType, index) {
+            if (page.sameId(itemId, page.details.itemId))
+                page.details.reload();
+        }
     }
 
     EditMetadataDialog {
@@ -785,13 +794,6 @@ Kirigami.ScrollablePage {
 
     IdentifyDialog {
         id: identifyDialog
-        connection: page.connection
-        details: page.details
-        shell: page.Window.window
-    }
-
-    EditImagesDialog {
-        id: editImagesDialog
         connection: page.connection
         details: page.details
         shell: page.Window.window
@@ -1134,7 +1136,8 @@ Kirigami.ScrollablePage {
                                     visible: titleBlock.seriesBeside
                                     opacity: 0.7
                                     textFormat: Text.PlainText
-                                    text: "›"
+                                    Accessible.ignored: true
+                                    text: Qt.application.layoutDirection === Qt.RightToLeft ? "‹" : "›"
                                 }
                             }
 

@@ -8,6 +8,10 @@ Kirigami.Page {
     id: page
     objectName: "placeholderSectionPage"
 
+    // The darker View background on every page: a page without a list (a plain flickable) would get the lighter Window one, and the sections would not match
+    Kirigami.Theme.colorSet: Kirigami.Theme.View
+    Kirigami.Theme.inherit: false
+
     // "music" or "audiobooks"
     required property string section
 

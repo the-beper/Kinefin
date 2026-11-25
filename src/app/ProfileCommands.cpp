@@ -24,6 +24,13 @@ const QString kCreate = QStringLiteral("create-profile");
 const QString kSetDefault = QStringLiteral("set-default-profile");
 const QString kDelete = QStringLiteral("delete-profile");
 
+int failed(QTextStream &err, const QString &message)
+{
+    err << "kinefin: " << message << Qt::endl;
+    return 1;
+}
+} // namespace
+
 QString resolveProfile(const ProfileIndexData &data, const QString &idOrName)
 {
     for (const ProfileEntry &entry : data.profiles) {
@@ -36,13 +43,6 @@ QString resolveProfile(const ProfileIndexData &data, const QString &idOrName)
     }
     return {};
 }
-
-int failed(QTextStream &err, const QString &message)
-{
-    err << "kinefin: " << message << Qt::endl;
-    return 1;
-}
-} // namespace
 
 void addProfileOptions(QCommandLineParser &parser)
 {

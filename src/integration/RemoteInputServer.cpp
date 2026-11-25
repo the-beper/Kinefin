@@ -538,6 +538,9 @@ bool RemoteInputServer::dispatchNavigation(Qt::Key key, const QString &text, boo
         m_suppressRepeats = false;
     const QPointer<QWindow> window = userWindow();
     auto *quick = qobject_cast<QQuickWindow *>(window.data());
+    // The window shows its focus ring from now on (it declares the property; a click clears it)
+    if (quick && quick->metaObject()->indexOfProperty("keyboardDriven") >= 0)
+        quick->setProperty("keyboardDriven", true);
     const QPointer<QQuickItem> focus = quick ? quick->activeFocusItem() : nullptr;
     // A move that enters a list or grid from outside holds back the repeats of the same press, so the row it reaches stays
     const auto moveFocus = [this, focus, quick, autoRepeat](NavDirection direction) {

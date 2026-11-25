@@ -529,6 +529,29 @@ class TestPlayerController : public QObject {
         QTRY_COMPARE(chain.server.playbackInfoRequests, requests + 1);
     }
 
+    void theShellIsToldOfTheTicksOfAFrameRateOnlyAtTenHertz()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        QVERIFY(chain.episodeThreeOpened());
+        auto *mpv = chain.engine()->controller();
+        Q_EMIT mpv->propertyChanged(QStringLiteral("duration"), 1800.0);
+        // Let a notice of the setup go by
+        QTest::qWait(250);
+        QSignalSpy notices(&chain.controller, &PlayerController::changed);
+        // Sixty ticks in a burst, as a video of 60 frames a second delivers them in a second: the first goes out, a trailing one follows, nothing in between
+        for (int i = 0; i < 60; ++i)
+            Q_EMIT mpv->propertyChanged(QStringLiteral("time-pos"), 100 + i / 60.0);
+        QCOMPARE(notices.size(), 1);
+        QTRY_COMPARE_WITH_TIMEOUT(notices.size(), 2, 1000);
+        // Nothing is pending after the trailing notice
+        QTest::qWait(250);
+        QCOMPARE(notices.size(), 2);
+        // The last tick of a burst is not lost
+        const qint64 expected = qRound64((100 + 59 / 60.0) * 10'000'000);
+        QVERIFY(qAbs(chain.controller.positionTicks() - expected) < 10'000);
+    }
+
     void aMovieKeepsNoSeriesChoice()
     {
         Chain chain;

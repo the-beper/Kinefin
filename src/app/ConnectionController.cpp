@@ -1276,6 +1276,37 @@ bool ConnectionController::deleteImage(const QString &itemId, const QString &ima
     return m_state == Authenticated && m_client.deleteImage(itemId, imageType, index);
 }
 
+bool ConnectionController::moveImage(const QString &itemId, const QString &imageType, int index,
+                                     int newIndex)
+{
+    return m_state == Authenticated && m_client.moveImage(itemId, imageType, index, newIndex);
+}
+
+int ConnectionController::takeImagesChannel()
+{
+    if (m_nextImagesChannel >= ItemDetailsModel::FirstChannel - 1)
+        m_nextImagesChannel = EditImagesModel::FirstChannel;
+    return m_nextImagesChannel++;
+}
+
+EditImagesModel *ConnectionController::createEditImages(const QString &itemId, QObject *owner)
+{
+    if (m_state != Authenticated || !m_client.isAdministrator() || !owner
+        || !isValidJellyfinId(itemId))
+        return nullptr;
+    return new EditImagesModel(&m_client, itemId, takeImagesChannel(), owner);
+}
+
+RemoteImagesModel *ConnectionController::createRemoteImages(const QString &itemId,
+                                                            const QString &imageType,
+                                                            QObject *owner)
+{
+    if (m_state != Authenticated || !m_client.isAdministrator() || !owner
+        || !isValidJellyfinId(itemId))
+        return nullptr;
+    return new RemoteImagesModel(&m_client, itemId, imageType, takeImagesChannel(), owner);
+}
+
 bool ConnectionController::uploadSubtitle(const QString &itemId, const QUrl &fileUrl,
                                           const QString &language, bool forced)
 {

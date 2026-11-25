@@ -9,6 +9,10 @@ Kirigami.ScrollablePage {
     id: page
     objectName: "resumeItemsPage"
 
+    // The darker View background on every page: a page without a list (a plain flickable) would get the lighter Window one, and the sections would not match
+    Kirigami.Theme.colorSet: Kirigami.Theme.View
+    Kirigami.Theme.inherit: false
+
     required property ConnectionController connection
 
     readonly property ResumeItemsModel model: connection.resumeItems
@@ -76,6 +80,8 @@ Kirigami.ScrollablePage {
             atStart: grid.atYBeginning
         }
         objectName: "resumeItemsGrid"
+        // Room under the bar: the rows scroll up to its line, but open clear of it
+        topMargin: Kirigami.Units.largeSpacing * 2
 
         // Wide tiles of about fourteen grid units, like the Home row
         readonly property real usableWidth: Math.max(0, width - leftMargin)
