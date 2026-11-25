@@ -3532,6 +3532,21 @@ QQuickItem *openEditImagesPage(Ui &ui, bool waitForList = true)
     return page;
 }
 
+// True once a control that takes the focus stands above `view` in the page, clear of the rail: the bar of a page builds its buttons a little after the page shows, and a slow runner can press Up before that
+bool controlAbove(Ui &ui, QQuickItem *view)
+{
+    const qreal top = view->mapToScene(QPointF(0, 0)).y();
+    const qreal railEdge = ui.sidebarWidth();
+    for (QQuickItem *item : allItems(ui.window->contentItem())) {
+        if (item == view || !item->isVisible() || !item->isEnabled() || !item->activeFocusOnTab())
+            continue;
+        const QRectF rect = item->mapRectToScene(item->boundingRect());
+        if (rect.bottom() <= top && rect.left() >= railEdge - 0.5)
+            return true;
+    }
+    return false;
+}
+
 // The question that asks before an image takes the place of one the item has, answered with Replace; the server has been asked for `downloadsBefore` downloads so far, none for this choice
 bool confirmReplacing(Ui &ui, qsizetype downloadsBefore = 0)
 {
@@ -13013,6 +13028,7 @@ class TestUiPages : public QObject {
         QCOMPARE(grid->property("currentIndex").toInt(), 0);
         Kinefin::RemoteInputServer input(QString(), QStringLiteral("test"));
         input.setWindow(ui.window);
+        QTRY_VERIFY(controlAbove(ui, grid));
         QVERIFY(input.dispatchKeycode(QStringLiteral("up")));
         QQuickItem *now = ui.window->activeFocusItem();
         QVERIFY(now && now != grid);
@@ -13037,6 +13053,7 @@ class TestUiPages : public QObject {
         Kinefin::RemoteInputServer input(QString(), QStringLiteral("test"));
         input.setWindow(ui.window);
         // Up leaves the grid for the toolbar above it, Down comes back
+        QTRY_VERIFY(controlAbove(ui, grid));
         QVERIFY(input.dispatchKeycode(QStringLiteral("up")));
         QTRY_VERIFY(!grid->hasActiveFocus());
         QVERIFY(input.dispatchKeycode(QStringLiteral("down")));
