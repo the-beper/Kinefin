@@ -12098,6 +12098,18 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(ui.window->activeFocusItem()
                     && ui.window->activeFocusItem()->objectName().startsWith(
                         QLatin1String("libraryCard_")));
+        QQuickItem *builtList = ui.item(QStringLiteral("homeRowList_0"));
+        QVERIFY(builtList);
+        QTRY_VERIFY([&] {
+            for (int at = 0; at < qMin(2, builtList->property("count").toInt()); ++at) {
+                QQuickItem *card = nullptr;
+                if (!QMetaObject::invokeMethod(builtList, "itemAtIndex",
+                                               Q_RETURN_ARG(QQuickItem *, card), Q_ARG(int, at))
+                    || !card)
+                    return false;
+            }
+            return builtList->property("count").toInt() > 0;
+        }());
         // Down from a tile enters the rows below: a card of the row takes the focus
         QVERIFY(input.dispatchKeycode(QStringLiteral("down")));
         QTRY_VERIFY2(!focusedRow().isEmpty(), qPrintable(focusPath()));
