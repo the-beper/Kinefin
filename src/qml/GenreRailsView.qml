@@ -9,7 +9,7 @@ import org.kde.kirigami as Kirigami
 ListView {
     id: view
     // What scrolls under the page row fades into it instead of being cut by its edge
-    TopFade {
+    TopShadow {
         parent: view
         z: 1
         atStart: view.atYBeginning
@@ -58,6 +58,8 @@ ListView {
 
     model: view.rails
     spacing: Kirigami.Units.largeSpacing
+    // Room under the bar: the rails scroll up to its line, but open clear of it
+    topMargin: Kirigami.Units.largeSpacing * 2
     clip: true
     boundsBehavior: Flickable.StopAtBounds
     currentIndex: 0
@@ -152,9 +154,9 @@ ListView {
             }
 
             Controls.Button {
-                flat: true
                 visible: row.hasCards
                 text: i18n("Show All")
+                icon.name: "go-next"
                 // The name is server text: only the accessible name carries it, never the control text
                 Accessible.name: i18nc("accessible name of the button that opens the grid of one genre, %1 is the genre", "Show All in %1", row.name)
                 onClicked: view.showAllRequested(row.genreId)

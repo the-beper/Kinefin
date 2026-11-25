@@ -19,6 +19,7 @@ done
 
 exec podman run --rm -i $tty --userns=keep-id --network=host --security-opt label=disable \
     -e QT_QPA_PLATFORM=offscreen \
+    -e LANG=C.UTF-8 \
     -v "$root:$root" -w "$root" \
     -v kinefin-buildtmp:/buildtmp \
     "$@"

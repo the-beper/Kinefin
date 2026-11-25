@@ -24,7 +24,9 @@ Kirigami.PromptDialog {
     readonly property bool failed: plan.state === "failed"
 
     title: i18n("Download All")
+    // One width for every state: a long message wraps inside it instead of widening the dialog
     preferredWidth: Kirigami.Units.gridUnit * 26
+    maximumWidth: Kirigami.Units.gridUnit * 26
     standardButtons: Kirigami.Dialog.Cancel
     customFooterActions: [
         Kirigami.Action {
@@ -72,7 +74,7 @@ Kirigami.PromptDialog {
                 return i18n("There are no episodes to download");
             if (dialog.plan.count === 0) {
                 if (dialog.plan.watchedSkipped > 0 && dialog.plan.alreadyDownloaded === 0)
-                    return i18n("Every episode has been watched: switch off Only unwatched episodes to download them again");
+                    return i18np("The episode has been watched", "All %1 episodes have been watched", dialog.plan.total);
                 if (dialog.plan.alreadyDownloaded > 0 && dialog.plan.watchedSkipped === 0)
                     return i18n("Every episode is already on this device");
                 if (dialog.plan.alreadyDownloaded + dialog.plan.watchedSkipped > 0)
@@ -93,20 +95,22 @@ Kirigami.PromptDialog {
     }
 
     Controls.Label {
+        objectName: "downloadAllWatchedHint"
+        Layout.fillWidth: true
+        // Under the check box that causes it: only the watched ones are left out and nothing else is there to download
+        visible: dialog.ready && dialog.plan.count === 0 && dialog.plan.watchedSkipped > 0 && dialog.plan.alreadyDownloaded === 0
+        wrapMode: Text.Wrap
+        textFormat: Text.PlainText
+        opacity: 0.7
+        text: i18n("Switch off Only unwatched episodes to download them again")
+    }
+
+    Controls.Label {
         objectName: "downloadAllTruncated"
         Layout.fillWidth: true
         visible: dialog.ready && dialog.plan.truncated
         wrapMode: Text.Wrap
         textFormat: Text.PlainText
         text: i18np("Only the first episode is included", "Only the first %1 episodes are included", dialog.plan.limit)
-    }
-
-    MessageBox {
-        objectName: "downloadAllMetered"
-        Layout.fillWidth: true
-        Layout.topMargin: Kirigami.Units.largeSpacing
-        visible: dialog.ready && dialog.plan.count > 0 && dialog.downloads.metered
-        type: Kirigami.MessageType.Warning
-        text: i18n("This network may charge for data")
     }
 }

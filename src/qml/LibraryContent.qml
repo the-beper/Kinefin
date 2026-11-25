@@ -138,7 +138,7 @@ Item {
         settingCurrent = false;
         userMoved = false;
         view.positionViewAtBeginning();
-        view.contentY = view.originY;
+        view.contentY = view.originY - view.topMargin;
     }
 
     Connections {
@@ -165,7 +165,6 @@ Item {
         // The user takes the view over
         function onMovementStarted() {
             topFling.stop();
-            content.userMoved = true;
         }
     }
 
@@ -174,7 +173,7 @@ Item {
         if (!view)
             return;
         view.cancelFlick();
-        const top = view.originY;
+        const top = view.originY - view.topMargin;
         if (view.contentY - top > view.height * 2)
             view.contentY = top + view.height * 2;
         topFling.from = view.contentY;
@@ -193,7 +192,6 @@ Item {
                 content.settingCurrent = true;
                 content.view.currentIndex = 0;
                 content.settingCurrent = false;
-                content.userMoved = true;
             }
         }
     }
@@ -249,6 +247,8 @@ Item {
         GridView {
             id: grid
             objectName: "libraryGrid"
+            // Room under the bar: the rows scroll up to its line, but open clear of it
+            topMargin: Kirigami.Units.largeSpacing * 2
 
             // A narrow window must be allowed a single legible poster instead of squeezing two cards below their minimum useful width
             readonly property int columns: Math.max(1, Math.floor(usableWidth / (Kirigami.Units.gridUnit * (content.tileUnits[content.listModel.imageType] ?? 10))))
@@ -268,6 +268,14 @@ Item {
             currentIndex: 0
             Accessible.role: Accessible.List
             Accessible.name: content.accessibleName
+
+            // A bare view scrolls a few pixels a notch: the same step as the page rows
+            Kirigami.WheelHandler {
+                target: grid
+                filterMouseEvents: true
+                keyNavigationEnabled: false
+                verticalStepSize: Kirigami.Units.gridUnit * 4
+            }
 
             Controls.ScrollBar.vertical: Controls.ScrollBar {
                 id: vbar
@@ -321,6 +329,8 @@ Item {
         ListView {
             id: list
             objectName: "libraryList"
+            // Room under the bar: the rows scroll up to its line, but open clear of it
+            topMargin: Kirigami.Units.largeSpacing * 2
 
             clip: true
             boundsBehavior: Flickable.StopAtBounds
@@ -330,6 +340,14 @@ Item {
             currentIndex: 0
             Accessible.role: Accessible.List
             Accessible.name: content.accessibleName
+
+            // A bare view scrolls a few pixels a notch: the same step as the page rows
+            Kirigami.WheelHandler {
+                target: list
+                filterMouseEvents: true
+                keyNavigationEnabled: false
+                verticalStepSize: Kirigami.Units.gridUnit * 4
+            }
 
             Controls.ScrollBar.vertical: Controls.ScrollBar {}
 
@@ -353,8 +371,8 @@ Item {
         }
     }
 
-    TopFade {
-        objectName: "libraryTopFade"
+    TopShadow {
+        objectName: "libraryTopShadow"
         atStart: content.atStart
     }
 

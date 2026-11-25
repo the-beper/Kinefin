@@ -9,6 +9,10 @@ Kirigami.ScrollablePage {
     id: page
     objectName: "personPage"
 
+    // The darker View background on every page: a page without a list (a plain flickable) would get the lighter Window one, and the sections would not match
+    Kirigami.Theme.colorSet: Kirigami.Theme.View
+    Kirigami.Theme.inherit: false
+
     required property ConnectionController connection
     required property string personName
 
@@ -76,12 +80,14 @@ Kirigami.ScrollablePage {
     GridView {
         id: grid
         // What scrolls under the page row fades into it instead of being cut by its edge
-        TopFade {
+        TopShadow {
             parent: grid
             z: 1
             atStart: grid.atYBeginning
         }
         objectName: "personItemsGrid"
+        // Room under the bar: the rows scroll up to its line, but open clear of it
+        topMargin: Kirigami.Units.largeSpacing * 2
 
         // Wide tiles of about fourteen grid units, like the Home row
         readonly property real usableWidth: Math.max(0, width - leftMargin)

@@ -37,9 +37,9 @@ Kirigami.ApplicationWindow {
     readonly property bool offline: connection.state === ConnectionController.Offline
     // A server is chosen while its sign-in or a session is in progress: the main menu offers Switch Server for it
     readonly property bool serverChosen: connection.state !== ConnectionController.Idle
-    // The header modes in pixels: Compact below the narrowest bar that keeps the box and the queue (about 30 grid units), Wide from 36 grid units; tests derive their window sizes from these
-    readonly property int compactLimit: Math.ceil(shellHeader.minimumBarWidth)
-    // The smallest window: the Compact header with every tab fits, and the pages keep room to show something
+    // The modes in pixels: Compact below the width where the sidebar's rail leaves a page as wide as the smallest window (the sidebar gives way to the header and its drawer), Wide from 36 grid units; tests derive their window sizes from these
+    readonly property int compactLimit: Math.ceil(shellSidebar.railWidth + minimumWidth)
+    // The smallest window: the Compact header with its navigation button fits, and the pages keep room to show something
     minimumWidth: Kirigami.Units.gridUnit * 24
     minimumHeight: Kirigami.Units.gridUnit * 20
     readonly property int wideLimit: Kirigami.Units.gridUnit * 36
@@ -49,7 +49,7 @@ Kirigami.ApplicationWindow {
     // attached Window.window kept its load-time value and never followed a resize
     readonly property bool compactHeader: width < compactLimit
     readonly property bool wideHeader: width >= wideLimit
-    // The tab the first page of the stack stands for: "home", "movies", "tvshows", "favorites" or "playlists"; empty on the sign-in and server pages and for a library opened from a tile. The depth and the current item change with every push and clear, and the first page is read after them
+    // The tab the first page of the stack stands for: "home", "movies", "tvshows", "music", "audiobooks", "favorites", "playlists" or "downloads"; empty on the sign-in and server pages and for a library opened from a tile. The depth and the current item change with every push and clear, and the first page is read after them
     readonly property string rootTab: pageStack.depth > 0 && pageStack.currentItem ? tabOfPage(pageStack.get(0)) : ""
     // The scroll position and the current tile of each tab left behind, so a tab comes back as the user left it; dropped with the session
     readonly property var tabState: ({})
@@ -101,18 +101,67 @@ Kirigami.ApplicationWindow {
     // The tab switch slides the whole row: Kirigami binds the transform and the opacity of every page, so a page is never the target
     pageStack.transform: Translate { id: tabShift }
     pageStack.globalToolBar.showNavigationButtons: Kirigami.ApplicationHeaderStyle.ShowBackButton
+    // The sidebar takes the leading edge of the window: the page row starts after it. A change of this margin resizes the row, which ends a slide in progress, so it follows the window mode only
+    pageStack.anchors.leftMargin: shellSidebar.inlineWidth
 
-    // The bar with the menus and the Home tab; it spans the window above the pages
+    // The width the sidebar takes inline (0 in a Compact window and while there is nothing to choose from), which the player page reaches out over
+    readonly property real sidebarWidth: shellSidebar.inlineWidth
+    // Signed out (the server and sign-in pages) the window has no rail and no bar: the main menu button stands alone in the top corner, so that Settings, About and Switch Server stay in reach
+    readonly property bool cornerMenu: !startupVisible && !navigation.navigable && !offline
+    readonly property Item cornerMenuSlot: cornerSlot
+    // Where the header's menu button stands while the sidebar shows, and the SyncPlay group menu the sidebar's entry opens: both belong to the header
+    readonly property Item sidebarUserSlot: shellSidebar.userSlot
+    readonly property bool groupMenuOpened: shellHeader.groupMenuOpened
+    function openGroupMenu(button) {
+        shellHeader.openGroupMenu(button);
+    }
+
+    // The sections of the shell with their actions and shortcuts; the sidebar draws them
+    ShellNavigation {
+        id: navigation
+
+        shell: window
+    }
+
+    // The bar of a window without the sidebar (Compact, or offline); with the sidebar showing, and signed out, it is hidden and takes no height, and the pages start at the top. It spans the window above the pages
     header: ShellHeader {
         id: shellHeader
-        // It never leaves the layout, since any resize of the page row ends Kirigami's slide at once: the player page reaches up under it, and it fades with the player page's slide and lets the clicks through to it while the player is in front
+        // It never leaves the layout while it shows, since any resize of the page row ends Kirigami's slide at once: the player page reaches up under it, and it fades with the player page's slide and lets the clicks through to it while the player is in front
         opacity: window.headerOpacity
         enabled: !window.playbackPageShowing
         // Covered by the player, it is not read out over it either
         Accessible.ignored: window.playbackPageShowing
-        visible: !window.startupVisible
+        // Signed out (the server and sign-in pages) there is nothing for it to hold: no sections to open, no search, no queue
+        visible: !window.startupVisible && window.sidebarWidth === 0 && !window.cornerMenu
 
         shell: window
+        navigation: navigation
+        onNavigationRequested: shellSidebar.openDrawer()
+    }
+
+    // The corner of a window with no bar: the header's menu button moves in here. Above the pages, below the startup cover
+    RowLayout {
+        id: cornerSlot
+        objectName: "cornerMenuSlot"
+
+        z: 3
+        visible: window.cornerMenu
+        anchors {
+            top: parent.top
+            right: parent.right
+            topMargin: Kirigami.Units.smallSpacing
+            rightMargin: Kirigami.Units.largeSpacing
+        }
+    }
+
+    // The rail down the leading edge of the window, from its top, and in a Compact window the drawer the header's button opens. It fades out with the header while the player is in front
+    ShellSidebar {
+        id: shellSidebar
+
+        shell: window
+        navigation: navigation
+        headerHeight: shellHeader.height
+        onDrawerDismissed: shellHeader.focusNavigationButton()
     }
 
     // The initial shell never flashes an empty page. The delay is short enough
@@ -199,6 +248,13 @@ Kirigami.ApplicationWindow {
                 onClicked: window.connection.cancel()
             }
         }
+    }
+
+    // Set by the keys (and by a gamepad or a remote) and cleared by a click or a touch: the focus ring of cards and rows shows only while it is true, so a page that opens with a current item lights nothing until the user moves
+    property bool keyboardDriven: false
+    InputModality {
+        objectName: "inputModality"
+        target: window
     }
 
     // The back button of the mouse goes back like Esc; the missing forward button is a deliberate exception
@@ -300,7 +356,7 @@ Kirigami.ApplicationWindow {
             if (playbackMode === "full")
                 playerAction(name === "previoustab" ? "previous" : "next");
             else
-                shellHeader.switchRelativeTab(name === "previoustab" ? -1 : 1);
+                navigation.switchRelativeTab(name === "previoustab" ? -1 : 1);
             break;
         case "previouschapter":
         case "nextchapter":
@@ -340,7 +396,7 @@ Kirigami.ApplicationWindow {
         onActivated: window.expandPlayer()
     }
 
-    // The page that comes to the front takes the keyboard focus, so Tab and the arrows work without a mouse click first; a page that already focused one of its own fields (sign-in, search) keeps that focus
+    // The page that comes to the front takes the keyboard focus, so Tab and the arrows work without a mouse click first; a page that already focused one of its own fields (sign-in) keeps that focus
     function focusIsIn(page) {
         for (let item = window.activeFocusItem; item; item = item.parent) {
             if (item === page)
@@ -361,7 +417,7 @@ Kirigami.ApplicationWindow {
     }
     onActiveFocusItemChanged: {
         const page = pageStack.currentItem;
-        if (!page || !activeFocusItem || openingSearchFromHeader || !focusIsIn(page))
+        if (!page || !activeFocusItem || !focusIsIn(page))
             return;
         // The tab stop that holds the focus (a list, a grid, a field), not the tile inside it that comes and goes
         let control = activeFocusItem;
@@ -370,9 +426,6 @@ Kirigami.ApplicationWindow {
         if (control && control !== page)
             lastFocus.set(page, control);
     }
-    // True while the search page the header box opened takes its place: Kirigami's ScrollablePage
-    // focuses its own scroll view while it is created, and neither that nor the page it belongs to may keep or remember the keyboard
-    property bool openingSearchFromHeader: false
     function applyPageFocus(page) {
         // Back goes to the control the page last had the focus in, a new page to its main control, any other page keeps a field it focused itself
         const remembered = lastFocus.get(page);
@@ -386,8 +439,8 @@ Kirigami.ApplicationWindow {
     function focusCurrentPage() {
         forgetLeftPages();
         const page = pageStack.currentItem;
-        // Typing in the header box is never interrupted, not even by the page the typing itself opened
-        if (!page || shellHeader.searchFieldHasFocus)
+        // Typing in the search popup is never interrupted: its field and its cards hold the keyboard while it shows
+        if (!page || searchPopup.visible)
             return;
         applyPageFocus(page);
     }
@@ -402,10 +455,8 @@ Kirigami.ApplicationWindow {
             window.shownPageIsPlayer = window.pageStack.currentItem?.objectName === "playerPage";
             // A page a Back left hidden above the current one is taken once the stack settles
             window.settlePageRowLater();
-            // The search page leaving the stack takes its term with it: the header box empties with the page.
-            // A page Back just left stays above the current one until the slide ends, and is not a page in the stack any more
-            if (window.searchPageIndex() < 0 && window.connection.search.term.length > 0)
-                window.connection.search.term = "";
+            // A page that comes to the front (a result, Play from a card menu, a SyncPlay item) ends the search: the popup would cover it
+            searchPopup.close();
             Qt.callLater(window.focusCurrentPage);
         }
     }
@@ -910,16 +961,6 @@ Kirigami.ApplicationWindow {
         }
     }
 
-    // A manual download starts at once on an unmetered or unknown network, and asks first when the network may charge for it
-    function askDownload(itemId) {
-        if (!connection.downloads.metered) {
-            connection.downloads.downloadItem(itemId);
-            return;
-        }
-        meteredDownloadDialog.itemId = itemId;
-        meteredDownloadDialog.open();
-    }
-
     // The record of the last local playback that started, overwritten by the next one
     property var localOwner: null
 
@@ -1075,15 +1116,6 @@ Kirigami.ApplicationWindow {
         pageStack.push(Qt.resolvedUrl("PersonPage.qml"), { connection: connection, personName: personName });
     }
 
-    // The stack position of the search page up to the one in front, -1 when it is not there
-    function searchPageIndex() {
-        for (let i = 0; i <= pageStack.currentIndex; ++i) {
-            if (pageStack.get(i)?.objectName === "searchPage")
-                return i;
-        }
-        return -1;
-    }
-
     // The page above the first one that holds changes the user has not saved (the User entry of Settings), or null
     function unsavedPage() {
         for (let i = 1; i < pageStack.depth; ++i) {
@@ -1110,86 +1142,37 @@ Kirigami.ApplicationWindow {
             popTo(base, animated);
     }
 
-    // The first keystroke of the header box on a type tab pops the pages above it: the box keeps the keyboard, which the page it pops back to would take
-    function popToBaseWhileTyping() {
-        const wasTyping = shellHeader.searchFieldHasFocus;
-        popToBase();
-        if (wasTyping)
-            Qt.callLater(shellHeader.refocusSearchField);
-    }
-
-    // Ctrl+F: a search page already in the stack is brought back as it is, a new one starts from an empty term above Home.
-    // The header box takes the focus (the page's own field in Compact mode, where the box hides)
+    // Ctrl+F, the Search entry of the rail and the search button of a Compact window: the search popup opens over the page in front with the term it had, and its field takes the keyboard. A player page in front goes first, its video to the mini player, as for any page change from it
     function openSearch() {
         if (connection.state !== ConnectionController.Authenticated)
             return;
-        // A search page already in the stack is brought back without dropping what lies below it
-        if ((isTypeTab(rootTab) || searchPageIndex() < 0) && askBeforeLeaving(() => openSearch()))
+        if (searchPopup.visible) {
+            searchPopup.focusSearchField();
             return;
-        if (isTypeTab(rootTab)) {
-            // On a type tab the box searches that tab's own list: the pages above the tab give way, and no search page opens
+        }
+        if (playbackPageShowing) {
+            if (askBeforeLeaving(() => openSearch()))
+                return;
             popToBase();
-            const tabPage = pageStack.get(0);
+            // The page change above has run its handlers by now: the popup opens after them, or the page in front would close it
             Qt.callLater(() => {
-                if (compactHeader)
-                    tabPage?.focusSearchField();
-                else
-                    shellHeader.focusSearchField();
+                if (signedIn)
+                    searchPopup.open();
             });
             return;
         }
-        let page = null;
-        const index = searchPageIndex();
-        if (index >= 0) {
-            page = pageStack.get(index);
-            if (index < pageStack.currentIndex)
-                popTo(page);
-        } else {
-            popToBase();
-            connection.search.clear();
-            page = pageStack.push(Qt.resolvedUrl("SearchPage.qml"), { connection: connection });
-        }
-        Qt.callLater(() => {
-            if (compactHeader)
-                page?.focusSearchField();
-            else
-                shellHeader.focusSearchField();
-        });
+        searchPopup.open();
     }
 
-    // The first keystroke in the header box: the page opens above the current one, and the term the keystroke already set stays
-    function openSearchIfMissing() {
-        if (connection.state !== ConnectionController.Authenticated)
-            return;
-        const index = searchPageIndex();
-        if (index >= 0) {
-            if (index < pageStack.currentIndex)
-                popTo(pageStack.get(index));
-            return;
+    // The search of the libraries, opened only by openSearch(); a result opens its details page above the page in front
+    SearchPopup {
+        id: searchPopup
+        connection: window.connection
+        onItemChosen: itemId => {
+            window.openItem(itemId);
+            Qt.callLater(window.focusCurrentPage);
         }
-        // While the box holds the keyboard, the page it opens must not take it: Kirigami's
-        // ScrollablePage focuses its own scroll view while it is created, so the box takes it back after
-        const wasTyping = shellHeader.searchFieldHasFocus;
-        if (wasTyping) {
-            openingSearchFromHeader = true;
-            pageStack.push(Qt.resolvedUrl("SearchPage.qml"), { connection: connection });
-            Qt.callLater(() => {
-                shellHeader.refocusSearchField();
-                openingSearchFromHeader = false;
-            });
-            return;
-        }
-        popToBase();
-        pageStack.push(Qt.resolvedUrl("SearchPage.qml"), { connection: connection });
-    }
-
-    // Down from the header box goes to the first row of the results that has cards
-    function searchResultsDown() {
-        const page = pageStack.currentItem;
-        if (page?.objectName === "searchPage")
-            page.focusFirstResults();
-        else if (page?.objectName === "libraryPage" && page.tabType !== "")
-            page.focusPrimary();
+        onFocusLost: Qt.callLater(window.focusCurrentPage)
     }
 
     // The genre rails of the library page that asks (its model: a tab or a collections library) go above it, and the page stays below
@@ -1293,7 +1276,7 @@ Kirigami.ApplicationWindow {
         // A refused send means a write for the item already runs: its answer updates the card
         onFavoriteRequested: (targetId, favorite) => window.connection.setFavorite(targetId, favorite)
         onPlayedRequested: (targetId, played) => window.setItemPlayed(targetId, played, cardMenu.positionTicks, cardMenu.played)
-        onDownloadRequested: targetId => window.askDownload(targetId)
+        onDownloadRequested: targetId => window.connection.downloads.downloadItem(targetId)
         onCancelDownloadRequested: targetId => window.connection.downloads.removeCurrentDownload(targetId)
         onRemoveDownloadRequested: targetId => window.confirmRemoveDownload(targetId)
         onAddToPlaylistRequested: targetId => window.addToPlaylist(targetId)
@@ -1363,6 +1346,9 @@ Kirigami.ApplicationWindow {
 
     // The section the page in front belongs to: the header marks it (a tab, the main menu button, the queue button); a page opened above a type tab belongs to that tab, and one opened from a collections tile to that library; the Settings page belongs to no tab, and the header search is global there and on the Favorites and Playlists tabs. Settings needs no session, so it is marked whatever the connection is
     readonly property string currentSection: {
+        // The search popup, while it shows, is the section the rail marks
+        if (searchPopup.visible)
+            return "search";
         if (pageStack.currentItem?.objectName === "settingsPage")
             return "settings";
         // The automatic downloads page opened from Settings belongs to it
@@ -1375,26 +1361,9 @@ Kirigami.ApplicationWindow {
             if (page?.objectName === "libraryPage" && page.tabType === "")
                 return "library:" + connection.library.libraryId;
         }
-        switch (pageStack.currentItem?.objectName) {
-        case "searchPage":
-            return "search";
-        case "queuePage":
+        if (pageStack.currentItem?.objectName === "queuePage")
             return "queue";
-        }
         return rootTab !== "" ? rootTab : "home";
-    }
-
-    // True while the Settings page is in the stack, whatever page lies above it (the search page the header box opens included): the box stays on the global search then, or the page it opens would turn it back to the list of the tab at the root and pop everything
-    readonly property bool globalSearchPage: {
-        // The current item is read for the dependency: the stack changes with every push and pop
-        if (!pageStack.currentItem)
-            return false;
-        for (let i = 1; i < pageStack.depth; ++i) {
-            const name = pageStack.get(i)?.objectName;
-            if (name === "settingsPage")
-                return true;
-        }
-        return false;
     }
 
     function isTypeTab(name) {
@@ -1413,6 +1382,8 @@ Kirigami.ApplicationWindow {
             return "playlists";
         case "downloadsPage":
             return "downloads";
+        case "placeholderSectionPage":
+            return page.section;
         }
         return "";
     }
@@ -1422,7 +1393,7 @@ Kirigami.ApplicationWindow {
         return name === "movies" ? connection.movieLibraries.length > 0 : connection.showLibraries.length > 0;
     }
 
-    // The tab becomes the first page of the stack: what was there goes, the tab it leaves is remembered, and the one it comes back to is restored. A type tab opens its list (the stored library when `libraryId` is empty, else that library, which a Home tile persists); the tab already in front only drops the pages above it. Favorites and Playlists are root tabs too and open at the top. `recentlyAdded` opens the type tab on the one-off Recently Added view instead of the stored one
+    // The tab becomes the first page of the stack: what was there goes, the tab it leaves is remembered, and the one it comes back to is restored. A type tab opens its list (the stored library when `libraryId` is empty, else that library, which a Home tile persists); the tab already in front only drops the pages above it. Favorites, Playlists, Music and Audiobooks (a placeholder page) are root tabs too and open at the top. `recentlyAdded` opens the type tab on the one-off Recently Added view instead of the stored one
     function openTab(name, libraryId) {
         openTabScope(name, libraryId, false);
     }
@@ -1479,18 +1450,20 @@ Kirigami.ApplicationWindow {
             page = pageStack.push(Qt.resolvedUrl("PlaylistsPage.qml"), { connection: connection, shell: window });
         else if (name === "downloads")
             page = pageStack.push(Qt.resolvedUrl("DownloadsPage.qml"), { connection: connection });
+        else if (name === "music" || name === "audiobooks")
+            page = pageStack.push(Qt.resolvedUrl("PlaceholderSectionPage.qml"), { section: name });
         else
             page = pageStack.push(Qt.resolvedUrl("LibraryPage.qml"), { model: name === "movies" ? connection.movies : connection.shows, tabType: name, connection: connection });
         if (tabState[name] && page?.restoreViewPosition)
             page.restoreViewPosition(tabState[name]);
     }
 
-    // The visible order of the tabs, which decides the side the new one slides in from
+    // The visible order of the sections, which decides the side the new one slides in from
     function tabOrder(name) {
-        return ["home", "movies", "tvshows", "downloads", "favorites", "playlists"].indexOf(name);
+        return navigation.entries.findIndex(entry => entry.section === name);
     }
 
-    // The new tab enters from the side it has in the tab bar; the row stays invisible from before the push until the motion starts, so the new page never shows one frame at rest
+    // The new tab enters from the side it has in the sidebar; the row stays invisible from before the push until the motion starts, so the new page never shows one frame at rest
     property bool tabMotionQueued: false
     // The index of the page the queued motion shows (0 for a tab, the page of a header section above it): a page pushed above that one ends the motion
     property int tabMotionIndex: 0
@@ -1625,7 +1598,18 @@ Kirigami.ApplicationWindow {
     function openDownloads() {
         if (!signedIn && !offline)
             return;
+        hideDownloadsNotices();
         openTab("downloads");
+    }
+
+    // The "Download queued" notice offers this tab, so it goes as the tab opens, whatever opened it (its button, the rail, a shortcut). The oldest notice hides first and at most four stack, so the loop leaves none
+    function hideDownloadsNotices() {
+        for (let i = 0; i < 4; ++i)
+            hidePassiveNotification();
+    }
+    onRootTabChanged: {
+        if (rootTab === "downloads")
+            hideDownloadsNotices();
     }
 
     // The automatic download rules open above the Downloads tab, which a page elsewhere gives way to after the question about unsaved changes; from Settings they open above it; a page of them already open is brought back
@@ -1660,6 +1644,24 @@ Kirigami.ApplicationWindow {
         if (fromPage)
             popTo(fromPage);
         pageStack.push(Qt.resolvedUrl("PlaylistPage.qml"), { connection: connection, shell: window, playlistId: playlistId, name: name ?? "" });
+    }
+
+    // The images of an item (administrators only) open above the details page that asks, the pages above it giving way; `itemName` is the name the page shows for the item
+    function openEditImages(itemId, itemName, fromPage) {
+        if (connection.state !== ConnectionController.Authenticated || !connection.currentUserIsAdministrator)
+            return;
+        if (fromPage)
+            popTo(fromPage);
+        pageStack.push(Qt.resolvedUrl("EditImagesPage.qml"), { connection: connection, itemId: itemId, itemName: itemName ?? "" });
+    }
+
+    // The images the providers offer for an item, for the type `imageType`, open above the Edit Images page that asks, which stays below as it is
+    function openRemoteImages(itemId, itemName, imageType, fromPage) {
+        if (connection.state !== ConnectionController.Authenticated || !connection.currentUserIsAdministrator)
+            return;
+        if (fromPage)
+            popTo(fromPage);
+        pageStack.push(Qt.resolvedUrl("RemoteImagesPage.qml"), { connection: connection, itemId: itemId, itemName: itemName ?? "", imageType: imageType, replaces: fromPage?.imageModel?.replaces(imageType) ?? false });
     }
 
     PlaylistDialogs {
@@ -2110,35 +2112,6 @@ Kirigami.ApplicationWindow {
         } else if (startupPage === "login" || startupPage === "home") {
             // The pages of a session, shown without one: the smoke test loads them in the real binary
             pageStack.push(Qt.resolvedUrl(startupPage === "login" ? "LoginPage.qml" : "HomePage.qml"), { connection: connection });
-        }
-    }
-
-    Kirigami.PromptDialog {
-        id: meteredDownloadDialog
-        objectName: "meteredDownloadDialog"
-
-        property string itemId
-
-        title: i18nc("@title:window", "Download Over Metered Network")
-        preferredWidth: Kirigami.Units.gridUnit * 26
-        standardButtons: Kirigami.Dialog.Cancel
-        customFooterActions: [
-            Kirigami.Action {
-                objectName: "meteredDownloadConfirm"
-                text: i18n("Download")
-                icon.name: "download-symbolic"
-                onTriggered: {
-                    window.connection.downloads.downloadItem(meteredDownloadDialog.itemId);
-                    meteredDownloadDialog.close();
-                }
-            }
-        ]
-
-        QQC2.Label {
-            Layout.fillWidth: true
-            wrapMode: Text.Wrap
-            textFormat: Text.PlainText
-            text: i18n("This network may charge for data. Download this item anyway?")
         }
     }
 

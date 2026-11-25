@@ -6,6 +6,7 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QList>
+#include <QMap>
 #include <QNetworkAccessManager>
 #include <QNetworkRequest>
 #include <QObject>
@@ -57,6 +58,15 @@ constexpr int RandomPageSize = 100;
 // Bounds of the user fields taken from the server
 constexpr int MaxUserNameChars = 128;
 constexpr int MaxPublicUsers = 100;
+
+// Bounds of a provider image reply: the images of one page (a larger `limit` is cut to it), the providers listed, and the characters of a provider name
+constexpr int MaxRemoteImagesPerPage = 30;
+constexpr int MaxRemoteImageProviders = 32;
+constexpr int MaxRemoteImageNameChars = 128;
+
+// Bounds of the current images of an item: the entries of `GET /Items/{id}/Images` kept (chapter images are dropped first), and the highest index of a type that holds several images (a backdrop)
+constexpr int MaxItemImages = 200;
+constexpr int MaxImageIndex = 99;
 
 struct ItemQuery {
     QString parentId;
@@ -219,14 +229,14 @@ class JellyfinClient final : public QObject {
     bool renamePlaylist(const QString &playlistId, const QString &name);
     // `DELETE /Items/{id}` removes any item for good, so the item is read first (`GET /Items/{id}`) and deleted only when its `Type` is exactly "Playlist" and its `CanDelete` is true: a playlist without that ends as playlistWriteFailed(Delete, 403) with no DELETE (the server answers 401 to a delete the user may not make, which would end the session); any other type, a failed read or an invalid reply ends as playlistWriteFailed(Delete) with the status of the read, and nothing is deleted. The playlist's write slot is held across both requests
     bool deletePlaylist(const QString &playlistId);
-    // The token-free URL of one item image (`GET /Items/{itemId}/Images/{type}` has no `security` requirement in the 12.4 spec, so the URL carries no credentials and the image fetch may stay unauthenticated). `imageType` is one of the spec's ImageType names; `format` may be empty (the server negotiates) or one of "jpg", "gif", "png", "webp"; `tag` is an opaque alphanumeric cache buster. Invalid input yields an empty URL, never a partially valid one
+    // The token-free URL of one item image (`GET /Items/{itemId}/Images/{type}` has no `security` requirement in the 12.4 spec, so the URL carries no credentials and the image fetch may stay unauthenticated). `imageType` is one of the spec's ImageType names; `format` may be empty (the server negotiates) or one of "jpg", "gif", "png", "webp"; `tag` is an opaque alphanumeric cache buster. `imageIndex` picks one image of a type that holds several (a backdrop), 0 to MaxImageIndex, as the `imageIndex` query parameter, so the path stays the one isServerImageUrl accepts; -1 asks for the type's first. Invalid input yields an empty URL, never a partially valid one
     QUrl imageUrl(const QString &itemId, const QString &imageType, int maxWidth, const QString &tag,
-                  int quality = 90, const QString &format = {}) const;
+                  int quality = 90, const QString &format = {}, int imageIndex = -1) const;
     // The token-free URL of one user's avatar: `GET /UserImage?userId=&tag=` answers anonymously (404 without an avatar) and takes no size: the page decodes at the size it needs. `tag` is the user's `PrimaryImageTag` (a cache buster, omitted from the URL when empty). An invalid id or tag yields an empty URL
     QUrl userImageUrl(const QString &userId, const QString &tag) const;
     // Whether `url` is one of the image URLs imageUrl() or userImageUrl() build for the server at `base`: same scheme, host and port, no credentials, and either the path `<base path>/Items/<id>/Images/<type>` with a valid id and type, or `<base path>/UserImage` with a query of only `userId` (valid id) and `tag` (valid). The one place that recognises what the builders produce, for the image fetcher's allowlist
     static bool isServerImageUrl(const QUrl &base, const QUrl &url);
-    // An artwork URL of a metadata provider (TMDB, TheTVDB, OMDb, Fanart.tv, Cover Art Archive): https, no credentials or fragment, a known domain or its subdomain. Used only for the Identify results, where the server hands out the provider's own image
+    // An artwork URL of a metadata provider (TMDB, TheTVDB, OMDb, Fanart.tv, Cover Art Archive): https, no credentials or fragment, a known domain or its subdomain. Used only for the thumbnails of Identify and Edit Images, where the server hands out the provider's own image
     static bool isProviderImageUrl(const QUrl &url);
     // The users the server lists on its sign-in screen (`GET /Users/Public`, no credentials, so it works in any state after the probe except while probing): publicUsersReady carries at most MaxPublicUsers validated entries (the others are dropped), publicUsersFailed a transport or protocol failure. A new call supersedes a pending one. Returns false, without a request, before the probe succeeded
     bool fetchPublicUsers();
@@ -290,10 +300,21 @@ class JellyfinClient final : public QObject {
     // Identify: searches the metadata providers of one movie or series (`POST /Items/RemoteSearch/{Movie|Series}`) and applies the chosen RemoteSearchResult (`POST /Items/RemoteSearch/Apply/{itemId}?replaceAllImages=false`). Administrators only; results and provider ids are validated and capped. The outcomes are remoteSearchFinished/remoteSearchFailed and remoteSearchApplied/remoteSearchApplyFailed
     bool remoteSearch(const QString &itemId, const QString &type, const QString &name, int year);
     bool applyRemoteSearch(const QString &itemId, const QVariantMap &result);
-    // Edit Images: uploads a local JPEG, PNG or WebP (at most 20 MiB) to `Primary`, `Backdrop` (index 0 to 9), `Logo`, `Banner`, `Thumb`, `Disc` or `Art`, or deletes one. Administrators only; the file is validated by its signature and read once. The outcomes are itemImageUpdated/itemImageUpdateFailed
+    // Edit Images: uploads a local JPEG, PNG or WebP (at most 20 MiB) as an image of `imageType`, or deletes one. The types are `Primary`, `Art`, `Banner`, `Disc`, `Logo`, `Thumb`, `Box`, `BoxRear` and `Menu` (index -1) and `Backdrop` and `Screenshot`, which hold several images (index 0 to MaxImageIndex; an upload takes -1 too, which adds the image after the others). Administrators only; the file is validated by its signature and read once. The outcomes are itemImageUpdated/itemImageUpdateFailed
     bool uploadImage(const QString &itemId, const QString &imageType, int index,
                      const QUrl &fileUrl);
     bool deleteImage(const QString &itemId, const QString &imageType, int index);
+    // Puts image `index` of a type that holds several (`Backdrop`, `Screenshot`) at `newIndex`, where the server swaps the two (`POST /Items/{id}/Images/{type}/{index}/Index?newIndex=`, 204): both 0 to MaxImageIndex and different. Administrators only. The indexes of a type change under every write, so it is refused while another write of that type of the item is in flight (and a second is refused until it ends); the outcome is itemImageUpdated with `newIndex` or itemImageUpdateFailed with `index`
+    bool moveImage(const QString &itemId, const QString &imageType, int index, int newIndex);
+    // Edit Images, the images the item has now (`GET /Items/{id}/Images`, at most MaxItemImages of the editable types) as {imageType, imageIndex (-1 for a type with one image), imageTag (empty unless a valid cache tag), width, height, size}. Administrators only. Same channel rules as fetchItems; the outcome is itemImagesReady or listingFailed("ItemImages")
+    bool fetchItemImages(const QString &itemId, int channel = 0);
+    // Edit Images, provider side: the providers that offer images for an item (`GET /Items/{id}/RemoteImages/Providers`, at most MaxRemoteImageProviders) as {name, supportedImages}. Same channel rules as fetchItems; the outcome is remoteImageProvidersReady or listingFailed("RemoteImageProviders")
+    bool fetchRemoteImageProviders(const QString &itemId, int channel = 0);
+    // One page of the images the providers offer for an item (`GET /Items/{id}/RemoteImages`): `type` is an ImageType name, `limit` is cut to MaxRemoteImagesPerPage, `providerName` empty asks every provider (at most MaxRemoteImageNameChars characters). Each image is {offerId, provider, thumbnailUrl, width, height, language, rating (a score from 0 to 10, or a count of likes when ratingType is "Likes"), voteCount, ratingType} with every field validated and capped; `thumbnailUrl` is the server's preview (the image's own URL when it sends none), kept only when isProviderImageUrl accepts it (else empty), and the full-size URL reaches the caller in no other field: the client keeps it under `offerId` for this session. Same channel rules as fetchItems; the outcome is remoteImagesReady or listingFailed("RemoteImages")
+    bool fetchRemoteImages(const QString &itemId, const QString &type, int startIndex, int limit,
+                           const QString &providerName, bool allLanguages, int channel = 0);
+    // Has the server download an offered image as the item's `type` image (`POST /Items/{id}/RemoteImages/Download`, 204; the route takes no provider name). Administrators only. It sends only the URL of an offer this session received for this very item and type, and refuses (false, no request) any other offer id, item or type, and every call once the session has ended. One write per item and type in flight: a download shares the lock of uploadImage, deleteImage and moveImage, and on a type with several images (Backdrop, Screenshot) any write refuses while another write of that type is out; the outcome is itemImageUpdated or itemImageUpdateFailed with index -1
+    bool downloadRemoteImage(const QString &itemId, const QString &type, quint32 offerId);
     // Edit Subtitles: uploads a local srt, ass, ssa or vtt file (at most 2 MiB, UTF-8) as an external subtitle, or deletes one by its stream index. Administrators only; the outcomes are itemSubtitleUpdated/itemSubtitleUpdateFailed
     bool uploadSubtitle(const QString &itemId, const QUrl &fileUrl, const QString &language,
                         bool forced);
@@ -382,7 +403,7 @@ class JellyfinClient final : public QObject {
     void requestFailed(int httpStatus, const QString &reason);
     // The server probe of connectToServer ended on a TLS certificate that failed verification (self-signed, expired, wrong host, untrusted): emitted instead of requestFailed, so a caller never takes it for a network failure
     void serverCertificateRejected();
-    // A listing family failed (status 0 for a transport error): `family` is the fixed name of the fetcher ("Items", "Resume", "Latest", "NextUp", "Seasons", "Episodes", "Similar", "Genres", "Filters", "MovieRecommendations", "Suggestions", "Upcoming", "Studios", "PlaylistEntries", "Sessions"), the reason a fixed English string; a 401 also expires the session. Listings never emit requestFailed (fetchUserViews, the libraries call, still does), so the Home page error stays about the libraries only. "FiltersLegacy" never emits it: legacyFiltersFailed is its failure
+    // A listing family failed (status 0 for a transport error): `family` is the fixed name of the fetcher ("Items", "Resume", "Latest", "NextUp", "Seasons", "Episodes", "Similar", "Genres", "Filters", "MovieRecommendations", "Suggestions", "Upcoming", "Studios", "PlaylistEntries", "RemoteImages", "RemoteImageProviders", "ItemImages", "Sessions"), the reason a fixed English string; a 401 also expires the session. Listings never emit requestFailed (fetchUserViews, the libraries call, still does), so the Home page error stays about the libraries only. "FiltersLegacy" never emits it: legacyFiltersFailed is its failure
     void listingFailed(const QString &family, int httpStatus, const QString &reason, int channel);
     // `userId` is the user whose session ended (userId() is already empty by then)
     void sessionExpired(const QString &userId);
@@ -458,7 +479,15 @@ class JellyfinClient final : public QObject {
     void remoteSearchFailed(const QString &itemId, int httpStatus);
     void remoteSearchApplied(const QString &itemId);
     void remoteSearchApplyFailed(const QString &itemId, int httpStatus);
-    // An image written or deleted, or a refusal
+    // Edit Images, provider side: the providers (each {name, supportedImages}) and one page of their images (each {offerId, provider, thumbnailUrl, width, height, language, rating, voteCount, ratingType}); `total` is the server's count over all pages, `providers` the names it reports
+    void remoteImageProvidersReady(const QString &itemId, const QVariantList &providers,
+                                   int channel);
+    void remoteImagesReady(const QString &itemId, const QString &type, int startIndex,
+                           const QVariantList &images, int total, const QStringList &providers,
+                           int channel);
+    // The images an item has now, each {imageType, imageIndex, imageTag, width, height, size}
+    void itemImagesReady(const QString &itemId, const QVariantList &images, int channel);
+    // An image written, moved or deleted, or a refusal
     void itemImageUpdated(const QString &itemId, const QString &imageType, int index);
     void itemImageUpdateFailed(const QString &itemId, const QString &imageType, int index,
                                int httpStatus);
@@ -549,6 +578,14 @@ class JellyfinClient final : public QObject {
     QSet<QString> m_remoteSearchPending;
     QSet<QString> m_remoteSearchApplyPending;
     QSet<QString> m_imagePending;
+    // The images the server offered in this session, by offer id (minted in order, so the first entry is the oldest): the only source of the URL downloadRemoteImage sends. Cleared when the session ends, the counter is not
+    struct RemoteImageOffer {
+        QString itemId;
+        QString type;
+        QString url;
+    };
+    QMap<quint32, RemoteImageOffer> m_remoteImageOffers;
+    quint32 m_lastRemoteImageOffer = 0;
     QSet<QString> m_subtitlePending;
     QSet<QString> m_playlistPending;
     QUrl m_base;
@@ -608,7 +645,7 @@ class JellyfinClient final : public QObject {
     // Flipped by the WebSocket component while an authenticated socket exists; `reportCapabilities()` carries it
     bool m_mediaControlAnnounced = false;
     bool m_verifyInFlight = false;
-    // The listing families: `Items`, `Resume`, `Latest`, `NextUp`, `Seasons`, `Episodes`, `Similar`, `Genres`, `Filters`, `FiltersLegacy`, `MovieRecommendations`, `Suggestions`, `Upcoming`, `Studios`, `PlaylistEntries`, `Sessions` — the serial each accepted request holds and the reply of the one in flight (for supersede aborts)
+    // The listing families: `Items`, `Resume`, `Latest`, `NextUp`, `Seasons`, `Episodes`, `Similar`, `Genres`, `Filters`, `FiltersLegacy`, `MovieRecommendations`, `Suggestions`, `Upcoming`, `Studios`, `PlaylistEntries`, `RemoteImages`, `RemoteImageProviders`, `ItemImages`, `Sessions` — the serial each accepted request holds and the reply of the one in flight (for supersede aborts)
     QHash<QString, quint64> m_listingSerials;
     QHash<QString, QPointer<QNetworkReply>> m_listingReplies;
 };

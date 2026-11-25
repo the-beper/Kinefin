@@ -24,12 +24,14 @@ src/qml/AddToCollectionDialog.qml
 src/qml/CollectionDialogs.qml
 src/qml/EditMetadataDialog.qml
 src/qml/IdentifyDialog.qml
-src/qml/EditImagesDialog.qml
+src/qml/EditImagesPage.qml
+src/qml/RemoteImagesPage.qml
+src/qml/ImageTypes.qml
 src/qml/EditSubtitlesDialog.qml
 src/qml/RemoteSessionsDialog.qml
 src/qml/SyncPlayDialog.qml
 src/qml/MediaInfoDialog.qml
-src/qml/SearchPage.qml
+src/qml/SearchPopup.qml
 src/qml/QueuePage.qml
 src/qml/DownloadsPage.qml
 src/qml/DownloadRulesPage.qml
@@ -62,6 +64,8 @@ src/qml/AddToPlaylistDialog.qml
 src/qml/PageBackButton.qml
 src/qml/PlaybackInfoOverlay.qml
 src/qml/ShellHeader.qml
+src/qml/ShellNavigation.qml
+src/qml/ShellSidebar.qml
 src/qml/AboutDialog.qml
 src/qml/ShortcutsDialog.qml
 src/qml/DialogTitleBar.qml
@@ -74,3 +78,4 @@ src/qml/FavoritesPage.qml
 src/qml/FavoriteCard.qml
 src/qml/FavoritesBanners.qml
 src/qml/FavoritesSectionPage.qml
+src/qml/PlaceholderSectionPage.qml

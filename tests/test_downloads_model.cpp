@@ -88,6 +88,9 @@ class TestDownloadsModel : public QObject {
         QCOMPARE(model.data(model.index(1), DownloadsModel::ProgressRole).toDouble(), 1.0);
         QCOMPARE(model.data(model.index(1), DownloadsModel::PrimaryTagRole).toString(),
                  QStringLiteral("tag2"));
+        // Neither a waiting nor a completed row has a speed
+        QCOMPARE(model.data(model.index(0), DownloadsModel::BytesPerSecondRole).toLongLong(), 0);
+        QCOMPARE(model.data(model.index(1), DownloadsModel::BytesPerSecondRole).toLongLong(), 0);
     }
 
     void reportsProgress()
@@ -105,6 +108,8 @@ class TestDownloadsModel : public QObject {
         QCOMPARE(model.data(model.index(0), DownloadsModel::ProgressRole).toDouble(), 0.25);
         QCOMPARE(model.data(model.index(0), DownloadsModel::BytesWrittenRole).toLongLong(), 1024);
         QCOMPARE(model.data(model.index(0), DownloadsModel::SizeRole).toLongLong(), 4096);
+        // No transfer runs for it, so there is no speed to show
+        QCOMPARE(model.data(model.index(0), DownloadsModel::BytesPerSecondRole).toLongLong(), 0);
     }
 };
 

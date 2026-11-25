@@ -179,8 +179,11 @@ class TestSpatialNavigation : public QObject {
         // A block cut by the edge is the first block
         QCOMPARE(pick(top, NavDirection::Down, {tile, QRectF(0, -30, 800, 60)}, Qt::LeftToRight),
                  1);
-        // Everything above the edge is out
+        // Everything above the edge is out, and so is what stands beside it
         QCOMPARE(pick(top, NavDirection::Down, {QRectF(0, -100, 800, 60)}, Qt::LeftToRight), -1);
+        QCOMPARE(pick(top, NavDirection::Down, {QRectF(-100, 20, 90, 50), row}, Qt::LeftToRight),
+                 1);
+        QCOMPARE(pick(top, NavDirection::Down, {QRectF(-100, 20, 90, 50)}, Qt::LeftToRight), -1);
         // From the bottom edge Up takes the block nearest to it; one that fills the whole view still counts
         const QRectF bottom(0, 600, 800, 0);
         QCOMPARE(pick(bottom, NavDirection::Up, {tile, row}, Qt::LeftToRight), 1);
@@ -283,6 +286,42 @@ ApplicationWindow {
         QCOMPARE(findSpatialTarget(far, NavDirection::Up), top);
         // The only item to the right lies outside the window and outside any flickable
         QCOMPARE(findSpatialTarget(far, NavDirection::Right), nullptr);
+    }
+
+    void aSideRegionIsReachedSidewaysNeverByAVerticalMove()
+    {
+        Scene scene;
+        QVERIFY(scene.load(R"(
+ApplicationWindow {
+    width: 640; height: 480; visible: true
+    Page {
+        anchors.fill: parent
+        Item {
+            objectName: "side"; width: 100; height: 480
+            property bool spatialSideRegion: true
+            Button { objectName: "sideTop"; x: 4; y: 10; width: 90; height: 40 }
+            Button { objectName: "sideNext"; x: 4; y: 56; width: 90; height: 40 }
+            Button { objectName: "sideEnd"; x: 4; y: 224; width: 90; height: 40 }
+        }
+        Button { objectName: "card"; x: 120; y: 60; width: 100; height: 160 }
+        Button { objectName: "below"; x: 120; y: 400; width: 100; height: 30 }
+    }
+})"));
+        QQuickItem *card = scene.item("card");
+        QQuickItem *below = scene.item("below");
+        QQuickItem *sideTop = scene.item("sideTop");
+        QQuickItem *sideNext = scene.item("sideNext");
+        QVERIFY(card && below && sideTop && sideNext);
+        // The rail entry just under the card scores better than the button below it, and still Down does not go there
+        QCOMPARE(findSpatialTarget(card, NavDirection::Down), below);
+        QCOMPARE(findSpatialTarget(below, NavDirection::Up), card);
+        // Sideways it is reached, and Right from it enters the page
+        QQuickItem *left = findSpatialTarget(card, NavDirection::Left);
+        QVERIFY(left && left->parentItem() == scene.item("side"));
+        QCOMPARE(findSpatialTarget(sideTop, NavDirection::Right), card);
+        // Inside the region the vertical keys move between its entries
+        QCOMPARE(findSpatialTarget(sideTop, NavDirection::Down), sideNext);
+        QCOMPARE(findSpatialTarget(sideNext, NavDirection::Up), sideTop);
     }
 
     void aTargetInsideAFlickableIsRevealed()

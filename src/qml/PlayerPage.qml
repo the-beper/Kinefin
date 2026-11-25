@@ -20,8 +20,12 @@ Kirigami.Page {
     readonly property Item videoSlot: slot
     title: player?.title || i18n("Now Playing")
     padding: 0
-    // The page reaches up under the shell header, which stays in the layout (a resize of the page row during the slide would end Kirigami's slide) and fades out while this page is in front: the video, the bars and the overlays span the whole window, and the heights below are the content item's (availableHeight)
+    // The page reaches up under the shell header and out over the sidebar, which stay in the layout (a resize of the page row during the slide would end Kirigami's slide) and fade out while this page is in front: the video, the bars and the overlays span the whole window, and the sizes below are the content item's (availableHeight, availableWidth)
     topPadding: page.Window.window?.header?.visible ? -page.Window.window.header.height : 0
+    // The reach over the sidebar is only while the page is the current one: a page that is leaving, or that waits above the current one, would show it as a strip of black at the edge of the window
+    readonly property real reach: page.isShowing ? (page.Window.window?.sidebarWidth ?? 0) : 0
+    leftPadding: page.mirrored ? 0 : -page.reach
+    rightPadding: page.mirrored ? -page.reach : 0
     // The video fills the page and the bars float above it: the page row's toolbar would be a strip that never hides
     globalToolBarStyle: Kirigami.ApplicationHeaderStyle.None
     readonly property bool isShowing: page.Window.window?.pageStack.currentItem === page
@@ -32,7 +36,7 @@ Kirigami.Page {
     }
     property bool showChrome: true
     // Below the window's wide limit the controls row shows icons only, each with its text as tooltip and accessible name
-    readonly property bool narrow: width < (page.Window.window?.wideLimit ?? 0)
+    readonly property bool narrow: availableWidth < (page.Window.window?.wideLimit ?? 0)
     // The button at the end of the timeline shows the remaining time instead of the total, for as long as this page lives
     property bool showRemaining: false
     readonly property bool fullScreen: page.Window.window?.visibility === Window.FullScreen
@@ -307,7 +311,7 @@ Kirigami.Page {
                 return;
         // fall through
         case Qt.Key_Menu:
-            page.showContextMenu(page.width / 2, page.availableHeight / 2);
+            page.showContextMenu(page.availableWidth / 2, page.availableHeight / 2);
             break;
         default: return;
         }
@@ -658,7 +662,7 @@ Kirigami.Page {
         anchors.bottomMargin: bottomBar.height + Kirigami.Units.largeSpacing
         enabled: page.player.clipSaving
         visible: page.player.clipSaving
-        width: Math.min(clipRow.implicitWidth + Kirigami.Units.largeSpacing * 2, page.width - Kirigami.Units.largeSpacing * 2)
+        width: Math.min(clipRow.implicitWidth + Kirigami.Units.largeSpacing * 2, page.availableWidth - Kirigami.Units.largeSpacing * 2)
         height: clipRow.implicitHeight + Kirigami.Units.largeSpacing * 2
         radius: Kirigami.Units.cornerRadius
         Kirigami.Theme.colorSet: Kirigami.Theme.Complementary
@@ -723,7 +727,7 @@ Kirigami.Page {
             when: page.player.upNextShown
             value: page.player.upNextSeconds
         }
-        width: Math.min(upNextRow.implicitWidth + Kirigami.Units.largeSpacing * 2, page.width - Kirigami.Units.largeSpacing * 2)
+        width: Math.min(upNextRow.implicitWidth + Kirigami.Units.largeSpacing * 2, page.availableWidth - Kirigami.Units.largeSpacing * 2)
         height: upNextRow.implicitHeight + Kirigami.Units.largeSpacing * 2
         radius: Kirigami.Units.cornerRadius
         Kirigami.Theme.colorSet: Kirigami.Theme.Complementary
@@ -953,7 +957,7 @@ Kirigami.Page {
                     visible: !page.player.localPlayback
                     enabled: !blockedByGroup
                     icon.name: "kinefin-cast"
-                    text: i18nc("@action:button", "Cast")
+                    text: i18nc("@action:button", "Cast…")
                     Accessible.description: blockedByGroup ? Controls.ToolTip.text : ""
                     Controls.ToolTip.text: blockedByGroup ? i18nc("@info:tooltip", "Not available while following a SyncPlay group") : text
                     Controls.ToolTip.visible: (hovered || visualFocus) && (display === Controls.AbstractButton.IconOnly || blockedByGroup)
@@ -1371,7 +1375,7 @@ Kirigami.Page {
         anchors.top: parent.top
         anchors.leftMargin: Kirigami.Units.largeSpacing
         anchors.topMargin: osd.wanted ? topRow.y + topRow.implicitHeight + Kirigami.Units.largeSpacing : Kirigami.Units.largeSpacing
-        width: Math.min(Kirigami.Units.gridUnit * 30, page.width - Kirigami.Units.largeSpacing * 2)
+        width: Math.min(Kirigami.Units.gridUnit * 30, page.availableWidth - Kirigami.Units.largeSpacing * 2)
         maximumHeight: page.availableHeight - anchors.topMargin - bottomBar.height
         Behavior on anchors.topMargin {
             NumberAnimation { duration: Kirigami.Units.longDuration; easing.type: Easing.OutCubic }
@@ -1637,9 +1641,9 @@ Kirigami.Page {
         focus: true
         // Where the bottom bar's controls start: the panel sits above them, since More Actions (a button of the bar) opens it and it must not cover that button
         readonly property real controlsTop: bottomBar.y + controls.y
-        width: Math.min(page.width, Kirigami.Units.gridUnit * 27)
+        width: Math.min(page.availableWidth, Kirigami.Units.gridUnit * 27)
         height: Math.max(0, Math.min(page.availableHeight * 0.75, Kirigami.Units.gridUnit * 32, controlsTop - Kirigami.Units.smallSpacing))
-        x: page.width - width
+        x: page.availableWidth - width
         y: controlsTop - Kirigami.Units.smallSpacing - height
         closePolicy: Controls.Popup.CloseOnEscape | Controls.Popup.CloseOnPressOutside
         // Only the way out fades: an enter transition would hold `opened` back, which the page's Escape and hover rules read; the exit leaves the opacity at 0, so each show puts it back

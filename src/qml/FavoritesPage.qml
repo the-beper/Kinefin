@@ -10,6 +10,10 @@ Kirigami.ScrollablePage {
     id: page
     objectName: "favoritesPage"
 
+    // The darker View background on every page: a page without a list (a plain flickable) would get the lighter Window one, and the sections would not match
+    Kirigami.Theme.colorSet: Kirigami.Theme.View
+    Kirigami.Theme.inherit: false
+
     required property ConnectionController connection
     // The window shell counts the pages: the scan stops with the last one
     required property var shell
@@ -80,9 +84,9 @@ Kirigami.ScrollablePage {
         }
     }
 
-    // The scan ended: the first row takes the keys unless the user went elsewhere meanwhile (the header box, or a row already focused)
+    // The scan ended: the first row takes the keys unless the user went elsewhere meanwhile (a row already focused)
     function focusWhenLoaded() {
-        if (!page.isCurrentPage || !page.shell || page.favorites.count === 0 || page.shell.header?.searchFieldHasFocus)
+        if (!page.isCurrentPage || !page.shell || page.favorites.count === 0)
             return;
         // A row that lost its cards keeps the active focus while it is hidden: that focus is no choice of the user
         if (page.shell.focusIsIn(rowsColumn) && page.Window.window?.activeFocusItem?.visible)

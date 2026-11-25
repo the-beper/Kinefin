@@ -9,6 +9,10 @@ Kirigami.ScrollablePage {
     id: page
     objectName: "favoritesSectionPage"
 
+    // The darker View background on every page: a page without a list (a plain flickable) would get the lighter Window one, and the sections would not match
+    Kirigami.Theme.colorSet: Kirigami.Theme.View
+    Kirigami.Theme.inherit: false
+
     required property ConnectionController connection
     // The window shell counts the pages: the scan stops with the last one
     required property var shell
@@ -48,9 +52,9 @@ Kirigami.ScrollablePage {
         grid.focusPrimary(Qt.TabFocusReason);
     }
 
-    // The scan ended: the cards take the keys unless the user went elsewhere meanwhile (the header box, or a card already focused). The grid holding the focus while it is created is not a choice
+    // The scan ended: the cards take the keys unless the user went elsewhere meanwhile (a card already focused). The grid holding the focus while it is created is not a choice
     function focusWhenLoaded() {
-        if (!page.isCurrentPage || !page.shell || grid.count === 0 || page.shell.header?.searchFieldHasFocus)
+        if (!page.isCurrentPage || !page.shell || grid.count === 0)
             return;
         const focused = page.Window.window?.activeFocusItem;
         if (focused && focused !== grid && page.shell.focusIsIn(grid))
@@ -138,7 +142,7 @@ Kirigami.ScrollablePage {
         }
 
         // What scrolls under the page row fades into it instead of being cut by its edge
-        TopFade {
+        TopShadow {
             parent: grid
             z: 1
             atStart: grid.atYBeginning
@@ -198,7 +202,7 @@ Kirigami.ScrollablePage {
         leftMargin: Kirigami.Units.largeSpacing
         cellWidth: Math.floor(usableWidth / columns)
         cellHeight: Math.round((cellWidth - Kirigami.Units.largeSpacing - Kirigami.Units.smallSpacing * 2) * 1.5) + Kirigami.Units.gridUnit * 3.5 + Kirigami.Units.largeSpacing
-        topMargin: Kirigami.Units.largeSpacing
+        topMargin: Kirigami.Units.largeSpacing * 2
         bottomMargin: Kirigami.Units.largeSpacing
         activeFocusOnTab: true
         keyNavigationEnabled: true

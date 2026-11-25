@@ -17,8 +17,6 @@ finish-args:
   - --own-name=org.mpris.MediaPlayer2.Kinefin.*
   # Inhibit the screensaver while playing, and release it otherwise (org.freedesktop.ScreenSaver).
   - --talk-name=org.freedesktop.ScreenSaver
-  # The download policy observes the read-only Metered property. No NM control actions
-  - --system-talk-name=org.freedesktop.NetworkManager
   # The access tokens live in the user's KWallet (KWalletTokenStore): the daemon is the only way to them from the sandbox, and there is no plaintext fallback.
   - --talk-name=org.kde.kwalletd6
   # Portals: the browser links (server web UI, externallinks) and the folder picker of the download export (a per-folder Document-portal grant, never a --filesystem=home).
@@ -46,6 +44,9 @@ modules:
       - -Dlua=disabled
       - -Dwayland=enabled
       - -Dx11=disabled
+      # Hardware decoding in copy mode (the default) needs a VA-API device that mpv creates on its own, and without x11 only the DRM backend can do it; `enabled` fails the build instead of dropping the feature (libdrm comes from the runtime, libdisplay-info and hwdata from the modules below)
+      - -Ddrm=enabled
+      - -Dvaapi-drm=enabled
       - -Dmanpage-build=disabled
     cleanup:
       - /share/applications
@@ -66,6 +67,30 @@ modules:
           stable-only: true
           url-template: https://github.com/mpv-player/mpv/archive/refs/tags/v$version.tar.gz
     modules:
+      # libdisplay-info reads the vendor names of the PNP id table at build time, which hwdata ships; mpv's drm feature needs the library
+      - name: hwdata
+        buildsystem: simple
+        build-commands:
+          - ./configure --prefix=/app --datadir=/app/share
+          - make install
+        cleanup:
+          - /share/hwdata
+          - /share/pkgconfig
+        sources:
+          - type: archive
+            url: https://github.com/vcrhonek/hwdata/archive/refs/tags/v0.413.tar.gz
+            sha256: 5a71ab7a48c668ef912fcfdbec046949087019f8dd7fb967445d36fbeb778350
+
+      - name: libdisplay-info
+        buildsystem: meson
+        cleanup:
+          - /include
+          - /lib/pkgconfig
+        sources:
+          - type: archive
+            url: https://gitlab.freedesktop.org/-/project/14497/uploads/289d58230e2981b51f23d31faf25bef9/libdisplay-info-0.4.0.tar.xz
+            sha256: 43b180baa143e2035654759d84e2b2f5ee77d5fe817c423838c7fe59c0d68459
+
       - name: libplacebo
         buildsystem: meson
         config-opts:

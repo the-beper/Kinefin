@@ -1,0 +1,14 @@
+[
+  {
+    "Name": "TheMovieDb",
+    "SupportedImages": ["Primary", "Backdrop", "Logo", "Primary", "NotAType"]
+  },
+  {
+    "Name": "Fanart",
+    "SupportedImages": ["Primary", "Art", "Banner", "Disc", "Thumb"]
+  },
+  {
+    "Name": "",
+    "SupportedImages": ["Primary"]
+  }
+]

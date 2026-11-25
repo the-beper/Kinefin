@@ -502,7 +502,13 @@ PlayerController::PlayerController(JellyfinClient &client, PlayQueue &queue,
         updateSkip();
         updateCurrentChapter();
         updateUpNext();
-        Q_EMIT changed();
+        // The first tick of a burst goes out at once, the rest wait for the timer: the properties of the shell that follow this signal are about fifty bindings, and a frame rate of them lags the page
+        if (m_positionNotice.isActive()) {
+            m_positionNoticePending = true;
+        } else {
+            Q_EMIT changed();
+            m_positionNotice.start();
+        }
     });
     connect(&m_engine, &PlaybackEngine::durationChanged, this, [this] {
         updateChapters();
@@ -716,6 +722,14 @@ PlayerController::PlayerController(JellyfinClient &client, PlayQueue &queue,
     connect(&m_clock, &QTimer::timeout, this, [this] {
         persistQueueCursor();
         Q_EMIT changed();
+    });
+    m_positionNotice.setSingleShot(true);
+    m_positionNotice.setInterval(100);
+    connect(&m_positionNotice, &QTimer::timeout, this, [this] {
+        if (!std::exchange(m_positionNoticePending, false))
+            return;
+        Q_EMIT changed();
+        m_positionNotice.start();
     });
     m_trackTimer.setInterval(2000);
     connect(&m_trackTimer, &QTimer::timeout, this, &PlayerController::refreshTracks);
@@ -1186,6 +1200,7 @@ bool PlayerController::searchRemoteSubtitles(const QString &language)
     m_remoteSubtitles.clear();
     m_remoteSubtitleSearching = true;
     m_remoteSubtitleQuery = m_itemId + QLatin1Char('/') + language;
+    m_remoteSubtitleLanguage = language;
     m_remoteSubtitleError.clear();
     Q_EMIT remoteSubtitlesChanged();
     if (!m_client.searchRemoteSubtitles(m_itemId, language)) {
@@ -1202,8 +1217,7 @@ bool PlayerController::downloadRemoteSubtitle(const QString &subtitleId)
 {
     // One download at a time: each success reopens the item
     if (!m_remoteSubtitleDownloadItem.isEmpty() || m_itemId.isEmpty() || !canManageSubtitles()
-        || !m_client.downloadRemoteSubtitle(m_itemId, subtitleId,
-                                            m_remoteSubtitleQuery.section(QLatin1Char('/'), 1)))
+        || !m_client.downloadRemoteSubtitle(m_itemId, subtitleId, m_remoteSubtitleLanguage))
         return false;
     m_remoteSubtitleDownloadItem = m_itemId;
     return true;
@@ -1220,6 +1234,7 @@ void PlayerController::resetRemoteSubtitles()
     m_remoteSubtitles.clear();
     m_remoteSubtitleSearching = false;
     m_remoteSubtitleQuery.clear();
+    m_remoteSubtitleLanguage.clear();
     m_remoteSubtitleDownloadItem.clear();
     m_remoteSubtitleError.clear();
     Q_EMIT remoteSubtitlesChanged();

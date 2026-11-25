@@ -39,9 +39,6 @@ org.freedesktop.portal.Desktop=talk
 com.canonical.AppMenu.Registrar=talk
 org.kde.KGlobalSettings=talk
 org.kde.kconfig.notify=talk
-
-[System Bus Policy]
-org.freedesktop.NetworkManager=talk
 """
 
 
@@ -196,8 +193,8 @@ class FlatpakSandboxPermissionsTest(unittest.TestCase):
         for old, new, error in (
             ("org.kde.kwalletd6=talk", "org.kde.kwalletd6=own", "[Session Bus Policy]"),
             ("org.kde.kwalletd6=talk", "", "[Session Bus Policy]"),
-            ("org.freedesktop.NetworkManager=talk", "org.freedesktop.NetworkManager=own", "[System Bus Policy]"),
-            ("org.freedesktop.NetworkManager=talk", "org.freedesktop.NetworkManager=talk\norg.freedesktop.*=talk", "[System Bus Policy]"),
+            ("[Session Bus Policy]\n", "[System Bus Policy]\norg.freedesktop.NetworkManager=talk\n\n[Session Bus Policy]\n", "[System Bus Policy]"),
+            ("[Session Bus Policy]\n", "[System Bus Policy]\norg.freedesktop.*=talk\n\n[Session Bus Policy]\n", "[System Bus Policy]"),
         ):
             with self.subTest(new=new):
                 self.metadata.write_text(original.replace(old, new), encoding="utf-8")

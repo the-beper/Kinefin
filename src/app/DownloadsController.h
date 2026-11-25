@@ -6,7 +6,6 @@
 #include "downloads/DownloadManager.h"
 #include "downloads/DownloadRules.h"
 #include "downloads/WatchedOutbox.h"
-#include "integration/NetworkMeter.h"
 #include "models/DownloadsModel.h"
 
 #include <QByteArray>
@@ -50,15 +49,15 @@ struct DownloadExtras {
     QList<SubtitleTrack> written;
 };
 
-// The download queue of the signed-in session: owns the engine and the model the Downloads page shows, asks the server for the item fields a download needs, and builds the resolver the engine calls at start time (the URL and the Authorization header, never stored). A manual download runs on any network; the engine's automatic ones follow the meter and the "only on unmetered networks" setting, failing closed while the meter is unknown
+// The download queue of the signed-in session: owns the engine and the model the Downloads page shows, asks the server for the item fields a download needs, and builds the resolver the engine calls at start time (the URL and the Authorization header, never stored)
 class DownloadsController final : public QObject {
     Q_OBJECT
     Q_PROPERTY(Kinefin::DownloadsModel *model READ model CONSTANT)
     // `Policy.EnableContentDownloading` of the signed-in user; false while unknown, so every action hides
     Q_PROPERTY(bool canDownload READ canDownload NOTIFY canDownloadChanged)
     Q_PROPERTY(bool online READ online NOTIFY onlineChanged)
-    // The current network is metered, or its state is unknown: a manual download asks first
-    Q_PROPERTY(bool metered READ metered NOTIFY meteredChanged)
+    // The speed of all running downloads together, in bytes per second (the average of the last few seconds); 0 when none runs
+    Q_PROPERTY(qint64 bytesPerSecond READ bytesPerSecond NOTIFY speedChanged)
     // Bumped on every record change, so a QML binding that reads a record's state follows the queue
     Q_PROPERTY(int revision READ revision NOTIFY revisionChanged)
     // The index could not be written: the queue lives for this session only
@@ -89,7 +88,7 @@ class DownloadsController final : public QObject {
     const DownloadStore *store() const { return m_manager.store(); }
     bool canDownload() const;
     bool online() const { return m_online; }
-    bool metered() const { return m_meter.metered(); }
+    qint64 bytesPerSecond() const { return m_speed; }
     int revision() const { return m_revision; }
     bool storageFailed() const { return m_storageFailed; }
     int pendingSyncCount() const;
@@ -102,8 +101,6 @@ class DownloadsController final : public QObject {
     // The session can serve downloads; false stops the active transfers and holds the queue
     void setOnline(bool online);
     void setParallelDownloads(int count);
-    // When false, automatic downloads may start on a metered network too; manual ones always may
-    void setUnmeteredOnly(bool unmeteredOnly);
     void setIgnoreCertificateErrors(bool ignore);
     // Re-reads the policy after a login or a profile refresh
     void refreshCanDownload();
@@ -173,7 +170,7 @@ class DownloadsController final : public QObject {
   Q_SIGNALS:
     void canDownloadChanged();
     void onlineChanged();
-    void meteredChanged();
+    void speedChanged();
     void revisionChanged();
     void storageFailedChanged();
     void outboxChanged();
@@ -237,7 +234,6 @@ class DownloadsController final : public QObject {
     DownloadRules m_rules;
     QTimer m_ruleTimer;
     QTimer m_ruleDebounce;
-    NetworkMeter m_meter;
     // The item each pending one-shot item fetch was asked for
     QHash<int, QString> m_fetches;
     QHash<int, QString> m_fetchRules;
@@ -267,9 +263,9 @@ class DownloadsController final : public QObject {
     QSet<QString> m_fetching;
     int m_nextChannel = 2'000'000;
     int m_revision = 0;
+    qint64 m_speed = 0;
     bool m_online = false;
     bool m_canDownload = false;
-    bool m_unmeteredOnly = true;
     bool m_ignoreCertificateErrors = false;
     bool m_storageFailed = false;
     bool m_kodiSidecars = false;

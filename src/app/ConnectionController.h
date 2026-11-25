@@ -24,6 +24,7 @@
 #include "api/JellyfinSocketClient.h"
 #include "imagecache/ImageOrigin.h"
 #include "models/CollectionsModel.h"
+#include "models/EditImagesModel.h"
 #include "models/FavoritesModel.h"
 #include "models/GenreRailsModel.h"
 #include "models/HomeRowsModel.h"
@@ -34,6 +35,7 @@
 #include "models/PlayQueue.h"
 #include "models/PlaylistEntriesModel.h"
 #include "models/PlaylistsController.h"
+#include "models/RemoteImagesModel.h"
 #include "models/RemoteSessionsModel.h"
 #include "models/ResumeItemsModel.h"
 #include "models/SearchModel.h"
@@ -290,10 +292,17 @@ class ConnectionController : public QObject {
     Q_INVOKABLE bool remoteSearch(const QString &itemId, const QString &type, const QString &name,
                                   int year);
     Q_INVOKABLE bool applyRemoteSearch(const QString &itemId, const QVariantMap &result);
-    // Edit Images: uploads a local file to an image type (Backdrop index 0 to 9, the others -1) or deletes one; administrators only. The outcomes are itemImageUpdated/itemImageUpdateFailed
+    // Edit Images: uploads a local file to an image type (Backdrop and Screenshot take an index from 0 to 99, or -1 to add one after the others; the other types take -1) or deletes one; administrators only. The outcomes are itemImageUpdated/itemImageUpdateFailed
     Q_INVOKABLE bool uploadImage(const QString &itemId, const QString &imageType, int index,
                                  const QUrl &fileUrl);
     Q_INVOKABLE bool deleteImage(const QString &itemId, const QString &imageType, int index);
+    // Moves one image of a type with several (Backdrop, Screenshot) to another index; administrators only. The outcome is itemImageUpdated (with the new index) or itemImageUpdateFailed
+    Q_INVOKABLE bool moveImage(const QString &itemId, const QString &imageType, int index,
+                               int newIndex);
+    // The images of one item for the Edit Images page `owner`, and what the providers offer for it for the online image page `owner` (`imageType` is the type to look for first): each model is a child of `owner`, takes a listing channel of its own and dies with it. Null unless signed in as an administrator and `owner` exists
+    Q_INVOKABLE Kinefin::EditImagesModel *createEditImages(const QString &itemId, QObject *owner);
+    Q_INVOKABLE Kinefin::RemoteImagesModel *
+    createRemoteImages(const QString &itemId, const QString &imageType, QObject *owner);
     // Edit Subtitles: uploads a local srt/ass/ssa/vtt (UTF-8, at most 2 MiB) or deletes an external subtitle by index; administrators only. The outcomes are itemSubtitleUpdated/itemSubtitleUpdateFailed
     Q_INVOKABLE bool uploadSubtitle(const QString &itemId, const QUrl &fileUrl,
                                     const QString &language, bool forced);
@@ -466,6 +475,9 @@ class ConnectionController : public QObject {
     RemoteCommands m_remoteCommands;
     BrowseStateStore m_browse;
     int m_nextDetailsChannel = ItemDetailsModel::FirstChannel;
+    int m_nextImagesChannel = EditImagesModel::FirstChannel;
+    // The next channel of an image page: it wraps below the details pages' range, since the pages of long ago have released theirs
+    int takeImagesChannel();
     std::shared_ptr<ImageOrigin> m_imageOrigin;
     QTimer m_quickConnectTimer;
     State m_state = Idle;

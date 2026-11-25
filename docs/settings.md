@@ -24,6 +24,7 @@ In the tables, the Key column is the key as stored in the file and the Default c
 | --- | --- | --- | --- | --- |
 | Full Screen (Window) | `fullscreen` | `false` | On or off | Starts the window in full screen and switches it live when you change the setting. The command-line flags `--fullscreen` and `--windowed` override it for that run, until you change the setting. |
 | Force Full Screen Display (Window) | `forceFSScreen` | `""` | Name of a screen output, such as `DP-1`; empty for the current screen | Full screen goes to the output with this name when it exists. |
+| Interface Scale (Application) | `uiScale` | `100` | 100% (`100`), 110% (`110`), 125% (`125`), 150% (`150`), 175% (`175`), 200% (`200`) | Enlarges the whole interface (text, icons, cards and spacing) by this percentage, on top of the scale factor Qt takes from the desktop. It applies at the next start, because Qt reads its scale factor only while the application starts, and it does not scale the video. If the `QT_SCALE_FACTOR` environment variable is set, Kinefin leaves it as it is and ignores this setting. |
 | Gamepad (Experimental) (Application) | `sdlEnabled` | `true` | On or off | Turns SDL3 gamepad input on or off. Off, Kinefin never initialises SDL and never opens a `/dev/input` device. |
 | Enable Input Repeat (Application) | `enableInputRepeat` | `true` | On or off | Repeats an action while you hold a gamepad direction or a keyboard key. Text fields keep their own key repeat, and the toggles in the player overlay never repeat. |
 | Ignore Certificate Errors (Application) | `ignoreSSLErrors` | `false` | On or off | Accepts invalid TLS certificates for all traffic to the Jellyfin server (API, WebSocket, images, mpv), never for the metadata providers' covers. Off, a certificate error stops the connection with a message naming this switch. A warning shows on the General page while it is on. The `--ignore-certificate-errors` flag forces it on for a run. |
@@ -106,7 +107,6 @@ Every tab switch applies at once. Turning a tab off returns you to the main tab,
 | Setting | Key | Default | Values | What it does |
 | --- | --- | --- | --- | --- |
 | Parallel Downloads | `parallel` | `2` | 1 download (`1`), 2 downloads (`2`), 3 downloads (`3`), 4 downloads (`4`) | Sets how many downloads run at the same time. |
-| Download Only on Unmetered Networks | `unmeteredOnly` | `true` | On or off | Holds automatic downloads while NetworkManager reports a metered connection. If the status is unknown or unavailable, they stay held. |
 | Write Kodi Metadata Files | `kodiSidecars` | `false` | On or off | Writes a Kodi-compatible `.nfo` file and `poster.jpg` next to an exported file. |
 | Export When Download Completes | `exportOnCompletion` | `false` | On or off | Copies each finished download to the host folder you chose, through the document portal. The control stays disabled with an explanation while no durable portal grant exists. |
 

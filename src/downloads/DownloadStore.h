@@ -58,8 +58,6 @@ struct DownloadRecord {
     QString ruleId;
     // What the user wants: false while paused and after a cancel
     bool wanted = true;
-    // A manual start on a metered network
-    bool meteredOverride = false;
 
     bool operator==(const DownloadRecord &) const = default;
     // serverId/userId/itemId, lower case

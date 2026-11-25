@@ -16,6 +16,17 @@ Controls.ToolBar {
 
     visible: prefs.loaded
     position: Controls.ToolBar.Footer
+    // A line over the whole bar, as the bars at the top have one under them
+    background: Item {
+        Kirigami.Separator {
+            anchors {
+                left: parent.left
+                right: parent.right
+                top: parent.top
+            }
+            Accessible.ignored: true
+        }
+    }
 
     // Ctrl+S saves while the bar shows, as its Save button does
     Shortcut {

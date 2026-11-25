@@ -8,7 +8,7 @@
 #include <QList>
 
 namespace Kinefin {
-// The rows of the Downloads page: active records first in queue order, then completed ones newest first. Server text (name, series name) is rendered as plain text by the page. A record is a row whether it is queued, running, paused, waiting, failed or done; the engine owns it, the model only mirrors it
+// The rows of the Downloads page: active records first in queue order, then completed ones newest first. `bytesPerSecond` is the engine's average speed of a record that is fetching, else 0, and follows the progress updates. Server text (name, series name) is rendered as plain text by the page. A record is a row whether it is queued, running, paused, waiting, failed or done; the engine owns it, the model only mirrors it
 class DownloadsModel final : public QAbstractListModel {
     Q_OBJECT
     Q_PROPERTY(int count READ count NOTIFY countsChanged)
@@ -36,7 +36,8 @@ class DownloadsModel final : public QAbstractListModel {
         DownloadedRole,
         SectionRole,
         PrimaryTagRole,
-        RuleIdRole
+        RuleIdRole,
+        BytesPerSecondRole
     };
 
     explicit DownloadsModel(DownloadManager *manager, QObject *parent = nullptr);

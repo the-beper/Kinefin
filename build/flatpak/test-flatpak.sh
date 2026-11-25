@@ -68,6 +68,13 @@ done
     fail "the Flatpak must not contain the scalable SVG icon"
 echo "ok: installed raster icon sizes and Flatpak SVG policy"
 
+# Hardware decoding gate: the default copy mode needs a VA-API device that mpv creates itself, and a build without x11 gets one only through the DRM backend
+libmpv=$(find "$install_root/files/lib" -name 'libmpv.so.*' -type f | head -n 1)
+[ -n "$libmpv" ] || fail "libmpv is not in the installed Flatpak"
+grep -ao 'List of enabled features:[ -~]*' "$libmpv" | grep -qw vaapi-drm ||
+    fail "libmpv has no vaapi-drm: hardware decoding in copy mode cannot start"
+echo "ok: libmpv has the VA-API DRM backend"
+
 if [ -n "${KINEFIN_EXPECT_VERSION:-}" ]; then
     out=$(flatpak run --env=QT_QPA_PLATFORM=offscreen "$id" --version 2>&1) || fail "--version failed: $out"
     printf '%s\n' "$out" | grep -qxF -e "Kinefin $KINEFIN_EXPECT_VERSION" -e "Kinefin: $KINEFIN_EXPECT_VERSION" \

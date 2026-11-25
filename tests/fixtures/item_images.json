@@ -1,0 +1,69 @@
+[
+  {
+    "ImageType": "Primary",
+    "ImageTag": "aaaa1111aaaa1111aaaa1111aaaa1111",
+    "Path": "/srv/media/movies/Arcturus/poster.jpg",
+    "Height": 3000,
+    "Width": 2000,
+    "Size": 482113
+  },
+  {
+    "ImageType": "Backdrop",
+    "ImageIndex": 0,
+    "ImageTag": "bbbb0000bbbb0000bbbb0000bbbb0000",
+    "Height": 1080,
+    "Width": 1920,
+    "Size": 245760
+  },
+  {
+    "ImageType": "Backdrop",
+    "ImageIndex": 1,
+    "ImageTag": "bbbb1111bbbb1111bbbb1111bbbb1111",
+    "Height": 1080,
+    "Width": 1920,
+    "Size": 301234
+  },
+  {
+    "ImageType": "Backdrop",
+    "ImageIndex": 2,
+    "ImageTag": "bbbb2222bbbb2222bbbb2222bbbb2222",
+    "Height": 720,
+    "Width": 1280,
+    "Size": 98765
+  },
+  {
+    "ImageType": "Logo",
+    "ImageTag": "cccc1111cccc1111cccc1111cccc1111",
+    "Height": 310,
+    "Width": 800,
+    "Size": 40960
+  },
+  {
+    "ImageType": "Box",
+    "ImageTag": "dddd1111dddd1111dddd1111dddd1111",
+    "Height": 500,
+    "Width": 400,
+    "Size": 12345
+  },
+  {
+    "ImageType": "Chapter",
+    "ImageIndex": 0,
+    "ImageTag": "eeee1111eeee1111eeee1111eeee1111",
+    "Height": 90,
+    "Width": 160,
+    "Size": 1024
+  },
+  {
+    "ImageType": "Backdrop",
+    "ImageTag": "ffff1111ffff1111ffff1111ffff1111",
+    "Height": 1080,
+    "Width": 1920,
+    "Size": 1000
+  },
+  {
+    "ImageType": "NotAType",
+    "ImageIndex": 0,
+    "ImageTag": "ffff2222ffff2222ffff2222ffff2222",
+    "Size": 1000
+  }
+]

@@ -15,8 +15,8 @@ Item {
     property bool backShown: false
     // The page's name; server text for a playlist or a library, so plain text only. Empty for none
     property string title: ""
-    // A fade from the row's background over the top of the content under it, for content that starts right at the row (the page sets the row's `z` above its content). The details page uses it instead of a TopFade inside its list, which raced the seasons row's asynchronous cards
-    property bool fadeBelow: false
+    // A thin shadow under the row, for content that starts right at the row and is drawn under it (the page sets the row's `z` above its content)
+    property bool shadowBelow: false
     // Names for the tests, as the pages had them before the row was shared
     property alias toolbarObjectName: toolbar.objectName
     property alias titleObjectName: titleLabel.objectName
@@ -26,63 +26,27 @@ Item {
     readonly property bool shown: backShown || title.length > 0 || toolbar.actions.length > 0
 
     visible: shown
-    implicitHeight: shown ? row.implicitHeight : 0
+    // The height of the row of the library page: the bars of the pages look alike
+    implicitHeight: shown ? Math.max(row.implicitHeight, Kirigami.Units.gridUnit * 2.5) : 0
     implicitWidth: row.implicitWidth + Kirigami.Units.largeSpacing * 2
 
     Rectangle {
-        objectName: "pageRowFade"
-        visible: bar.fadeBelow
+        objectName: "pageRowShadow"
+        visible: bar.shadowBelow
         anchors {
             left: parent.left
             right: parent.right
             top: parent.bottom
         }
-        // A smooth quadratic falloff, (1 - t)², from the row's colour at the edge (no seam) to nothing: no band where it turns, and mostly see-through in its lower half
-        height: Kirigami.Units.gridUnit * 2
+        height: Kirigami.Units.smallSpacing * 2
         gradient: Gradient {
             GradientStop {
-                position: 0.0
-                color: Qt.alpha(Kirigami.Theme.backgroundColor, 1.00)
+                position: 0
+                color: Qt.rgba(0, 0, 0, 0.3)
             }
             GradientStop {
-                position: 0.1
-                color: Qt.alpha(Kirigami.Theme.backgroundColor, 0.81)
-            }
-            GradientStop {
-                position: 0.2
-                color: Qt.alpha(Kirigami.Theme.backgroundColor, 0.64)
-            }
-            GradientStop {
-                position: 0.3
-                color: Qt.alpha(Kirigami.Theme.backgroundColor, 0.49)
-            }
-            GradientStop {
-                position: 0.4
-                color: Qt.alpha(Kirigami.Theme.backgroundColor, 0.36)
-            }
-            GradientStop {
-                position: 0.5
-                color: Qt.alpha(Kirigami.Theme.backgroundColor, 0.25)
-            }
-            GradientStop {
-                position: 0.6
-                color: Qt.alpha(Kirigami.Theme.backgroundColor, 0.16)
-            }
-            GradientStop {
-                position: 0.7
-                color: Qt.alpha(Kirigami.Theme.backgroundColor, 0.09)
-            }
-            GradientStop {
-                position: 0.8
-                color: Qt.alpha(Kirigami.Theme.backgroundColor, 0.04)
-            }
-            GradientStop {
-                position: 0.9
-                color: Qt.alpha(Kirigami.Theme.backgroundColor, 0.01)
-            }
-            GradientStop {
-                position: 1.0
-                color: Qt.alpha(Kirigami.Theme.backgroundColor, 0.00)
+                position: 1
+                color: Qt.rgba(0, 0, 0, 0)
             }
         }
     }
@@ -112,7 +76,21 @@ Item {
             id: toolbar
 
             Layout.fillWidth: true
+            // Framed buttons, as the bar of the library page has them
+            flat: false
             display: bar.wide ? Controls.AbstractButton.TextBesideIcon : Controls.AbstractButton.IconOnly
         }
+    }
+
+    // A line under the whole bar, over the width of the page
+    Kirigami.Separator {
+        objectName: "pageToolbarSeparator"
+        visible: bar.shown
+        anchors {
+            left: parent.left
+            right: parent.right
+            bottom: parent.bottom
+        }
+        Accessible.ignored: true
     }
 }

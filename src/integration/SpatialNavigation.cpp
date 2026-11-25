@@ -147,6 +147,8 @@ struct Walk {
     QList<bool> dropped;
     // The mini player floats over the page and has no space of its own: what lies fully under it is out of reach
     QList<QQuickItem *> occluders;
+    // A vertical move does not pass into a region that stands beside the page (the rail) unless the focus is in it
+    bool skipSideRegions = false;
 };
 
 void collect(Walk &walk, QQuickItem *item, QRectF clip, bool inFlickable)
@@ -155,6 +157,9 @@ void collect(Walk &walk, QQuickItem *item, QRectF clip, bool inFlickable)
         return;
     // A popup is searched as a root of its own, never as part of the page under it
     if (item != walk.root && item->inherits("QQuickPopupItem"))
+        return;
+    if (walk.skipSideRegions && item != walk.root && !walk.focusChain.contains(item)
+        && item->property("spatialSideRegion").toBool())
         return;
     const bool flickable = item->inherits("QQuickFlickable");
     bool inFlickableBelow = inFlickable;
@@ -243,10 +248,12 @@ struct Found {
     QList<QRectF> rects;
 };
 
-Found candidatesUnder(QQuickItem *root, QQuickItem *focus, QQuickWindow *window)
+Found candidatesUnder(QQuickItem *root, QQuickItem *focus, QQuickWindow *window,
+                      NavDirection direction)
 {
     Walk walk;
     walk.root = root;
+    walk.skipSideRegions = direction == NavDirection::Up || direction == NavDirection::Down;
     for (QQuickItem *item = focus; item; item = item->parentItem())
         walk.focusChain.insert(item);
     collect(walk, root, QRectF(0, 0, window->width(), window->height()), false);
@@ -348,8 +355,11 @@ qsizetype chooseSpatialCandidate(const QRectF &source, NavDirection direction,
         const QRectF to = downFrame(candidates.at(i), direction);
         if (to.width() < 1 || to.height() < 1)
             continue;
+        const double overlap =
+            std::max(0.0, std::min(to.right(), from.right()) - std::max(to.left(), from.left()));
+        // An edge that is entered has what lies across it for candidates, never what stands beside it (the rail next to a page)
         if (entry) {
-            if (to.bottom() <= from.bottom())
+            if (to.bottom() <= from.bottom() || overlap <= 0)
                 continue;
         } else {
             if (to.contains(from)
@@ -357,8 +367,6 @@ qsizetype chooseSpatialCandidate(const QRectF &source, NavDirection direction,
                 continue;
         }
         const double gap = std::max(0.0, to.top() - from.bottom());
-        const double overlap =
-            std::max(0.0, std::min(to.right(), from.right()) - std::max(to.left(), from.left()));
         const double miss =
             overlap > 0 ? 0.0 : std::max(to.left() - from.right(), from.left() - to.right());
         const double score =
@@ -394,13 +402,13 @@ QQuickItem *findSpatialTarget(QQuickItem *focus, NavDirection direction)
                      [](const QQuickItem *a, const QQuickItem *b) { return a->z() < b->z(); });
     std::ranges::reverse(popups);
     for (QQuickItem *popup : std::as_const(popups)) {
-        const Found found = candidatesUnder(popup, focus, window);
+        const Found found = candidatesUnder(popup, focus, window, direction);
         if (found.items.isEmpty() && !popup->isAncestorOf(focus))
             continue;
         const qsizetype index = chooseSpatialCandidate(source, direction, found.rects, reading);
         return index >= 0 ? found.items.at(index) : nullptr;
     }
-    const Found found = candidatesUnder(window->contentItem(), focus, window);
+    const Found found = candidatesUnder(window->contentItem(), focus, window, direction);
     const qsizetype index = chooseSpatialCandidate(source, direction, found.rects, reading);
     return index >= 0 ? found.items.at(index) : nullptr;
 }

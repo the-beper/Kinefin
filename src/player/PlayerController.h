@@ -697,6 +697,9 @@ class PlayerController final : public QObject {
     // One report after a run of seeks, however many there were
     QTimer m_seekReport;
     QTimer m_trackTimer;
+    // The position moves with every video frame: the shell is told at most this often, the last change of a burst after it
+    QTimer m_positionNotice;
+    bool m_positionNoticePending = false;
     // Wall-clock time since the current file loaded
     QElapsedTimer m_playedClock;
     // The playback rate a restart of the same item keeps, applied after the settings
@@ -821,6 +824,8 @@ class PlayerController final : public QObject {
     bool m_remoteSubtitleSearching = false;
     // "<itemId>/<language>" of the search in flight: a reply for another one is dropped
     QString m_remoteSubtitleQuery;
+    // The language the results on show were searched in, kept after they arrive: a download names it to tell its own saved file from the ones the item already had
+    QString m_remoteSubtitleLanguage;
     // The bit rate fallback: the rule, the request in flight, the lowered source waiting for the reopen and what the last request asked for
     BitrateFallback m_fallback;
     struct FallbackRequest {

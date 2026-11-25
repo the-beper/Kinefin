@@ -20,6 +20,7 @@
   - [Show more library tabs](#show-more-library-tabs)
   - [Missing and unaired episodes](#missing-and-unaired-episodes)
   - [Item details](#item-details)
+  - [Edit images](#edit-images)
   - [Search](#search)
   - [Favorites](#favorites)
   - [Playlists](#playlists)
@@ -70,7 +71,7 @@ It needs:
 - Plasma on Wayland.
 - Flatpak, the only way Kinefin is packaged.
 
-Kinefin covers movies and shows. Music and audiobooks are not built yet: those libraries show on Home but stay disabled with "Not supported yet".
+Kinefin covers movies and shows. Music and audiobooks are not built yet: those libraries show on Home but stay disabled with "Not supported yet", and their rail entries open a page that says they are coming soon.
 
 Server administration is not part of Kinefin. If you are an administrator, **Admin Dashboard** in the main menu opens the server's web interface in your browser. User management, library management, plugins and Live TV setup happen there.
 
@@ -160,7 +161,7 @@ In the picker, arrows move, Return or Space chooses, and a lock badge marks a us
 
 **Ask for Password** stores no token for that user, so Kinefin asks every time. It is off by default.
 
-The main menu, opened from the avatar at the right end of the header, has the account actions:
+The main menu, opened from the avatar at the foot of the left rail (the right end of the header in a [Compact window](#browse)), has the account actions:
 
 | Action            | Effect                                                                                                     |
 | ----------------- | ---------------------------------------------------------------------------------------------------------- |
@@ -172,9 +173,23 @@ The main menu, opened from the avatar at the right end of the header, has the ac
 
 ## Browse
 
-The header holds the tabs **Home**, **Downloads**, **Favorites** and **Playlists**, then **Movies** and **Shows** when the server has a library of that type. Further right are the search box, the **Queue** button with its count, and the main menu. When the window is narrow the labels become icons with tooltips, and the search box becomes a button.
+A rail down the left edge of the window holds the entries, each icon with its label under it:
+
+| Place   | Entries                                                                                                                                      |
+| ------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Top     | **Search**                                                                                                                                   |
+| Middle  | **Home**, **Movies** and **Shows** (each only when the server has a library of that type), **Music**, **Audiobooks**, then **Favorites**, **Playlists** and **Downloads** |
+| Foot    | **Queue** with its count, **Group** while you are in a SyncPlay group, and the main menu as your avatar                                      |
+
+**Music** and **Audiobooks** open a page that says they are coming soon. **Downloads** also shows how many downloads are not finished. In a short window the middle entries scroll, with a scroll bar that shows when some are out of view, and the foot stays in view.
+
+Ctrl+1 to Ctrl+8 open the middle entries by their position among the visible ones, so without a Movies library **Shows** is Ctrl+2.
+
+In a window narrower than the smallest window plus the rail (Compact), the rail gives way to a header bar. It has a button that opens the same entries in a drawer, a **Search** button and the main menu, which then also holds **Queue** and the SyncPlay group. The header bar also shows while you work offline, and it is hidden on the **Servers** and sign-in pages, which have only the main menu button in the top corner. The bar of every page has framed buttons and a full-width line under it, with a soft shadow below.
 
 Escape and Alt+Left go back. The mouse back button does too. Ctrl+R reloads the page in front.
+
+No card or row shows a focus ring when a page opens or scrolls. The ring appears after you press a key or use a gamepad, and a click or a touch hides it again.
 
 A middle click on a page that scrolls starts autoscroll: a marker shows where you clicked, and moving the pointer away from it scrolls the page, faster the farther the pointer is. Moving the pointer back to the marker pauses the scroll. A click of any mouse button, Escape, the wheel or a change of page ends it, and the click or the Escape does nothing else: it opens no card and goes back no page. If you hold the middle button for more than a moment, or drag with it held, the scroll lasts only while it is down. A middle click on a text field pastes as usual and starts nothing.
 
@@ -224,7 +239,7 @@ The entries shown depend on the item's type. Marking as watched from a card show
 
 **Movies** and **Shows** list every library of that type. When you have two or more such libraries, a selector lets you pick one or **All Libraries**. Kinefin remembers the selection, the view options, the filters and the sort for each library.
 
-The toolbar has the sub-tabs, **Filters**, **Sort** and the view options. Search in these tabs filters the list in front of you instead of opening the search page.
+The toolbar has the sub-tabs, **Filters**, **Sort** and the view options. A Compact window adds a search row under it that filters the list in front of you; in a wide window use [Search](#search).
 
 To filter:
 
@@ -252,7 +267,7 @@ To filter:
 
 Type in the search field above the options to narrow them. The options you have checked stay listed whatever you type. A server can have thousands of tags, so Tags lists the ones you have checked first, then the first 300 tags of the server, and a line under the list says how many it leaves out: search to find the others.
 
-**Saved Filters…**, under the list of sections, keeps the filters you have chosen under a name and puts them back later. The dialog lists the sets saved for this kind of list (movies, series, episodes or collections): choose one to put it on the list, which closes both dialogs; the sort, the search and the view options stay. Type a name and press **Save** to keep the filters now chosen in the Filters dialog (a taken name asks to **Replace**), and use the pencil to rename a set in its row (Return keeps the name, Escape leaves it) or the bin to delete it, which the dialog offers to **Undo**. Up to 50 sets, saved on this device for your account; a tag or a rating is kept as a digest, not as text. The Favorites pages have none.
+**Saved Filters…**, at the bottom left under the list of sections, level with the buttons, keeps the filters you have chosen under a name and puts them back later. The dialog lists the sets saved for this kind of list (movies, series, episodes or collections): choose one to put it on the list, which closes both dialogs; the sort, the search and the view options stay. Type a name and press **Save** to keep the filters now chosen in the Filters dialog (a taken name asks to **Replace**), and use the pencil to rename a set in its row (Return keeps the name, Escape leaves it) or the bin to delete it, which the dialog offers to **Undo**. Up to 50 sets, saved on this device for your account; a tag or a rating is kept as a digest, not as text. The Favorites pages have none.
 
 A section that does not apply to the current list is left out. While the genres and tags (or the ratings and years) load or fail to load, one entry stands in for them with a busy or warning icon, and its pane has **Retry**. **Clear Filters** removes the filters of the current view only; search, sort and library stay. If a filter leaves nothing, the page says so and offers **Clear Filters**.
 
@@ -321,11 +336,11 @@ Selecting a card opens the details page: a hero with the backdrop, logo, a facts
 
 **Show Media Info**, a button in the toolbar of the page, opens a dialog with the container, size, bit rate and streams of each source, and **Copy** puts the text on the clipboard.
 
-Before you play, choose the audio track and the subtitles (or **Off**) with **Audio** and **Subtitles** in the row under the facts, which appears only when there is a choice; **Play** and **Resume** use them. When the item has a resume point, **Play from Beginning** appears left of **Resume** and starts from the first second. **Play Trailer** opens the item's first trailer in your browser. **Copy Stream URL** puts the URL of the first source on the clipboard, without a token. **Refresh Metadata** asks the server to fetch the item's metadata and images again.
+Before you play, choose the audio track and the subtitles (or **Off**) with the selectors **Audio** and **Subtitles** (each with an icon) in the row under the facts, which appears only when there is a choice; **Play** and **Resume** use them. When the item has a resume point, **Play from Beginning** appears left of **Resume** and starts from the first second. **Play Trailer** opens the item's first trailer in your browser. **Copy Stream URL** puts the URL of the first source on the clipboard, without a token. **Refresh Metadata** asks the server to fetch the item's metadata and images again.
 
-On a movie or show page, **Add to Collection…** puts the item into an existing collection or a new one. An administrator can change the item on the server. **Delete Media…** removes a movie, episode or video when the server allows it, after a confirmation; the server deletes the file and it cannot be recovered. **Edit Metadata…** changes the name, overview, year, official rating and genres. **Identify…** on a movie or a show searches the metadata providers; select a match and press **Apply Match** to apply it. **Edit Images…** replaces or removes the primary image, the backdrop or the logo. **Edit Subtitles…** uploads an external subtitle file or deletes an external track. Clicking a cast member opens the movies, shows and episodes that person appears in.
+On a movie or show page, **Add to Collection…** puts the item into an existing collection or a new one. An administrator can change the item on the server. **Delete Media…** removes a movie, episode or video when the server allows it, after a confirmation; the server deletes the file and it cannot be recovered. **Edit Metadata…** changes the name, overview, year, official rating and genres. **Identify…** on a movie or a show searches the metadata providers; select a match and press **Apply Match** to apply it. **Edit Images…** opens the page described in [Edit images](#edit-images). **Edit Subtitles…** uploads an external subtitle file or deletes an external track. Clicking a cast member opens the movies, shows and episodes that person appears in.
 
-A series page lists seasons and one Next Up entry, a season page lists its episodes, and an episode page links to its series and season. A series or a season has **Play**, which plays its first episode (a series starts from its first regular season, not from the Specials). **Mark as Watched** or **Mark as Unwatched** in the toolbar marks every episode of a series or a season; the seasons, the episode to continue with and the episode list are read again afterwards. Once you have watched part of it, **Continue** goes on with the series' Next Up episode, or the season's first unwatched one (it reads **Resume** and picks up where you stopped when that episode is in progress), and **Play from Beginning** starts over from the first episode. The buttons appear when the server has answered for both. Each plays one episode, like opening that episode and pressing Play. A collection page lists its first 100 items. **Add to Playlist…** is on movie, episode and video pages.
+A series page lists seasons and one Next Up entry, a season page lists its episodes, and an episode page links to its series and season. On a season page of a wide window the series link and the season name share one line, and no episode is highlighted until you move into the list. Episodes and cast stay within the reading width of a very wide window. A series or a season has **Play**, which plays its first episode (a series starts from its first regular season, not from the Specials). **Mark as Watched** or **Mark as Unwatched** in the toolbar marks every episode of a series or a season; the seasons, the episode to continue with and the episode list are read again afterwards. Once you have watched part of it, **Continue** goes on with the series' Next Up episode, or the season's first unwatched one (it reads **Resume** and picks up where you stopped when that episode is in progress), and **Play from Beginning** starts over from the first episode. The buttons appear when the server has answered for both. Each plays one episode, like opening that episode and pressing Play. A collection page lists its first 100 items. **Add to Playlist…** is on movie, episode and video pages.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="images/dark/series.png">
@@ -337,9 +352,22 @@ A series page lists seasons and one Next Up entry, a season page lists its episo
   <img alt="The page of a season: its episodes with a still, the runtime and the first lines of the overview" src="images/season.png">
 </picture>
 
+### Edit images
+
+**Edit Images…** in the **Edit** submenu of a movie, series, season, episode or collection (administrators only) opens the **Edit Images** page above the details page. It has one section for each image type the item can have: Primary, Backdrop, Logo, Banner, Thumb, Art and Disc, and Box, Box (rear), Menu and Screenshot when the item already has some. Each image shows a thumbnail, its size in pixels and its file size. Back (Esc) returns to the details page, which reads the item again after every change.
+
+| Button                           | What it does                                                                                                                                                                   |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Upload…**                      | Sends a JPEG, PNG or WebP file of at most 20 MiB from your computer. Backdrops and screenshots get the new image after the others; every other type has its image replaced |
+| **Search Online…**               | Opens the **Search Online** page for that type (the toolbar button does the same for Primary)                                            |
+| **Move Earlier**, **Move Later** | On a type with several images (Backdrop, Screenshot), changes their order; the first backdrop is the one the details page shows                                              |
+| **Delete…**                      | Removes the image from the server after a confirmation; it cannot be recovered                                                                                               |
+
+**Search Online…** opens the **Search Online** page, a grid of the images that the item's metadata providers offer. Each image shows its provider, its size, its language and the rating its users gave it. **Image type** switches the type, **Provider** narrows the list to one provider that offers that type, and **Include all languages** adds the images in other languages; the list moves 24 images at a time with **Previous** and **Next**. Select an image, or move to it with the arrow keys and press Return, and the server downloads it as that type of image of the item; Kinefin then goes back to the **Edit Images** page. The previews load from the providers' own sites without your sign-in, and the download itself goes through your server.
+
 ### Search
 
-Ctrl+F, or typing in the header box, opens the search page. It shows four groups of up to 24 results: Movies, Series, Episodes and Collections. Selecting a result opens its details page. Search covers titles only, not people.
+**Search** in the rail, the search button of a Compact window, or Ctrl+F opens a search popup near the top of the window. It shows four groups of up to 24 results: Movies, Series, Episodes and Collections. Selecting a result opens its details page above the page you were on and closes the popup. Search covers titles only, not people.
 
 ### Favorites
 
@@ -368,7 +396,7 @@ The queue is an ordered list of up to 500 movies, episodes and videos, each at m
 
 To add to it, use **Play Next** (top of the queue) or **Add to Queue** (end) on a card or a details page. On a season, series or collection they add the playable episodes or children: a season from its first unplayed episode, a series from its Next Up episode.
 
-The **Queue** button in the header opens the page. Its toolbar has **Resume Queue**, **Play From Here**, **Undo** and **Clear Queue** (with confirmation). In the list:
+**Queue** at the foot of the rail (in the main menu of a Compact window) opens the page. Its toolbar has **Resume Queue**, **Play From Here**, **Undo** and **Clear Queue** (with confirmation). In the list:
 
 | Key                | Action               |
 | ------------------ | -------------------- |
@@ -394,7 +422,7 @@ The video fills the window. Bars with the controls appear when you move the poin
   <img alt="The player with its controls showing: the title, the elapsed and total time around the seek bar, and the Audio and Subtitles menus" src="images/player.png">
 </picture>
 
-The top bar has **Back** (leaves the player, playback continues in the mini player), the title and episode line, and **Cast** and **Picture-in-Picture** buttons. In a SyncPlay group a group button also shows there.
+The top bar has **Back** (leaves the player, playback continues in the mini player), the title and episode line, and **Cast…** and **Picture-in-Picture** buttons. In a SyncPlay group a group button also shows there.
 
 The bottom bar has the timeline with a thumbnail preview while you drag, **Previous** and **Next** (when there is one), **Pause** or **Resume**, a speaker button with a volume slider, **Audio**, **Subtitles**, **Full Screen Mode** and **More Actions**. The time at the left of the timeline is the current position. The one at the right toggles total and remaining time. A box above the timeline shows the time under the pointer, and the chapter there when the item has chapters; it also shows while you drag. **Ends at** shows the clock time the item ends at the current speed. **Skip Intro**, **Skip Recap** or **Skip Outro** appears during a segment the server knows, and the timeline marks each of them as a grey band; the box above the timeline names the segment under the pointer.
 
@@ -531,7 +559,7 @@ In a group the player waits for the others, and notifications name members who j
 
 Closing the player stops following the group but keeps you in it. **Follow Again** in the dialog catches up. A lost connection joins the group again.
 
-While you are in a group the top bar has a **SyncPlay Group** button next to the queue. Its tooltip says the group's name and how many people are in it, **Not following** when the playback is not in step with the group (the icon dims) and **Waiting for others** when the group waits for someone (a dot appears on the icon). Its menu lists the group and its members, up to ten, and has **Stop Following** or **Follow Again**, **Leave Group** and **SyncPlay…**, which opens the dialog. In a narrow window the same menu is the **SyncPlay Group** entry of the main menu.
+While you are in a group the rail has a **Group** button above your avatar. Its tooltip says the group's name and how many people are in it, **Not following** when the playback is not in step with the group (the icon dims) and **Waiting for others** when the group waits for someone (a dot appears on the icon). Its menu lists the group and its members, up to ten, and has **Stop Following** or **Follow Again**, **Leave Group** and **SyncPlay…**, which opens the dialog. In a Compact window the same menu is the **SyncPlay Group** entry of the main menu.
 
 ### Control other sessions
 
@@ -549,11 +577,11 @@ The **Downloads** tab holds a download queue, saved files and offline playback. 
 
 To download an item, choose **Download** on its details page or in a card menu. Kinefin fetches the original file with no re-encoding and resumes an interrupted transfer. External text subtitles (up to 8) and chapters are saved with it, once the file completes. Embedded subtitles stay in the file.
 
-To download a whole series or season, choose **Download** in the toolbar of its page, then **Download All…**. A dialog reads the episodes and says how many it will fetch and how much space they take together (when the server gives every size). **Only unwatched episodes** is on by default; switch it off to include the ones you watched. Episodes that are already on this device or have no file are left out, a series of more than 1000 episodes is cut at 1000, and nothing starts before you press **Download**. The batch joins the queue in order, and a notification names how many entered it.
+To download a whole series or season, choose **Download** in the toolbar of its page, then **Download All…**. A dialog reads the episodes and says how many it will fetch and how much space they take together (when the server gives every size). **Only unwatched episodes** is on by default; switch it off to include the ones you watched. When every episode has been watched, the dialog says so and offers that switch. Episodes that are already on this device or have no file are left out, a series of more than 1000 episodes is cut at 1000, and nothing starts before you press **Download**. The batch joins the queue in order, and a notification names how many entered it.
 
-The Downloads page has an active section and a completed one. Each row has one main button (**Play**, **Resume**, **Retry** or **Pause**) and **More Actions**: **Export…**, **Cancel Download** and **Delete Download…**, which asks first. A click on a completed row plays it. The footer shows the storage used and the number of changes waiting to sync.
+The Downloads page has an active section and a completed one. A row shows the poster, the title, a second line with the year or the season and episode, and a progress bar until the download is finished or has failed. The line under it gives the size written of the total, the percentage, the speed (an average over the last few seconds) and the time left; a queued, paused, waiting or failed download says so in words instead. Each row has one main button (**Play**, **Resume**, **Retry** or **Pause**) and **More Actions**: **Export…**, **Cancel Download** and **Delete Download…**, which asks first. A click on a completed row plays it. The footer shows the number of downloads (or "No downloads"), the speed of the running ones together, the storage used and the number of changes waiting to sync.
 
-**Settings**, **Downloads** sets how many downloads run at once and whether automatic downloads wait for an unmetered network.
+**Settings**, **Downloads** sets how many downloads run at once.
 
 ### Automatic downloads for a series
 
@@ -627,8 +655,8 @@ Ctrl+Shift+/ opens the shortcuts dialog, which lists the keys below and, while a
 | Escape, Alt+Left                                                 | Go back                                 |
 | Ctrl+F                                                           | Search                                  |
 | Ctrl+R                                                           | Refresh                                 |
-| Ctrl+1 to Ctrl+6                                                 | Tab by position                         |
-| Ctrl+PgUp, Ctrl+PgDown, Ctrl+[, Ctrl+], Ctrl+Shift+Tab, Ctrl+Tab | Previous or next tab, wrapping          |
+| Ctrl+1 to Ctrl+8                                                 | Rail entry by position                  |
+| Ctrl+PgUp, Ctrl+PgDown, Ctrl+[, Ctrl+], Ctrl+Shift+Tab, Ctrl+Tab | Previous or next entry, wrapping        |
 | Menu, Shift+F10                                                  | Open the item menu                      |
 | Ctrl+Z                                                           | Undo the last change on the Queue page  |
 | Ctrl+Up, Ctrl+Down, Delete                                       | Move or remove a queue or playlist item |
@@ -656,7 +684,7 @@ Kinefin reads SDL3 gamepads and shows no notice when one connects or leaves. The
 | North (Y, Triangle) | Play or pause            | Play or pause                                 |
 | Start               | Open the main menu       | Toggle full screen                            |
 | Select              | Expand the player        | Expand the player                             |
-| Shoulder buttons    | Previous or next tab     | Previous or next item                         |
+| Shoulder buttons    | Previous or next entry   | Previous or next item                         |
 | Triggers            | Previous or next chapter | Previous or next chapter                      |
 | Right stick         | Volume up or down        | Volume up or down                             |
 
@@ -689,7 +717,7 @@ A profile id too long for the path gets no socket (the path holds 107 bytes, so 
 | `playpause`, `play`, `pause`, `stop`, `next`, `previous`, `fastforward`, `rewind`      | The player command                                                                                                |
 | `volumeup`, `volumedown`, `togglemute`                                                 | Volume and mute                                                                                                   |
 | `togglefullscreen`, `host:fullscreen`                                                  | Toggle full screen                                                                                                |
-| `previoustab`, `nexttab`, `previouschapter`, `nextchapter`, `mainmenu`, `expandplayer` | The gamepad actions: previous or next tab, chapter, the main menu and Expand Player                               |
+| `previoustab`, `nexttab`, `previouschapter`, `nextchapter`, `mainmenu`, `expandplayer` | The gamepad actions: previous or next rail entry, chapter, the main menu and Expand Player                               |
 
 With `socat`, this sends play or pause to the default profile:
 

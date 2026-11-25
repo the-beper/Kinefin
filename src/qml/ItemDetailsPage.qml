@@ -9,6 +9,10 @@ Kirigami.ScrollablePage {
     id: page
     objectName: "itemDetailsPage"
 
+    // The darker View background on every page: a page without a list (a plain flickable) would get the lighter Window one, and the sections would not match
+    Kirigami.Theme.colorSet: Kirigami.Theme.View
+    Kirigami.Theme.inherit: false
+
     required property ConnectionController connection
     required property string itemId
 
@@ -55,6 +59,8 @@ Kirigami.ScrollablePage {
 
     // The space the page keeps around its content
     readonly property real margin: Kirigami.Units.largeSpacing
+    // The episodes and the people under them keep the reading width of the header, centred
+    readonly property real listColumnWidth: Math.min(Math.max(0, list.width - margin * 2), page.Window.window?.readingWidth ?? Infinity)
     readonly property ItemChildrenModel childModel: details.below
     // Empty when the series has no episode to continue with
     readonly property var nextUp: childModel.nextUp
@@ -230,8 +236,8 @@ Kirigami.ScrollablePage {
         icon.name: "edit-image"
         visible: page.details.status === ItemDetailsModel.Ready
                  && page.connection.currentUserIsAdministrator
-                 && ["Movie", "Series", "Episode", "Season"].indexOf(page.details.type) >= 0
-        onTriggered: editImagesDialog.open()
+                 && ["Movie", "Series", "Episode", "Season", "BoxSet"].indexOf(page.details.type) >= 0
+        onTriggered: page.Window.window.openEditImages(page.details.itemId, page.details.name, page)
     }
     readonly property Kirigami.Action editSubtitlesAction: Kirigami.Action {
         objectName: "editSubtitlesAction"
@@ -310,7 +316,7 @@ Kirigami.ScrollablePage {
             else if (page.downloadCancellable)
                 page.connection.downloads.removeCurrentDownload(page.details.itemId);
             else
-                page.Window.window.askDownload(page.details.itemId);
+                page.connection.downloads.downloadItem(page.details.itemId);
         }
     }
     // Automatic downloads of a series or a season; the rule store has one rule per series
@@ -579,9 +585,9 @@ Kirigami.ScrollablePage {
     Accessible.role: Accessible.Pane
     Accessible.name: title
     header: PageToolbar {
-        // Over the content: the hero's backdrop, and what scrolls up, fade into the row instead of meeting it at an edge
+        // Over the content: the hero's backdrop, and what scrolls up, pass under the row's shadow
         z: 1
-        fadeBelow: true
+        shadowBelow: true
         backShown: true
         actions: page.actions
         toolbarObjectName: "detailsToolbar"
@@ -772,6 +778,11 @@ Kirigami.ScrollablePage {
             if (page.sameId(itemId, page.details.itemId))
                 page.Window.window.showPassiveNotification(i18n("The metadata could not be saved: check the connection to the server and try again"));
         }
+        // The poster, the backdrop and the logo follow what the Edit Images pages above this one write
+        function onItemImageUpdated(itemId, imageType, index) {
+            if (page.sameId(itemId, page.details.itemId))
+                page.details.reload();
+        }
     }
 
     EditMetadataDialog {
@@ -783,13 +794,6 @@ Kirigami.ScrollablePage {
 
     IdentifyDialog {
         id: identifyDialog
-        connection: page.connection
-        details: page.details
-        shell: page.Window.window
-    }
-
-    EditImagesDialog {
-        id: editImagesDialog
         connection: page.connection
         details: page.details
         shell: page.Window.window
@@ -835,7 +839,8 @@ Kirigami.ScrollablePage {
 
         activeFocusOnTab: count > 0
         keyNavigationEnabled: true
-        currentIndex: 0
+        // Nothing is current until the user moves into the rows: a season opens without an episode lit
+        currentIndex: -1
         objectName: "episodesList"
         // Only a season has episodes: the header carries the rest of the page
         model: page.childModel.episodes
@@ -984,13 +989,13 @@ Kirigami.ScrollablePage {
                                 id: scrim
 
                                 readonly property color fade: Kirigami.Theme.backgroundColor
-                                // The fade above the text: up to ten grid units, less where the image has no more room above the text block
-                                readonly property real fadeLength: hero.overlay ? Math.max(Kirigami.Units.gridUnit * 3, Math.min(parent.height - heroText.implicitHeight - page.margin, Kirigami.Units.gridUnit * 10)) : Kirigami.Units.gridUnit * 4
+                                // The fade above the text: up to seven grid units, less where the image has no more room above the text block
+                                readonly property real fadeLength: hero.overlay ? Math.max(Kirigami.Units.gridUnit * 3, Math.min(parent.height - heroText.implicitHeight - page.margin, Kirigami.Units.gridUnit * 7)) : Kirigami.Units.gridUnit * 4
                                 // Where the text block starts inside the scrim: the fade is measured from it, not from the image's bottom
                                 readonly property real textTop: Math.max(0, height - page.margin - heroText.implicitHeight)
                                 readonly property real fadeTop: hero.overlay ? Math.min(1, textTop / height) : 1
                                 // How opaque the fade is where it ends, at the top of the text block; under the text it goes on to the full colour
-                                readonly property real topAlpha: hero.overlay ? 0.85 : 1
+                                readonly property real topAlpha: hero.overlay ? 0.75 : 1
 
                                 anchors {
                                     left: parent.left
@@ -1068,42 +1073,71 @@ Kirigami.ScrollablePage {
                                 Accessible.name: detailsTitle.underParentLogo ? page.details.seriesName : page.details.name
                             }
 
-                            // An episode or a season shows its series' logo: its own name stays under it, a size smaller
-                            Kirigami.Heading {
-                                id: detailsTitle
-                                objectName: "detailsTitle"
-                                readonly property bool underParentLogo: logo.status === Image.Ready && (page.details.type === "Episode" || page.details.type === "Season")
-                                Layout.fillWidth: true
-                                visible: logo.status !== Image.Ready || underParentLogo
-                                level: underParentLogo ? 2 : 1
-                                wrapMode: Text.Wrap
-                                // Item names come from the server: plain text only
-                                textFormat: Text.PlainText
-                                text: page.details.name
-                            }
+                            // A season reads as a path on one line, its series then its name; any other page stacks the name over the links
+                            GridLayout {
+                                id: titleBlock
 
-                            Flow {
-                                Layout.fillWidth: true
-                                spacing: Kirigami.Units.largeSpacing
-                                // The data decides, not the links: a child reads back its effective visibility, which follows this Flow
-                                visible: page.showSeriesLink || page.showSeasonLink
+                                readonly property bool seriesBeside: page.details.type === "Season" && page.showSeriesLink && !hero.narrow
 
-                                Kirigami.LinkButton {
-                                    id: seriesLink
-                                    objectName: "seriesLink"
-                                    visible: page.showSeriesLink
+                                Layout.fillWidth: true
+                                columns: seriesBeside ? 3 : 1
+                                columnSpacing: Kirigami.Units.largeSpacing
+                                rowSpacing: heroText.spacing
+
+                                // An episode or a season shows its series' logo: its own name stays under it, a size smaller
+                                Kirigami.Heading {
+                                    id: detailsTitle
+                                    objectName: "detailsTitle"
+                                    readonly property bool underParentLogo: logo.status === Image.Ready && (page.details.type === "Episode" || page.details.type === "Season")
+                                    Layout.fillWidth: true
+                                    Layout.row: 0
+                                    Layout.column: titleBlock.seriesBeside ? 2 : 0
+                                    Layout.alignment: titleBlock.seriesBeside ? Qt.AlignBottom : Qt.AlignTop
+                                    visible: logo.status !== Image.Ready || underParentLogo
+                                    level: underParentLogo ? 2 : 1
+                                    wrapMode: Text.Wrap
+                                    // Item names come from the server: plain text only
                                     textFormat: Text.PlainText
-                                    text: page.details.seriesName
-                                    onClicked: page.Window.window.openAncestor(page.details.seriesId, page)
+                                    text: page.details.name
                                 }
 
-                                Kirigami.LinkButton {
-                                    id: seasonLink
-                                    objectName: "seasonLink"
-                                    visible: page.showSeasonLink
+                                Flow {
+                                    Layout.fillWidth: !titleBlock.seriesBeside
+                                    Layout.row: titleBlock.seriesBeside ? 0 : 1
+                                    Layout.column: 0
+                                    Layout.alignment: titleBlock.seriesBeside ? Qt.AlignBottom : Qt.AlignTop
+                                    spacing: Kirigami.Units.largeSpacing
+                                    // The data decides, not the links: a child reads back its effective visibility, which follows this Flow
+                                    visible: page.showSeriesLink || page.showSeasonLink
+
+                                    Kirigami.LinkButton {
+                                        id: seriesLink
+                                        objectName: "seriesLink"
+                                        visible: page.showSeriesLink
+                                        textFormat: Text.PlainText
+                                        text: page.details.seriesName
+                                        onClicked: page.Window.window.openAncestor(page.details.seriesId, page)
+                                    }
+
+                                    Kirigami.LinkButton {
+                                        id: seasonLink
+                                        objectName: "seasonLink"
+                                        visible: page.showSeasonLink
+                                        textFormat: Text.PlainText
+                                        text: page.details.seasonNumber > 0 ? i18n("Season %1", page.details.seasonNumber) : (page.details.seasonNumber === 0 ? i18n("Specials") : i18n("Season"))
+                                        onClicked: page.Window.window.openAncestor(page.details.seasonId, page)
+                                    }
+                                }
+
+                                Controls.Label {
+                                    Layout.row: 0
+                                    Layout.column: 1
+                                    Layout.alignment: Qt.AlignBottom
+                                    visible: titleBlock.seriesBeside
+                                    opacity: 0.7
                                     textFormat: Text.PlainText
-                                    text: page.details.seasonNumber > 0 ? i18n("Season %1", page.details.seasonNumber) : (page.details.seasonNumber === 0 ? i18n("Specials") : i18n("Season"))
-                                    onClicked: page.Window.window.openAncestor(page.details.seasonId, page)
+                                    Accessible.ignored: true
+                                    text: Qt.application.layoutDirection === Qt.RightToLeft ? "‹" : "›"
                                 }
                             }
 
@@ -1360,20 +1394,28 @@ Kirigami.ScrollablePage {
                         id: streamSelectors
                         Layout.fillWidth: true
                         visible: page.audioChoices.length > 1 || page.subtitleChoices.length > 2
-                        spacing: Kirigami.Units.largeSpacing
+                        // The two selectors stand apart, each with its label right before its box
+                        spacing: Kirigami.Units.gridUnit
                         // The two boxes share one capped width so they line up; the full track names live in the wider popup
                         readonly property real boxWidth: Math.min(Kirigami.Units.gridUnit * 13, Math.max(Kirigami.Units.gridUnit * 6, width - Kirigami.Units.gridUnit * 6))
-                        // Both labels take the width of the longer one, so the boxes start at the same x when the Flow wraps them onto two lines
-                        readonly property real labelWidth: Math.max(audioLabel.visible ? audioLabel.implicitWidth : 0, subtitleLabel.visible ? subtitleLabel.implicitWidth : 0)
 
                         RowLayout {
-                            spacing: Kirigami.Units.smallSpacing
+                            spacing: Kirigami.Units.largeSpacing
 
-                            Controls.Label {
-                                id: audioLabel
-                                text: i18n("Audio")
+                            RowLayout {
+                                spacing: Kirigami.Units.smallSpacing
                                 visible: page.audioChoices.length > 1
-                                Layout.preferredWidth: streamSelectors.labelWidth
+
+                                Kirigami.Icon {
+                                    source: "audio-headphones"
+                                    implicitWidth: Kirigami.Units.iconSizes.small
+                                    implicitHeight: Kirigami.Units.iconSizes.small
+                                    Accessible.ignored: true
+                                }
+                                Controls.Label {
+                                    id: audioLabel
+                                    text: i18n("Audio")
+                                }
                             }
                             TextMetrics {
                                 id: audioNameMetrics
@@ -1426,13 +1468,22 @@ Kirigami.ScrollablePage {
                         }
 
                         RowLayout {
-                            spacing: Kirigami.Units.smallSpacing
+                            spacing: Kirigami.Units.largeSpacing
 
-                            Controls.Label {
-                                id: subtitleLabel
-                                text: i18n("Subtitles")
+                            RowLayout {
+                                spacing: Kirigami.Units.smallSpacing
                                 visible: page.subtitleChoices.length > 2
-                                Layout.preferredWidth: streamSelectors.labelWidth
+
+                                Kirigami.Icon {
+                                    source: "media-view-subtitles-symbolic"
+                                    implicitWidth: Kirigami.Units.iconSizes.small
+                                    implicitHeight: Kirigami.Units.iconSizes.small
+                                    Accessible.ignored: true
+                                }
+                                Controls.Label {
+                                    id: subtitleLabel
+                                    text: i18n("Subtitles")
+                                }
                             }
                             TextMetrics {
                                 id: subtitleNameMetrics
@@ -1960,8 +2011,8 @@ Kirigami.ScrollablePage {
         }
 
         delegate: EpisodeRow {
-            x: page.margin
-            width: list.width - page.margin * 2
+            x: (list.width - width) / 2
+            width: page.listColumnWidth
             // The list is the one tab stop, the arrow keys move inside it
             focusPolicy: Qt.NoFocus
             highlighted: ListView.isCurrentItem && list.activeFocus
@@ -1990,9 +2041,9 @@ Kirigami.ScrollablePage {
             ColumnLayout {
                 id: footerContent
 
-                x: page.margin
+                x: (parent.width - width) / 2
                 y: page.margin
-                width: parent.width - page.margin * 2
+                width: page.listColumnWidth
 
                 MessageBox {
                     id: episodesWarning

@@ -8,6 +8,7 @@ __pycache__/
 /po/kinefin.pot
 **/tmp/
 /.cache/
+/.env
 **/*.patch
 **/*.tmp
 /build/flatpak/build-id

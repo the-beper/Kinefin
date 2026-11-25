@@ -324,11 +324,6 @@ DownloadsController::DownloadsController(JellyfinClient *client, const QString &
                     reply->ignoreSslErrors(errors);
             });
     m_manager.setOnline(false);
-    m_manager.setMetered(m_meter.metered() && m_unmeteredOnly);
-    connect(&m_meter, &NetworkMeter::meteredChanged, this, [this](bool metered) {
-        m_manager.setMetered(metered && m_unmeteredOnly);
-        Q_EMIT meteredChanged();
-    });
     connect(m_client, &JellyfinClient::itemsReady, this, &DownloadsController::onItemsReady);
     connect(m_client, &JellyfinClient::itemPlayedUpdated, this,
             [this](const QString &itemId, bool played) {
@@ -411,6 +406,12 @@ DownloadsController::DownloadsController(JellyfinClient *client, const QString &
     connect(&m_manager, &DownloadManager::recordChanged, this, [this] {
         ++m_revision;
         Q_EMIT revisionChanged();
+        // The progress of a transfer is a record change, and so is a stalled one's falling speed
+        const qint64 speed = m_manager.totalBytesPerSecond();
+        if (speed == m_speed)
+            return;
+        m_speed = speed;
+        Q_EMIT speedChanged();
     });
     refreshOwner();
     refreshCanDownload();
@@ -495,12 +496,6 @@ void DownloadsController::setOnline(bool online)
 void DownloadsController::setParallelDownloads(int count)
 {
     m_manager.setParallelDownloads(count);
-}
-
-void DownloadsController::setUnmeteredOnly(bool unmeteredOnly)
-{
-    m_unmeteredOnly = unmeteredOnly;
-    m_manager.setMetered(m_meter.metered() && m_unmeteredOnly);
 }
 
 void DownloadsController::setIgnoreCertificateErrors(bool ignore)
@@ -1721,8 +1716,6 @@ std::optional<DownloadRecord> DownloadsController::recordFor(const QJsonObject &
     record.seasonNumber = std::min(details.seasonNumber, DownloadRecord::MaxIndexNumber);
     record.episodeNumber = std::min(details.episodeNumber, DownloadRecord::MaxIndexNumber);
     record.year = details.year;
-    // A manual start on a metered network is the user's explicit choice; a rule waits for the meter
-    record.meteredOverride = ruleId.isEmpty() && m_meter.metered();
     if (details.runtimeMinutes > 0) {
         record.runtimeTicks = std::min(qint64(details.runtimeMinutes) * 60 * 10'000'000,
                                        DownloadRecord::MaxRuntimeTicks);

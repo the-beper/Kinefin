@@ -141,6 +141,40 @@ class TestDownloadStore : public QObject {
         QCOMPARE(reloaded.records().constFirst().itemId, hex(1));
     }
 
+    // An index written when records carried a metered flag still loads: the key is ignored and not written back
+    void ignoresAFieldAnOlderIndexHad()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString path = dir.filePath(QStringLiteral("index.json"));
+        DownloadStore store;
+        store.setStoragePath(path);
+        QVERIFY(store.upsert(record(1)));
+        store.flush();
+
+        QJsonObject root = fileObject(path);
+        QJsonArray records = root.value(QStringLiteral("records")).toArray();
+        QCOMPARE(records.size(), 1);
+        QJsonObject old = records.at(0).toObject();
+        QVERIFY(!old.contains(QStringLiteral("meteredOverride")));
+        old.insert(QStringLiteral("meteredOverride"), true);
+        records.replace(0, old);
+        root.insert(QStringLiteral("records"), records);
+        QVERIFY(writeObject(path, root));
+
+        DownloadStore reloaded;
+        reloaded.setStoragePath(path);
+        QCOMPARE(reloaded.records().size(), 1);
+        QCOMPARE(reloaded.records().constFirst().itemId, hex(1));
+        QVERIFY(!QFile::exists(path + QStringLiteral(".broken")));
+
+        QVERIFY(reloaded.upsert(record(1, QStringLiteral("paused"))));
+        reloaded.flush();
+        const QJsonArray written = fileObject(path).value(QStringLiteral("records")).toArray();
+        QCOMPARE(written.size(), 1);
+        QVERIFY(!written.at(0).toObject().contains(QStringLiteral("meteredOverride")));
+    }
+
     void keepsLaterVersionAside()
     {
         QTemporaryDir dir;

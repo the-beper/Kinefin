@@ -11,6 +11,7 @@ class QTextStream;
 
 namespace Kinefin {
 class TokenStore;
+struct ProfileIndexData;
 
 // `--profile`, `--list-profiles`, `--create-profile`, `--set-default-profile` and `--delete-profile`
 void addProfileOptions(QCommandLineParser &parser);
@@ -18,6 +19,9 @@ void addProfileOptions(QCommandLineParser &parser);
 // Runs the administrative command of the command line, if any, and returns its exit code (0 done, 1 failed, 2 a usage error such as two commands at once or a command together with `--profile`); nullopt when the command line has none. Meant to run before the single-instance service, so it works while the app is running
 std::optional<int> runProfileCommand(const QCommandLineParser &parser, TokenStore &store,
                                      QTextStream &out, QTextStream &err);
+
+// The id of the profile whose id, else whose name, is `idOrName`; empty when there is none
+QString resolveProfile(const ProfileIndexData &data, const QString &idOrName);
 
 // The profile the app starts with: `--profile` (the id, else the name) or the index's default. Empty with `error` set when the index is unusable or names no such profile
 QString startupProfileId(const QCommandLineParser &parser, QString *error);

@@ -111,13 +111,20 @@ Kirigami.Dialog {
             text: i18n("This subtitle is added to “%1” on the server, for everyone who watches it", dialog.itemName)
         }
 
-        Kirigami.FormLayout {
+        GridLayout {
             Layout.fillWidth: true
+            columns: 2
+            columnSpacing: Kirigami.Units.largeSpacing
+            rowSpacing: Kirigami.Units.smallSpacing
 
+            Controls.Label {
+                Layout.columnSpan: 2
+                text: i18nc("@label:textbox", "Language:")
+            }
             Controls.TextField {
                 id: languageField
                 objectName: "uploadSubtitleLanguage"
-                Kirigami.FormData.label: i18nc("@label:textbox", "Language:")
+                Layout.fillWidth: true
                 placeholderText: i18n("eng")
                 maximumLength: 3
                 validator: RegularExpressionValidator {
@@ -130,8 +137,7 @@ Kirigami.Dialog {
             Controls.CheckBox {
                 id: forcedSwitch
                 objectName: "uploadSubtitleForced"
-                Kirigami.FormData.label: i18n("Forced:")
-                Accessible.name: i18n("Forced")
+                text: i18n("Forced")
             }
         }
 

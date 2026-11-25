@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Kinefin contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/ConnectionController.h"
+#include "app/EarlyUiScale.h"
 #include "app/ImageNetworkFactory.h"
 #include "app/InputFilter.h"
 #include "app/Logging.h"
@@ -29,19 +30,23 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QGuiApplication>
+#include <QHash>
 #include <QIcon>
 #include <QMessageBox>
 #include <QPointer>
 #include <QQmlApplicationEngine>
 #include <QQuickStyle>
 #include <QQuickWindow>
+#include <QRegularExpression>
 #include <QSGRendererInterface>
 #include <QTextStream>
+#include <QTimer>
 #include <QVariant>
 #include <KAboutData>
 #include <KDBusService>
 #include <KLocalizedQmlContext>
 #include <KLocalizedString>
+#include <functional>
 #include <memory>
 #include <optional>
 
@@ -62,6 +67,48 @@ void applyPlatformOption(int argc, char **argv)
         }
     }
 }
+
+// Qt reads QT_SCALE_FACTOR only while QApplication is constructed, so the interface scale of the profile is applied here; a variable that is already set wins
+void applyInterfaceScale(int argc, char **argv)
+{
+    if (qEnvironmentVariableIsSet("QT_SCALE_FACTOR"))
+        return;
+    QStringList arguments;
+    for (int i = 1; i < argc; ++i)
+        arguments << QString::fromLocal8Bit(argv[i]);
+    const int percent = Kinefin::startupUiScalePercent(arguments);
+    if (percent > 100)
+        qputenv("QT_SCALE_FACTOR", QByteArray::number(percent / 100.0));
+}
+
+#ifdef KINEFIN_DEV_AUTOLOGIN
+// Tokens stay in memory in a dev run of build/dev-run.sh, so its throw-away profile never asks a wallet to open
+class DevTokenStore final : public Kinefin::TokenStore {
+  public:
+    void read(const QString &key, ReadDone done) override
+    {
+        QTimer::singleShot(
+            0, this, [this, key, done] { done(m_tokens.contains(key), m_tokens.value(key)); });
+    }
+    void write(const QString &key, const QString &token, Done done) override
+    {
+        QTimer::singleShot(0, this, [this, key, token, done] {
+            m_tokens.insert(key, token);
+            done(true);
+        });
+    }
+    void remove(const QString &key, Done done) override
+    {
+        QTimer::singleShot(0, this, [this, key, done] {
+            m_tokens.remove(key);
+            done(true);
+        });
+    }
+
+  private:
+    QHash<QString, QString> m_tokens;
+};
+#endif
 } // namespace
 
 int main(int argc, char *argv[])
@@ -69,6 +116,7 @@ int main(int argc, char *argv[])
     // mpvqt uses QQuickFramebufferObject, which requires Qt Quick's OpenGL graphics API. Select it before any QQuickWindow is constructed
     QQuickWindow::setGraphicsApi(QSGRendererInterface::OpenGL);
     applyPlatformOption(argc, argv);
+    applyInterfaceScale(argc, argv);
     QApplication app(argc, argv);
     // org.kde.desktop needs QApplication; an environment variable naming another style wins
     if (qEnvironmentVariableIsEmpty("QT_QUICK_CONTROLS_STYLE"))
@@ -279,14 +327,18 @@ int main(int argc, char *argv[])
         qCritical("Unable to read the profile: %s", qPrintable(profileError));
         return 1;
     }
+#ifdef KINEFIN_DEV_AUTOLOGIN
+    DevTokenStore devTokens;
+    Kinefin::ConnectionController connection(profileId, deviceId, QStringLiteral(KINEFIN_VERSION),
+                                             &devTokens);
+#else
     Kinefin::ConnectionController connection(profileId, deviceId, QStringLiteral(KINEFIN_VERSION));
+#endif
     connection.setIgnoreCertificateErrors(settings.certificateErrorsIgnored());
     // The download queue follows the client settings of this profile at once
     const auto applyDownloadSettings = [&settings, &connection] {
         connection.downloads()->setParallelDownloads(
             settings.value(QStringLiteral("downloads"), QStringLiteral("parallel")).toInt());
-        connection.downloads()->setUnmeteredOnly(
-            settings.value(QStringLiteral("downloads"), QStringLiteral("unmeteredOnly")).toBool());
         connection.downloads()->setKodiSidecars(
             settings.value(QStringLiteral("downloads"), QStringLiteral("kodiSidecars")).toBool());
     };
@@ -298,8 +350,6 @@ int main(int argc, char *argv[])
                 return;
             if (key == QLatin1String("parallel"))
                 connection.downloads()->setParallelDownloads(settings.value(section, key).toInt());
-            else if (key == QLatin1String("unmeteredOnly"))
-                connection.downloads()->setUnmeteredOnly(settings.value(section, key).toBool());
             else if (key == QLatin1String("kodiSidecars"))
                 connection.downloads()->setKodiSidecars(settings.value(section, key).toBool());
         });
@@ -413,6 +463,85 @@ int main(int argc, char *argv[])
         pendingItemId.reset();
         showItem(itemId);
     }
+#ifdef KINEFIN_DEV_AUTOLOGIN
+    // The throw-away profile of build/dev-run.sh holds no session: the test server and its user come from the environment, the plain HTTP of a LAN server is accepted, and the password is sent once, when the server asks for it (without one the sign-in page stays for the user)
+    if (const QString server = qEnvironmentVariable("KINEFIN_DEV_SERVER"); !server.isEmpty()) {
+        const QString user = qEnvironmentVariable("KINEFIN_DEV_USER");
+        const QString password = qEnvironmentVariable("KINEFIN_DEV_PASSWORD");
+        qunsetenv("KINEFIN_DEV_PASSWORD");
+        auto tried = std::make_shared<bool>(password.isEmpty());
+        QObject::connect(
+            &connection, &Kinefin::ConnectionController::stateChanged, &connection,
+            [&connection, user, password, tried] {
+                if (connection.state() == Kinefin::ConnectionController::ConfirmInsecure) {
+                    connection.confirmInsecureHttp();
+                } else if (connection.state() == Kinefin::ConnectionController::NeedsLogin
+                           && !*tried) {
+                    *tried = true;
+                    connection.login(user, password);
+                }
+            });
+        connection.connectToWithFallback(server);
+    }
+    // build/dev-run.sh --shots: once the session is open, walks the steps of KINEFIN_DEV_STEPS (home, movies, shows, music, audiobooks, favorites, playlists, downloads, search, item:<id>), saves a PNG of the window after each one into KINEFIN_DEV_SHOTS and quits
+    if (const QString directory = qEnvironmentVariable("KINEFIN_DEV_SHOTS"); !directory.isEmpty()) {
+        const QStringList steps =
+            qEnvironmentVariable("KINEFIN_DEV_STEPS").split(u',', Qt::SkipEmptyParts);
+        const QStringList size = qEnvironmentVariable("KINEFIN_DEV_SIZE").split(u'x');
+        if (size.size() == 2 && size.at(0).toInt() > 0 && size.at(1).toInt() > 0)
+            window->resize(size.at(0).toInt(), size.at(1).toInt());
+        QDir().mkpath(directory);
+        const QHash<QString, QString> sections{
+            {QStringLiteral("home"), QStringLiteral("homeTabAction")},
+            {QStringLiteral("movies"), QStringLiteral("moviesTabAction")},
+            {QStringLiteral("shows"), QStringLiteral("tvShowsTabAction")},
+            {QStringLiteral("music"), QStringLiteral("musicTabAction")},
+            {QStringLiteral("audiobooks"), QStringLiteral("audiobooksTabAction")},
+            {QStringLiteral("favorites"), QStringLiteral("favoritesTabAction")},
+            {QStringLiteral("playlists"), QStringLiteral("playlistsTabAction")},
+            {QStringLiteral("downloads"), QStringLiteral("downloadsTabAction")}};
+        auto index = std::make_shared<qsizetype>(0);
+        auto walk = std::make_shared<std::function<void()>>();
+        *walk = [window, steps, sections, directory, index, walk, showItem] {
+            if (*index >= steps.size()) {
+                QCoreApplication::quit();
+                return;
+            }
+            const QString step = steps.at(*index);
+            if (const auto action = sections.constFind(step); action != sections.cend()) {
+                if (QObject *entry = window->findChild<QObject *>(*action))
+                    QMetaObject::invokeMethod(entry, "trigger");
+            } else if (step == QLatin1String("search")) {
+                QMetaObject::invokeMethod(window, "openSearch");
+            } else if (step.startsWith(QLatin1String("item:"))) {
+                showItem(step.mid(5));
+            }
+            QTimer::singleShot(4000, window, [window, step, directory, index, walk] {
+                QString name = step;
+                name.replace(QRegularExpression(QStringLiteral("[^A-Za-z0-9_-]")),
+                             QStringLiteral("_"));
+                window->grabWindow().save(QStringLiteral("%1/%2-%3.png")
+                                              .arg(directory)
+                                              .arg(*index + 1, 2, 10, QLatin1Char('0'))
+                                              .arg(name));
+                ++*index;
+                (*walk)();
+            });
+        };
+        auto started = std::make_shared<bool>(false);
+        // Without a server to sign in to, the steps start on the page that opens
+        if (qEnvironmentVariable("KINEFIN_DEV_SERVER").isEmpty())
+            QTimer::singleShot(4000, &connection, [walk] { (*walk)(); });
+        QObject::connect(&connection, &Kinefin::ConnectionController::stateChanged, &connection,
+                         [&connection, walk, started] {
+                             if (connection.state() != Kinefin::ConnectionController::Authenticated
+                                 || *started)
+                                 return;
+                             *started = true;
+                             QTimer::singleShot(4000, &connection, [walk] { (*walk)(); });
+                         });
+    }
+#endif
     // The desktop's media controls and the screen kept on during playback; Quit closes the window as Ctrl+Q does, so unsaved preferences are asked about first
     Kinefin::Mpris mpris(player, profileId, QDBusConnection::sessionBus());
     QObject::connect(&mpris, &Kinefin::Mpris::raiseRequested, &app, raiseWindow);
