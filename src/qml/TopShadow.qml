@@ -3,7 +3,7 @@
 import QtQuick
 import org.kde.kirigami as Kirigami
 
-// Under a toolbar: the content fades into the background as it scrolls up beneath it, instead of looking cut by the edge
+// Under a toolbar: a thin shadow on the top edge of the content once it has scrolled, so it looks as if it passes under the bar
 Rectangle {
     // Nothing is under the edge while the content is at its start
     required property bool atStart
@@ -13,16 +13,16 @@ Rectangle {
         right: parent.right
         top: parent.top
     }
-    height: Kirigami.Units.gridUnit
+    height: Kirigami.Units.smallSpacing * 2
     opacity: atStart ? 0 : 1
     gradient: Gradient {
         GradientStop {
             position: 0
-            color: Kirigami.Theme.backgroundColor
+            color: Qt.rgba(0, 0, 0, 0.3)
         }
         GradientStop {
             position: 1
-            color: Qt.alpha(Kirigami.Theme.backgroundColor, 0)
+            color: Qt.rgba(0, 0, 0, 0)
         }
     }
 

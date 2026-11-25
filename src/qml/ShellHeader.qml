@@ -6,13 +6,15 @@ import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 import org.kde.kirigamiaddons.components as Components
 
-// The top bar: the Home, Movies, Shows, Downloads, Favorites and Playlists tabs at the left, content-sized with an underline under the current one (Movies and Shows only while the server has a library of the type), and search, queue, the SyncPlay group while one is joined and the one menu button (the account avatar) at the right; the menu holds the account and the application entries. The tabs carry their labels while they fit with the search box at its minimum width (`labelledTabs`) and are icon-only otherwise; Compact (narrower than the bar with icon-only tabs and the box at its minimum, `minimumBarWidth`) turns the box into a search button and folds the queue into the menu
+// The bar of a window without the sidebar: a Compact window (narrower than `compactLimit`), and a window with nothing to choose from (signed out, or offline with only Downloads). It has the search button, which opens the search popup, the one menu button (the account avatar) and, in Compact, the button that opens the sections in a drawer; the queue and the SyncPlay group fold into the menu. With the sidebar showing, the bar is hidden: its menu button, its menus, its dialogs and its actions stay here, and the button stands at the foot of the sidebar
 Item {
     id: root
     objectName: "shellHeader"
 
     // The shell window: its functions open the pages, its connection holds the session and the search
     required property var shell
+    // The sections the sidebar draws: their actions and shortcuts live there
+    required property ShellNavigation navigation
 
     readonly property ConnectionController connection: shell.connection
     readonly property bool signedIn: connection.state === ConnectionController.Authenticated
@@ -22,6 +24,11 @@ Item {
     readonly property var syncPlay: shell.syncPlay ?? null
     // The shell derives the mode from the window width it owns: a binding on the attached Window.window here kept its load-time value and never followed a resize
     readonly property bool compact: shell.compactHeader
+    // The sidebar shows: the bar is hidden, and the menu button stands at the foot of the sidebar
+    readonly property bool inSidebar: shell.sidebarWidth > 0
+    // A SyncPlay group is joined: the sidebar's entry opens its menu, and in Compact the menu of the bar holds it
+    readonly property bool groupJoined: signedIn && shell.groupJoined
+    readonly property bool groupMenuOpened: groupMenu.opened
 
     // The signed-in user, found among the saved users by id: null when signed out or when the list has no such entry
     readonly property var currentUser: {
@@ -29,104 +36,25 @@ Item {
         return signedIn && userId.length > 0 ? connection.users.find(user => user.id === userId) ?? null : null;
     }
 
-    implicitHeight: Math.max(tabsRow.implicitHeight, rightCluster.implicitHeight + Kirigami.Units.smallSpacing * 2)
+    // The height and the margins of the bars of the pages
+    implicitHeight: Math.max(rightCluster.implicitHeight + Kirigami.Units.smallSpacing * 2, Kirigami.Units.gridUnit * 2.5)
 
-    // Ctrl+F focuses the box and selects what is in it
-    function focusSearchField() {
-        searchField.forceActiveFocus(Qt.TabFocusReason);
-        searchField.selectAll();
-    }
-
-    // The keyboard comes back to the box after the page its typing opened was created: unlike Ctrl+F it must not select, or the keystroke that opened the page would be replaced
-    function refocusSearchField() {
-        searchField.forceActiveFocus(Qt.TabFocusReason);
-    }
+    // The button of a Compact window asks for the drawer with the sections
+    signal navigationRequested
 
     // A gamepad's Start opens the main menu where its button stands
     function openMainMenu() {
         mainMenu.open();
     }
 
-    // Move between the root tabs in their visible order, wrapping (a library type may be absent). Detail pages belong to their root tab; using the shortcut returns to the selected tab, just like clicking its header button
-    function switchRelativeTab(step) {
-        if (!signedIn)
-            return;
-        const tabs = tabActions.filter(action => action.visible);
-        if (tabs.length < 2)
-            return;
-        const current = Math.max(0, tabs.findIndex(action => action.section === shell.rootTab));
-        tabs[(current + step + tabs.length) % tabs.length].trigger();
+    // The menu of the SyncPlay group opens beside the button of the sidebar that asks
+    function openGroupMenu(button) {
+        groupPlacement.openFor(button);
     }
 
-    // The tabs in their order: the fixed sections, then the library types after a divider; the Ctrl+N shortcuts follow the position among the visible ones
-    readonly property var fixedTabActions: [homeAction, downloadsAction, favoritesTabAction, playlistsTabAction]
-    readonly property var libraryTabActions: [moviesAction, tvShowsAction]
-    readonly property var tabActions: fixedTabActions.concat(libraryTabActions)
-    // The divider stands only between two groups that both show a tab
-    readonly property bool tabGroupsDivided: fixedTabActions.some(action => action.visible) && libraryTabActions.some(action => action.visible)
-    function tabShortcut(action) {
-        let position = 0;
-        for (const candidate of tabActions) {
-            if (candidate.visible)
-                ++position;
-            if (candidate === action)
-                return candidate.visible ? "Ctrl+" + position : "";
-        }
-        return "";
-    }
-
-    // Whether the tabs carry their labels: computed from the translated labels and the fixed parts of the bar, never from the layout that results from it
-    readonly property real tabHorizontalPadding: Kirigami.Units.largeSpacing
-    readonly property real tabSpacing: Kirigami.Units.smallSpacing
-    readonly property real tabsStart: Kirigami.Units.smallSpacing + (headerBackButton.visible ? headerBackButton.implicitWidth + Kirigami.Units.smallSpacing : 0)
-    readonly property real searchMinimumWidth: Kirigami.Units.gridUnit * 11
-    readonly property real searchMaximumWidth: Kirigami.Units.gridUnit * 20
-    // What the right cluster takes besides the search box outside Compact mode, with the spacing before it and the margin after it; the group button counts while a group is joined (its `joined`, not its `visible`, which follows Compact)
-    readonly property real rightFixedWidth: queueButton.implicitWidth + clusterSeparator.implicitWidth + mainMenuButton.implicitWidth + rightCluster.spacing * 3 + Kirigami.Units.smallSpacing + (groupButton.joined ? groupButton.implicitWidth + rightCluster.spacing : 0)
-    FontMetrics {
-        id: tabFontMetrics
-        font: Kirigami.Theme.defaultFont
-    }
-    function tabsWidth(labelled) {
-        let width = 0;
-        let count = 0;
-        for (const action of tabActions) {
-            if (!action.visible)
-                continue;
-            width += tabHorizontalPadding * 2 + Kirigami.Units.iconSizes.smallMedium;
-            if (labelled)
-                width += tabSpacing + Math.ceil(tabFontMetrics.advanceWidth(action.text));
-            ++count;
-        }
-        // The divider is one more item of the row, with its own margins
-        if (tabGroupsDivided)
-            width += tabSpacing + tabsDivider.implicitWidth + tabsDivider.Layout.leftMargin + tabsDivider.Layout.rightMargin;
-        return width + Math.max(0, count - 1) * tabSpacing;
-    }
-    function barWidth(labelled) {
-        return tabsStart + tabsWidth(labelled) + Kirigami.Units.smallSpacing * 2 + searchMinimumWidth + rightCluster.spacing + rightFixedWidth;
-    }
-    readonly property bool labelledTabs: !compact && barWidth(true) <= width
-    // The narrowest bar that keeps the box and the queue: the shell's Compact limit, so nothing overlaps whatever the font and the icon sizes
-    readonly property real minimumBarWidth: barWidth(false)
-
-    // The list the box searches: the model of the type tab at the root of the stack; on any other page the box feeds the global search
-    readonly property var localModel: {
-        // The Settings page opened over a tab is no part of it: the box searches the whole server there, and on the Favorites and Playlists tabs
-        if (shell.globalSearchPage)
-            return null;
-        switch (shell.rootTab) {
-        case "movies":
-            return connection.movies;
-        case "tvshows":
-            return connection.shows;
-        }
-        return null;
-    }
-
-    // The term the box shows now: the one of the list it searches
-    function currentTerm() {
-        return localModel ? localModel.searchTerm : connection.search.term;
+    // The drawer of a Compact window gives the keyboard back to the button that opened it
+    function focusNavigationButton() {
+        navigationButton.forceActiveFocus(Qt.TabFocusReason);
     }
 
     // Runs `action` at once, or once the user settled the unsaved preferences draft that the page above would lose
@@ -135,17 +63,33 @@ Item {
             action();
     }
 
-    // The box holds the keyboard while the term is being typed: the shell does not move the focus while a keystroke of its own opens the search page
-    readonly property bool searchFieldHasFocus: searchField.activeFocus
+    // First in the file: siblings take the Tab order by declaration, so this button precedes the back button and the right cluster. A Compact window has no sidebar: it opens the drawer with the sections, which gives the keyboard back here when it closes without a choice
+    QQC2.ToolButton {
+        id: navigationButton
+        objectName: "navigationButton"
+        flat: false
+        visible: root.compact && root.navigation.navigable
+        anchors.left: parent.left
+        anchors.leftMargin: Kirigami.Units.largeSpacing
+        anchors.verticalCenter: parent.verticalCenter
+        text: i18nc("@action:button", "Open Navigation")
+        icon.name: "application-menu"
+        display: QQC2.AbstractButton.IconOnly
+        QQC2.ToolTip.text: text
+        QQC2.ToolTip.visible: hovered || visualFocus
+        QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
+        onClicked: root.navigationRequested()
+    }
 
-    // First in the file: siblings take the Tab order by declaration, so the back button precedes the tabs and the right cluster. Only a narrow Settings page with an entry open has it: there the entry hides the list, and this is the pointer's way back to it (a wide one leaves through the tabs)
+    // Only a narrow Settings page with an entry open has it: there the entry hides the list, and this is the pointer's way back to it (with the sidebar showing the page has its own)
     QQC2.ToolButton {
         id: headerBackButton
         objectName: "headerBackButton"
+        flat: false
         visible: shell.pageStack.currentItem?.objectName === "settingsPage" && shell.pageStack.currentItem.narrow && shell.pageStack.currentItem.entryOpen
         z: 2
         anchors.left: parent.left
-        anchors.leftMargin: Kirigami.Units.smallSpacing
+        anchors.leftMargin: Kirigami.Units.largeSpacing + (navigationButton.visible ? navigationButton.implicitWidth + Kirigami.Units.smallSpacing : 0)
         anchors.verticalCenter: parent.verticalCenter
         text: i18nc("@action:button", "Back")
         icon.name: Qt.application.layoutDirection === Qt.RightToLeft ? "go-next" : "go-previous"
@@ -156,192 +100,24 @@ Item {
         onClicked: shell.pageStack.goBack()
     }
 
-    // The tabs are as wide as their content; the underline of the current one sits at the bottom edge of the header
-    RowLayout {
-        id: tabsRow
-        objectName: "headerTabs"
-
-        // The tabs report the page tab role: their row is the list they belong to
-        Accessible.role: Accessible.PageTabList
-
-        anchors {
-            left: headerBackButton.visible ? headerBackButton.right : parent.left
-            leftMargin: Kirigami.Units.smallSpacing
-            top: parent.top
-            bottom: parent.bottom
-        }
-        spacing: root.tabSpacing
-        visible: root.tabActions.filter(action => action.visible).length > 1
-
-        Repeater {
-            model: root.fixedTabActions
-            delegate: tabButton
-        }
-
-        Kirigami.Separator {
-            id: tabsDivider
-            objectName: "headerTabsDivider"
-            visible: root.tabGroupsDivided
-            Layout.alignment: Qt.AlignVCenter
-            Layout.preferredHeight: Kirigami.Units.gridUnit
-            Layout.leftMargin: Kirigami.Units.smallSpacing
-            Layout.rightMargin: Kirigami.Units.smallSpacing
-        }
-
-        Repeater {
-            model: root.libraryTabActions
-            delegate: tabButton
-        }
-
-        Component {
-            id: tabButton
-
-            Kirigami.NavigationTabButton {
-                id: tab
-
-                required property Kirigami.Action modelData
-
-                text: modelData.text
-                icon.name: modelData.icon.name
-                visible: modelData.visible
-                enabled: modelData.enabled
-                // A plain binding: the button is no member of a tab group and a click does not toggle it
-                checkable: false
-                checked: root.shell.currentSection === modelData.section
-                // Not checkable, so the screen reader learns the current tab from the selection
-                Accessible.role: Accessible.PageTab
-                Accessible.selected: checked
-                display: root.labelledTabs ? QQC2.AbstractButton.TextBesideIcon : QQC2.AbstractButton.IconOnly
-                onClicked: modelData.trigger()
-                Keys.onReturnPressed: animateClick()
-                Keys.onEnterPressed: animateClick()
-
-                QQC2.ToolTip.text: display === QQC2.AbstractButton.IconOnly ? text : ""
-                QQC2.ToolTip.visible: (hovered || visualFocus) && QQC2.ToolTip.text.length > 0
-                QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
-
-                Layout.fillHeight: true
-
-                leftPadding: root.tabHorizontalPadding
-                rightPadding: root.tabHorizontalPadding
-                topPadding: Kirigami.Units.largeSpacing
-                bottomPadding: Kirigami.Units.largeSpacing
-                leftInset: 0
-                rightInset: 0
-                topInset: 0
-                bottomInset: 0
-                spacing: root.tabSpacing
-                implicitWidth: implicitContentWidth + leftPadding + rightPadding
-                implicitHeight: implicitContentHeight + topPadding + bottomPadding
-
-                contentItem: RowLayout {
-                    spacing: tab.spacing
-
-                    Kirigami.Icon {
-                        source: tab.icon.name
-                        color: Kirigami.Theme.textColor
-                        Layout.preferredWidth: Kirigami.Units.iconSizes.smallMedium
-                        Layout.preferredHeight: Kirigami.Units.iconSizes.smallMedium
-                    }
-                    QQC2.Label {
-                        visible: tab.display !== QQC2.AbstractButton.IconOnly
-                        text: tab.text
-                        color: Kirigami.Theme.textColor
-                        textFormat: Text.PlainText
-                    }
-                }
-
-                // The same geometry in every state: hover, focus and the current mark only add paint
-                background: Item {
-                    Rectangle {
-                        anchors {
-                            fill: parent
-                            topMargin: Kirigami.Units.smallSpacing
-                            bottomMargin: Kirigami.Units.smallSpacing
-                        }
-                        radius: Kirigami.Units.cornerRadius
-                        color: tab.down ? Qt.alpha(Kirigami.Theme.highlightColor, 0.3) : (tab.hovered ? Qt.alpha(Kirigami.Theme.highlightColor, 0.15) : "transparent")
-                        border.width: tab.visualFocus ? 1 : 0
-                        border.color: Kirigami.Theme.highlightColor
-                    }
-                    Rectangle {
-                        objectName: "tabIndicator"
-                        visible: tab.checked
-                        anchors.bottom: parent.bottom
-                        anchors.bottomMargin: 1
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        width: Math.max(0, tab.availableWidth - Kirigami.Units.smallSpacing)
-                        height: Math.max(2, Math.round(Kirigami.Units.smallSpacing * 0.75))
-                        radius: height / 2
-                        color: Kirigami.Theme.highlightColor
-                    }
-                }
-            }
-        }
-    }
-
     RowLayout {
         id: rightCluster
 
         anchors {
             right: parent.right
-            rightMargin: Kirigami.Units.smallSpacing
+            rightMargin: Kirigami.Units.largeSpacing
             verticalCenter: parent.verticalCenter
         }
         spacing: Kirigami.Units.smallSpacing
 
-        // The search box: on a type tab it searches that tab's list and the first keystroke pops back to the tab; elsewhere it owns the global term and the first keystroke opens the search page above the current one
-        Kirigami.SearchField {
-            id: searchField
-            objectName: "headerSearchField"
-
-            // The room the tabs leave, between the minimum and the maximum width
-            Layout.preferredWidth: Math.min(root.searchMaximumWidth, Math.max(root.searchMinimumWidth,
-                root.width - root.tabsStart - root.tabsWidth(root.labelledTabs) - Kirigami.Units.smallSpacing * 2 - rightCluster.spacing - root.rightFixedWidth))
-            Layout.alignment: Qt.AlignVCenter
-            // Before signing in (servers, sign-in, user picker) there is nothing to search and no queue: the menu alone stays
-            visible: !root.compact && root.signedIn
-            // The shell owns Ctrl+F: the field's own sequence would make it ambiguous
-            focusSequences: []
-            maximumLength: 128
-            autoAccept: false
-            placeholderText: {
-                switch (root.localModel ? root.shell.rootTab : "") {
-                case "movies":
-                    return i18nc("@info:placeholder", "Search in Movies");
-                case "tvshows":
-                    return i18nc("@info:placeholder", "Search in Shows");
-                }
-                return i18nc("@info:placeholder", "Search");
-            }
-
-            // The box is the source of truth of the term: its own text never echoes back
-            onTextChanged: {
-                if (text === root.currentTerm())
-                    return;
-                if (root.localModel) {
-                    root.localModel.searchTerm = text;
-                    root.shell.popToBaseWhileTyping();
-                } else {
-                    root.connection.search.term = text;
-                    root.shell.openSearchIfMissing();
-                }
-            }
-            onAccepted: {
-                if (!root.localModel)
-                    root.connection.search.searchNow();
-            }
-            Keys.onDownPressed: root.shell.searchResultsDown()
-            Component.onCompleted: text = root.currentTerm()
-        }
-
-        // The box of a Compact window: as Ctrl+F, it opens the search page with its own field, or the field of the type tab in front
+        // The search popup, as Ctrl+F opens it
         QQC2.ToolButton {
             id: searchButton
             objectName: "headerSearchButton"
 
             Layout.alignment: Qt.AlignVCenter
             visible: root.compact && root.signedIn
+            flat: false
             text: i18nc("@action:button", "Search")
             icon.name: "search"
             display: QQC2.AbstractButton.IconOnly
@@ -352,286 +128,89 @@ Item {
             onClicked: shell.openSearch()
         }
 
-        QQC2.ToolButton {
-            id: queueButton
-            objectName: "queueButton"
-
-            readonly property int queued: root.signedIn ? root.connection.queue.count : 0
-
-            Layout.alignment: Qt.AlignVCenter
-            visible: !root.compact && root.signedIn
-            text: i18nc("@action:button", "Queue")
-            // Not the icon of the Playlists tab
-            icon.name: "media-track-queue-amarok"
-            display: QQC2.AbstractButton.IconOnly
-            QQC2.ToolTip.text: queued > 0 ? i18ncp("@info:tooltip the queue button and how many items the queue holds", "Queue, %1 item", "Queue, %1 items", queued) : text
-            QQC2.ToolTip.visible: hovered || visualFocus
-            QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
-            Accessible.name: QQC2.ToolTip.text
-            down: shell.currentSection === "queue"
-            onClicked: shell.openSection("queuePage", "QueuePage.qml", { connection: shell.connection })
-
-            // How many items wait in the queue, on the icon's corner; the accessible name says it in words
-            Rectangle {
-                objectName: "queueCountBadge"
-                visible: queueButton.queued > 0
-                anchors {
-                    top: parent.top
-                    right: parent.right
-                    topMargin: Kirigami.Units.smallSpacing / 2
-                    rightMargin: Kirigami.Units.smallSpacing / 2
-                }
-                height: Math.round(Kirigami.Units.gridUnit * 0.8)
-                width: Math.max(height, badgeLabel.implicitWidth + Kirigami.Units.smallSpacing)
-                radius: height / 2
-                color: Kirigami.Theme.highlightColor
-                Accessible.ignored: true
-
-                QQC2.Label {
-                    id: badgeLabel
-                    anchors.centerIn: parent
-                    font.pixelSize: Math.round(parent.height * 0.7)
-                    color: Kirigami.Theme.highlightedTextColor
-                    textFormat: Text.PlainText
-                    text: queueButton.queued > 99 ? i18nc("@label more than 99 items in the queue badge", "99+") : Number(queueButton.queued).toLocaleString(Qt.locale(), "f", 0)
-                }
-            }
-        }
-
-        // While a SyncPlay group is joined: who is in it, whether the playback keeps in step with it and whether it waits for someone, with the quick actions of the group in a menu (the queue, the groups list and a new group stay in the dialog)
-        QQC2.ToolButton {
-            id: groupButton
-            objectName: "syncPlayGroupButton"
-
-            readonly property var syncPlay: root.syncPlay
-            readonly property bool joined: root.signedIn && !!syncPlay && syncPlay.status === SyncPlayController.Joined
-            // The name of the group is server text: a plain text tooltip below, the accessible name says the same
-            readonly property string summary: {
-                if (!joined)
-                    return "";
-                const name = syncPlay.groupName.length > 0 ? syncPlay.groupName : i18n("Unnamed group");
-                const parts = [i18ncp("@info:tooltip %2 is the name of the group", "SyncPlay group %2: %1 person", "SyncPlay group %2: %1 people", syncPlay.participants.length, name)];
-                if (!syncPlay.following)
-                    parts.push(i18nc("@info:tooltip the playback does not keep in step with the group", "Not following"));
-                else if (syncPlay.waiting)
-                    parts.push(i18nc("@info:tooltip the group waits for someone", "Waiting for others"));
-                return parts.join(" · ");
-            }
-
-            Layout.alignment: Qt.AlignVCenter
-            visible: !root.compact && joined
-            text: i18nc("@action:button", "SyncPlay Group")
-            icon.name: "system-users-symbolic"
-            display: QQC2.AbstractButton.IconOnly
-            // Not following is the state to see: the icon dims
-            opacity: syncPlay?.following ? 1 : 0.55
-            down: groupMenu.opened
-            Accessible.name: summary
-            Accessible.role: Accessible.ButtonMenu
-            onClicked: groupMenu.open()
-
-            PlainToolTip {
-                text: groupButton.summary
-                visible: (groupButton.hovered || groupButton.visualFocus) && !groupMenu.opened
-            }
-
-            // The group waits for someone, on the icon's corner; the tooltip and the accessible name say it in words
-            Rectangle {
-                objectName: "syncPlayWaitingBadge"
-                visible: (groupButton.syncPlay?.following ?? false) && (groupButton.syncPlay?.waiting ?? false)
-                anchors {
-                    top: parent.top
-                    right: parent.right
-                    topMargin: Kirigami.Units.smallSpacing
-                    rightMargin: Kirigami.Units.smallSpacing
-                }
-                width: Kirigami.Units.smallSpacing * 2
-                height: width
-                radius: width / 2
-                color: Kirigami.Theme.neutralTextColor
-                Accessible.ignored: true
-            }
-
-            GroupMenu {
-                id: groupMenu
-                objectName: "syncPlayGroupMenu"
-                parent: groupButton
-            }
-            PopupPlacement { popup: groupMenu; anchor: groupButton }
-        }
-
-        Kirigami.Separator {
-            id: clusterSeparator
-
-            Layout.alignment: Qt.AlignVCenter
-            Layout.preferredHeight: Kirigami.Units.gridUnit
-            visible: !root.compact && root.signedIn
-        }
-
-        // The one menu: the avatar of the user marks the account, the arrow the menu; signed out it is the plain menu icon
+        // The one menu: the avatar of the user marks the account, the arrow the menu; signed out it is the plain menu icon. With the sidebar showing, this same button stands at the foot of the sidebar, with the avatar alone
         QQC2.ToolButton {
             id: mainMenuButton
             objectName: "mainMenuButton"
 
-            Layout.alignment: Qt.AlignVCenter
-            implicitHeight: queueButton.implicitHeight
+            // Framed in the bar like the buttons of the pages, bare in the rail like its entries
+            flat: root.inSidebar
+            parent: root.inSidebar ? (root.shell.sidebarUserSlot ?? rightCluster) : rightCluster
+            Layout.alignment: Qt.AlignHCenter | Qt.AlignVCenter
+            // In the rail the hit area is as wide as the other entries, and the avatar stays in the middle of it
+            Layout.fillWidth: root.inSidebar
+            Layout.leftMargin: root.inSidebar ? Kirigami.Units.smallSpacing : 0
+            Layout.rightMargin: root.inSidebar ? Kirigami.Units.smallSpacing : 0
+            Layout.minimumHeight: implicitHeight
+            implicitHeight: root.inSidebar ? Kirigami.Units.iconSizes.smallMedium + Kirigami.Units.largeSpacing * 2 : searchButton.implicitHeight
             // The hover and focus frame keeps some room around the avatar and the arrow
-            leftPadding: Kirigami.Units.largeSpacing
-            rightPadding: Kirigami.Units.largeSpacing
+            leftPadding: root.inSidebar ? Kirigami.Units.smallSpacing : Kirigami.Units.largeSpacing
+            rightPadding: root.inSidebar ? Kirigami.Units.smallSpacing : Kirigami.Units.largeSpacing
             // Not `text`: with no icon of its own the style would draw it beside the avatar; the label is the tooltip, and the accessible name adds who is signed in
             readonly property string label: i18nc("@action:button", "Main Menu")
             Accessible.name: root.signedIn && root.currentUser ? i18nc("@label %1 is a user name", "Main Menu, signed in as %1", root.currentUser.name) : label
             Accessible.role: Accessible.ButtonMenu
             display: QQC2.AbstractButton.IconOnly
             QQC2.ToolTip.text: label
-            QQC2.ToolTip.visible: (hovered || visualFocus) && !mainMenu.opened
+            QQC2.ToolTip.visible: !root.inSidebar && (hovered || visualFocus) && !mainMenu.opened
             QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
             // The menu marks where its entries lead while one of them shows
             down: shell.currentSection === "settings"
             onClicked: mainMenu.open()
 
-            contentItem: RowLayout {
-                spacing: Kirigami.Units.smallSpacing
+            // The content is centred in the button whatever its width, and the avatar is as wide as it is tall
+            contentItem: Item {
+                implicitWidth: userRow.implicitWidth
+                implicitHeight: userRow.implicitHeight
 
-                Components.Avatar {
-                    objectName: "accountAvatar"
-                    visible: root.signedIn
-                    Layout.preferredWidth: Kirigami.Units.iconSizes.smallMedium
-                    Layout.preferredHeight: Kirigami.Units.iconSizes.smallMedium
-                    Accessible.ignored: true
-                    name: root.currentUser ? root.currentUser.name : ""
-                    // Only URLs built by JellyfinClient::userImageUrl belong here: a raw server string must never become a source
-                    source: root.currentUser ? root.currentUser.imageUrl : ""
-                    // The image is decoded at the size it shows
-                    sourceSize.width: width * Screen.devicePixelRatio
-                    sourceSize.height: height * Screen.devicePixelRatio
-                }
-                Kirigami.Icon {
-                    visible: root.signedIn
-                    source: "arrow-down"
-                    color: Kirigami.Theme.textColor
-                    Layout.preferredWidth: Kirigami.Units.iconSizes.small
-                    Layout.preferredHeight: Kirigami.Units.iconSizes.small
-                }
-                Kirigami.Icon {
-                    visible: !root.signedIn
-                    source: "open-menu-symbolic"
-                    color: Kirigami.Theme.textColor
-                    Layout.preferredWidth: Kirigami.Units.iconSizes.smallMedium
-                    Layout.preferredHeight: Kirigami.Units.iconSizes.smallMedium
+                RowLayout {
+                    id: userRow
+                    anchors.centerIn: parent
+                    spacing: Kirigami.Units.smallSpacing
+
+                    Components.Avatar {
+                        objectName: "accountAvatar"
+                        visible: root.signedIn
+                        // Square, so that the avatar is round whatever the width of the button
+                        Layout.preferredWidth: Kirigami.Units.iconSizes.smallMedium
+                        Layout.preferredHeight: Kirigami.Units.iconSizes.smallMedium
+                        Layout.minimumWidth: Kirigami.Units.iconSizes.smallMedium
+                        Layout.minimumHeight: Kirigami.Units.iconSizes.smallMedium
+                        Layout.maximumWidth: Kirigami.Units.iconSizes.smallMedium
+                        Layout.maximumHeight: Kirigami.Units.iconSizes.smallMedium
+                        Accessible.ignored: true
+                        name: root.currentUser ? root.currentUser.name : ""
+                        // Only URLs built by JellyfinClient::userImageUrl belong here: a raw server string must never become a source
+                        source: root.currentUser ? root.currentUser.imageUrl : ""
+                        // The image is decoded at the size it shows
+                        sourceSize.width: width * Screen.devicePixelRatio
+                        sourceSize.height: height * Screen.devicePixelRatio
+                    }
+                    Kirigami.Icon {
+                        visible: root.signedIn && !root.inSidebar
+                        source: "arrow-down"
+                        color: Kirigami.Theme.textColor
+                        Layout.preferredWidth: Kirigami.Units.iconSizes.small
+                        Layout.preferredHeight: Kirigami.Units.iconSizes.small
+                    }
+                    Kirigami.Icon {
+                        visible: !root.signedIn
+                        source: "open-menu-symbolic"
+                        color: Kirigami.Theme.textColor
+                        Layout.preferredWidth: Kirigami.Units.iconSizes.smallMedium
+                        Layout.preferredHeight: Kirigami.Units.iconSizes.smallMedium
+                    }
                 }
             }
+
+            // The rail's tooltip stands beside the button, where it never covers the entry above
+            PlainToolTip {
+                text: mainMenuButton.label
+                visible: root.inSidebar && (mainMenuButton.hovered || mainMenuButton.visualFocus) && !mainMenu.opened
+                x: mainMenuButton.mirrored ? -width - Kirigami.Units.smallSpacing : mainMenuButton.width + Kirigami.Units.smallSpacing
+                y: Math.round((mainMenuButton.height - height) / 2)
+            }
         }
-    }
-
-    // The term reached the box from outside (a field of the search page, a term the page took with it when it left): the box follows it, and never while it echoes its own edit
-    Connections {
-        target: root.connection.search
-        function onTermChanged() {
-            if (!root.localModel && searchField.text !== root.connection.search.term)
-                searchField.text = root.connection.search.term;
-        }
-    }
-
-    // The same for the list a type tab searches, and the box takes the term of the other list when the tab changes
-    Connections {
-        target: root.localModel
-        function onSearchTermChanged() {
-            if (searchField.text !== root.localModel.searchTerm)
-                searchField.text = root.localModel.searchTerm;
-        }
-    }
-    onLocalModelChanged: searchField.text = currentTerm()
-
-    Kirigami.Action {
-        id: homeAction
-        objectName: "homeTabAction"
-
-        property string section: "home"
-        text: i18nc("@title:tab", "Home")
-        icon.name: "go-home"
-        visible: root.signedIn
-        enabled: root.signedIn
-        shortcut: root.tabShortcut(homeAction)
-        onTriggered: shell.goHome()
-    }
-
-    // Ctrl+2 and onwards follow the position of the visible tabs: a missing Movies tab moves Shows to Ctrl+2
-    Kirigami.Action {
-        id: moviesAction
-        objectName: "moviesTabAction"
-
-        property string section: "movies"
-        text: i18nc("@title:tab", "Movies")
-        icon.name: "video-symbolic"
-        visible: root.connection.movieLibraries.length > 0
-        enabled: root.signedIn
-        shortcut: root.tabShortcut(moviesAction)
-        onTriggered: shell.openTab("movies")
-    }
-    Kirigami.Action {
-        id: tvShowsAction
-        objectName: "tvShowsTabAction"
-
-        property string section: "tvshows"
-        text: i18nc("@title:tab", "Shows")
-        icon.name: "video-television"
-        visible: root.connection.showLibraries.length > 0
-        enabled: root.signedIn
-        shortcut: root.tabShortcut(tvShowsAction)
-        onTriggered: shell.openTab("tvshows")
-    }
-    Kirigami.Action {
-        id: downloadsAction
-        objectName: "downloadsTabAction"
-
-        property string section: "downloads"
-        text: i18nc("@title:tab", "Downloads")
-        icon.name: "folder-download-symbolic"
-        visible: root.signedIn || root.offline
-        enabled: root.signedIn || root.offline
-        shortcut: root.tabShortcut(downloadsAction)
-        onTriggered: shell.openDownloads()
-    }
-    Kirigami.Action {
-        id: favoritesTabAction
-        objectName: "favoritesTabAction"
-
-        property string section: "favorites"
-        text: i18nc("@title:tab", "Favorites")
-        icon.name: "favorite"
-        visible: root.signedIn
-        enabled: root.signedIn
-        shortcut: root.tabShortcut(favoritesTabAction)
-        onTriggered: shell.openFavorites()
-    }
-    Kirigami.Action {
-        id: playlistsTabAction
-        objectName: "playlistsTabAction"
-
-        property string section: "playlists"
-        text: i18nc("@title:tab", "Playlists")
-        icon.name: "view-media-playlist"
-        visible: root.signedIn
-        enabled: root.signedIn
-        shortcut: root.tabShortcut(playlistsTabAction)
-        onTriggered: shell.openPlaylists()
-    }
-
-    // PageUp/PageDown are the KDE tab navigation conventions. They work even when a detail page is on top; absent Movies/TV types are skipped
-    Shortcut {
-        objectName: "previousTabShortcut"
-        sequences: ["Ctrl+PgUp", "Ctrl+[", "Ctrl+Shift+Tab"]
-        context: Qt.WindowShortcut
-        enabled: root.signedIn
-        onActivated: root.switchRelativeTab(-1)
-    }
-    Shortcut {
-        objectName: "nextTabShortcut"
-        sequences: ["Ctrl+PgDown", "Ctrl+]", "Ctrl+Tab"]
-        context: Qt.WindowShortcut
-        enabled: root.signedIn
-        onActivated: root.switchRelativeTab(1)
     }
 
     // The shortcuts live on the actions, not on the menu items, so they work with the menu closed
@@ -765,10 +344,10 @@ Item {
         onTriggered: root.afterUnsavedSettled(() => root.connection.cancel())
     }
 
-    // Under the button, right-aligned with it (left-aligned when mirrored) as the bar ends there, and above it in a window too short to hold the menu below
-    PopupPlacement { popup: mainMenu; anchor: mainMenuButton }
+    // Under the button, right-aligned with it (left-aligned when mirrored) as the bar ends there, and above it in a window too short to hold the menu below; beside it, as high as the window allows, while the button stands in the sidebar
+    PopupPlacement { popup: mainMenu; anchor: mainMenuButton; beside: root.inSidebar }
 
-    // The quick actions of the group the viewer is in: the menu of the button in the bar and, in a compact window, an entry of the main menu
+    // The quick actions of the group the viewer is in: the menu of the sidebar's entry and, in a compact window, an entry of the main menu
     component GroupMenu: QQC2.Menu {
         id: groupMenuRoot
 
@@ -826,9 +405,9 @@ Item {
         }
     }
 
-    // A compact window has no room for the button: the group's menu is an entry of the main menu, under SyncPlay
+    // A compact window has no sidebar entry: the group's menu is an entry of the main menu, under SyncPlay
     Instantiator {
-        model: root.compact && groupButton.joined ? 1 : 0
+        model: root.compact && root.groupJoined ? 1 : 0
         delegate: GroupMenu {
             objectName: "syncPlayGroupSubmenu"
             withDialogEntry: false
@@ -844,6 +423,13 @@ Item {
         }
         onObjectRemoved: (index, object) => mainMenu.removeMenu(object)
     }
+
+    // The menu of the sidebar's SyncPlay entry: it hangs from the entry that opens it
+    GroupMenu {
+        id: groupMenu
+        objectName: "syncPlayGroupMenu"
+    }
+    PopupPlacement { id: groupPlacement; popup: groupMenu; beside: true }
 
     QQC2.Menu {
         id: mainMenu
@@ -1083,14 +669,15 @@ Item {
     ShortcutsDialog {
         id: shortcutsDialog
         objectName: "shortcutsDialog"
-        tabActions: root.tabActions
+        tabActions: root.navigation.actions
         gamepad: root.shell.gamepad ?? null
     }
 
-    // A hairline under the bar, as Dolphin and the other Breeze applications draw
+    // A hairline under the bar, as Dolphin and the other Breeze applications draw; it starts where the sidebar's own line ends
     Kirigami.Separator {
         objectName: "shellHeaderSeparator"
         anchors.left: parent.left
+        anchors.leftMargin: root.shell.sidebarWidth
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         Accessible.ignored: true

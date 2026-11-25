@@ -13,11 +13,11 @@ Kirigami.Page {
     required property ConnectionController connection
     // The name comes from the server: the page title renders it as plain text
     property string libraryName: ""
-    // "movies" or "tvshows" for the page of a tab (its title is the tab name and the header box searches its list), empty for a library opened from a tile
+    // "movies" or "tvshows" for the page of a tab (its title is the tab name), empty for a library opened from a tile
     property string tabType: ""
     // The libraries the tab can list (`id` and `name` of each): the selector shows from two
     readonly property var libraries: tabType === "movies" ? connection.movieLibraries : tabType === "tvshows" ? connection.showLibraries : []
-    // The header modes of the window: Compact hides the header box (and this page's own field takes its place), Wide is where the toolbar shows its labels
+    // The modes of the window: Compact has no rail, and this page's own field filters the list there; Wide is where the toolbar shows its labels
     readonly property bool compactShell: Window.window ? Window.window.compactHeader : false
     readonly property bool wideShell: Window.window ? Window.window.wideHeader : true
 
@@ -48,11 +48,6 @@ Kirigami.Page {
     // Applied once the view has rows: the tab may still be loading its first page
     function restoreViewPosition(position) {
         listContent.item?.restoreViewPosition(position);
-    }
-
-    // The tab's search field takes the keyboard
-    function focusSearchField() {
-        searchRow.item?.focusSearchField();
     }
 
     // The view takes the keys as soon as the page shows
@@ -217,7 +212,7 @@ Kirigami.Page {
             listContent.heldModel = listModel;
     }
 
-    // A sub-tab was chosen while a search is typed in the header box: the search is the main list's
+    // A sub-tab was chosen while a search is typed in the Compact field: the search is the main list's
     Connections {
         target: page.model
         function onSearchTermChanged() {
@@ -238,6 +233,8 @@ Kirigami.Page {
             Layout.fillWidth: true
             Layout.leftMargin: Kirigami.Units.largeSpacing
             Layout.rightMargin: Kirigami.Units.largeSpacing
+            // The height of the row of PageToolbar: the bars of the pages look alike
+            Layout.preferredHeight: Math.max(toolbarRow.implicitHeight, Kirigami.Units.gridUnit * 2.5)
             visible: page.listModel !== null || page.hasSubtabs || page.tabType === ""
             spacing: Kirigami.Units.mediumSpacing
 
@@ -302,6 +299,7 @@ Kirigami.Page {
             // The toolbar is the page's top row: the way back from a network's series sits in it, not on a row of its own
             Controls.ToolButton {
                 objectName: "networkBackButton"
+                flat: false
                 visible: page.networkBackShown
                 icon.name: "go-previous"
                 text: i18n("All Networks")
@@ -335,6 +333,8 @@ Kirigami.Page {
                 objectName: "libraryToolbar"
 
                 Layout.fillWidth: true
+                // Framed buttons, as the bar of PageToolbar has them; the sub-tab entries show their checked state
+                flat: false
                 display: page.wideShell ? Controls.AbstractButton.TextBesideIcon : Controls.AbstractButton.IconOnly
 
                 actions: [
@@ -568,6 +568,7 @@ Kirigami.Page {
             // At the right end, apart from the controls of the view, and never in the toolbar's overflow menu
             Controls.ToolButton {
                 objectName: "returnToTopButton"
+                flat: false
                 visible: page.listModel !== null
                 action: returnToTopAction
                 display: page.wideShell ? Controls.AbstractButton.TextBesideIcon : Controls.AbstractButton.IconOnly
@@ -577,7 +578,15 @@ Kirigami.Page {
             }
         }
 
-        // A Compact window has no search box in the header: the tab's own field sits under the toolbar, built only then
+        // A line under the whole bar, as under the bar of PageToolbar
+        Kirigami.Separator {
+            objectName: "libraryToolbarSeparator"
+            Layout.fillWidth: true
+            visible: toolbarRow.visible
+            Accessible.ignored: true
+        }
+
+        // A Compact window has no rail with the search entry of the global search: the tab's own field, which filters its list, sits under the toolbar, built only then
         Loader {
             id: searchRow
 
@@ -594,18 +603,13 @@ Kirigami.Page {
                 id: tabSearch
                 objectName: "librarySearchField"
 
-                function focusSearchField() {
-                    tabSearch.forceActiveFocus(Qt.TabFocusReason);
-                    tabSearch.selectAll();
-                }
-
                 // The shell owns Ctrl+F: the field's own sequence would make it ambiguous
                 focusSequences: []
                 maximumLength: 128
                 autoAccept: false
                 placeholderText: page.tabType === "movies" ? i18nc("@info:placeholder", "Search in Movies") : i18nc("@info:placeholder", "Search in Shows")
 
-                // The field is the source of truth while it holds the focus, and follows the term the header box changes
+                // The field is the source of truth while it holds the focus, and follows the term of the list
                 onTextChanged: {
                     if (text !== page.model.searchTerm)
                         page.model.searchTerm = text;

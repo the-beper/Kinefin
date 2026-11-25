@@ -70,14 +70,14 @@ add_library(kinefin_core STATIC
     src/downloads/DownloadStore.h
     src/downloads/DownloadTransfer.cpp
     src/downloads/DownloadTransfer.h
+    src/downloads/SpeedAverage.cpp
+    src/downloads/SpeedAverage.h
     src/downloads/WatchedOutbox.cpp
     src/downloads/WatchedOutbox.h
     src/downloads/ExportNames.cpp
     src/downloads/ExportNames.h
     src/downloads/DownloadRules.cpp
     src/downloads/DownloadRules.h
-    src/integration/NetworkMeter.cpp
-    src/integration/NetworkMeter.h
     src/models/DownloadsModel.cpp
     src/models/DownloadsModel.h
     src/syncplay/ServerClock.cpp
@@ -283,7 +283,7 @@ qt_add_resources(kinefin_cast "cast_roots"
 target_link_libraries(kinefin_player PUBLIC kinefin_cast)
 
 # The QML module lives in a static library of its own so that the UI tests can import it like the application does
-foreach(page Main PlayerPage OsdButton MiniPlayer PictureInPictureWindow PlaybackInfoOverlay ShellHeader AboutDialog ShortcutsDialog DialogTitleBar RemoteSessionsDialog SyncPlayDialog MediaInfoDialog CastDialog CastTargetRow HomePage LibraryTile LibraryPage ResumeItemsPage PersonPage MediaCard CardMenu CardRow EpisodeRow ItemDetailsPage SearchPage QueuePage FilterDialog FilterChips GenreRailsView GenreRailsPage LibraryContent ItemListRow ItemRowGrid LoginPage UserPickerPage MessageBox ServersPage SettingsPage SettingRow UserPreferencesForm UserPreferencesSaveBar FavoritesPage FavoriteCard FavoritesBanners FavoritesSectionPage TopFade MediaListRow PlaylistsPage PlaylistPage PlaylistDialogs AddToPlaylistDialog AddToCollectionDialog CollectionDialogs EditMetadataDialog IdentifyDialog EditImagesDialog EditSubtitlesDialog PageToolbar PageBackButton FadeInOnShow PageTitle PlainToolTip PopupPlacement AutoScroll DownloadsPage DownloadRulesPage DownloadAllDialog RuleDialog SubtitleSearchDialog SavedFiltersDialog UploadSubtitleDialog PlainMenuItem)
+foreach(page Main PlayerPage OsdButton MiniPlayer PictureInPictureWindow PlaybackInfoOverlay ShellHeader ShellNavigation ShellSidebar AboutDialog ShortcutsDialog DialogTitleBar RemoteSessionsDialog SyncPlayDialog MediaInfoDialog CastDialog CastTargetRow HomePage LibraryTile LibraryPage ResumeItemsPage PersonPage MediaCard CardMenu CardRow EpisodeRow ItemDetailsPage SearchPopup QueuePage FilterDialog FilterChips GenreRailsView GenreRailsPage LibraryContent ItemListRow ItemRowGrid LoginPage UserPickerPage MessageBox ServersPage SettingsPage SettingRow UserPreferencesForm UserPreferencesSaveBar FavoritesPage FavoriteCard FavoritesBanners FavoritesSectionPage TopShadow MediaListRow PlaylistsPage PlaylistPage PlaylistDialogs AddToPlaylistDialog AddToCollectionDialog CollectionDialogs EditMetadataDialog IdentifyDialog EditImagesDialog EditSubtitlesDialog PageToolbar PageBackButton FadeInOnShow PageTitle PlainToolTip PopupPlacement AutoScroll DownloadsPage DownloadRulesPage DownloadAllDialog RuleDialog SubtitleSearchDialog SavedFiltersDialog UploadSubtitleDialog PlainMenuItem PlaceholderSectionPage)
     set_source_files_properties(src/qml/${page}.qml PROPERTIES QT_RESOURCE_ALIAS ${page}.qml)
 endforeach()
 # The images the pages draw themselves, beside the QML files they belong to
@@ -314,6 +314,8 @@ qt_add_qml_module(kinefin_ui
         src/qml/AutoScroll.qml
         src/qml/PlaybackInfoOverlay.qml
         src/qml/ShellHeader.qml
+        src/qml/ShellNavigation.qml
+        src/qml/ShellSidebar.qml
         src/qml/ShortcutsDialog.qml
         src/qml/DialogTitleBar.qml
         src/qml/AboutDialog.qml
@@ -338,7 +340,7 @@ qt_add_qml_module(kinefin_ui
         src/qml/CardRow.qml
         src/qml/EpisodeRow.qml
         src/qml/ItemDetailsPage.qml
-        src/qml/SearchPage.qml
+        src/qml/SearchPopup.qml
         src/qml/QueuePage.qml
         src/qml/DownloadsPage.qml
         src/qml/DownloadRulesPage.qml
@@ -350,10 +352,11 @@ qt_add_qml_module(kinefin_ui
         src/qml/SavedFiltersDialog.qml
         src/qml/UploadSubtitleDialog.qml
         src/qml/PlainMenuItem.qml
+        src/qml/PlaceholderSectionPage.qml
         src/qml/GenreRailsView.qml
         src/qml/GenreRailsPage.qml
         src/qml/LibraryContent.qml
-        src/qml/TopFade.qml
+        src/qml/TopShadow.qml
         src/qml/ItemListRow.qml
         src/qml/ItemRowGrid.qml
         src/qml/LoginPage.qml
@@ -457,6 +460,11 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/build/flatpak/build-id")
     endif()
 endif()
 target_compile_definitions(kinefin PRIVATE KINEFIN_VERSION="${PROJECT_VERSION}" KINEFIN_DISPLAY_VERSION="${KINEFIN_DISPLAY_VERSION}" TRANSLATION_DOMAIN="kinefin")
+# Only build/dev-run.sh turns it on: no release build signs in from the environment
+option(KINEFIN_DEV_AUTOLOGIN "Sign in from KINEFIN_DEV_SERVER, KINEFIN_DEV_USER and KINEFIN_DEV_PASSWORD" OFF)
+if(KINEFIN_DEV_AUTOLOGIN)
+    target_compile_definitions(kinefin PRIVATE KINEFIN_DEV_AUTOLOGIN)
+endif()
 
 # po/ is flat (<language>.po), while ki18n_install expects <language>/<domain>.po and would install the catalogs under the wrong names: compile each one to <locale>/<language>/LC_MESSAGES/kinefin.mo instead
 if(NOT KDE_INSTALL_LOCALEDIR)
@@ -756,6 +764,10 @@ if(BUILD_TESTING)
     target_link_libraries(test_download_store PRIVATE kinefin_core Qt6::Test)
     add_test(NAME download_store COMMAND test_download_store)
 
+    add_executable(test_speed_average tests/test_speed_average.cpp)
+    target_link_libraries(test_speed_average PRIVATE kinefin_core Qt6::Test)
+    add_test(NAME speed_average COMMAND test_speed_average)
+
     add_executable(test_download_transfer tests/test_download_transfer.cpp)
     target_compile_definitions(test_download_transfer PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(test_download_transfer PRIVATE kinefin_core Qt6::Test Qt6::Network)
@@ -782,10 +794,6 @@ if(BUILD_TESTING)
     add_executable(test_watched_outbox tests/test_watched_outbox.cpp)
     target_link_libraries(test_watched_outbox PRIVATE kinefin_core Qt6::Test)
     add_test(NAME watched_outbox COMMAND test_watched_outbox)
-
-    add_executable(test_network_meter tests/test_network_meter.cpp)
-    target_link_libraries(test_network_meter PRIVATE kinefin_core Qt6::Test Qt6::DBus)
-    add_test(NAME network_meter COMMAND test_network_meter)
 
     add_executable(test_genre_rails_model tests/test_genre_rails_model.cpp)
     target_compile_definitions(test_genre_rails_model PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")

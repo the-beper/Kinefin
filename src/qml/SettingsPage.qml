@@ -285,12 +285,27 @@ Kirigami.Page {
             visible: !page.narrow || page.entryOpen
             spacing: 0
 
+            // The way back to the list while an entry hides it, in the bar the other pages have: the window's header has the button otherwise, and it is hidden where the sidebar shows
+            PageToolbar {
+                id: settingsBar
+                Layout.fillWidth: true
+                backShown: page.narrow && page.entryOpen && !(page.Window.window?.header?.visible ?? false)
+            }
+
             Controls.ScrollView {
                 id: settingsView
                 objectName: "settingsContentView"
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 contentWidth: availableWidth
+
+                // Under the bar of a narrow page only: the shadow shows once the entry has scrolled
+                TopShadow {
+                    parent: settingsView
+                    z: 1
+                    visible: settingsBar.shown
+                    atStart: page.scroller?.atYBeginning ?? true
+                }
 
                 // Another section fades in instead of standing there at once
                 // On the GUI thread: a render-thread animator can leave a stale frame when its item is hidden mid-fade

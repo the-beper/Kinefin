@@ -218,6 +218,22 @@ class TestClientSettings : public QObject {
         QVERIFY(readAll(path()).contains("future_key=7"));
     }
 
+    // A key of a setting that no longer exists is never read, listed or warned about, and stays in the file
+    void aRemovedSettingStaysInTheFileAndIsIgnored()
+    {
+        writeFile(path(), "[downloads]\nparallel=3\nunmeteredOnly=false\n");
+        const QString section = QStringLiteral("downloads");
+        const QString removed = QStringLiteral("unmeteredOnly");
+        {
+            ClientSettings settings(path());
+            QCOMPARE(settings.value(section, QStringLiteral("parallel")), 3);
+            QVERIFY(!settings.value(section, removed).isValid());
+            QVERIFY(!settings.setValue(section, removed, true));
+            QVERIFY(settings.setValue(section, QStringLiteral("parallel"), 4));
+        }
+        QVERIFY(readAll(path()).contains("unmeteredOnly=false"));
+    }
+
     void aNewerFileIsMovedAsideAndReplacedByDefaults()
     {
         const QByteArray newer = "[General]\nversion=2\n\n[main]\nfullscreen=true\n";

@@ -3,17 +3,20 @@
 #pragma once
 
 #include <QByteArray>
+#include <QElapsedTimer>
 #include <QHash>
 #include <QList>
 #include <QObject>
 #include <QSet>
 #include <QString>
+#include <QTimer>
 #include <QUrl>
 
 #include <functional>
 #include <optional>
 
 #include "downloads/DownloadStore.h"
+#include "downloads/SpeedAverage.h"
 
 namespace Kinefin {
 class DownloadTransfer;
@@ -25,7 +28,7 @@ struct DownloadSource {
     bool ignoreCertificateErrors = false;
 };
 
-// The download queue of one profile: at most `MaxParallel` transfers at once, each in its own thread, and a persisted record per item. The manager never stores a URL or a token; `sourceResolver` builds both from the record when a transfer starts. A manual enqueue (empty `ruleId`) runs even on a metered network; an automatic one waits, failing closed while the meter is unknown. Records survive a restart: a `fetching` record becomes `queued`, a `paused` one stays paused, and a completed file is only played through `localPath()`
+// The download queue of one profile: at most `MaxParallel` transfers at once, each in its own thread, and a persisted record per item. The manager never stores a URL or a token; `sourceResolver` builds both from the record when a transfer starts. Records survive a restart: a `fetching` record becomes `queued`, a `paused` one stays paused, and a completed file is only played through `localPath()`
 class DownloadManager final : public QObject {
     Q_OBJECT
 
@@ -50,9 +53,6 @@ class DownloadManager final : public QObject {
     // Whether the session can serve downloads at all; false stops the active transfers (their partials are kept) and holds the queue
     void setOnline(bool online);
     bool online() const;
-    // Whether the current network is metered; it starts metered, so automatic downloads wait until the caller knows the answer and automatic transfers already running stop
-    void setMetered(bool metered);
-    bool metered() const;
 
     void setSourceResolver(SourceResolver resolver);
 
@@ -61,7 +61,7 @@ class DownloadManager final : public QObject {
     bool enqueue(const DownloadRecord &record, bool batch = false);
     // Queues a record again after a failure, or resumes a paused one
     bool retry(const QString &serverId, const QString &userId, const QString &itemId);
-    // Runs the queue now: for a gate that opened without setOnline or setMetered changing (the download policy became known)
+    // Runs the queue now: for a gate that opened without setOnline changing (the download policy became known)
     void wake();
     // Stores the fields a caller owns (local position, played, exported state, info fields) of an existing record and emits recordChanged; false for an unknown key. While a transfer runs, its state, size, byte count, container and ETag are kept as they are
     bool updateRecord(const DownloadRecord &record);
@@ -72,6 +72,11 @@ class DownloadManager final : public QObject {
     bool pause(const QString &serverId, const QString &userId, const QString &itemId);
     // Drops the item: its whole folder (media, partial, sidecar, poster, info, subtitles) goes, then the record
     bool remove(const QString &serverId, const QString &userId, const QString &itemId);
+
+    // The download speed of a record that is fetching, averaged over the last few seconds (SpeedAverage); 0 for any other state, and while the transfer has not sent two samples yet
+    qint64 bytesPerSecond(const DownloadRecord &record) const;
+    // The speed of every transfer that runs
+    qint64 totalBytesPerSecond() const;
 
     // The validated path of a completed file; empty for anything else
     QString localPath(const DownloadRecord &record) const;
@@ -107,7 +112,8 @@ class DownloadManager final : public QObject {
     // False when the record was already in that state; `writeNow` false batches the write for the caller
     bool setRecordState(const QString &key, const QString &state, const QString &error = {},
                         int httpStatus = 0, bool writeNow = true);
-    bool startable(const DownloadRecord &record) const;
+    qint64 speedOf(const QString &key) const;
+    void decaySpeeds();
     void dropFiles(const DownloadRecord &record);
     void scheduleRetry(const QString &key, int httpStatus);
     void stopActive(const QString &key, Stop reason);
@@ -128,8 +134,12 @@ class DownloadManager final : public QObject {
     QHash<QString, int> m_retryAttempt;
     QSet<QString> m_retryPending;
     QList<int> m_retryDelays{30'000, 120'000, 600'000};
+    // One average per running transfer, fed by its progress signal
+    QHash<QString, SpeedAverage> m_speeds;
+    QElapsedTimer m_clock;
+    // One timer for all transfers, running while one does: a transfer that stops sending gives no progress to carry its speed down
+    QTimer m_speedTimer;
     int m_parallel = DefaultParallel;
     bool m_online = true;
-    bool m_metered = true;
 };
 } // namespace Kinefin

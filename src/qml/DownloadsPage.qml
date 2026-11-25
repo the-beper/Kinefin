@@ -15,6 +15,8 @@ Kirigami.ScrollablePage {
 
     readonly property DownloadsController downloads: connection.downloads
     readonly property DownloadsModel downloadsModel: downloads.model
+    // The rows, their headers and the notes above them are capped at the shell's reading width and centred, as the other lists are
+    readonly property real sideMargin: Math.max(0, (list.width - (page.Window.window?.readingWidth ?? list.width)) / 2)
 
     title: i18n("Downloads")
     // As the Movies and Shows tabs: no title bar, the toolbar above the list names the page in a Compact window
@@ -106,9 +108,43 @@ Kirigami.ScrollablePage {
         return line;
     }
 
-    function rowStatus(state, error, size, bytesWritten) {
-        if (state === "fetching" && size > 0)
-            return i18nc("@info download progress, bytes written of the total size", "%1 of %2", page.downloads.formattedSize(bytesWritten), page.downloads.formattedSize(size));
+    // The speed in the unit family of the sizes: "12.4 MB/s"; empty when nothing moves
+    function speedText(bytesPerSecond) {
+        return bytesPerSecond > 0 ? i18nc("@info a transfer speed, %1 is a size such as 12.4 MB", "%1/s", page.downloads.formattedSize(bytesPerSecond)) : "";
+    }
+
+    // What is left at the current speed, to the minute; empty without a size or a speed
+    function timeLeftText(size, bytesWritten, bytesPerSecond) {
+        if (size <= 0 || bytesPerSecond <= 0 || bytesWritten >= size)
+            return "";
+        const minutes = Math.round((size - bytesWritten) / bytesPerSecond / 60);
+        if (minutes < 1)
+            return i18n("less than a minute left");
+        if (minutes < 60)
+            return i18n("about %1 min left", minutes);
+        if (minutes < 24 * 60)
+            return i18nc("@info time left, hours and minutes", "about %1 h %2 min left", Math.floor(minutes / 60), minutes % 60);
+        return i18n("more than a day left");
+    }
+
+    // The one muted line of a row: while it fetches the parts that are known (bytes of the total, percentage, speed, time left), else the state in plain words
+    function rowStatus(state, error, size, bytesWritten, progress, bytesPerSecond) {
+        if (state === "fetching") {
+            const parts = [];
+            if (size > 0) {
+                parts.push(i18nc("@info download progress, bytes written of the total size", "%1 of %2", page.downloads.formattedSize(bytesWritten), page.downloads.formattedSize(size)));
+                parts.push(i18nc("@info download progress in percent", "%1%", Math.floor(Math.max(0, progress) * 100)));
+            } else if (bytesWritten > 0) {
+                parts.push(page.downloads.formattedSize(bytesWritten));
+            }
+            const speed = page.speedText(bytesPerSecond);
+            if (speed.length > 0)
+                parts.push(speed);
+            const left = page.timeLeftText(size, bytesWritten, bytesPerSecond);
+            if (left.length > 0)
+                parts.push(left);
+            return parts.length > 0 ? parts.join(" · ") : page.stateText(state);
+        }
         if (state === "completed" || state === "exported")
             return page.downloads.formattedSize(size);
         if (state === "error")
@@ -190,6 +226,13 @@ Kirigami.ScrollablePage {
         id: list
         objectName: "downloadsList"
 
+        // On the view, not in its content: the shadow stays under the toolbar while the rows scroll
+        TopShadow {
+            parent: list
+            z: 1
+            atStart: list.atYBeginning
+        }
+
         model: page.downloadsModel
         activeFocusOnTab: true
         keyNavigationEnabled: true
@@ -239,8 +282,11 @@ Kirigami.ScrollablePage {
             required property real size
             required property real bytesWritten
             required property real progress
+            required property real bytesPerSecond
             required property bool active
             required property bool downloaded
+            // One status line shared by the row and its accessible description
+            readonly property string statusText: page.rowStatus(recordState, error, size, bytesWritten, progress, bytesPerSecond)
             readonly property bool cancellable: ["queued", "fetching", "waiting"].indexOf(recordState) >= 0
             readonly property bool removable: ["paused", "error", "completed", "exported"].indexOf(recordState) >= 0
             readonly property bool hasMenu: cancellable || removable
@@ -251,7 +297,19 @@ Kirigami.ScrollablePage {
             }
 
             objectName: "downloadRow_" + itemId
+            // The row spans the list and its visible part is capped at the reading width and centred: a ListView resets the x of its delegates, so the side margins are insets
             width: list.width
+            leftInset: page.sideMargin
+            rightInset: page.sideMargin
+            leftPadding: page.sideMargin + Kirigami.Units.largeSpacing
+            rightPadding: page.sideMargin + Kirigami.Units.largeSpacing
+            topPadding: Kirigami.Units.smallSpacing
+            bottomPadding: Kirigami.Units.smallSpacing
+            containmentMask: QtObject {
+                function contains(point: point): bool {
+                    return point.x >= page.sideMargin && point.x <= row.width - page.sideMargin;
+                }
+            }
             highlighted: ListView.isCurrentItem && ListView.view.activeFocus
             // The style's row background reads this hint, not Kirigami.Theme.useAlternateBackgroundColor, and the row's index
             Kirigami.StyleHints.useAlternateBackgroundColor: true
@@ -262,7 +320,7 @@ Kirigami.ScrollablePage {
                     page.Window.window.playDownload(row.serverId, row.userId, row.itemId);
             }
             Accessible.name: row.name
-            Accessible.description: page.rowStatus(row.recordState, row.error, row.size, row.bytesWritten)
+            Accessible.description: row.statusText
 
             contentItem: RowLayout {
                 spacing: Kirigami.Units.largeSpacing
@@ -286,7 +344,9 @@ Kirigami.ScrollablePage {
                         anchors.fill: parent
                         // Only URLs built by JellyfinClient::imageUrl reach the image fetcher's allowlist
                         source: {
-                            page.connection.downloads.revision; // the poster may have been written after the completion
+                            // The poster may be written after the completion: a finished row follows the queue, a running one has none to find and skips the progress updates
+                            if (row.downloaded)
+                                page.connection.downloads.revision;
                             return page.connection.downloads.posterSource(row.serverId, row.userId, row.itemId, row.primaryTag);
                         }
                         fillMode: Image.PreserveAspectCrop
@@ -298,6 +358,7 @@ Kirigami.ScrollablePage {
                 }
                 ColumnLayout {
                     Layout.fillWidth: true
+                    Layout.alignment: Qt.AlignVCenter
                     spacing: Kirigami.Units.smallSpacing / 2
 
                     Controls.Label {
@@ -324,18 +385,20 @@ Kirigami.ScrollablePage {
                         font: Kirigami.Theme.smallFont
                     }
                     Controls.ProgressBar {
+                        objectName: "downloadProgress_" + row.itemId
                         Layout.fillWidth: true
-                        Layout.maximumWidth: Kirigami.Units.gridUnit * 20
-                        visible: row.recordState === "fetching"
+                        // Every unfinished row keeps its bar, so a queued row that starts does not change the height of the rows below it
+                        visible: row.active && row.recordState !== "error"
                         from: 0
                         to: 1
                         // An unknown size has no fraction to show
-                        indeterminate: row.size <= 0 || row.progress < 0
+                        indeterminate: row.recordState === "fetching" && (row.size <= 0 || row.progress < 0)
                         value: Math.max(0, row.progress)
                     }
                     Controls.Label {
+                        objectName: "downloadStatus_" + row.itemId
                         Layout.fillWidth: true
-                        text: page.rowStatus(row.recordState, row.error, row.size, row.bytesWritten)
+                        text: row.statusText
                         textFormat: Text.PlainText
                         // An error ends with what to do: it wraps instead of losing that end
                         wrapMode: row.recordState === "error" ? Text.Wrap : Text.NoWrap
@@ -431,9 +494,16 @@ Kirigami.ScrollablePage {
         }
 
         section.property: "section"
-        section.delegate: Kirigami.ListSectionHeader {
+        section.delegate: Item {
             width: list.width
-            text: section === "completed" ? i18n("Available on This Device") : i18n("Active Downloads")
+            height: sectionHeader.implicitHeight
+
+            Kirigami.ListSectionHeader {
+                id: sectionHeader
+                x: page.sideMargin
+                width: parent.width - page.sideMargin * 2
+                text: section === "completed" ? i18n("Available on This Device") : i18n("Active Downloads")
+            }
         }
 
         header: Item {
@@ -450,6 +520,8 @@ Kirigami.ScrollablePage {
                     right: parent.right
                     top: parent.top
                     margins: Kirigami.Units.largeSpacing
+                    leftMargin: page.sideMargin + Kirigami.Units.largeSpacing
+                    rightMargin: page.sideMargin + Kirigami.Units.largeSpacing
                 }
                 spacing: Kirigami.Units.smallSpacing
 
@@ -510,6 +582,17 @@ Kirigami.ScrollablePage {
 
     footer: Controls.ToolBar {
         objectName: "downloadsFooter"
+        // A line over the whole bar, as the bars at the top have one under them
+        background: Item {
+            Kirigami.Separator {
+                anchors {
+                    left: parent.left
+                    right: parent.right
+                    top: parent.top
+                }
+                Accessible.ignored: true
+            }
+        }
         // The label starts at the same distance from the left edge as its text does from the top: the content row centres it vertically
         leftPadding: topPadding + footerCount.y
         rightPadding: leftPadding
@@ -524,6 +607,13 @@ Kirigami.ScrollablePage {
                 textFormat: Text.PlainText
                 elide: Text.ElideRight
                 text: i18np("%1 download", "%1 downloads", page.downloadsModel.count)
+            }
+            Controls.Label {
+                objectName: "downloadsFooterSpeed"
+                visible: page.downloads.bytesPerSecond > 0
+                textFormat: Text.PlainText
+                color: Kirigami.Theme.disabledTextColor
+                text: page.speedText(page.downloads.bytesPerSecond)
             }
             Controls.Label {
                 visible: page.downloads.pendingSyncCount > 0

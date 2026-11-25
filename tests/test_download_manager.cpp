@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Kinefin contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
-// The download queue: parallel starts, persistence, pause and resume, cancel/remove (a removal outranks a gate change and drops the whole item folder), record updates, offline, the metered rule, automatic retries, the container fallback and the restart of a record left fetching
+// The download queue: parallel starts, persistence, pause and resume, cancel/remove (a removal outranks a gate change and drops the whole item folder), record updates, offline, the speed average, automatic retries, the container fallback and the restart of a record left fetching
 #include "FakeJellyfin.h"
 #include "downloads/DownloadManager.h"
 
@@ -104,13 +104,43 @@ class TestDownloadManager : public QObject {
             const QString path = manager.localPath(*found);
             QVERIFY(!path.isEmpty());
             QCOMPARE(contents(path), server.downloadBodyFor(hex(index).toLatin1()));
+            QCOMPARE(manager.bytesPerSecond(*found), 0);
         }
+        QCOMPARE(manager.totalBytesPerSecond(), 0);
         QVERIFY(QFile::exists(dir.filePath(QStringLiteral("index.json"))));
 
         DownloadStore reloaded;
         reloaded.setStoragePath(dir.filePath(QStringLiteral("index.json")));
         QCOMPARE(reloaded.records().size(), 2);
         QCOMPARE(reloaded.records().constFirst().state, QStringLiteral("completed"));
+    }
+
+    // The average needs two samples apart: a transfer that has sent nothing, and a paused one, have no speed
+    void hasNoSpeedWithoutProgress()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        server.holdDownload = true;
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        DownloadManager manager;
+        manager.setStoragePath(dir.filePath(QStringLiteral("index.json")));
+        manager.setSourceResolver([&server](const DownloadRecord &record) {
+            return std::optional<DownloadSource>(sourceFor(server, record));
+        });
+        QVERIFY(manager.enqueue(queued(1)));
+        QTRY_COMPARE_WITH_TIMEOUT(server.downloadRequests, 1, 5000);
+        const std::optional<DownloadRecord> running = manager.store()->find(kServer, kUser, hex(1));
+        QVERIFY(running);
+        QCOMPARE(running->state, QStringLiteral("fetching"));
+        QCOMPARE(manager.bytesPerSecond(*running), 0);
+        QCOMPARE(manager.totalBytesPerSecond(), 0);
+
+        QVERIFY(manager.pause(kServer, kUser, hex(1)));
+        const std::optional<DownloadRecord> paused = manager.store()->find(kServer, kUser, hex(1));
+        QVERIFY(paused);
+        QCOMPARE(manager.bytesPerSecond(*paused), 0);
+        QCOMPARE(manager.totalBytesPerSecond(), 0);
     }
 
     void honoursTheParallelLimit()
@@ -246,24 +276,15 @@ class TestDownloadManager : public QObject {
         QVERIFY(QFile::exists(itemDirectory(dir, 2) + QStringLiteral("/poster.jpg")));
     }
 
-    void aRemovalSurvivesAGateChange_data()
-    {
-        QTest::addColumn<bool>("byMeter");
-        QTest::newRow("offline") << false;
-        QTest::newRow("metered") << true;
-    }
-
     // The gate closing after remove() asks to stop the same transfer; the weaker reason must not turn the removal into a requeue
     void aRemovalSurvivesAGateChange()
     {
-        QFETCH(bool, byMeter);
         FakeJellyfin server;
         QVERIFY(server.listen());
         server.holdDownload = true;
         QTemporaryDir dir;
         QVERIFY(dir.isValid());
         DownloadManager manager;
-        manager.setMetered(false);
         manager.setStoragePath(dir.filePath(QStringLiteral("index.json")));
         manager.setSourceResolver([&server](const DownloadRecord &record) {
             return std::optional<DownloadSource>(sourceFor(server, record));
@@ -272,19 +293,13 @@ class TestDownloadManager : public QObject {
         QVERIFY(manager.enqueue(queued(1, kRule)));
         QTRY_COMPARE_WITH_TIMEOUT(server.downloadRequests, 1, 5000);
         QVERIFY(manager.remove(kServer, kUser, hex(1)));
-        if (byMeter)
-            manager.setMetered(true);
-        else
-            manager.setOnline(false);
+        manager.setOnline(false);
         QTRY_COMPARE_WITH_TIMEOUT(removed.count(), 1, 5000);
         QVERIFY(!manager.store()->find(kServer, kUser, hex(1)));
         QVERIFY(!QFileInfo::exists(itemDirectory(dir, 1)));
 
         // Opening the gate again must not bring the record back
-        if (byMeter)
-            manager.setMetered(false);
-        else
-            manager.setOnline(true);
+        manager.setOnline(true);
         QVERIFY(!manager.store()->find(kServer, kUser, hex(1)));
         QCOMPARE(server.downloadRequests, 1);
     }
@@ -426,34 +441,6 @@ class TestDownloadManager : public QObject {
         QTRY_COMPARE_WITH_TIMEOUT(completed.count(), 1, 10000);
     }
 
-    void meteredHoldsOnlyAutomaticDownloads()
-    {
-        FakeJellyfin server;
-        QVERIFY(server.listen());
-        QTemporaryDir dir;
-        QVERIFY(dir.isValid());
-        DownloadManager manager;
-        manager.setStoragePath(dir.filePath(QStringLiteral("index.json")));
-        manager.setSourceResolver([&server](const DownloadRecord &record) {
-            return std::optional<DownloadSource>(sourceFor(server, record));
-        });
-        QSignalSpy completed(&manager, &DownloadManager::downloadCompleted);
-        manager.setMetered(true);
-        QVERIFY(manager.enqueue(queued(1, kRule)));
-        QTest::qWait(300);
-        QCOMPARE(server.downloadRequests, 0);
-        QCOMPARE(manager.store()->find(kServer, kUser, hex(1))->state, QStringLiteral("waiting"));
-
-        QVERIFY(manager.enqueue(queued(2)));
-        QTRY_COMPARE_WITH_TIMEOUT(completed.count(), 1, 10000);
-        QCOMPARE(manager.store()->find(kServer, kUser, hex(2))->state, QStringLiteral("completed"));
-        QCOMPARE(server.downloadRequests, 1);
-
-        manager.setMetered(false);
-        QTRY_COMPARE_WITH_TIMEOUT(completed.count(), 2, 10000);
-        QCOMPARE(manager.store()->find(kServer, kUser, hex(1))->state, QStringLiteral("completed"));
-    }
-
     void requeuesARecordLeftFetching()
     {
         FakeJellyfin server;
@@ -516,7 +503,6 @@ class TestDownloadManager : public QObject {
         QTemporaryDir dir;
         QVERIFY(dir.isValid());
         DownloadManager manager;
-        manager.setMetered(false);
         manager.setRetryDelays({300});
         manager.setStoragePath(dir.filePath(QStringLiteral("index.json")));
         manager.setSourceResolver([&server](const DownloadRecord &record) {
@@ -531,34 +517,6 @@ class TestDownloadManager : public QObject {
         server.downloadStatus = 0;
         QTRY_COMPARE_WITH_TIMEOUT(completed.count(), 1, 10000);
         QVERIFY(server.downloadRequests >= 2);
-        QCOMPARE(manager.store()->find(kServer, kUser, hex(1))->state, QStringLiteral("completed"));
-    }
-
-    void meteredStopsARunningAutomaticDownload()
-    {
-        FakeJellyfin server;
-        QVERIFY(server.listen());
-        server.holdDownload = true;
-        QTemporaryDir dir;
-        QVERIFY(dir.isValid());
-        DownloadManager manager;
-        manager.setMetered(false);
-        manager.setStoragePath(dir.filePath(QStringLiteral("index.json")));
-        manager.setSourceResolver([&server](const DownloadRecord &record) {
-            return std::optional<DownloadSource>(sourceFor(server, record));
-        });
-        QSignalSpy completed(&manager, &DownloadManager::downloadCompleted);
-        QVERIFY(manager.enqueue(queued(1, kRule)));
-        QTRY_COMPARE_WITH_TIMEOUT(server.downloadRequests, 1, 5000);
-        manager.setMetered(true);
-        QTRY_COMPARE_WITH_TIMEOUT(manager.store()->find(kServer, kUser, hex(1))->state,
-                                  QStringLiteral("waiting"), 5000);
-        QTest::qWait(200);
-        QCOMPARE(server.downloadRequests, 1);
-
-        server.holdDownload = false;
-        manager.setMetered(false);
-        QTRY_COMPARE_WITH_TIMEOUT(completed.count(), 1, 10000);
         QCOMPARE(manager.store()->find(kServer, kUser, hex(1))->state, QStringLiteral("completed"));
     }
 

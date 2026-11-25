@@ -1,0 +1,72 @@
+{
+  "Images": [
+    {
+      "ProviderName": "TheMovieDb",
+      "Url": "https://image.tmdb.org/t/p/original/poster-a.jpg",
+      "ThumbnailUrl": "https://image.tmdb.org/t/p/w154/poster-a.jpg",
+      "Height": 3000,
+      "Width": 2000,
+      "CommunityRating": 5.4,
+      "VoteCount": 12,
+      "Language": "en",
+      "Type": "Primary",
+      "RatingType": "Score"
+    },
+    {
+      "ProviderName": "TheMovieDb",
+      "Url": "http://image.tmdb.org/t/p/original/poster-b.jpg",
+      "ThumbnailUrl": "http://image.tmdb.org/t/p/w154/poster-b.jpg",
+      "Height": 1500,
+      "Width": 1000,
+      "CommunityRating": 7,
+      "VoteCount": 3,
+      "Language": "it",
+      "Type": "Primary",
+      "RatingType": "Score"
+    },
+    {
+      "ProviderName": "TheTVDB",
+      "Url": "https://cdn.example.invalid/poster-c.jpg",
+      "ThumbnailUrl": "https://cdn.example.invalid/poster-c-small.jpg",
+      "Height": 1500,
+      "Width": 1000,
+      "CommunityRating": 6,
+      "VoteCount": 40,
+      "Language": "pt-BR",
+      "Type": "Primary",
+      "RatingType": "Likes"
+    },
+    {
+      "ProviderName": "Fanart",
+      "Url": "https://assets.fanart.tv/fanart/movies/603/movieposter/poster-d.jpg?a=1&b=x+y%20z",
+      "ThumbnailUrl": "https://assets.fanart.tv/preview/movies/603/movieposter/poster-d.jpg",
+      "Height": 1426,
+      "Width": 1000,
+      "CommunityRating": 0,
+      "VoteCount": 0,
+      "Language": "",
+      "Type": "Primary"
+    },
+    {
+      "ProviderName": "ProviderWithAVeryLongNameThatTheServerShouldNeverSendProviderWithAVeryLongNameThatTheServerShouldNeverSendProviderWithAVeryLongNameThatTheServerShouldNeverSend",
+      "Url": "https://image.tmdb.org/t/p/original/poster-e.jpg",
+      "Height": -1,
+      "Width": 70000,
+      "CommunityRating": 42,
+      "VoteCount": -3,
+      "Language": "en_US; drop",
+      "Type": "Primary",
+      "RatingType": "Bogus"
+    },
+    {
+      "ProviderName": "TheMovieDb",
+      "ThumbnailUrl": "https://image.tmdb.org/t/p/w154/no-url.jpg",
+      "Height": 100,
+      "Width": 100,
+      "Type": "Primary"
+    },
+    "not an image"
+  ],
+  "TotalRecordCount": 57,
+  "Providers": ["TheMovieDb", "TheTVDB", "Fanart", ""]
+}

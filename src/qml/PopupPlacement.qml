@@ -14,6 +14,8 @@ QtObject {
     property Item openedFrom: null
     // Opens above the button when it fits there, as the player's bottom bar does
     property bool preferAbove: false
+    // Opens at the side of the button instead of below or above it, bottom-aligned with it and moved up as far as the window needs: the menu of a button in a rail at the window's edge
+    property bool beside: false
 
     // `popup(parent, x, y)` of another opener changes the parent: the button counts only while the popup hangs from it
     readonly property Item control: openedFrom && openedFrom === popup.parent ? openedFrom : anchor
@@ -50,7 +52,7 @@ QtObject {
             return fitsAbove;
         return roomAbove > roomBelow || (roomAbove === roomBelow && preferAbove);
     }
-    readonly property real shownHeight: Math.min(fullHeight, Math.max(0, opensUp ? roomAbove : roomBelow))
+    readonly property real shownHeight: Math.min(fullHeight, Math.max(0, beside ? (window?.height ?? 0) : opensUp ? roomAbove : roomBelow))
     readonly property bool cut: ready && shownHeight < fullHeight
 
     // In the window, as the scene counts: the popup's left edge, with the start edges aligned (the left ones, the right ones when mirrored) unless that leaves the window
@@ -59,6 +61,12 @@ QtObject {
             return 0;
         const width = placement.popup.width;
         const rtl = Qt.application.layoutDirection === Qt.RightToLeft;
+        if (placement.beside) {
+            const trailing = rtl ? placement.controlAt.x - width : placement.controlAt.x + placement.control.width;
+            const leading = rtl ? placement.controlAt.x + placement.control.width : placement.controlAt.x - width;
+            const left = trailing >= 0 && trailing + width <= placement.window.width ? trailing : leading;
+            return Math.max(0, Math.min(left, placement.window.width - width));
+        }
         const leftAligned = placement.controlAt.x;
         const rightAligned = placement.controlAt.x + placement.control.width - width;
         let left = rtl ? rightAligned : leftAligned;
@@ -66,7 +74,11 @@ QtObject {
             left = rtl ? leftAligned : rightAligned;
         return Math.max(0, Math.min(left, placement.window.width - width));
     }
-    readonly property real sceneY: opensUp ? controlAt.y - popup.height : controlAt.y + (control?.height ?? 0)
+    readonly property real sceneY: {
+        if (beside)
+            return Math.max(0, Math.min(controlAt.y + (control?.height ?? 0) - popup.height, (window?.height ?? 0) - popup.height));
+        return opensUp ? controlAt.y - popup.height : controlAt.y + (control?.height ?? 0);
+    }
 
     // Opens the popup of a button that shares it with others or with the pointer: it is placed as above until it closes, then it is the owner's again
     function openFor(button: Item): void {

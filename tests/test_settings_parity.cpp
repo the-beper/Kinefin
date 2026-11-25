@@ -142,18 +142,13 @@ class TestSettingsParity : public QObject {
         QCOMPARE(homeFavorites->type, SettingDefinition::Type::Bool);
         QCOMPARE(QString::fromUtf8(homeFavorites->group.untranslatedText()),
                  QString::fromUtf8(homeLibraries->group.untranslatedText()));
-        // The downloads: parallel transfers and the unmetered-only rule, both visible
+        // The downloads: the number of parallel transfers is visible
         const auto *parallelDownloads =
             Kinefin::findSetting(QStringLiteral("downloads"), QStringLiteral("parallel"));
         QVERIFY(parallelDownloads && !parallelDownloads->hidden
                 && !parallelDownloads->label.isEmpty());
         QCOMPARE(parallelDownloads->type, SettingDefinition::Type::Int);
         QCOMPARE(parallelDownloads->defaultValue, QVariant(2));
-        const auto *unmeteredOnly =
-            Kinefin::findSetting(QStringLiteral("downloads"), QStringLiteral("unmeteredOnly"));
-        QVERIFY(unmeteredOnly && !unmeteredOnly->hidden && !unmeteredOnly->label.isEmpty());
-        QCOMPARE(unmeteredOnly->type, SettingDefinition::Type::Bool);
-        QCOMPARE(unmeteredOnly->defaultValue, QVariant(true));
         const auto *sidecars =
             Kinefin::findSetting(QStringLiteral("downloads"), QStringLiteral("kodiSidecars"));
         QVERIFY(sidecars && !sidecars->hidden && !sidecars->disabled);

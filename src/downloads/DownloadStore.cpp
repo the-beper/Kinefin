@@ -199,10 +199,6 @@ std::optional<DownloadRecord> readRecord(const QJsonObject &object)
     if (!wanted.isBool())
         return std::nullopt;
     record.wanted = wanted.toBool();
-    const QJsonValue meteredOverride = object.value(QLatin1String("meteredOverride"));
-    if (!meteredOverride.isBool())
-        return std::nullopt;
-    record.meteredOverride = meteredOverride.toBool();
     // An index written before the poster existed has no tag: the row falls back to its type icon
     if (object.contains(QLatin1String("positionTicks"))) {
         if (!readInteger(object, QLatin1String("positionTicks"), 0, DownloadRecord::MaxRuntimeTicks,
@@ -249,8 +245,7 @@ QJsonObject recordObject(const DownloadRecord &record)
                        {QStringLiteral("addedAt"), record.addedAt},
                        {QStringLiteral("updatedAt"), record.updatedAt},
                        {QStringLiteral("ruleId"), record.ruleId},
-                       {QStringLiteral("wanted"), record.wanted},
-                       {QStringLiteral("meteredOverride"), record.meteredOverride}};
+                       {QStringLiteral("wanted"), record.wanted}};
 }
 
 qint64 recordBytes(const DownloadRecord &record)

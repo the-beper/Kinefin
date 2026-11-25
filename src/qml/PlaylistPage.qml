@@ -296,7 +296,7 @@ Kirigami.ScrollablePage {
     ListView {
         id: list
         // What scrolls under the page row fades into it instead of being cut by its edge
-        TopFade {
+        TopShadow {
             parent: list
             z: 1
             atStart: list.atYBeginning

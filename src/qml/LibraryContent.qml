@@ -353,8 +353,8 @@ Item {
         }
     }
 
-    TopFade {
-        objectName: "libraryTopFade"
+    TopShadow {
+        objectName: "libraryTopShadow"
         atStart: content.atStart
     }
 

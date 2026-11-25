@@ -181,8 +181,8 @@ Kirigami.ScrollablePage {
         objectName: "queueList"
 
         // On the view, not in its content: the fade stays under the toolbar while the rows scroll
-        TopFade {
-            objectName: "queueTopFade"
+        TopShadow {
+            objectName: "queueTopShadow"
             parent: list
             z: 1
             atStart: list.atYBeginning

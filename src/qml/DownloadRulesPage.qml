@@ -112,6 +112,13 @@ Kirigami.ScrollablePage {
         id: list
         objectName: "downloadRulesList"
 
+        // On the view, not in its content: the shadow stays under the toolbar while the rows scroll
+        TopShadow {
+            parent: list
+            z: 1
+            atStart: list.atYBeginning
+        }
+
         model: ruleModel
         activeFocusOnTab: true
         keyNavigationEnabled: true

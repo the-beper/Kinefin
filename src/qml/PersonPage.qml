@@ -76,7 +76,7 @@ Kirigami.ScrollablePage {
     GridView {
         id: grid
         // What scrolls under the page row fades into it instead of being cut by its edge
-        TopFade {
+        TopShadow {
             parent: grid
             z: 1
             atStart: grid.atYBeginning

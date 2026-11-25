@@ -48,9 +48,9 @@ Kirigami.ScrollablePage {
         grid.focusPrimary(Qt.TabFocusReason);
     }
 
-    // The scan ended: the cards take the keys unless the user went elsewhere meanwhile (the header box, or a card already focused). The grid holding the focus while it is created is not a choice
+    // The scan ended: the cards take the keys unless the user went elsewhere meanwhile (a card already focused). The grid holding the focus while it is created is not a choice
     function focusWhenLoaded() {
-        if (!page.isCurrentPage || !page.shell || grid.count === 0 || page.shell.header?.searchFieldHasFocus)
+        if (!page.isCurrentPage || !page.shell || grid.count === 0)
             return;
         const focused = page.Window.window?.activeFocusItem;
         if (focused && focused !== grid && page.shell.focusIsIn(grid))
@@ -138,7 +138,7 @@ Kirigami.ScrollablePage {
         }
 
         // What scrolls under the page row fades into it instead of being cut by its edge
-        TopFade {
+        TopShadow {
             parent: grid
             z: 1
             atStart: grid.atYBeginning

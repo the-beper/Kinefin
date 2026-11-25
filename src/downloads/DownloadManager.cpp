@@ -10,6 +10,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QSet>
+#include <QStringList>
 #include <QTimer>
 #include <QUuid>
 
@@ -20,6 +21,8 @@
 namespace Kinefin {
 namespace {
 constexpr qint64 MaxTimestamp = qint64(1) << 52;
+// A transfer with no progress for this long is a stalled one: its speed starts to fall, a row at a time, until the window is empty
+constexpr int StallMs = 1000;
 
 qint64 now()
 {
@@ -55,7 +58,10 @@ bool olderFirst(const DownloadRecord &left, const DownloadRecord &right)
 
 DownloadManager::DownloadManager(QObject *parent) : QObject(parent)
 {
+    m_clock.start();
+    m_speedTimer.setInterval(StallMs);
     QObject::connect(&m_store, &DownloadStore::saveFailed, this, &DownloadManager::storageError);
+    QObject::connect(&m_speedTimer, &QTimer::timeout, this, &DownloadManager::decaySpeeds);
 }
 
 DownloadManager::~DownloadManager()
@@ -73,6 +79,8 @@ void DownloadManager::setStoragePath(const QString &indexPath)
     for (DownloadTransfer *transfer : std::as_const(m_active))
         delete transfer;
     m_active.clear();
+    m_speeds.clear();
+    m_speedTimer.stop();
     // A removal still waiting for its transfer to stop completes on the old profile: the transfers are gone, so nothing writes the files any more
     for (auto removing = m_removing.cbegin(); removing != m_removing.cend(); ++removing) {
         const std::optional<DownloadRecord> found = m_store.findByKey(removing.key());
@@ -144,27 +152,6 @@ void DownloadManager::setOnline(bool online)
 bool DownloadManager::online() const
 {
     return m_online;
-}
-
-void DownloadManager::setMetered(bool metered)
-{
-    if (m_metered == metered)
-        return;
-    m_metered = metered;
-    if (metered) {
-        for (const QString &key : m_active.keys()) {
-            const std::optional<DownloadRecord> found = m_store.findByKey(key);
-            if (!found || found->ruleId.isEmpty() || found->meteredOverride)
-                continue;
-            stopActive(key, Stop::Hold);
-        }
-    }
-    pump();
-}
-
-bool DownloadManager::metered() const
-{
-    return m_metered;
 }
 
 void DownloadManager::setSourceResolver(SourceResolver resolver)
@@ -342,6 +329,47 @@ QList<int> DownloadManager::retryDelays() const
     return m_retryDelays;
 }
 
+qint64 DownloadManager::bytesPerSecond(const DownloadRecord &record) const
+{
+    return record.state == QLatin1String("fetching") ? speedOf(record.key()) : 0;
+}
+
+qint64 DownloadManager::totalBytesPerSecond() const
+{
+    qint64 total = 0;
+    for (auto speed = m_speeds.cbegin(); speed != m_speeds.cend(); ++speed)
+        total += speedOf(speed.key());
+    return total;
+}
+
+qint64 DownloadManager::speedOf(const QString &key) const
+{
+    // A transfer being stopped has no speed any more, whatever its last samples say
+    const auto found = m_speeds.constFind(key);
+    if (found == m_speeds.cend() || m_stopping.contains(key))
+        return 0;
+    return found->bytesPerSecond(m_clock.elapsed());
+}
+
+void DownloadManager::decaySpeeds()
+{
+    const qint64 at = m_clock.elapsed();
+    QStringList stalled;
+    for (auto speed = m_speeds.begin(); speed != m_speeds.end(); ++speed) {
+        if (speed->empty() || at - speed->lastSampleMs() < StallMs)
+            continue;
+        stalled.append(speed.key());
+        // The last report of a spent window reads zero
+        if (at - speed->lastSampleMs() >= SpeedAverage::WindowMs)
+            speed->clear();
+    }
+    for (const QString &key : std::as_const(stalled)) {
+        const std::optional<DownloadRecord> found = m_store.findByKey(key);
+        if (found)
+            Q_EMIT recordChanged(*found);
+    }
+}
+
 void DownloadManager::pump()
 {
     if (!m_online)
@@ -357,11 +385,7 @@ void DownloadManager::pump()
             continue;
         if (record.state != QLatin1String("queued") && record.state != QLatin1String("waiting"))
             continue;
-        // A whole pass over the queue holds records for the same reason: one write for all of them
-        if (!startable(record)) {
-            held = setRecordState(key, QStringLiteral("waiting"), {}, 0, false) || held;
-            continue;
-        }
+        // A whole pass over the queue holds its records with one write
         if (!m_resolver) {
             held = setRecordState(key, QStringLiteral("waiting"), {}, 0, false) || held;
             continue;
@@ -375,11 +399,6 @@ void DownloadManager::pump()
     }
     if (held)
         m_store.flush();
-}
-
-bool DownloadManager::startable(const DownloadRecord &record) const
-{
-    return m_online && (!m_metered || record.ruleId.isEmpty() || record.meteredOverride);
 }
 
 void DownloadManager::start(const DownloadRecord &record, const DownloadSource &source)
@@ -417,6 +436,7 @@ void DownloadManager::start(const DownloadRecord &record, const DownloadSource &
                              updated.size = total;
                          updated.updatedAt = now();
                          m_store.upsert(updated, false);
+                         m_speeds[key].add(m_clock.elapsed(), written);
                          // Progress is a row update, not a structural change: the page keeps its scroll and focus
                          Q_EMIT recordChanged(updated);
                      });
@@ -453,6 +473,9 @@ void DownloadManager::start(const DownloadRecord &record, const DownloadSource &
         return;
     }
     m_active.insert(key, transfer);
+    m_speeds.remove(key);
+    if (!m_speedTimer.isActive())
+        m_speedTimer.start();
     Q_EMIT recordChanged(updated);
     Q_EMIT recordsChanged();
 }
@@ -462,6 +485,9 @@ void DownloadManager::release(const QString &key)
     DownloadTransfer *transfer = m_active.take(key);
     if (transfer)
         transfer->deleteLater();
+    m_speeds.remove(key);
+    if (m_active.isEmpty())
+        m_speedTimer.stop();
 }
 
 void DownloadManager::finishTransfer(const QString &key, bool completed, qint64 size,
@@ -535,7 +561,7 @@ void DownloadManager::finishTransfer(const QString &key, bool completed, qint64 
         if (!record.wanted)
             return;
         // The gate may have opened again before this failure arrived: requeue, and the caller's pump restarts it
-        record.state = startable(record) ? QStringLiteral("queued") : QStringLiteral("waiting");
+        record.state = m_online ? QStringLiteral("queued") : QStringLiteral("waiting");
         record.error.clear();
         record.httpStatus = 0;
         record.updatedAt = now();

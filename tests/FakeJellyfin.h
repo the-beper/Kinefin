@@ -493,6 +493,16 @@ class FakeJellyfin {
     QList<QByteArray> imageDeletes;        // every image DELETE route
     QList<QByteArray> subtitleUploads;     // every POST /Videos/{id}/Subtitles body
     QList<QByteArray> subtitleDeletes;     // every DELETE /Videos/{id}/Subtitles/{index} route
+    // Provider images: GET /Items/{id}/RemoteImages/Providers and GET /Items/{id}/RemoteImages answer their status with the remote_image_providers and remote_images fixtures unless a test sets a body, POST .../RemoteImages/Download answers its status; each request is logged with its query, `holdRemoteImages` keeps the two GET answers back until releaseHeld()
+    int remoteImageProvidersStatus = 200;
+    int remoteImagesStatus = 200;
+    int remoteImageDownloadStatus = 204;
+    QByteArray remoteImageProvidersBody;
+    QByteArray remoteImagesBody;
+    bool holdRemoteImages = false;
+    QList<QByteArray> remoteImageProviderRoutes; // every providers route
+    QList<QByteArray> remoteImageRoutes;         // every images route, query included
+    QList<QByteArray> remoteImageDownloads;      // every download route, query included
     // The status of the newer write routes, a success unless a test says otherwise
     int imageWriteStatus = 204;
     int subtitleWriteStatus = 204;
@@ -833,6 +843,39 @@ class FakeJellyfin {
             return true;
         }
         return false;
+    }
+
+    // GET /Items/{id}/RemoteImages/Providers, GET /Items/{id}/RemoteImages and POST /Items/{id}/RemoteImages/Download; false when the request is another route
+    bool handleRemoteImageRoute(QTcpSocket *socket, const QByteArray &method,
+                                const QByteArray &route, const QByteArray &authorization)
+    {
+        const QByteArray path = route.split('?').first();
+        const bool providers = method == "GET" && path.endsWith("/RemoteImages/Providers");
+        const bool images = method == "GET" && path.endsWith("/RemoteImages");
+        const bool download = method == "POST" && path.endsWith("/RemoteImages/Download");
+        if (!providers && !images && !download)
+            return false;
+        if (!hasSessionToken(authorization)) {
+            respond(socket, 401, {});
+            return true;
+        }
+        if (download) {
+            remoteImageDownloads.append(route);
+            respond(socket, remoteImageDownloadStatus, {});
+            return true;
+        }
+        (providers ? remoteImageProviderRoutes : remoteImageRoutes).append(route);
+        if (holdRemoteImages) {
+            m_held.append(socket);
+            return true;
+        }
+        const int status = providers ? remoteImageProvidersStatus : remoteImagesStatus;
+        QByteArray body = providers ? remoteImageProvidersBody : remoteImagesBody;
+        if (body.isEmpty())
+            body = fixture(providers ? QStringLiteral("remote_image_providers")
+                                     : QStringLiteral("remote_images"));
+        respond(socket, status, status == 200 ? body : QByteArray());
+        return true;
     }
 
     // GET /Items/{id}/Download; false when the request is another route
@@ -1509,6 +1552,8 @@ class FakeJellyfin {
             return;
         }
         if (handleRemoteSubtitleRoute(socket, method, route, authorization))
+            return;
+        if (handleRemoteImageRoute(socket, method, route, authorization))
             return;
         if (handleDownloadRoute(socket, method, route, range, ifRange, authorization))
             return;

@@ -106,7 +106,6 @@ Every tab switch applies at once. Turning a tab off returns you to the main tab,
 | Setting | Key | Default | Values | What it does |
 | --- | --- | --- | --- | --- |
 | Parallel Downloads | `parallel` | `2` | 1 download (`1`), 2 downloads (`2`), 3 downloads (`3`), 4 downloads (`4`) | Sets how many downloads run at the same time. |
-| Download Only on Unmetered Networks | `unmeteredOnly` | `true` | On or off | Holds automatic downloads while NetworkManager reports a metered connection. If the status is unknown or unavailable, they stay held. |
 | Write Kodi Metadata Files | `kodiSidecars` | `false` | On or off | Writes a Kodi-compatible `.nfo` file and `poster.jpg` next to an exported file. |
 | Export When Download Completes | `exportOnCompletion` | `false` | On or off | Copies each finished download to the host folder you chose, through the document portal. The control stays disabled with an explanation while no durable portal grant exists. |
 

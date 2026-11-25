@@ -193,11 +193,13 @@ Controls.ItemDelegate {
             Layout.alignment: Qt.AlignTop
             spacing: Kirigami.Units.smallSpacing
 
+            // On the highlight the labels take the colour the style draws for text over it
             Controls.Label {
                 Layout.fillWidth: true
                 elide: Text.ElideRight
                 maximumLineCount: 1
                 font.bold: true
+                color: row.highlighted ? Kirigami.Theme.highlightedTextColor : Kirigami.Theme.textColor
                 textFormat: Text.PlainText
                 text: row.label
             }
@@ -208,6 +210,7 @@ Controls.ItemDelegate {
                 elide: Text.ElideRight
                 maximumLineCount: 1
                 opacity: 0.7
+                color: row.highlighted ? Kirigami.Theme.highlightedTextColor : Kirigami.Theme.textColor
                 textFormat: Text.PlainText
                 text: row.loaded ? row.runtimeText : ""
             }
@@ -219,6 +222,7 @@ Controls.ItemDelegate {
                 elide: Text.ElideRight
                 maximumLineCount: 2
                 opacity: 0.7
+                color: row.highlighted ? Kirigami.Theme.highlightedTextColor : Kirigami.Theme.textColor
                 textFormat: Text.PlainText
                 text: row.loaded ? row.overview : ""
             }

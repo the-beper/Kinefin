@@ -20,8 +20,10 @@ Kirigami.Page {
     readonly property Item videoSlot: slot
     title: player?.title || i18n("Now Playing")
     padding: 0
-    // The page reaches up under the shell header, which stays in the layout (a resize of the page row during the slide would end Kirigami's slide) and fades out while this page is in front: the video, the bars and the overlays span the whole window, and the heights below are the content item's (availableHeight)
+    // The page reaches up under the shell header and out over the sidebar, which stay in the layout (a resize of the page row during the slide would end Kirigami's slide) and fade out while this page is in front: the video, the bars and the overlays span the whole window, and the sizes below are the content item's (availableHeight, availableWidth)
     topPadding: page.Window.window?.header?.visible ? -page.Window.window.header.height : 0
+    leftPadding: page.mirrored ? 0 : -(page.Window.window?.sidebarWidth ?? 0)
+    rightPadding: page.mirrored ? -(page.Window.window?.sidebarWidth ?? 0) : 0
     // The video fills the page and the bars float above it: the page row's toolbar would be a strip that never hides
     globalToolBarStyle: Kirigami.ApplicationHeaderStyle.None
     readonly property bool isShowing: page.Window.window?.pageStack.currentItem === page
@@ -32,7 +34,7 @@ Kirigami.Page {
     }
     property bool showChrome: true
     // Below the window's wide limit the controls row shows icons only, each with its text as tooltip and accessible name
-    readonly property bool narrow: width < (page.Window.window?.wideLimit ?? 0)
+    readonly property bool narrow: availableWidth < (page.Window.window?.wideLimit ?? 0)
     // The button at the end of the timeline shows the remaining time instead of the total, for as long as this page lives
     property bool showRemaining: false
     readonly property bool fullScreen: page.Window.window?.visibility === Window.FullScreen
@@ -307,7 +309,7 @@ Kirigami.Page {
                 return;
         // fall through
         case Qt.Key_Menu:
-            page.showContextMenu(page.width / 2, page.availableHeight / 2);
+            page.showContextMenu(page.availableWidth / 2, page.availableHeight / 2);
             break;
         default: return;
         }

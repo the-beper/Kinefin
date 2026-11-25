@@ -112,6 +112,8 @@ QVariant DownloadsModel::data(const QModelIndex &index, int role) const
         return record.primaryTag;
     case RuleIdRole:
         return record.ruleId;
+    case BytesPerSecondRole:
+        return m_manager->bytesPerSecond(record);
     }
     return {};
 }
@@ -136,7 +138,8 @@ QHash<int, QByteArray> DownloadsModel::roleNames() const
             {DownloadedRole, "downloaded"},
             {SectionRole, "section"},
             {PrimaryTagRole, "primaryTag"},
-            {RuleIdRole, "ruleId"}};
+            {RuleIdRole, "ruleId"},
+            {BytesPerSecondRole, "bytesPerSecond"}};
 }
 
 void DownloadsModel::updateRecord(const DownloadRecord &record)

@@ -19,6 +19,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 Q_LOGGING_CATEGORY(apiLog, "kinefin.api")
 
@@ -467,6 +468,87 @@ bool validImageTarget(const QString &type, int index)
     if (!types.contains(type))
         return false;
     return type == QLatin1String("Backdrop") ? index >= 0 && index <= 9 : index == -1;
+}
+
+constexpr int MaxRemoteImageOffers = 1000;
+constexpr int MaxRemoteImageUrlChars = 2048;
+const QString remoteImagesFamily = QStringLiteral("RemoteImages");
+const QString remoteImageProvidersFamily = QStringLiteral("RemoteImageProviders");
+
+QString normalizedItemId(const QString &itemId)
+{
+    return QString(itemId).remove(QLatin1Char('-')).toLower();
+}
+
+// A query value percent-encoded in full: QUrlQuery leaves '+' as it is, which the server reads as a space
+QString encodedQueryValue(const QString &value)
+{
+    return QString::fromLatin1(QUrl::toPercentEncoding(value));
+}
+
+// A provider name of a reply: at most MaxRemoteImageNameChars characters, else empty
+QString remoteImageProviderName(const QJsonValue &value)
+{
+    const QString name = value.toString();
+    return name.size() <= MaxRemoteImageNameChars ? name : QString();
+}
+
+// The language of a provider image: letters and hyphens, at most 16, else empty
+QString remoteImageLanguage(const QJsonValue &value)
+{
+    const QString language = value.toString();
+    if (language.size() > 16)
+        return {};
+    for (const QChar c : language) {
+        const bool letter = (c >= QLatin1Char('a') && c <= QLatin1Char('z'))
+                            || (c >= QLatin1Char('A') && c <= QLatin1Char('Z'));
+        if (!letter && c != QLatin1Char('-'))
+            return {};
+    }
+    return language;
+}
+
+// A whole number of a reply held to 0..max (anything that is not a number is 0)
+int clampedCount(const QJsonValue &value, int max)
+{
+    return int(qBound(0.0, std::floor(value.toDouble()), double(max)));
+}
+
+// One image of a RemoteImages reply as the caller sees it (without its offer id), with the full-size URL in `url` for the offer store alone. False when the entry has no usable URL: it could not be downloaded anyway
+bool remoteImageEntry(const QJsonObject &object, QString *url, QVariantMap *entry)
+{
+    const auto field = [&object](QLatin1String name) { return object.value(name); };
+    *url = field(QLatin1String("Url")).toString();
+    const QUrl full(*url);
+    if (url->isEmpty() || url->size() > MaxRemoteImageUrlChars || !full.isValid()
+        || (full.scheme() != QLatin1String("http") && full.scheme() != QLatin1String("https"))
+        || full.host().isEmpty())
+        return false;
+    // The preview is the server's thumbnail, else the image itself, and only an https URL on a provider domain is handed out
+    QString preview = field(QLatin1String("ThumbnailUrl")).toString();
+    if (preview.isEmpty())
+        preview = *url;
+    const QUrl thumbnail(preview);
+    const bool previewOk =
+        preview.size() <= MaxRemoteImageUrlChars && JellyfinClient::isProviderImageUrl(thumbnail);
+    const QString ratingType = field(QLatin1String("RatingType")).toString();
+    entry->clear();
+    entry->insert(QStringLiteral("provider"),
+                  remoteImageProviderName(field(QLatin1String("ProviderName"))));
+    entry->insert(QStringLiteral("thumbnailUrl"),
+                  previewOk ? thumbnail.toString(QUrl::FullyEncoded) : QString());
+    entry->insert(QStringLiteral("width"), clampedCount(field(QLatin1String("Width")), 65535));
+    entry->insert(QStringLiteral("height"), clampedCount(field(QLatin1String("Height")), 65535));
+    entry->insert(QStringLiteral("language"),
+                  remoteImageLanguage(field(QLatin1String("Language"))));
+    entry->insert(QStringLiteral("rating"),
+                  qBound(0.0, field(QLatin1String("CommunityRating")).toDouble(), 10.0));
+    entry->insert(QStringLiteral("voteCount"),
+                  clampedCount(field(QLatin1String("VoteCount")), std::numeric_limits<int>::max()));
+    const bool knownRatingType =
+        ratingType == QLatin1String("Score") || ratingType == QLatin1String("Likes");
+    entry->insert(QStringLiteral("ratingType"), knownRatingType ? ratingType : QString());
+    return true;
 }
 
 // The MIME type of the image data, told apart by its signature; empty when it is not a JPEG, PNG or WebP
@@ -3301,6 +3383,157 @@ bool JellyfinClient::deleteImage(const QString &itemId, const QString &imageType
     return true;
 }
 
+bool JellyfinClient::fetchRemoteImageProviders(const QString &itemId, int channel)
+{
+    if (m_state != State::Authenticated || !isValidJellyfinId(itemId))
+        return false;
+    const QString key = listingKey(remoteImageProvidersFamily, channel);
+    const quint64 serial = supersedeListing(key);
+    const QUrl url =
+        endpoint(QStringLiteral("/Items/") + itemId + QStringLiteral("/RemoteImages/Providers"));
+    QNetworkReply *reply = m_network.get(requestFor(url, true));
+    m_listingReplies.insert(key, reply);
+    attach(reply, m_generation, [this, key, itemId, channel, serial](QNetworkReply *finished) {
+        if (listingSuperseded(key, serial))
+            return;
+        QJsonArray entries;
+        if (!listingArray(finished, remoteImageProvidersFamily, channel, &entries))
+            return;
+        QVariantList providers;
+        for (const QJsonValue &entry : entries) {
+            if (providers.size() >= MaxRemoteImageProviders)
+                break;
+            const QJsonObject object = entry.toObject();
+            const QString name = remoteImageProviderName(object.value(QStringLiteral("Name")));
+            if (name.isEmpty())
+                continue;
+            QStringList supported;
+            const QJsonArray types = object.value(QStringLiteral("SupportedImages")).toArray();
+            for (const QJsonValue &type : types) {
+                const QString token = type.toString();
+                if (isValidImageTypeToken(token) && !supported.contains(token))
+                    supported.append(token);
+            }
+            providers.append(QVariantMap{{QStringLiteral("name"), name},
+                                         {QStringLiteral("supportedImages"), supported}});
+        }
+        Q_EMIT remoteImageProvidersReady(itemId, providers, channel);
+    });
+    return true;
+}
+
+bool JellyfinClient::fetchRemoteImages(const QString &itemId, const QString &type, int startIndex,
+                                       int limit, const QString &providerName, bool allLanguages,
+                                       int channel)
+{
+    if (m_state != State::Authenticated || !isValidJellyfinId(itemId)
+        || !isValidImageTypeToken(type) || startIndex < 0 || limit <= 0
+        || providerName.size() > MaxRemoteImageNameChars)
+        return false;
+    const QString key = listingKey(remoteImagesFamily, channel);
+    const quint64 serial = supersedeListing(key);
+    QUrl url = endpoint(QStringLiteral("/Items/") + itemId + QStringLiteral("/RemoteImages"));
+    QString query = QStringLiteral("type=") + type;
+    query += QStringLiteral("&startIndex=") + QString::number(startIndex);
+    query += QStringLiteral("&limit=") + QString::number(qMin(limit, MaxRemoteImagesPerPage));
+    query += QStringLiteral("&includeAllLanguages=");
+    query += allLanguages ? QStringLiteral("true") : QStringLiteral("false");
+    if (!providerName.isEmpty())
+        query += QStringLiteral("&providerName=") + encodedQueryValue(providerName);
+    url.setQuery(query, QUrl::StrictMode);
+    QNetworkRequest request = requestFor(url, true);
+    // The server asks the providers while the request waits: slower than the default 15 s
+    request.setTransferTimeout(30'000);
+    QNetworkReply *reply = m_network.get(request);
+    m_listingReplies.insert(key, reply);
+    attach(reply, m_generation,
+           [this, key, itemId, type, startIndex, channel, serial](QNetworkReply *finished) {
+               if (listingSuperseded(key, serial))
+                   return;
+               QJsonObject data;
+               if (!listingObject(finished, remoteImagesFamily, channel, &data))
+                   return;
+               const int status =
+                   finished->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+               const QJsonValue images = data.value(QStringLiteral("Images"));
+               const QJsonValue count = data.value(QStringLiteral("TotalRecordCount"));
+               if (!images.isArray() || !count.isDouble()) {
+                   Q_EMIT listingFailed(remoteImagesFamily, status,
+                                        QStringLiteral("Invalid listing response"), channel);
+                   return;
+               }
+               const int total = count.toInt(-1);
+               if (total < images.toArray().size()) {
+                   Q_EMIT listingFailed(remoteImagesFamily, status,
+                                        QStringLiteral("Invalid listing pagination"), channel);
+                   return;
+               }
+               const QString item = normalizedItemId(itemId);
+               QVariantList offered;
+               for (const QJsonValue &image : images.toArray()) {
+                   if (offered.size() >= MaxRemoteImagesPerPage)
+                       break;
+                   QString fullUrl;
+                   QVariantMap entry;
+                   if (!image.isObject() || !remoteImageEntry(image.toObject(), &fullUrl, &entry))
+                       continue;
+                   const quint32 offerId = ++m_lastRemoteImageOffer;
+                   m_remoteImageOffers.insert(offerId, {item, type, fullUrl});
+                   entry.insert(QStringLiteral("offerId"), offerId);
+                   offered.append(entry);
+               }
+               while (m_remoteImageOffers.size() > MaxRemoteImageOffers)
+                   m_remoteImageOffers.erase(m_remoteImageOffers.begin());
+               QStringList providers;
+               for (const QJsonValue &value : data.value(QStringLiteral("Providers")).toArray()) {
+                   const QString name = remoteImageProviderName(value);
+                   if (!name.isEmpty() && providers.size() < MaxRemoteImageProviders)
+                       providers.append(name);
+               }
+               Q_EMIT remoteImagesReady(itemId, type, startIndex, offered, total, providers,
+                                        channel);
+           });
+    return true;
+}
+
+bool JellyfinClient::downloadRemoteImage(const QString &itemId, const QString &type,
+                                         quint32 offerId)
+{
+    if (!isAuthenticated() || !isAdministrator() || !isValidJellyfinId(itemId)
+        || !isValidImageTypeToken(type))
+        return false;
+    const QString item = normalizedItemId(itemId);
+    const auto offer = m_remoteImageOffers.constFind(offerId);
+    if (offer == m_remoteImageOffers.constEnd() || offer->itemId != item || offer->type != type)
+        return false;
+    const QString key = item + QLatin1Char('|') + type + QStringLiteral("|-1");
+    if (m_imagePending.contains(key))
+        return false;
+    QUrl url =
+        endpoint(QStringLiteral("/Items/") + itemId + QStringLiteral("/RemoteImages/Download"));
+    // The offer's URL goes out percent-encoded in full: QUrlQuery would leave its '&' and '+' ambiguous
+    const QString query = QStringLiteral("type=") + type + QStringLiteral("&imageUrl=");
+    url.setQuery(query + encodedQueryValue(offer->url), QUrl::StrictMode);
+    QNetworkRequest request = requestFor(url, true);
+    // The server fetches the image from the provider while the request waits
+    request.setTransferTimeout(30'000);
+    m_imagePending.insert(key);
+    QNetworkReply *reply = postEmpty(m_network, request);
+    attach(reply, m_generation, [this, itemId, type, key](QNetworkReply *finished) {
+        m_imagePending.remove(key);
+        const int status = finished->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (status == 401) {
+            invalidateSession();
+            return;
+        }
+        if (status == 204 && finished->error() == QNetworkReply::NoError)
+            Q_EMIT itemImageUpdated(itemId, type, -1);
+        else
+            Q_EMIT itemImageUpdateFailed(itemId, type, -1, status);
+    });
+    return true;
+}
+
 bool JellyfinClient::uploadSubtitle(const QString &itemId, const QUrl &fileUrl,
                                     const QString &language, bool forced)
 {
@@ -3611,7 +3844,7 @@ void JellyfinClient::releaseListingChannel(int channel)
           QStringLiteral("Episodes"), QStringLiteral("Genres"), QStringLiteral("Filters"),
           QStringLiteral("FiltersLegacy"), QStringLiteral("MovieRecommendations"),
           QStringLiteral("Suggestions"), QStringLiteral("Upcoming"), QStringLiteral("Studios"),
-          QStringLiteral("PlaylistEntries")}) {
+          QStringLiteral("PlaylistEntries"), remoteImagesFamily, remoteImageProvidersFamily}) {
         const QString key = listingKey(family, channel);
         if (!m_listingSerials.contains(key))
             continue;
@@ -3730,6 +3963,7 @@ void JellyfinClient::abortPending()
     m_remoteSearchPending.clear();
     m_remoteSearchApplyPending.clear();
     m_imagePending.clear();
+    m_remoteImageOffers.clear();
     m_subtitlePending.clear();
     // Reports die with the pending requests, quietly: the generation bump keeps their handlers from running. The same goes for a session re-check whose flag would otherwise stay set forever
     m_reportQueue.clear();

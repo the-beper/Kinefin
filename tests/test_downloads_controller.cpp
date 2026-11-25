@@ -249,11 +249,9 @@ struct Rig {
 
     bool signIn() { return server.listen() && login(client, server); }
 
-    // Online, with rule downloads allowed on a metered network, so a test does not depend on the host's connection
     void open()
     {
         downloads = std::make_unique<DownloadsController>(&client, kProfile);
-        downloads->setUnmeteredOnly(false);
         downloads->setOnline(true);
     }
 
@@ -707,6 +705,27 @@ class TestDownloadsController : public QObject {
         QCOMPARE(failed.first().at(0).toString(), manualMissing);
         QCOMPARE(failed.first().at(1).toString(), QStringLiteral("notfound"));
         QCOMPARE(enqueued.count(), 1);
+    }
+
+    // The speed is the engine's average of a running transfer: with none running, and once the last one ends, the total and every row read zero
+    void noSpeedWithoutARunningDownload()
+    {
+        Rig rig;
+        QVERIFY(rig.signIn());
+        const QString item = hexId('d', 6);
+        rig.serve(episodeItem(item, QStringLiteral("Speedless")));
+        rig.open();
+        QCOMPARE(rig.downloads->bytesPerSecond(), 0);
+        QCOMPARE(rig.downloads->property("bytesPerSecond").toLongLong(), 0);
+
+        QVERIFY(rig.downloads->downloadItem(item));
+        QTRY_COMPARE_WITH_TIMEOUT(rig.downloads->downloadState(item), QStringLiteral("completed"),
+                                  10000);
+        QCOMPARE(rig.downloads->bytesPerSecond(), 0);
+        const Kinefin::DownloadsModel *model = rig.downloads->model();
+        QCOMPARE(model->rowCount(), 1);
+        const QModelIndex row = model->index(0);
+        QCOMPARE(model->data(row, Kinefin::DownloadsModel::BytesPerSecondRole).toLongLong(), 0);
     }
 
     // Two owners with the same item id: a local playback changes the record of the owner it names

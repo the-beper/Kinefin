@@ -80,9 +80,9 @@ Kirigami.ScrollablePage {
         }
     }
 
-    // The scan ended: the first row takes the keys unless the user went elsewhere meanwhile (the header box, or a row already focused)
+    // The scan ended: the first row takes the keys unless the user went elsewhere meanwhile (a row already focused)
     function focusWhenLoaded() {
-        if (!page.isCurrentPage || !page.shell || page.favorites.count === 0 || page.shell.header?.searchFieldHasFocus)
+        if (!page.isCurrentPage || !page.shell || page.favorites.count === 0)
             return;
         // A row that lost its cards keeps the active focus while it is hidden: that focus is no choice of the user
         if (page.shell.focusIsIn(rowsColumn) && page.Window.window?.activeFocusItem?.visible)

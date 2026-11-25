@@ -30,7 +30,7 @@ Kinefin is written for Plasma instead. The interface is Kirigami and follows the
 
 ### Browse
 
-- Home with Continue Watching, Next Up, Favorites and Recently Added; Movies and Shows tabs with filters, saved filter sets, sort orders and grid or list views.
+- Home with Continue Watching, Next Up, Favorites and Recently Added; Movies and Shows pages with filters, saved filter sets, sort orders and grid or list views.
 - Details pages for movies, series, seasons and episodes, with the audio and subtitle track chosen before you play. Search, Favorites, video playlists and a play queue.
 - Several servers, and several users per server. Sign in with a password or Quick Connect; the access token is kept in KWallet, never in a file.
 
@@ -58,14 +58,14 @@ Kinefin is written for Plasma instead. The interface is Kirigami and follows the
 
 ### Not included
 
-- Music and audiobooks: their libraries show on Home but stay disabled for now. Both are planned (see the [TODO](TODO.md)).
+- Music and audiobooks: their libraries show on Home but stay disabled for now, and their sidebar entries say they are coming soon. Both are planned (see the [TODO](TODO.md)).
 - Server administration: **Admin Dashboard** opens the server's web interface in your browser.
 
 ## Gallery
 
 <table>
   <tr>
-    <td><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/dark/library.png"><img alt="The Movies tab, a grid of posters" src="docs/images/library.png"></picture></td>
+    <td><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/dark/library.png"><img alt="The Movies page, a grid of posters" src="docs/images/library.png"></picture></td>
     <td><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/dark/filters.png"><img alt="The Filters dialog, with its sections on the left" src="docs/images/filters.png"></picture></td>
   </tr>
   <tr>
