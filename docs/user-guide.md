@@ -576,7 +576,7 @@ While you are in a group the rail has a **Group** button above your avatar. Its 
 
 The main menu's **Remote Sessions** opens a dialog listing the other sessions on the server. It refreshes every 5 seconds while open. Each session has **Pause**, **Resume** and **Stop**.
 
-Other Jellyfin clients can also control Kinefin while you are signed in. They can send navigation keys, volume, mute, track and quality choices, and **Play**. A remote **Play** of one video plays it. Several videos become the saved queue. Remote navigation keys are ignored while a text field or a dialog has focus. Remote text messages are not shown.
+Other Jellyfin clients can also control Kinefin while you are signed in: in the web interface or the Jellyfin app on a phone, open the list behind the cast button and pick Kinefin. They can play, pause, stop, seek, skip to the next or previous item, and send navigation keys, volume, mute, full screen, repeat, shuffle, track and quality choices. A remote **Play** of one video plays it. Several videos replace the queue and play from the one chosen, with an **Undo** notice when they replace a queue you had; a remote Play Next adds them after the current item, a remote Play Last at the end of the queue. Remote navigation keys are ignored while a text field or a dialog has focus. Remote text messages are not shown.
 
 MPRIS is supported: media keys and the Plasma media controls see the current item, and `Next` and `Previous` follow the queue or the series. Any program on your session bus can read the title, the series and episode label, the item id and the artwork. The server address, your user name, the stream URL and the access token are never published.
 
