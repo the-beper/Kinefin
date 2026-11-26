@@ -4,7 +4,6 @@ import QtQuick
 import QtQuick.Controls as Controls
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
-import org.kde.kirigamiaddons.components as Components
 
 Kirigami.ScrollablePage {
     id: page
@@ -41,133 +40,224 @@ Kirigami.ScrollablePage {
     }
 
     ColumnLayout {
-        spacing: Kirigami.Units.largeSpacing
+        // One centred column of a fixed width: the heading, the tiles, the form and the actions share it
+        ColumnLayout {
+            id: column
 
-        MessageBox {
-            visible: page.connection.errorText.length > 0
-            type: Kirigami.MessageType.Error
-            text: page.connection.errorText
-        }
-
-        Controls.Label {
+            Layout.alignment: Qt.AlignHCenter | Qt.AlignTop
             Layout.fillWidth: true
-            wrapMode: Text.Wrap
-            textFormat: Text.PlainText
-            text: i18n("Server: %1", page.connection.serverUrl)
-        }
-
-        Kirigami.Heading {
-            visible: publicUsers.visible
-            level: 2
-            text: page.usersTitle
-        }
-
-        // The users of the server that are not saved yet: a tile fills in the username and goes on to the password
-        ListView {
-            id: publicUsers
-            objectName: "publicUsersStrip"
-
-            Layout.fillWidth: true
-            Layout.preferredHeight: Kirigami.Units.iconSizes.huge + Kirigami.Units.gridUnit * 3
-            visible: !page.quick && count > 0
-            enabled: !page.signingIn
-            orientation: ListView.Horizontal
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 26
             spacing: Kirigami.Units.smallSpacing
-            clip: true
-            boundsBehavior: Flickable.StopAtBounds
-            model: page.connection.publicUsers
-            activeFocusOnTab: true
-            keyNavigationEnabled: true
-            currentIndex: 0
-            Accessible.role: Accessible.List
-            Accessible.name: page.usersTitle
 
-            // The tiles are not tab stops: the list is, and it takes the current user
-            Keys.onReturnPressed: currentItem?.choose()
-            Keys.onEnterPressed: currentItem?.choose()
-            Keys.onSpacePressed: currentItem?.choose()
+            MessageBox {
+                Layout.bottomMargin: Kirigami.Units.largeSpacing
+                visible: page.connection.errorText.length > 0
+                type: Kirigami.MessageType.Error
+                text: page.connection.errorText
+            }
 
-            delegate: Controls.ItemDelegate {
-                id: userTile
+            // The heading and the address are one block
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 0
 
-                required property int index
-                required property var modelData
-
-                function choose() {
-                    username.text = userTile.modelData.name;
-                    password.forceActiveFocus(Qt.TabFocusReason);
+                Kirigami.Heading {
+                    Layout.fillWidth: true
+                    horizontalAlignment: Text.AlignHCenter
+                    wrapMode: Text.Wrap
+                    level: 1
+                    text: page.title
                 }
 
-                objectName: "publicUser_" + modelData.id
-                width: Kirigami.Units.gridUnit * 7
-                height: publicUsers.height
-                focusPolicy: Qt.NoFocus
-                highlighted: ListView.isCurrentItem && publicUsers.activeFocus
-                Accessible.name: i18nc("@label %1 is a user name", "Use %1", modelData.name)
-                onPressed: {
-                    publicUsers.currentIndex = userTile.index;
-                    publicUsers.forceActiveFocus(Qt.MouseFocusReason);
-                }
-                onClicked: choose()
-
-                contentItem: ColumnLayout {
-                    spacing: Kirigami.Units.smallSpacing
-
-                    Components.Avatar {
-                        Layout.alignment: Qt.AlignHCenter
-                        Layout.preferredWidth: Kirigami.Units.iconSizes.huge
-                        Layout.preferredHeight: Kirigami.Units.iconSizes.huge
-                        // The tile names the user to a screen reader
-                        Accessible.ignored: true
-                        name: userTile.modelData.name
-                        // Only URLs built by JellyfinClient::userImageUrl belong here: a raw server string must never become a source
-                        source: userTile.modelData.imageUrl
-                        // The image is decoded at the size it shows
-                        sourceSize.width: width * Screen.devicePixelRatio
-                        sourceSize.height: height * Screen.devicePixelRatio
-                    }
-
-                    // User names come from the server: plain text only
-                    Controls.Label {
-                        Layout.fillWidth: true
-                        horizontalAlignment: Text.AlignHCenter
-                        elide: Text.ElideRight
-                        maximumLineCount: 1
-                        textFormat: Text.PlainText
-                        text: userTile.modelData.name
-                    }
+                // The server address is server text: plain
+                Controls.Label {
+                    Layout.fillWidth: true
+                    horizontalAlignment: Text.AlignHCenter
+                    wrapMode: Text.Wrap
+                    textFormat: Text.PlainText
+                    color: Kirigami.Theme.disabledTextColor
+                    text: page.connection.serverUrl
                 }
             }
-        }
 
-        Kirigami.FormLayout {
-            Layout.fillWidth: true
-            visible: !page.quick
+            Kirigami.Heading {
+                Layout.fillWidth: true
+                horizontalAlignment: Text.AlignHCenter
+                visible: publicUsers.visible
+                level: 2
+                text: page.usersTitle
+            }
 
-            Controls.TextField {
-                id: username
-                objectName: "usernameField"
-                Kirigami.FormData.label: i18n("Username:")
+            // The users of the server that are not saved yet: a tile fills in the username and goes on to the password. One tab stop with the arrow keys inside, centred, wrapping when the column is narrower
+            Item {
+                id: publicUsers
+                objectName: "publicUsersStrip"
+
+                readonly property real gap: Kirigami.Units.largeSpacing
+                readonly property real cellWidth: Kirigami.Units.gridUnit * 7 + gap
+                readonly property bool rtl: Qt.application.layoutDirection === Qt.RightToLeft
+                readonly property int count: publicTiles.count
+                readonly property int maxColumns: Math.max(1, Math.floor((width + gap) / cellWidth))
+                readonly property int columns: Math.max(1, Math.min(count, maxColumns))
+                // Two rows of tiles, so that many public users do not push the form down; Show All lists the rest
+                property bool expanded: false
+                readonly property bool truncated: count > maxColumns * 2
+                readonly property int shown: expanded ? count : Math.min(count, maxColumns * 2)
+                property int currentIndex: 0
+                property Item currentItem: null
+
+                function refreshCurrent() {
+                    currentItem = publicTiles.itemAt(currentIndex);
+                }
+
+                function moveTo(index) {
+                    currentIndex = index;
+                    refreshCurrent();
+                    if (currentItem)
+                        Spatial.reveal(currentItem);
+                }
+
+                Layout.fillWidth: true
+                Layout.preferredHeight: publicFlow.implicitHeight
+                visible: !page.quick && count > 0
                 enabled: !page.signingIn
-                Accessible.name: i18n("Username")
-                onAccepted: password.forceActiveFocus()
-                // A user known beforehand (from the picker) goes straight to the password
-                Component.onCompleted: {
-                    text = page.connection.loginUserName;
-                    (text.length > 0 ? password : username).forceActiveFocus();
+                activeFocusOnTab: true
+                Accessible.role: Accessible.List
+                Accessible.name: page.usersTitle
+                onCurrentIndexChanged: refreshCurrent()
+                // Collapsing never leaves the current tile hidden
+                onShownChanged: {
+                    if (shown > 0 && currentIndex >= shown)
+                        moveTo(shown - 1);
+                }
+
+                // The keys act on the current tile
+                Keys.onReturnPressed: currentItem?.clicked()
+                Keys.onEnterPressed: currentItem?.clicked()
+                Keys.onSpacePressed: currentItem?.clicked()
+                Keys.onPressed: event => {
+                    const last = shown - 1;
+                    const row = Math.floor(currentIndex / columns);
+                    const lastRow = Math.floor(last / columns);
+                    let handled = last >= 0;
+                    switch (event.key) {
+                    case Qt.Key_Left:
+                        moveTo(rtl ? Math.min(last, currentIndex + 1) : Math.max(0, currentIndex - 1));
+                        break;
+                    case Qt.Key_Right:
+                        moveTo(rtl ? Math.max(0, currentIndex - 1) : Math.min(last, currentIndex + 1));
+                        break;
+                    case Qt.Key_Home:
+                        moveTo(0);
+                        break;
+                    case Qt.Key_End:
+                        moveTo(last);
+                        break;
+                    case Qt.Key_Up:
+                        if (row > 0)
+                            moveTo(currentIndex - columns);
+                        else
+                            handled = Spatial.move(publicUsers, Qt.Key_Up);
+                        break;
+                    case Qt.Key_Down:
+                        // The last row leads to Show All, or the form
+                        if (row < lastRow)
+                            moveTo(Math.min(last, currentIndex + columns));
+                        else
+                            (showAll.visible ? showAll : username).forceActiveFocus(Qt.TabFocusReason);
+                        break;
+                    default:
+                        handled = false;
+                    }
+                    event.accepted = handled;
+                }
+
+                Flow {
+                    id: publicFlow
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    width: publicUsers.columns * publicUsers.cellWidth - publicUsers.gap
+                    spacing: publicUsers.gap
+
+                    Repeater {
+                        id: publicTiles
+                        model: page.connection.publicUsers
+                        onItemAdded: Qt.callLater(publicUsers.refreshCurrent)
+                        onItemRemoved: Qt.callLater(publicUsers.refreshCurrent)
+
+                        delegate: UserTile {
+                            id: userTile
+
+                            required property int index
+                            required property var modelData
+
+                            objectName: "publicUser_" + modelData.id
+                            name: modelData.name
+                            imageUrl: modelData.imageUrl
+                            size: Kirigami.Units.gridUnit * 7
+                            visible: index < publicUsers.shown
+                            accessibleLabel: i18nc("@label %1 is a user name", "Use %1", modelData.name)
+                            highlighted: publicUsers.currentIndex === index && publicUsers.activeFocus
+
+                            onPressed: {
+                                publicUsers.currentIndex = userTile.index;
+                                publicUsers.forceActiveFocus(Qt.MouseFocusReason);
+                            }
+                            onClicked: {
+                                username.text = userTile.modelData.name;
+                                password.forceActiveFocus(Qt.TabFocusReason);
+                            }
+                        }
+                    }
                 }
             }
-            Kirigami.PasswordField {
-                id: password
-                objectName: "passwordField"
-                Kirigami.FormData.label: i18n("Password:")
+
+            Controls.Button {
+                id: showAll
+                objectName: "publicUsersToggle"
+                Layout.alignment: Qt.AlignHCenter
+                visible: publicUsers.visible && publicUsers.truncated
                 enabled: !page.signingIn
-                Accessible.name: i18n("Password")
-                onAccepted: signIn.clicked()
+                flat: true
+                text: publicUsers.expanded ? i18n("Show Less") : i18n("Show All")
+                onClicked: publicUsers.expanded = !publicUsers.expanded
             }
-            RowLayout {
+
+            Kirigami.FormLayout {
+                Layout.fillWidth: true
+                Layout.topMargin: publicUsers.visible ? Kirigami.Units.largeSpacing : 0
+                visible: !page.quick
+
+                Controls.TextField {
+                    id: username
+                    objectName: "usernameField"
+                    Layout.fillWidth: true
+                    Kirigami.FormData.label: i18n("Username:")
+                    enabled: !page.signingIn
+                    Accessible.name: i18n("Username")
+                    onAccepted: password.forceActiveFocus()
+                    Keys.onUpPressed: event => {
+                        event.accepted = publicUsers.visible;
+                        if (event.accepted)
+                            publicUsers.forceActiveFocus(Qt.BacktabFocusReason);
+                    }
+                    // A user known beforehand (from the picker) goes straight to the password
+                    Component.onCompleted: {
+                        text = page.connection.loginUserName;
+                        (text.length > 0 ? password : username).forceActiveFocus();
+                    }
+                }
+                Kirigami.PasswordField {
+                    id: password
+                    objectName: "passwordField"
+                    Layout.fillWidth: true
+                    Kirigami.FormData.label: i18n("Password:")
+                    enabled: !page.signingIn
+                    Accessible.name: i18n("Password")
+                    onAccepted: signIn.clicked()
+                }
                 Controls.Button {
                     id: signIn
+                    Layout.fillWidth: true
                     text: i18n("Sign In")
                     icon.name: "user-identity"
                     // A Jellyfin account may have no password: only the name is required
@@ -175,64 +265,95 @@ Kirigami.ScrollablePage {
                     onClicked: page.connection.login(username.text, password.text)
                 }
                 Controls.BusyIndicator {
+                    Layout.alignment: Qt.AlignHCenter
                     FadeInOnShow {}
                     visible: page.signingIn
                     running: page.signingIn
                 }
             }
-            Controls.Button {
-                text: i18n("Use Quick Connect")
-                icon.name: "smartphone"
-                enabled: !page.signingIn
-                onClicked: page.connection.startQuickConnect()
-            }
-            Controls.Button {
-                text: i18nc("@action:button Opens the list of the saved users of this server", "Choose Another User")
-                icon.name: "system-switch-user"
-                visible: page.connection.hasSavedUsers
-                enabled: !page.signingIn
-                onClicked: page.connection.chooseAnotherUser()
-            }
-            Controls.Button {
-                text: i18nc("@action:button Goes back to the list of servers", "Switch Server")
-                icon.name: "network-server"
-                enabled: !page.signingIn
-                onClicked: page.connection.cancel()
-            }
-        }
 
-        ColumnLayout {
-            visible: page.quick
-            Layout.fillWidth: true
-            spacing: Kirigami.Units.largeSpacing
+            // The secondary actions in one centred row; they stack when the column is too narrow for all of them
+            GridLayout {
+                id: secondary
 
-            Controls.Label {
+                // The width the visible buttons need side by side
+                readonly property real neededWidth: {
+                    let width = 0;
+                    let shown = 0;
+                    for (const child of children) {
+                        if (child.visible) {
+                            width += child.implicitWidth;
+                            ++shown;
+                        }
+                    }
+                    return width + Math.max(0, shown - 1) * columnSpacing;
+                }
+
+                Layout.alignment: Qt.AlignHCenter
+                Layout.topMargin: Kirigami.Units.largeSpacing
+                visible: !page.quick
+                columns: neededWidth <= column.width ? Math.max(1, children.length) : 1
+                columnSpacing: Kirigami.Units.largeSpacing
+                rowSpacing: Kirigami.Units.smallSpacing
+
+                Controls.Button {
+                    Layout.alignment: Qt.AlignHCenter
+                    text: i18n("Use Quick Connect")
+                    icon.name: "smartphone"
+                    enabled: !page.signingIn
+                    onClicked: page.connection.startQuickConnect()
+                }
+                Controls.Button {
+                    Layout.alignment: Qt.AlignHCenter
+                    text: i18nc("@action:button Opens the list of the saved users of this server", "Choose Another User")
+                    icon.name: "system-switch-user"
+                    visible: page.connection.hasSavedUsers
+                    enabled: !page.signingIn
+                    onClicked: page.connection.chooseAnotherUser()
+                }
+                Controls.Button {
+                    Layout.alignment: Qt.AlignHCenter
+                    text: i18nc("@action:button Goes back to the list of servers", "Switch Server")
+                    icon.name: "network-server"
+                    enabled: !page.signingIn
+                    onClicked: page.connection.cancel()
+                }
+            }
+
+            ColumnLayout {
+                visible: page.quick
                 Layout.fillWidth: true
-                wrapMode: Text.Wrap
-                text: i18n("On a device that is already signed in, open Quick Connect in the Jellyfin settings and enter this code")
-            }
-            Kirigami.Heading {
-                Layout.alignment: Qt.AlignHCenter
-                level: 1
-                font.letterSpacing: Kirigami.Units.largeSpacing
-                textFormat: Text.PlainText
-                text: page.connection.quickConnectCode
-                Accessible.name: i18n("Quick Connect code %1", page.connection.quickConnectCode)
-            }
-            RowLayout {
-                Layout.alignment: Qt.AlignHCenter
-                Controls.BusyIndicator {
-                    FadeInOnShow {}
-                    running: page.quick
-                }
+                spacing: Kirigami.Units.largeSpacing
+
                 Controls.Label {
-                    text: i18n("Waiting for approval…")
+                    Layout.fillWidth: true
+                    horizontalAlignment: Text.AlignHCenter
+                    wrapMode: Text.Wrap
+                    text: i18n("On a device that is already signed in, open Quick Connect in the Jellyfin settings and enter this code")
                 }
-            }
-            Controls.Button {
-                Layout.alignment: Qt.AlignHCenter
-                text: i18n("Cancel")
-                onClicked: page.connection.cancelQuickConnect()
+                Kirigami.Heading {
+                    Layout.alignment: Qt.AlignHCenter
+                    level: 2
+                    font.letterSpacing: Kirigami.Units.largeSpacing
+                    textFormat: Text.PlainText
+                    text: page.connection.quickConnectCode
+                    Accessible.name: i18n("Quick Connect code %1", page.connection.quickConnectCode)
+                }
+                RowLayout {
+                    Layout.alignment: Qt.AlignHCenter
+                    Controls.BusyIndicator {
+                        FadeInOnShow {}
+                        running: page.quick
+                    }
+                    Controls.Label {
+                        text: i18n("Waiting for approval…")
+                    }
+                }
+                Controls.Button {
+                    Layout.alignment: Qt.AlignHCenter
+                    text: i18n("Cancel")
+                    onClicked: page.connection.cancelQuickConnect()
+                }
             }
         }
     }

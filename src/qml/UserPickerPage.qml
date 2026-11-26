@@ -4,9 +4,8 @@ import QtQuick
 import QtQuick.Controls as Controls
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
-import org.kde.kirigamiaddons.components as Components
 
-// Who is watching: one tile per user saved for the server and an Add User tile at the end. A user without a stored session, or set to ask for the password, shows a lock and leads to the sign-in page
+// Who is watching: one tile per user saved for the server and an Add User button under them. A user without a stored session, or set to ask for the password, shows a lock and leads to the sign-in page
 Kirigami.ScrollablePage {
     id: page
     objectName: "userPickerPage"
@@ -22,31 +21,19 @@ Kirigami.ScrollablePage {
     // The row toolbar is ToolBar everywhere (Main.qml): the pre-signin screens keep their identity in the top bar instead
     globalToolBarStyle: Kirigami.ApplicationHeaderStyle.None
 
-    // `ConnectionController::users` entries (`id`, `name`, `imageUrl`, `remembered`, `askPassword`) carry server metadata, rendered as plain text; the last entry stands for Add User
-    readonly property var entries: connection.users.concat([{ id: "", name: "", imageUrl: "", remembered: true, askPassword: false, add: true }])
-
     title: i18nc("@title", "Who is watching?")
 
-    actions: [
-        Kirigami.Action {
-            text: i18nc("@action:button Goes back to the list of servers", "Switch Server")
-            icon.name: "network-server"
-            onTriggered: page.connection.cancel()
-        }
-    ]
-
-    // The grid takes the keys as soon as the page shows
+    // The tiles take the keys as soon as the page shows
     function focusPrimary() {
-        grid.forceActiveFocus(Qt.TabFocusReason);
+        (grid.count > 0 ? grid : addUser).forceActiveFocus(Qt.TabFocusReason);
     }
 
-    // The menu of a tile (a right click, the Menu key or the button of the tile): it opens at a point of the tile, or from the button when one is given
+    // The menu of a tile (a right click, the Menu key or the button of the tile): it opens at a point of the tile, or from the button when one is given. `ConnectionController::users` entries (`id`, `name`, `imageUrl`, `remembered`, `askPassword`) carry server metadata, rendered as plain text
     function openUserMenu(tile, x, y, button) {
-        if (tile.isAdd)
-            return;
-        userMenu.userId = tile.modelData.id;
-        userMenu.userName = tile.modelData.name;
-        askPasswordItem.checked = tile.modelData.askPassword;
+        const user = page.connection.users[tile.index];
+        userMenu.userId = user.id;
+        userMenu.userName = user.name;
+        askPasswordItem.checked = user.askPassword;
         if (button)
             userMenuPlacement.openFor(button);
         else
@@ -54,7 +41,7 @@ Kirigami.ScrollablePage {
     }
 
     function indexOfUser(userId) {
-        return page.entries.findIndex(entry => entry.id === userId);
+        return page.connection.users.findIndex(entry => entry.id === userId);
     }
 
     // The button's menu goes below the button, above it when there is no room below; the pointer's and the keyboard's open at their point
@@ -79,7 +66,7 @@ Kirigami.ScrollablePage {
                 Qt.callLater(() => {
                     const index = page.indexOfUser(userId);
                     if (index >= 0)
-                        grid.currentIndex = index;
+                        grid.moveTo(index);
                     page.focusPrimary();
                 });
             }
@@ -126,185 +113,169 @@ Kirigami.ScrollablePage {
         }
     }
 
-    GridView {
-        id: grid
-        objectName: "userPickerGrid"
+    ColumnLayout {
+        spacing: Kirigami.Units.smallSpacing
 
-        readonly property real avatarSize: Kirigami.Units.gridUnit * 6
-        readonly property real minCellWidth: Kirigami.Units.gridUnit * 10
-        // As many columns as fit, down to one, and never more than there are tiles; the tiles share the width, so they sit in the middle without any margin that would have to follow the width
-        readonly property int columns: Math.max(1, Math.min(count, Math.floor(width / minCellWidth)))
+        // The heading and the address are one block
+        ColumnLayout {
+            Layout.fillWidth: true
+            spacing: 0
 
-        model: page.entries
-        cellWidth: Math.floor(width / columns)
-        cellHeight: avatarSize + Kirigami.Units.gridUnit * 3.5
-        topMargin: Kirigami.Units.gridUnit
-        activeFocusOnTab: true
-        keyNavigationEnabled: true
-        currentIndex: 0
-        Accessible.role: Accessible.List
-        Accessible.name: page.title
+            Kirigami.Heading {
+                Layout.fillWidth: true
+                horizontalAlignment: Text.AlignHCenter
+                wrapMode: Text.Wrap
+                level: 1
+                text: page.title
+            }
 
-        // The tiles are not tab stops: the grid is, and it chooses the current user
-        Keys.onReturnPressed: currentItem?.choose()
-        Keys.onEnterPressed: currentItem?.choose()
-        Keys.onSpacePressed: currentItem?.choose()
-        Keys.onMenuPressed: if (currentItem) page.openUserMenu(currentItem, 0, currentItem.height)
-        Keys.onPressed: event => {
-            if (event.modifiers === Qt.ShiftModifier && event.key === Qt.Key_F10 && currentItem) {
-                page.openUserMenu(currentItem, 0, currentItem.height);
-                event.accepted = true;
+            // The server address is server text: plain
+            Controls.Label {
+                Layout.fillWidth: true
+                horizontalAlignment: Text.AlignHCenter
+                wrapMode: Text.Wrap
+                textFormat: Text.PlainText
+                color: Kirigami.Theme.disabledTextColor
+                text: page.connection.serverUrl
             }
         }
 
-        delegate: Controls.ItemDelegate {
-            id: tile
+        // The tiles are one tab stop with the arrow keys inside; the row is as wide as its columns, centred, and wraps when the page is narrower
+        Item {
+            id: grid
+            objectName: "userPickerGrid"
 
-            required property int index
-            required property var modelData
+            readonly property real gap: Kirigami.Units.largeSpacing
+            readonly property real cellWidth: Kirigami.Units.gridUnit * 9 + gap
+            readonly property int count: tiles.count
+            readonly property bool rtl: Qt.application.layoutDirection === Qt.RightToLeft
+            // As many columns as fit, down to one, and never more than there are tiles
+            readonly property int columns: Math.max(1, Math.min(count, Math.floor((width + gap) / cellWidth)))
+            property int currentIndex: 0
+            property Item currentItem: null
 
-            readonly property bool isAdd: modelData.add === true
-            // No stored session, or a password wanted every time
-            readonly property bool locked: !isAdd && (!modelData.remembered || modelData.askPassword)
-            readonly property string lockedText: i18nc("@info:tooltip", "Asks for the password")
-            readonly property string addText: i18nc("@action:button", "Add User")
-
-            function choose() {
-                if (isAdd)
-                    page.connection.addUser();
-                else
-                    page.connection.chooseUser(modelData.id);
+            function refreshCurrent() {
+                currentItem = tiles.itemAt(currentIndex);
             }
 
-            objectName: isAdd ? "userTileAdd" : "userTile_" + modelData.id
-            width: grid.cellWidth
-            height: grid.cellHeight
-            // The grid is the one tab stop, the arrow keys move inside it
-            focusPolicy: Qt.NoFocus
-            highlighted: GridView.isCurrentItem && grid.activeFocus
-            Accessible.name: isAdd ? addText : modelData.name
-            Accessible.description: locked ? lockedText : ""
-            Controls.ToolTip.text: lockedText
-            Controls.ToolTip.visible: hovered && locked && !menuButton.hovered
-            Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
-
-            onPressed: {
-                grid.currentIndex = tile.index;
-                grid.forceActiveFocus(Qt.MouseFocusReason);
+            function moveTo(index) {
+                currentIndex = index;
+                refreshCurrent();
+                if (currentItem)
+                    Spatial.reveal(currentItem);
             }
-            onClicked: choose()
 
-            TapHandler {
-                acceptedButtons: Qt.RightButton
-                enabled: !tile.isAdd
-                onTapped: eventPoint => {
-                    grid.currentIndex = tile.index;
-                    grid.forceActiveFocus(Qt.MouseFocusReason);
-                    page.openUserMenu(tile, eventPoint.position.x, eventPoint.position.y);
+            Layout.fillWidth: true
+            Layout.preferredHeight: flow.implicitHeight
+            // Without users the page has Add User only, and there is no tab stop
+            visible: count > 0
+            activeFocusOnTab: true
+            Accessible.role: Accessible.List
+            Accessible.name: page.title
+            onCurrentIndexChanged: refreshCurrent()
+
+            // The keys act on the current tile
+            Keys.onReturnPressed: currentItem?.clicked()
+            Keys.onEnterPressed: currentItem?.clicked()
+            Keys.onSpacePressed: currentItem?.clicked()
+            Keys.onMenuPressed: if (currentItem) page.openUserMenu(currentItem, 0, currentItem.height)
+            Keys.onPressed: event => {
+                const last = count - 1;
+                const row = Math.floor(currentIndex / columns);
+                const lastRow = Math.floor(last / columns);
+                let handled = last >= 0;
+                switch (event.key) {
+                case Qt.Key_Left:
+                    moveTo(rtl ? Math.min(last, currentIndex + 1) : Math.max(0, currentIndex - 1));
+                    break;
+                case Qt.Key_Right:
+                    moveTo(rtl ? Math.max(0, currentIndex - 1) : Math.min(last, currentIndex + 1));
+                    break;
+                case Qt.Key_Home:
+                    moveTo(0);
+                    break;
+                case Qt.Key_End:
+                    moveTo(last);
+                    break;
+                case Qt.Key_Up:
+                    if (row > 0)
+                        moveTo(currentIndex - columns);
+                    else
+                        handled = Spatial.move(grid, Qt.Key_Up);
+                    break;
+                case Qt.Key_Down:
+                    // The last row leads to Add User
+                    if (row < lastRow)
+                        moveTo(Math.min(last, currentIndex + columns));
+                    else
+                        addUser.forceActiveFocus(Qt.TabFocusReason);
+                    break;
+                case Qt.Key_F10:
+                    handled = event.modifiers === Qt.ShiftModifier && currentItem !== null;
+                    if (handled)
+                        page.openUserMenu(currentItem, 0, currentItem.height);
+                    break;
+                default:
+                    handled = false;
                 }
+                event.accepted = handled;
             }
 
-            contentItem: ColumnLayout {
-                spacing: Kirigami.Units.smallSpacing
+            Flow {
+                id: flow
+                anchors.horizontalCenter: parent.horizontalCenter
+                width: grid.columns * grid.cellWidth - grid.gap
+                spacing: grid.gap
 
-                Item {
-                    Layout.alignment: Qt.AlignHCenter
-                    Layout.preferredWidth: grid.avatarSize
-                    Layout.preferredHeight: grid.avatarSize
+                Repeater {
+                    id: tiles
+                    model: page.connection.users
+                    onItemAdded: Qt.callLater(grid.refreshCurrent)
+                    onItemRemoved: Qt.callLater(grid.refreshCurrent)
 
-                    Components.Avatar {
-                        objectName: "userAvatar"
-                        anchors.fill: parent
-                        visible: !tile.isAdd
-                        // The tile names the user to a screen reader
-                        Accessible.ignored: true
-                        name: tile.modelData.name
-                        // Only URLs built by JellyfinClient::userImageUrl belong here: a raw server string must never become a source
-                        source: tile.modelData.imageUrl
-                        // The image is decoded at the size it shows
-                        sourceSize.width: width * Screen.devicePixelRatio
-                        sourceSize.height: height * Screen.devicePixelRatio
-                    }
+                    delegate: UserTile {
+                        id: tile
 
-                    Rectangle {
-                        anchors.fill: parent
-                        visible: tile.isAdd
-                        radius: width / 2
-                        color: Kirigami.Theme.alternateBackgroundColor
-                        border.width: 1
-                        border.color: Kirigami.Theme.disabledTextColor
+                        required property int index
+                        required property var modelData
 
-                        Kirigami.Icon {
-                            anchors.centerIn: parent
-                            width: Kirigami.Units.iconSizes.large
-                            height: width
-                            source: "list-add-user"
-                        }
-                    }
+                        objectName: "userTile_" + modelData.id
+                        name: modelData.name
+                        imageUrl: modelData.imageUrl
+                        // No stored session, or a password wanted every time
+                        locked: !modelData.remembered || modelData.askPassword
+                        showMenu: true
+                        highlighted: grid.currentIndex === index && grid.activeFocus
 
-                    Rectangle {
-                        objectName: "userLock"
-                        anchors {
-                            right: parent.right
-                            bottom: parent.bottom
-                        }
-                        width: Kirigami.Units.iconSizes.smallMedium + Kirigami.Units.smallSpacing
-                        height: width
-                        radius: width / 2
-                        visible: tile.locked
-                        color: Kirigami.Theme.backgroundColor
-                        border.width: 1
-                        border.color: Kirigami.Theme.disabledTextColor
-
-                        Kirigami.Icon {
-                            anchors.centerIn: parent
-                            width: Kirigami.Units.iconSizes.small
-                            height: width
-                            source: "lock"
-                        }
-                    }
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: 0
-
-                    // User names come from the server: plain text only
-                    Controls.Label {
-                        objectName: "userName"
-                        Layout.fillWidth: true
-                        horizontalAlignment: Text.AlignHCenter
-                        elide: Text.ElideRight
-                        maximumLineCount: 1
-                        textFormat: Text.PlainText
-                        text: tile.isAdd ? tile.addText : tile.modelData.name
-                    }
-
-                    Controls.ToolButton {
-                        id: menuButton
-                        objectName: "userMenuButton"
-                        Layout.preferredWidth: Kirigami.Units.iconSizes.smallMedium
-                        Layout.preferredHeight: Kirigami.Units.iconSizes.smallMedium
-                        focusPolicy: Qt.NoFocus
-                        padding: 0
-                        visible: !tile.isAdd
-                        display: Controls.AbstractButton.IconOnly
-                        icon.name: "overflow-menu"
-                        icon.width: Kirigami.Units.iconSizes.small
-                        icon.height: Kirigami.Units.iconSizes.small
-                        text: i18nc("@action:button", "More Actions")
-                        // The tooltip keeps the short text: a screen reader hears which user the button belongs to
-                        Accessible.name: i18nc("@label %1 is a user name", "More Actions for %1", tile.modelData.name)
-                        Controls.ToolTip.text: text
-                        Controls.ToolTip.visible: hovered
-                        Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
-                        onClicked: {
+                        onPressed: {
                             grid.currentIndex = tile.index;
                             grid.forceActiveFocus(Qt.MouseFocusReason);
-                            page.openUserMenu(tile, 0, 0, menuButton);
+                        }
+                        onClicked: page.connection.chooseUser(modelData.id)
+                        onMenuRequested: (x, y, button) => {
+                            grid.currentIndex = tile.index;
+                            grid.forceActiveFocus(Qt.MouseFocusReason);
+                            page.openUserMenu(tile, x, y, button);
                         }
                     }
                 }
+            }
+        }
+
+        Controls.Button {
+            id: addUser
+            objectName: "userAddButton"
+            Layout.alignment: Qt.AlignHCenter
+            Layout.topMargin: Kirigami.Units.largeSpacing
+            text: i18nc("@action:button", "Add User")
+            icon.name: "list-add-user"
+            onClicked: page.connection.addUser()
+            Keys.onReturnPressed: clicked()
+            Keys.onEnterPressed: clicked()
+            Keys.onUpPressed: event => {
+                event.accepted = grid.count > 0;
+                if (event.accepted)
+                    grid.forceActiveFocus(Qt.BacktabFocusReason);
             }
         }
     }

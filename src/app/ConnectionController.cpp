@@ -671,6 +671,7 @@ void ConnectionController::connectToWithFallback(const QString &address)
     connectTo(candidates.constFirst().toString());
     if (m_state != Connecting)
         m_connectionFallback.clear();
+    m_schemeGuessed = !m_connectionFallback.isEmpty();
 }
 
 void ConnectionController::tryNextConnection()
@@ -737,6 +738,7 @@ bool ConnectionController::workOffline()
     m_sync.cancelRestore();
     m_client.disconnectFromServer();
     m_connectionFallback.clear();
+    m_schemeGuessed = false;
     clearQuickConnect();
     if (!m_libraries.isEmpty()) {
         m_libraries.clear();
@@ -756,6 +758,7 @@ void ConnectionController::connectTo(const QString &address)
     if (m_state != Idle && m_state != NeedsLogin)
         return;
     setError({});
+    m_schemeGuessed = false;
     QString text = address.trimmed();
     if (!text.contains(QLatin1String("://")))
         text.prepend(QLatin1String("https://"));
@@ -786,10 +789,13 @@ void ConnectionController::onServerReady()
     Q_EMIT serverUrlChanged();
     m_publicSource.clear();
     refreshUsers();
-    if (base.scheme() == QLatin1String("http") && !isLoopbackHost(base))
-        setState(ConfirmInsecure);
-    else
+    // Plain HTTP to another host asks first. A saved server (the same address and public id, for as long as one of its users is saved) skips it: the sign-in that saved it was confirmed, so this tells apart another server at the same address but not one that repeats the id (see SECURITY.md). An address whose scheme was guessed always asks, or blocking HTTPS would downgrade a saved host unnoticed
+    if (base.scheme() != QLatin1String("http") || isLoopbackHost(base))
         proceedAfterProbe();
+    else if (m_sync.isSavedServer() && !m_schemeGuessed)
+        allowInsecureHttp();
+    else
+        setState(ConfirmInsecure);
 }
 
 void ConnectionController::onRestoreFinished()
@@ -845,6 +851,11 @@ void ConnectionController::confirmInsecureHttp()
 {
     if (m_state != ConfirmInsecure)
         return;
+    allowInsecureHttp();
+}
+
+void ConnectionController::allowInsecureHttp()
+{
     m_client.setAllowInsecureHttp(true);
     // Credentials may travel now: the saved users of the server become usable
     refreshUsers();
@@ -887,6 +898,7 @@ void ConnectionController::cancelQuickConnect()
 void ConnectionController::cancel()
 {
     m_connectionFallback.clear();
+    m_schemeGuessed = false;
     if (m_state == Idle)
         return;
     if (m_state == Offline) {

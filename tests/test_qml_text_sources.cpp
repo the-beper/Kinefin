@@ -50,7 +50,7 @@ const QList<std::pair<QString, QString>> &knownTooltipBindings()
          QStringLiteral("display === QQC2.AbstractButton.IconOnly ? text : \"\"")},
         // Properties that hold a translated string
         {QStringLiteral("ShellHeader.qml"), QStringLiteral("label")},
-        {QStringLiteral("UserPickerPage.qml"), QStringLiteral("lockedText")},
+        {QStringLiteral("UserTile.qml"), QStringLiteral("lockedText")},
     };
     return known;
 }

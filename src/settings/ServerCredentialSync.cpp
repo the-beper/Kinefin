@@ -134,11 +134,21 @@ QList<ServerCredential> ServerCredentialSync::restorableUsers() const
         return users;
     for (const ServerCredential &entry : m_entries) {
         // The token goes only to the server it was issued by: same public id, same resolved base URL (scheme, host, port and path, so a token issued over TLS never travels over plain HTTP and another service on the same host never gets it) and the same device identity
-        if (entry.serverId == m_client->serverId() && entry.deviceId == m_client->deviceId()
-            && QUrl(entry.url) == m_client->serverUrl())
+        if (isProbedServer(entry) && entry.deviceId == m_client->deviceId())
             users.append(entry);
     }
     return users;
+}
+
+bool ServerCredentialSync::isSavedServer() const
+{
+    return std::any_of(m_entries.cbegin(), m_entries.cend(),
+                       [this](const ServerCredential &entry) { return isProbedServer(entry); });
+}
+
+bool ServerCredentialSync::isProbedServer(const ServerCredential &entry) const
+{
+    return entry.serverId == m_client->serverId() && QUrl(entry.url) == m_client->serverUrl();
 }
 
 void ServerCredentialSync::onServerReady()

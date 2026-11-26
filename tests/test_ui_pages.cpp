@@ -513,19 +513,19 @@ struct Ui {
                && qWaitForScaled(
                    [this] {
                        const QQuickItem *grid = item(QStringLiteral("userPickerGrid"));
-                       return grid && grid->property("count").toInt() == 3;
+                       return grid && grid->property("count").toInt() == 2;
                    },
                    5000);
     }
 
-    // The tile of a saved user or the Add User tile of the picker
+    // The tile of a saved user or the Add User button of the picker
     QQuickItem *userTile(const QString &userId) const
     {
-        return item(userId.isEmpty() ? QStringLiteral("userTileAdd")
+        return item(userId.isEmpty() ? QStringLiteral("userAddButton")
                                      : QStringLiteral("userTile_") + userId);
     }
 
-    // Moves the current tile of the picker grid to the one of this user (empty: Add User)
+    // Moves the current tile of the picker grid to the one of this user
     bool selectTile(const QString &userId)
     {
         QQuickItem *grid = item(QStringLiteral("userPickerGrid"));
@@ -11403,6 +11403,95 @@ class TestUiPages : public QObject {
         QVERIFY(!ui.controller.errorText().isEmpty());
     }
 
+    // The question before credentials go over plain HTTP to another host is a modal dialog: Esc and Cancel refuse it, Continue Anyway goes on to the sign-in
+    void plainHttpToAnotherHostAsksInAModalDialog()
+    {
+        const QHostAddress lan = otherHostAddress();
+        if (lan.isNull())
+            QSKIP("no non-loopback IPv4 address on this machine");
+        FakeJellyfin lanServer;
+        QVERIFY(lanServer.listen(QHostAddress::AnyIPv4));
+        const QString url =
+            QStringLiteral("http://%1:%2/jellyfin").arg(lan.toString()).arg(lanServer.url().port());
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("servers")));
+        // The sign-in page replaces the Servers page that owns the dialog
+        const QPointer<QObject> dialog = ui.popup(QStringLiteral("insecureDialog"));
+        QVERIFY(dialog);
+        QVERIFY(!dialog->property("visible").toBool());
+        const QString warning = QStringLiteral("%1 does not use HTTPS: your username, password, "
+                                               "and session would travel unencrypted")
+                                    .arg(url);
+
+        ui.controller.connectTo(url);
+        QTRY_COMPARE(ui.controller.state(), ConnectionController::ConfirmInsecure);
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QVERIFY(dialog->property("modal").toBool());
+        QCOMPARE(dialog->property("title").toString(),
+                 QStringLiteral("Connect Without Encryption"));
+        QTRY_VERIFY(ui.showsText(warning));
+        int found = 0;
+        QVERIFY(ui.notPlainText(warning, &found).isEmpty());
+        QVERIFY(found > 0);
+        // Esc refuses: nothing was sent and the connection is gone
+        QTest::keyClick(ui.window, Qt::Key_Escape);
+        QTRY_COMPARE(ui.controller.state(), ConnectionController::Idle);
+        QTRY_VERIFY(!dialog->property("visible").toBool());
+        QCOMPARE(lanServer.successfulLogins, 0);
+
+        ui.controller.connectTo(url);
+        QTRY_COMPARE(ui.controller.state(), ConnectionController::ConfirmInsecure);
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QVERIFY(clickInDialog(ui, QStringLiteral("insecureDialog"), QStringLiteral("Cancel")));
+        QTRY_COMPARE(ui.controller.state(), ConnectionController::Idle);
+        QTRY_VERIFY(!dialog->property("visible").toBool());
+
+        ui.controller.connectTo(url);
+        QTRY_COMPARE(ui.controller.state(), ConnectionController::ConfirmInsecure);
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QVERIFY(
+            clickInDialog(ui, QStringLiteral("insecureDialog"), QStringLiteral("Continue Anyway")));
+        QTRY_COMPARE(ui.controller.state(), ConnectionController::NeedsLogin);
+        QTRY_VERIFY(ui.item(QStringLiteral("loginPage")) != nullptr);
+    }
+
+    // An address typed without a scheme whose HTTPS attempt failed reaches the HTTP endpoint: the dialog names that address, as plain text, and opens only once the connect cover is gone
+    void theFallbackToPlainHttpNamesTheAddressInTheDialog()
+    {
+        const QHostAddress lan = otherHostAddress();
+        if (lan.isNull())
+            QSKIP("no non-loopback IPv4 address on this machine");
+        FakeJellyfin lanServer;
+        QVERIFY(lanServer.listen(QHostAddress::AnyIPv4));
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("servers")));
+        const QPointer<QObject> dialog = ui.popup(QStringLiteral("insecureDialog"));
+        QVERIFY(dialog);
+        const QString warning =
+            QStringLiteral("The server answered at http://%1:%2, which does not use HTTPS: your "
+                           "username, password, and session would travel unencrypted")
+                .arg(lan.toString())
+                .arg(lanServer.url().port());
+        ui.item(QStringLiteral("serverHostField"))->setProperty("text", lan.toString());
+        ui.item(QStringLiteral("serverPortField"))
+            ->setProperty("text", QString::number(lanServer.url().port()));
+        QQuickItem *connect = ui.item(QStringLiteral("connectNewServerButton"));
+        QTRY_VERIFY(connect->isEnabled());
+        ui.clickCenter(connect);
+        QTRY_COMPARE(ui.controller.state(), ConnectionController::ConfirmInsecure);
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QVERIFY(!ui.window->property("startupVisible").toBool());
+        QCOMPARE(lanServer.tlsAttempts, 1);
+        QTRY_VERIFY(ui.showsText(warning));
+        int found = 0;
+        QVERIFY(ui.notPlainText(warning, &found).isEmpty());
+        QVERIFY(found > 0);
+        QVERIFY(clickInDialog(ui, QStringLiteral("insecureDialog"), QStringLiteral("Cancel")));
+        QTRY_COMPARE(ui.controller.state(), ConnectionController::Idle);
+    }
+
     void theConnectCoverCancelsASilentServer()
     {
         Ui ui(m_home->path());
@@ -12332,8 +12421,8 @@ class TestUiPages : public QObject {
         QCOMPARE(ui.savedUsers().size(), 1);
         QQuickItem *grid = ui.item(QStringLiteral("userPickerGrid"));
         QVERIFY(grid);
-        // The saved user and Add User
-        QTRY_COMPARE(grid->property("count").toInt(), 2);
+        // The saved user, and the Add User button under the tiles
+        QTRY_COMPARE(grid->property("count").toInt(), 1);
         QVERIFY(ui.userTile(QString()) != nullptr);
         // The grid has the keys, and Return signs the saved user back in without a password
         QTRY_VERIFY(grid->hasActiveFocus());
@@ -12445,7 +12534,9 @@ class TestUiPages : public QObject {
         QVERIFY(ui.load());
         QVERIFY(ui.openPickerWithTwoUsers());
         QTRY_VERIFY(ui.item(QStringLiteral("userPickerGrid"))->hasActiveFocus());
-        QVERIFY(ui.selectTile(QString()));
+        // Down from the last row of tiles reaches Add User, and Return presses it
+        QTest::keyClick(ui.window, Qt::Key_Down);
+        QTRY_VERIFY(ui.userTile(QString())->hasActiveFocus());
         QTest::keyClick(ui.window, Qt::Key_Return);
         QTRY_COMPARE(ui.controller.state(), ConnectionController::NeedsLogin);
         QTRY_VERIFY(ui.item(QStringLiteral("loginPage")) != nullptr);
@@ -12528,6 +12619,45 @@ class TestUiPages : public QObject {
         QTest::keyClick(ui.window, Qt::Key_Return);
         QTRY_COMPARE(ui.controller.state(), ConnectionController::Authenticated);
         QTRY_VERIFY(ui.item(QStringLiteral("homePage")) != nullptr);
+    }
+
+    // Many public users show two rows of tiles, so that the form stays in reach; Show All lists the rest and Show Less folds them again
+    void theSignInShowsTwoRowsOfPublicUsersUntilShowAll()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        ui.server.users.clear();
+        for (int i = 0; i < 40; ++i) {
+            ui.server.users.append({QStringLiteral("%1").arg(i + 1, 32, 16, QLatin1Char('0')),
+                                    "token",
+                                    QStringLiteral("User %1").arg(i),
+                                    {},
+                                    false});
+        }
+        ui.controller.connectTo(address(ui.server));
+        QVERIFY(ui.reach(ConnectionController::NeedsLogin, QStringLiteral("loginPage")));
+        QQuickItem *strip = ui.item(QStringLiteral("publicUsersStrip"));
+        QVERIFY(strip);
+        QTRY_COMPARE(strip->property("count").toInt(), 40);
+        const auto shownTiles = [strip] {
+            int shown = 0;
+            for (QQuickItem *candidate : allItems(strip)) {
+                if (candidate->objectName().startsWith(QStringLiteral("publicUser_"))
+                    && candidate->isVisible())
+                    ++shown;
+            }
+            return shown;
+        };
+        const auto twoRows = [strip] { return strip->property("maxColumns").toInt() * 2; };
+        QTRY_VERIFY(twoRows() >= 2 && twoRows() < 40);
+        QTRY_COMPARE(shownTiles(), twoRows());
+        QQuickItem *toggle = ui.item(QStringLiteral("publicUsersToggle"));
+        QVERIFY(toggle);
+        QVERIFY(toggle->isVisible());
+        ui.clickCenter(toggle);
+        QTRY_COMPARE(shownTiles(), 40);
+        ui.clickCenter(toggle);
+        QTRY_COMPARE(shownTiles(), twoRows());
     }
 
     void theMenuOfATileAsksForThePasswordAndRemovesTheUser()
@@ -12628,8 +12758,8 @@ class TestUiPages : public QObject {
         QVERIFY(ui.openPickerWithTwoUsers());
         const QQuickItem *grid = ui.item(QStringLiteral("userPickerGrid"));
         QVERIFY(grid);
-        const int cell = int(grid->property("minCellWidth").toReal());
-        const QStringList tiles{kAliceId, kBobId, QString()};
+        const int cell = int(grid->property("cellWidth").toReal());
+        const QStringList tiles{kAliceId, kBobId};
         const auto distinct = [&ui, &tiles](bool rows) {
             QSet<int> positions;
             for (const QString &id : tiles) {
@@ -12654,19 +12784,30 @@ class TestUiPages : public QObject {
             }
             return true;
         };
-        // Three columns hold the three tiles in one row, two wrap the last one, and the narrowest window the shell allows keeps as many columns as whole cells fit in the grid
-        QVERIFY(ui.opensWindowOfWidth(cell * 3 + 120));
+        // The tiles are square
+        const QQuickItem *first = ui.userTile(kAliceId);
+        QVERIFY(first);
+        QCOMPARE(first->width(), first->height());
+        // Two columns hold the two tiles in one row, centred in the window; the narrowest window the shell allows keeps as many columns as whole cells fit
+        QVERIFY(ui.opensWindowOfWidth(cell * 2 + 240));
         QTRY_COMPARE(distinct(true), 1);
-        QTRY_VERIFY(tilesInside());
-        QVERIFY(ui.opensWindowOfWidth(cell * 2 + 60));
-        QTRY_COMPARE(distinct(true), 2);
         QTRY_COMPARE(distinct(false), 2);
         QTRY_VERIFY(tilesInside());
+        QTRY_VERIFY([&] {
+            const QQuickItem *a = ui.userTile(kAliceId);
+            const QQuickItem *b = ui.userTile(kBobId);
+            const qreal left =
+                qMin(a->mapToScene(QPointF(0, 0)).x(), b->mapToScene(QPointF(0, 0)).x());
+            const qreal right = qMax(a->mapToScene(QPointF(a->width(), 0)).x(),
+                                     b->mapToScene(QPointF(b->width(), 0)).x());
+            const QPointF middle = grid->mapToScene(QPointF(grid->width() / 2, 0));
+            return qAbs((left + right) / 2 - middle.x()) <= 2;
+        }());
         QVERIFY(ui.opensWindowOfWidth(ui.window->minimumWidth()));
         QTRY_COMPARE(grid->width() <= ui.window->width(), true);
-        const int columns = qBound(1, int(grid->width()) / cell, 3);
-        QTRY_COMPARE(distinct(false), columns);
-        QTRY_COMPARE(distinct(true), (3 + columns - 1) / columns);
+        const int columns = grid->property("columns").toInt();
+        QVERIFY(columns >= 1 && columns <= 2);
+        QTRY_COMPARE(distinct(true), (2 + columns - 1) / columns);
         QTRY_VERIFY(tilesInside());
     }
 

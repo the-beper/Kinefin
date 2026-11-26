@@ -14,6 +14,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QNetworkInterface>
 #include <QPointer>
 #include <QSet>
 #include <QSignalSpy>
@@ -39,6 +40,16 @@ inline QByteArray fixture(const QString &name)
     if (!file.open(QIODevice::ReadOnly))
         return {};
     return file.readAll();
+}
+
+// A non-loopback IPv4 address of this machine, null when there is none: a server reached through it counts as another host
+inline QHostAddress otherHostAddress()
+{
+    for (const QHostAddress &candidate : QNetworkInterface::allAddresses()) {
+        if (candidate.protocol() == QAbstractSocket::IPv4Protocol && !candidate.isLoopback())
+            return candidate;
+    }
+    return {};
 }
 
 class FakeJellyfin {

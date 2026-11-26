@@ -131,7 +131,9 @@ A saved server keeps the exact address that worked and is never retried on anoth
 If the server presents an invalid TLS certificate, Kinefin stops with a message and does not fall back to HTTP. Fix the certificate, the address or the port. For a server with a self-signed certificate you can switch on **Ignore Certificate Errors** in **Settings**, **General**.
 
 > [!WARNING]
-> Over plain HTTP your password and everything you watch travel unencrypted. Before Kinefin sends credentials to an HTTP address that is not on this computer, it asks you to confirm with **Continue Anyway**. After an automatic fallback the warning says that HTTPS did not answer and names the address that did.
+> Over plain HTTP your password and everything you watch travel unencrypted. Before Kinefin sends credentials to an HTTP address that is not on this computer, it opens a **Connect Without Encryption** dialog. **Continue Anyway** goes on; **Cancel** or Esc stops the connection. After an automatic fallback the dialog names the HTTP address that answered, and it always appears.
+>
+> Once you have signed in, Kinefin does not ask again for that address while a saved user of the server exists. It compares the address and the server's public id, which tells another server at the same address apart from the saved one, but not a host that copies the id: see [SECURITY.md](../SECURITY.md#scope-and-threat-model). A different address asks again.
 
 While Kinefin connects, the **Servers** page shows **Cancel**.
 
@@ -141,7 +143,7 @@ While Kinefin connects, the **Servers** page shows **Cancel**.
 
 ### Sign in with a password or Quick Connect
 
-After the server answers, the sign-in page offers a password or Quick Connect. Users the server lists as public appear as tiles; selecting one fills in the name. For a user without a password, leave **Password** empty and press **Sign In**.
+After the server answers, the sign-in page offers a password or Quick Connect. Users the server lists as public appear as tiles above the form; selecting one fills in the name. **Use Quick Connect**, **Choose Another User** (when users are saved) and **Switch Server** are buttons under **Sign In**: side by side when the window is wide enough, stacked when it is narrow. A server with many public users shows two rows of tiles and a **Show All** button. For a user without a password, leave **Password** empty and press **Sign In**.
 
 To use Quick Connect, choose it on the sign-in page and confirm the code it shows from a Jellyfin client that is already signed in to the same server.
 
@@ -151,13 +153,13 @@ Kinefin never stores your password. The access token is kept in KWallet.
 
 Each user you sign in as is saved with the server. What happens at the next start depends on how many users are saved:
 
-| Saved users                      | Result                                                                 |
-| -------------------------------- | ---------------------------------------------------------------------- |
-| One, remembered                  | Signs in without a prompt                                              |
-| One, set to **Ask for Password** | Password prompt                                                        |
-| Two or more                      | The user picker, a grid of avatars, with **Add User** as the last tile |
+| Saved users                      | Result                                                                                                    |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| One, remembered                  | Signs in without a prompt                                                                                 |
+| One, set to **Ask for Password** | Password prompt                                                                                           |
+| Two or more                      | The user picker: centred rows of avatars that wrap with the window, and an **Add User** button under them |
 
-In the picker, arrows move, Return or Space chooses, and a lock badge marks a user without a stored token. The Menu key, a right click or the overflow button opens **Ask for Password** and **Remove User…**. **Switch Server**, at the top of the page, goes back to the **Servers** page.
+In the picker, arrows move between the tiles and down to **Add User**, Return or Space chooses, and a lock badge marks a user without a stored token. The Menu key, a right click or the overflow button opens **Ask for Password** and **Remove User…**. **Switch Server** is in the main menu.
 
 **Ask for Password** stores no token for that user, so Kinefin asks every time. It is off by default.
 
@@ -751,7 +753,7 @@ Flatpak shares that folder with the host, so a script outside the sandbox can us
 1. Press **Test** on the **Servers** page. The message names the address that answered, or says what failed.
 2. Check the host and the port. Enter a port only for a non-standard one.
 3. If the message mentions the certificate, fix the certificate. For a self-signed certificate you can switch on **Ignore Certificate Errors** in **Settings**, **General**.
-4. If only HTTP answers, confirm the warning knowing the traffic is not encrypted.
+4. If only HTTP answers, choose **Continue Anyway** in the **Connect Without Encryption** dialog, knowing the traffic is not encrypted.
 
 ### Kinefin asks for the password again
 

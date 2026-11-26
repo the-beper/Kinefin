@@ -44,7 +44,7 @@ Kirigami.ScrollablePage {
         const port = portField.text.trim();
         return port.length === 0 ? formHost : formHost + ":" + parseInt(port, 10);
     }
-    // The connection's error stays after a failed connect: one message box at a time, and the live check of the address is the one the user can act on, so it takes the place of the stale error. The insecure-connection warning comes from a connect that may not have used the form, so the address problem waits for it
+    // The connection's error stays after a failed connect: one message box at a time, and the live check of the address is the one the user can act on, so it takes the place of the stale error. The insecure-connection dialog comes from a connect that may not have used the form, so the address problem waits for it
     readonly property bool addressProblemShown: !confirming && ((hostField.text.trim().length > 0 && formHost.length === 0) || !formPortValid)
     readonly property var newServerStatus: connection.serverReachability[formAddress] ?? ({})
 
@@ -70,7 +70,7 @@ Kirigami.ScrollablePage {
         }
     }
 
-    // Whether the connection under way came from the form without a scheme: an HTTP server it reached means HTTPS did not answer, which the warning says
+    // Whether the connection under way came from the form without a scheme: an HTTP server it reached is a fallback the user did not type, so the warning names its address
     property bool automaticScheme: false
 
     function connectAddress(url, tryFallback) {
@@ -110,6 +110,50 @@ Kirigami.ScrollablePage {
         }
     }
 
+    // The question opens once the connect cover is gone: the cover has its own Cancel, and the dialog would open over it
+    readonly property bool asking: confirming && !(page.Window.window?.startupVisible ?? false)
+    onAskingChanged: {
+        if (asking)
+            insecureDialog.open();
+        else
+            insecureDialog.close();
+    }
+    Component.onCompleted: {
+        if (asking)
+            insecureDialog.open();
+    }
+
+    Kirigami.PromptDialog {
+        id: insecureDialog
+        objectName: "insecureDialog"
+        title: i18nc("@title:window", "Connect Without Encryption")
+        preferredWidth: Kirigami.Units.gridUnit * 26
+        maximumWidth: Math.min(Kirigami.Units.gridUnit * 28, page.width - Kirigami.Units.largeSpacing * 2)
+        standardButtons: Kirigami.Dialog.Cancel
+        customFooterActions: [
+            Kirigami.Action {
+                text: i18n("Continue Anyway")
+                icon.name: "security-low"
+                onTriggered: page.connection.confirmInsecureHttp()
+            }
+        ]
+        // Cancel, Esc and a click outside end up here while the question is open; a confirmation has left the state by the time the dialog closes
+        onClosed: {
+            if (page.confirming)
+                page.connection.cancel();
+        }
+
+        // The subtitle would render the address as rich text: it goes into a plain-text label
+        Controls.Label {
+            Layout.fillWidth: true
+            wrapMode: Text.Wrap
+            textFormat: Text.PlainText
+            text: page.automaticScheme
+                  ? i18nc("@info %1 is the HTTP address that answered", "The server answered at %1, which does not use HTTPS: your username, password, and session would travel unencrypted", page.connection.serverUrl)
+                  : i18nc("@info %1 is the server's HTTP address", "%1 does not use HTTPS: your username, password, and session would travel unencrypted", page.connection.serverUrl)
+        }
+    }
+
     ColumnLayout {
         // Side by side, the columns and the line between them reach the bottom of the page
         height: page.splitLayout ? Math.max(implicitHeight, page.flickable.height - page.topPadding - page.bottomPadding) : implicitHeight
@@ -127,26 +171,6 @@ Kirigami.ScrollablePage {
             text: i18n("Work Offline")
             icon.name: "network-disconnect"
             onClicked: page.connection.workOffline()
-        }
-        MessageBox {
-            Layout.fillWidth: true
-            Layout.topMargin: Kirigami.Units.largeSpacing
-            visible: page.confirming
-            type: Kirigami.MessageType.Warning
-            // The address is the one the user typed, as it answered: it passed the form's checks and QUrl, so it carries no markup the box could render
-            text: page.automaticScheme
-                  ? i18nc("@info %1 is the HTTP address that answered", "HTTPS did not answer, only %1 did: your username, password, and session would travel unencrypted", page.connection.serverUrl)
-                  : i18n("This server does not use HTTPS: your username, password, and session would travel unencrypted")
-            actions: [
-                Kirigami.Action {
-                    text: i18n("Continue Anyway")
-                    onTriggered: page.connection.confirmInsecureHttp()
-                },
-                Kirigami.Action {
-                    text: i18n("Cancel")
-                    onTriggered: page.connection.cancel()
-                }
-            ]
         }
 
         GridLayout {

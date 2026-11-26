@@ -7,7 +7,6 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
-#include <QNetworkInterface>
 #include <QPointer>
 #include <QSignalSpy>
 #include <QSslCertificate>
@@ -218,6 +217,37 @@ bool saveBothUsers(const FakeJellyfin &server)
     controller->addUser();
     return controller->state() == ConnectionController::NeedsLogin
            && signInUser(*controller, QStringLiteral("Ben"), 2);
+}
+
+// The address of `server` as seen from `host`, under the path the fake serves
+QString plainHttpUrl(const QHostAddress &host, const FakeJellyfin &server)
+{
+    return QStringLiteral("http://%1:%2/jellyfin").arg(host.toString()).arg(server.url().port());
+}
+
+// Signs the fixture user in on a plain-HTTP server of another host, accepting the warning, and waits until the server is saved
+bool signInOverPlainHttp(ConnectionController &controller, const QString &url)
+{
+    controller.connectTo(url);
+    if (!waitForState(controller, ConnectionController::ConfirmInsecure))
+        return false;
+    controller.confirmInsecureHttp();
+    controller.login(QStringLiteral("fixture-user"), QStringLiteral("fixture-password"));
+    return waitForState(controller, ConnectionController::Authenticated)
+           && QTest::qWaitFor([&] { return controller.servers().size() == 1; }, 10000);
+}
+
+// The record a sign-in of the fixture user on `url` leaves, for a server with `serverId`
+Kinefin::ServerCredential savedRecord(const QString &url, const QString &serverId)
+{
+    Kinefin::ServerCredential record;
+    record.serverId = serverId;
+    record.url = QUrl(url).toString();
+    record.userId = kFixtureUserId;
+    record.deviceId = kDevice;
+    record.deviceName = QStringLiteral("Kinefin test");
+    record.username = QStringLiteral("fixture-user");
+    return record;
 }
 
 // A parameter of a captured listing request, decoded
@@ -728,13 +758,7 @@ class TestConnectionController : public QObject {
     // The endpoint reached by the fallback is plain HTTP: the warning comes before any credential
     void connectFallbackToHttpOnAnotherHostAsksConfirmation()
     {
-        QHostAddress lan;
-        for (const QHostAddress &candidate : QNetworkInterface::allAddresses()) {
-            if (candidate.protocol() == QAbstractSocket::IPv4Protocol && !candidate.isLoopback()) {
-                lan = candidate;
-                break;
-            }
-        }
+        const QHostAddress lan = otherHostAddress();
         if (lan.isNull())
             QSKIP("no non-loopback IPv4 address on this machine");
         FakeJellyfin server;
@@ -2621,13 +2645,7 @@ class TestConnectionController : public QObject {
     // Plain HTTP to a non-loopback host needs the user's explicit opt-in before any credential is sent
     void plainHttpToAnotherHostNeedsConfirmation()
     {
-        QHostAddress lan;
-        for (const QHostAddress &candidate : QNetworkInterface::allAddresses()) {
-            if (candidate.protocol() == QAbstractSocket::IPv4Protocol && !candidate.isLoopback()) {
-                lan = candidate;
-                break;
-            }
-        }
+        const QHostAddress lan = otherHostAddress();
         if (lan.isNull())
             QSKIP("no non-loopback IPv4 address on this machine");
         FakeJellyfin server;
@@ -2645,11 +2663,142 @@ class TestConnectionController : public QObject {
         QTRY_VERIFY(controller->state() == ConnectionController::Authenticated);
         QTRY_COMPARE(controller->servers().size(), 1);
 
-        // A stored plain-HTTP session is not restored behind the user's back: the prompt comes back, and cancelling it returns to Idle with nothing sent
+        // The sign-in saved the server: connecting to it again does not ask, and the stored session is restored
         controller->cancel();
         controller->connectTo(
             QStringLiteral("http://%1:%2/jellyfin").arg(lan.toString()).arg(server.url().port()));
+        QTRY_VERIFY(controller->state() == ConnectionController::Authenticated);
+        QCOMPARE(server.successfulLogins, 1);
+    }
+
+    // A server signed in to over plain HTTP keeps its confirmation: neither the start of the app nor a manual connect asks again
+    void aSavedPlainHttpServerIsNotAskedAgain()
+    {
+        const QHostAddress host = otherHostAddress();
+        if (host.isNull())
+            QSKIP("no non-loopback IPv4 address on this machine");
+        FakeJellyfin server;
+        QVERIFY(server.listen(QHostAddress::AnyIPv4));
+        const QString url = plainHttpUrl(host, server);
+        {
+            auto first = makeController();
+            QVERIFY(signInOverPlainHttp(*first, url));
+        }
+        auto second = makeController();
+        QList<ConnectionController::State> seen;
+        QObject::connect(second.get(), &ConnectionController::stateChanged, second.get(),
+                         [&] { seen.append(second->state()); });
+        second->start();
+        QTRY_VERIFY(second->state() == ConnectionController::Authenticated);
+        QVERIFY(!seen.contains(ConnectionController::ConfirmInsecure));
+        QCOMPARE(server.successfulLogins, 1); // restored without a password
+        second->cancel();
+        seen.clear();
+        second->connectTo(url);
+        QTRY_VERIFY(second->state() == ConnectionController::Authenticated);
+        QVERIFY(!seen.contains(ConnectionController::ConfirmInsecure));
+        QCOMPARE(server.successfulLogins, 1);
+    }
+
+    // The skip follows the server record, not a user that can be restored: a record of another device identity restores nothing, yet the server was confirmed
+    void aSavedPlainHttpServerWithoutARestorableUserIsNotAskedAgain()
+    {
+        const QHostAddress host = otherHostAddress();
+        if (host.isNull())
+            QSKIP("no non-loopback IPv4 address on this machine");
+        FakeJellyfin server;
+        QVERIFY(server.listen(QHostAddress::AnyIPv4));
+        const QString url = plainHttpUrl(host, server);
+        Kinefin::ServerCredential record = savedRecord(url, kServerId);
+        record.deviceId = QStringLiteral("another-device");
+        QVERIFY(Kinefin::saveServerCredentials(kProfile, {record}));
+        auto controller = makeController();
+        QList<ConnectionController::State> seen;
+        QObject::connect(controller.get(), &ConnectionController::stateChanged, controller.get(),
+                         [&] { seen.append(controller->state()); });
+        controller->start();
+        QTRY_VERIFY(controller->state() == ConnectionController::NeedsLogin);
+        QVERIFY(!seen.contains(ConnectionController::ConfirmInsecure));
+        QVERIFY(controller->users().isEmpty());
+        controller->login(QStringLiteral("fixture-user"), QStringLiteral("fixture-password"));
+        QTRY_VERIFY(controller->state() == ConnectionController::Authenticated);
+    }
+
+    // The confirmation belongs to the saved address: another path of the same server and another server ask
+    void anAddressNeverSavedStillAsksConfirmation()
+    {
+        const QHostAddress host = otherHostAddress();
+        if (host.isNull())
+            QSKIP("no non-loopback IPv4 address on this machine");
+        FakeJellyfin server;
+        QVERIFY(server.listen(QHostAddress::AnyIPv4));
+        FakeJellyfin other;
+        QVERIFY(other.listen(QHostAddress::AnyIPv4));
+        {
+            auto first = makeController();
+            QVERIFY(signInOverPlainHttp(*first, plainHttpUrl(host, server)));
+        }
+        auto controller = makeController();
+        controller->connectTo(
+            QStringLiteral("http://%1:%2/other").arg(host.toString()).arg(server.url().port()));
         QTRY_VERIFY(controller->state() == ConnectionController::ConfirmInsecure);
+        controller->cancel();
+        controller->connectTo(plainHttpUrl(host, other));
+        QTRY_VERIFY(controller->state() == ConnectionController::ConfirmInsecure);
+        controller->cancel();
+        QCOMPARE(controller->state(), ConnectionController::Idle);
+        QCOMPARE(server.successfulLogins, 1);
+        QCOMPARE(other.successfulLogins, 0);
+    }
+
+    // An address typed without a scheme that falls back to HTTP always asks, even when a record of that exact endpoint exists: blocking HTTPS must not downgrade a saved host unnoticed. The fallback leaves nothing behind for the next connection
+    void aSchemeFallbackToASavedPlainHttpServerStillAsksConfirmation()
+    {
+        const QHostAddress host = otherHostAddress();
+        if (host.isNull())
+            QSKIP("no non-loopback IPv4 address on this machine");
+        FakeJellyfin server;
+        QVERIFY(server.listen(QHostAddress::AnyIPv4));
+        const QString url = plainHttpUrl(host, server);
+        {
+            auto first = makeController();
+            QVERIFY(signInOverPlainHttp(*first, url));
+        }
+        auto controller = makeController();
+        controller->connectToWithFallback(
+            QStringLiteral("%1:%2/jellyfin").arg(host.toString()).arg(server.url().port()));
+        QTRY_VERIFY(controller->state() == ConnectionController::ConfirmInsecure);
+        QCOMPARE(controller->serverUrl(), url);
+        QCOMPARE(server.tlsAttempts, 1); // HTTPS was tried first
+        controller->login(QStringLiteral("fixture-user"), QStringLiteral("fixture-password"));
+        QCOMPARE(controller->state(), ConnectionController::ConfirmInsecure); // refused
+        controller->cancel();
+        QCOMPARE(controller->state(), ConnectionController::Idle);
+        QCOMPARE(server.successfulLogins, 1);
+        // The same endpoint given with its scheme is the saved server: no question
+        controller->connectTo(url);
+        QTRY_VERIFY(controller->state() == ConnectionController::Authenticated);
+        QCOMPARE(server.successfulLogins, 1);
+    }
+
+    // A saved address that now answers with another server id is not the server that was confirmed
+    void aSavedAddressAnsweringAsAnotherServerStillAsksConfirmation()
+    {
+        const QHostAddress host = otherHostAddress();
+        if (host.isNull())
+            QSKIP("no non-loopback IPv4 address on this machine");
+        FakeJellyfin server;
+        QVERIFY(server.listen(QHostAddress::AnyIPv4));
+        const QString url = plainHttpUrl(host, server);
+        const QString otherServerId = QStringLiteral("0123456789abcdef0123456789abcdef");
+        QVERIFY(otherServerId != kServerId);
+        QVERIFY(Kinefin::saveServerCredentials(kProfile, {savedRecord(url, otherServerId)}));
+        auto controller = makeController();
+        controller->start();
+        QTRY_VERIFY(controller->state() == ConnectionController::ConfirmInsecure);
+        controller->login(QStringLiteral("fixture-user"), QStringLiteral("fixture-password"));
+        QCOMPARE(controller->state(), ConnectionController::ConfirmInsecure); // refused
+        QCOMPARE(server.successfulLogins, 0);
         controller->cancel();
         QCOMPARE(controller->state(), ConnectionController::Idle);
     }

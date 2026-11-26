@@ -41,6 +41,8 @@ class ServerCredentialSync final : public QObject {
     QList<ServerCredential> credentials() const { return m_entries; }
     // The records of the probed server that this client may restore, whether or not a token is stored for them (the caller checks `remembered` and `askPassword`): empty before a probe and on a transport that would refuse credentials
     QList<ServerCredential> restorableUsers() const;
+    // Whether a record names the probed server: the same public id and the same resolved base URL as restorableUsers() asks for, whether or not any of its users could be restored. A record exists only after a sign-in that succeeded
+    bool isSavedServer() const;
     bool restorePending() const { return m_restorePending; }
     // Abandons the restore waiting for the store, if any: its answer is ignored and restoreFinished() does not follow
     void cancelRestore();
@@ -73,6 +75,7 @@ class ServerCredentialSync final : public QObject {
     void onLoginSucceeded();
     void onSessionExpired(const QString &expiredUserId);
     void finishRestore(const ServerCredential &entry, bool ok, const QString &token, bool legacy);
+    bool isProbedServer(const ServerCredential &entry) const;
     void writeToken(const QString &serverId, const QString &userId, const QString &token,
                     std::function<void(bool ok)> stored);
     void dropToken(const QString &serverId, const QString &userId);

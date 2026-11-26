@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: kinefin 0\n"
 "Report-Msgid-Bugs-To: https://github.com/the-beper/Kinefin/issues\n"
-"POT-Creation-Date: 2026-11-26 14:59+0000\n"
+"POT-Creation-Date: 2026-11-26 16:39+0000\n"
 "PO-Revision-Date: 2026-11-07 00:00+0000\n"
 "Last-Translator: the-beper\n"
 "Language-Team: Italian\n"
@@ -46,7 +46,7 @@ msgid "Jellyfin server reachable at %1"
 msgstr "Server Jellyfin raggiungibile su %1"
 
 #: src/app/ConnectionController.cpp:654 src/app/ConnectionController.cpp:667
-#: src/app/ConnectionController.cpp:767
+#: src/app/ConnectionController.cpp:770
 msgid "Enter a valid server address"
 msgstr "Inserisci un indirizzo di server valido"
 
@@ -54,27 +54,27 @@ msgstr "Inserisci un indirizzo di server valido"
 msgid "Testing connection…"
 msgstr "Connessione in corso…"
 
-#: src/app/ConnectionController.cpp:763
+#: src/app/ConnectionController.cpp:766
 msgid "The device identity of this profile is invalid"
 msgstr "L'identità del dispositivo di questo profilo non è valida"
 
-#: src/app/ConnectionController.cpp:800
+#: src/app/ConnectionController.cpp:806
 msgid "Could not read the saved session. Sign in again"
 msgstr "Impossibile leggere la sessione salvata. Accedi di nuovo"
 
-#: src/app/ConnectionController.cpp:861
+#: src/app/ConnectionController.cpp:872
 msgid "Enter a username"
 msgstr "Inserisci un nome utente"
 
-#: src/app/ConnectionController.cpp:873
+#: src/app/ConnectionController.cpp:884
 msgid "Quick Connect is not available"
 msgstr "Quick Connect non è disponibile"
 
-#: src/app/ConnectionController.cpp:1140
+#: src/app/ConnectionController.cpp:1152
 msgid "Your session has expired. Sign in again"
 msgstr "La sessione è scaduta. Accedi di nuovo"
 
-#: src/app/ConnectionController.cpp:1155
+#: src/app/ConnectionController.cpp:1167
 msgid ""
 "Could not reach a Jellyfin server. Check the address and your network "
 "connection"
@@ -82,23 +82,23 @@ msgstr ""
 "Impossibile raggiungere un server Jellyfin. Controlla l'indirizzo e la "
 "connessione di rete"
 
-#: src/app/ConnectionController.cpp:1159
+#: src/app/ConnectionController.cpp:1171
 msgid "Wrong username or password"
 msgstr "Nome utente o password errati"
 
-#: src/app/ConnectionController.cpp:1160
+#: src/app/ConnectionController.cpp:1172
 msgid "Signing in failed. Try again, or check the server"
 msgstr "Accesso non riuscito. Riprova o controlla il server"
 
-#: src/app/ConnectionController.cpp:1165
+#: src/app/ConnectionController.cpp:1177
 msgid "Quick Connect is not available on this server"
 msgstr "Quick Connect non è disponibile su questo server"
 
-#: src/app/ConnectionController.cpp:1166
+#: src/app/ConnectionController.cpp:1178
 msgid "Quick Connect failed or expired. Start it again"
 msgstr "Quick Connect non riuscito o scaduto. Avvialo di nuovo"
 
-#: src/app/ConnectionController.cpp:1173
+#: src/app/ConnectionController.cpp:1185
 msgid "Could not load the libraries. Try again"
 msgstr "Impossibile caricare le librerie. Riprova"
 
@@ -1167,7 +1167,7 @@ msgid "Recently Added in %1"
 msgstr "Aggiunti di recente in %1"
 
 #: src/qml/HomePage.qml:247 src/qml/GenreRailsView.qml:158
-#: src/qml/FavoritesPage.qml:270
+#: src/qml/LoginPage.qml:221 src/qml/FavoritesPage.qml:270
 msgid "Show All"
 msgstr "Mostra tutto"
 
@@ -1624,7 +1624,7 @@ msgid_plural "%1 subtitles"
 msgstr[0] "%1 sottotitolo"
 msgstr[1] "%1 sottotitoli"
 
-#: src/qml/ItemDetailsPage.qml:1780
+#: src/qml/ItemDetailsPage.qml:1780 src/qml/LoginPage.qml:221
 msgid "Show Less"
 msgstr "Mostra meno"
 
@@ -4100,55 +4100,51 @@ msgctxt "@action:button %1 is the name of a row of cards"
 msgid "Next in %1"
 msgstr "Successivo in %1"
 
-#: src/qml/LoginPage.qml:27
+#: src/qml/LoginPage.qml:26
 msgctxt "@title"
 msgid "Users on This Server"
 msgstr "Utenti di questo server"
 
-#: src/qml/LoginPage.qml:29 src/qml/LoginPage.qml:171
+#: src/qml/LoginPage.qml:28 src/qml/LoginPage.qml:261
 msgid "Sign In"
 msgstr "Accedi"
 
-#: src/qml/LoginPage.qml:56
-msgid "Server: %1"
-msgstr "Server: %1"
-
-#: src/qml/LoginPage.qml:106
+#: src/qml/LoginPage.qml:198
 msgctxt "@label %1 is a user name"
 msgid "Use %1"
 msgstr "Usa %1"
 
-#: src/qml/LoginPage.qml:150
+#: src/qml/LoginPage.qml:234
 msgid "Username:"
 msgstr "Nome utente:"
 
-#: src/qml/LoginPage.qml:152
+#: src/qml/LoginPage.qml:236
 msgid "Username"
 msgstr "Nome utente"
 
-#: src/qml/LoginPage.qml:163
+#: src/qml/LoginPage.qml:253
 msgid "Password:"
 msgstr "Password:"
 
-#: src/qml/LoginPage.qml:165
+#: src/qml/LoginPage.qml:255
 msgid "Password"
 msgstr "Password"
 
-#: src/qml/LoginPage.qml:184
+#: src/qml/LoginPage.qml:301
 msgid "Use Quick Connect"
 msgstr "Usa Quick Connect"
 
-#: src/qml/LoginPage.qml:190
+#: src/qml/LoginPage.qml:308
 msgctxt "@action:button Opens the list of the saved users of this server"
 msgid "Choose Another User"
 msgstr "Scegli un altro utente"
 
-#: src/qml/LoginPage.qml:197 src/qml/UserPickerPage.qml:32
+#: src/qml/LoginPage.qml:316
 msgctxt "@action:button Goes back to the list of servers"
 msgid "Switch Server"
 msgstr "Cambia server"
 
-#: src/qml/LoginPage.qml:212
+#: src/qml/LoginPage.qml:332
 msgid ""
 "On a device that is already signed in, open Quick Connect in the Jellyfin "
 "settings and enter this code"
@@ -4156,45 +4152,45 @@ msgstr ""
 "Su un dispositivo già connesso, apri Quick Connect nelle impostazioni di "
 "Jellyfin e inserisci questo codice"
 
-#: src/qml/LoginPage.qml:220
+#: src/qml/LoginPage.qml:340
 msgid "Quick Connect code %1"
 msgstr "Codice Quick Connect %1"
 
-#: src/qml/LoginPage.qml:229
+#: src/qml/LoginPage.qml:349
 msgid "Waiting for approval…"
 msgstr "In attesa di approvazione…"
 
-#: src/qml/LoginPage.qml:234 src/qml/PlayerPage.qml:707
-#: src/qml/ServersPage.qml:146 src/qml/ServersPage.qml:261
+#: src/qml/LoginPage.qml:354 src/qml/PlayerPage.qml:707
+#: src/qml/ServersPage.qml:285
 msgid "Cancel"
 msgstr "Annulla"
 
-#: src/qml/UserPickerPage.qml:28
+#: src/qml/UserPickerPage.qml:24
 msgctxt "@title"
 msgid "Who is watching?"
 msgstr "Chi sta guardando?"
 
-#: src/qml/UserPickerPage.qml:73
+#: src/qml/UserPickerPage.qml:60
 msgctxt "@action:inmenu"
 msgid "Ask for Password"
 msgstr "Chiedi la password"
 
-#: src/qml/UserPickerPage.qml:89
+#: src/qml/UserPickerPage.qml:76
 msgctxt "@action:inmenu"
 msgid "Remove User…"
 msgstr "Rimuovi utente…"
 
-#: src/qml/UserPickerPage.qml:106
+#: src/qml/UserPickerPage.qml:93
 msgctxt "@title:window"
 msgid "Remove User"
 msgstr "Rimuovi utente"
 
-#: src/qml/UserPickerPage.qml:110 src/qml/PlaylistPage.qml:164
+#: src/qml/UserPickerPage.qml:97 src/qml/PlaylistPage.qml:164
 msgctxt "@action:button"
 msgid "Remove"
 msgstr "Rimuovi"
 
-#: src/qml/UserPickerPage.qml:125
+#: src/qml/UserPickerPage.qml:112
 msgctxt "@info %1 is a user name"
 msgid ""
 "Remove %1 and the saved queue from this system? The account on the server is "
@@ -4203,22 +4199,22 @@ msgstr ""
 "Rimuovere %1 e la coda salvata da questo sistema? L'account sul server non "
 "viene modificato"
 
-#: src/qml/UserPickerPage.qml:169
-msgctxt "@info:tooltip"
-msgid "Asks for the password"
-msgstr "Chiede la password"
-
-#: src/qml/UserPickerPage.qml:170
+#: src/qml/UserPickerPage.qml:270
 msgctxt "@action:button"
 msgid "Add User"
 msgstr "Aggiungi utente"
 
-#: src/qml/UserPickerPage.qml:295 src/qml/PlayerPage.qml:1363
+#: src/qml/UserTile.qml:22
+msgctxt "@info:tooltip"
+msgid "Asks for the password"
+msgstr "Chiede la password"
+
+#: src/qml/UserTile.qml:118 src/qml/PlayerPage.qml:1363
 msgctxt "@action:button"
 msgid "More Actions"
 msgstr "Altre azioni"
 
-#: src/qml/UserPickerPage.qml:297
+#: src/qml/UserTile.qml:120
 msgctxt "@label %1 is a user name"
 msgid "More Actions for %1"
 msgstr "Altre azioni per %1"
@@ -6253,59 +6249,65 @@ msgid ""
 "Remove %1 from the saved servers? You will have to sign in again to use it"
 msgstr "Rimuovere %1 dai server salvati? Dovrai accedere di nuovo per usarlo"
 
-#: src/qml/ServersPage.qml:127
-msgid "Work Offline"
-msgstr "Lavora offline"
+#: src/qml/ServersPage.qml:129
+msgctxt "@title:window"
+msgid "Connect Without Encryption"
+msgstr "Connetti senza cifratura"
 
-#: src/qml/ServersPage.qml:138
-msgctxt "@info %1 is the HTTP address that answered"
-msgid ""
-"HTTPS did not answer, only %1 did: your username, password, and session "
-"would travel unencrypted"
-msgstr ""
-"HTTPS non risponde, risponde solo %1: nome utente, password e sessione "
-"viaggerebbero senza cifratura"
-
-#: src/qml/ServersPage.qml:139
-msgid ""
-"This server does not use HTTPS: your username, password, and session would "
-"travel unencrypted"
-msgstr ""
-"Questo server non usa HTTPS: nome utente, password e sessione viaggerebbero "
-"senza cifratura"
-
-#: src/qml/ServersPage.qml:142
+#: src/qml/ServersPage.qml:135
 msgid "Continue Anyway"
 msgstr "Continua comunque"
 
-#: src/qml/ServersPage.qml:169
+#: src/qml/ServersPage.qml:152
+msgctxt "@info %1 is the HTTP address that answered"
+msgid ""
+"The server answered at %1, which does not use HTTPS: your username, "
+"password, and session would travel unencrypted"
+msgstr ""
+"Il server ha risposto all'indirizzo %1, che non usa HTTPS: nome utente, "
+"password e sessione viaggerebbero senza cifratura"
+
+#: src/qml/ServersPage.qml:153
+msgctxt "@info %1 is the server's HTTP address"
+msgid ""
+"%1 does not use HTTPS: your username, password, and session would travel "
+"unencrypted"
+msgstr ""
+"%1 non usa HTTPS: nome utente, password e sessione viaggerebbero senza "
+"cifratura"
+
+#: src/qml/ServersPage.qml:171
+msgid "Work Offline"
+msgstr "Lavora offline"
+
+#: src/qml/ServersPage.qml:193
 msgid "Add a Server"
 msgstr "Aggiungi un server"
 
-#: src/qml/ServersPage.qml:184
+#: src/qml/ServersPage.qml:208
 msgctxt "@label:textbox"
 msgid "Address:"
 msgstr "Indirizzo:"
 
-#: src/qml/ServersPage.qml:191 src/qml/ServersPage.qml:193
+#: src/qml/ServersPage.qml:215 src/qml/ServersPage.qml:217
 msgid "Domain or IP address"
 msgstr "Dominio o indirizzo IP"
 
-#: src/qml/ServersPage.qml:197
+#: src/qml/ServersPage.qml:221
 msgctxt "@label:textbox"
 msgid "Port:"
 msgstr "Porta:"
 
-#: src/qml/ServersPage.qml:203
+#: src/qml/ServersPage.qml:227
 msgctxt "@info:placeholder the port field left empty"
 msgid "Automatic"
 msgstr "Automatico"
 
-#: src/qml/ServersPage.qml:206
+#: src/qml/ServersPage.qml:230
 msgid "Port"
 msgstr "Porta"
 
-#: src/qml/ServersPage.qml:212
+#: src/qml/ServersPage.qml:236
 msgid ""
 "HTTPS is tried before HTTP, and an empty port tries 443 and 8920, then 8096 "
 "and 80"
@@ -6313,55 +6315,55 @@ msgstr ""
 "HTTPS viene provato prima di HTTP, e una porta vuota prova 443 e 8920, poi "
 "8096 e 80"
 
-#: src/qml/ServersPage.qml:223
+#: src/qml/ServersPage.qml:247
 msgid "Enter only the domain or IP address, without a scheme or a path"
 msgstr ""
 "Inserisci solo il dominio o l'indirizzo IP, senza protocollo né percorso"
 
-#: src/qml/ServersPage.qml:224
+#: src/qml/ServersPage.qml:248
 msgid "Enter a port from 1 to 65535, or leave it empty"
 msgstr "Inserisci una porta da 1 a 65535, oppure lasciala vuota"
 
-#: src/qml/ServersPage.qml:232 src/qml/ServersPage.qml:319
+#: src/qml/ServersPage.qml:256 src/qml/ServersPage.qml:343
 msgid "Test"
 msgstr "Prova"
 
-#: src/qml/ServersPage.qml:243 src/qml/ServersPage.qml:330
+#: src/qml/ServersPage.qml:267 src/qml/ServersPage.qml:354
 msgctxt "@info %1 is a server address"
 msgid "Testing %1…"
 msgstr "Connessione a %1 in corso…"
 
-#: src/qml/ServersPage.qml:249 src/qml/ServersPage.qml:311
+#: src/qml/ServersPage.qml:273 src/qml/ServersPage.qml:335
 msgid "Connect"
 msgstr "Connetti"
 
-#: src/qml/ServersPage.qml:259
+#: src/qml/ServersPage.qml:283
 msgid "Connecting…"
 msgstr "Connessione in corso…"
 
-#: src/qml/ServersPage.qml:282
+#: src/qml/ServersPage.qml:306
 msgid "Saved Servers"
 msgstr "Server salvati"
 
-#: src/qml/ServersPage.qml:287
+#: src/qml/ServersPage.qml:311
 msgid "No servers yet"
 msgstr "Ancora nessun server"
 
-#: src/qml/ServersPage.qml:314
+#: src/qml/ServersPage.qml:338
 msgctxt "@action:button %1 is a server address"
 msgid "Connect to %1"
 msgstr "Connetti a %1"
 
-#: src/qml/ServersPage.qml:321
+#: src/qml/ServersPage.qml:345
 msgctxt "@action:button %1 is a server address"
 msgid "Test %1"
 msgstr "Prova %1"
 
-#: src/qml/ServersPage.qml:334
+#: src/qml/ServersPage.qml:358
 msgid "Remove…"
 msgstr "Rimuovi…"
 
-#: src/qml/ServersPage.qml:336
+#: src/qml/ServersPage.qml:360
 msgid "Remove server %1"
 msgstr "Rimuovi server %1"
 

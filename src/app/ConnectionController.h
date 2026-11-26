@@ -314,7 +314,7 @@ class ConnectionController : public QObject {
     // Removes a stored server with all its users, saved queues and browse state; disconnects first when it is the active one
     // Probe /System/Info/Public once, without a session/token. An address without a scheme (host, host:port, [ipv6]:port) is tried on https then http (see connectionCandidates) when `standardPortFallback` is set, and the reachability entry's resolvedUrl is the one that answered; one with a scheme is tried as given. A certificate error on an https candidate ends the test with its own message and never moves on to http
     Q_INVOKABLE void testServer(const QString &address, bool standardPortFallback = false);
-    // Connecting from the new-server form: the same candidates as testServer(address, true), moving to the next one only when an attempt fails at network level (refused, unreachable, timeout, a port that does not speak TLS). A certificate error stops with its own error text. The endpoint that answered is the one connected and saved; an http one goes through ConfirmInsecure as usual. Saved-server connections use connectTo() and never silently change their endpoint
+    // Connecting from the new-server form: the same candidates as testServer(address, true), moving to the next one only when an attempt fails at network level (refused, unreachable, timeout, a port that does not speak TLS). A certificate error stops with its own error text. The endpoint that answered is the one connected and saved; an http one always goes through ConfirmInsecure, even for a saved server. Saved-server connections use connectTo() and never silently change their endpoint
     Q_INVOKABLE void connectToWithFallback(const QString &address);
     Q_INVOKABLE void removeServer(const QString &serverId);
     // Opens the admin dashboard of the active server's web interface in the host browser (the app's one action for everything server-side). False when there is no server or its address is not an http(s) link
@@ -379,6 +379,8 @@ class ConnectionController : public QObject {
     void onRestoreFinished();
     // The server is probed and credentials may be sent: sign-in, an automatic restore or the picker, by how many users are saved
     void proceedAfterProbe();
+    // Lets credentials travel over plain HTTP to the probed server for this connection, then goes on as proceedAfterProbe(): what the user's confirmation does, and what a server saved earlier gets without asking
+    void allowInsecureHttp();
     // Starts restoring a saved user: Connecting, or the sign-in with the name filled in when the restore cannot start
     void restoreUser(const QString &userId);
     // The sign-in page for a saved user (empty id: a fresh sign-in)
@@ -491,6 +493,8 @@ class ConnectionController : public QObject {
     QHash<QString, QPointer<QNetworkReply>> m_probeReplies;
     QHash<QString, quint64> m_probeGeneration;
     QList<QUrl> m_connectionFallback;
+    // Set by connectToWithFallback for an address typed without a scheme: an http endpoint that answers is one the user did not type, so it always asks, even for a saved server
+    bool m_schemeGuessed = false;
     quint64 m_testGeneration = 0;
     QVariantList m_users;
     QList<PublicUser>
