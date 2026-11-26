@@ -160,8 +160,8 @@ Kirigami.ScrollablePage {
             objectName: "remoteImagesHint"
             Layout.fillWidth: true
             // Room under the bar, as the lists of the other pages leave
-            Layout.topMargin: Kirigami.Units.largeSpacing * 2
-            Layout.leftMargin: Kirigami.Units.largeSpacing
+            Layout.topMargin: PageMetrics.margin
+            Layout.leftMargin: PageMetrics.margin
             Layout.rightMargin: Kirigami.Units.largeSpacing
             wrapMode: Text.Wrap
             opacity: 0.7
@@ -332,14 +332,14 @@ Kirigami.ScrollablePage {
             atStart: grid.atYBeginning
         }
 
-        readonly property real gutter: Kirigami.Units.largeSpacing
+        readonly property real gutter: PageMetrics.margin
         readonly property real aspect: types.aspect(page.offers.imageType)
         readonly property real usableWidth: Math.max(0, width - leftMargin)
         readonly property int columns: Math.max(1, Math.floor(usableWidth / (Kirigami.Units.gridUnit * types.tileUnits(page.offers.imageType))))
 
         model: page.offers
-        topMargin: Kirigami.Units.largeSpacing
-        leftMargin: Kirigami.Units.largeSpacing
+        topMargin: PageMetrics.margin
+        leftMargin: PageMetrics.margin
         cellWidth: Math.floor(usableWidth / columns)
         // The picture inside the tile margins, then the provider, the size and the rating
         cellHeight: Math.round((cellWidth - gutter - Kirigami.Units.smallSpacing * 2) / aspect) + Kirigami.Units.gridUnit * 4.5 + gutter

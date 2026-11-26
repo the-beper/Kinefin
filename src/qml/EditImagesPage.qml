@@ -30,8 +30,14 @@ Kirigami.ScrollablePage {
     property string uploadType: ""
     property string deleteType: ""
     property int deleteIndex: -1
-    // Set when the keyboard was asked for before the list had a first row
+    // Set when the keyboard was asked for before the grid had a first card
     property bool focusWanted: false
+    // The least width of a card: the grid has as many columns as fit at this width, and the cards share what is left of the row
+    readonly property real cardMinWidth: Kirigami.Units.gridUnit * 23
+    // The preview of every card has this height, whatever the shape of its image
+    readonly property real previewHeight: Kirigami.Units.gridUnit * 8
+    readonly property string uploadText: i18n("Upload…")
+    readonly property string searchText: i18n("Search Online…")
 
     title: i18n("Edit Images")
     // The row of the page carries the way back and the name, as on the Movies and Shows tabs
@@ -42,7 +48,7 @@ Kirigami.ScrollablePage {
 
     // The Upload button of the first type takes the keys as soon as the page shows
     function focusPrimary() {
-        const first = list.itemAtIndex(0);
+        const first = cards.itemAt(0);
         if (first)
             first.uploadButton.forceActiveFocus(Qt.TabFocusReason);
         else
@@ -69,6 +75,11 @@ Kirigami.ScrollablePage {
 
     function fileSize(image) {
         return image.size > 0 ? Qt.locale().formattedDataSize(image.size, 1) : "";
+    }
+
+    // The size in pixels and the file size on one line
+    function details(image) {
+        return [dimensions(image), fileSize(image)].filter(part => part.length > 0).join(" · ");
     }
 
     function searchOnline(type) {
@@ -139,12 +150,17 @@ Kirigami.ScrollablePage {
         id: types
     }
 
-    // A button that scrolls itself into view when the keyboard reaches it
+    // A button that scrolls itself into view when the keyboard reaches it, and names itself in a tooltip while it shows no label
     component ActionButton: Controls.Button {
         id: actionButton
         onVisualFocusChanged: {
             if (visualFocus)
                 Spatial.reveal(actionButton);
+        }
+
+        PlainToolTip {
+            visible: (actionButton.hovered || actionButton.visualFocus) && actionButton.display === Controls.AbstractButton.IconOnly && actionButton.text.length > 0
+            text: actionButton.text
         }
     }
 
@@ -221,45 +237,61 @@ Kirigami.ScrollablePage {
         }
     }
 
-    ListView {
-        id: list
+    Flickable {
+        id: scroller
         objectName: "editImagesList"
 
-        // On the view, not in its content: the shadow stays under the toolbar while the types scroll
+        // The page margin at the edges and between the cards
+        readonly property real gap: PageMetrics.margin
+        readonly property real usableWidth: Math.max(0, width - gap * 2)
+        readonly property int columns: Math.max(1, Math.floor((usableWidth + gap) / (page.cardMinWidth + gap)))
+        readonly property real cardWidth: Math.floor((usableWidth - gap * (columns - 1)) / columns)
+
+        contentWidth: width
+        contentHeight: column.implicitHeight + gap * 2
+
+        // On the view, not in its content: the shadow stays under the toolbar while the cards scroll
         TopShadow {
-            parent: list
+            parent: scroller
             z: 1
-            atStart: list.atYBeginning
+            atStart: scroller.atYBeginning
         }
 
-        model: page.imageModel
-        // The buttons are the tab stops: the view only scrolls
-        keyNavigationEnabled: false
-        // Every type is built at once (there are at most eleven), so the keyboard reaches the buttons below the view
-        cacheBuffer: Kirigami.Units.gridUnit * 400
-        bottomMargin: Kirigami.Units.largeSpacing
-        Accessible.role: Accessible.List
-        Accessible.name: page.title
+        ColumnLayout {
+            id: column
+            x: scroller.gap
+            y: scroller.gap
+            width: scroller.usableWidth
+            spacing: scroller.gap
 
-        Kirigami.LoadingPlaceholder {
-            FadeInOnShow {}
-            anchors.centerIn: parent
-            visible: page.loading && list.count === 0
-            text: i18n("Loading…")
-        }
+            // Hidden buttons that measure what the labelled ones need: the real ones lose their labels in a card too narrow for them, and their own width then says nothing
+            Item {
+                id: measure
+                visible: false
 
-        header: Item {
-            width: list.width
-            height: intro.implicitHeight + Kirigami.Units.largeSpacing * 2
+                readonly property real labelled: uploadSample.implicitWidth + searchSample.implicitWidth + iconSample.implicitWidth * 3 + Kirigami.Units.smallSpacing * 5
+                readonly property real rowHeight: Math.max(uploadSample.implicitHeight, searchSample.implicitHeight, iconSample.implicitHeight)
+
+                Controls.Button {
+                    id: uploadSample
+                    text: page.uploadText
+                    icon.name: "document-open"
+                }
+                Controls.Button {
+                    id: searchSample
+                    text: page.searchText
+                    icon.name: "edit-find"
+                }
+                Controls.ToolButton {
+                    id: iconSample
+                    display: Controls.AbstractButton.IconOnly
+                    icon.name: "go-next"
+                }
+            }
 
             ColumnLayout {
                 id: intro
-                anchors {
-                    left: parent.left
-                    right: parent.right
-                    top: parent.top
-                    margins: Kirigami.Units.largeSpacing
-                }
+                Layout.fillWidth: true
                 spacing: Kirigami.Units.smallSpacing
 
                 Controls.Label {
@@ -280,196 +312,270 @@ Kirigami.ScrollablePage {
                     text: i18n("JPEG, PNG, or WebP, at most 20 MiB")
                 }
             }
-        }
 
-        delegate: Item {
-            id: group
-
-            required property int index
-            required property string imageType
-            required property bool multiple
-            required property var images
-
-            property alias uploadButton: upload
-            readonly property string typeLabel: types.label(imageType)
-            readonly property real frameHeight: Kirigami.Units.gridUnit * types.frameUnits(imageType)
-            readonly property real frameWidth: frameHeight * types.aspect(imageType)
-
-            objectName: "editImagesGroup_" + imageType
-            width: ListView.view.width
-            height: content.implicitHeight + Kirigami.Units.largeSpacing
-
-            Component.onCompleted: {
-                if (index === 0 && page.focusWanted) {
-                    page.focusWanted = false;
-                    upload.forceActiveFocus(Qt.TabFocusReason);
-                }
+            Kirigami.LoadingPlaceholder {
+                FadeInOnShow {}
+                Layout.fillWidth: true
+                visible: page.loading && cards.count === 0
+                text: i18n("Loading…")
             }
 
-            ColumnLayout {
-                id: content
-                anchors {
-                    left: parent.left
-                    right: parent.right
-                    top: parent.top
-                    leftMargin: Kirigami.Units.largeSpacing
-                    rightMargin: Kirigami.Units.largeSpacing
-                }
-                spacing: Kirigami.Units.smallSpacing
+            // One card per image type, in the order of the model: left to right, then down
+            Grid {
+                Layout.alignment: Qt.AlignLeft | Qt.AlignTop
+                columns: scroller.columns
+                columnSpacing: scroller.gap
+                rowSpacing: scroller.gap
 
-                Kirigami.Separator {
-                    Layout.fillWidth: true
-                    Layout.bottomMargin: Kirigami.Units.smallSpacing
-                    visible: group.index > 0
-                }
+                Repeater {
+                    id: cards
+                    model: page.imageModel
 
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: Kirigami.Units.smallSpacing
+                    delegate: Rectangle {
+                        id: group
 
-                    Kirigami.Heading {
-                        Layout.fillWidth: true
-                        level: 3
-                        elide: Text.ElideRight
-                        textFormat: Text.PlainText
-                        text: group.typeLabel
-                    }
-                    ActionButton {
-                        id: upload
-                        objectName: "editImageUpload_" + group.imageType
-                        text: i18n("Upload…")
-                        icon.name: "document-open"
-                        enabled: !page.writing
-                        Accessible.name: i18nc("@action:button %1 is an image type", "Upload %1 Image", group.typeLabel)
-                        onClicked: page.choose(group.imageType)
-                    }
-                    ActionButton {
-                        objectName: "editImageSearch_" + group.imageType
-                        text: i18n("Search Online…")
-                        icon.name: "edit-find"
-                        enabled: !page.writing
-                        Accessible.name: i18nc("@action:button %1 is an image type", "Search Online for a %1 Image", group.typeLabel)
-                        onClicked: page.searchOnline(group.imageType)
-                    }
-                }
+                        required property int index
+                        required property string imageType
+                        required property bool multiple
+                        required property var images
 
-                Controls.Label {
-                    objectName: "editImagesNone_" + group.imageType
-                    visible: group.images.length === 0 && page.imageModel.status !== EditImagesModel.Loading
-                    opacity: 0.7
-                    textFormat: Text.PlainText
-                    text: i18nc("@info no image of this type", "None")
-                }
+                        property alias uploadButton: upload
+                        readonly property string typeLabel: types.label(imageType)
+                        readonly property real padding: Kirigami.Units.largeSpacing * 2
+                        // The card shows one image of its type at a time, known by its cache tag: a move changes the place of an image but not its tag, so the card goes on showing the image that was moved. Without a known tag (none chosen yet, or the image was deleted) it shows the first
+                        property string shownTag: ""
+                        readonly property int shown: {
+                            if (shownTag.length > 0) {
+                                for (let at = 0; at < images.length; ++at) {
+                                    if (images[at].imageTag === shownTag)
+                                        return at;
+                                }
+                            }
+                            return 0;
+                        }
+                        // The place of the shown image among those of a type with several
+                        readonly property string place: multiple && images.length > 0 ? i18nc("@info the place of an image among those of its type", "%1 of %2", String(shown + 1), String(images.length)) : ""
+                        // The buttons keep their labels while the card has room for them, and the same for every card, as they all have the width
+                        readonly property bool compact: width - padding * 2 < measure.labelled
 
-                Flow {
-                    Layout.fillWidth: true
-                    spacing: Kirigami.Units.largeSpacing
+                        function showPlace(target) {
+                            const at = Math.max(0, Math.min(target, images.length - 1));
+                            shownTag = images[at]?.imageTag ?? "";
+                        }
 
-                    Repeater {
-                        model: group.images
+                        objectName: "editImagesGroup_" + imageType
+                        width: scroller.cardWidth
+                        height: content.implicitHeight + padding * 2
+                        color: Kirigami.Theme.alternateBackgroundColor
+                        radius: Kirigami.Units.cornerRadius
+                        border.width: 1
+                        border.color: Qt.alpha(Kirigami.Theme.textColor, 0.2)
+                        Accessible.role: Accessible.Grouping
+                        Accessible.name: typeLabel
 
-                        delegate: Column {
-                            id: card
+                        Component.onCompleted: {
+                            if (index === 0 && page.focusWanted) {
+                                page.focusWanted = false;
+                                upload.forceActiveFocus(Qt.TabFocusReason);
+                            }
+                        }
 
-                            required property var modelData
-                            required property int index
-                            readonly property var image: modelData
-                            // A type with several: the place of the image among them
-                            readonly property string place: group.multiple ? i18nc("@info the place of an image among those of its type", "%1 of %2", String(card.index + 1), String(group.images.length)) : ""
-                            readonly property string described: card.image.imageIndex >= 0 ? i18nc("@info image type and the place of the image among those of its type", "%1 %2", group.typeLabel, card.place) : group.typeLabel
-
-                            objectName: "editImageCard_" + group.imageType + (card.image.imageIndex >= 0 ? "_" + card.image.imageIndex : "")
-                            width: group.frameWidth
+                        ColumnLayout {
+                            id: content
+                            anchors {
+                                fill: parent
+                                margins: group.padding
+                            }
                             spacing: Kirigami.Units.smallSpacing
 
+                            // The same height with or without the buttons that step through the images, so the cards stay even
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: Math.max(heading.implicitHeight, previous.implicitHeight)
+                                spacing: Kirigami.Units.smallSpacing
+
+                                Kirigami.Heading {
+                                    id: heading
+                                    Layout.fillWidth: true
+                                    level: 3
+                                    elide: Text.ElideRight
+                                    textFormat: Text.PlainText
+                                    text: group.typeLabel
+                                }
+                                IconButton {
+                                    id: previous
+                                    objectName: "editImagePrevious_" + group.imageType
+                                    visible: group.multiple && group.images.length > 1
+                                    text: i18nc("@action:button", "Previous Image")
+                                    icon.name: Qt.application.layoutDirection === Qt.RightToLeft ? "go-next-view" : "go-previous-view"
+                                    Accessible.name: i18nc("@action:button %1 is an image type", "Show the Previous %1 Image", group.typeLabel)
+                                    // Round from the first to the last: a button that disabled itself at an end would drop the keyboard focus
+                                    onClicked: group.showPlace((group.shown + group.images.length - 1) % group.images.length)
+                                }
+                                Controls.Label {
+                                    objectName: "editImagesPlace_" + group.imageType
+                                    visible: text.length > 0
+                                    opacity: 0.7
+                                    textFormat: Text.PlainText
+                                    text: group.place
+                                }
+                                IconButton {
+                                    objectName: "editImageNext_" + group.imageType
+                                    visible: previous.visible
+                                    text: i18nc("@action:button", "Next Image")
+                                    icon.name: Qt.application.layoutDirection === Qt.RightToLeft ? "go-previous-view" : "go-next-view"
+                                    Accessible.name: i18nc("@action:button %1 is an image type", "Show the Next %1 Image", group.typeLabel)
+                                    onClicked: group.showPlace((group.shown + 1) % group.images.length)
+                                }
+                            }
+
+                            // Every image of the type has its place in the frame and only the shown one is visible; a type with no image says so in the same frame
                             Rectangle {
-                                width: parent.width
-                                height: group.frameHeight
-                                color: Kirigami.Theme.alternateBackgroundColor
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: page.previewHeight
+                                color: Kirigami.Theme.backgroundColor
                                 radius: Kirigami.Units.cornerRadius
                                 border.width: 1
                                 border.color: Qt.alpha(Kirigami.Theme.textColor, 0.2)
                                 clip: true
 
-                                Kirigami.Icon {
+                                Controls.Label {
+                                    objectName: "editImagesNone_" + group.imageType
                                     anchors.centerIn: parent
-                                    width: Kirigami.Units.iconSizes.large
-                                    height: width
-                                    visible: thumbnail.status !== Image.Ready
-                                    source: "image-x-generic"
+                                    visible: group.images.length === 0 && page.imageModel.status !== EditImagesModel.Loading
                                     opacity: 0.7
+                                    textFormat: Text.PlainText
+                                    text: i18nc("@info no image of this type", "None")
                                 }
-                                Image {
-                                    id: thumbnail
-                                    objectName: "editImageThumbnail"
-                                    anchors.fill: parent
-                                    anchors.margins: 1
-                                    asynchronous: true
-                                    fillMode: Image.PreserveAspectFit
-                                    sourceSize.width: width * Screen.devicePixelRatio
-                                    // Only a URL the model built with the API client's image URL builder: a raw server string never becomes a source
-                                    source: card.image.thumbnailUrl
+
+                                Repeater {
+                                    model: group.images
+
+                                    delegate: Item {
+                                        id: slide
+
+                                        required property var modelData
+                                        required property int index
+                                        readonly property var image: modelData
+
+                                        objectName: "editImageCard_" + group.imageType + (slide.image.imageIndex >= 0 ? "_" + slide.image.imageIndex : "")
+                                        anchors.fill: parent
+                                        visible: slide.index === group.shown
+
+                                        Kirigami.Icon {
+                                            anchors.centerIn: parent
+                                            width: Kirigami.Units.iconSizes.large
+                                            height: width
+                                            visible: thumbnail.status !== Image.Ready
+                                            source: "image-x-generic"
+                                            opacity: 0.7
+                                        }
+                                        Image {
+                                            id: thumbnail
+                                            objectName: "editImageThumbnail"
+                                            anchors.fill: parent
+                                            anchors.margins: 1
+                                            asynchronous: true
+                                            fillMode: Image.PreserveAspectFit
+                                            sourceSize.width: width * Screen.devicePixelRatio
+                                            // Only a URL the model built with the API client's image URL builder: a raw server string never becomes a source
+                                            source: slide.image.thumbnailUrl
+                                        }
+                                    }
                                 }
                             }
 
+                            // The line keeps its height when the type has no image
                             Controls.Label {
-                                width: parent.width
-                                visible: text.length > 0
-                                elide: Text.ElideRight
-                                maximumLineCount: 1
-                                textFormat: Text.PlainText
-                                text: card.place
-                            }
-                            Controls.Label {
-                                width: parent.width
-                                visible: text.length > 0
+                                id: info
+                                objectName: "editImageInfo_" + group.imageType
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: infoMetrics.height
                                 elide: Text.ElideRight
                                 maximumLineCount: 1
                                 opacity: 0.7
                                 font: Kirigami.Theme.smallFont
                                 textFormat: Text.PlainText
-                                text: page.dimensions(card.image)
+                                text: group.images.length > 0 ? page.details(group.images[group.shown]) : ""
                             }
-                            Controls.Label {
-                                width: parent.width
-                                visible: text.length > 0
-                                elide: Text.ElideRight
-                                maximumLineCount: 1
-                                opacity: 0.7
-                                font: Kirigami.Theme.smallFont
-                                textFormat: Text.PlainText
-                                text: page.fileSize(card.image)
+                            FontMetrics {
+                                id: infoMetrics
+                                font: info.font
                             }
 
-                            // Disabled while the list reloads after a write, or when that reload failed: the indexes on the cards are the old ones, and a move or a delete by them would hit another image
-                            Row {
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: measure.rowHeight
                                 spacing: Kirigami.Units.smallSpacing
 
-                                IconButton {
-                                    objectName: "editImageEarlier_" + group.imageType + "_" + card.image.imageIndex
-                                    visible: group.multiple
-                                    text: i18nc("@action:button", "Move Earlier")
-                                    icon.name: Qt.application.layoutDirection === Qt.RightToLeft ? "go-next" : "go-previous"
-                                    enabled: !page.writing && !page.loading && !page.failed && card.image.previousIndex >= 0
-                                    Accessible.name: i18nc("@action:button %1 is an image type and its place", "Move %1 Earlier", card.described)
-                                    onClicked: page.moveImage(group.imageType, card.image.imageIndex, card.image.previousIndex)
+                                ActionButton {
+                                    id: upload
+                                    objectName: "editImageUpload_" + group.imageType
+                                    text: page.uploadText
+                                    icon.name: "document-open"
+                                    display: group.compact ? Controls.AbstractButton.IconOnly : Controls.AbstractButton.TextBesideIcon
+                                    enabled: !page.writing
+                                    Accessible.name: i18nc("@action:button %1 is an image type", "Upload %1 Image", group.typeLabel)
+                                    onClicked: page.choose(group.imageType)
                                 }
-                                IconButton {
-                                    objectName: "editImageLater_" + group.imageType + "_" + card.image.imageIndex
-                                    visible: group.multiple
-                                    text: i18nc("@action:button", "Move Later")
-                                    icon.name: Qt.application.layoutDirection === Qt.RightToLeft ? "go-previous" : "go-next"
-                                    enabled: !page.writing && !page.loading && !page.failed && card.image.nextIndex >= 0
-                                    Accessible.name: i18nc("@action:button %1 is an image type and its place", "Move %1 Later", card.described)
-                                    onClicked: page.moveImage(group.imageType, card.image.imageIndex, card.image.nextIndex)
+                                ActionButton {
+                                    objectName: "editImageSearch_" + group.imageType
+                                    text: page.searchText
+                                    icon.name: "edit-find"
+                                    display: group.compact ? Controls.AbstractButton.IconOnly : Controls.AbstractButton.TextBesideIcon
+                                    enabled: !page.writing
+                                    Accessible.name: i18nc("@action:button %1 is an image type", "Search Online for a %1 Image", group.typeLabel)
+                                    onClicked: page.searchOnline(group.imageType)
                                 }
-                                IconButton {
-                                    objectName: "editImageDelete_" + group.imageType + (card.image.imageIndex >= 0 ? "_" + card.image.imageIndex : "")
-                                    text: i18nc("@action:button", "Delete…")
-                                    icon.name: "edit-delete"
-                                    enabled: !page.writing && !page.loading && !page.failed
-                                    Accessible.name: i18nc("@action:button %1 is an image type and its place", "Delete %1", card.described)
-                                    onClicked: page.confirmDelete(group.imageType, card.image.imageIndex)
+                                Item {
+                                    Layout.fillWidth: true
+                                }
+
+                                // The buttons of the shown image: disabled while the list reloads after a write, or when that reload failed, as the indexes on the cards are the old ones, and a move or a delete by them would hit another image
+                                Repeater {
+                                    model: group.images
+
+                                    delegate: RowLayout {
+                                        id: tools
+
+                                        required property var modelData
+                                        required property int index
+                                        readonly property var image: modelData
+                                        // A type with several: the place of the image among them
+                                        readonly property string place: group.multiple ? i18nc("@info the place of an image among those of its type", "%1 of %2", String(tools.index + 1), String(group.images.length)) : ""
+                                        readonly property string described: tools.image.imageIndex >= 0 ? i18nc("@info image type and the place of the image among those of its type", "%1 %2", group.typeLabel, tools.place) : group.typeLabel
+
+                                        visible: tools.index === group.shown
+                                        spacing: Kirigami.Units.smallSpacing
+
+                                        IconButton {
+                                            objectName: "editImageEarlier_" + group.imageType + "_" + tools.image.imageIndex
+                                            visible: group.multiple
+                                            text: i18nc("@action:button", "Move Earlier")
+                                            // An arrow with a shaft moves the image, the chevrons of the heading only step through them
+                                            icon.name: Qt.application.layoutDirection === Qt.RightToLeft ? "arrow-right" : "arrow-left"
+                                            enabled: !page.writing && !page.loading && !page.failed && tools.image.previousIndex >= 0
+                                            Accessible.name: i18nc("@action:button %1 is an image type and its place", "Move %1 Earlier", tools.described)
+                                            onClicked: page.moveImage(group.imageType, tools.image.imageIndex, tools.image.previousIndex)
+                                        }
+                                        IconButton {
+                                            objectName: "editImageLater_" + group.imageType + "_" + tools.image.imageIndex
+                                            visible: group.multiple
+                                            text: i18nc("@action:button", "Move Later")
+                                            icon.name: Qt.application.layoutDirection === Qt.RightToLeft ? "arrow-left" : "arrow-right"
+                                            enabled: !page.writing && !page.loading && !page.failed && tools.image.nextIndex >= 0
+                                            Accessible.name: i18nc("@action:button %1 is an image type and its place", "Move %1 Later", tools.described)
+                                            onClicked: page.moveImage(group.imageType, tools.image.imageIndex, tools.image.nextIndex)
+                                        }
+                                        IconButton {
+                                            objectName: "editImageDelete_" + group.imageType + (tools.image.imageIndex >= 0 ? "_" + tools.image.imageIndex : "")
+                                            text: i18nc("@action:button", "Delete…")
+                                            icon.name: "edit-delete"
+                                            enabled: !page.writing && !page.loading && !page.failed
+                                            Accessible.name: i18nc("@action:button %1 is an image type and its place", "Delete %1", tools.described)
+                                            onClicked: page.confirmDelete(group.imageType, tools.image.imageIndex)
+                                        }
+                                    }
                                 }
                             }
                         }

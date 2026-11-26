@@ -19,6 +19,8 @@ Item {
     readonly property real margin: OsdMetrics.edge
     readonly property real buttonSize: OsdMetrics.buttonSize
     readonly property real panelPadding: OsdMetrics.panelPadding
+    // The right-aligned title keeps as much room from the bar's end as above it: the row is as tall as the pause button and the title sits in its middle
+    readonly property real titleEndGap: Math.max(0, Math.round((buttonSize - titleLabel.implicitHeight) / 2))
     readonly property real panelSize: OsdMetrics.panelSize
     readonly property bool mirrored: Qt.application.layoutDirection === Qt.RightToLeft
     // A tap on a touch screen shows the controls for a few seconds: a press on a control that is not shown only does that, so a touch never acts on what it cannot see
@@ -209,7 +211,7 @@ Item {
             onActivated: mini.shell.stopPlayback()
         }
 
-        // Pause and the title, with the bar of how much is played along the bottom edge, in a box that takes as little of the picture as it can
+        // Pause, the bar of how much is played and the title in one row, in a box that takes as little of the picture as it can
         OsdBox {
             id: bottomPanel
             objectName: "miniPlayerBottomPanel"
@@ -217,7 +219,7 @@ Item {
             anchors.right: parent.right
             anchors.bottom: parent.bottom
             anchors.margins: mini.margin
-            height: mini.panelPadding + bottomRow.implicitHeight + Kirigami.Units.smallSpacing / 2 + progressBar.height + progressBar.anchors.bottomMargin
+            height: mini.panelPadding * 2 + bottomRow.implicitHeight
             RowLayout {
                 id: bottomRow
                 anchors.left: parent.left
@@ -237,42 +239,50 @@ Item {
                     enabled: !!mini.player?.active && !mini.player.loading
                     onActivated: mini.shell.playerAction("playpause")
                 }
-                Controls.Label {
-                    objectName: "miniPlayerTitle"
+                // Read only: seeking belongs to the full player; the bar gives screen readers the value, and the fill is drawn by hand to be thin and to follow the layout direction. It takes the room the title leaves
+                Controls.ProgressBar {
+                    id: progressBar
+                    objectName: "miniPlayerProgress"
                     Layout.fillWidth: true
+                    Layout.alignment: Qt.AlignVCenter
+                    Layout.preferredHeight: Math.round(Kirigami.Units.smallSpacing / 2)
+                    padding: 0
+                    from: 0
+                    to: 1
+                    value: mini.progress
+                    Accessible.name: i18n("Playback position")
+                    background: Rectangle {
+                        color: Qt.alpha(Kirigami.Theme.textColor, 0.3)
+                    }
+                    contentItem: Item {
+                        Rectangle {
+                            height: parent.height
+                            width: Math.round(parent.width * progressBar.position)
+                            x: mini.mirrored ? parent.width - width : 0
+                            color: Kirigami.Theme.highlightColor
+                        }
+                    }
+                }
+                Controls.Label {
+                    id: titleLabel
+                    objectName: "miniPlayerTitle"
+                    // Its own width up to two fifths of the row, cut at its end past that
+                    Layout.maximumWidth: Math.round(bottomRow.width * 0.4)
+                    Layout.rightMargin: mini.titleEndGap
                     textFormat: Text.PlainText
                     horizontalAlignment: Text.AlignRight
                     elide: Text.ElideRight
                     font.bold: true
                     color: Kirigami.Theme.textColor
                     text: mini.player?.title || i18n("Now Playing")
-                }
-            }
-            // Read only: seeking belongs to the full player; the bar gives screen readers the value, and the fill is drawn by hand to be thin and to follow the layout direction. It is inset by the radius of the box, so its ends stay inside the corners
-            Controls.ProgressBar {
-                id: progressBar
-                objectName: "miniPlayerProgress"
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.bottom: parent.bottom
-                anchors.leftMargin: Kirigami.Units.cornerRadius
-                anchors.rightMargin: Kirigami.Units.cornerRadius
-                anchors.bottomMargin: Kirigami.Units.smallSpacing - 1
-                height: Kirigami.Units.smallSpacing / 2
-                padding: 0
-                from: 0
-                to: 1
-                value: mini.progress
-                Accessible.name: i18n("Playback position")
-                background: Rectangle {
-                    color: Qt.alpha(Kirigami.Theme.textColor, 0.3)
-                }
-                contentItem: Item {
-                    Rectangle {
-                        height: parent.height
-                        width: Math.round(parent.width * progressBar.position)
-                        x: mini.mirrored ? parent.width - width : 0
-                        color: Kirigami.Theme.highlightColor
+
+                    HoverHandler {
+                        id: titleHover
+                    }
+                    // Server text, cut at two fifths of the row: the whole of it on hover
+                    PlainToolTip {
+                        visible: titleLabel.truncated && titleHover.hovered
+                        text: titleLabel.text
                     }
                 }
             }

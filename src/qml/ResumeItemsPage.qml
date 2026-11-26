@@ -80,8 +80,8 @@ Kirigami.ScrollablePage {
             atStart: grid.atYBeginning
         }
         objectName: "resumeItemsGrid"
-        // Room under the bar: the rows scroll up to its line, but open clear of it
-        topMargin: Kirigami.Units.largeSpacing * 2
+        // The page margin under the bar, as at its sides: the rows scroll up to its line, but open clear of it
+        topMargin: PageMetrics.margin
 
         // Wide tiles of about fourteen grid units, like the Home row
         readonly property real usableWidth: Math.max(0, width - leftMargin)
@@ -89,7 +89,7 @@ Kirigami.ScrollablePage {
 
         model: page.model
         // The page margin on the left, as the library grid has it: the cards do not touch the edge
-        leftMargin: Kirigami.Units.largeSpacing
+        leftMargin: PageMetrics.margin
         cellWidth: Math.floor(usableWidth / columns)
         // A 16:9 image inside the tile margins, then the name and the second line
         cellHeight: Math.round((cellWidth - Kirigami.Units.largeSpacing - Kirigami.Units.smallSpacing * 2) * 9 / 16) + Kirigami.Units.gridUnit * 3.5 + Kirigami.Units.largeSpacing

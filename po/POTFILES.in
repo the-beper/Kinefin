@@ -21,6 +21,7 @@ src/qml/LibraryPage.qml
 src/qml/LibraryTile.qml
 src/qml/ResumeItemsPage.qml
 src/qml/PersonPage.qml
+src/qml/PersonSeriesEpisodesPage.qml
 src/qml/AddToCollectionDialog.qml
 src/qml/CollectionDialogs.qml
 src/qml/EditMetadataDialog.qml

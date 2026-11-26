@@ -58,8 +58,8 @@ ListView {
 
     model: view.rails
     spacing: Kirigami.Units.largeSpacing
-    // Room under the bar: the rails scroll up to its line, but open clear of it
-    topMargin: Kirigami.Units.largeSpacing * 2
+    // The page margin under the bar, as at its sides: the rails scroll up to its line, but open clear of it
+    topMargin: PageMetrics.margin
     clip: true
     boundsBehavior: Flickable.StopAtBounds
     currentIndex: 0

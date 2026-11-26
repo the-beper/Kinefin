@@ -242,6 +242,12 @@ Kirigami.Page {
             visible: page.listModel !== null || page.hasSubtabs || page.tabType === ""
             spacing: Kirigami.Units.mediumSpacing
 
+            // The navigation button floats over the start of the row in a Compact window, as over the row of PageToolbar
+            Item {
+                visible: PageMetrics.cornerNavigation
+                Layout.preferredWidth: PageMetrics.cornerButton
+            }
+
             // A library opened from a Home tile sits above Home: its way back and its name lead the row, as PageToolbar does on the other pages
             PageBackButton {
                 visible: page.tabType === ""

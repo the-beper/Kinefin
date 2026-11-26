@@ -87,7 +87,7 @@ Item {
         shell.openSection("queuePage", "QueuePage.qml", { connection: shell.connection });
     }
 
-    // The main menu is the header's: it opens where the header's user button stands
+    // The main menu is the header's: it opens where the header's user button stands, or under the floating button in a Compact window
     function openMainMenu() {
         shell.header?.openMainMenu();
     }
@@ -646,7 +646,7 @@ Item {
         }
     }
 
-    // What the rail holds, as rows with the labels beside the icons, for a Compact window: it opens from the header's button, closes on Escape, on a click outside and on a choice; the modal blocks the window's shortcuts while it is open
+    // What the rail holds, as rows with the labels beside the icons, for a Compact window: it opens from the floating button of the window or with a swipe from its edge, closes on Escape, on a click outside and on a choice; the modal blocks the window's shortcuts while it is open
     QQC2.Drawer {
         id: navigationDrawer
         objectName: "navigationDrawer"
@@ -672,8 +672,11 @@ Item {
         edge: Qt.LeftEdge
         modal: true
         focus: true
-        // No swipe from the window edge: the header's button is the one way in
-        dragMargin: 0
+        // The swipe from the window edge opens it in a Compact window (the default margin), and not while the rail shows, where there is no drawer to open, nor over the player, which hides the corner button too
+        Binding on dragMargin {
+            when: !root.drawerAllowed || root.shell.playbackPageShowing
+            value: 0
+        }
         width: Math.min(root.drawerWidth, root.shell.width - Kirigami.Units.gridUnit * 2)
         height: parent ? parent.height : root.shell.height
         // The rail's own margins at the top and the foot
@@ -772,7 +775,7 @@ Item {
                     Keys.onDownPressed: root.stepFocus(root.drawerButtons(), drawerGroup, 1)
                 }
 
-                // The main menu is the header's: the drawer goes first, and the menu opens under the header's button
+                // The main menu is the header's: the drawer goes first, and the menu opens under the floating button
                 RailEntry {
                     id: drawerUser
                     objectName: "drawerUser"

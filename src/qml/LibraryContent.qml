@@ -247,13 +247,13 @@ Item {
         GridView {
             id: grid
             objectName: "libraryGrid"
-            // Room under the bar: the rows scroll up to its line, but open clear of it
-            topMargin: Kirigami.Units.largeSpacing * 2
+            // The page margin under the bar, as at its sides: the rows scroll up to its line, but open clear of it
+            topMargin: PageMetrics.margin
 
             // A narrow window must be allowed a single legible poster instead of squeezing two cards below their minimum useful width
             readonly property int columns: Math.max(1, Math.floor(usableWidth / (Kirigami.Units.gridUnit * (content.tileUnits[content.listModel.imageType] ?? 10))))
             // The gap between two cards and the margin around them; the width the page margin and the vertical scroll bar take is not shared out to the cells, so no card sits under the bar
-            readonly property real gutter: Kirigami.Units.largeSpacing
+            readonly property real gutter: PageMetrics.margin
             readonly property real usableWidth: Math.max(0, width - leftMargin - vbar.implicitWidth)
 
             clip: true
@@ -329,8 +329,8 @@ Item {
         ListView {
             id: list
             objectName: "libraryList"
-            // Room under the bar: the rows scroll up to its line, but open clear of it
-            topMargin: Kirigami.Units.largeSpacing * 2
+            // The page margin under the bar, as at its sides: the rows scroll up to its line, but open clear of it
+            topMargin: PageMetrics.margin
 
             clip: true
             boundsBehavior: Flickable.StopAtBounds

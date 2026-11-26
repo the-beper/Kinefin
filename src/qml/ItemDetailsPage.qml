@@ -899,8 +899,9 @@ Kirigami.ScrollablePage {
 
         // The rows are not tab stops: the list is, and it opens the current episode
         function openCurrent() {
-            if (list.currentItem?.enabled)
-                page.Window.window.openItem(list.currentItem.itemId, page);
+            const row = list.currentItem?.episode;
+            if (row?.enabled)
+                page.Window.window.openItem(row.itemId, page);
         }
         Keys.onReturnPressed: openCurrent()
         Keys.onEnterPressed: openCurrent()
@@ -2132,27 +2133,36 @@ Kirigami.ScrollablePage {
             }
         }
 
-        delegate: EpisodeRow {
-            x: (list.width - width) / 2
-            width: page.listColumnWidth
-            // The list is the one tab stop, the arrow keys move inside it
-            focusPolicy: Qt.NoFocus
-            highlighted: ListView.isCurrentItem && list.activeFocus
-            itemId: model.itemId
-            name: model.name
-            seasonNumber: model.seasonNumber
-            episodeNumber: model.episodeNumber
-            episodeNumberEnd: model.episodeNumberEnd
-            runtimeMinutes: model.runtimeMinutes
-            overview: model.overview
-            imageUrl: model.imageUrl
-            played: model.played
-            playedPercentage: model.playedPercentage
-            favorite: model.favorite
-            virtualItem: model.virtualItem
-            unaired: model.unaired
-            loaded: model.loaded
-            onClicked: page.Window.window.openItem(itemId, page)
+        // A slot as wide as the list centres the row in it: the list resets the x of a delegate it lays out, so only the first row kept a centring of its own
+        delegate: Item {
+            id: episodeSlot
+            readonly property alias episode: episodeRow
+            width: list.width
+            height: episodeRow.height
+
+            EpisodeRow {
+                id: episodeRow
+                x: (episodeSlot.width - width) / 2
+                width: page.listColumnWidth
+                // The list is the one tab stop, the arrow keys move inside it
+                focusPolicy: Qt.NoFocus
+                highlighted: episodeSlot.ListView.isCurrentItem && list.activeFocus
+                itemId: model.itemId
+                name: model.name
+                seasonNumber: model.seasonNumber
+                episodeNumber: model.episodeNumber
+                episodeNumberEnd: model.episodeNumberEnd
+                runtimeMinutes: model.runtimeMinutes
+                overview: model.overview
+                imageUrl: model.imageUrl
+                played: model.played
+                playedPercentage: model.playedPercentage
+                favorite: model.favorite
+                virtualItem: model.virtualItem
+                unaired: model.unaired
+                loaded: model.loaded
+                onClicked: page.Window.window.openItem(itemId, page)
+            }
         }
 
         footer: Item {

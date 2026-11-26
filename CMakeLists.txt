@@ -128,6 +128,8 @@ add_library(kinefin_core STATIC
     src/models/PagedItemsModel.h
     src/models/ResumeItemsModel.cpp
     src/models/ResumeItemsModel.h
+    src/models/PersonEpisodesModel.cpp
+    src/models/PersonEpisodesModel.h
     src/models/PersonItemsModel.cpp
     src/models/PersonItemsModel.h
     src/models/CollectionsModel.cpp
@@ -297,7 +299,7 @@ qt_add_resources(kinefin_cast "cast_roots"
 target_link_libraries(kinefin_player PUBLIC kinefin_cast)
 
 # The QML module lives in a static library of its own so that the UI tests can import it like the application does
-foreach(page Main PlayerPage OsdButton OsdBox OsdMetrics MiniPlayer PictureInPictureWindow PlaybackInfoOverlay ShellHeader ShellNavigation ShellSidebar AboutDialog ShortcutsDialog DialogTitleBar RemoteSessionsDialog SyncPlayDialog MediaInfoDialog CastDialog CastTargetRow HomePage LibraryTile LibraryPage ResumeItemsPage PersonPage MediaCard CardMenu CardRow EpisodeRow ItemDetailsPage SearchPopup QueuePage FilterDialog FilterChips GenreRailsView GenreRailsPage LibraryContent ItemListRow ItemRowGrid LoginPage UserPickerPage UserTile MessageBox ServersPage SettingsPage SettingRow UserPreferencesForm UserPreferencesSaveBar FavoritesPage FavoriteCard FavoritesBanners FavoritesSectionPage TopShadow MediaListRow PlaylistsPage PlaylistPage PlaylistDialogs AddToPlaylistDialog AddToCollectionDialog CollectionDialogs EditMetadataDialog IdentifyDialog EditImagesPage RemoteImagesPage ImageTypes EditSubtitlesDialog PageToolbar PageBackButton FadeInOnShow PageTitle PlainToolTip PopupPlacement ChoiceBox AutoScroll DownloadsPage DownloadRulesPage DownloadAllDialog RuleDialog SubtitleSearchDialog SavedFiltersDialog UploadSubtitleDialog PlainMenuItem PlaceholderSectionPage)
+foreach(page Main PageMetrics PlayerPage OsdButton OsdBox OsdMetrics MiniPlayer PictureInPictureWindow PlaybackInfoOverlay ShellHeader ShellNavigation ShellSidebar AboutDialog ShortcutsDialog DialogTitleBar RemoteSessionsDialog SyncPlayDialog MediaInfoDialog CastDialog CastTargetRow HomePage LibraryTile LibraryPage ResumeItemsPage PersonPage PersonSeriesEpisodesPage MediaCard CardMenu CardRow EpisodeRow ItemDetailsPage SearchPopup QueuePage FilterDialog FilterChips GenreRailsView GenreRailsPage LibraryContent ItemListRow ItemRowGrid LoginPage UserPickerPage UserTile MessageBox ServersPage SettingsPage SettingRow UserPreferencesForm UserPreferencesSaveBar FavoritesPage FavoriteCard FavoritesBanners FavoritesSectionPage TopShadow MediaListRow PlaylistsPage PlaylistPage PlaylistDialogs AddToPlaylistDialog AddToCollectionDialog CollectionDialogs EditMetadataDialog IdentifyDialog EditImagesPage RemoteImagesPage ImageTypes EditSubtitlesDialog PageToolbar CornerStrip PageBackButton FadeInOnShow PageTitle PlainToolTip PopupPlacement ChoiceBox AutoScroll DownloadsPage DownloadRulesPage DownloadAllDialog RuleDialog SubtitleSearchDialog SavedFiltersDialog UploadSubtitleDialog PlainMenuItem PlaceholderSectionPage)
     set_source_files_properties(src/qml/${page}.qml PROPERTIES QT_RESOURCE_ALIAS ${page}.qml)
 endforeach()
 # The images the pages draw themselves, beside the QML files they belong to
@@ -305,7 +307,7 @@ foreach(icon critic-fresh critic-rotten)
     set_source_files_properties(src/qml/icons/${icon}.svg PROPERTIES QT_RESOURCE_ALIAS icons/${icon}.svg)
 endforeach()
 # A singleton needs the flag before the module lists the file
-set_source_files_properties(src/qml/OsdMetrics.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
+set_source_files_properties(src/qml/PageMetrics.qml src/qml/OsdMetrics.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 qt_add_library(kinefin_ui STATIC)
 qt_add_qml_module(kinefin_ui
     URI org.kde.kinefin
@@ -318,6 +320,7 @@ qt_add_qml_module(kinefin_ui
         src/qml/OsdBox.qml
         src/qml/OsdButton.qml
         src/qml/OsdMetrics.qml
+        src/qml/PageMetrics.qml
         src/qml/MiniPlayer.qml
         src/qml/PictureInPictureWindow.qml
         src/qml/MediaListRow.qml
@@ -326,6 +329,7 @@ qt_add_qml_module(kinefin_ui
         src/qml/PlaylistDialogs.qml
         src/qml/AddToPlaylistDialog.qml
         src/qml/PageToolbar.qml
+        src/qml/CornerStrip.qml
         src/qml/PageBackButton.qml
         src/qml/FadeInOnShow.qml
         src/qml/PageTitle.qml
@@ -350,6 +354,7 @@ qt_add_qml_module(kinefin_ui
         src/qml/LibraryPage.qml
         src/qml/ResumeItemsPage.qml
         src/qml/PersonPage.qml
+        src/qml/PersonSeriesEpisodesPage.qml
         src/qml/AddToCollectionDialog.qml
         src/qml/CollectionDialogs.qml
         src/qml/EditMetadataDialog.qml
@@ -959,6 +964,11 @@ if(BUILD_TESTING)
     target_compile_definitions(test_resume_items_model PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(test_resume_items_model PRIVATE kinefin_core Qt6::Test Qt6::Network)
     add_test(NAME resume_items_model COMMAND test_resume_items_model)
+
+    add_executable(test_person_items_model tests/test_person_items_model.cpp)
+    target_compile_definitions(test_person_items_model PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    target_link_libraries(test_person_items_model PRIVATE kinefin_core Qt6::Test Qt6::Network)
+    add_test(NAME person_items_model COMMAND test_person_items_model)
 
     add_executable(test_server_credentials tests/test_server_credentials.cpp)
     target_link_libraries(test_server_credentials PRIVATE kinefin_core Qt6::Test)

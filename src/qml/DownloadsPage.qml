@@ -55,8 +55,8 @@ Kirigami.ScrollablePage {
 
     // Read once per change: the box, the header and the resolution share it
     readonly property var outboxConflicts: downloads.outboxConflicts
-    // The top padding of a section header, what Kirigami gives it by default, set on the headers and taken off the list's top margin: the first heading then sits as far under the bar as the first row of the other lists
-    readonly property real sectionPadding: Kirigami.Units.largeSpacing + Kirigami.Units.smallSpacing
+    // The top padding of a section header, set on the headers with no top margin on the list: the first heading then sits as far under the bar as the first row of the other lists (the page margin)
+    readonly property real sectionPadding: PageMetrics.margin
 
     // An icon-only button of a row, with its text as the tooltip
     component RowButton: Controls.ToolButton {
@@ -241,8 +241,8 @@ Kirigami.ScrollablePage {
     ListView {
         id: list
         objectName: "downloadsList"
-        // Room under the bar: the rows scroll up to its line, but open clear of it
-        topMargin: Kirigami.Units.largeSpacing * 2 - page.sectionPadding
+        // No margin of its own: the first heading carries the page margin as its top padding
+        topMargin: 0
 
         // On the view, not in its content: the shadow stays under the toolbar while the rows scroll
         TopShadow {

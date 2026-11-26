@@ -19,7 +19,7 @@ GridView {
     readonly property real tileWidth: Kirigami.Units.gridUnit * (landscape ? 14 : 10)
     readonly property int columns: Math.max(1, Math.floor(usableWidth / tileWidth))
     // The gap between two cards and the margin around them; the width the page margin and the vertical scroll bar take is not shared out to the cells, so no card sits under the bar
-    readonly property real gutter: Kirigami.Units.largeSpacing
+    readonly property real gutter: PageMetrics.margin
     readonly property real usableWidth: Math.max(0, width - leftMargin - vbar.implicitWidth)
     readonly property real aspect: landscape ? 9 / 16 : 3 / 2
 

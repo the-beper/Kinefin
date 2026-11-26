@@ -306,8 +306,8 @@ Kirigami.ScrollablePage {
             atStart: list.atYBeginning
         }
         objectName: "playlistEntries"
-        // Room under the bar: the rows scroll up to its line, but open clear of it
-        topMargin: Kirigami.Units.largeSpacing * 2
+        // The page margin under the bar, as at its sides: the rows scroll up to its line, but open clear of it
+        topMargin: PageMetrics.margin
 
         model: page.entries
         activeFocusOnTab: true

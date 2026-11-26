@@ -541,6 +541,8 @@ class FakeJellyfin {
     QHash<QString, QByteArray> itemsById;
     // A search answers by the one type it asks for: `includeItemTypes` value -> fixture name. Only a request with a searchTerm is answered this way
     QHash<QString, QString> itemsByType;
+    // The credits of a person answer by the `includeItemTypes` a request with `personIds` asks for ("Movie,Series", "Episode"): the items it lists, sliced by startIndex and limit, with the whole list as TotalRecordCount. Any person id gets them
+    QHash<QString, QJsonArray> personItems;
     // A genre rail answers by the one genre id it asks for: `genreIds` value -> fixture name. Only a request with a genreIds is answered this way
     QHash<QString, QString> itemsByGenre;
     // When >= 0 the Genres family is generated from startIndex/limit: this is the TotalRecordCount
@@ -1286,6 +1288,24 @@ class FakeJellyfin {
             .toJson(QJsonDocument::Compact);
     }
 
+    QByteArray personItemsBody(const QByteArray &route) const
+    {
+        const QUrlQuery query = capturedListingQuery(route);
+        const QJsonArray all =
+            personItems.value(query.queryItemValue(QStringLiteral("includeItemTypes")));
+        const int start = std::max(0, query.queryItemValue(QStringLiteral("startIndex")).toInt());
+        const int limit = query.hasQueryItem(QStringLiteral("limit"))
+                              ? query.queryItemValue(QStringLiteral("limit")).toInt()
+                              : int(all.size());
+        QJsonArray items;
+        for (int row = start; row < start + limit && row < all.size(); ++row)
+            items.append(all.at(row));
+        return QJsonDocument(QJsonObject{{QStringLiteral("Items"), items},
+                                         {QStringLiteral("StartIndex"), start},
+                                         {QStringLiteral("TotalRecordCount"), int(all.size())}})
+            .toJson(QJsonDocument::Compact);
+    }
+
     static void respondBytes(QTcpSocket *socket, int status, const QByteArray &body,
                              const QByteArray &extraHeaders = {})
     {
@@ -1664,6 +1684,11 @@ class FakeJellyfin {
             } else if (listingFamily == QLatin1String("Genres") && generatedGenreTotal >= 0
                        && !denyListings && !redirectListings) {
                 respond(socket, 200, generatedGenresBody(route));
+            } else if (listingFamily == QLatin1String("Items") && route.contains("personIds=")
+                       && personItems.contains(capturedListingQuery(route).queryItemValue(
+                           QStringLiteral("includeItemTypes")))
+                       && !denyListings && !redirectListings) {
+                respond(socket, 200, personItemsBody(route));
             } else if (listingFamily == QLatin1String("Items") && route.contains("searchTerm=")
                        && itemsByType.contains(capturedListingQuery(route).queryItemValue(
                            QStringLiteral("includeItemTypes")))) {

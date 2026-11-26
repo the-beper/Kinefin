@@ -106,8 +106,8 @@ Kirigami.ScrollablePage {
             atStart: grid.atYBeginning
         }
         objectName: "playlistsGrid"
-        // Room under the bar: the rows scroll up to its line, but open clear of it
-        topMargin: Kirigami.Units.largeSpacing * 2
+        // The page margin under the bar, as at its sides: the rows scroll up to its line, but open clear of it
+        topMargin: PageMetrics.margin
 
         // Poster tiles of about ten grid units, at least one to a row
         readonly property real usableWidth: Math.max(0, width - leftMargin)
@@ -115,7 +115,7 @@ Kirigami.ScrollablePage {
 
         model: page.playlists.list
         // The page margin on the left, as the library grid has it: the cards do not touch the edge
-        leftMargin: Kirigami.Units.largeSpacing
+        leftMargin: PageMetrics.margin
         cellWidth: Math.floor(usableWidth / columns)
         // A 2:3 poster inside the tile margins, then the name and the second line
         cellHeight: Math.round((cellWidth - Kirigami.Units.largeSpacing - Kirigami.Units.smallSpacing * 2) * 1.5) + Kirigami.Units.gridUnit * 3.5 + Kirigami.Units.largeSpacing

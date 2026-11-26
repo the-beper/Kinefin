@@ -190,6 +190,13 @@ struct PersonItemsModelForeign {
     QML_UNCREATABLE("Created by the application")
 };
 
+struct PersonEpisodesModelForeign {
+    Q_GADGET
+    QML_FOREIGN(Kinefin::PersonEpisodesModel)
+    QML_NAMED_ELEMENT(PersonEpisodesModel)
+    QML_UNCREATABLE("Created by the application")
+};
+
 struct CollectionsModelForeign {
     Q_GADGET
     QML_FOREIGN(Kinefin::CollectionsModel)

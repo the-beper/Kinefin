@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import QtQuick
 
-// The image types of Jellyfin as the Edit Images pages present them: the name of each, and the shape of the frame that shows an image of it
+// The image types of Jellyfin as the Edit Images pages present them: the name of each, the shape of its usual picture and the width of a tile of the online grid
 QtObject {
     function label(type) {
         switch (type) {
@@ -47,17 +47,6 @@ QtObject {
             return 1;
         }
         return 16 / 9;
-    }
-
-    // The height of the frame of a current image, in grid units: the width follows from the aspect
-    function frameUnits(type) {
-        switch (type) {
-        case "Banner":
-            return 4;
-        case "Logo":
-            return 5;
-        }
-        return 9;
     }
 
     // The width of a tile of the online grid, in grid units
