@@ -45,6 +45,11 @@ Kirigami.ApplicationWindow {
     readonly property int wideLimit: Kirigami.Units.gridUnit * 36
     // The widest a block of reading content (item header, queue rows) gets before it is centred: the pages read it from here so they agree
     readonly property real readingWidth: Kirigami.Units.gridUnit * 70
+    // The HDR output of the full player (the Playback Info row and the setting row read it from here); the window and the player page turn transparent while its video is drawn below the window
+    readonly property var hdrOutput: hdr
+    readonly property bool hdrActive: hdr.active
+    // The window shows what lies behind it only while the HDR video is drawn there
+    color: hdr.active ? "transparent" : Kirigami.Theme.backgroundColor
     // The width decides the modes, read here where the width lives: a header-side binding on the
     // attached Window.window kept its load-time value and never followed a resize
     readonly property bool compactHeader: width < compactLimit
@@ -641,6 +646,15 @@ Kirigami.ApplicationWindow {
     readonly property Item videoSlot: playbackMode === "full" ? (playerPage?.videoSlot ?? null) : playbackMode === "mini" ? miniPlayer.videoSlot : playbackMode === "pip" ? (pictureInPictureWindow?.videoSlot ?? null) : null
     onVideoSlotChanged: placeVideo()
 
+    // The HDR path draws only the full player's video: not the mini player, not the picture-in-picture window, not a cast
+    HdrOutput {
+        id: hdr
+        window: window
+        videoItem: videoLoader.item
+        player: window.player
+        mainView: window.playbackMode === "full" && window.playbackPageShowing && !window.player?.casting && !window.player?.castTargetId && !window.player?.canContinueHere
+    }
+
     // The one video item, built when playback starts and deleted only when it ends, so the mpv core and the session outlive every page; it is never a child of a page, only moved between the slots
     Loader {
         id: videoLoader
@@ -651,11 +665,13 @@ Kirigami.ApplicationWindow {
         opacity: 0
         active: window.playbackMode !== "none"
         sourceComponent: MpvVideoItem {
+            id: videoRenderer
             objectName: "videoRenderer"
             anchors.fill: parent
             player: window.player
             // The last frame of the local playback stays on the item while a cast plays or has failed: the black behind it shows instead; transparent rather than hidden, so that the item keeps its surface
-            opacity: window.player?.casting || window.player?.castTargetId || window.player?.canContinueHere ? 0 : 1
+            // Transparent too while the HDR video is drawn in the surface below the window
+            opacity: window.player?.casting || window.player?.castTargetId || window.player?.canContinueHere || hdr.active ? 0 : 1
             // The picture-in-picture window could not render the video: it goes back to the full player, playing on
             onRendererFailed: {
                 if (window.playbackMode !== "pip")
@@ -666,14 +682,32 @@ Kirigami.ApplicationWindow {
 
             // Moved into another window (picture in picture and back) the item has no picture until its new render context is ready and mpv drew into it: black covers it until `ready`, waits a moment for the player to give the new context its video track, then fades out, with a fallback in case `ready` never comes
             readonly property var hostWindow: Window.window
+            // A move to another window waits for the new render context's `ready`, whatever the HDR path does meanwhile
+            property bool awaitingRenderer: false
             onHostWindowChanged: {
+                videoRenderer.awaitingRenderer = true;
                 windowCoverFade.stop();
                 windowCover.opacity = 1;
                 windowCoverFallback.restart();
             }
             onReady: {
+                videoRenderer.awaitingRenderer = false;
                 windowCoverFallback.stop();
                 windowCoverFade.restart();
+            }
+            // The handover to or from the HDR surface leaves the item without a picture for a moment: the same black cover until the switch ends, which comes with `ready` when the item's renderer made its context again, or without one when it never freed it
+            Connections {
+                target: hdr
+                function onSwitchingChanged() {
+                    if (hdr.switching) {
+                        windowCoverFade.stop();
+                        windowCover.opacity = 1;
+                        windowCoverFallback.restart();
+                    } else if (!videoRenderer.awaitingRenderer) {
+                        windowCoverFallback.stop();
+                        windowCoverFade.restart();
+                    }
+                }
             }
             Rectangle {
                 id: windowCover

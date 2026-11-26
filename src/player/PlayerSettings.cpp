@@ -30,8 +30,9 @@ PlayerSettings::PlayerSettings(ClientSettings &settings, PlaybackEngine &engine,
 {
     connect(&settings, &ClientSettings::valueChanged, this,
             [this](const QString &section, const QString &key) {
-                // Night mode rebuilds only the audio chain: a full apply would reset the speed the user chose while playing
-                if (section == QLatin1String("audio") && key == QLatin1String("night_mode"))
+                // Night mode rebuilds only the audio chain and HDR output is read by the HDR path alone: a full apply would reset the speed the user chose while playing
+                if ((section == QLatin1String("audio") && key == QLatin1String("night_mode"))
+                    || (section == QLatin1String("video") && key == QLatin1String("hdr_output")))
                     return;
                 if (section == QLatin1String("audio") || section == QLatin1String("video")
                     || section == QLatin1String("subtitles") || section == QLatin1String("other"))
@@ -150,6 +151,8 @@ void PlayerSettings::apply()
     applySubtitles();
     applyTls();
     applyOverrides(); // intentionally last; same precedence as the web client
+    if (m_hdrTarget)
+        applyHdrTarget();
 }
 
 void PlayerSettings::applyAudio()
@@ -423,19 +426,23 @@ void PlayerSettings::applyEntry(const MpvConfEntry &entry)
             {QStringLiteral("change-list"), entry.name, entry.listOperation, entry.value});
 }
 
-void PlayerSettings::applyConfFile()
+void PlayerSettings::applyConfFile(const QStringList &only)
 {
     const MpvConf conf = m_settings.readMpvConf();
-    for (const MpvConfProblem &problem : conf.problems) {
-        if (problem.line == 0)
-            qCWarning(playerLog) << "mpv.conf is not read: it is not a regular file, cannot be "
-                                    "opened or is too large";
-        else
-            qCWarning(playerLog) << "mpv.conf line" << problem.line << problem.name
-                                 << "is not applied";
+    if (only.isEmpty()) {
+        for (const MpvConfProblem &problem : conf.problems) {
+            if (problem.line == 0)
+                qCWarning(playerLog) << "mpv.conf is not read: it is not a regular file, cannot be "
+                                        "opened or is too large";
+            else
+                qCWarning(playerLog)
+                    << "mpv.conf line" << problem.line << problem.name << "is not applied";
+        }
     }
-    for (const MpvConfEntry &entry : conf.entries)
-        applyEntry(entry);
+    for (const MpvConfEntry &entry : conf.entries) {
+        if (only.isEmpty() || only.contains(entry.name))
+            applyEntry(entry);
+    }
 }
 
 void PlayerSettings::applyOverrides(const QStringList &only)
@@ -453,6 +460,31 @@ void PlayerSettings::applyOverrides(const QStringList &only)
         if (only.isEmpty() || only.contains(entry.name))
             applyEntry(entry);
     }
+}
+
+void PlayerSettings::setHdrTarget(std::optional<int> peak)
+{
+    if (peak == m_hdrTarget)
+        return;
+    m_hdrTarget = peak;
+    if (m_engine.isInitialized())
+        applyHdrTarget();
+}
+
+void PlayerSettings::applyHdrTarget()
+{
+    if (m_hdrTarget) {
+        m_engine.setMpvProperty(QStringLiteral("target-trc"), QStringLiteral("pq"));
+        m_engine.setMpvProperty(QStringLiteral("target-prim"), QStringLiteral("bt.2020"));
+        m_engine.setMpvProperty(QStringLiteral("target-peak"), QString::number(*m_hdrTarget));
+        return;
+    }
+    const QStringList names{QStringLiteral("target-trc"), QStringLiteral("target-prim"),
+                            QStringLiteral("target-peak")};
+    for (const QString &name : names)
+        m_engine.setMpvProperty(name, QStringLiteral("auto"));
+    applyConfFile(names);
+    applyOverrides(names);
 }
 
 void PlayerSettings::setAudioOffset(double seconds)

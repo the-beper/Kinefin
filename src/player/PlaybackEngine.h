@@ -13,6 +13,7 @@
 #include <optional>
 
 #include "api/MediaSourceSelection.h"
+#include "player/HdrPolicy.h"
 #include "player/PlaybackSession.h"
 
 class MpvController;
@@ -87,6 +88,8 @@ class PlaybackEngine final : public QObject {
     void markEnded();
     // mpv's own picture facts, cached from its property changes (no mpv call): `videoWidth`, `videoHeight` (dwidth, dheight), `droppedFrames` (frame-drop-count), `decoderDroppedFrames` (decoder-frame-drop-count), `hwdec` (hwdec-current); a key is present only while mpv has a value
     [[nodiscard]] QVariantMap videoFacts() const { return m_videoFacts; }
+    // The colour facts of mpv's `video-params` (gamma, primaries and the HDR metadata), cached from its property changes: kept apart from `videoFacts`, which Playback Info shows whole; a fact mpv does not have reads empty or 0. They stay while the property is unavailable (the video is off during a renderer handover) and go with the file, a new open or a detach
+    [[nodiscard]] HdrVideoFacts hdrVideoFacts() const { return m_hdrVideoFacts; }
 
     // The render context of the video item was replaced (the item moved to another window): libmpv turns the video off when the old context goes, so a loaded file whose `vid` is off gets its video track selected again. Nothing else changes: session, position and reports stay untouched. During the opening it waits for fileLoaded, where `afterLoad` lets it pick a track although none was selected yet
     void restoreVideo(bool afterLoad = false);
@@ -104,6 +107,8 @@ class PlaybackEngine final : public QObject {
     void fileLoaded();
     // The decoder's picture parameters (video-dec-params) changed or appeared
     void videoParamsChanged();
+    // The colour facts (`hdrVideoFacts`) changed, appeared or went with the file
+    void hdrVideoFactsChanged();
     // The size mpv shows the video at (dwidth, dheight) changed, appeared or went with the file
     void videoSizeChanged();
     void seekingChanged(bool seeking);
@@ -120,6 +125,7 @@ class PlaybackEngine final : public QObject {
     void onPropertyChanged(const QString &property, const QVariant &value);
     void onEndFile(const QString &reason);
     void clearVideoFacts();
+    void setHdrVideoFacts(const HdrVideoFacts &facts);
     void readVideoSize();
     void settleSeek();
     void onPlaybackRestart();
@@ -144,6 +150,7 @@ class PlaybackEngine final : public QObject {
     bool m_canSeek = false;
     qreal m_rate = 1.0;
     QVariantMap m_videoFacts;
+    HdrVideoFacts m_hdrVideoFacts;
     // The last video track mpv reported as selected: `vid` reads off once the render context is gone
     std::optional<qint64> m_videoTrackId;
     // A renderer change came while the file opened: the video is chosen again at fileLoaded

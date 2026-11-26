@@ -39,6 +39,7 @@ Kinefin is written for Plasma instead. The interface is Kirigami and follows the
 - Direct play or server transcoding, chapters, Skip Intro and the other media segments, Up Next, and a quality cap that also lowers itself on a slow connection.
 - Audio and subtitle tracks, a second subtitle line, subtitle files of your own, and subtitle search through the server's OpenSubtitles plugin.
 - A mini player and a picture-in-picture window while you browse. Clips and GIFs, debanding and your own GLSL shaders.
+- HDR video shown as HDR on HDR screens (KWin on Plasma 6.4 or later), in the full player.
 - Audio passthrough, hardware decoding and subtitle styling with Jellyfin Desktop's settings, and your own `mpv.conf` on top.
 
 ### On other screens and with other people

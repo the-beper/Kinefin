@@ -11,6 +11,7 @@
 #include "player/BitrateFallback.h"
 #include "player/ClipExporter.h"
 #include "player/GroupPlayback.h"
+#include "player/HdrPolicy.h"
 #include "player/PlaybackEngine.h"
 #include "player/PlaybackReporter.h"
 #include "player/PlayerSettings.h"
@@ -139,6 +140,10 @@ class PlayerController final : public QObject {
     Q_PROPERTY(QString aspectMode READ aspectMode NOTIFY changed)
     // The width over the height that mpv shows the video at: the file's own shape, or the shape that an Aspect Ratio choice (4:3, 16:9, Widescreen for 4:3 Video) forces, which mpv applies to its display size; Zoom, Stretch and Original Size leave it as it is. Zero while no video size is known, and read once after a burst of size changes
     Q_PROPERTY(qreal videoAspect READ videoAspect NOTIFY videoAspectChanged)
+    // The video of the item is HDR (see `Kinefin::videoIsHdr`); once true it stays until another item starts, so a reload of the stream or a gap of mpv's picture facts does not drop it
+    Q_PROPERTY(bool videoIsHdr READ videoIsHdr NOTIFY videoIsHdrChanged)
+    // The `video.hdr_output` setting is Auto: false when it is Off
+    Q_PROPERTY(bool hdrOutputSettingAuto READ hdrOutputSettingAuto NOTIFY hdrOutputSettingChanged)
     // The night-mode filter of the audio chain, remembered per profile: the OSD's check and the Settings switch are one setting
     Q_PROPERTY(bool nightMode READ nightMode NOTIFY changed)
     // Clip and GIF marks of the playing item, -1 when unset: the line the Clip menu states and the two Save entries
@@ -249,6 +254,14 @@ class PlayerController final : public QObject {
     // The aspect mode of this playback: the `video.aspect` setting until a choice is made, and again for the next item
     QString aspectMode() const { return m_mpvSettings.aspectMode(); }
     qreal videoAspect() const { return m_videoAspect; }
+    // mpv's gamma once it is known (`pq` or `hlg`), else the server's range type for a source played as it is (a transcode never takes the hint, as the server may tone map it); latched for the item
+    bool videoIsHdr() const { return m_videoIsHdr; }
+    // mpv's colour facts of the picture (gamma, primaries, HDR metadata), empty or 0 where unknown
+    HdrVideoFacts hdrVideoFacts() const { return m_engine.hdrVideoFacts(); }
+    // The `video.hdr_output` setting (`auto` or `off`); a stored value that is neither reads as Auto
+    bool hdrOutputSettingAuto() const;
+    // The HDR path's output colour volume in mpv (see `PlayerSettings::setHdrTarget`); empty gives it back to mpv.conf and the Manual MPV Configuration
+    void setHdrTarget(std::optional<int> targetPeak) { m_mpvSettings.setHdrTarget(targetPeak); }
     bool nightMode() const;
     qint64 clipStartTicks() const { return m_clipStart; }
     qint64 clipEndTicks() const { return m_clipEnd; }
@@ -466,6 +479,9 @@ class PlayerController final : public QObject {
   Q_SIGNALS:
     void changed();
     void videoAspectChanged();
+    void videoIsHdrChanged();
+    void hdrVideoFactsChanged();
+    void hdrOutputSettingChanged();
     void localPlaybackChanged();
     // A local file's position, and whether it reached its end; the shell stores it on the download
     void localPositionChanged(const QString &itemId, qint64 ticks, bool played);
@@ -606,6 +622,10 @@ class PlayerController final : public QObject {
     }
     // The tracks the second subtitle slot may take: text subtitles other than the primary
     QList<TrackFact> secondarySubtitleFacts() const;
+    // Sets `videoIsHdr` when mpv's gamma or the source's range type says so; once set it holds until the item changes
+    void refreshVideoIsHdr();
+    // Another item starts, or none plays: `videoIsHdr` is false again
+    void resetVideoIsHdr();
     // The playing item can give a clip or GIF: SDR, and a local file, a direct play or a stream whose cache still holds the marks
     bool clipReady(bool gif, QString *reason) const;
     // What refuses a clip whatever its format (HDR, marks gone from the cache), empty when nothing does
@@ -743,6 +763,7 @@ class PlayerController final : public QObject {
     // The aspect of the video as last read from mpv's dwidth and dheight, zero when unknown
     qreal m_videoAspect = 0;
     bool m_videoAspectPending = false;
+    bool m_videoIsHdr = false;
     bool m_rememberAudio = true;
     bool m_rememberSubtitles = true;
     // The speed of this playback is decided (a repeat kept it, or the user chose one); a track was chosen since the file loaded; the file is loaded; the series' speed and aspect were applied

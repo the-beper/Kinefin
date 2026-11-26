@@ -81,6 +81,12 @@ keychain=$(find "$install_root/files/lib" -name 'libqt6keychain.so.*' -type f | 
 grep -aq secret_password_lookup "$keychain" || fail "libqt6keychain has no libsecret backend: no token could be stored"
 echo "ok: QtKeychain has the libsecret backend"
 
+# HDR output gate: CMake builds the path only where it finds QtWaylandClient's private headers, and a bundle without it would show HDR video as SDR without a word. Only the HDR code imports Qt's wrappers of wp_color_manager_v1, whose names stay in the stripped binary's dynamic symbols
+binary="$install_root/files/bin/kinefin"
+[ -f "$binary" ] || fail "the kinefin binary is not in the installed Flatpak"
+grep -aq wp_color_manager_v1 "$binary" || fail "kinefin was built without the HDR output path"
+echo "ok: kinefin has the HDR output path"
+
 if [ -n "${KINEFIN_EXPECT_VERSION:-}" ]; then
     out=$(flatpak run --env=QT_QPA_PLATFORM=offscreen "$id" --version 2>&1) || fail "--version failed: $out"
     printf '%s\n' "$out" | grep -qxF -e "Kinefin $KINEFIN_EXPECT_VERSION" -e "Kinefin: $KINEFIN_EXPECT_VERSION" \

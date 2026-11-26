@@ -12,6 +12,9 @@ Rectangle {
     required property var player
     // The video item's size in pixels
     property size playerSize: Qt.size(0, 0)
+    // The shell's HdrOutput, whose status text is the live "HDR output" row; the row is left out without it
+    property var hdrOutput: null
+    readonly property string hdrText: overlay.hdrOutput?.statusText ?? ""
     // The panel scrolls when its rows are taller than this
     property real maximumHeight: Kirigami.Units.gridUnit * 40
     // The last answer of the player's playbackInfo()
@@ -148,6 +151,7 @@ Rectangle {
             row("streamType", i18nc("@label", "Stream type"), [stream]),
             { key: "sizes", label: i18nc("@label", "Player sizes"), text: "", live: true },
             row("hwdec", i18nc("@label", "Hardware decoding"), [hwdec === "no" ? i18nc("@item:intext hardware decoding is off", "Off") : hwdec]),
+            { key: "hdrOutput", label: i18nc("@label", "HDR output"), text: "", live: true },
             row("dropped", i18nc("@label", "Frames dropped"), [overlay.present(info.droppedFrames) ? overlay.number(info.droppedFrames, 0) : ""]),
             row("decoderDropped", i18nc("@label", "Frames dropped by the decoder"), [overlay.present(info.decoderDroppedFrames) ? overlay.number(info.decoderDroppedFrames, 0) : ""])
         ]);
@@ -260,8 +264,8 @@ Rectangle {
                         delegate: RowLayout {
                             id: row
                             required property var modelData
-                            // The live row shows once its text is known
-                            visible: !modelData.live || overlay.sizesText.length > 0
+                            // A live row shows once its text is known
+                            visible: !modelData.live || (modelData.key === "sizes" ? overlay.sizesText.length > 0 : overlay.hdrText.length > 0)
                             Layout.fillWidth: true
                             spacing: Kirigami.Units.largeSpacing
                             Controls.Label {
@@ -278,7 +282,7 @@ Rectangle {
                                 Layout.alignment: Qt.AlignTop
                                 wrapMode: Text.Wrap
                                 textFormat: Text.PlainText
-                                text: row.modelData.live ? overlay.sizesText : row.modelData.text
+                                text: row.modelData.live ? (row.modelData.key === "sizes" ? overlay.sizesText : overlay.hdrText) : row.modelData.text
                             }
                         }
                     }

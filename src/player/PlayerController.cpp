@@ -473,6 +473,8 @@ PlayerController::PlayerController(JellyfinClient &client, PlayQueue &queue,
             [this](const QString &section, const QString &key) {
                 if (section == QLatin1String("audio") && key == QLatin1String("night_mode"))
                     Q_EMIT changed();
+                else if (section == QLatin1String("video") && key == QLatin1String("hdr_output"))
+                    Q_EMIT hdrOutputSettingChanged();
             });
     connect(&m_queue, &PlayQueue::edited, this, &PlayerController::updatePlaylist);
     connect(&client, &JellyfinClient::mediaSegmentsReady, this,
@@ -627,6 +629,10 @@ PlayerController::PlayerController(JellyfinClient &client, PlayQueue &queue,
     });
     connect(&m_engine, &PlaybackEngine::videoParamsChanged, &m_mpvSettings,
             &PlayerSettings::applyLoadedAspect);
+    connect(&m_engine, &PlaybackEngine::hdrVideoFactsChanged, this, [this] {
+        refreshVideoIsHdr();
+        Q_EMIT hdrVideoFactsChanged();
+    });
     connect(&m_engine, &PlaybackEngine::videoSizeChanged, this, [this] {
         // dwidth and dheight arrive one after the other: the aspect is read once both are in, not from a mix of the old size and the new
         if (m_videoAspectPending)
@@ -826,6 +832,7 @@ void PlayerController::detachVideo(MpvAbstractItem *item)
         return;
     if (m_casting) {
         m_engine.detach(item, false);
+        m_mpvSettings.setHdrTarget(std::nullopt);
         disconnect(item, &QQuickItem::windowChanged, this, nullptr);
         m_mpvSettings.setWindow(nullptr);
         m_video = nullptr;
@@ -841,6 +848,8 @@ void PlayerController::detachVideo(MpvAbstractItem *item)
     reportLocalPosition(false);
     m_queue.setCurrentPlaybackItemId({});
     m_engine.detach(item);
+    // The mpv of the next renderer starts without the HDR path's target
+    m_mpvSettings.setHdrTarget(std::nullopt);
     disconnect(item, &QQuickItem::windowChanged, this, nullptr);
     m_mpvSettings.setWindow(nullptr);
     m_video = nullptr;
@@ -1167,6 +1176,8 @@ bool PlayerController::startItem(const QString &id, qint64 resumeTicks, bool gro
     m_skipLabel.clear();
     setSegments({});
     m_source = PlaybackSource{};
+    if (!sameItem)
+        resetVideoIsHdr();
     // The same item again (a repeat) keeps the aspect and the rate the user chose; a group plays at 1.0
     m_keptRate.reset();
     if (sameItem && !grouped)
@@ -1433,6 +1444,8 @@ bool PlayerController::openLocal()
     m_skipEnd = 0;
     // Nothing of a server item played before stays: its source, rate, aspect and trickplay tiles
     m_source = PlaybackSource{};
+    if (request.itemId != m_itemId)
+        resetVideoIsHdr();
     m_keptRate.reset();
     m_mpvSettings.setAspectOverride({});
     m_requestedFrame.reset();
@@ -1933,6 +1946,7 @@ void PlayerController::onSource(const PlaybackSource &source)
         return;
     m_loading = false;
     m_source = source;
+    refreshVideoIsHdr();
     m_subtitleOptions = source.externalSubtitles;
     // A new file drops the subtitle files mpv had added to the old one
     m_loadedSubtitles.clear();
@@ -2020,6 +2034,7 @@ void PlayerController::startCast(const PlaybackSource &source)
     }
     m_loading = false;
     m_source = source;
+    refreshVideoIsHdr();
     m_castTrackPending = false;
     // A Google Cast device (the renderer that takes a text track) gets a transcoded frame of a size it shows whole; the seeks reload this URL too
     if (transcode && m_cast->takesTextTrack(m_castTarget)) {
@@ -2653,6 +2668,7 @@ void PlayerController::clearCurrent()
     setSegments({});
     resetForNextItem();
     m_source = PlaybackSource{};
+    resetVideoIsHdr();
     m_keptRate.reset();
     m_mpvSettings.setAspectOverride({});
     m_itemChapters.clear();
@@ -3302,6 +3318,46 @@ bool PlayerController::directPlay() const
     return active() && m_engine.isInitialized() && !m_source.itemId.isEmpty()
            && m_source.itemId == m_itemId && m_source.method == PlaybackSource::Method::Direct;
 }
+
+void PlayerController::refreshVideoIsHdr()
+{
+    const QString gamma = m_engine.hdrVideoFacts().gamma;
+    bool hdr = false;
+    if (!gamma.isEmpty() && gamma != QLatin1String("auto")) {
+        // mpv knows the picture and decides: a transcode the server tone mapped to SDR is SDR whatever the item was before
+        hdr = Kinefin::videoIsHdr(gamma, QString(), false);
+    } else {
+        // Unknown until the first video-params of a file: the source's hint, or what this item already was, so a reload does not drop the HDR path for a moment
+        const StreamSummary *video = pickStream(m_source.media.source, u"Video");
+        QString rangeType;
+        if (video)
+            rangeType = video->videoRangeType.isEmpty() ? video->videoRange : video->videoRangeType;
+        const bool hintUsable = m_source.method == PlaybackSource::Method::Direct
+                                || m_source.method == PlaybackSource::Method::Local;
+        hdr = m_videoIsHdr || Kinefin::videoIsHdr(QString(), rangeType, hintUsable);
+    }
+    if (hdr == m_videoIsHdr)
+        return;
+    m_videoIsHdr = hdr;
+    Q_EMIT videoIsHdrChanged();
+    // The clip entries (clipReason, clipVideoEnabled) read it
+    Q_EMIT changed();
+}
+
+void PlayerController::resetVideoIsHdr()
+{
+    if (!std::exchange(m_videoIsHdr, false))
+        return;
+    Q_EMIT videoIsHdrChanged();
+    Q_EMIT changed();
+}
+
+bool PlayerController::hdrOutputSettingAuto() const
+{
+    return m_settings.value(QStringLiteral("video"), QStringLiteral("hdr_output")).toString()
+           != QLatin1String("off");
+}
+
 std::optional<int> PlayerController::streamIndexOfTrack(const QString &type, int id) const
 {
     if (!active() || !m_engine.isInitialized())
@@ -3478,24 +3534,10 @@ bool PlayerController::clipCached() const
 
 QString PlayerController::clipCommonReason() const
 {
-    const bool local = m_localPlayback && !m_localSourcePath.isEmpty();
-    if (!local) {
-        const StreamSummary *video = pickStream(m_source.media.source, u"Video");
-        bool hdr = video
-                   && (video->videoRange == QLatin1String("HDR")
-                       || video->videoRangeType.startsWith(QLatin1String("HDR"))
-                       || video->videoRangeType.startsWith(QLatin1String("DOVI")));
-        // A stream's clip is the picture mpv decodes: a transcode the server tone mapped is SDR whatever the source was
-        const QString gamma =
-            clipFromCache() ? m_engine.mpvProperty(QStringLiteral("video-params/gamma")).toString()
-                            : QString();
-        if (!gamma.isEmpty())
-            hdr = gamma == QLatin1String("pq") || gamma == QLatin1String("hlg");
-        if (hdr)
-            return i18n("Clips cannot be saved from HDR video");
-        if (clipFromCache() && !clipCached())
-            return i18n("The start of the clip is no longer buffered");
-    }
+    if (m_videoIsHdr)
+        return i18n("Clips cannot be saved from HDR video");
+    if (clipFromCache() && !clipCached())
+        return i18n("The start of the clip is no longer buffered");
     return {};
 }
 

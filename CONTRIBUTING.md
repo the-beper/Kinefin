@@ -40,7 +40,7 @@ The build tree defaults to `/buildtmp/check` (a named podman volume that build-e
 
 mpvqt 1.2.1 is fetched by the root `CMakeLists.txt` (`FetchContent`, SHA256 pinned); the Flatpak manifest pins the same tarball and points `KINEFIN_MPVQT_URL` at it, so the two pins must move together. Its renderer is replaced by the copy in `third_party/mpvqt/` (the patch step of `FetchContent`); a new mpvqt version needs that copy diffed against its own renderer first.
 
-The picture-in-picture window's KWin surface (`src/app/PipSurface.cpp`, the `xx_pip_v1` protocol vendored in `third_party/wayland/`) uses QtWaylandClient's private headers, which only the Flatpak SDK ships: it compiles in the Flatpak build alone (CMake prints `KWin picture-in-picture surface (xx_pip_v1): ON`), while the native build and the offscreen tests get the ordinary-window fallback.
+The picture-in-picture window's KWin surface (`src/app/PipSurface.cpp`, the `xx_pip_v1` protocol vendored in `third_party/wayland/`) and the HDR output (`src/app/HdrVideoWindow.cpp`, `HdrColorManagement.cpp`) use QtWaylandClient's private headers. The build image has them (`qt6-qtbase-private-devel`) and so has the Flatpak SDK, so both builds compile the picture-in-picture surface and the HDR output (CMake prints `KWin picture-in-picture surface (xx_pip_v1): ON` and `HDR video output (color-management-v1): ON`). The offscreen tests still get the ordinary-window fallback.
 
 After changing `build/Containerfile`, rebuild the local image before checking:
 

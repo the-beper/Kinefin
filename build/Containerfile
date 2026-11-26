@@ -13,7 +13,7 @@ RUN dnf install -y --setopt=install_weak_deps=False \
         clang-tools-extra cppcheck reuse \
         dbus-devel dbus-daemon libxml2 desktop-file-utils appstream gettext curl \
         mpv-devel SDL3-devel \
-        qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qtsvg-devel qt6-qtwayland-devel \
+        qt6-qtbase-devel qt6-qtbase-private-devel qt6-qtdeclarative-devel qt6-qtsvg-devel qt6-qtwayland-devel \
         qt6-qtwebsockets-devel openssl-devel \
         extra-cmake-modules \
         kf6-kirigami-devel kf6-kirigami-addons kf6-ki18n-devel kf6-kconfig-devel \

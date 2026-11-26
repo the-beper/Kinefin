@@ -3808,6 +3808,177 @@ class TestPlayerController : public QObject {
         QVERIFY(!chain.controller.clipVideoEnabled());
     }
 
+    // Before mpv knows the picture the server's range type is the hint, for a source played as it is; a transcode ignores it, as the server may tone map
+    void videoIsHdrFromRangeType()
+    {
+        using Method = Kinefin::PlaybackSource::Method;
+        const auto hdrOf = [](Method method, const QString &rangeType) {
+            Chain chain;
+            if (!chain.ok
+                || !chain.engine()->init({QStringLiteral("vo=null"), QStringLiteral("ao=null")})
+                || !chain.controller.playItem(kMovie, 0))
+                return std::optional<bool>();
+            Kinefin::PlaybackSource source;
+            source.itemId = kMovie;
+            source.mediaSourceId = QStringLiteral("c1b2a3d4e5f6071829304a5b6c7d8e9f");
+            source.playSessionId = QStringLiteral("s1");
+            source.method = method;
+            source.url = QUrl(TestWav::writeWavClip(chain.dir, 5));
+            Kinefin::StreamSummary video;
+            video.type = QStringLiteral("Video");
+            video.videoRangeType = rangeType;
+            source.media.source.streams.append(video);
+            if (source.url.isEmpty())
+                return std::optional<bool>();
+            Q_EMIT chain.client.playbackInfoReady(source);
+            if (!QTest::qWaitFor([&chain] { return chain.controller.canSeek(); }))
+                return std::optional<bool>();
+            return std::optional<bool>(chain.controller.videoIsHdr());
+        };
+        for (const QString &type :
+             {QStringLiteral("HDR10"), QStringLiteral("HDR10Plus"), QStringLiteral("HLG"),
+              QStringLiteral("DOVI"), QStringLiteral("DOVIWithHDR10"),
+              QStringLiteral("DOVIWithHLG")}) {
+            QCOMPARE(hdrOf(Method::Direct, type), std::optional<bool>(true));
+            QCOMPARE(hdrOf(Method::Transcode, type), std::optional<bool>(false));
+        }
+        QCOMPARE(hdrOf(Method::Direct, QStringLiteral("SDR")), std::optional<bool>(false));
+        QCOMPARE(hdrOf(Method::Direct, QStringLiteral("DOVIWithSDR")), std::optional<bool>(false));
+        QCOMPARE(hdrOf(Method::Direct, QString()), std::optional<bool>(false));
+    }
+
+    void videoIsHdrChangeIsSignalled()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        QVERIFY(chain.engine()->init({QStringLiteral("vo=null"), QStringLiteral("ao=null")}));
+        QVERIFY(chain.controller.playItem(kMovie, 0));
+        QVERIFY(!chain.controller.videoIsHdr());
+        QSignalSpy hdrChanged(&chain.controller, &PlayerController::videoIsHdrChanged);
+        QSignalSpy changed(&chain.controller, &PlayerController::changed);
+        Kinefin::PlaybackSource source;
+        source.itemId = kMovie;
+        source.mediaSourceId = QStringLiteral("c1b2a3d4e5f6071829304a5b6c7d8e9f");
+        source.playSessionId = QStringLiteral("s1");
+        source.method = Kinefin::PlaybackSource::Method::Direct;
+        source.url = QUrl(TestWav::writeWavClip(chain.dir, 5));
+        Kinefin::StreamSummary video;
+        video.type = QStringLiteral("Video");
+        video.videoRangeType = QStringLiteral("HDR10");
+        source.media.source.streams.append(video);
+        QVERIFY(!source.url.isEmpty());
+        Q_EMIT chain.client.playbackInfoReady(source);
+        QTRY_VERIFY(chain.controller.videoIsHdr());
+        QCOMPARE(hdrChanged.count(), 1);
+        // The clip entries are bound to `changed`
+        QVERIFY(changed.count() >= 1);
+    }
+
+    // A transcode has no hint: mpv's gamma decides, once known it holds for the item, and the gap of mpv's picture facts during the handover to the HDR surface does not take it back
+    void videoIsHdrOfATranscodeIsLatched()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        QVERIFY(playsClip(chain, Kinefin::PlaybackSource::Method::Transcode));
+        QVERIFY(!chain.controller.videoIsHdr());
+        auto *mpv = chain.engine()->controller();
+        Q_EMIT mpv->propertyChanged(
+            QStringLiteral("video-params"),
+            QVariantMap{{QStringLiteral("gamma"), QStringLiteral("bt.1886")}});
+        QVERIFY(!chain.controller.videoIsHdr());
+        QSignalSpy hdrChanged(&chain.controller, &PlayerController::videoIsHdrChanged);
+        Q_EMIT mpv->propertyChanged(QStringLiteral("video-params"),
+                                    QVariantMap{{QStringLiteral("gamma"), QStringLiteral("hlg")}});
+        QVERIFY(chain.controller.videoIsHdr());
+        QCOMPARE(chain.controller.hdrVideoFacts().gamma, QStringLiteral("hlg"));
+        // The video is off while the render context changes hands: the property is unavailable
+        Q_EMIT mpv->propertyChanged(QStringLiteral("video-params"), QVariant());
+        QVERIFY(chain.controller.videoIsHdr());
+        QCOMPARE(chain.controller.hdrVideoFacts().gamma, QStringLiteral("hlg"));
+        QCOMPARE(hdrChanged.count(), 1);
+        // The same item again keeps it until mpv knows the picture: a transcode the server tone mapped to SDR is SDR
+        QVERIFY(chain.controller.playItem(kMovie, 0));
+        QVERIFY(chain.controller.videoIsHdr());
+        Q_EMIT mpv->propertyChanged(
+            QStringLiteral("video-params"),
+            QVariantMap{{QStringLiteral("gamma"), QStringLiteral("bt.1886")}});
+        QVERIFY(!chain.controller.videoIsHdr());
+        QCOMPARE(hdrChanged.count(), 2);
+        // Another item starts without it
+        QVERIFY(chain.controller.playItem(kOtherMovie, 0));
+        QVERIFY(!chain.controller.videoIsHdr());
+        QCOMPARE(hdrChanged.count(), 2);
+    }
+
+    // A download has no source summary (openLocal): mpv's gamma decides, and the clip refusal follows it as it does for a stream
+    void aLocalFileIsHdrFromMpvsGamma()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        const QString clip = QUrl(TestWav::writeWavClip(chain.dir, 30)).toLocalFile();
+        QVERIFY(!clip.isEmpty());
+        QVERIFY(chain.engine()->init({QStringLiteral("vo=null"), QStringLiteral("ao=null")}));
+        QVERIFY(chain.controller.playLocalFile(clip, kMovie, QStringLiteral("Local Movie"), {}));
+        QTRY_VERIFY(chain.controller.canSeek());
+        QVERIFY(chain.controller.localPlayback());
+        QVERIFY(!chain.controller.videoIsHdr());
+        chain.playsAt(1.0, 30);
+        chain.controller.markClipStart();
+        chain.playsAt(5.0, 30);
+        chain.controller.markClipEnd();
+        QVERIFY(chain.controller.clipVideoEnabled());
+        QVERIFY(chain.controller.clipGifEnabled());
+        QSignalSpy changed(&chain.controller, &PlayerController::changed);
+        Q_EMIT chain.engine()->controller()->propertyChanged(
+            QStringLiteral("video-params"),
+            QVariantMap{{QStringLiteral("gamma"), QStringLiteral("pq")},
+                        {QStringLiteral("primaries"), QStringLiteral("bt.2020")}});
+        QVERIFY(chain.controller.videoIsHdr());
+        QVERIFY(changed.count() >= 1);
+        QCOMPARE(chain.controller.clipReason(),
+                 QStringLiteral("Clips cannot be saved from HDR video"));
+        QVERIFY(!chain.controller.clipVideoEnabled());
+        QVERIFY(!chain.controller.clipGifEnabled());
+        // The download of another item is no HDR video until mpv says so
+        QVERIFY(chain.controller.playItem(kOtherMovie, 0));
+        QVERIFY(!chain.controller.videoIsHdr());
+    }
+
+    // `video.hdr_output` is Auto unless it says off: an invalid stored value reads as Auto
+    void theHdrOutputSettingReadsAutoUnlessOff()
+    {
+        {
+            Chain chain;
+            QVERIFY(chain.ok);
+            QVERIFY(chain.controller.hdrOutputSettingAuto());
+        }
+        {
+            Chain chain("[video]\nhdr_output=off\n");
+            QVERIFY(chain.ok);
+            QVERIFY(!chain.controller.hdrOutputSettingAuto());
+        }
+        {
+            Chain chain("[video]\nhdr_output=maybe\n");
+            QVERIFY(chain.ok);
+            QVERIFY(chain.controller.hdrOutputSettingAuto());
+        }
+        Chain chain;
+        QVERIFY(chain.ok);
+        QSignalSpy changed(&chain.controller, &PlayerController::hdrOutputSettingChanged);
+        QVERIFY(chain.settings.setValue(QStringLiteral("video"), QStringLiteral("hdr_output"),
+                                        QStringLiteral("off")));
+        QCOMPARE(changed.count(), 1);
+        QVERIFY(!chain.controller.hdrOutputSettingAuto());
+        QVERIFY(!chain.settings.setValue(QStringLiteral("video"), QStringLiteral("hdr_output"),
+                                         QStringLiteral("sometimes")));
+        QCOMPARE(changed.count(), 1);
+        QVERIFY(!chain.controller.hdrOutputSettingAuto());
+        QVERIFY(chain.settings.setValue(QStringLiteral("video"), QStringLiteral("hdr_output"),
+                                        QStringLiteral("auto")));
+        QCOMPARE(changed.count(), 2);
+        QVERIFY(chain.controller.hdrOutputSettingAuto());
+    }
+
     void aManualQualityStepPinsAndReopens()
     {
         Chain chain;

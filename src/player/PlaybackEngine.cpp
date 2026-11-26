@@ -181,6 +181,7 @@ void PlaybackEngine::wireController()
         {"hwdec-current", MPV_FORMAT_STRING, 10},
         {"video-dec-params", MPV_FORMAT_NODE, 11},
         {"vid", MPV_FORMAT_NODE, 12},
+        {"video-params", MPV_FORMAT_NODE, 13},
     };
     for (const Observed &entry : observed) {
         if (m_renderer)
@@ -236,6 +237,7 @@ bool PlaybackEngine::open(const PlaybackSource &source, bool startPaused)
     m_videoTrackId.reset();
     m_restorePending = false;
     m_cacheStalled = false;
+    setHdrVideoFacts({});
     settleSeek();
     if (m_durationTicks != 0) {
         m_durationTicks = 0;
@@ -451,6 +453,19 @@ void PlaybackEngine::onPropertyChanged(const QString &property, const QVariant &
     } else if (property == QLatin1String("video-dec-params")) {
         if (value.isValid())
             Q_EMIT videoParamsChanged();
+    } else if (property == QLatin1String("video-params")) {
+        // Unavailable (an invalid value) while the video is off, as it is during the handover to the HDR surface and a reload: the last facts stay until the file ends, or the HDR path would leave for the gap and enter again. The strings come from the file, so they are capped
+        if (!value.isValid())
+            return;
+        const QVariantMap params = value.toMap();
+        HdrVideoFacts facts;
+        facts.gamma = params.value(QStringLiteral("gamma")).toString().left(64);
+        facts.primaries = params.value(QStringLiteral("primaries")).toString().left(64);
+        facts.maxCll = params.value(QStringLiteral("max-cll")).toDouble();
+        facts.maxFall = params.value(QStringLiteral("max-fall")).toDouble();
+        facts.minLuma = params.value(QStringLiteral("min-luma")).toDouble();
+        facts.maxLuma = params.value(QStringLiteral("max-luma")).toDouble();
+        setHdrVideoFacts(facts);
     } else if (property == QLatin1String("vid")) {
         // Only a selected track is remembered: the off state is what restoreVideo repairs
         if (value.typeId() == QMetaType::LongLong || value.typeId() == QMetaType::Int)
@@ -536,8 +551,17 @@ void PlaybackEngine::restoreVideo(bool afterLoad)
     setProperty(QStringLiteral("vid"), *track);
 }
 
+void PlaybackEngine::setHdrVideoFacts(const HdrVideoFacts &facts)
+{
+    if (facts == m_hdrVideoFacts)
+        return;
+    m_hdrVideoFacts = facts;
+    Q_EMIT hdrVideoFactsChanged();
+}
+
 void PlaybackEngine::clearVideoFacts()
 {
+    setHdrVideoFacts({});
     const bool hadSize = m_videoFacts.contains(QStringLiteral("videoWidth"))
                          || m_videoFacts.contains(QStringLiteral("videoHeight"));
     m_videoFacts.clear();
