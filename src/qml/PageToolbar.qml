@@ -5,7 +5,7 @@ import QtQuick.Controls as Controls
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 
-// The row a page puts under the window header, in the style of the Movies and Shows tabs (it replaces Kirigami's title row, so the page sets `globalToolBarStyle: Kirigami.ApplicationHeaderStyle.None`): at its start the way back of a page that sits above another and the page's name, then the page's actions, labelled in the Wide header and icons with tooltips below it, what does not fit in the overflow menu. With nothing to show it takes no room
+// The row a page puts under the window header, in the style of the Movies and Shows tabs (it replaces Kirigami's title row, so the page sets `globalToolBarStyle: Kirigami.ApplicationHeaderStyle.None`): at its start the way back of a page that sits above another and the page's name, then the page's actions, labelled in the Wide header and icons with tooltips below it, what does not fit in the overflow menu. With nothing to show it takes no room, except in a Compact window, which has no header: the row is the top of the page there, and it leaves the start corner to the navigation button that floats over it
 Item {
     id: bar
 
@@ -23,7 +23,7 @@ Item {
 
     readonly property bool wide: Window.window ? Window.window.wideHeader : true
     // Its own content decides, never an ancestor's visibility: a page sliding out must keep its height
-    readonly property bool shown: backShown || title.length > 0 || toolbar.actions.length > 0
+    readonly property bool shown: backShown || title.length > 0 || toolbar.actions.length > 0 || PageMetrics.cornerNavigation
 
     visible: shown
     // The height of the row of the library page: the bars of the pages look alike
@@ -62,6 +62,12 @@ Item {
             rightMargin: Kirigami.Units.largeSpacing
         }
         spacing: Kirigami.Units.mediumSpacing
+
+        // The navigation button floats over the start of the row in a Compact window: the way back or the name starts after it
+        Item {
+            visible: PageMetrics.cornerNavigation
+            Layout.preferredWidth: PageMetrics.cornerButton
+        }
 
         PageBackButton {
             visible: bar.backShown

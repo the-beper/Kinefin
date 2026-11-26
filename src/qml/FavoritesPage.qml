@@ -126,6 +126,8 @@ Kirigami.ScrollablePage {
     header: ColumnLayout {
         spacing: 0
 
+        CornerStrip {}
+
         FilterChips {
             dialog: filterDialog
             list: page.favorites

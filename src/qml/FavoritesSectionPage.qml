@@ -199,10 +199,10 @@ Kirigami.ScrollablePage {
             type: page.type
         }
         // The page margin on the left, as the library grid has it: the cards do not touch the edge
-        leftMargin: Kirigami.Units.largeSpacing
+        leftMargin: PageMetrics.margin
         cellWidth: Math.floor(usableWidth / columns)
         cellHeight: Math.round((cellWidth - Kirigami.Units.largeSpacing - Kirigami.Units.smallSpacing * 2) * 1.5) + Kirigami.Units.gridUnit * 3.5 + Kirigami.Units.largeSpacing
-        topMargin: Kirigami.Units.largeSpacing * 2
+        topMargin: PageMetrics.margin
         bottomMargin: Kirigami.Units.largeSpacing
         activeFocusOnTab: true
         keyNavigationEnabled: true

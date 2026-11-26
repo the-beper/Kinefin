@@ -6,7 +6,7 @@ import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 import org.kde.kirigamiaddons.components as Components
 
-// The bar of a window without the sidebar: a Compact window (narrower than `compactLimit`), and an offline window with only Downloads to choose from (a signed-out window has no bar: the menu button stands alone in the top corner). It has the search button, which opens the search popup, the one menu button (the account avatar) and, in Compact, the button that opens the sections in a drawer; the queue and the SyncPlay group fold into the menu. With the sidebar showing, the bar is hidden: its menu button, its menus, its dialogs and its actions stay here, and the button stands at the foot of the sidebar
+// The bar of an offline window with only Downloads to choose from: it has the one menu button (the account avatar). A signed-out window has no bar (the menu button stands alone in the top corner), and neither has a window with sections to choose from: the sidebar stands at its edge, or in a Compact window (narrower than `compactLimit`) the drawer opens from the button that floats in the top corner. The bar is hidden there: its menu button, its menus, its dialogs and its actions stay here, and the button stands at the foot of the sidebar, or in a Compact window the main menu hangs from the floating button and the queue and the SyncPlay group fold into it
 Item {
     id: root
     objectName: "shellHeader"
@@ -29,6 +29,8 @@ Item {
     // A SyncPlay group is joined: the sidebar's entry opens its menu, and in Compact the menu of the bar holds it
     readonly property bool groupJoined: signedIn && shell.groupJoined
     readonly property bool groupMenuOpened: groupMenu.opened
+    // What the main menu hangs from: its button, or in a Compact window, where the bar is hidden and the button stands in it, the floating navigation button
+    readonly property Item menuOrigin: shell.cornerNavigation ? shell.cornerNavigationButton : mainMenuButton
 
     // The signed-in user, found among the saved users by id: null when signed out or when the list has no such entry
     readonly property var currentUser: {
@@ -38,9 +40,6 @@ Item {
 
     // The height and the margins of the bars of the pages
     implicitHeight: Math.max(rightCluster.implicitHeight + Kirigami.Units.smallSpacing * 2, Kirigami.Units.gridUnit * 2.5)
-
-    // The button of a Compact window asks for the drawer with the sections
-    signal navigationRequested
 
     // A gamepad's Start opens the main menu where its button stands
     function openMainMenu() {
@@ -52,36 +51,13 @@ Item {
         groupPlacement.openFor(button);
     }
 
-    // The drawer of a Compact window gives the keyboard back to the button that opened it
-    function focusNavigationButton() {
-        navigationButton.forceActiveFocus(Qt.TabFocusReason);
-    }
-
     // Runs `action` at once, or once the user settled the unsaved preferences draft that the page above would lose
     function afterUnsavedSettled(action) {
         if (!shell.askBeforeLeaving(action))
             action();
     }
 
-    // First in the file: siblings take the Tab order by declaration, so this button precedes the back button and the right cluster. A Compact window has no sidebar: it opens the drawer with the sections, which gives the keyboard back here when it closes without a choice
-    QQC2.ToolButton {
-        id: navigationButton
-        objectName: "navigationButton"
-        flat: false
-        visible: root.compact && root.navigation.navigable
-        anchors.left: parent.left
-        anchors.leftMargin: Kirigami.Units.largeSpacing
-        anchors.verticalCenter: parent.verticalCenter
-        text: i18nc("@action:button", "Open Navigation")
-        icon.name: "application-menu"
-        display: QQC2.AbstractButton.IconOnly
-        QQC2.ToolTip.text: text
-        QQC2.ToolTip.visible: hovered || visualFocus
-        QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
-        onClicked: root.navigationRequested()
-    }
-
-    // Only a narrow Settings page with an entry open has it: there the entry hides the list, and this is the pointer's way back to it (with the sidebar showing the page has its own)
+    // Only a narrow Settings page with an entry open has it: there the entry hides the list, and this is the pointer's way back to it (with the sidebar or the drawer the page has its own)
     QQC2.ToolButton {
         id: headerBackButton
         objectName: "headerBackButton"
@@ -89,7 +65,7 @@ Item {
         visible: shell.pageStack.currentItem?.objectName === "settingsPage" && shell.pageStack.currentItem.narrow && shell.pageStack.currentItem.entryOpen
         z: 2
         anchors.left: parent.left
-        anchors.leftMargin: Kirigami.Units.largeSpacing + (navigationButton.visible ? navigationButton.implicitWidth + Kirigami.Units.smallSpacing : 0)
+        anchors.leftMargin: Kirigami.Units.largeSpacing
         anchors.verticalCenter: parent.verticalCenter
         text: i18nc("@action:button", "Back")
         icon.name: Qt.application.layoutDirection === Qt.RightToLeft ? "go-next" : "go-previous"
@@ -110,24 +86,6 @@ Item {
         }
         spacing: Kirigami.Units.smallSpacing
 
-        // The search popup, as Ctrl+F opens it
-        QQC2.ToolButton {
-            id: searchButton
-            objectName: "headerSearchButton"
-
-            Layout.alignment: Qt.AlignVCenter
-            visible: root.compact && root.signedIn
-            flat: false
-            text: i18nc("@action:button", "Search")
-            icon.name: "search"
-            display: QQC2.AbstractButton.IconOnly
-            QQC2.ToolTip.text: text
-            QQC2.ToolTip.visible: hovered || visualFocus
-            QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
-            down: shell.currentSection === "search"
-            onClicked: shell.openSearch()
-        }
-
         // The one menu: the avatar of the user marks the account, the arrow the menu; signed out it is the plain menu icon. With the sidebar showing, this same button stands at the foot of the sidebar, with the avatar alone
         QQC2.ToolButton {
             id: mainMenuButton
@@ -142,7 +100,7 @@ Item {
             Layout.leftMargin: root.inSidebar ? Kirigami.Units.smallSpacing : 0
             Layout.rightMargin: root.inSidebar ? Kirigami.Units.smallSpacing : 0
             Layout.minimumHeight: implicitHeight
-            implicitHeight: root.inSidebar ? Kirigami.Units.iconSizes.smallMedium + Kirigami.Units.largeSpacing * 2 : searchButton.implicitHeight
+            implicitHeight: root.inSidebar ? Kirigami.Units.iconSizes.smallMedium + Kirigami.Units.largeSpacing * 2 : PageMetrics.cornerButton
             // The hover and focus frame keeps some room around the avatar and the arrow
             leftPadding: root.inSidebar ? Kirigami.Units.smallSpacing : Kirigami.Units.largeSpacing
             rightPadding: root.inSidebar ? Kirigami.Units.smallSpacing : Kirigami.Units.largeSpacing
@@ -166,7 +124,7 @@ Item {
                 RowLayout {
                     id: userRow
                     anchors.centerIn: parent
-                    spacing: Kirigami.Units.smallSpacing
+                    spacing: root.inSidebar ? Kirigami.Units.mediumSpacing : Kirigami.Units.smallSpacing
 
                     Components.Avatar {
                         objectName: "accountAvatar"
@@ -186,12 +144,14 @@ Item {
                         sourceSize.width: width * Screen.devicePixelRatio
                         sourceSize.height: height * Screen.devicePixelRatio
                     }
+                    // The arrow points where the menu opens: below the header's button, beside the rail's
                     Kirigami.Icon {
-                        visible: root.signedIn && !root.inSidebar
-                        source: "arrow-down"
+                        objectName: "accountMenuArrow"
+                        visible: root.signedIn
+                        source: !root.inSidebar ? "arrow-down" : Qt.application.layoutDirection === Qt.RightToLeft ? "go-previous-symbolic" : "go-next-symbolic"
                         color: Kirigami.Theme.textColor
-                        Layout.preferredWidth: Kirigami.Units.iconSizes.small
-                        Layout.preferredHeight: Kirigami.Units.iconSizes.small
+                        Layout.preferredWidth: root.inSidebar ? Kirigami.Units.iconSizes.smallMedium : Kirigami.Units.iconSizes.small
+                        Layout.preferredHeight: root.inSidebar ? Kirigami.Units.iconSizes.smallMedium : Kirigami.Units.iconSizes.small
                     }
                     Kirigami.Icon {
                         visible: !root.signedIn
@@ -272,7 +232,7 @@ Item {
         }
     }
 
-    // The queue of a Compact window, as a menu entry, since the bar has no room for it; a MenuItem does not mirror the visibility of its action, so the entry hides on its own
+    // The queue of a Compact window, as a menu entry, since there is no rail entry for it; a MenuItem does not mirror the visibility of its action, so the entry hides on its own
     Kirigami.Action {
         id: compactQueueAction
         objectName: "compactQueueAction"
@@ -344,8 +304,8 @@ Item {
         onTriggered: root.afterUnsavedSettled(() => root.connection.cancel())
     }
 
-    // Under the button, right-aligned with it (left-aligned when mirrored) as the bar ends there, and above it in a window too short to hold the menu below; beside it, as high as the window allows, while the button stands in the sidebar
-    PopupPlacement { popup: mainMenu; anchor: mainMenuButton; beside: root.inSidebar }
+    // Under the button, right-aligned with it (left-aligned when mirrored) as the bar ends there, and above it in a window too short to hold the menu below; beside it, as high as the window allows, while the button stands in the sidebar. A Compact window has no bar: the menu hangs from the floating navigation button, whose corner the drawer opened from
+    PopupPlacement { popup: mainMenu; anchor: root.menuOrigin; beside: root.inSidebar }
 
     // The quick actions of the group the viewer is in: the menu of the sidebar's entry and, in a compact window, an entry of the main menu
     component GroupMenu: QQC2.Menu {
@@ -434,7 +394,7 @@ Item {
     QQC2.Menu {
         id: mainMenu
         objectName: "mainMenu"
-        parent: mainMenuButton
+        parent: root.menuOrigin
         // The widest shown entry (its label plus the shortcut column, which the style's MenuItem counts in its implicit width) and the menu's paddings, never wider than the window
         readonly property real widestEntry: {
             let widest = 0;

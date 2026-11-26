@@ -135,6 +135,12 @@ QVariantMap SeasonEpisodesModel::rowMap(const JellyfinClient *client, const Item
     return map;
 }
 
+QVariant SeasonEpisodesModel::roleValue(const JellyfinClient *client, const ItemSummary &item,
+                                        int role)
+{
+    return episodeValue(client, item, true, role);
+}
+
 QVariant SeasonEpisodesModel::rowData(const ItemSummary &item, bool loaded, int role) const
 {
     return episodeValue(m_client, item, loaded, role);

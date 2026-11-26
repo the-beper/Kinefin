@@ -4,7 +4,7 @@ import QtQuick
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 
-// Everything in the library a person appears in, opened from a cast card
+// Everything in the library a person appears in, opened from a cast card: movies, the series they are in the cast of, and one card for each series they only have episodes in, which opens their episodes of it
 Kirigami.ScrollablePage {
     id: page
     objectName: "personPage"
@@ -86,8 +86,8 @@ Kirigami.ScrollablePage {
             atStart: grid.atYBeginning
         }
         objectName: "personItemsGrid"
-        // Room under the bar: the rows scroll up to its line, but open clear of it
-        topMargin: Kirigami.Units.largeSpacing * 2
+        // The page margin under the bar, as at its sides: the rows scroll up to its line, but open clear of it
+        topMargin: PageMetrics.margin
 
         // Wide tiles of about fourteen grid units, like the Home row
         readonly property real usableWidth: Math.max(0, width - leftMargin)
@@ -95,7 +95,7 @@ Kirigami.ScrollablePage {
 
         model: page.model
         // The page margin on the left, as the library grid has it: the cards do not touch the edge
-        leftMargin: Kirigami.Units.largeSpacing
+        leftMargin: PageMetrics.margin
         cellWidth: Math.floor(usableWidth / columns)
         // A 16:9 image inside the tile margins, then the name and the second line
         cellHeight: Math.round((cellWidth - Kirigami.Units.largeSpacing - Kirigami.Units.smallSpacing * 2) * 9 / 16) + Kirigami.Units.gridUnit * 3.5 + Kirigami.Units.largeSpacing
@@ -108,7 +108,7 @@ Kirigami.ScrollablePage {
         // The tiles are not tab stops: the grid is, and it opens the current item
         function openCurrent() {
             if (grid.currentItem?.enabled)
-                page.Window.window.openItem(grid.currentItem.itemId, page);
+                grid.currentItem.openTarget();
         }
         Keys.onReturnPressed: openCurrent()
         Keys.onEnterPressed: openCurrent()
@@ -139,30 +139,25 @@ Kirigami.ScrollablePage {
         }
 
         delegate: MediaCard {
-            required property int seasonNumber
-            required property int episodeNumber
-            required property string episodeTitle
+            // A series the person only has episodes in: how many (0 for any other card)
+            required property int guestEpisodes
 
             width: grid.cellWidth - Kirigami.Units.largeSpacing
             height: grid.cellHeight - Kirigami.Units.largeSpacing
             // The grid is the one tab stop, the arrow keys move inside it
             focusPolicy: Qt.NoFocus
             landscape: true
+            // A guest-series card stands for the person's episodes: a menu would act on the whole series, without its favorite or played state
+            hasMenu: guestEpisodes === 0
             highlighted: GridView.isCurrentItem && grid.activeFocus
-            onClicked: page.Window.window.openItem(itemId, page)
-            subtitle: {
-                if (episodeNumber >= 0) {
-                    const label = EpisodeLabel.label(seasonNumber, episodeNumber);
-                    return episodeTitle.length > 0 ? i18nc("episode label and episode title", "%1 — %2", label, episodeTitle) : label;
-                }
-                return year > 0 ? String(year) : "";
-            }
-            spokenSubtitle: {
-                if (episodeNumber >= 0) {
-                    const label = EpisodeLabel.spoken(seasonNumber, episodeNumber);
-                    return episodeTitle.length > 0 ? i18nc("episode label and episode title", "%1 — %2", label, episodeTitle) : label;
-                }
-                return year > 0 ? String(year) : "";
+            onClicked: openTarget()
+            subtitle: guestEpisodes > 0 ? i18np("%1 episode", "%1 episodes", guestEpisodes) : (year > 0 ? String(year) : "")
+
+            function openTarget() {
+                if (guestEpisodes > 0)
+                    page.Window.window.openPersonSeries(itemId, name, page.personName);
+                else
+                    page.Window.window.openItem(itemId, page);
             }
         }
     }

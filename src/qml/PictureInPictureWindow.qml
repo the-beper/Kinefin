@@ -23,8 +23,10 @@ Controls.ApplicationWindow {
     }
     onVideoAspectChanged: if (videoAspect > 0) aspect = shapeOf(videoAspect)
     readonly property bool mirrored: Qt.application.layoutDirection === Qt.RightToLeft
-    // The strips along the edges that resize the window; the controls keep clear of them
+    // The room between the boxes and the window's edges
     readonly property int edgeWidth: OsdMetrics.edge
+    // The strips along the edges that resize the window: wider than that room, so they also take the outer rim of the boxes, as a window frame would
+    readonly property int gripWidth: Kirigami.Units.largeSpacing
     // The side of a button, and the room around it on its panel (shared with the mini player): the least window at its widest shape is 16 grid units by 5.3, which holds a panel at the top, another at the bottom and the strips along the edges
     readonly property int buttonSize: OsdMetrics.buttonSize
     readonly property int panelPadding: OsdMetrics.panelPadding
@@ -121,8 +123,8 @@ Controls.ApplicationWindow {
         id: area
         required property int edges
         readonly property bool diagonal: (area.edges & (Qt.LeftEdge | Qt.RightEdge)) && (area.edges & (Qt.TopEdge | Qt.BottomEdge))
-        width: pip.edgeWidth
-        height: pip.edgeWidth
+        width: pip.gripWidth
+        height: pip.gripWidth
         hoverEnabled: true
         cursorShape: !area.diagonal ? ((area.edges & (Qt.LeftEdge | Qt.RightEdge)) ? Qt.SizeHorCursor : Qt.SizeVerCursor)
                      : (area.edges === (Qt.TopEdge | Qt.LeftEdge) || area.edges === (Qt.BottomEdge | Qt.RightEdge)) ? Qt.SizeFDiagCursor : Qt.SizeBDiagCursor

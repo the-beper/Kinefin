@@ -115,8 +115,8 @@ Kirigami.ScrollablePage {
     ListView {
         id: list
         objectName: "downloadRulesList"
-        // Room under the bar: the rows scroll up to its line, but open clear of it
-        topMargin: Kirigami.Units.largeSpacing * 2
+        // The page margin under the bar, as at its sides: the rows scroll up to its line, but open clear of it
+        topMargin: PageMetrics.margin
 
         // On the view, not in its content: the shadow stays under the toolbar while the rows scroll
         TopShadow {

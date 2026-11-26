@@ -114,6 +114,9 @@ Kirigami.ApplicationWindow {
     // Signed out (the server and sign-in pages) the window has no rail and no bar: the main menu button stands alone in the top corner, so that Settings, About and Switch Server stay in reach
     readonly property bool cornerMenu: !startupVisible && !navigation.navigable && !offline
     readonly property Item cornerMenuSlot: cornerSlot
+    // A Compact window with sections to choose from has no bar either: a button floating in the top corner opens the drawer, and the pages keep that corner free (PageMetrics)
+    readonly property bool cornerNavigation: shellSidebar.drawerAllowed
+    readonly property Item cornerNavigationButton: navigationButton
     // Where the header's menu button stands while the sidebar shows, and the SyncPlay group menu the sidebar's entry opens: both belong to the header
     readonly property Item sidebarUserSlot: shellSidebar.userSlot
     readonly property bool groupMenuOpened: shellHeader.groupMenuOpened
@@ -128,7 +131,7 @@ Kirigami.ApplicationWindow {
         shell: window
     }
 
-    // The bar of a window without the sidebar (Compact, or offline); with the sidebar showing, and signed out, it is hidden and takes no height, and the pages start at the top. It spans the window above the pages
+    // The bar of an offline window with only Downloads to choose from; with the sidebar or the drawer's button showing, and signed out, it is hidden and takes no height, and the pages start at the top. It spans the window above the pages
     header: ShellHeader {
         id: shellHeader
         // It never leaves the layout while it shows, since any resize of the page row ends Kirigami's slide at once: the player page reaches up under it, and it fades with the player page's slide and lets the clicks through to it while the player is in front
@@ -137,11 +140,10 @@ Kirigami.ApplicationWindow {
         // Covered by the player, it is not read out over it either
         Accessible.ignored: window.playbackPageShowing
         // Signed out (the server and sign-in pages) there is nothing for it to hold: no sections to open, no search, no queue
-        visible: !window.startupVisible && window.sidebarWidth === 0 && !window.cornerMenu
+        visible: !window.startupVisible && window.sidebarWidth === 0 && !window.cornerMenu && !window.cornerNavigation
 
         shell: window
         navigation: navigation
-        onNavigationRequested: shellSidebar.openDrawer()
     }
 
     // The corner of a window with no bar: the header's menu button moves in here. Above the pages, below the startup cover
@@ -159,13 +161,46 @@ Kirigami.ApplicationWindow {
         }
     }
 
-    // The rail down the leading edge of the window, from its top, and in a Compact window the drawer the header's button opens. It fades out with the header while the player is in front
+    // The button of a Compact window, which has no bar: it floats in the leading top corner, centred in the height of the bar of a page, and opens the sections in the drawer. A child of the root item beside the content item, as the sidebar, so that Tab reaches it before the pages; it fades out with the header while the player is in front
+    QQC2.ToolButton {
+        id: navigationButton
+        objectName: "navigationButton"
+
+        parent: window.contentItem.parent
+        z: 3
+        flat: false
+        visible: window.cornerNavigation && !window.startupVisible && opacity > 0
+        opacity: window.headerOpacity
+        enabled: !window.playbackPageShowing
+        Accessible.ignored: window.playbackPageShowing
+        width: PageMetrics.cornerButton
+        height: PageMetrics.cornerButton
+        x: Qt.application.layoutDirection === Qt.RightToLeft ? (parent?.width ?? 0) - width - PageMetrics.margin : PageMetrics.margin
+        y: Math.round((PageMetrics.barHeight - height) / 2)
+        text: i18nc("@action:button", "Open Navigation")
+        icon.name: "application-menu"
+        display: QQC2.AbstractButton.IconOnly
+        QQC2.ToolTip.text: text
+        QQC2.ToolTip.visible: hovered || visualFocus
+        QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
+        onClicked: shellSidebar.openDrawer()
+    }
+
+    // The pages read the corner from the one place that holds the sizes of their content
+    Binding {
+        target: PageMetrics
+        property: "cornerNavigation"
+        value: window.cornerNavigation
+    }
+
+    // The rail down the leading edge of the window, from its top, and in a Compact window the drawer the corner button opens, or an edge swipe. It fades out with the header while the player is in front
     ShellSidebar {
         id: shellSidebar
 
         shell: window
         navigation: navigation
-        onDrawerDismissed: shellHeader.focusNavigationButton()
+        // The drawer closed without a choice: the keyboard goes back to the button that opened it
+        onDrawerDismissed: navigationButton.forceActiveFocus(window.keyboardDriven ? Qt.TabFocusReason : Qt.OtherFocusReason)
     }
 
     // The initial shell never flashes an empty page. The delay is short enough
@@ -214,7 +249,13 @@ Kirigami.ApplicationWindow {
     }
     Connections {
         target: window.connection
-        function onStateChanged() { Qt.callLater(window.settleStartup); }
+        function onStateChanged() {
+            // The question about plain HTTP opens its dialog at once: the cover goes without waiting for the minimum or the fade
+            if (window.connection.state === ConnectionController.ConfirmInsecure)
+                window.startupVisible = false;
+            else
+                Qt.callLater(window.settleStartup);
+        }
         function onHomeProjectionChanged() { Qt.callLater(window.settleStartup); }
     }
     Rectangle {
@@ -225,7 +266,10 @@ Kirigami.ApplicationWindow {
         color: Kirigami.Theme.backgroundColor
         opacity: window.startupVisible ? 1 : 0
         visible: opacity > 0
-        Behavior on opacity { NumberAnimation { duration: Kirigami.Units.longDuration; easing.type: Easing.OutCubic } }
+        Behavior on opacity {
+            enabled: window.connection.state !== ConnectionController.ConfirmInsecure
+            NumberAnimation { duration: Kirigami.Units.longDuration; easing.type: Easing.OutCubic }
+        }
         // Do not allow activating a page while the shell is still preparing.
         MouseArea { anchors.fill: parent; enabled: window.startupVisible }
         Column {
@@ -1147,6 +1191,13 @@ Kirigami.ApplicationWindow {
             return;
         popTo(fromPage);
         pageStack.push(Qt.resolvedUrl("PersonPage.qml"), { connection: connection, personName: personName });
+    }
+
+    // The episodes one person has in a series, from a series card of the person page
+    function openPersonSeries(seriesId, seriesName, personName) {
+        if (connection.state !== ConnectionController.Authenticated || !connection.personItems.showSeries(seriesId))
+            return;
+        pageStack.push(Qt.resolvedUrl("PersonSeriesEpisodesPage.qml"), { connection: connection, seriesName: seriesName, personName: personName });
     }
 
     // The page above the first one that holds changes the user has not saved (the User entry of Settings), or null

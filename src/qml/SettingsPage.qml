@@ -258,6 +258,8 @@ Kirigami.Page {
                     width: Math.max(0, parent.width)
                     spacing: 0
 
+                    CornerStrip {}
+
                     // The page has no title bar: the list names itself, as System Settings does
                     Kirigami.ListSectionHeader {
                         objectName: "settingsListHeader"
@@ -285,7 +287,7 @@ Kirigami.Page {
             visible: !page.narrow || page.entryOpen
             spacing: 0
 
-            // The way back to the list while an entry hides it, in the bar the other pages have: the window's header has the button otherwise, and it is hidden where the sidebar shows
+            // The way back to the list while an entry hides it, in the bar the other pages have: the window's header has the button otherwise, and it is hidden where the sidebar or the drawer's button shows
             PageToolbar {
                 id: settingsBar
                 Layout.fillWidth: true

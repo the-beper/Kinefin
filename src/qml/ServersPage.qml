@@ -110,8 +110,8 @@ Kirigami.ScrollablePage {
         }
     }
 
-    // The question opens once the connect cover is gone: the cover has its own Cancel, and the dialog would open over it
-    readonly property bool asking: confirming && !(page.Window.window?.startupVisible ?? false)
+    // The shell drops the connect cover as soon as the state is ConfirmInsecure, so the dialog opens at once
+    readonly property bool asking: confirming
     onAskingChanged: {
         if (asking)
             insecureDialog.open();

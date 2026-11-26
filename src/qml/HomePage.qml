@@ -20,6 +20,9 @@ Kirigami.ScrollablePage {
 
     title: i18n("Home")
 
+    // The same margin on every side as the grids of the other pages: Kirigami's default is a grid unit
+    padding: PageMetrics.margin
+
     // The scroll position, for the tab to come back as it was left
     function viewPosition() {
         return { currentIndex: 0, contentY: page.flickable.contentY };
@@ -76,6 +79,8 @@ Kirigami.ScrollablePage {
     ColumnLayout {
         id: homeColumn
         spacing: Kirigami.Units.largeSpacing
+
+        CornerStrip {}
 
         // One box at a time, the page's own error first
         MessageBox {

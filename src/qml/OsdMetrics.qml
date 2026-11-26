@@ -6,8 +6,8 @@ import org.kde.kirigami as Kirigami
 
 // The proportions of the boxes over the picture, shared by the mini player and the picture-in-picture window so that the two look alike
 QtObject {
-    // The distance of a box from the edge of its window: nothing touches an edge, and the picture-in-picture window keeps its resize strips this wide
-    readonly property int edge: Kirigami.Units.largeSpacing
+    // The distance of a box from the edge of its window: nothing touches an edge, and the picture-in-picture window's resize strips, wider, also take the boxes' outer rim
+    readonly property int edge: Kirigami.Units.smallSpacing
     // The side of a button, and the room around it on its panel; a box that is a button itself is the side of a panel
     readonly property int buttonSize: Math.round(Kirigami.Units.gridUnit * 1.75)
     readonly property int panelPadding: Math.round(Kirigami.Units.smallSpacing / 2)

@@ -56,10 +56,11 @@ Kirigami.ScrollablePage {
                 text: page.connection.errorText
             }
 
-            // The heading and the address are one block
+            // The heading and the address are one block, with room before what follows
             ColumnLayout {
                 Layout.fillWidth: true
-                spacing: 0
+                Layout.bottomMargin: Kirigami.Units.gridUnit
+                spacing: Kirigami.Units.smallSpacing
 
                 Kirigami.Heading {
                     Layout.fillWidth: true
@@ -222,42 +223,90 @@ Kirigami.ScrollablePage {
                 onClicked: publicUsers.expanded = !publicUsers.expanded
             }
 
-            Kirigami.FormLayout {
+            // The boxes and the button take the full width of the column, like the actions below; the labels hang in the free space at the left of the column, and stand above their boxes when there is not enough of it, as in a narrow form
+            ColumnLayout {
+                id: form
+
+                // The room at the left of the column, labels included
+                readonly property real labelRoom: (page.width - column.width) / 2 - Kirigami.Units.largeSpacing
+                readonly property bool labelsFit: labelRoom >= Math.max(usernameLabel.implicitWidth, passwordLabel.implicitWidth)
+
                 Layout.fillWidth: true
                 Layout.topMargin: publicUsers.visible ? Kirigami.Units.largeSpacing : 0
                 visible: !page.quick
+                spacing: Kirigami.Units.largeSpacing
 
-                Controls.TextField {
-                    id: username
-                    objectName: "usernameField"
+                // Without room at the left a label stands above its box, as in a narrow form
+                ColumnLayout {
                     Layout.fillWidth: true
-                    Kirigami.FormData.label: i18n("Username:")
-                    enabled: !page.signingIn
-                    Accessible.name: i18n("Username")
-                    onAccepted: password.forceActiveFocus()
-                    Keys.onUpPressed: event => {
-                        event.accepted = publicUsers.visible;
-                        if (event.accepted)
-                            publicUsers.forceActiveFocus(Qt.BacktabFocusReason);
+                    spacing: Kirigami.Units.smallSpacing
+
+                    Controls.Label {
+                        objectName: "usernameAboveLabel"
+                        visible: !form.labelsFit
+                        text: usernameLabel.text
                     }
-                    // A user known beforehand (from the picker) goes straight to the password
-                    Component.onCompleted: {
-                        text = page.connection.loginUserName;
-                        (text.length > 0 ? password : username).forceActiveFocus();
+                    Controls.TextField {
+                        id: username
+                        objectName: "usernameField"
+                        Layout.fillWidth: true
+                        enabled: !page.signingIn
+                        Accessible.name: i18n("Username")
+                        onAccepted: password.forceActiveFocus()
+
+                        Controls.Label {
+                            id: usernameLabel
+                            anchors.right: parent.left
+                            anchors.rightMargin: Kirigami.Units.largeSpacing
+                            anchors.verticalCenter: parent.verticalCenter
+                            visible: form.labelsFit
+                            horizontalAlignment: Text.AlignRight
+                            text: i18n("Username:")
+                        }
+                        Keys.onUpPressed: event => {
+                            event.accepted = publicUsers.visible;
+                            if (event.accepted)
+                                publicUsers.forceActiveFocus(Qt.BacktabFocusReason);
+                        }
+                        // A user known beforehand (from the picker) goes straight to the password
+                        Component.onCompleted: {
+                            text = page.connection.loginUserName;
+                            (text.length > 0 ? password : username).forceActiveFocus();
+                        }
                     }
                 }
-                Kirigami.PasswordField {
-                    id: password
-                    objectName: "passwordField"
+                ColumnLayout {
                     Layout.fillWidth: true
-                    Kirigami.FormData.label: i18n("Password:")
-                    enabled: !page.signingIn
-                    Accessible.name: i18n("Password")
-                    onAccepted: signIn.clicked()
+                    spacing: Kirigami.Units.smallSpacing
+
+                    Controls.Label {
+                        objectName: "passwordAboveLabel"
+                        visible: !form.labelsFit
+                        text: passwordLabel.text
+                    }
+                    Kirigami.PasswordField {
+                        id: password
+                        objectName: "passwordField"
+                        Layout.fillWidth: true
+                        enabled: !page.signingIn
+                        Accessible.name: i18n("Password")
+                        onAccepted: signIn.clicked()
+
+                        Controls.Label {
+                            id: passwordLabel
+                            anchors.right: parent.left
+                            anchors.rightMargin: Kirigami.Units.largeSpacing
+                            anchors.verticalCenter: parent.verticalCenter
+                            visible: form.labelsFit
+                            horizontalAlignment: Text.AlignRight
+                            text: i18n("Password:")
+                        }
+                    }
                 }
                 Controls.Button {
                     id: signIn
                     Layout.fillWidth: true
+                    Layout.topMargin: Kirigami.Units.largeSpacing
                     text: i18n("Sign In")
                     icon.name: "user-identity"
                     // A Jellyfin account may have no password: only the name is required
@@ -272,39 +321,40 @@ Kirigami.ScrollablePage {
                 }
             }
 
-            // The secondary actions in one centred row; they stack when the column is too narrow for all of them
+            // The secondary actions share the column width in equal cells; they stack when the column is too narrow for all of them
             GridLayout {
                 id: secondary
 
-                // The width the visible buttons need side by side
+                // The width the visible buttons need side by side, all as wide as the widest
                 readonly property real neededWidth: {
-                    let width = 0;
+                    let widest = 0;
                     let shown = 0;
                     for (const child of children) {
                         if (child.visible) {
-                            width += child.implicitWidth;
+                            widest = Math.max(widest, child.implicitWidth);
                             ++shown;
                         }
                     }
-                    return width + Math.max(0, shown - 1) * columnSpacing;
+                    return widest * shown + Math.max(0, shown - 1) * columnSpacing;
                 }
 
-                Layout.alignment: Qt.AlignHCenter
+                Layout.fillWidth: true
                 Layout.topMargin: Kirigami.Units.largeSpacing
                 visible: !page.quick
+                uniformCellWidths: true
                 columns: neededWidth <= column.width ? Math.max(1, children.length) : 1
                 columnSpacing: Kirigami.Units.largeSpacing
                 rowSpacing: Kirigami.Units.smallSpacing
 
                 Controls.Button {
-                    Layout.alignment: Qt.AlignHCenter
+                    Layout.fillWidth: true
                     text: i18n("Use Quick Connect")
                     icon.name: "smartphone"
                     enabled: !page.signingIn
                     onClicked: page.connection.startQuickConnect()
                 }
                 Controls.Button {
-                    Layout.alignment: Qt.AlignHCenter
+                    Layout.fillWidth: true
                     text: i18nc("@action:button Opens the list of the saved users of this server", "Choose Another User")
                     icon.name: "system-switch-user"
                     visible: page.connection.hasSavedUsers
@@ -312,7 +362,7 @@ Kirigami.ScrollablePage {
                     onClicked: page.connection.chooseAnotherUser()
                 }
                 Controls.Button {
-                    Layout.alignment: Qt.AlignHCenter
+                    Layout.fillWidth: true
                     text: i18nc("@action:button Goes back to the list of servers", "Switch Server")
                     icon.name: "network-server"
                     enabled: !page.signingIn

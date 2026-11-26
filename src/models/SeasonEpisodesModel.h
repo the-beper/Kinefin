@@ -48,6 +48,8 @@ class SeasonEpisodesModel final : public PagedItemsModel {
 
     // The values of one episode as a map with the role names: the one owner of how an episode row reads, shared with the Next Up entry of a series page
     static QVariantMap rowMap(const JellyfinClient *client, const ItemSummary &item);
+    // One role of one episode, as a row of the model reads it: for a list of episodes that is not paged
+    static QVariant roleValue(const JellyfinClient *client, const ItemSummary &item, int role);
 
   protected:
     bool sendPage(int start, int limit) override;
