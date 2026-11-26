@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 Kinefin contributors
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""build/desktop-check.sh against fake busctl, kwallet-query and systemd-inhibit.
+"""build/desktop-check.sh against fake busctl and systemd-inhibit and a keyring file in a temporary home.
 
 The script reads a real Plasma session; here the commands it calls are stubs that answer as a good
 session would, and as a bad one would, so its parsing, its verdicts and its exit status are tested
@@ -18,8 +18,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "build" / "desktop-check.sh"
 SH = shutil.which("sh") or "/bin/sh"
-SERVER = "a" * 32
-USER = "b" * 32
+APP_ID = "io.github.the_beper.Kinefin"
+# Looks like an encrypted file, and must never show up in a report: the check reads the mode, not the content
+KEYRING_MARKER = "KEYRING-CONTENT-MARKER"
 
 # The state file holds what the fake player says; Pause, Play and Seek change it
 BUSCTL = r"""#!/bin/sh
@@ -63,10 +64,6 @@ case " $* " in
 esac
 """
 
-KWALLET = """#!/bin/sh
-cat "$FAKE_STATE/wallet"
-"""
-
 INHIBIT = """#!/bin/sh
 cat "$FAKE_STATE/inhibitors"
 """
@@ -86,13 +83,16 @@ class DesktopCheck(unittest.TestCase):
         self.state.mkdir()
         self.bin = base / "bin"
         self.bin.mkdir()
-        for name, text in (("busctl", BUSCTL), ("kwallet-query", KWALLET), ("systemd-inhibit", INHIBIT)):
+        for name, text in (("busctl", BUSCTL), ("systemd-inhibit", INHIBIT)):
             path = self.bin / name
             path.write_text(text)
             path.chmod(path.stat().st_mode | stat.S_IXUSR)
         (self.state / "metadata").write_text(GOOD_METADATA)
         (self.state / "matches").write_text('a(sssida{sv}) 2 "m1" "Arcturus (2012)" "video" 50 1 0 "m2" "Boreal" "video" 50 1 0\n')
-        (self.state / "wallet").write_text(f"default/{SERVER}/{USER}\n")
+        self.keyring = base / ".var" / "app" / APP_ID / "data" / "keyrings" / "default.keyring"
+        self.keyring.parent.mkdir(parents=True)
+        self.keyring.write_text(KEYRING_MARKER)
+        self.keyring.chmod(0o600)
         (self.state / "inhibitors").write_text("WHO UID USER PID COMM WHAT WHY MODE\nKinefin 1000 u 11 kinefin sleep Cast playing block\n")
         self.profiles = base / "profiles"
         (self.profiles / "default").mkdir(parents=True)
@@ -131,7 +131,7 @@ class DesktopCheck(unittest.TestCase):
             "PASS  MPRIS Play: Playing",
             "PASS  Screen inhibition while playing: Kinefin holds 1",
             "PASS  Suspend inhibition during a cast: a sleep inhibitor of Kinefin",
-            "PASS  KWallet entries: 1, named <profile>/<serverId>/<userId>",
+            "PASS  Token keyring: default.keyring in the Flatpak data folder, private (mode 600)",
             "PASS  servers.json holds no token: 1 file(s) checked",
             "PASS  KRunner Match 'the': 2 match(es)",
             "PASS  KRunner Run: the first match was run",
@@ -142,6 +142,7 @@ class DesktopCheck(unittest.TestCase):
         self.assertEqual(self.report.read_text().count("FAIL"), 0)
         self.assertEqual(result.stdout.strip(), self.report.read_text().strip())
         self.assertNotIn("PRIVATE-REASON", result.stdout)
+        self.assertNotIn(KEYRING_MARKER, result.stdout + self.report.read_text())
 
     def test_without_the_act_flag_nothing_is_controlled(self) -> None:
         result = self.run_script()
@@ -182,12 +183,13 @@ class DesktopCheck(unittest.TestCase):
         self.assertIn("SKIP  MPRIS controls: nothing plays", result.stdout)
         self.assertIn("SKIP  Screen inhibition: nothing plays: start a video", result.stdout)
 
-    def test_a_wallet_key_of_the_wrong_shape_and_a_token_on_disk_fail(self) -> None:
-        (self.state / "wallet").write_text(f"default/{SERVER}/{USER}\nplain-key\n")
+    def test_a_keyring_readable_by_others_and_a_token_on_disk_fail(self) -> None:
+        self.keyring.chmod(0o644)
         (self.profiles / "default" / "servers.json").write_text('{"servers": [{"id": "x", "accessToken": "t"}]}')
         result = self.run_script()
         self.assertEqual(result.returncode, 1)
-        self.assertIn("FAIL  KWallet entries: 1 of 2 keys are not <profile>/<serverId>/<userId>", result.stdout)
+        self.assertIn("FAIL  Token keyring: default.keyring is readable by others (mode 644)", result.stdout)
+        self.assertNotIn(KEYRING_MARKER, result.stdout + self.report.read_text())
         self.assertIn("FAIL  servers.json holds no token", result.stdout)
 
     def test_markup_in_a_match_fails(self) -> None:
@@ -253,11 +255,21 @@ class DesktopCheck(unittest.TestCase):
         self.assertNotIn("MPRIS name", result.stdout)
         self.assertIn("1 check(s) failed", self.report.read_text())
 
-    def test_a_wallet_with_wide_ids_and_a_per_server_key_passes(self) -> None:
-        (self.state / "wallet").write_text(f"default/A1-b2C/{USER.upper()}\ndefault/{SERVER}\n")
+    def test_a_missing_keyring_is_a_skip(self) -> None:
+        self.keyring.unlink()
         result = self.run_script()
         self.assertEqual(result.returncode, 0, result.stdout)
-        self.assertIn("PASS  KWallet entries: 2, named <profile>/<serverId>/<userId> (1 of them <profile>/<serverId>, the older per-server key)", result.stdout)
+        self.assertIn("SKIP  Token keyring: no ", result.stdout)
+        self.assertNotIn("PASS  Token keyring", result.stdout)
+
+    def test_a_keyring_that_is_not_a_regular_file_fails(self) -> None:
+        self.keyring.unlink()
+        self.keyring.symlink_to(Path(self.temp.name) / "elsewhere")
+        (Path(self.temp.name) / "elsewhere").write_text(KEYRING_MARKER)
+        result = self.run_script()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("FAIL  Token keyring: ", result.stdout)
+        self.assertIn("is not a regular file", result.stdout)
 
     def test_no_servers_json_is_a_skip_and_does_not_read_stdin(self) -> None:
         (self.profiles / "default" / "servers.json").unlink()

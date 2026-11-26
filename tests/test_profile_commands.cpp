@@ -217,7 +217,7 @@ class TestProfileCommands : public QObject {
         QVERIFY(QFileInfo::exists(profileDataDirectory(QStringLiteral("busy"))));
     }
 
-    void deleteRemovesTheFilesAndTheWalletEntries()
+    void deleteRemovesTheFilesAndTheKeyringEntries()
     {
         MemoryTokenStore store;
         Output output;
@@ -238,8 +238,8 @@ class TestProfileCommands : public QObject {
                                             QStringLiteral("n"),
                                             QStringLiteral("name"),
                                             {}}}));
-        // The legacy key of one server and the per-user key of the other
-        store.tokens.insert(legacyServerTokenKey(id, QStringLiteral("srv1")), QStringLiteral("t1"));
+        store.tokens.insert(serverTokenKey(id, QStringLiteral("srv1"), QStringLiteral("u")),
+                            QStringLiteral("t1"));
         store.tokens.insert(serverTokenKey(id, QStringLiteral("srv2"), QStringLiteral("u")),
                             QStringLiteral("t2"));
         store.tokens.insert(
@@ -257,7 +257,7 @@ class TestProfileCommands : public QObject {
         QVERIFY(ids().contains(QStringLiteral("other")));
     }
 
-    void aWalletFailureStillDeletesTheFiles()
+    void aKeyringFailureStillDeletesTheFiles()
     {
         MemoryTokenStore store;
         store.failRemoves = true;
@@ -272,7 +272,7 @@ class TestProfileCommands : public QObject {
                                                                {}}}));
         QCOMPARE(run({QStringLiteral("--delete-profile"), QStringLiteral("old")}, store, output),
                  1);
-        QVERIFY(output.err.contains(QStringLiteral("wallet")));
+        QVERIFY(output.err.contains(QStringLiteral("keyring")));
         QVERIFY(!ids().contains(QStringLiteral("old")));
         QVERIFY(!QFileInfo::exists(profileDataDirectory(QStringLiteral("old"))));
     }

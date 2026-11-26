@@ -34,7 +34,7 @@ namespace {
 const QString kProfile = QStringLiteral("default");
 const QString kDevice = QStringLiteral("test-device");
 
-// The wallet of the current test: shared by every controller of it, like the user's KWallet across restarts
+// The keyring of the current test: shared by every controller of it, like the user's keyring across restarts
 std::unique_ptr<MemoryTokenStore> gStore;
 
 std::unique_ptr<ConnectionController> makeController()
@@ -2497,7 +2497,7 @@ class TestConnectionController : public QObject {
         QVERIFY(Kinefin::loadServerCredentials(kProfile).isEmpty());
     }
 
-    // The wallet may take as long as the user needs to unlock it: the controller keeps connecting, it neither shows the sign-in nor loses the session
+    // The keyring may take as long as the user needs to unlock it: the controller keeps connecting, it neither shows the sign-in nor loses the session
     void aSlowWalletKeepsConnectingUntilItAnswers()
     {
         FakeJellyfin server;
@@ -2552,9 +2552,48 @@ class TestConnectionController : public QObject {
         QTRY_VERIFY(controller->state() == ConnectionController::NeedsLogin);
         controller->login(QStringLiteral("fixture-user"), QStringLiteral("fixture-password"));
         QTRY_VERIFY(controller->state() == ConnectionController::Authenticated);
-        QTRY_VERIFY(!controller->errorText().isEmpty());
+        QTRY_COMPARE(controller->errorText(),
+                     QStringLiteral("Could not save the session. You will have to sign in again "
+                                    "next time"));
         QVERIFY(controller->servers().isEmpty());
         QVERIFY(Kinefin::loadServerCredentials(kProfile).isEmpty());
+    }
+
+    // The update from the KWallet builds: the record says remembered but the keyring holds nothing yet, so the user signs in once and the next start restores without a password
+    void aRememberedUserWithoutAStoredTokenSignsInOnceAndIsRestoredNext()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        {
+            auto first = makeController();
+            first->connectTo(address(server));
+            QTRY_VERIFY(first->state() == ConnectionController::NeedsLogin);
+            first->login(QStringLiteral("fixture-user"), QStringLiteral("fixture-password"));
+            QTRY_VERIFY(first->state() == ConnectionController::Authenticated);
+            QTRY_COMPARE(first->servers().size(), 1);
+            QTRY_COMPARE(gStore->tokens.size(), 1);
+        }
+        gStore->tokens.clear();
+        const auto records = Kinefin::loadServerCredentials(kProfile);
+        QCOMPARE(records.size(), 1);
+        QVERIFY(records.first().remembered);
+        QCOMPARE(server.successfulLogins, 1);
+
+        {
+            auto second = makeController();
+            second->start();
+            QTRY_VERIFY(second->state() == ConnectionController::NeedsLogin);
+            QVERIFY(!second->loginUserName().isEmpty());
+            second->login(QStringLiteral("fixture-user"), QStringLiteral("fixture-password"));
+            QTRY_VERIFY(second->state() == ConnectionController::Authenticated);
+            QCOMPARE(server.successfulLogins, 2);
+            QTRY_COMPARE(gStore->tokens.size(), 1);
+        }
+
+        auto third = makeController();
+        third->start();
+        QTRY_VERIFY(third->state() == ConnectionController::Authenticated);
+        QCOMPARE(server.successfulLogins, 2);
     }
 
     // A later library load must not wipe the notice that the token could not be saved

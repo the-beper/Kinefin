@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: kinefin 0\n"
 "Report-Msgid-Bugs-To: https://github.com/the-beper/Kinefin/issues\n"
-"POT-Creation-Date: 2026-11-26 16:39+0000\n"
+"POT-Creation-Date: 2026-11-26 17:07+0000\n"
 "PO-Revision-Date: 2026-11-07 00:00+0000\n"
 "Last-Translator: the-beper\n"
 "Language-Team: English\n"
@@ -22,57 +22,53 @@ msgstr ""
 "and the port, or turn on Ignore Certificate Errors in Settings"
 
 #: src/app/ConnectionController.cpp:455
-msgid ""
-"Could not save the session in KWallet. You will have to sign in again next "
-"time"
-msgstr ""
-"Could not save the session in KWallet. You will have to sign in again next "
-"time"
+msgid "Could not save the session. You will have to sign in again next time"
+msgstr "Could not save the session. You will have to sign in again next time"
 
-#: src/app/ConnectionController.cpp:592
+#: src/app/ConnectionController.cpp:591
 msgid ""
 "Server not reachable: check the address, the port and the network connection"
 msgstr ""
 "Server not reachable: check the address, the port and the network connection"
 
-#: src/app/ConnectionController.cpp:628
+#: src/app/ConnectionController.cpp:627
 msgid "Jellyfin server reachable"
 msgstr "Jellyfin server reachable"
 
-#: src/app/ConnectionController.cpp:630
+#: src/app/ConnectionController.cpp:629
 msgid "Jellyfin server reachable at %1"
 msgstr "Jellyfin server reachable at %1"
 
-#: src/app/ConnectionController.cpp:654 src/app/ConnectionController.cpp:667
-#: src/app/ConnectionController.cpp:770
+#: src/app/ConnectionController.cpp:653 src/app/ConnectionController.cpp:666
+#: src/app/ConnectionController.cpp:769
 msgid "Enter a valid server address"
 msgstr "Enter a valid server address"
 
-#: src/app/ConnectionController.cpp:657
+#: src/app/ConnectionController.cpp:656
 msgid "Testing connection…"
 msgstr "Testing connection…"
 
-#: src/app/ConnectionController.cpp:766
+#: src/app/ConnectionController.cpp:765
 msgid "The device identity of this profile is invalid"
 msgstr "The device identity of this profile is invalid"
 
-#: src/app/ConnectionController.cpp:806
+#: src/app/ConnectionController.cpp:805
 msgid "Could not read the saved session. Sign in again"
 msgstr "Could not read the saved session. Sign in again"
 
-#: src/app/ConnectionController.cpp:872
+#: src/app/ConnectionController.cpp:871
 msgid "Enter a username"
 msgstr "Enter a username"
 
-#: src/app/ConnectionController.cpp:884
+#: src/app/ConnectionController.cpp:883
 msgid "Quick Connect is not available"
 msgstr "Quick Connect is not available"
 
-#: src/app/ConnectionController.cpp:1152
+#: src/app/ConnectionController.cpp:1151
 msgid "Your session has expired. Sign in again"
 msgstr "Your session has expired. Sign in again"
 
-#: src/app/ConnectionController.cpp:1167
+#: src/app/ConnectionController.cpp:1166
 msgid ""
 "Could not reach a Jellyfin server. Check the address and your network "
 "connection"
@@ -80,23 +76,23 @@ msgstr ""
 "Could not reach a Jellyfin server. Check the address and your network "
 "connection"
 
-#: src/app/ConnectionController.cpp:1171
+#: src/app/ConnectionController.cpp:1170
 msgid "Wrong username or password"
 msgstr "Wrong username or password"
 
-#: src/app/ConnectionController.cpp:1172
+#: src/app/ConnectionController.cpp:1171
 msgid "Signing in failed. Try again, or check the server"
 msgstr "Signing in failed. Try again, or check the server"
 
-#: src/app/ConnectionController.cpp:1177
+#: src/app/ConnectionController.cpp:1176
 msgid "Quick Connect is not available on this server"
 msgstr "Quick Connect is not available on this server"
 
-#: src/app/ConnectionController.cpp:1178
+#: src/app/ConnectionController.cpp:1177
 msgid "Quick Connect failed or expired. Start it again"
 msgstr "Quick Connect failed or expired. Start it again"
 
-#: src/app/ConnectionController.cpp:1185
+#: src/app/ConnectionController.cpp:1184
 msgid "Could not load the libraries. Try again"
 msgstr "Could not load the libraries. Try again"
 

@@ -25,7 +25,7 @@
 #include <algorithm>
 
 #include "integration/LinkRouter.h"
-#include "settings/KWalletTokenStore.h"
+#include "settings/KeychainTokenStore.h"
 #include "settings/ProfilePaths.h"
 
 namespace Kinefin {
@@ -241,7 +241,7 @@ LibraryItemsModel::ViewState fromStored(const BrowseStateStore::ViewState &store
 ConnectionController::ConnectionController(const QString &profileId, const QString &deviceId,
                                            const QString &version, TokenStore *store,
                                            QObject *parent)
-    : QObject(parent), m_ownedStore(store ? nullptr : new KWalletTokenStore), m_client(this),
+    : QObject(parent), m_ownedStore(store ? nullptr : new KeychainTokenStore), m_client(this),
       m_sync(&m_client, store ? store : m_ownedStore.get(), profileId, this),
       m_downloads(&m_client, profileId)
 {
@@ -452,8 +452,7 @@ ConnectionController::ConnectionController(const QString &profileId, const QStri
     });
     connect(&m_sync, &ServerCredentialSync::restoreFinished, this, [this] { onRestoreFinished(); });
     connect(&m_sync, &ServerCredentialSync::saveFailed, this, [this] {
-        setError(i18n("Could not save the session in KWallet. You will have to sign in again next "
-                      "time"));
+        setError(i18n("Could not save the session. You will have to sign in again next time"));
     });
     connect(&m_client, &JellyfinClient::serverReady, this, [this] { onServerReady(); });
     connect(&m_client, &JellyfinClient::loginSucceeded, this, [this] { onLoginSucceeded(); });
@@ -770,7 +769,7 @@ void ConnectionController::connectTo(const QString &address)
         setError(i18n("Enter a valid server address"));
         return;
     }
-    // A wallet read still pending belongs to the connection that went: its answer must not land on this one
+    // A keyring read still pending belongs to the connection that went: its answer must not land on this one
     m_sync.cancelRestore();
     clearQuickConnect();
     setLoginUserName({});
@@ -800,7 +799,7 @@ void ConnectionController::onServerReady()
 
 void ConnectionController::onRestoreFinished()
 {
-    // A restored session already made this Authenticated; any other outcome (the wallet could not be read) goes to the sign-in of that user
+    // A restored session already made this Authenticated; any other outcome (the keyring could not be read) goes to the sign-in of that user
     if (m_state != Connecting || m_client.isAuthenticated())
         return;
     setError(i18n("Could not read the saved session. Sign in again"));
@@ -826,7 +825,7 @@ void ConnectionController::restoreUser(const QString &userId)
     setError({});
     m_restoringUserId = userId;
     setState(Connecting);
-    // A stored session being read from the wallet keeps this on Connecting until it is known whether it restores
+    // A stored session being read from the keyring keeps this on Connecting until it is known whether it restores
     if (!m_sync.restoreUser(userId))
         askPasswordOf(userId);
 }

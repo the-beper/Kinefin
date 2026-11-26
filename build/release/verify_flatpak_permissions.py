@@ -47,12 +47,13 @@ ALLOWED_ARGS = frozenset({
     "--device=input",
     "--own-name=org.mpris.MediaPlayer2.Kinefin.*",
     "--talk-name=org.freedesktop.ScreenSaver",
-    "--talk-name=org.kde.kwalletd6",
     "--talk-name=org.freedesktop.portal.Desktop",
+    # Pins the token store to libsecret: left to auto-detection, QtKeychain would use KWallet where it answers
+    "--env=QTKEYCHAIN_BACKEND=libsecret",
 })
 
 ROOT_KEY = re.compile(r"([a-z][a-z0-9-]*):(?:\s+(.*))?\Z")
-ARG_LINE = re.compile(r"  - (--[a-z][a-z-]*=[A-Za-z0-9_.*-]+)(?:\s+#.*)?\Z")
+ARG_LINE = re.compile(r"  - (--[a-z][a-z-]*=[A-Za-z0-9_.*-]+|--env=[A-Z][A-Z0-9_]*=[A-Za-z0-9_.-]+)(?:\s+#.*)?\Z")
 YAML_REFERENCE = re.compile(r"(?:^|\s)(?:<<:|[&*][A-Za-z_][A-Za-z0-9_-]*)")
 
 
@@ -118,10 +119,11 @@ def check_manifest(contents: str) -> None:
         raise SandboxError(f"unapproved finish-args (extra={extra}, missing={missing})")
 
 
-def expected_metadata() -> tuple[dict[str, set[str]], dict[str, str], dict[str, str]]:
+def expected_metadata() -> tuple[dict[str, set[str]], dict[str, str], dict[str, str], dict[str, str]]:
     contexts: dict[str, set[str]] = {"shared": set(), "sockets": set(), "devices": set()}
     session: dict[str, str] = {}
     system: dict[str, str] = {}
+    environment: dict[str, str] = {}
     for arg in ALLOWED_ARGS:
         key, value = arg.split("=", 1)
         if key in ("--share", "--socket", "--device"):
@@ -130,9 +132,12 @@ def expected_metadata() -> tuple[dict[str, set[str]], dict[str, str], dict[str, 
             session[value] = "own" if key == "--own-name" else "talk"
         elif key in ("--system-talk-name", "--system-own-name"):
             system[value] = "own" if key == "--system-own-name" else "talk"
+        elif key == "--env":
+            name, _, setting = value.partition("=")
+            environment[name] = setting
         else:
             raise SandboxError(f"unhandled policy permission {key}")
-    return contexts, {**session, **RUNTIME_SESSION_BUS}, system
+    return contexts, {**session, **RUNTIME_SESSION_BUS}, system, environment
 
 
 def permission_list(value: str, label: str) -> set[str]:
@@ -166,7 +171,7 @@ def check_metadata(contents: str) -> None:
 
     if not parser.has_section("Context"):
         raise SandboxError("installed metadata is missing [Context]")
-    contexts, session, system = expected_metadata()
+    contexts, session, system, environment = expected_metadata()
     for key, wanted in contexts.items():
         actual = permission_list(parser.get("Context", key, fallback=""), f"Context/{key}")
         if actual != wanted:
@@ -180,7 +185,10 @@ def check_metadata(contents: str) -> None:
         actual = dict(parser.items(section, raw=True)) if parser.has_section(section) else {}
         if actual != expected:
             raise SandboxError(f"installed [{section}] differs from approved policy")
-    for section in ("Environment", "USB Devices", "A11y Bus Policy"):
+    actual_environment = dict(parser.items("Environment", raw=True)) if parser.has_section("Environment") else {}
+    if actual_environment != environment:
+        raise SandboxError("installed [Environment] differs from approved policy")
+    for section in ("USB Devices", "A11y Bus Policy"):
         if parser.has_section(section) and parser.items(section, raw=True):
             raise SandboxError(f"unexpected installed [{section}] permissions")
 

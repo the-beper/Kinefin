@@ -105,7 +105,7 @@ The repository's commits are signed with a key whose fingerprint is `CC7D 0664 D
 
 ### Uninstall
 
-Run `flatpak uninstall io.github.the_beper.Kinefin`. That keeps your data; add `--delete-data` to remove the servers, settings, downloads and logs as well. `flatpak remote-delete kinefin` removes the repository as a source. The access tokens are in KWallet, not in that folder: sign out of each user before you uninstall, or delete the `Kinefin` folder of your wallet in KWalletManager afterwards.
+Run `flatpak uninstall io.github.the_beper.Kinefin`. That keeps your data; add `--delete-data` to remove the servers, settings, downloads and logs as well. `flatpak remote-delete kinefin` removes the repository as a source. The access tokens are in a keyring file inside that data folder, so `--delete-data` removes them too; without it, sign out of each user first if you want the tokens gone. Delete the `Kinefin` folder of your wallet in KWalletManager if an earlier version saved tokens there.
 
 ## Sign in
 
@@ -147,7 +147,7 @@ After the server answers, the sign-in page offers a password or Quick Connect. U
 
 To use Quick Connect, choose it on the sign-in page and confirm the code it shows from a Jellyfin client that is already signed in to the same server.
 
-Kinefin never stores your password. The access token is kept in KWallet.
+Kinefin never stores your password. The access token is kept in the system keyring through the Secret portal (on Plasma 6.2 or later, KWallet's portal backend; on GNOME, GNOME Keyring). Without a Secret portal the session stays in memory and you sign in again at the next start; see [Security](../SECURITY.md).
 
 ### Several users on one server
 
@@ -576,7 +576,7 @@ While you are in a group the rail has a **Group** button above your avatar. Its 
 
 The main menu's **Remote Sessions** opens a dialog listing the other sessions on the server. It refreshes every 5 seconds while open. Each session has **Pause**, **Resume** and **Stop**.
 
-Other Jellyfin clients can also control Kinefin while you are signed in. They can send navigation keys, volume, mute, track and quality choices, and **Play**. A remote **Play** of one video plays it. Several videos become the saved queue. Remote navigation keys are ignored while a text field or a dialog has focus. Remote text messages are not shown.
+Other Jellyfin clients can also control Kinefin while you are signed in: in the web interface or the Jellyfin app on a phone, open the list behind the cast button and pick Kinefin. They can play, pause, stop, seek, skip to the next or previous item, and send navigation keys, volume, mute, full screen, repeat, shuffle, track and quality choices. A remote **Play** of one video plays it. Several videos replace the queue and play from the one chosen, with an **Undo** notice when they replace a queue you had; a remote Play Next adds them after the current item, a remote Play Last at the end of the queue. Remote navigation keys are ignored while a text field or a dialog has focus. Remote text messages are not shown.
 
 MPRIS is supported: media keys and the Plasma media controls see the current item, and `Next` and `Previous` follow the queue or the series. Any program on your session bus can read the title, the series and episode label, the item id and the artwork. The server address, your user name, the stream URL and the access token are never published.
 
@@ -757,7 +757,7 @@ Flatpak shares that folder with the host, so a script outside the sandbox can us
 
 ### Kinefin asks for the password again
 
-A user set to **Ask for Password** is asked every time. Otherwise the saved token may be gone: it is stored in KWallet, and a wallet that cannot be read, or an expired token on the server, leads back to the password prompt. Sign in again. The prompt does not need the server to be added again.
+A user set to **Ask for Password** is asked every time. Otherwise the saved token may be gone: it is stored in the keyring, and a keyring that cannot be read, or an expired token on the server, leads back to the password prompt. Tokens that an earlier version kept in KWallet are not read: after updating from it, every saved user signs in once more. The prompt does not need the server to be added again.
 
 ### Playback stutters
 
@@ -831,7 +831,7 @@ Everything is per profile. A profile is a separate set of servers, users and set
 
 In the Flatpak these paths are under `~/.var/app/io.github.the_beper.Kinefin/`.
 
-The data folder also holds the settings (`kinefin.conf`), the server records (`servers.json`, without tokens), the queue and browse state, and the remembered track choices. Access tokens are in KWallet.
+The data folder also holds the settings (`kinefin.conf`), the server records (`servers.json`, without tokens), the queue and browse state, and the remembered track choices. Access tokens are in the keyring: in the Flatpak that is `~/.var/app/io.github.the_beper.Kinefin/data/keyrings/default.keyring`, one file for every profile, which deleting a profile's folder does not remove.
 
 The log holds the newest 10 sessions: `kinefin.log` and `kinefin.log.1` to `.9`. Access tokens are never written to it. `--log-level` on the command line raises or lowers its detail for one run.
 

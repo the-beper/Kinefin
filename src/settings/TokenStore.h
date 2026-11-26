@@ -8,7 +8,7 @@
 #include <functional>
 
 namespace Kinefin {
-// Where access tokens live: the one place allowed to hold them outside memory (KWallet in the app, a fake in tests). Every operation is asynchronous and its callback runs from the event loop, never from inside the call; a callback may arrive after the caller lost interest, so callers guard it. Keys are opaque to the store. A token is never logged, by the store or by its callers
+// Where access tokens live: the one place allowed to hold them outside memory (the system keyring in the app, a fake in tests). Every operation is asynchronous and its callback runs from the event loop, never from inside the call; a callback may arrive after the caller lost interest, so callers guard it. Keys are opaque to the store. A token is never logged, by the store or by its callers
 class TokenStore : public QObject {
     Q_OBJECT
 

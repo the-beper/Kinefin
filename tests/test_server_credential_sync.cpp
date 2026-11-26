@@ -3,11 +3,13 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QtTest>
 
-#include <functional>
 #include <utility>
 
 #include "FakeJellyfin.h"
@@ -20,12 +22,11 @@ using Kinefin::ServerCredentialSync;
 
 namespace {
 const QString kProfile = QStringLiteral("default");
-// The server id of tests/fixtures/system_info_public.json, and the wallet key it gives
+// The server id of tests/fixtures/system_info_public.json, and the keyring key it gives
 const QString kServerId = QStringLiteral("9c076c52ba5340d59f6baf5b57cf0a5e");
-// The user of tests/fixtures/authenticate_success.json, and the per-user and legacy wallet keys
+// The user of tests/fixtures/authenticate_success.json, and its keyring key
 const QString kUserId = QStringLiteral("d5ed5d4e2e5447b58e9f2b6f7bd5c96a");
 const QString kKey = kProfile + QStringLiteral("/") + kServerId + QStringLiteral("/") + kUserId;
-const QString kLegacyKey = kProfile + QStringLiteral("/") + kServerId;
 const QString kOtherUserId = QStringLiteral("0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b");
 const QString kOtherKey =
     kProfile + QStringLiteral("/") + kServerId + QStringLiteral("/") + kOtherUserId;
@@ -77,15 +78,6 @@ void addOtherUser(MemoryTokenStore &store, FakeJellyfin *server = nullptr)
     saved.append(other);
     QVERIFY(Kinefin::saveServerCredentials(kProfile, saved));
     store.tokens.insert(kOtherKey, QStringLiteral("other-token-0123"));
-}
-
-// The state an older version left: the record of `userId` has no `remembered` key, so it owns the legacy per-server wallet key
-void makeLegacyOwner(const QString &userId = kUserId)
-{
-    auto saved = stored();
-    for (ServerCredential &record : saved)
-        record.ownsLegacyKey = record.userId == userId;
-    QVERIFY(Kinefin::saveServerCredentials(kProfile, saved));
 }
 
 // A first run that stores a session, then closes the app
@@ -168,7 +160,7 @@ class TestServerCredentialSync : public QObject {
         MemoryTokenStore store;
         storeASession(server, store);
 
-        store.hold = true; // the wallet is still being unlocked
+        store.hold = true; // the keyring is still being unlocked
         JellyfinClient client;
         ServerCredentialSync sync(&client, &store, kProfile);
         QVERIFY(probe(client, server));
@@ -198,7 +190,7 @@ class TestServerCredentialSync : public QObject {
         QTRY_COMPARE(finished.size(), 1);
         QVERIFY(!client.isAuthenticated());
         QCOMPARE(server.usersMeRequests, 0);
-        QCOMPARE(stored().size(), 1); // kept: the wallet may answer next time
+        QCOMPARE(stored().size(), 1); // kept: the keyring may answer next time
     }
 
     void aRestoreAbandonedWhileTheStoreAnswersDoesNothing()
@@ -269,7 +261,7 @@ class TestServerCredentialSync : public QObject {
         QVERIFY(sync.restoreUser(kUserId));
         QTRY_COMPARE(expired.size(), 1);
         QVERIFY(!second.isAuthenticated());
-        QTRY_VERIFY(!store.tokens.contains(kKey)); // the token left the wallet
+        QTRY_VERIFY(!store.tokens.contains(kKey)); // the token left the keyring
         QCOMPARE(store.tokens.value(kOtherKey), QStringLiteral("other-token-0123"));
         QCOMPARE(sync.credentials().size(), 2);
         for (const ServerCredential &record : sync.credentials())
@@ -338,7 +330,7 @@ class TestServerCredentialSync : public QObject {
         QVERIFY(sync.credentials().isEmpty());
     }
 
-    // The sign-out's removal and the second login's save may reach the wallet in any order after a slow unlock: the newer token must survive the older save's cleanup
+    // The sign-out's removal and the second login's save may reach the keyring in any order after a slow unlock: the newer token must survive the older save's cleanup
     void aNewerSaveSurvivesTheCleanupOfAnOlderOne()
     {
         FakeJellyfin server;
@@ -450,7 +442,7 @@ class TestServerCredentialSync : public QObject {
         MemoryTokenStore store;
         storeASession(server, store);
         {
-            // Another device id: not restored, and the wallet is not even asked
+            // Another device id: not restored, and the keyring is not even asked
             JellyfinClient other;
             ServerCredentialSync sync(&other, &store, kProfile);
             QVERIFY(other.setDeviceIdentity(QStringLiteral("Kinefin test"),
@@ -574,122 +566,37 @@ class TestServerCredentialSync : public QObject {
         QCOMPARE(stored().first().userId, kUserId);
     }
 
-    void legacyKeyMigratesOnRestore()
+    // A record of a file without `remembered` reads as remembered and asks the store for the per-user key only
+    void aRecordWithoutRememberedReadsOnlyThePerUserKey()
     {
         FakeJellyfin server;
         QVERIFY(server.listen());
         MemoryTokenStore store;
         storeASession(server, store);
-        // The state an older version left: the token under the per-server key
-        store.tokens.clear();
-        store.tokens.insert(kLegacyKey, QString::fromUtf8(kFixtureToken));
-        makeLegacyOwner();
+        {
+            QFile file(Kinefin::serverCredentialsPath(kProfile));
+            QVERIFY(file.open(QIODevice::ReadOnly));
+            QJsonObject root = QJsonDocument::fromJson(file.readAll()).object();
+            file.close();
+            QJsonArray servers = root.value(QStringLiteral("servers")).toArray();
+            QJsonObject record = servers.at(0).toObject();
+            record.remove(QStringLiteral("remembered"));
+            servers[0] = record;
+            root.insert(QStringLiteral("servers"), servers);
+            QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            file.write(QJsonDocument(root).toJson());
+        }
 
         JellyfinClient client;
         ServerCredentialSync sync(&client, &store, kProfile);
+        QCOMPARE(sync.credentials().size(), 1);
+        QVERIFY(sync.credentials().first().remembered);
         QVERIFY(probe(client, server));
         QVERIFY(restoreLast(sync));
         QTRY_VERIFY(client.isAuthenticated());
-        QTRY_VERIFY(!store.tokens.contains(kLegacyKey));
-        QCOMPARE(store.tokens.value(kKey).toUtf8(), kFixtureToken);
-        QCOMPARE(store.tokens.size(), 1);
-        QCOMPARE(server.successfulLogins, 1);
-        // Migrated: the record owns nothing any more, and says so in the file
-        QTRY_VERIFY(!stored().first().ownsLegacyKey);
-        QVERIFY(stored().first().remembered);
-    }
-
-    // The legacy key held the token of one user only: another stored user never reads it
-    void onlyTheOwnerOfTheLegacyKeyReadsIt()
-    {
-        FakeJellyfin server;
-        QVERIFY(server.listen());
-        MemoryTokenStore store;
-        storeASession(server, store);
-        addOtherUser(store, &server);
-        store.tokens.clear();
-        store.tokens.insert(kLegacyKey, QString::fromUtf8(kFixtureToken));
-        makeLegacyOwner(kUserId);
-
-        JellyfinClient client;
-        ServerCredentialSync sync(&client, &store, kProfile);
-        QSignalSpy finished(&sync, &ServerCredentialSync::restoreFinished);
-        QVERIFY(probe(client, server));
-        // The other user has no token of its own: one read, no fall back to the owner's token
-        QVERIFY(sync.restoreUser(kOtherUserId));
-        QTRY_COMPARE(finished.size(), 1);
         QCOMPARE(store.reads, 1);
-        QVERIFY(!client.isAuthenticated());
-        QCOMPARE(store.tokens.value(kLegacyKey).toUtf8(), kFixtureToken);
-        // The owner migrates it
-        QVERIFY(sync.restoreUser(kUserId));
-        QTRY_VERIFY(client.isAuthenticated());
-        QCOMPARE(client.userId(), kUserId);
-        QTRY_VERIFY(!store.tokens.contains(kLegacyKey));
-        QCOMPARE(store.tokens.value(kKey).toUtf8(), kFixtureToken);
-    }
-
-    // Every way of forgetting the owner takes the legacy token with it; forgetting another user leaves it
-    void forgettingTheOwnerRemovesTheLegacyKey()
-    {
-        using Forget = std::function<void(ServerCredentialSync &, const QString &)>;
-        const QList<std::pair<const char *, Forget>> forgets = {
-            {"forgetUser", [](ServerCredentialSync &sync,
-                              const QString &user) { sync.forgetUser(kServerId, user); }},
-            {"forgetToken", [](ServerCredentialSync &sync,
-                               const QString &user) { sync.forgetToken(kServerId, user); }},
-            {"setAskPassword", [](ServerCredentialSync &sync, const QString &user) {
-                 sync.setAskPassword(kServerId, user, true);
-             }}};
-        for (const auto &[name, forget] : forgets) {
-            MemoryTokenStore store;
-            ServerCredential owner;
-            owner.serverId = kServerId;
-            owner.url = QStringLiteral("http://127.0.0.1:1/jellyfin");
-            owner.userId = kUserId;
-            owner.deviceId = QStringLiteral("stable-test-id");
-            owner.ownsLegacyKey = true;
-            ServerCredential other = owner;
-            other.userId = kOtherUserId;
-            other.ownsLegacyKey = false;
-            QVERIFY(Kinefin::saveServerCredentials(kProfile, {owner, other}));
-            store.tokens.insert(kLegacyKey, QStringLiteral("legacy-token"));
-            store.tokens.insert(kOtherKey, QStringLiteral("other-token-0123"));
-
-            JellyfinClient client;
-            ServerCredentialSync sync(&client, &store, kProfile);
-            forget(sync, kOtherUserId);
-            QTRY_VERIFY2(!store.tokens.contains(kOtherKey), name);
-            QTest::qWait(50);
-            QVERIFY2(store.tokens.contains(kLegacyKey), name);
-            forget(sync, kUserId);
-            QTRY_VERIFY2(!store.tokens.contains(kLegacyKey), name);
-            for (const ServerCredential &record : stored()) {
-                if (record.userId == kUserId)
-                    QVERIFY2(!record.ownsLegacyKey, name);
-            }
-        }
-    }
-
-    // A password login of the owner replaces both its tokens, and the legacy key goes
-    void loginOfTheLegacyOwnerRemovesTheLegacyKey()
-    {
-        FakeJellyfin server;
-        QVERIFY(server.listen());
-        MemoryTokenStore store;
-        storeASession(server, store);
-        store.tokens.clear();
-        store.tokens.insert(kLegacyKey, QStringLiteral("old-token"));
-        makeLegacyOwner();
-
-        JellyfinClient client;
-        ServerCredentialSync sync(&client, &store, kProfile);
-        QVERIFY(login(client, server));
-        QTRY_COMPARE(store.tokens.value(kKey).toUtf8(), kFixtureToken);
-        QTRY_VERIFY(!store.tokens.contains(kLegacyKey));
-        QCOMPARE(store.tokens.size(), 1);
-        QTRY_VERIFY(!stored().first().ownsLegacyKey);
-        QVERIFY(stored().first().remembered);
+        QCOMPARE(store.writes, 1); // the first run's save only
+        QCOMPARE(store.removes, 0);
     }
 
     // The token of a user who signs in again is dead on the server: when the new one cannot be stored, nothing is left to restore
@@ -712,34 +619,6 @@ class TestServerCredentialSync : public QObject {
         QCOMPARE(stored().size(), 1);
         QVERIFY(!stored().first().remembered);
         QVERIFY(!sync.restoreUser(kUserId));
-    }
-
-    void migrationWriteFailureKeepsLegacyToken()
-    {
-        FakeJellyfin server;
-        QVERIFY(server.listen());
-        MemoryTokenStore store;
-        storeASession(server, store);
-        store.tokens.clear();
-        store.tokens.insert(kLegacyKey, QString::fromUtf8(kFixtureToken));
-        makeLegacyOwner();
-        const int writesBefore = store.writes;
-        store.failWrites = true;
-
-        JellyfinClient client;
-        ServerCredentialSync sync(&client, &store, kProfile);
-        QSignalSpy failed(&sync, &ServerCredentialSync::saveFailed);
-        QVERIFY(probe(client, server));
-        QVERIFY(restoreLast(sync));
-        QTRY_VERIFY(client.isAuthenticated()); // the session itself is fine
-        QTRY_COMPARE(store.writes, writesBefore + 1);
-        QTest::qWait(100);
-        // Kept for the next restart
-        QCOMPARE(store.tokens.value(kLegacyKey).toUtf8(), kFixtureToken);
-        QVERIFY(!store.tokens.contains(kKey));
-        QCOMPARE(failed.size(), 0); // not the user's business
-        // Still the owner after a restart, so the next one retries the migration
-        QVERIFY(stored().first().ownsLegacyKey);
     }
 
     // No token is ever written for a user that always asks for the password
@@ -838,7 +717,7 @@ class TestServerCredentialSync : public QObject {
         MemoryTokenStore store;
         storeASession(server, store);
         addOtherUser(store, &server);
-        // Another server's record and token, and a leftover legacy token of this one
+        // Another server's record and token
         auto saved = stored();
         ServerCredential another = saved.first();
         another.serverId = QStringLiteral("another-server");
@@ -847,7 +726,6 @@ class TestServerCredentialSync : public QObject {
         QVERIFY(Kinefin::saveServerCredentials(kProfile, saved));
         const QString anotherKey = kProfile + QStringLiteral("/another-server/") + kUserId;
         store.tokens.insert(anotherKey, QStringLiteral("keep"));
-        store.tokens.insert(kLegacyKey, QStringLiteral("old"));
 
         JellyfinClient client;
         ServerCredentialSync sync(&client, &store, kProfile);
@@ -859,7 +737,7 @@ class TestServerCredentialSync : public QObject {
         QCOMPARE(stored().first().serverId, QStringLiteral("another-server"));
     }
 
-    void forgetProfileTokensRemovesPerUserAndLegacyKeys()
+    void forgetProfileTokensRemovesEveryUserKeyOfTheProfile()
     {
         MemoryTokenStore store;
         ServerCredential record;
@@ -876,8 +754,6 @@ class TestServerCredentialSync : public QObject {
         store.tokens.insert(QStringLiteral("default/srv1/u1"), QStringLiteral("t"));
         store.tokens.insert(QStringLiteral("default/srv1/u2"), QStringLiteral("t"));
         store.tokens.insert(QStringLiteral("default/srv2/u1"), QStringLiteral("t"));
-        store.tokens.insert(QStringLiteral("default/srv1"), QStringLiteral("legacy"));
-        store.tokens.insert(QStringLiteral("default/srv2"), QStringLiteral("legacy"));
         store.tokens.insert(QStringLiteral("other/srv1/u1"), QStringLiteral("keep"));
 
         bool done = false;
@@ -922,30 +798,6 @@ class TestServerCredentialSync : public QObject {
         QCOMPARE(sync.restorableUsers().size(), 1);
         QVERIFY(!sync.restoreUser(QStringLiteral("a/b")));
         QCOMPARE(store.reads, 0);
-    }
-
-    // The record of the old format that had an invalid user id owned the legacy key: it goes with the record, unless the server id could alias another key
-    void recordsWithInvalidIdsLeaveNoLegacyKeyBehind()
-    {
-        MemoryTokenStore store;
-        ServerCredential bad;
-        bad.serverId = kServerId;
-        bad.url = QStringLiteral("http://127.0.0.1:1/jellyfin");
-        bad.userId = QStringLiteral("x y");
-        bad.deviceId = QStringLiteral("stable-test-id");
-        ServerCredential aliasing = bad;
-        aliasing.serverId = QStringLiteral("a/b");
-        aliasing.userId = kUserId;
-        QVERIFY(Kinefin::saveServerCredentials(kProfile, {bad, aliasing}));
-        store.tokens.insert(kLegacyKey, QStringLiteral("old"));
-        store.tokens.insert(QStringLiteral("default/a/b"), QStringLiteral("another-key"));
-
-        JellyfinClient client;
-        ServerCredentialSync sync(&client, &store, kProfile);
-        QVERIFY(sync.credentials().isEmpty());
-        QTRY_VERIFY(!store.tokens.contains(kLegacyKey));
-        QTest::qWait(50);
-        QVERIFY(store.tokens.contains(QStringLiteral("default/a/b")));
     }
 
     void updateUserRefreshesTheNameAndTheTagOfOneRecord()

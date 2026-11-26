@@ -13,7 +13,7 @@ bool validProfileId(const QString &profileId);
 // What `--create-profile` accepts: the profile's id is its name, 1-64 characters of [A-Za-z0-9_] (safe in file names, D-Bus names and shell)
 bool validProfileName(const QString &name);
 
-// `--config-dir`: one absolute root that replaces the XDG locations for this run (`<root>/profiles.json`, `<root>/profiles/<id>`, `<root>/cache/<id>`); an empty root restores the XDG layout. Set it before the first path is read. KWallet entries are keyed by profile and server ids only, so two roots that share a profile id share its tokens
+// `--config-dir`: one absolute root that replaces the XDG locations for this run (`<root>/profiles.json`, `<root>/profiles/<id>`, `<root>/cache/<id>`); an empty root restores the XDG layout. Set it before the first path is read. Keyring entries are keyed by profile and server ids only, so two roots that share a profile id share its tokens
 void setProfileRoot(const QString &root);
 QString profileRoot();
 

@@ -155,7 +155,7 @@ int deleteProfileCommand(const QString &name, TokenStore &store, QTextStream &ou
     const auto lock = lockProfile(id, &error);
     if (!lock)
         return failed(err, error);
-    // The index entry goes first: a failure there leaves the profile whole. The wallet entries are found through servers.json, so they go before the files do
+    // The index entry goes first: a failure there leaves the profile whole. The keyring entries are found through servers.json, so they go before the files do
     if (!removeProfileEntry(id, &error))
         return failed(err, error);
     // The callback may arrive after the timeout, when this function is gone: it owns its state
@@ -173,7 +173,7 @@ int deleteProfileCommand(const QString &name, TokenStore &store, QTextStream &ou
     });
     timeout.start(30000);
     wait->loop.exec();
-    const bool walletOk = wait->ok;
+    const bool keyringOk = wait->ok;
 
     bool filesOk = true;
     for (const QString &directory : {profileDataDirectory(id), profileCacheDirectory(id)}) {
@@ -183,13 +183,12 @@ int deleteProfileCommand(const QString &name, TokenStore &store, QTextStream &ou
     if (!filesOk)
         return failed(err, QStringLiteral("Some files of the profile could not be removed"));
     out << "Deleted profile " << id << Qt::endl;
-    if (!walletOk) {
+    if (!keyringOk) {
         // The files are gone, so the entries can no longer be found later: say so, and fail
         return failed(
             err, QStringLiteral("the session tokens of this profile could not be removed from the "
-                                "wallet; remove the \"")
-                     + id
-                     + QStringLiteral("/…\" entries in the Kinefin folder of KWallet by hand"));
+                                "keyring; to end those sessions, delete the devices named Kinefin "
+                                "of its users in the Jellyfin server's dashboard"));
     }
     return 0;
 }
