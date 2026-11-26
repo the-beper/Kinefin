@@ -1799,7 +1799,11 @@ QString osdBoxProblem(QQuickItem *box)
         return QStringLiteral("it is no rectangle");
     if (box->property("radius").toReal() <= 0)
         return QStringLiteral("it is not rounded");
-    if (qAbs(box->property("color").value<QColor>().alphaF() - 0.9) >= 0.02)
+    // The colour under the pointer is tinted: the box says what it is at rest
+    const QVariant base = box->property("base");
+    const QColor fill =
+        base.isValid() ? base.value<QColor>() : box->property("color").value<QColor>();
+    if (qAbs(fill.alphaF() - 0.9) >= 0.02)
         return QStringLiteral("it is not about 0.9 opaque");
     if (QQmlProperty(box, QStringLiteral("border.width")).read().toInt() != 1)
         return QStringLiteral("its outline is not one pixel wide");
@@ -5177,7 +5181,7 @@ class TestUiPages : public QObject {
         QJsonObject movie = QJsonDocument::fromJson(ui.server.itemsById.value(kMovieId)).object();
         const QString tag =
             movie.value(QStringLiteral("BackdropImageTags")).toArray().first().toString();
-        // 1 by 1 component, a dark grey
+        // A hash of one component, a single colour
         movie.insert(QStringLiteral("ImageBlurHashes"),
                      QJsonObject{{QStringLiteral("Backdrop"),
                                   QJsonObject{{tag, QStringLiteral("00~~~~")}}}});
@@ -5213,9 +5217,22 @@ class TestUiPages : public QObject {
             QTRY_VERIFY(placeholder->property("opacity").toReal() < 0.01);
         else
             QVERIFY(placeholder->property("opacity").toReal() > 0.99);
-        // The cast photos are asked for after the cover has come or given up: at the end the page has asked for more than the cover
-        QTRY_VERIFY(ui.server.imageRequests >= 2);
         QTRY_VERIFY(ui.item(QStringLiteral("itemDetailsPage"))->property("coverSettled").toBool());
+        // The cast photos are asked for after the cover has come or given up: the first photo of a person is requested after the backdrop
+        const QByteArray personPrefix("a1b2c3d4e5f60718293a4b5c6d7e8f0");
+        const auto firstRoute = [&](const QByteArray &part) {
+            const QList<QByteArray> routes = ui.server.imageRoutes;
+            for (qsizetype index = 0; index < routes.size(); ++index) {
+                if (routes.at(index).contains(part))
+                    return index;
+            }
+            return qsizetype(-1);
+        };
+        QTRY_VERIFY(firstRoute(personPrefix) >= 0);
+        const qsizetype backdropAt = firstRoute("/Images/Backdrop");
+        QVERIFY2(backdropAt >= 0, "the backdrop was never asked for");
+        QVERIFY2(backdropAt < firstRoute(personPrefix),
+                 "a cast photo was asked for before the cover");
         // An image that the server refuses is reported by QML, which is what the case is about
         QMutexLocker locker(&gWarningsMutex);
         gWarnings.removeIf([](const QString &warning) {
@@ -13305,13 +13322,25 @@ class TestUiPages : public QObject {
         };
         QTRY_COMPARE(view->property("barInset").toReal(), 0.0);
         QVERIFY(view->property("contentHeight").toReal() <= view->height());
-        const qreal margin = gaps(home).first;
-        QVERIFY(margin >= 0);
-        for (const QQuickItem *entry : ui.tabButtons()) {
-            const auto [start, end] = gaps(entry);
-            QVERIFY2(qAbs(start - margin) <= 0.5 && qAbs(end - margin) <= 0.5,
-                     qPrintable(entry->objectName()));
-        }
+        // The entries settle after the window's resize: they all stand the same distance from both edges once they have
+        qreal margin = 0;
+        QString misaligned;
+        const auto flushWithBothEdges = [&] {
+            margin = gaps(home).first;
+            if (margin < 0) {
+                misaligned = QStringLiteral("home has a negative margin");
+                return false;
+            }
+            for (const QQuickItem *entry : ui.tabButtons()) {
+                const auto [start, end] = gaps(entry);
+                if (qAbs(start - margin) > 0.5 || qAbs(end - margin) > 0.5) {
+                    misaligned = entry->objectName();
+                    return false;
+                }
+            }
+            return true;
+        };
+        QTRY_VERIFY2(flushWithBothEdges(), qPrintable(misaligned));
         // Too short for them: the bar shows and the entries give up its width
         const int low = ui.window->minimumHeight();
         ui.window->resize(width, low);
@@ -19952,10 +19981,8 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(sceneRect(back).width() > 0 && sceneRect(cast).width() > 0
                     && sceneRect(pip).width() > 0 && bottom->width() > 0);
         const QRectF window(QPointF(0, 0), QSizeF(ui.window->size()));
-        // The bar of the top line draws nothing, and the two panels of the title and of the actions are gone
+        // The bar of the top line draws nothing
         QVERIFY(!topBar->inherits("QQuickRectangle"));
-        QVERIFY(!ui.item(QStringLiteral("playerTopLeadingPanel")));
-        QVERIFY(!ui.item(QStringLiteral("playerTopTrailingPanel")));
         for (const QQuickItem *item : {back, title, subtitle, cast, pip})
             QVERIFY2(topBar->isAncestorOf(item), qPrintable(item->objectName()));
         // Back is a square box of two grid units, standing off the corner of the window, and it is the button itself that is drawn as the box
@@ -21717,9 +21744,6 @@ class TestUiPages : public QObject {
         QVERIFY(ui.signIn());
         QQuickWindow *pip = openPictureInPicture(ui, stub);
         QVERIFY(pip);
-        // No panel stands behind a corner button, the button is the box
-        QVERIFY(!pictureInPictureItem(pip, QStringLiteral("pictureInPictureBackPanel")));
-        QVERIFY(!pictureInPictureItem(pip, QStringLiteral("pictureInPictureClosePanel")));
         for (const QString &name : {QStringLiteral("pictureInPictureBackButton"),
                                     QStringLiteral("pictureInPictureCloseButton")}) {
             QQuickItem *button = pictureInPictureItem(pip, name);

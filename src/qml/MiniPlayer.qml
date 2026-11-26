@@ -16,7 +16,6 @@ Item {
     // The video item of the shell sits here while the mini player shows
     readonly property Item videoSlot: slot
     readonly property real margin: Kirigami.Units.largeSpacing
-    // The side of the boxes of the corners, and of the pause button
     readonly property real boxSize: Math.round(Kirigami.Units.gridUnit * 1.75)
     readonly property real playSize: Math.round(Kirigami.Units.gridUnit * 1.5)
     readonly property bool mirrored: Qt.application.layoutDirection === Qt.RightToLeft

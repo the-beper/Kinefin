@@ -63,20 +63,20 @@ constexpr int MaxRememberedItems = 1000;
 // Past the cap the items chosen longest ago go first, those stored before entries carried a time ("at") before all; `spare` is the choice just made, which stays whatever its time says
 void evictOldestChoices(QJsonObject &memory, const QString &spare)
 {
-    const auto chosenAt = [](QJsonObject::const_iterator it) {
-        return it.value().toObject().value(QStringLiteral("at")).toInteger();
-    };
-    while (memory.size() > MaxRememberedItems) {
-        auto oldest = memory.constEnd();
-        for (auto it = memory.constBegin(); it != memory.constEnd(); ++it) {
-            if (it.key() != spare
-                && (oldest == memory.constEnd() || chosenAt(it) < chosenAt(oldest)))
-                oldest = it;
-        }
-        if (oldest == memory.constEnd())
-            return;
-        memory.remove(oldest.key());
+    if (memory.size() <= MaxRememberedItems)
+        return;
+    // Sorted once: a file far over the cap costs no more than its size
+    QList<std::pair<qint64, QString>> order;
+    order.reserve(memory.size());
+    for (auto entry = memory.constBegin(); entry != memory.constEnd(); ++entry) {
+        if (entry.key() != spare)
+            order.append(
+                {entry.value().toObject().value(QStringLiteral("at")).toInteger(), entry.key()});
     }
+    std::sort(order.begin(), order.end());
+    const qsizetype excess = memory.size() - MaxRememberedItems;
+    for (qsizetype index = 0; index < excess && index < order.size(); ++index)
+        memory.remove(order.at(index).second);
 }
 // An item that played for less wall-clock time than this since it loaded is not repeated
 constexpr qint64 MinimumPlayedMs = 2000;

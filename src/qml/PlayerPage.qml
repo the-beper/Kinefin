@@ -1726,13 +1726,8 @@ Kirigami.Page {
         Controls.ToolTip.visible: display === Controls.AbstractButton.IconOnly && (hovered || visualFocus)
         Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
     }
-    // A panel of the bars: a solid rounded background in the complementary colours of the OSD, no gradient, and a click on it is not a click on the video
-    component OsdPanel: Rectangle {
-        radius: Kirigami.Units.cornerRadius
-        color: Qt.alpha(Kirigami.Theme.backgroundColor, 0.9)
-        // An outline keeps it apart from a dark picture
-        border.width: 1
-        border.color: Qt.alpha(Kirigami.Theme.textColor, 0.2)
+    // A panel of the bars: a click on it is not a click on the video
+    component OsdPanel: OsdBox {
         BarClickGuard { onClicked: page.wakeChrome() }
     }
     // The wheel steps the volume: five per notch, a touchpad's travel added up to whole notches

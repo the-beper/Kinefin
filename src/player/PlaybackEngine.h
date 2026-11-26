@@ -119,6 +119,8 @@ class PlaybackEngine final : public QObject {
     void onFileStarted();
     void onPropertyChanged(const QString &property, const QVariant &value);
     void onEndFile(const QString &reason);
+    void clearVideoFacts();
+    void readVideoSize();
     void settleSeek();
     void onPlaybackRestart();
 

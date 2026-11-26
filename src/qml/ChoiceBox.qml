@@ -4,7 +4,7 @@ import QtQuick
 import QtQuick.Controls as Controls
 import org.kde.kirigami as Kirigami
 
-// The drop-down list of the app (the settings rows use the delegates of kirigami-addons): a combo box over a list of objects, `textRole` naming the field with the text of a row. The list is a menu, its rows menu items with the chosen one highlighted, and it opens below the box and above it when there is no room below, never over it. Rows are plain text: the names come from the server, and the style's own rows read them as mnemonic rich text
+// The drop-down list of the app (the settings rows use the delegates of kirigami-addons), `textRole` naming the field with the text of a row: the names come from the server, and the style's own rows read them as mnemonic rich text, so rows are plain text
 Controls.ComboBox {
     id: choiceBox
 

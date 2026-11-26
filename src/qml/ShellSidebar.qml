@@ -6,7 +6,7 @@ import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 import org.kde.kirigamiaddons.components as Components
 
-// The rail down the leading edge of the window, from its top to its bottom, with each label under its icon: Search, the sections of the shell (they scroll in a short window), then the queue, the SyncPlay group while one is joined and the user menu, which stay in reach. A Compact window has no rail: the header is shown, and its button opens a modal drawer with the same content as the rail (the sections, Search, the queue, the SyncPlay group and the user), each with its label beside the icon. The item lives in the root item of the window, beside the content item, not in it: the header is painted above the content item, and only a sibling can paint over the header's leading cell
+// The item lives in the root item of the window, beside the content item, not in it: the header is painted above the content item, and only a sibling can paint over the header's leading cell
 Item {
     id: root
     objectName: "shellSidebar"
@@ -73,7 +73,6 @@ Item {
         return [searchEntry].concat(sidebarEntries.buttons(), [queueEntry, groupEntry]);
     }
 
-    // Every row of the drawer, top to bottom
     function drawerButtons() {
         return drawerEntries.buttons().concat([drawerSearch, drawerQueue, drawerGroup, drawerUser]);
     }
@@ -392,7 +391,6 @@ Item {
         }
     }
 
-    // The search popup, as Ctrl+F opens it
     component SearchEntry: RailEntry {
         text: i18nc("@action:button", "Search")
         iconName: "search"
@@ -405,7 +403,7 @@ Item {
 
         visible: root.navigation.signedIn
         text: i18nc("@action:button", "Queue")
-        // Not the icon of the Playlists tab
+        // Not the icon of the Playlists tab, which would read as the same entry
         iconName: "media-track-queue-amarok"
         entryLabel: queued > 0 ? i18ncp("@info:tooltip the queue button and how many items the queue holds", "Queue, %1 item", "Queue, %1 items", queued) : text
         badgeCount: queued
@@ -730,7 +728,7 @@ Item {
                 objectName: "drawerActionsDivider"
             }
 
-            // Search, the queue, the group and the user, in the order of the rail and in reach whatever the height of the window
+            // Search, the queue, the group and the user: in reach whatever the height of the window
             ColumnLayout {
                 Layout.fillWidth: true
                 spacing: Kirigami.Units.smallSpacing / 2

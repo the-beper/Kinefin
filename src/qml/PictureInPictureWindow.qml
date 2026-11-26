@@ -29,7 +29,6 @@ Controls.ApplicationWindow {
     readonly property int buttonSize: Math.round(Kirigami.Units.gridUnit * 1.75)
     readonly property int panelPadding: Math.round(Kirigami.Units.smallSpacing / 2)
     readonly property int panelSize: buttonSize + panelPadding * 2
-    // The speaker of the full player: muted, low, medium or high
     readonly property string volumeIcon: {
         const volume = player?.volume ?? 100;
         return player?.muted || volume === 0 ? "audio-volume-muted" : volume < 34 ? "audio-volume-low" : volume < 67 ? "audio-volume-medium" : "audio-volume-high";
@@ -130,7 +129,7 @@ Controls.ApplicationWindow {
         onPressed: pip.startSystemResize(area.edges)
     }
 
-    // A solid rounded panel of the controls, as the full player's: the complementary colours a little see-through and an outline, and a click on it is not a click on the video
+    // A click on a panel of the controls is not a click on the video
     component PipPanel: OsdBox {
         MouseArea {
             anchors.fill: parent
@@ -260,7 +259,6 @@ Controls.ApplicationWindow {
                 }
             }
 
-            // The controls and the timeline on one panel along the bottom
             PipPanel {
                 objectName: "pictureInPictureBottomPanel"
                 anchors.left: parent.left
@@ -284,7 +282,6 @@ Controls.ApplicationWindow {
                             pip.shell.playerAction("playpause");
                         }
                     }
-                    // As the speaker button of the full player: a click mutes or unmutes
                     PipButton {
                         id: muteButton
                         objectName: "pictureInPictureMuteButton"

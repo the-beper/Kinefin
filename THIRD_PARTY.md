@@ -16,7 +16,7 @@ The Flatpak runs on `org.kde.Platform` 6.11 from Flathub. These libraries come w
 | Component | Used for | License |
 | --- | --- | --- |
 | [Qt 6](https://www.qt.io) (Core, Gui, Widgets, Quick, Qml, Quick Controls 2, D-Bus, Network) | The application framework | LGPL-3.0-only |
-| [KDE Frameworks 6](https://develop.kde.org/products/frameworks/) (Kirigami, KConfig, KCoreAddons, KI18n, KDBusAddons, KWallet) | The interface, settings, translations, single instance, the token store | LGPL, per file |
+| [KDE Frameworks 6](https://develop.kde.org/products/frameworks/) (Kirigami, KConfig, KCoreAddons, KI18n, KDBusAddons, KWallet, KWindowSystem) | The interface, settings, translations, single instance, the token store, the shadow of the picture-in-picture window | LGPL, per file |
 | [OpenSSL 3](https://www.openssl.org) | TLS (as Qt Network's backend), and the signature and chain checks of Google Cast device authentication | Apache-2.0 |
 | [SDL 3](https://www.libsdl.org) | Gamepad input | Zlib |
 

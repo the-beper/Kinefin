@@ -3,6 +3,7 @@
 import QtQuick
 import QtQuick.Controls as Controls
 import QtQuick.Layouts
+import QtQuick.Shapes
 import org.kde.kirigami as Kirigami
 
 Kirigami.ScrollablePage {
@@ -614,27 +615,44 @@ Kirigami.ScrollablePage {
             now = new Date();
     }
 
-    // A bordered label for a short fact; `accessibleName` says what it is when the caption alone does not
-    // The series and the season over an episode or a season: links in the size the page asks for, the series' name bold, a ring for the keyboard focus instead of the bold the style gives focus
-    component ContextLink: Kirigami.LinkButton {
+    // The series and the season over an episode or a season: flat text buttons, as the HIG asks of internal navigation, in the size the page asks for and in the text colour, which reads on the photo where a link colour does not; the series' name is bold
+    component ContextLink: Controls.ToolButton {
         id: contextLink
 
-        // The size of the text and whether it is bold whatever the focus
         property real size: Kirigami.Theme.defaultFont.pointSize
         property bool strong: false
+        // A name longer than the line is elided, not left to run out of the page
+        property real maximumWidth: Infinity
 
-        textFormat: Text.PlainText
+        width: Math.min(implicitWidth, maximumWidth)
+        flat: true
         font.pointSize: contextLink.size
-        font.bold: contextLink.strong || contextLink.activeFocus
+        font.bold: contextLink.strong
+        // Plain text at rest reads on the photo; the underline says it is clickable
+        font.underline: contextLink.hovered || contextLink.visualFocus
+        // A name from the server must not become a shortcut: the style would take Alt plus a letter of it
+        Kirigami.MnemonicData.enabled: false
+        Accessible.name: text
+        // Flat: nothing at rest, a tint under the pointer, a ring for the keyboard focus; the style's own background would draw the text a second time
         background: Rectangle {
-            visible: contextLink.activeFocus
-            color: "transparent"
-            border.width: 2
-            border.color: Kirigami.Theme.highlightColor
             radius: Kirigami.Units.cornerRadius
+            color: contextLink.down ? Qt.alpha(Kirigami.Theme.textColor, 0.2) : (contextLink.hovered ? Qt.alpha(Kirigami.Theme.textColor, 0.12) : "transparent")
+            border.width: contextLink.visualFocus ? 2 : 0
+            border.color: Kirigami.Theme.highlightColor
+        }
+        // The name comes from the server: plain text only, with no mnemonic from an ampersand in it
+        contentItem: Controls.Label {
+            text: contextLink.text
+            textFormat: Text.PlainText
+            font: contextLink.font
+            color: Kirigami.Theme.textColor
+            elide: Text.ElideRight
+            verticalAlignment: Text.AlignVCenter
+            Accessible.ignored: true
         }
     }
 
+    // A bordered label for a short fact; `accessibleName` says what it is when the caption alone does not
     component Badge: Rectangle {
         id: badge
 
@@ -1020,7 +1038,8 @@ Kirigami.ScrollablePage {
                                 anchors.fill: parent
                                 asynchronous: true
                                 fillMode: Image.PreserveAspectCrop
-                                sourceSize.width: width * Screen.devicePixelRatio
+                                // The widest step of backdropUrlFor, a limit and no scale: a size that followed the window would reload the picture at every pixel of a resize
+                                sourceSize.width: 1920
                                 // At the width of the view in steps, not the largest every time; the URL of the details is read too, so a reload of them follows
                                 source: page.inView && page.details.backdropUrl.toString().length > 0 ? page.details.backdropUrlFor(width * Screen.devicePixelRatio) : ""
                                 // The picture comes in slowly over the blurred one, which it hides in the end
@@ -1046,7 +1065,7 @@ Kirigami.ScrollablePage {
                                     bottom: parent.bottom
                                 }
                                 height: hero.overlay ? Math.min(parent.height, heroText.implicitHeight + page.margin + fadeLength) : fadeLength
-                                // One long, even ramp over the whole height of the fade, with no flat part: the opacity is t^1.4 (t from 0 at the top to 1 at the bottom) sampled at eighths, so it starts level, climbs steadily through the text block and reaches the full colour only at the bottom edge
+                                // One even ramp over the whole fade with no flat part, so the picture shows clear at the top and the colour is full only at the bottom edge: the opacity is t^1.4 sampled at eighths
                                 gradient: Gradient {
                                     GradientStop {
                                         position: 0
@@ -1084,6 +1103,87 @@ Kirigami.ScrollablePage {
                                         position: 1
                                         color: scrim.fade
                                     }
+                                }
+                            }
+
+                            // A second, soft fade in the corner behind the title, the links and the facts: a half ellipse on each side of the reading column's edge at the bottom (a circle of 200 by 100 stretched to its radii), level at its core and gone at its rim with no edge or seam
+                            Shape {
+                                id: cornerFade
+                                objectName: "detailsCornerFade"
+
+                                readonly property color fade: Kirigami.Theme.backgroundColor
+                                readonly property real radiusX: Math.min(hero.width * 0.55, Kirigami.Units.gridUnit * 40)
+                                readonly property real radiusY: Math.min(hero.imageHeight, Math.max(hero.imageHeight * 0.45, heroText.implicitHeight + page.margin + Kirigami.Units.gridUnit * 3))
+
+                                visible: hero.overlay
+                                // Centred on the column's left edge, the backdrop (which clips) goes on beyond it on a wide window
+                                x: headerContent.x - width / 2
+                                y: parent.height - height
+                                width: 200
+                                height: 100
+                                transform: Scale {
+                                    origin.x: cornerFade.width / 2
+                                    origin.y: cornerFade.height
+                                    xScale: cornerFade.radiusX / (cornerFade.width / 2)
+                                    yScale: cornerFade.radiusY / cornerFade.height
+                                }
+
+                                ShapePath {
+                                    strokeColor: "transparent"
+                                    strokeWidth: -1
+                                    fillGradient: RadialGradient {
+                                        centerX: cornerFade.width / 2
+                                        centerY: cornerFade.height
+                                        centerRadius: cornerFade.height
+                                        focalX: centerX
+                                        focalY: centerY
+                                        GradientStop {
+                                            position: 0
+                                            color: Qt.alpha(cornerFade.fade, 0.75)
+                                        }
+                                        GradientStop {
+                                            position: 0.3
+                                            color: Qt.alpha(cornerFade.fade, 0.75)
+                                        }
+                                        GradientStop {
+                                            position: 0.3875
+                                            color: Qt.alpha(cornerFade.fade, 0.7178)
+                                        }
+                                        GradientStop {
+                                            position: 0.475
+                                            color: Qt.alpha(cornerFade.fade, 0.633)
+                                        }
+                                        GradientStop {
+                                            position: 0.5625
+                                            color: Qt.alpha(cornerFade.fade, 0.513)
+                                        }
+                                        GradientStop {
+                                            position: 0.65
+                                            color: Qt.alpha(cornerFade.fade, 0.375)
+                                        }
+                                        GradientStop {
+                                            position: 0.7375
+                                            color: Qt.alpha(cornerFade.fade, 0.237)
+                                        }
+                                        GradientStop {
+                                            position: 0.825
+                                            color: Qt.alpha(cornerFade.fade, 0.117)
+                                        }
+                                        GradientStop {
+                                            position: 0.9125
+                                            color: Qt.alpha(cornerFade.fade, 0.0323)
+                                        }
+                                        GradientStop {
+                                            position: 1
+                                            color: Qt.alpha(cornerFade.fade, 0.0)
+                                        }
+                                    }
+                                    startX: 0
+                                    startY: 0
+                                    PathLine { x: cornerFade.width; y: 0 }
+                                    PathLine { x: cornerFade.width; y: cornerFade.height }
+                                    PathLine { x: 0; y: cornerFade.height }
+                                    PathLine { x: 0; y: 0 }
                                 }
                             }
                         }
@@ -1149,6 +1249,8 @@ Kirigami.ScrollablePage {
                                 }
 
                                 Flow {
+                                    // The buttons' own padding stays for their hover and focus background: the text lines up with the title and the facts
+                                    Layout.leftMargin: -seriesLink.leftPadding
                                     Layout.fillWidth: !titleBlock.seriesBeside
                                     Layout.row: titleBlock.seriesBeside || titleBlock.seriesFirst ? 0 : 1
                                     Layout.column: 0
@@ -1160,6 +1262,7 @@ Kirigami.ScrollablePage {
                                     ContextLink {
                                         id: seriesLink
                                         objectName: "seriesLink"
+                                        maximumWidth: titleBlock.width
                                         visible: page.showSeriesLink
                                         size: titleBlock.contextSize
                                         strong: true
@@ -1181,6 +1284,7 @@ Kirigami.ScrollablePage {
                                     ContextLink {
                                         id: seasonLink
                                         objectName: "seasonLink"
+                                        maximumWidth: titleBlock.width
                                         visible: page.showSeasonLink
                                         size: titleBlock.contextSize
                                         text: page.details.seasonNumber > 0 ? i18n("Season %1", page.details.seasonNumber) : (page.details.seasonNumber === 0 ? i18n("Specials") : i18n("Season"))

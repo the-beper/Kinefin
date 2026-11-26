@@ -416,7 +416,6 @@ Kirigami.ScrollablePage {
 
                     RowButton {
                         objectName: "downloadPlay_" + row.itemId
-                        // The one action the row's state leads to: Play, Resume, Retry or Pause
                         readonly property string rowAction: row.downloaded ? "play"
                             : row.recordState === "paused" ? "resume"
                             : row.recordState === "error" ? "retry"

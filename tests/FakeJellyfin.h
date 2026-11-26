@@ -237,6 +237,8 @@ class FakeJellyfin {
     // An image of its own for one item: keyed "<item id>/<image type>" (Primary, Backdrop, Thumb), then by "<item id>", and "user" for the avatars; the documentation screenshots use it
     QHash<QString, QByteArray> imageBodies;
     QByteArray lastImageRoute;
+    // Every image route asked for, in order
+    QList<QByteArray> imageRoutes;
     QByteArray lastImageAuth;
     QByteArray lastImageCookie;
     // GET /Items/{id}/Download: a deterministic body per id, Range/If-Range honoured unless a knob says otherwise
@@ -2047,6 +2049,7 @@ class FakeJellyfin {
         if (method == "GET" && route.contains("/Images/")) {
             ++imageRequests;
             lastImageRoute = route;
+            imageRoutes.append(route);
             lastImageAuth = authorization;
             lastImageCookie = cookie;
             if (redirectImages) {

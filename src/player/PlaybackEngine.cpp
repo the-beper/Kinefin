@@ -103,6 +103,8 @@ void PlaybackEngine::detach(MpvAbstractItem *item, bool stopSession)
     disconnect(m_controller, nullptr, this, nullptr);
     m_controller = nullptr;
     m_renderer = nullptr;
+    // The end of the file will not reach this engine: the size it had goes with the picture
+    clearVideoFacts();
 }
 
 void PlaybackEngine::setProperty(const QString &name, const QVariant &value)
@@ -146,6 +148,7 @@ void PlaybackEngine::wireController()
     connect(m_controller, &MpvController::fileStarted, this, &PlaybackEngine::onFileStarted);
     connect(m_controller, &MpvController::fileLoaded, this, [this] {
         qCDebug(playerLog) << "file loaded";
+        readVideoSize();
         m_session.opened();
         if (m_startPaused)
             m_session.pause();
@@ -533,14 +536,38 @@ void PlaybackEngine::restoreVideo(bool afterLoad)
     setProperty(QStringLiteral("vid"), *track);
 }
 
-void PlaybackEngine::onEndFile(const QString &reason)
+void PlaybackEngine::clearVideoFacts()
 {
-    qCDebug(playerLog) << "end file:" << reason;
     const bool hadSize = m_videoFacts.contains(QStringLiteral("videoWidth"))
                          || m_videoFacts.contains(QStringLiteral("videoHeight"));
     m_videoFacts.clear();
     if (hadSize)
         Q_EMIT videoSizeChanged();
+}
+
+// mpv tells a property only when its value changes: a file of the size of the one before brings no event, so the size is read once the file has loaded
+void PlaybackEngine::readVideoSize()
+{
+    if (m_videoFacts.contains(QStringLiteral("videoWidth"))
+        && m_videoFacts.contains(QStringLiteral("videoHeight")))
+        return;
+    const auto isSize = [](const QVariant &value) {
+        return (value.typeId() == QMetaType::LongLong || value.typeId() == QMetaType::Int)
+               && value.toLongLong() > 0;
+    };
+    const QVariant width = mpvProperty(QStringLiteral("dwidth"));
+    const QVariant height = mpvProperty(QStringLiteral("dheight"));
+    if (!isSize(width) || !isSize(height))
+        return;
+    m_videoFacts.insert(QStringLiteral("videoWidth"), width);
+    m_videoFacts.insert(QStringLiteral("videoHeight"), height);
+    Q_EMIT videoSizeChanged();
+}
+
+void PlaybackEngine::onEndFile(const QString &reason)
+{
+    qCDebug(playerLog) << "end file:" << reason;
+    clearVideoFacts();
     settleSeek();
     const bool eofish = reason == QLatin1String("eof");
     switch (m_session.state()) {
