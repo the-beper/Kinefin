@@ -211,6 +211,8 @@ target_link_libraries(kinefin_player PUBLIC kinefin_core MpvQt::MpvQt Qt6::Gui)
 if(mpvqt_BINARY_DIR)
     target_include_directories(kinefin_player PRIVATE ${mpvqt_BINARY_DIR}/src)
 endif()
+# The QML module registers SyncPlayController as a foreign type: its type registrar needs this library's metatypes
+qt_extract_metatypes(kinefin_player)
 
 # The desktop around the app: MPRIS and the screensaver inhibition on the session bus, the remote-control socket
 add_library(kinefin_integration STATIC
