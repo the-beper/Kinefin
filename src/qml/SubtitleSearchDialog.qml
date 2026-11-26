@@ -97,7 +97,7 @@ Kirigami.Dialog {
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: Kirigami.Units.largeSpacing
-                    Controls.ComboBox {
+                    ChoiceBox {
                         id: languageBox
                         objectName: "subtitleLanguageBox"
                         Layout.fillWidth: true
@@ -107,8 +107,6 @@ Kirigami.Dialog {
                         Accessible.name: i18nc("@label:listbox", "Subtitle language")
                         model: dialog.languages
                         onActivated: dialog.search()
-                        // The list opens below the box and above it when there is no room below, never over it
-                        PopupPlacement { popup: languageBox.popup; anchor: languageBox }
                     }
                     Controls.Button {
                         objectName: "subtitleSearchButton"

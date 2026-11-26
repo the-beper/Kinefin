@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Kinefin contributors
 # SPDX-License-Identifier: GPL-3.0-or-later
 cmake_minimum_required(VERSION 3.25)
-project(kinefin VERSION 0.9.1 LANGUAGES CXX)
+project(kinefin VERSION 0.9.2 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -22,7 +22,7 @@ find_package(OpenSSL 3.0 REQUIRED COMPONENTS Crypto)
 if(QT_KNOWN_POLICY_QTP0004)
     qt_policy(SET QTP0004 OLD)
 endif()
-find_package(KF6 6.24 REQUIRED COMPONENTS Config CoreAddons I18n DBusAddons Wallet)
+find_package(KF6 6.24 REQUIRED COMPONENTS Config CoreAddons I18n DBusAddons Wallet WindowSystem)
 # The KDE runtime 6.11 ships SDL 3.2; the gamepad input needs nothing but the library
 find_package(SDL3 3.2 REQUIRED CONFIG)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
@@ -144,6 +144,8 @@ add_library(kinefin_core STATIC
     src/models/LibrarySubtabController.h
     src/models/RecommendationRowsModel.cpp
     src/models/RecommendationRowsModel.h
+    src/imagecache/BlurHash.cpp
+    src/imagecache/BlurHash.h
     src/imagecache/ImageNetworkAccess.cpp
     src/imagecache/ImageNetworkAccess.h
     src/imagecache/ImageOrigin.cpp
@@ -289,7 +291,7 @@ qt_add_resources(kinefin_cast "cast_roots"
 target_link_libraries(kinefin_player PUBLIC kinefin_cast)
 
 # The QML module lives in a static library of its own so that the UI tests can import it like the application does
-foreach(page Main PlayerPage OsdButton MiniPlayer PictureInPictureWindow PlaybackInfoOverlay ShellHeader ShellNavigation ShellSidebar AboutDialog ShortcutsDialog DialogTitleBar RemoteSessionsDialog SyncPlayDialog MediaInfoDialog CastDialog CastTargetRow HomePage LibraryTile LibraryPage ResumeItemsPage PersonPage MediaCard CardMenu CardRow EpisodeRow ItemDetailsPage SearchPopup QueuePage FilterDialog FilterChips GenreRailsView GenreRailsPage LibraryContent ItemListRow ItemRowGrid LoginPage UserPickerPage MessageBox ServersPage SettingsPage SettingRow UserPreferencesForm UserPreferencesSaveBar FavoritesPage FavoriteCard FavoritesBanners FavoritesSectionPage TopShadow MediaListRow PlaylistsPage PlaylistPage PlaylistDialogs AddToPlaylistDialog AddToCollectionDialog CollectionDialogs EditMetadataDialog IdentifyDialog EditImagesPage RemoteImagesPage ImageTypes EditSubtitlesDialog PageToolbar PageBackButton FadeInOnShow PageTitle PlainToolTip PopupPlacement AutoScroll DownloadsPage DownloadRulesPage DownloadAllDialog RuleDialog SubtitleSearchDialog SavedFiltersDialog UploadSubtitleDialog PlainMenuItem PlaceholderSectionPage)
+foreach(page Main PlayerPage OsdButton OsdBox MiniPlayer PictureInPictureWindow PlaybackInfoOverlay ShellHeader ShellNavigation ShellSidebar AboutDialog ShortcutsDialog DialogTitleBar RemoteSessionsDialog SyncPlayDialog MediaInfoDialog CastDialog CastTargetRow HomePage LibraryTile LibraryPage ResumeItemsPage PersonPage MediaCard CardMenu CardRow EpisodeRow ItemDetailsPage SearchPopup QueuePage FilterDialog FilterChips GenreRailsView GenreRailsPage LibraryContent ItemListRow ItemRowGrid LoginPage UserPickerPage MessageBox ServersPage SettingsPage SettingRow UserPreferencesForm UserPreferencesSaveBar FavoritesPage FavoriteCard FavoritesBanners FavoritesSectionPage TopShadow MediaListRow PlaylistsPage PlaylistPage PlaylistDialogs AddToPlaylistDialog AddToCollectionDialog CollectionDialogs EditMetadataDialog IdentifyDialog EditImagesPage RemoteImagesPage ImageTypes EditSubtitlesDialog PageToolbar PageBackButton FadeInOnShow PageTitle PlainToolTip PopupPlacement ChoiceBox AutoScroll DownloadsPage DownloadRulesPage DownloadAllDialog RuleDialog SubtitleSearchDialog SavedFiltersDialog UploadSubtitleDialog PlainMenuItem PlaceholderSectionPage)
     set_source_files_properties(src/qml/${page}.qml PROPERTIES QT_RESOURCE_ALIAS ${page}.qml)
 endforeach()
 # The images the pages draw themselves, beside the QML files they belong to
@@ -305,6 +307,7 @@ qt_add_qml_module(kinefin_ui
     QML_FILES
         src/qml/Main.qml
         src/qml/PlayerPage.qml
+        src/qml/OsdBox.qml
         src/qml/OsdButton.qml
         src/qml/MiniPlayer.qml
         src/qml/PictureInPictureWindow.qml
@@ -319,6 +322,7 @@ qt_add_qml_module(kinefin_ui
         src/qml/PageTitle.qml
         src/qml/PlainToolTip.qml
         src/qml/PopupPlacement.qml
+        src/qml/ChoiceBox.qml
         src/qml/AutoScroll.qml
         src/qml/PlaybackInfoOverlay.qml
         src/qml/ShellHeader.qml
@@ -401,8 +405,12 @@ qt_add_qml_module(kinefin_ui
         src/app/MiddleButtonWatcher.h
         src/app/MouseNavigation.cpp
         src/app/MouseNavigation.h
+        src/app/BlurHashImageProvider.cpp
+        src/app/BlurHashImageProvider.h
         src/app/MpvVideoItem.cpp
         src/app/MpvVideoItem.h
+        src/app/PipAspect.h
+        src/app/PipShadow.h
         src/app/PipSurface.cpp
         src/app/PipSurface.h
         src/app/RemoteCommands.cpp
@@ -414,7 +422,7 @@ target_compile_definitions(kinefin_ui PRIVATE TRANSLATION_DOMAIN="kinefin")
 target_link_libraries(kinefin_ui PUBLIC
     kinefin_core kinefin_player kinefin_integration MpvQt::MpvQt
     Qt6::Gui Qt6::Quick Qt6::Qml Qt6::QuickControls2
-    KF6::I18n KF6::I18nQml
+    KF6::I18n KF6::I18nQml KF6::WindowSystem
 )
 # KWin's picture-in-picture surface needs QtWaylandClient's private headers: the Flatpak SDK ships them, the Fedora build image has the CMake target without them. Without them PipSurface reports itself unavailable and the window stays an ordinary one
 find_package(Qt6 QUIET COMPONENTS WaylandClient WaylandClientPrivate WaylandScannerTools)
@@ -589,6 +597,20 @@ if(BUILD_TESTING)
     target_link_libraries(test_input_filter PRIVATE kinefin_integration Qt6::Test Qt6::Gui)
     add_test(NAME input_filter COMMAND test_input_filter)
     set_tests_properties(input_filter PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+    add_executable(test_blurhash tests/test_blurhash.cpp)
+    target_link_libraries(test_blurhash PRIVATE kinefin_ui kinefin_core Qt6::Test Qt6::Gui)
+    add_test(NAME blurhash COMMAND test_blurhash)
+
+    add_executable(test_pip_aspect tests/test_pip_aspect.cpp)
+    target_include_directories(test_pip_aspect PRIVATE src/app)
+    target_link_libraries(test_pip_aspect PRIVATE Qt6::Test Qt6::Core)
+    add_test(NAME pip_aspect COMMAND test_pip_aspect)
+
+    add_executable(test_pip_shadow tests/test_pip_shadow.cpp)
+    target_include_directories(test_pip_shadow PRIVATE src/app)
+    target_link_libraries(test_pip_shadow PRIVATE Qt6::Test Qt6::Gui Qt6::Core)
+    add_test(NAME pip_shadow COMMAND test_pip_shadow)
 
     add_executable(test_gamepad_mapper tests/test_gamepad_mapper.cpp)
     target_link_libraries(test_gamepad_mapper PRIVATE kinefin_integration Qt6::Test)

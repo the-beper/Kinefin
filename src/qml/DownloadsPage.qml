@@ -55,6 +55,18 @@ Kirigami.ScrollablePage {
 
     // Read once per change: the box, the header and the resolution share it
     readonly property var outboxConflicts: downloads.outboxConflicts
+    // The top padding of a section header, what Kirigami gives it by default, set on the headers and taken off the list's top margin: the first heading then sits as far under the bar as the first row of the other lists
+    readonly property real sectionPadding: Kirigami.Units.largeSpacing + Kirigami.Units.smallSpacing
+
+    // An icon-only button of a row, with its text as the tooltip
+    component RowButton: Controls.ToolButton {
+        display: Controls.AbstractButton.IconOnly
+        // A click on a button leaves the keys on the list: Tab still reaches the buttons
+        focusPolicy: Qt.TabFocus
+        Controls.ToolTip.text: text
+        Controls.ToolTip.visible: hovered || visualFocus
+        Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
+    }
 
     // The list takes the keys as soon as the page shows
     function focusPrimary() {
@@ -230,7 +242,7 @@ Kirigami.ScrollablePage {
         id: list
         objectName: "downloadsList"
         // Room under the bar: the rows scroll up to its line, but open clear of it
-        topMargin: Kirigami.Units.largeSpacing * 2
+        topMargin: Kirigami.Units.largeSpacing * 2 - page.sectionPadding
 
         // On the view, not in its content: the shadow stays under the toolbar while the rows scroll
         TopShadow {
@@ -252,23 +264,13 @@ Kirigami.ScrollablePage {
             if (item && item.downloaded)
                 page.Window.window.playDownload(item.serverId, item.userId, item.itemId);
         }
-        Keys.onMenuPressed: {
-            if (list.currentItem)
-                list.currentItem.openMenu();
-        }
         Keys.onDeletePressed: {
             const item = list.currentItem;
             if (item && item.removable)
                 page.askRemove(item.serverId, item.userId, item.itemId, item.name);
         }
-        Keys.onPressed: event => {
-            if (event.modifiers === Qt.ShiftModifier && event.key === Qt.Key_F10 && list.currentItem) {
-                list.currentItem.openMenu();
-                event.accepted = true;
-            }
-        }
 
-        // A row is a record of the queue; the list takes the keys as the Queue page's does: Return plays, Menu or Shift+F10 opens the row's menu, Delete asks to delete
+        // A row is a record of the queue; the list takes the keys as the Queue page's does: Return plays, Delete asks to delete
         delegate: Controls.ItemDelegate {
             id: row
 
@@ -295,12 +297,6 @@ Kirigami.ScrollablePage {
             readonly property string statusText: page.rowStatus(recordState, error, size, bytesWritten, progress, bytesPerSecond)
             readonly property bool cancellable: ["queued", "fetching", "waiting"].indexOf(recordState) >= 0
             readonly property bool removable: ["paused", "error", "completed", "exported"].indexOf(recordState) >= 0
-            readonly property bool hasMenu: cancellable || removable
-
-            function openMenu() {
-                if (hasMenu)
-                    rowMenu.open();
-            }
 
             objectName: "downloadRow_" + itemId
             // The row spans the list and its visible part is capped at the reading width and centred: a ListView resets the x of its delegates, so the side margins are insets
@@ -414,86 +410,66 @@ Kirigami.ScrollablePage {
                         font: Kirigami.Theme.smallFont
                     }
                 }
-                Controls.ToolButton {
-                    objectName: "downloadPlay_" + row.itemId
+                RowLayout {
                     Layout.alignment: Qt.AlignVCenter
-                    // The one action the row's state leads to: Play, Resume, Retry or Pause
-                    readonly property string rowAction: row.downloaded ? "play"
-                        : row.recordState === "paused" ? "resume"
-                        : row.recordState === "error" ? "retry"
-                        : row.cancellable ? "pause" : ""
-                    visible: rowAction.length > 0
-                    text: rowAction === "play" ? i18n("Play")
-                        : rowAction === "resume" ? i18n("Resume")
-                        : rowAction === "retry" ? i18n("Retry") : i18n("Pause")
-                    icon.name: rowAction === "retry" ? "view-refresh" : rowAction === "pause" ? "media-playback-pause" : "media-playback-start"
-                    display: Controls.AbstractButton.IconOnly
-                    Accessible.name: rowAction === "play" ? i18nc("@action:button %1 is the item", "Play %1", row.name)
-                        : rowAction === "resume" ? i18nc("@action:button %1 is the item", "Resume %1", row.name)
-                        : rowAction === "retry" ? i18nc("@action:button %1 is the item", "Retry %1", row.name)
-                        : i18nc("@action:button %1 is the item", "Pause %1", row.name)
-                    Controls.ToolTip.text: text
-                    Controls.ToolTip.visible: hovered || visualFocus
-                    Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
-                    onClicked: {
-                        switch (rowAction) {
-                        case "play":
-                            page.Window.window.playDownload(row.serverId, row.userId, row.itemId);
-                            break;
-                        case "pause":
-                            page.pauseRow(row.serverId, row.userId, row.itemId);
-                            break;
-                        default:
-                            page.resumeRow(row.serverId, row.userId, row.itemId);
-                        }
-                    }
-                }
-                Controls.ToolButton {
-                    id: rowMore
-                    objectName: "downloadMore_" + row.itemId
-                    Layout.alignment: Qt.AlignVCenter
-                    visible: row.hasMenu
-                    text: i18n("More Actions")
-                    icon.name: "overflow-menu"
-                    display: Controls.AbstractButton.IconOnly
-                    Accessible.name: i18nc("@action:button %1 is the item", "More Actions for %1", row.name)
-                    Controls.ToolTip.text: text
-                    Controls.ToolTip.visible: hovered || visualFocus
-                    Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
-                    onClicked: rowMenu.open()
-                    // Below the button, above it when there is no room below
-                    PopupPlacement { popup: rowMenu; anchor: rowMore }
-                    Controls.Menu {
-                        id: rowMenu
-                        Controls.MenuItem {
-                            objectName: "downloadExport_" + row.itemId
-                            text: i18n("Export…")
-                            icon.name: "document-export"
-                            visible: row.downloaded
-                            height: visible ? implicitHeight : 0
-                            onTriggered: {
-                                exportDialog.serverId = row.serverId;
-                                exportDialog.userId = row.userId;
-                                exportDialog.itemId = row.itemId;
-                                exportDialog.open();
+                    spacing: Kirigami.Units.smallSpacing
+
+                    RowButton {
+                        objectName: "downloadPlay_" + row.itemId
+                        readonly property string rowAction: row.downloaded ? "play"
+                            : row.recordState === "paused" ? "resume"
+                            : row.recordState === "error" ? "retry"
+                            : row.cancellable ? "pause" : ""
+                        visible: rowAction.length > 0
+                        text: rowAction === "play" ? i18n("Play")
+                            : rowAction === "resume" ? i18n("Resume")
+                            : rowAction === "retry" ? i18n("Retry") : i18n("Pause")
+                        icon.name: rowAction === "retry" ? "view-refresh" : rowAction === "pause" ? "media-playback-pause" : "media-playback-start"
+                        Accessible.name: rowAction === "play" ? i18nc("@action:button %1 is the item", "Play %1", row.name)
+                            : rowAction === "resume" ? i18nc("@action:button %1 is the item", "Resume %1", row.name)
+                            : rowAction === "retry" ? i18nc("@action:button %1 is the item", "Retry %1", row.name)
+                            : i18nc("@action:button %1 is the item", "Pause %1", row.name)
+                        onClicked: {
+                            switch (rowAction) {
+                            case "play":
+                                page.Window.window.playDownload(row.serverId, row.userId, row.itemId);
+                                break;
+                            case "pause":
+                                page.pauseRow(row.serverId, row.userId, row.itemId);
+                                break;
+                            default:
+                                page.resumeRow(row.serverId, row.userId, row.itemId);
                             }
                         }
-                        Controls.MenuItem {
-                            objectName: "downloadCancel_" + row.itemId
-                            text: i18n("Cancel Download")
-                            icon.name: "process-stop"
-                            visible: row.cancellable
-                            height: visible ? implicitHeight : 0
-                            onTriggered: page.cancelRow(row.serverId, row.userId, row.itemId)
+                    }
+                    RowButton {
+                        objectName: "downloadExport_" + row.itemId
+                        visible: row.downloaded
+                        text: i18n("Export…")
+                        icon.name: "document-export"
+                        Accessible.name: i18nc("@action:button %1 is the item", "Export %1", row.name)
+                        onClicked: {
+                            exportDialog.serverId = row.serverId;
+                            exportDialog.userId = row.userId;
+                            exportDialog.itemId = row.itemId;
+                            exportDialog.open();
                         }
-                        Controls.MenuItem {
-                            objectName: "downloadDelete_" + row.itemId
-                            text: i18n("Delete Download…")
-                            icon.name: "edit-delete"
-                            visible: row.removable
-                            height: visible ? implicitHeight : 0
-                            onTriggered: page.askRemove(row.serverId, row.userId, row.itemId, row.name)
-                        }
+                    }
+                    RowButton {
+                        objectName: "downloadCancel_" + row.itemId
+                        visible: row.cancellable
+                        text: i18n("Cancel Download")
+                        icon.name: "process-stop"
+                        Accessible.name: i18nc("@action:button %1 is the item", "Cancel Download of %1", row.name)
+                        onClicked: page.cancelRow(row.serverId, row.userId, row.itemId)
+                    }
+                    RowButton {
+                        objectName: "downloadDelete_" + row.itemId
+                        visible: row.removable
+                        text: i18n("Delete Download…")
+                        icon.name: "edit-delete"
+                        Accessible.name: i18nc("@action:button %1 is the item", "Delete Download of %1", row.name)
+                        onClicked: page.askRemove(row.serverId, row.userId, row.itemId, row.name)
                     }
                 }
             }
@@ -506,8 +482,10 @@ Kirigami.ScrollablePage {
 
             Kirigami.ListSectionHeader {
                 id: sectionHeader
+                objectName: "downloadsSection_" + section
                 x: page.sideMargin
                 width: parent.width - page.sideMargin * 2
+                topPadding: page.sectionPadding
                 text: section === "completed" ? i18n("Available on This Device") : i18n("Active Downloads")
             }
         }

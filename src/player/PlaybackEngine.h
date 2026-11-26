@@ -104,6 +104,8 @@ class PlaybackEngine final : public QObject {
     void fileLoaded();
     // The decoder's picture parameters (video-dec-params) changed or appeared
     void videoParamsChanged();
+    // The size mpv shows the video at (dwidth, dheight) changed, appeared or went with the file
+    void videoSizeChanged();
     void seekingChanged(bool seeking);
 
   private:
@@ -117,6 +119,8 @@ class PlaybackEngine final : public QObject {
     void onFileStarted();
     void onPropertyChanged(const QString &property, const QVariant &value);
     void onEndFile(const QString &reason);
+    void clearVideoFacts();
+    void readVideoSize();
     void settleSeek();
     void onPlaybackRestart();
 

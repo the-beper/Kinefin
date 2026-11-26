@@ -161,7 +161,7 @@ In the picker, arrows move, Return or Space chooses, and a lock badge marks a us
 
 **Ask for Password** stores no token for that user, so Kinefin asks every time. It is off by default.
 
-The main menu, opened from the avatar at the foot of the left rail (the right end of the header in a [Compact window](#browse)), has the account actions:
+The main menu, opened from the avatar at the foot of the left rail (the right end of the header, or your row of the drawer, in a [Compact window](#browse)), has the account actions:
 
 | Action            | Effect                                                                                                     |
 | ----------------- | ---------------------------------------------------------------------------------------------------------- |
@@ -181,11 +181,11 @@ A rail down the left edge of the window holds the entries, each icon with its la
 | Middle  | **Home**, **Movies** and **Shows** (each only when the server has a library of that type), **Music**, **Audiobooks**, then **Favorites**, **Playlists** and **Downloads** |
 | Foot    | **Queue** with its count, **Group** while you are in a SyncPlay group, and the main menu as your avatar                                      |
 
-**Music** and **Audiobooks** open a page that says they are coming soon. **Downloads** also shows how many downloads are not finished. In a short window the middle entries scroll, with a scroll bar that shows when some are out of view, and the foot stays in view.
+**Music** and **Audiobooks** open a page that says they are coming soon. **Downloads** also shows how many downloads are not finished. In a short window the middle entries scroll, with a scroll bar that shows when some are out of view and takes its own strip beside the entries, and the foot stays in view.
 
 Ctrl+1 to Ctrl+8 open the middle entries by their position among the visible ones, so without a Movies library **Shows** is Ctrl+2.
 
-In a window narrower than the smallest window plus the rail (Compact), the rail gives way to a header bar. It has a button that opens the same entries in a drawer, a **Search** button and the main menu, which then also holds **Queue** and the SyncPlay group. The header bar also shows while you work offline, and it is hidden on the **Servers** and sign-in pages, which have only the main menu button in the top corner. The bar of every page has framed buttons and a full-width line under it, with a soft shadow below.
+In a window narrower than the smallest window plus the rail (Compact), the rail gives way to a header bar. It has three controls: a button that opens a drawer, a **Search** button and the main menu, which then also holds **Queue** and the SyncPlay group. The drawer repeats the rail as rows with the labels beside the icons: the sections, **Search**, **Queue** with its count, **SyncPlay Group** while you are in a group (with **Not following** or **Waiting for others** under it when that applies) and a row with your avatar and name. The **SyncPlay Group** and user rows end with an arrow because they open a menu; the user row opens the main menu. In a short window the sections of the drawer scroll and the rows below them stay in view. The header bar also shows while you work offline, and it is hidden on the **Servers** and sign-in pages, which have only the main menu button in the top corner. The bar of every page has framed buttons and a full-width line under it, with a soft shadow below.
 
 Escape and Alt+Left go back. The mouse back button does too. Ctrl+R reloads the page in front.
 
@@ -340,7 +340,7 @@ Before you play, choose the audio track and the subtitles (or **Off**) with the 
 
 On a movie or show page, **Add to Collection…** puts the item into an existing collection or a new one. An administrator can change the item on the server. **Delete Media…** removes a movie, episode or video when the server allows it, after a confirmation; the server deletes the file and it cannot be recovered. **Edit Metadata…** changes the name, overview, year, official rating and genres. **Identify…** on a movie or a show searches the metadata providers; select a match and press **Apply Match** to apply it. **Edit Images…** opens the page described in [Edit images](#edit-images). **Edit Subtitles…** uploads an external subtitle file or deletes an external track. Clicking a cast member opens the movies, shows and episodes that person appears in.
 
-A series page lists seasons and one Next Up entry, a season page lists its episodes, and an episode page links to its series and season. On a season page of a wide window the series link and the season name share one line, and no episode is highlighted until you move into the list. Episodes and cast stay within the reading width of a very wide window. A series or a season has **Play**, which plays its first episode (a series starts from its first regular season, not from the Specials). **Mark as Watched** or **Mark as Unwatched** in the toolbar marks every episode of a series or a season; the seasons, the episode to continue with and the episode list are read again afterwards. Once you have watched part of it, **Continue** goes on with the series' Next Up episode, or the season's first unwatched one (it reads **Resume** and picks up where you stopped when that episode is in progress), and **Play from Beginning** starts over from the first episode. The buttons appear when the server has answered for both. Each plays one episode, like opening that episode and pressing Play. A collection page lists its first 100 items. **Add to Playlist…** is on movie, episode and video pages.
+A series page lists seasons and one Next Up entry, a season page lists its episodes, and an episode page has buttons for its series and season, in the text colour with the series' name in bold. On a season page of a wide window the series name and the season name share one line, and no episode is highlighted until you move into the list. Episodes and cast stay within the reading width of a very wide window. A series or a season has **Play**, which plays its first episode (a series starts from its first regular season, not from the Specials). **Mark as Watched** or **Mark as Unwatched** in the toolbar marks every episode of a series or a season; the seasons, the episode to continue with and the episode list are read again afterwards. Once you have watched part of it, **Continue** goes on with the series' Next Up episode, or the season's first unwatched one (it reads **Resume** and picks up where you stopped when that episode is in progress), and **Play from Beginning** starts over from the first episode. The buttons appear when the server has answered for both. Each plays one episode, like opening that episode and pressing Play. A collection page lists its first 100 items. **Add to Playlist…** is on movie, episode and video pages.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="images/dark/series.png">
@@ -359,7 +359,7 @@ A series page lists seasons and one Next Up entry, a season page lists its episo
 | Button                           | What it does                                                                                                                                                                   |
 | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Upload…**                      | Sends a JPEG, PNG or WebP file of at most 20 MiB from your computer. Backdrops and screenshots get the new image after the others; every other type has its image replaced |
-| **Search Online…**               | Opens the **Search Online** page for that type (the toolbar button does the same for Primary)                                            |
+| **Search Online…**               | Opens the **Search Online** page for that type                                                                                                                                 |
 | **Move Earlier**, **Move Later** | On a type with several images (Backdrop, Screenshot), changes their order; the first backdrop is the one the details page shows                                              |
 | **Delete…**                      | Removes the image from the server after a confirmation; it cannot be recovered                                                                                               |
 
@@ -367,7 +367,7 @@ A series page lists seasons and one Next Up entry, a season page lists its episo
 
 ### Search
 
-**Search** in the rail, the search button of a Compact window, or Ctrl+F opens a search popup near the top of the window. It shows four groups of up to 24 results: Movies, Series, Episodes and Collections. Selecting a result opens its details page above the page you were on and closes the popup. Search covers titles only, not people.
+**Search** in the rail, the search button or the **Search** row of the drawer in a Compact window, or Ctrl+F opens a search popup near the top of the window. It shows four groups of up to 24 results: Movies, Series, Episodes and Collections. Selecting a result opens its details page above the page you were on and closes the popup. Search covers titles only, not people.
 
 ### Favorites
 
@@ -396,7 +396,7 @@ The queue is an ordered list of up to 500 movies, episodes and videos, each at m
 
 To add to it, use **Play Next** (top of the queue) or **Add to Queue** (end) on a card or a details page. On a season, series or collection they add the playable episodes or children: a season from its first unplayed episode, a series from its Next Up episode.
 
-**Queue** at the foot of the rail (in the main menu of a Compact window) opens the page. Its toolbar has **Resume Queue**, **Play From Here**, **Undo** and **Clear Queue** (with confirmation). In the list:
+**Queue** at the foot of the rail (a row of the drawer and an entry of the main menu in a Compact window) opens the page. Its toolbar has **Resume Queue**, **Play From Here**, **Undo** and **Clear Queue** (with confirmation). In the list:
 
 | Key                | Action               |
 | ------------------ | -------------------- |
@@ -413,7 +413,7 @@ An episode played on its own is not added to the queue. The player still lets yo
 
 To play, press **Play** or **Resume** on a card or details page, or press Return on a focused card. Kinefin direct-plays the file when the server allows it and the file passes the device rules. Otherwise the server transcodes. **Media Info** and the player's **Playback Info** panel show which one is happening.
 
-The video fills the window. Bars with the controls appear when you move the pointer and hide 5 seconds later. They stay while playback is paused, while the pointer rests on them and while a menu is open.
+The video fills the window. The controls float over it: a line at the top and a rounded panel at the bottom, with the picture visible around them. They appear when you move the pointer and hide 5 seconds later. They stay while playback is paused, while the pointer rests on them and while a menu is open.
 
 ### Control playback
 
@@ -422,11 +422,11 @@ The video fills the window. Bars with the controls appear when you move the poin
   <img alt="The player with its controls showing: the title, the elapsed and total time around the seek bar, and the Audio and Subtitles menus" src="images/player.png">
 </picture>
 
-The top bar has **Back** (leaves the player, playback continues in the mini player), the title and episode line, and **Cast…** and **Picture-in-Picture** buttons. In a SyncPlay group a group button also shows there.
+The top line starts with **Back** (leaves the player, playback continues in the mini player), a square box that lights up as a whole under the pointer. The title and episode line sit beside it as plain text, shortened to fit in a narrow window. Beside it, as tall as the box, are **Cast…**, **Picture-in-Picture** and, in a SyncPlay group, **Show SyncPlay Group**, as ordinary buttons that show their icons only in a narrow window.
 
-The bottom bar has the timeline with a thumbnail preview while you drag, **Previous** and **Next** (when there is one), **Pause** or **Resume**, a speaker button with a volume slider, **Audio**, **Subtitles**, **Full Screen Mode** and **More Actions**. The time at the left of the timeline is the current position. The one at the right toggles total and remaining time. A box above the timeline shows the time under the pointer, and the chapter there when the item has chapters; it also shows while you drag. **Ends at** shows the clock time the item ends at the current speed. **Skip Intro**, **Skip Recap** or **Skip Outro** appears during a segment the server knows, and the timeline marks each of them as a grey band; the box above the timeline names the segment under the pointer.
+The bottom panel has the timeline with a thumbnail preview while you drag, **Previous** and **Next** (when there is one), **Pause** or **Resume**, a speaker button with a volume slider, **Audio**, **Subtitles**, **Full Screen Mode** and **More Actions**. The time at the left of the timeline is the current position. The one at the right toggles total and remaining time. A box above the timeline shows the time under the pointer, and the chapter there when the item has chapters; it also shows while you drag. **Ends at** shows the clock time the item ends at the current speed. **Skip Intro**, **Skip Recap** or **Skip Outro** appears during a segment the server knows, and the timeline marks each of them as a grey band; the box above the timeline names the segment under the pointer.
 
-A right click on the video, the Menu key or Shift+F10 open a context menu with the main actions. A single click on the video pauses or resumes, and a double click toggles full screen. The mouse wheel anywhere over the player changes the volume by 5.
+A right click on the video, the Menu key or Shift+F10 open a context menu with the main actions: **Pause** or **Resume**, **Previous**, **Next**, **Audio**, **Subtitles**, **Full Screen Mode**, **Show Mini Player** and **More Actions**. A single click on the video pauses or resumes, and a double click toggles full screen. The mouse wheel anywhere over the player changes the volume by 5.
 
 | Key            | Action                                                                         |
 | -------------- | ------------------------------------------------------------------------------ |
@@ -462,7 +462,7 @@ A right click on the video, the Menu key or Shift+F10 open a context menu with t
 | **Sleep Timer**           | Stops playback after 15 to 120 minutes, at the **End of Current Item** or at the **End of Queue**                                                                                                                                                                               |
 | **Now Playing Queue**     | A panel with the queue                                                                                                                                                                                                                                                          |
 | **Screenshot**            | Saves the current frame                                                                                                                                                                                                                                                         |
-| **Keep Controls Visible** | Keeps the bars up                                                                                                                                                                                                                                                               |
+| **Keep Controls Visible** | Keeps the controls up                                                                                                                                                                                                                                                             |
 | **Forget Series Choices** | Clears what Kinefin remembered for this series                                                                                                                                                                                                                                  |
 
 The Audio menu ends with **Night Mode**, which raises quiet dialogue and lowers loud scenes. It is the same switch as in **Settings**, **Audio**.
@@ -492,15 +492,24 @@ To search for a subtitle online:
 
 The entry shows only when your server user is allowed to manage subtitles, the item comes from the server and you are not in a SyncPlay group. Searching needs the OpenSubtitles plugin on the server, because Kinefin never contacts OpenSubtitles itself; without it the dialog says that no provider is installed. After the download the video reopens at the current position with the new track available. If the server cannot save the file, a message says so and the server's administrator can check where the library stores subtitles.
 
-Kinefin remembers an explicit track choice per item. For an episode played directly it also remembers it per series and applies it to the following episodes, matching by language and forced flag. **Remember the audio track** and **Remember the subtitle track** in **Settings**, **User** turn this off.
+Kinefin remembers an explicit track choice per item, for up to 1000 items across all servers and users; past that, the choice made longest ago is forgotten. For an episode played directly it also remembers it per series and applies it to the following episodes, matching by language and forced flag. **Remember the audio track** and **Remember the subtitle track** in **Settings**, **User** turn this off.
 
 ### Keep watching while you browse
 
-The **Back** button, Escape, Alt+Left and the mouse back button leave the player without stopping. The video moves to a mini player docked in the bottom right corner of the window while you browse. Hovering it shows **Pause** or **Resume**, **Expand Player**, **Close Mini Player**, the title and a progress line. **Close Mini Player** stops playback. Ctrl+Shift+P expands it.
+The **Back** button, Escape, Alt+Left and the mouse back button leave the player without stopping. The video moves to a mini player docked in the bottom right corner of the window while you browse. Hovering it, or tapping it on a touch screen, shows two square boxes in the top corners, **Expand Player** at the leading one and **Close Mini Player** at the trailing one, and a low box along the bottom with **Pause** or **Resume**, the title and, along its bottom edge, a thin progress bar. **Close Mini Player** stops playback. Ctrl+Shift+P expands it.
 
-**Picture-in-Picture**, in the top bar and the context menu, moves the video into a small frameless window of its own. The main window stays free to use or minimise. Controls show on hover: an X in the corner, **Pause** or **Resume**, a timeline and the time. A click pauses or resumes, and Space pauses. The X, a double click, closing the window or Ctrl+Shift+P return to the full player without stopping.
+**Picture-in-Picture**, in the top row and the context menu, moves the video into a small frameless window of its own. The main window stays free to use or minimise. The controls show on hover, or after a tap on a touch screen, on three boxes of the same kind as the player's, each lit as a whole under the pointer: a small one in each top corner and one along the bottom. In a right-to-left language the two top corners swap.
 
-On KWin the window stays above the others. On other compositors it is an ordinary window, which the compositor may let other windows cover.
+| Control                                          | Effect                                                                                                                                   |
+| ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| **Back to Player** (top left)                    | The video returns to the full player and playback goes on                                                                                |
+| **Stop Playback and Close** (top right)          | Stops the playback and closes the window; closing the window the usual way does the same                                                 |
+| **Pause** or **Resume**, **Mute** or **Unmute** | Bottom panel buttons that pause or resume and mute or unmute                                                                             |
+| Timeline (bottom)                                | Seeks; the time beside it is elapsed and total, or only elapsed when the window is narrower than 20 grid units (about 360 px with the default font) |
+| Click on the video, Space                        | Pause or resume                                                                                                                          |
+| Double click on the video, Ctrl+Shift+P          | Return to the full player with playback going on                                                                                         |
+
+The window opens in the shape of the video (16:9 until it is known; never wider than 3:1 nor taller than 3:4), and the choices of **Aspect Ratio** that force a shape (4:3, 16:9, Widescreen for 4:3 Video) count, where Zoom, Stretch and Original Size do not. On KWin it stays above the others and keeps that shape while you resize it, and takes the new shape when the next video has another. On other compositors it is an ordinary window that you can resize to any shape, and the compositor may let other windows cover it.
 
 ### Play the next item automatically
 
@@ -544,7 +553,7 @@ A clip lasts 1 to 60 seconds and a GIF 1 to 15 seconds. The clip is MP4 (H.264 a
 
 **Video Enhancement** in **More Actions** switches mpv's debanding and your own GLSL shaders on and off while a video plays. Put `.glsl` or `.hook` files in the `shaders` folder of the profile (`~/.local/share/kinefin/profiles/<profile>/shaders/`, under `~/.var/app/io.github.the_beper.Kinefin/` in the Flatpak). The menu lists up to 32 files of at most 256 KiB, by name, and reads the folder each time it opens. Kinefin ships no shaders.
 
-A choice applies to the item that plays and is forgotten when the next one starts: lines in `mpv.conf` (see [mpv Configuration](settings.md#mpv-configuration-other)) still decide what is on at the start. A shader that mpv cannot compile does not show an error in the menu: add `log-file=/some/path` to `mpv.conf` and read mpv's log there. The menu is not available while casting.
+A choice applies to the item that plays and is forgotten when the next one starts: lines in `mpv.conf` (see [mpv Configuration](settings.md#mpv-configuration-other)) still decide what is on at the start. A shader that mpv cannot compile does not show an error in the menu: add `log-file=/some/path` to `mpv.conf` and read mpv's log there. The menu is not available while casting. Kinefin starts frames 10 ms before they are due, which a shader that takes longer than that to draw a frame can make late: put `video-timing-offset=0.05` in `mpv.conf` to give it more time.
 
 ### Watch together with SyncPlay
 
@@ -559,7 +568,7 @@ In a group the player waits for the others, and notifications name members who j
 
 Closing the player stops following the group but keeps you in it. **Follow Again** in the dialog catches up. A lost connection joins the group again.
 
-While you are in a group the rail has a **Group** button above your avatar. Its tooltip says the group's name and how many people are in it, **Not following** when the playback is not in step with the group (the icon dims) and **Waiting for others** when the group waits for someone (a dot appears on the icon). Its menu lists the group and its members, up to ten, and has **Stop Following** or **Follow Again**, **Leave Group** and **SyncPlay…**, which opens the dialog. In a Compact window the same menu is the **SyncPlay Group** entry of the main menu.
+While you are in a group the rail has a **Group** button above your avatar. Its tooltip says the group's name and how many people are in it, **Not following** when the playback is not in step with the group (the icon dims) and **Waiting for others** when the group waits for someone (a dot appears on the icon). Its menu lists the group and its members, up to ten, and has **Stop Following** or **Follow Again**, **Leave Group** and **SyncPlay…**, which opens the dialog. In a Compact window the drawer has a **SyncPlay Group** row, which opens the same menu, and the main menu has it as the **SyncPlay Group** entry.
 
 ### Control other sessions
 
@@ -579,7 +588,15 @@ To download an item, choose **Download** on its details page or in a card menu. 
 
 To download a whole series or season, choose **Download** in the toolbar of its page, then **Download All…**. A dialog reads the episodes and says how many it will fetch and how much space they take together (when the server gives every size). **Only unwatched episodes** is on by default; switch it off to include the ones you watched. When every episode has been watched, the dialog says so and offers that switch. Episodes that are already on this device or have no file are left out, a series of more than 1000 episodes is cut at 1000, and nothing starts before you press **Download**. The batch joins the queue in order, and a notification names how many entered it.
 
-The Downloads page has an active section and a completed one. A row shows the poster, the title, a second line with the year or the season and episode, and a progress bar until the download is finished or has failed. The line under it gives the size written of the total, the percentage, the speed (an average over the last few seconds) and the time left; a queued, paused, waiting or failed download says so in words instead. Each row has one main button (**Play**, **Resume**, **Retry** or **Pause**) and **More Actions**: **Export…**, **Cancel Download** and **Delete Download…**, which asks first. A click on a completed row plays it. The footer shows the number of downloads (or "No downloads"), the speed of the running ones together, the storage used and the number of changes waiting to sync.
+The Downloads page has an active section and a completed one. A row shows the poster, the title, a second line with the year or the season and episode, and a progress bar until the download is finished or has failed. The line under it gives the size written of the total, the percentage, the speed (an average over the last few seconds) and the time left; a queued, paused, waiting or failed download says so in words instead. The buttons at the end of a row depend on its state:
+
+| State                          | Buttons                                       |
+| ------------------------------ | --------------------------------------------- |
+| Queued, downloading or waiting | **Pause**, **Cancel Download**                |
+| Paused or failed               | **Resume** or **Retry**, **Delete Download…** |
+| Downloaded or exported         | **Play**, **Export…**, **Delete Download…**   |
+
+The buttons show icons only, and their names are the tooltips. **Cancel Download** acts at once, and **Delete Download…** asks first. A click on a completed row plays it. The footer shows the number of downloads (or "No downloads"), the speed of the running ones together, the storage used and the number of changes waiting to sync.
 
 **Settings**, **Downloads** sets how many downloads run at once.
 
@@ -618,7 +635,7 @@ Kinefin plays on DLNA (UPnP) renderers such as smart TVs and network players, an
 
 To cast:
 
-1. Choose **Cast…** in a card menu, on a details page, or in the player's top bar.
+1. Choose **Cast…** in a card menu, on a details page, or in the player's top row.
 2. Pick a device in the dialog. The list is built while the dialog is open. **This Computer** is the first row.
 3. Wait for the device to start.
 

@@ -15,11 +15,6 @@
 - AppImage, deb, rpm, Arch and portable tar.gz packages
 - Flathub
 
-## Known issues
-
-- Resizing the picture-in-picture window does not always keep the video's proportions
-- Remembered audio and subtitle choices are cleared once they pass 1000 items
-
 ## Ideas, not planned
 
 - Live TV

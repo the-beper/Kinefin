@@ -17,15 +17,17 @@ export XDG_RUNTIME_DIR=/tmp/xdg HOME=/tmp/home
 export XDG_CONFIG_HOME="$HOME/.config" XDG_DATA_HOME="$HOME/.local/share"
 mkdir -p "$XDG_RUNTIME_DIR"
 chmod 700 "$XDG_RUNTIME_DIR"
-mkdir -p "$out" "$XDG_CONFIG_HOME" "$XDG_DATA_HOME/applications" "$XDG_DATA_HOME/icons/hicolor/scalable/apps"
-# KWin takes the icon of the title bar from the desktop file the window's app id names
+mkdir -p "$out" "$XDG_CONFIG_HOME" "$XDG_DATA_HOME/applications" "$HOME/share"
+# KWin takes the icon of the title bar from the desktop file the window's app id names, and the buttons take the icons of the application (the Cast one) from a data directory, as an install lays them out
 cp data/io.github.the_beper.Kinefin.desktop "$XDG_DATA_HOME/applications/"
-cp data/icons/hicolor/scalable/apps/io.github.the_beper.Kinefin.svg "$XDG_DATA_HOME/icons/hicolor/scalable/apps/"
+cp -r data/icons "$HOME/share/"
+export XDG_DATA_DIRS="$HOME/share:/usr/local/share:/usr/share"
 # Dark is the scheme file written to kdeglobals, as Plasma writes it when the scheme is chosen: Kirigami, the Breeze style and the window decoration read their colours from it
 if [ "$scheme" = dark ]; then
     cp /usr/share/color-schemes/BreezeDark.colors "$XDG_CONFIG_HOME/kdeglobals"
     printf '\n[General]\nColorScheme=BreezeDark\n\n[KDE]\nwidgetStyle=Breeze\n' >>"$XDG_CONFIG_HOME/kdeglobals"
 fi
+printf '[Common]\nShadowSize=ShadowSmall\n' >"$XDG_CONFIG_HOME/breezerc"
 # kwin_wayland carries a file capability, which a rootless container refuses to execute; a copy has none
 cp /usr/bin/kwin_wayland "$XDG_RUNTIME_DIR/kwin_wayland"
 # shellcheck disable=SC2016

@@ -169,7 +169,7 @@ ColumnLayout {
                 Accessible.ignored: true
             }
 
-            Controls.ComboBox {
+            ChoiceBox {
                 id: box
 
                 Layout.fillWidth: grid.columns === 1
@@ -179,8 +179,6 @@ ColumnLayout {
                 currentIndex: row.currentRow
                 Accessible.name: row.text
                 onActivated: index => row.picked(row.entries[index].code)
-                // The list opens below the box and above it when there is no room below, never over it
-                PopupPlacement { popup: box.popup; anchor: box }
 
                 // A new list puts the box back on its first entry without changing the value the binding computes (the code keeps the same position when the catalog arrives), so the choice is bound again
                 function followChoice() {
@@ -193,22 +191,6 @@ ColumnLayout {
                 onCountChanged: {
                     followChoice();
                     Qt.callLater(followChoice);
-                }
-
-                // The style paints the selected name itself, as plain text; a custom contentItem breaks it, which reads text input API
-                delegate: Controls.ItemDelegate {
-                    id: entry
-
-                    required property var modelData
-                    required property int index
-
-                    width: ListView.view ? ListView.view.width : implicitWidth
-                    highlighted: box.highlightedIndex === entry.index
-                    contentItem: Controls.Label {
-                        textFormat: Text.PlainText
-                        elide: Text.ElideRight
-                        text: entry.modelData.name
-                    }
                 }
             }
 

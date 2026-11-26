@@ -88,13 +88,20 @@ Kirigami.Page {
     // A cast from its choice of a device on: casting is false while the server negotiates the stream for the device, also between two items of a cast
     readonly property bool castActive: page.player.casting || page.player.castTargetId.length > 0
     readonly property bool barsHeld: osdLocked || page.player.paused || page.player.casting || pointerOnBars || timeline.pressed
-    // The pointer in the window over a bar, its controls or its shade, read from the one hover of the page: it follows every move and ends when the pointer leaves the window
-    readonly property bool pointerOnBars: pointer.hovered && osd.visible && (pointer.point.position.y < topBar.height || pointer.point.position.y > page.availableHeight - bottomBar.height)
+    // The pointer in the window over a panel of the bars or the margin around it, read from the one hover of the page: it follows every move and ends when the pointer leaves the window
+    readonly property bool pointerOnBars: pointer.hovered && osd.visible && (page.overPanel(topRow, topBar) || page.overPanel(bottomBar, osd))
     // Once nothing holds them, the bars get their full time again before they go
     onBarsHeldChanged: if (!barsHeld && showChrome) chromeTimer.restart()
     // The volume slider keeps the bars up only while the pointer is on it or on the speaker, or drags it: one opened by the keyboard or a long press goes with the bars
     readonly property bool volumeHeld: volumePopup.opened && (muteButton.hovered || volumeHover.hovered || volumeSlider.pressed)
 
+    // Whether the pointer is over `panel`, which stands in `holder`, or in the margin of the panels
+    function overPanel(panel, holder) {
+        const at = pointer.point.position;
+        const margin = Kirigami.Units.largeSpacing;
+        const top = holder.y + panel.y;
+        return at.x >= panel.x - margin && at.x < panel.x + panel.width + margin && at.y >= top - margin && at.y < top + panel.height + margin;
+    }
     // The page keeps the keyboard: the controls of the bars take it only through Tab, so the keys work whatever was clicked
     function focusPrimary() { page.forceActiveFocus(Qt.TabFocusReason); }
     function wakeChrome() { showChrome = true; chromeTimer.restart(); }
@@ -526,7 +533,7 @@ Kirigami.Page {
         objectName: "playerGroupNotice"
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.top: parent.top
-        anchors.topMargin: topBar.height
+        anchors.topMargin: topBar.height + Kirigami.Units.largeSpacing
         visible: noticeTimer.running
         color: "white"
         textFormat: Text.PlainText
@@ -633,7 +640,7 @@ Kirigami.Page {
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         anchors.margins: Kirigami.Units.largeSpacing
-        anchors.bottomMargin: bottomBar.height + Kirigami.Units.largeSpacing
+        anchors.bottomMargin: osd.bottomReach + Kirigami.Units.largeSpacing
         // The Up Next card takes its place over the credits; Cancel brings it back
         readonly property bool shown: page.player.skipLabel.length > 0 && !page.player.upNextShown
         // The last label stays while the button fades out, so it keeps its width
@@ -659,13 +666,13 @@ Kirigami.Page {
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         anchors.margins: Kirigami.Units.largeSpacing
-        anchors.bottomMargin: bottomBar.height + Kirigami.Units.largeSpacing
+        anchors.bottomMargin: osd.bottomReach + Kirigami.Units.largeSpacing
         enabled: page.player.clipSaving
         visible: page.player.clipSaving
         width: Math.min(clipRow.implicitWidth + Kirigami.Units.largeSpacing * 2, page.availableWidth - Kirigami.Units.largeSpacing * 2)
         height: clipRow.implicitHeight + Kirigami.Units.largeSpacing * 2
         radius: Kirigami.Units.cornerRadius
-        Kirigami.Theme.colorSet: Kirigami.Theme.Complementary
+        Kirigami.Theme.colorSet: Kirigami.Theme.Window
         Kirigami.Theme.inherit: false
         color: Qt.alpha(Kirigami.Theme.backgroundColor, 0.9)
         border.width: 1
@@ -709,7 +716,7 @@ Kirigami.Page {
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         anchors.margins: Kirigami.Units.largeSpacing
-        anchors.bottomMargin: bottomBar.height + Kirigami.Units.largeSpacing
+        anchors.bottomMargin: osd.bottomReach + Kirigami.Units.largeSpacing
         enabled: page.player.upNextShown
         opacity: page.player.upNextShown ? 1 : 0
         visible: page.player.upNextShown || opacity > 0
@@ -730,7 +737,7 @@ Kirigami.Page {
         width: Math.min(upNextRow.implicitWidth + Kirigami.Units.largeSpacing * 2, page.availableWidth - Kirigami.Units.largeSpacing * 2)
         height: upNextRow.implicitHeight + Kirigami.Units.largeSpacing * 2
         radius: Kirigami.Units.cornerRadius
-        Kirigami.Theme.colorSet: Kirigami.Theme.Complementary
+        Kirigami.Theme.colorSet: Kirigami.Theme.Window
         Kirigami.Theme.inherit: false
         color: Qt.alpha(Kirigami.Theme.backgroundColor, 0.9)
         // An outline keeps it apart from a dark picture
@@ -826,10 +833,11 @@ Kirigami.Page {
         id: previewPanel
         anchors.bottom: parent.bottom
         anchors.horizontalCenter: parent.horizontalCenter
-        // Over the time bubble too, where that rises above the bar's shade
-        anchors.bottomMargin: bottomBar.height + Kirigami.Units.largeSpacing + (seekBubble.visible ? Math.max(0, seekBubble.height + Kirigami.Units.smallSpacing * 2 - (bottomBar.height - controls.implicitHeight)) : 0)
+        // Over the time bubble too, where that rises above the bottom panel
+        anchors.bottomMargin: osd.bottomReach + Kirigami.Units.largeSpacing + (seekBubble.visible ? Math.max(0, seekBubble.height + Kirigami.Units.smallSpacing - Kirigami.Units.largeSpacing) : 0)
         width: Kirigami.Units.gridUnit * 16
-        height: previewImage.implicitHeight > 0 ? Kirigami.Units.gridUnit * 11 : 0
+        // Never taller than the room between the top bar and the bottom panel, which a short window leaves small
+        height: previewImage.implicitHeight > 0 ? Math.max(0, Math.min(Kirigami.Units.gridUnit * 11, page.height - topBar.height - osd.bottomReach - Kirigami.Units.largeSpacing * 3)) : 0
         radius: Kirigami.Units.smallSpacing
         color: "#e9000000"
         visible: timeline.pressed && !!page.player.previewImage
@@ -868,33 +876,34 @@ Kirigami.Page {
         }
     }
 
-    // The bars float above the video and fade together; the complementary colour set gives their text, icons and the shade behind them, which fades into the video
+    // The bars are solid panels that float above the video and fade together, with no shade over the picture; the colour set of the window gives their text, icons and background
     Item {
         id: osd
         objectName: "playerOsd"
         anchors.fill: parent
         readonly property bool wanted: page.showChrome || !page.player.active || page.menuOpen || page.volumeHeld || page.barsHeld
+        // How far up from the bottom of the window the bottom panel reaches, its margin included: what else stands at the bottom stands above it
+        readonly property real bottomReach: bottomBar.height + Kirigami.Units.largeSpacing
         enabled: wanted
         opacity: wanted ? 1 : 0
         // Visible as soon as it is wanted, so the Tab that wakes the bars finds their controls while they fade in
         visible: wanted || opacity > 0
-        Kirigami.Theme.colorSet: Kirigami.Theme.Complementary
+        Kirigami.Theme.colorSet: Kirigami.Theme.Window
         Kirigami.Theme.inherit: false
         Behavior on opacity {
             NumberAnimation { duration: Kirigami.Units.longDuration; easing.type: Easing.OutCubic }
         }
 
-        Rectangle {
+        // The top of the video: Back is a square box, the title is plain text beside it, and the actions are buttons of the desktop style standing alone; all on one line
+        Item {
             id: topBar
             objectName: "playerTopBar"
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
-            height: topRow.implicitHeight + Kirigami.Units.largeSpacing * 2 + Kirigami.Units.gridUnit * 2
-            gradient: Gradient {
-                GradientStop { position: 0; color: Qt.alpha(Kirigami.Theme.backgroundColor, 0.8) }
-                GradientStop { position: 1; color: Qt.alpha(Kirigami.Theme.backgroundColor, 0) }
-            }
+            // The side of the box of Back, which the standalone buttons are as high as
+            readonly property real boxSize: Kirigami.Units.gridUnit * 2
+            height: Math.max(boxSize, titleColumn.implicitHeight) + Kirigami.Units.largeSpacing * 2
             // The bar slides out of the window as it fades
             transform: Translate {
                 y: osd.wanted ? 0 : -Kirigami.Units.gridUnit
@@ -905,55 +914,65 @@ Kirigami.Page {
             BarClickGuard { onClicked: page.wakeChrome() }
             RowLayout {
                 id: topRow
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.top: parent.top
+                anchors.fill: parent
                 anchors.margins: Kirigami.Units.largeSpacing
                 spacing: Kirigami.Units.largeSpacing
                 OsdButton {
+                    id: backButton
                     objectName: "playerBackButton"
-                    Layout.alignment: Qt.AlignTop
+                    Layout.alignment: Qt.AlignVCenter
+                    Layout.preferredWidth: topBar.boxSize
+                    Layout.preferredHeight: topBar.boxSize
                     icon.name: page.mirrored ? "go-previous-symbolic-rtl" : "go-previous-symbolic"
                     text: i18nc("@action:button", "Back")
+                    background: OsdBox { control: backButton }
                     onClicked: page.leavePlayer()
                 }
                 ColumnLayout {
+                    id: titleColumn
                     Layout.fillWidth: true
+                    Layout.alignment: Qt.AlignVCenter
                     spacing: 0
                     Kirigami.Heading {
+                        id: playerTitle
                         objectName: "playerTitle"
                         Layout.fillWidth: true
                         level: 2
                         textFormat: Text.PlainText
                         text: page.player.title || i18n("Now Playing")
                         elide: Text.ElideRight
+                        // The text is on the picture whatever the colour scheme: white with a dark outline reads on a bright frame as on a dark one
+                        color: "white"
+                        style: Text.Outline
+                        styleColor: Qt.rgba(0, 0, 0, 0.85)
                     }
                     Controls.Label {
+                        id: playerSubtitle
                         objectName: "playerSubtitle"
                         Layout.fillWidth: true
                         visible: text.length > 0
                         textFormat: Text.PlainText
                         text: page.player.subtitle
                         elide: Text.ElideRight
+                        color: "white"
+                        style: Text.Outline
+                        styleColor: Qt.rgba(0, 0, 0, 0.85)
                     }
                 }
                 // In a SyncPlay group: says so, and opens the group's dialog
-                OsdButton {
+                TopAction {
                     objectName: "playerSyncPlayButton"
-                    Layout.alignment: Qt.AlignTop
                     visible: page.grouped
-                    display: page.narrow ? Controls.AbstractButton.IconOnly : Controls.AbstractButton.TextBesideIcon
                     icon.name: "system-users"
                     text: i18nc("@action:button", "Show SyncPlay Group")
+                    Controls.ToolTip.text: text
                     onClicked: page.Window.window?.openSyncPlay()
                 }
                 // Where the video plays: a device for a video that plays here, the way back for a cast
-                OsdButton {
+                TopAction {
                     id: castButton
                     objectName: "playerCastButton"
-                    Layout.alignment: Qt.AlignTop
                     readonly property bool blockedByGroup: page.groupFollowing
-                    display: page.narrow ? Controls.AbstractButton.IconOnly : Controls.AbstractButton.TextBesideIcon
                     visible: !page.player.localPlayback
                     enabled: !blockedByGroup
                     icon.name: "kinefin-cast"
@@ -963,11 +982,9 @@ Kirigami.Page {
                     Controls.ToolTip.visible: (hovered || visualFocus) && (display === Controls.AbstractButton.IconOnly || blockedByGroup)
                     onClicked: page.Window.window.castCurrent()
                 }
-                // The video in a window of its own; the mini player has no button here, it is the first entry of More Actions and Back leads to it as well
-                OsdButton {
+                // The video in a window of its own; the mini player has no button here, it is an entry of More Actions and of the context menu, and Back leads to it as well
+                TopAction {
                     objectName: "playerPictureInPictureButton"
-                    Layout.alignment: Qt.AlignTop
-                    display: page.narrow ? Controls.AbstractButton.IconOnly : Controls.AbstractButton.TextBesideIcon
                     icon.name: "window-duplicate"
                     text: i18nc("@action:button", "Picture-in-Picture")
                     enabled: !page.player.casting
@@ -979,24 +996,21 @@ Kirigami.Page {
             }
         }
 
-        Rectangle {
+        // The panel of the timeline and the controls, floating over the bottom of the video
+        OsdPanel {
             id: bottomBar
             objectName: "playerBottomBar"
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.bottom: parent.bottom
-            height: controls.implicitHeight + Kirigami.Units.largeSpacing * 2 + Kirigami.Units.gridUnit * 2
-            gradient: Gradient {
-                GradientStop { position: 0; color: Qt.alpha(Kirigami.Theme.backgroundColor, 0) }
-                GradientStop { position: 1; color: Qt.alpha(Kirigami.Theme.backgroundColor, 0.85) }
-            }
+            anchors.margins: Kirigami.Units.largeSpacing
+            height: controls.implicitHeight + Kirigami.Units.largeSpacing * 2
             transform: Translate {
                 y: osd.wanted ? 0 : Kirigami.Units.gridUnit
                 Behavior on y {
                     NumberAnimation { duration: Kirigami.Units.longDuration; easing.type: Easing.OutCubic }
                 }
             }
-            BarClickGuard { onClicked: page.wakeChrome() }
             ColumnLayout {
                 id: controls
                 anchors.left: parent.left
@@ -1137,7 +1151,7 @@ Kirigami.Page {
                             // Read once here: the player notifies its duration with every position
                             readonly property real duration: page.player.durationTicks
                             anchors.fill: parent
-                            Kirigami.Theme.colorSet: Kirigami.Theme.Complementary
+                            Kirigami.Theme.colorSet: Kirigami.Theme.Window
                             Kirigami.Theme.inherit: false
                             Accessible.ignored: true
                             Repeater {
@@ -1374,9 +1388,9 @@ Kirigami.Page {
         anchors.left: parent.left
         anchors.top: parent.top
         anchors.leftMargin: Kirigami.Units.largeSpacing
-        anchors.topMargin: osd.wanted ? topRow.y + topRow.implicitHeight + Kirigami.Units.largeSpacing : Kirigami.Units.largeSpacing
+        anchors.topMargin: osd.wanted ? topBar.height + Kirigami.Units.largeSpacing : Kirigami.Units.largeSpacing
         width: Math.min(Kirigami.Units.gridUnit * 30, page.availableWidth - Kirigami.Units.largeSpacing * 2)
-        maximumHeight: page.availableHeight - anchors.topMargin - bottomBar.height
+        maximumHeight: page.availableHeight - anchors.topMargin - osd.bottomReach
         Behavior on anchors.topMargin {
             NumberAnimation { duration: Kirigami.Units.longDuration; easing.type: Easing.OutCubic }
         }
@@ -1446,7 +1460,7 @@ Kirigami.Page {
             Controls.MenuSeparator {}
         ]
     }
-    // The right click on the video: the controls of the bars, then the longer More Actions list as one submenu so the menu stays short
+    // The right click on the video: the controls of the bars, the mini player, then the longer More Actions list as one submenu so the menu stays short
     Controls.Menu {
         id: contextMenu
         objectName: "playerContextMenu"
@@ -1541,6 +1555,12 @@ Kirigami.Page {
             icon.name: page.fullScreen ? "view-restore" : "view-fullscreen"
             text: page.fullScreenText
             onTriggered: page.toggleFullScreen()
+        }
+        Controls.MenuItem {
+            objectName: "playerContextMiniItem"
+            icon.name: "window-minimize-pip"
+            text: i18nc("@action:button", "Show Mini Player")
+            onTriggered: page.leavePlayer()
         }
         MoreMenu {
             id: contextMoreMenu
@@ -1639,8 +1659,8 @@ Kirigami.Page {
         objectName: "nowPlayingPanel"
         modal: false
         focus: true
-        // Where the bottom bar's controls start: the panel sits above them, since More Actions (a button of the bar) opens it and it must not cover that button
-        readonly property real controlsTop: bottomBar.y + controls.y
+        // Where the bottom panel starts: the queue sits above it, since More Actions (a button of the panel) opens it and it must not cover that button
+        readonly property real controlsTop: bottomBar.y
         width: Math.min(page.availableWidth, Kirigami.Units.gridUnit * 27)
         height: Math.max(0, Math.min(page.availableHeight * 0.75, Kirigami.Units.gridUnit * 32, controlsTop - Kirigami.Units.smallSpacing))
         x: page.availableWidth - width
@@ -1697,6 +1717,54 @@ Kirigami.Page {
     component BarClickGuard: MouseArea {
         anchors.fill: parent
         acceptedButtons: Qt.AllButtons
+    }
+    // A button that stands alone on the top line, a box of the bars as high as the one of Back; its text is the tooltip when only the icon shows. The keys stay with the page: Tab reaches it
+    component TopAction: Controls.Button {
+        id: action
+
+        // The desktop style gives a button the colours of the Button set, the window's, as the other boxes have, are asked for again
+        Kirigami.Theme.colorSet: Kirigami.Theme.Window
+        Kirigami.Theme.inherit: false
+        Layout.alignment: Qt.AlignVCenter
+        Layout.preferredHeight: topBar.boxSize
+        hoverEnabled: true
+        focusPolicy: Qt.TabFocus
+        display: page.narrow ? Controls.AbstractButton.IconOnly : Controls.AbstractButton.TextBesideIcon
+        leftPadding: Kirigami.Units.largeSpacing
+        rightPadding: Kirigami.Units.largeSpacing
+        topPadding: 0
+        bottomPadding: 0
+        Controls.ToolTip.visible: display === Controls.AbstractButton.IconOnly && (hovered || visualFocus)
+        Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
+        // The style draws the text and the icon in its own background: both are drawn here, with the box
+        background: OsdBox {
+            control: action
+            showIcon: false
+        }
+        contentItem: RowLayout {
+            spacing: Kirigami.Units.smallSpacing
+            opacity: action.enabled ? 1 : 0.4
+
+            Kirigami.Icon {
+                visible: action.icon.name !== ""
+                source: action.icon.name
+                color: Kirigami.Theme.textColor
+                Layout.preferredWidth: Kirigami.Units.iconSizes.smallMedium
+                Layout.preferredHeight: Kirigami.Units.iconSizes.smallMedium
+            }
+            Controls.Label {
+                visible: action.display !== Controls.AbstractButton.IconOnly
+                text: action.text
+                textFormat: Text.PlainText
+                color: Kirigami.Theme.textColor
+                elide: Text.ElideRight
+                Accessible.ignored: true
+            }
+        }
+    }
+    // A panel of the bars: a click on it is not a click on the video
+    component OsdPanel: OsdBox {
+        BarClickGuard { onClicked: page.wakeChrome() }
     }
     // The wheel steps the volume: five per notch, a touchpad's travel added up to whole notches
     component VolumeWheel: MouseArea {

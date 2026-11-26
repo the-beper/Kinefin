@@ -126,6 +126,8 @@ struct ItemDetails {
     // The image of the item itself, or else the parent's, with the id that owns it
     QString backdropItemId;
     QString backdropTag;
+    // The BlurHash of the item's own backdrop, empty for a parent's backdrop and for one the server sent no valid hash of
+    QString backdropBlurHash;
     QString logoItemId;
     QString logoTag;
     QList<PersonSummary> people;

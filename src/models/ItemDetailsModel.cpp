@@ -466,6 +466,30 @@ QUrl ItemDetailsModel::backdropUrl() const
                : QUrl();
 }
 
+QUrl ItemDetailsModel::backdropPlaceholderUrl() const
+{
+    // The hash was checked when the details were read; written in hexadecimal, which a URL path carries whatever the hash holds
+    return m_details.backdropBlurHash.isEmpty()
+               ? QUrl()
+               : QUrl(QStringLiteral("image://blurhash/")
+                      + QString::fromLatin1(m_details.backdropBlurHash.toLatin1().toHex()));
+}
+
+QUrl ItemDetailsModel::backdropUrlFor(qreal pixelWidth) const
+{
+    if (!m_client || m_details.backdropTag.isEmpty() || !(pixelWidth > 0))
+        return QUrl();
+    int width = kBackdropWidth;
+    for (const int step : {640, 960, 1280}) {
+        if (pixelWidth <= step) {
+            width = step;
+            break;
+        }
+    }
+    return m_client->imageUrl(m_details.backdropItemId, QStringLiteral("Backdrop"), width,
+                              m_details.backdropTag);
+}
+
 QUrl ItemDetailsModel::logoUrl() const
 {
     return m_client && !m_details.logoTag.isEmpty()

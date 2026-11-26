@@ -26,6 +26,9 @@ KNOWN_NOISE += ("QQuickImage: Error transferring https://",)
 # The offscreen platform has no window stacking: the return from picture in picture raises the main window
 KNOWN_NOISE += ("This plugin does not support raise()",)
 
+# The offscreen platform cannot hand size hints on: the picture-in-picture window's minimum height follows the video's shape
+KNOWN_NOISE += ("This plugin does not support propagateSizeHints()",)
+
 
 # KINEFIN_START_PAGE opens Settings as a page, About as a popup, or the sign-in and Home pages without a session;
 # None is the plain Servers page.

@@ -16,6 +16,8 @@ Item {
     // The video item of the shell sits here while the mini player shows
     readonly property Item videoSlot: slot
     readonly property real margin: Kirigami.Units.largeSpacing
+    readonly property real boxSize: Math.round(Kirigami.Units.gridUnit * 1.75)
+    readonly property real playSize: Math.round(Kirigami.Units.gridUnit * 1.5)
     readonly property bool mirrored: Qt.application.layoutDirection === Qt.RightToLeft
     // A tap on a touch screen shows the controls for a few seconds: a press on a control that is not shown only does that, so a touch never acts on what it cannot see
     property bool touchRevealed: false
@@ -108,9 +110,13 @@ Item {
         }
     }
 
-    Rectangle {
+    // The shadow sets the dock off from the page; the picture-in-picture window's has the same values (PictureInPictureWindow.qml) and they must stay in sync
+    Kirigami.ShadowedRectangle {
         anchors.fill: parent
         color: "black"
+        shadow.size: Kirigami.Units.gridUnit
+        shadow.yOffset: Kirigami.Units.smallSpacing
+        shadow.color: Qt.rgba(0, 0, 0, 0.45)
     }
     Item {
         id: slot
@@ -167,96 +173,89 @@ Item {
         objectName: "miniPlayerScrim"
         anchors.fill: parent
         opacity: mini.controlsShown ? 1 : 0
-        Kirigami.Theme.colorSet: Kirigami.Theme.Complementary
+        Kirigami.Theme.colorSet: Kirigami.Theme.Window
         Kirigami.Theme.inherit: false
         Behavior on opacity {
             NumberAnimation { duration: Kirigami.Units.longDuration; easing.type: Easing.OutCubic }
         }
 
-        Rectangle {
+        // The box that takes the video back to the full player, and the one that stops it: the corners of the top, as in the picture-in-picture window
+        MiniButton {
+            id: expandButton
+            objectName: "miniPlayerExpandButton"
             anchors.left: parent.left
+            anchors.top: parent.top
+            anchors.margins: Kirigami.Units.smallSpacing
+            implicitWidth: mini.boxSize
+            implicitHeight: mini.boxSize
+            icon.name: "window-restore-pip"
+            text: i18nc("@action:button", "Expand Player")
+            background: OsdBox { control: expandButton }
+            onActivated: mini.shell.expandPlayer()
+        }
+        MiniButton {
+            id: closeButton
+            objectName: "miniPlayerCloseButton"
             anchors.right: parent.right
             anchors.top: parent.top
-            height: topRow.implicitHeight + Kirigami.Units.largeSpacing
-            gradient: Gradient {
-                GradientStop { position: 0; color: Qt.alpha(Kirigami.Theme.backgroundColor, 0.8) }
-                GradientStop { position: 1; color: Qt.alpha(Kirigami.Theme.backgroundColor, 0) }
-            }
+            anchors.margins: Kirigami.Units.smallSpacing
+            implicitWidth: mini.boxSize
+            implicitHeight: mini.boxSize
+            icon.name: "window-close"
+            text: i18nc("@action:button stops playback and closes the mini player", "Close Mini Player")
+            background: OsdBox { control: closeButton }
+            onActivated: mini.shell.stopPlayback()
         }
-        Rectangle {
+
+        // Pause and the title, with the bar of how much is played along the bottom edge, in a box that takes as little of the picture as it can
+        OsdBox {
+            id: bottomPanel
+            objectName: "miniPlayerBottomPanel"
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.bottom: parent.bottom
-            height: bottomColumn.implicitHeight + Kirigami.Units.largeSpacing
-            gradient: Gradient {
-                GradientStop { position: 0; color: Qt.alpha(Kirigami.Theme.backgroundColor, 0) }
-                GradientStop { position: 1; color: Qt.alpha(Kirigami.Theme.backgroundColor, 0.85) }
-            }
-        }
-
-        RowLayout {
-            id: topRow
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.top: parent.top
-            anchors.leftMargin: Kirigami.Units.smallSpacing
-            anchors.rightMargin: Kirigami.Units.smallSpacing
-            anchors.topMargin: Kirigami.Units.smallSpacing
-            spacing: Kirigami.Units.smallSpacing
-            Controls.Label {
-                objectName: "miniPlayerTitle"
-                Layout.fillWidth: true
-                Layout.leftMargin: Kirigami.Units.smallSpacing
-                textFormat: Text.PlainText
-                elide: Text.ElideRight
-                font.bold: true
-                color: Kirigami.Theme.textColor
-                text: mini.player?.title || i18n("Now Playing")
-            }
-            MiniButton {
-                id: closeButton
-                objectName: "miniPlayerCloseButton"
-                icon.name: "window-close"
-                text: i18nc("@action:button stops playback and closes the mini player", "Close Mini Player")
-                onActivated: mini.shell.stopPlayback()
-            }
-        }
-
-        ColumnLayout {
-            id: bottomColumn
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.bottom: parent.bottom
-            anchors.leftMargin: Kirigami.Units.smallSpacing
-            anchors.rightMargin: Kirigami.Units.smallSpacing
-            anchors.bottomMargin: Kirigami.Units.smallSpacing
-            spacing: Kirigami.Units.smallSpacing
+            anchors.margins: Kirigami.Units.smallSpacing
+            height: Kirigami.Units.smallSpacing + bottomRow.implicitHeight + Kirigami.Units.smallSpacing / 2 + progressBar.height + progressBar.anchors.bottomMargin
             RowLayout {
-                Layout.fillWidth: true
+                id: bottomRow
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.leftMargin: Kirigami.Units.smallSpacing
+                anchors.rightMargin: Kirigami.Units.smallSpacing
+                anchors.topMargin: Kirigami.Units.smallSpacing
                 spacing: Kirigami.Units.smallSpacing
                 MiniButton {
                     id: playButton
                     objectName: "miniPlayerPauseButton"
+                    implicitWidth: mini.playSize
+                    implicitHeight: mini.playSize
                     text: mini.player?.paused ? i18n("Resume") : i18n("Pause")
                     icon.name: mini.player?.paused ? "media-playback-start" : "media-playback-pause"
                     enabled: !!mini.player?.active && !mini.player.loading
                     onActivated: mini.shell.playerAction("playpause")
                 }
-                Item { Layout.fillWidth: true }
-                MiniButton {
-                    id: expandButton
-                    objectName: "miniPlayerExpandButton"
-                    icon.name: "window-restore-pip"
-                    text: i18nc("@action:button", "Expand Player")
-                    onActivated: mini.shell.expandPlayer()
+                Controls.Label {
+                    objectName: "miniPlayerTitle"
+                    Layout.fillWidth: true
+                    textFormat: Text.PlainText
+                    elide: Text.ElideRight
+                    font.bold: true
+                    color: Kirigami.Theme.textColor
+                    text: mini.player?.title || i18n("Now Playing")
                 }
             }
-            // Read only: seeking belongs to the full player; the bar gives screen readers the value, and the fill is drawn by hand to be thin and to follow the layout direction
+            // Read only: seeking belongs to the full player; the bar gives screen readers the value, and the fill is drawn by hand to be thin and to follow the layout direction. It is inset by the radius of the box, so its ends stay inside the corners
             Controls.ProgressBar {
                 id: progressBar
                 objectName: "miniPlayerProgress"
-                Layout.fillWidth: true
-                Layout.preferredHeight: Kirigami.Units.smallSpacing / 2
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                anchors.leftMargin: Kirigami.Units.cornerRadius
+                anchors.rightMargin: Kirigami.Units.cornerRadius
+                anchors.bottomMargin: Kirigami.Units.smallSpacing - 1
+                height: Kirigami.Units.smallSpacing / 2
                 padding: 0
                 from: 0
                 to: 1

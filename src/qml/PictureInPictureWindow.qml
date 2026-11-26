@@ -5,7 +5,7 @@ import QtQuick.Controls as Controls
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 
-// The player in a small frameless window of its own, over the other windows: the shell's video item sits in its slot while the mode is picture in picture. Closing it gives the video back to the full player, as a browser's picture in picture does. An ApplicationWindow rather than a Window because the tooltips of the buttons need a popup overlay
+// The player in a small frameless window of its own, over the other windows: the shell's video item sits in its slot while the mode is picture in picture. Closing it stops the playback, and a button at its leading corner gives the video back to the full player, as a browser's picture in picture does. An ApplicationWindow rather than a Window because the tooltips of the buttons need a popup overlay
 Controls.ApplicationWindow {
     id: pip
     objectName: "pictureInPictureWindow"
@@ -15,13 +15,30 @@ Controls.ApplicationWindow {
     readonly property var player: shell.player
     // The video item of the shell sits here while the window shows
     readonly property Item videoSlot: slot
+    // The shape of the window: the video's, kept from the last one known since mpv has no size between two files, 16:9 until one is known; never wider than 3:1 nor taller than 3:4, which the controls need room for
+    property real aspect: 16 / 9
+    readonly property real videoAspect: player?.videoAspect ?? 0
+    function shapeOf(ratio) {
+        return Math.max(3 / 4, Math.min(3, ratio));
+    }
+    onVideoAspectChanged: if (videoAspect > 0) aspect = shapeOf(videoAspect)
     readonly property bool mirrored: Qt.application.layoutDirection === Qt.RightToLeft
     // The strips along the edges that resize the window; the controls keep clear of them
     readonly property int edgeWidth: Kirigami.Units.largeSpacing
+    // The side of a button, and the room around it on its panel: the least window at its widest shape is 16 grid units by 5.3, which holds a panel at the top, another at the bottom and the strips along the edges
+    readonly property int buttonSize: Math.round(Kirigami.Units.gridUnit * 1.75)
+    readonly property int panelPadding: Math.round(Kirigami.Units.smallSpacing / 2)
+    readonly property int panelSize: buttonSize + panelPadding * 2
+    readonly property string volumeIcon: {
+        const volume = player?.volume ?? 100;
+        return player?.muted || volume === 0 ? "audio-volume-muted" : volume < 34 ? "audio-volume-low" : volume < 67 ? "audio-volume-medium" : "audio-volume-high";
+    }
+    // The total time next to the elapsed one only where the timeline keeps room beside them: in a narrower window the time is the elapsed one alone
+    readonly property bool totalTimeShown: width >= Kirigami.Units.gridUnit * 20
     // Set by a touch tap that found the controls hidden: they show for a while, as on the mini player
     property bool touchRevealed: false
     // The controls show under the pointer, after a touch tap, while the keyboard is on one of them and while the timeline is dragged
-    readonly property bool controlsShown: touchRevealed || hover.hovered || timeline.pressed || playButton.visualFocus || timeline.visualFocus || closeButton.visualFocus
+    readonly property bool controlsShown: touchRevealed || hover.hovered || timeline.pressed || backButton.visualFocus || closeButton.visualFocus || playButton.visualFocus || muteButton.visualFocus || timeline.visualFocus
     function reveal() {
         touchRevealed = true;
         revealTimer.restart();
@@ -49,26 +66,36 @@ Controls.ApplicationWindow {
     // Shown once the picture-in-picture role is settled
     visible: false
     color: "black"
-    minimumWidth: Kirigami.Units.gridUnit * 16
-    minimumHeight: Math.round(pip.minimumWidth * 9 / 16)
+    readonly property int minimumShapeWidth: Kirigami.Units.gridUnit * 16
+    // With the compositor's surface the least width is the surface's own: a minimum of the window itself would be kept even where it is past the compositor's bounds
+    minimumWidth: pipSurface.available ? 0 : pip.minimumShapeWidth
+    minimumHeight: pipSurface.available ? 0 : Math.round(pip.minimumShapeWidth / pip.aspect)
     title: pip.player?.title || i18n("Now Playing")
 
-    // Closing the window, from its own button or the window manager, returns to the full player: the playback goes on there. A window the shell already gave up closes
+    // Closing the window, from its own X or the window manager, stops the playback, which takes the window with it. A window the shell already gave up closes
     onClosing: close => {
         if (shell.playbackMode !== "pip")
             return;
         close.accepted = false;
-        returnToPlayer();
+        shell.stopPlayback();
     }
 
     // KWin's picture-in-picture surface, where the compositor offers it: it keeps the window above the others and places, moves and resizes it. The role is given before the window first shows; elsewhere the window stays an ordinary frameless one
     PipSurface {
         id: pipSurface
+        aspectRatio: pip.aspect
+        minimumWidth: pip.minimumShapeWidth
+        // The mini player's shadow has the same values (MiniPlayer.qml)
+        shadowSize: Kirigami.Units.gridUnit
+        shadowYOffset: Kirigami.Units.smallSpacing
+        shadowOpacity: 0.45
     }
     // The size is set once, not bound: after the first configure only the compositor sizes the window, and a size the window set itself past its bounds would end the connection
     Component.onCompleted: {
-        pip.width = Math.round(Math.max(Screen.width * 0.3, pip.minimumWidth));
-        pip.height = Math.round(pip.width * 9 / 16);
+        if (pip.videoAspect > 0)
+            pip.aspect = pip.shapeOf(pip.videoAspect);
+        pip.width = Math.round(Math.max(Screen.width * 0.3, pip.minimumShapeWidth));
+        pip.height = Math.round(pip.width / pip.aspect);
         pipSurface.assign(pip);
         pip.visible = true;
     }
@@ -100,6 +127,18 @@ Controls.ApplicationWindow {
         cursorShape: !area.diagonal ? ((area.edges & (Qt.LeftEdge | Qt.RightEdge)) ? Qt.SizeHorCursor : Qt.SizeVerCursor)
                      : (area.edges === (Qt.TopEdge | Qt.LeftEdge) || area.edges === (Qt.BottomEdge | Qt.RightEdge)) ? Qt.SizeFDiagCursor : Qt.SizeBDiagCursor
         onPressed: pip.startSystemResize(area.edges)
+    }
+
+    // A click on a panel of the controls is not a click on the video
+    component PipPanel: OsdBox {
+        MouseArea {
+            anchors.fill: parent
+            acceptedButtons: Qt.AllButtons
+        }
+    }
+    component PipButton: OsdButton {
+        implicitWidth: pip.buttonSize
+        implicitHeight: pip.buttonSize
     }
 
     Item {
@@ -179,120 +218,143 @@ Controls.ApplicationWindow {
 
         // The controls stay in the focus chain while hidden, so Tab reaches them and shows them
         Item {
-            id: scrim
-            objectName: "pictureInPictureScrim"
+            id: osd
+            objectName: "pictureInPictureOsd"
             anchors.fill: parent
             opacity: pip.controlsShown ? 1 : 0
-            Kirigami.Theme.colorSet: Kirigami.Theme.Complementary
+            Kirigami.Theme.colorSet: Kirigami.Theme.Window
             Kirigami.Theme.inherit: false
             Behavior on opacity {
                 NumberAnimation { duration: Kirigami.Units.longDuration; easing.type: Easing.OutCubic }
             }
 
-            // Taller than what it carries, so the controls sit on the dark part over a bright picture
-            Rectangle {
+            // The way back to the full player at the leading corner and the X at the trailing one, mirrored in right-to-left, each a box that is the button itself
+            RowLayout {
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.top: parent.top
-                height: closeButton.height + pip.edgeWidth * 2 + Kirigami.Units.gridUnit
-                gradient: Gradient {
-                    GradientStop { position: 0; color: Qt.alpha(Kirigami.Theme.backgroundColor, 0.8) }
-                    GradientStop { position: 1; color: Qt.alpha(Kirigami.Theme.backgroundColor, 0) }
+                anchors.margins: pip.edgeWidth
+                layoutDirection: pip.mirrored ? Qt.RightToLeft : Qt.LeftToRight
+                PipButton {
+                    id: backButton
+                    objectName: "pictureInPictureBackButton"
+                    Layout.preferredWidth: pip.panelSize
+                    Layout.preferredHeight: pip.panelSize
+                    icon.name: "window-restore-pip"
+                    text: i18nc("@action:button gives the video back to the full player, which plays on", "Back to Player")
+                    background: OsdBox { control: backButton }
+                    onClicked: pip.returnToPlayer()
                 }
-            }
-            OsdButton {
-                id: closeButton
-                objectName: "pictureInPictureCloseButton"
-                // The trailing corner, mirrored in right-to-left
-                x: pip.mirrored ? pip.edgeWidth : parent.width - width - pip.edgeWidth
-                y: pip.edgeWidth
-                icon.name: "window-close"
-                text: i18nc("@action:button closes the picture-in-picture window; the video goes back to the full player", "Close Picture-in-Picture")
-                onClicked: pip.returnToPlayer()
+                Item { Layout.fillWidth: true }
+                PipButton {
+                    id: closeButton
+                    objectName: "pictureInPictureCloseButton"
+                    Layout.preferredWidth: pip.panelSize
+                    Layout.preferredHeight: pip.panelSize
+                    icon.name: "window-close"
+                    text: i18nc("@action:button stops the playback and closes the picture-in-picture window", "Stop Playback and Close")
+                    Accessible.name: text
+                    background: OsdBox { control: closeButton }
+                    onClicked: pip.close()
+                }
             }
 
-            Rectangle {
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.bottom: parent.bottom
-                height: controls.implicitHeight + pip.edgeWidth * 2 + Kirigami.Units.gridUnit
-                gradient: Gradient {
-                    GradientStop { position: 0; color: Qt.alpha(Kirigami.Theme.backgroundColor, 0) }
-                    GradientStop { position: 1; color: Qt.alpha(Kirigami.Theme.backgroundColor, 0.85) }
-                }
-            }
-            RowLayout {
-                id: controls
+            PipPanel {
+                objectName: "pictureInPictureBottomPanel"
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
                 anchors.margins: pip.edgeWidth
-                spacing: Kirigami.Units.smallSpacing
-                OsdButton {
-                    id: playButton
-                    objectName: "pictureInPicturePauseButton"
-                    text: pip.player?.paused ? i18n("Resume") : i18n("Pause")
-                    icon.name: pip.player?.paused ? "media-playback-start" : "media-playback-pause"
-                    enabled: !!pip.player?.active && !pip.player.loading
-                    onClicked: {
-                        pip.touched();
-                        pip.shell.playerAction("playpause");
-                    }
-                }
-                // The full player's timeline without its previews: a drag seeks where it is let go, the arrow keys seek as the full player's do
-                Controls.Slider {
-                    id: timeline
-                    objectName: "pictureInPictureTimeline"
-                    Layout.fillWidth: true
-                    focusPolicy: Qt.TabFocus
-                    enabled: !!pip.player?.canSeek && pip.player.durationTicks > 0
-                    from: 0
-                    to: Math.max(1, (pip.player?.durationTicks ?? 0) / 10000000)
-                    property real dragSeconds: 0
-                    value: pressed ? dragSeconds : (pip.player?.positionTicks ?? 0) / 10000000
-                    Keys.onLeftPressed: pip.seekRelative(-10)
-                    Keys.onRightPressed: pip.seekRelative(10)
-                    Keys.onUpPressed: pip.seekRelative(60)
-                    Keys.onDownPressed: pip.seekRelative(-60)
-                    onMoved: {
-                        pip.touched();
-                        if (!pip.player)
-                            return;
-                        if (!timeline.pressed) {
-                            pip.player.seek(Math.round(timeline.value * 10000000));
-                            return;
+                height: pip.panelSize
+                RowLayout {
+                    id: controls
+                    anchors.fill: parent
+                    anchors.margins: pip.panelPadding
+                    spacing: Kirigami.Units.smallSpacing
+                    PipButton {
+                        id: playButton
+                        objectName: "pictureInPicturePauseButton"
+                        text: pip.player?.paused ? i18n("Resume") : i18n("Pause")
+                        icon.name: pip.player?.paused ? "media-playback-start" : "media-playback-pause"
+                        enabled: !!pip.player?.active && !pip.player.loading
+                        onClicked: {
+                            pip.touched();
+                            pip.shell.playerAction("playpause");
                         }
-                        timeline.dragSeconds = timeline.value;
                     }
-                    onPressedChanged: {
-                        if (!pip.player)
-                            return;
-                        if (timeline.pressed)
-                            timeline.dragSeconds = pip.player.positionTicks / 10000000;
-                        else
-                            pip.player.seek(Math.round(timeline.dragSeconds * 10000000));
+                    PipButton {
+                        id: muteButton
+                        objectName: "pictureInPictureMuteButton"
+                        text: pip.player?.muted ? i18n("Unmute") : i18n("Mute")
+                        icon.name: pip.volumeIcon
+                        enabled: !!pip.player?.active
+                        onClicked: {
+                            pip.touched();
+                            pip.shell.playerAction("togglemute");
+                        }
                     }
-                    Accessible.name: i18n("Playback position")
-                }
-                Controls.Label {
-                    id: timeLabel
-                    objectName: "pictureInPictureTime"
-                    // As wide as its widest text and never otherwise, so the timeline does not move while the numbers change
-                    Layout.preferredWidth: widestTime.implicitWidth
-                    horizontalAlignment: Text.AlignRight
-                    textFormat: Text.PlainText
-                    font.pointSize: Kirigami.Theme.smallFont.pointSize
-                    font.features: { "tnum": 1 }
-                    readonly property real shownTicks: timeline.pressed ? timeline.dragSeconds * 10000000 : (pip.player?.positionTicks ?? 0)
-                    text: pip.player ? i18nc("@info:status elapsed and total time of the video", "%1 / %2", pip.player.timeText(timeLabel.shownTicks), pip.player.timeText(pip.player.durationTicks)) : ""
-                    Accessible.name: pip.player ? i18nc("@info accessible name of the elapsed and total time", "%1 of %2", pip.player.timeText(timeLabel.shownTicks), pip.player.timeText(pip.player.durationTicks)) : ""
-                }
-                // The time label with its widest text, never shown: the total stands for every time, and with tabular digits every digit is as wide as 0
-                Controls.Label {
-                    id: widestTime
-                    visible: false
-                    font: timeLabel.font
-                    text: pip.player ? i18nc("@info:status elapsed and total time of the video", "%1 / %2", pip.player.timeText(pip.player.durationTicks), pip.player.timeText(pip.player.durationTicks)).replace(/[0-9]/g, "0") : ""
+                    // The full player's timeline without its previews: a drag seeks where it is let go, the arrow keys seek as the full player's do
+                    Controls.Slider {
+                        id: timeline
+                        objectName: "pictureInPictureTimeline"
+                        Layout.fillWidth: true
+                        Layout.minimumWidth: Kirigami.Units.gridUnit * 5
+                        focusPolicy: Qt.TabFocus
+                        enabled: !!pip.player?.canSeek && pip.player.durationTicks > 0
+                        from: 0
+                        to: Math.max(1, (pip.player?.durationTicks ?? 0) / 10000000)
+                        property real dragSeconds: 0
+                        value: pressed ? dragSeconds : (pip.player?.positionTicks ?? 0) / 10000000
+                        Keys.onLeftPressed: pip.seekRelative(-10)
+                        Keys.onRightPressed: pip.seekRelative(10)
+                        Keys.onUpPressed: pip.seekRelative(60)
+                        Keys.onDownPressed: pip.seekRelative(-60)
+                        onMoved: {
+                            pip.touched();
+                            if (!pip.player)
+                                return;
+                            if (!timeline.pressed) {
+                                pip.player.seek(Math.round(timeline.value * 10000000));
+                                return;
+                            }
+                            timeline.dragSeconds = timeline.value;
+                        }
+                        onPressedChanged: {
+                            if (!pip.player)
+                                return;
+                            if (timeline.pressed)
+                                timeline.dragSeconds = pip.player.positionTicks / 10000000;
+                            else
+                                pip.player.seek(Math.round(timeline.dragSeconds * 10000000));
+                        }
+                        Accessible.name: i18n("Playback position")
+                    }
+                    // The time in the full player's text size, bold on the panel so it reads on any picture
+                    Controls.Label {
+                        id: timeLabel
+                        objectName: "pictureInPictureTime"
+                        // As wide as its widest text and never otherwise, so the timeline does not move while the numbers change
+                        Layout.preferredWidth: widestTime.implicitWidth
+                        Layout.rightMargin: Kirigami.Units.smallSpacing * 2
+                        horizontalAlignment: Text.AlignRight
+                        textFormat: Text.PlainText
+                        color: Kirigami.Theme.textColor
+                        font.weight: Font.DemiBold
+                        font.features: { "tnum": 1 }
+                        readonly property real shownTicks: timeline.pressed ? timeline.dragSeconds * 10000000 : (pip.player?.positionTicks ?? 0)
+                        function spelled(elapsed, total) {
+                            return pip.totalTimeShown ? i18nc("@info:status elapsed and total time of the video", "%1 / %2", elapsed, total) : elapsed;
+                        }
+                        text: pip.player ? spelled(pip.player.timeText(timeLabel.shownTicks), pip.player.timeText(pip.player.durationTicks)) : ""
+                        Accessible.name: pip.player ? i18nc("@info accessible name of the elapsed and total time", "%1 of %2", pip.player.timeText(timeLabel.shownTicks), pip.player.timeText(pip.player.durationTicks)) : ""
+                    }
+                    // The time label with its widest text in the shown form, never shown: the total stands for every time, and with tabular digits every digit is as wide as 0
+                    Controls.Label {
+                        id: widestTime
+                        visible: false
+                        font: timeLabel.font
+                        text: pip.player ? timeLabel.spelled(pip.player.timeText(pip.player.durationTicks), pip.player.timeText(pip.player.durationTicks)).replace(/[0-9]/g, "0") : ""
+                    }
                 }
             }
         }

@@ -260,7 +260,7 @@ Kirigami.Page {
                 // A long library name never pushes the toolbar out
                 Layout.maximumWidth: Kirigami.Units.gridUnit * 16
 
-                sourceComponent: Controls.ComboBox {
+                sourceComponent: ChoiceBox {
                     id: selector
                     objectName: "librarySelector"
 
@@ -278,24 +278,6 @@ Kirigami.Page {
                     onActivated: index => {
                         page.connection.openType(page.tabType, entries[index].id);
                         currentIndex = Qt.binding(() => selector.scopeIndex());
-                    }
-                    // The list opens below the box and above it when there is no room below, never over it
-                    PopupPlacement { popup: selector.popup; anchor: selector }
-
-                    // Library names come from the server: plain text only (the style paints the selected name itself, as plain text; a custom contentItem breaks it, which reads text input API)
-                    delegate: Controls.ItemDelegate {
-                        id: entry
-
-                        required property var modelData
-                        required property int index
-
-                        width: ListView.view ? ListView.view.width : implicitWidth
-                        highlighted: selector.highlightedIndex === entry.index
-                        contentItem: Controls.Label {
-                            textFormat: Text.PlainText
-                            elide: Text.ElideRight
-                            text: entry.modelData.name
-                        }
                     }
                 }
             }

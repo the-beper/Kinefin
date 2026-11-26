@@ -8,6 +8,7 @@
 
 #include <QJsonArray>
 #include <QSignalSpy>
+#include <QUrlQuery>
 #include <QtTest/QtTest>
 
 using Kinefin::ItemDetailsModel;
@@ -818,6 +819,70 @@ class TestItemDetailsModel : public QObject {
         QTRY_COMPARE(f.server.listingRoutes.value(QStringLiteral("Similar")).size(), 1);
         QTRY_COMPARE(details->similarStatus(), ItemDetailsModel::Ready);
         QVERIFY(details->similar()->count() > 0);
+    }
+
+    void theBackdropPlaceholderComesFromAValidBlurHashOfTheItemsOwnBackdrop()
+    {
+        const auto placeholderOf = [](const QJsonValue &hashes) {
+            Fixture f;
+            if (!f.ok)
+                return QString(QStringLiteral("no fixture"));
+            QJsonObject item =
+                QJsonDocument::fromJson(fixtureItem(QStringLiteral("movie_item"))).object();
+            if (!hashes.isUndefined())
+                item.insert(QStringLiteral("ImageBlurHashes"), hashes);
+            f.server.itemsById.insert(kMovie, QJsonDocument(item).toJson(QJsonDocument::Compact));
+            auto movie = f.open(kMovie);
+            if (!QTest::qWaitFor([&movie] { return movie->status() == ItemDetailsModel::Ready; }))
+                return QString(QStringLiteral("not ready"));
+            return movie->backdropPlaceholderUrl().toString();
+        };
+        // 1 by 1 component: 6 characters
+        const QString hash = QStringLiteral("00ABCDEF").left(6);
+        const QJsonObject valid{
+            {QStringLiteral("Backdrop"), QJsonObject{{QStringLiteral("arcturus-backdrop"), hash}}}};
+        // The hash goes through the provider as hexadecimal digits
+        QCOMPARE(placeholderOf(valid), QStringLiteral("image://blurhash/")
+                                           + QString::fromLatin1(hash.toLatin1().toHex()));
+        // No hashes, a hash for another tag, a hash that is not one and a wrong type give none
+        QVERIFY(placeholderOf(QJsonValue(QJsonValue::Undefined)).isEmpty());
+        QVERIFY(placeholderOf(QJsonObject{{QStringLiteral("Backdrop"),
+                                           QJsonObject{{QStringLiteral("other-tag"), hash}}}})
+                    .isEmpty());
+        QVERIFY(placeholderOf(QJsonObject{{QStringLiteral("Backdrop"),
+                                           QJsonObject{{QStringLiteral("arcturus-backdrop"),
+                                                        QStringLiteral("<b>no</b>")}}}})
+                    .isEmpty());
+        QVERIFY(placeholderOf(QJsonObject{{QStringLiteral("Backdrop"), QStringLiteral("text")}})
+                    .isEmpty());
+        QVERIFY(placeholderOf(QStringLiteral("text")).isEmpty());
+    }
+
+    void theBackdropIsAskedAtTheWidthOfTheViewInSteps()
+    {
+        Fixture f;
+        QVERIFY(f.ok);
+        auto movie = f.open(kMovie);
+        QTRY_COMPARE(movie->status(), ItemDetailsModel::Ready);
+        const auto widthOf = [&movie, &f](qreal pixels) {
+            const QUrl url = movie->backdropUrlFor(pixels);
+            const QUrlQuery query(url);
+            return allowed(f, url) ? query.queryItemValue(QStringLiteral("maxWidth")).toInt() : -1;
+        };
+        QCOMPARE(widthOf(1), 640);
+        QCOMPARE(widthOf(640), 640);
+        QCOMPARE(widthOf(641), 960);
+        QCOMPARE(widthOf(960), 960);
+        QCOMPARE(widthOf(1000), 1280);
+        QCOMPARE(widthOf(1280), 1280);
+        QCOMPARE(widthOf(1281), 1920);
+        QCOMPARE(widthOf(5000), 1920);
+        // Without a width there is nothing to ask for yet, and without a backdrop nothing at all
+        QVERIFY(movie->backdropUrlFor(0).isEmpty());
+        QVERIFY(movie->backdropUrlFor(-5).isEmpty());
+        // The same tag and item as the property
+        QCOMPARE(QUrlQuery(movie->backdropUrlFor(5000)).queryItemValue(QStringLiteral("tag")),
+                 QUrlQuery(movie->backdropUrl()).queryItemValue(QStringLiteral("tag")));
     }
 
     void imagesPassTheServerImageAllowlist()

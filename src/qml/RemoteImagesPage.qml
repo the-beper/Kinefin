@@ -145,30 +145,6 @@ Kirigami.ScrollablePage {
         }
     }
 
-    // A combo box of choices ({value, text}): the list opens below the box and above it when there is no room below, never over it
-    component ChoiceBox: Controls.ComboBox {
-        id: choiceBox
-        textRole: "text"
-        valueRole: "value"
-        PopupPlacement { popup: choiceBox.popup; anchor: choiceBox }
-
-        // Provider names come from the server: plain text only (the style paints the selected name itself, as plain text; a custom contentItem breaks it, which reads text input API)
-        delegate: Controls.ItemDelegate {
-            id: choice
-
-            required property var modelData
-            required property int index
-
-            width: ListView.view ? ListView.view.width : implicitWidth
-            highlighted: choiceBox.highlightedIndex === choice.index
-            contentItem: Controls.Label {
-                textFormat: Text.PlainText
-                elide: Text.ElideRight
-                text: choice.modelData.text
-            }
-        }
-    }
-
     header: ColumnLayout {
         spacing: 0
 
@@ -183,6 +159,8 @@ Kirigami.ScrollablePage {
         Controls.Label {
             objectName: "remoteImagesHint"
             Layout.fillWidth: true
+            // Room under the bar, as the lists of the other pages leave
+            Layout.topMargin: Kirigami.Units.largeSpacing * 2
             Layout.leftMargin: Kirigami.Units.largeSpacing
             Layout.rightMargin: Kirigami.Units.largeSpacing
             wrapMode: Text.Wrap
@@ -221,6 +199,7 @@ Kirigami.ScrollablePage {
                 Layout.preferredWidth: Kirigami.Units.gridUnit * 8
                 Layout.maximumWidth: Kirigami.Units.gridUnit * 14
                 model: page.typeChoices
+                textRole: "text"
                 currentIndex: page.indexOfValue(page.typeChoices, page.offers.imageType)
                 Accessible.name: i18nc("@label:listbox", "Image type")
                 onActivated: index => {
@@ -240,6 +219,7 @@ Kirigami.ScrollablePage {
                 Layout.preferredWidth: Kirigami.Units.gridUnit * 8
                 Layout.maximumWidth: Kirigami.Units.gridUnit * 14
                 model: page.providerChoices
+                textRole: "text"
                 currentIndex: page.indexOfValue(page.providerChoices, page.offers.provider)
                 Accessible.name: i18nc("@label:listbox", "Provider")
                 onActivated: index => {
