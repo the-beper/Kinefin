@@ -118,6 +118,14 @@ Kirigami.Page {
         shell.enterPictureInPicture();
     }
     function closePlayer() { page.Window.window.stopPlayback(); }
+    function takeScreenshot() {
+        if (!page.player.screenshot()) {
+            page.Window.window?.showPassiveNotification(i18n("Could not save the screenshot"));
+            return;
+        }
+        screenshotSaveDialog.currentFile = page.player.suggestedScreenshotUrl();
+        screenshotSaveDialog.open();
+    }
     // When a menu or popup last began to close: the click that closes one is not a click on the video
     property double popupClosedAt: 0
     function popupGone() {
@@ -1065,26 +1073,48 @@ Kirigami.Page {
                         Keys.onUpPressed: { page.player.seekRelative(60); page.wakeChrome(); }
                         Keys.onDownPressed: { page.player.seekRelative(-60); page.wakeChrome(); }
                         property real dragSeconds: 0
-                        value: pressed ? dragSeconds : page.player.positionTicks / 10000000
+                        // Where the user asked to go, from the first move of a drag until the player reports a position near it (or the timeout), -1 for none: the handle shows it instead of the old position, which stays until the seek lands
+                        property real targetSeconds: -1
+                        readonly property real playerSeconds: page.player.positionTicks / 10000000
+                        value: pressed ? dragSeconds : (targetSeconds >= 0 ? targetSeconds : playerSeconds)
+                        // The press switches the value to dragSeconds, which must already be what is shown for the handle not to jump
+                        onValueChanged: if (!pressed)
+                            dragSeconds = value
+                        onPlayerSecondsChanged: if (!pressed && targetSeconds >= 0 && Math.abs(playerSeconds - targetSeconds) <= 1)
+                            targetSeconds = -1
+                        // A new item has another length, and its position is not the target of the old one
+                        onToChanged: targetSeconds = -1
+                        function seekTo(seconds) {
+                            page.player.seek(Math.round(seconds * 10000000));
+                            targetSeconds = Math.abs(seconds - playerSeconds) > 1 ? seconds : -1;
+                            targetTimeout.restart();
+                        }
                         onMoved: {
                             page.wakeChrome();
                             if (!pressed) {
-                                page.player.seek(Math.round(value * 10000000));
+                                seekTo(value);
                                 return;
                             }
                             dragSeconds = value;
+                            targetSeconds = value;
                             previewTimer.restart();
                         }
                         onPressedChanged: {
                             if (pressed) {
-                                dragSeconds = page.player.positionTicks / 10000000;
+                                targetTimeout.stop();
                                 page.wakeChrome();
                             } else {
                                 previewTimer.stop();
-                                page.player.seek(Math.round(dragSeconds * 10000000));
+                                seekTo(dragSeconds);
                                 page.player.clearPreview();
                                 page.wakeChrome();
                             }
+                        }
+                        // A seek the player never lands on (the server restarted its stream elsewhere, the player refused it) stops being shown after a few seconds
+                        Timer {
+                            id: targetTimeout
+                            interval: 5000
+                            onTriggered: timeline.targetSeconds = -1
                         }
                         Accessible.name: i18n("Playback position")
                         // Above the style's own wheel handling, which would seek a tenth of the film per notch: the wheel sets the volume here as everywhere in the player
@@ -1374,14 +1404,6 @@ Kirigami.Page {
                         onClicked: moreMenu.open()
                     }
                 }
-                Controls.Label {
-                    visible: screenshotNotice.running && !!page.player.screenshotPath
-                    Layout.fillWidth: true
-                    textFormat: Text.PlainText
-                    elide: Text.ElideMiddle
-                    text: i18n("Screenshot saved to %1", page.player.screenshotPath)
-                }
-                Timer { id: screenshotNotice; interval: 6000 }
             }
         }
     }
@@ -1430,6 +1452,19 @@ Kirigami.Page {
         nameFilters: gif ? [i18n("GIF images (*.gif)")] : [i18n("Video clips (*.mp4 *.webm)")]
         currentFile: page.player.suggestedClipUrl(gif)
         onAccepted: page.player.saveClip(gif, selectedFile)
+    }
+    // The frame is taken before the dialog opens, and the playback waits for either answer
+    FileDialog {
+        id: screenshotSaveDialog
+        objectName: "playerScreenshotSaveDialog"
+        fileMode: FileDialog.SaveFile
+        title: i18n("Save Screenshot")
+        nameFilters: [i18n("PNG images (*.png)")]
+        onAccepted: {
+            if (!page.player.saveScreenshot(selectedFile))
+                page.Window.window?.showPassiveNotification(i18n("Could not save the screenshot"));
+        }
+        onRejected: page.player.cancelScreenshot()
     }
 
     Connections {
@@ -2162,9 +2197,8 @@ Kirigami.Page {
             icon.name: "camera-photo-symbolic"
             enabled: !page.player.casting
             onTriggered: {
-                page.player.screenshot();
                 page.wakeChrome();
-                screenshotNotice.restart();
+                page.takeScreenshot();
             }
         }
         Controls.Menu {

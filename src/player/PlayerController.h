@@ -132,7 +132,6 @@ class PlayerController final : public QObject {
     Q_PROPERTY(QVariantList subtitleTracks READ subtitleTracks NOTIFY tracksChanged)
     Q_PROPERTY(QVariantList externalSubtitles READ externalSubtitles NOTIFY tracksChanged)
     Q_PROPERTY(QString previewImage READ previewImage NOTIFY previewChanged)
-    Q_PROPERTY(QString screenshotPath READ screenshotPath NOTIFY changed)
     Q_PROPERTY(QString skipLabel READ skipLabel NOTIFY changed)
     Q_PROPERTY(int sleepRemainingMinutes READ sleepRemainingMinutes NOTIFY changed)
     Q_PROPERTY(bool sleepAtEndOfItem READ sleepAtEndOfItem NOTIFY changed)
@@ -249,7 +248,6 @@ class PlayerController final : public QObject {
     QVariantList subtitleTracks() const { return m_subtitleTracks; }
     QVariantList externalSubtitles() const { return m_externalSubtitles; }
     QString previewImage() const { return m_previewImage; }
-    QString screenshotPath() const { return m_screenshotPath; }
     QString skipLabel() const { return m_skipLabel; }
     // The aspect mode of this playback: the `video.aspect` setting until a choice is made, and again for the next item
     QString aspectMode() const { return m_mpvSettings.aspectMode(); }
@@ -357,7 +355,14 @@ class PlayerController final : public QObject {
     Q_INVOKABLE void setSleepAtEndOfItem(bool enabled);
     // Stop when the queue reaches its end (before a repeat wraps); a lone item ends like End of Current Item
     Q_INVOKABLE void setSleepAtEndOfQueue(bool enabled);
-    Q_INVOKABLE void screenshot();
+    // Captures the current frame at once into a file of the profile's own folder and pauses a playback that was running while the Save dialog is open; false, with nothing paused, when there is no frame to take
+    Q_INVOKABLE bool screenshot();
+    // The file the Save dialog starts from: the title and the time of the frame taken, named as a clip is, in the user's Pictures folder
+    Q_INVOKABLE QUrl suggestedScreenshotUrl() const;
+    // Copies the frame taken to the file the portal granted, then removes it and resumes the playback the capture paused; the frame is gone whatever the answer, false when it could not be copied
+    Q_INVOKABLE bool saveScreenshot(const QUrl &destination);
+    // The dialog was cancelled: removes the frame taken and resumes the playback the capture paused
+    Q_INVOKABLE void cancelScreenshot();
     // The clip marks at the current position; both are cleared by another item and by a stop
     Q_INVOKABLE void markClipStart();
     Q_INVOKABLE void markClipEnd();
@@ -653,6 +658,10 @@ class PlayerController final : public QObject {
     void onClipFinished(const QString &stagingPath);
     void onClipFailed(ClipExporter::Error error);
     void cancelClipExport();
+    // Removes the frame taken and, when `resumeIfPaused` is set, resumes the playback the capture paused
+    void finishScreenshot(bool resumeIfPaused);
+    // The name of an export with the time of `ticks` and `extension` (the dot included), as the Save dialogs propose it
+    QString exportFileName(qint64 ticks, const QString &extension) const;
     // mpv's `secondary-sid`, without the memory a choice writes: 0 turns it off
     bool setSecondarySubtitle(int id);
     // After a same-item reopen, the second subtitle comes back by its stream index or is downloaded again
@@ -774,7 +783,10 @@ class PlayerController final : public QObject {
     std::optional<TrickplayFrame> m_requestedFrame;
     QImage m_lastTile;
     QString m_previewImage;
-    QString m_screenshotPath;
+    // The frame taken and waiting for the Save dialog, the position it was taken at, and whether the capture paused a playback that ran
+    QString m_screenshotFile;
+    qint64 m_screenshotTicks = 0;
+    bool m_screenshotPaused = false;
     QString m_profileDataDir;
     QUrl m_pendingSubtitle;
     // Distinguishes two subtitle files saved within the same millisecond
