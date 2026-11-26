@@ -170,7 +170,8 @@ Kirigami.ScrollablePage {
                     id: signIn
                     text: i18n("Sign In")
                     icon.name: "user-identity"
-                    enabled: !page.signingIn && username.text.length > 0 && password.text.length > 0
+                    // A Jellyfin account may have no password: only the name is required
+                    enabled: !page.signingIn && username.text.length > 0
                     onClicked: page.connection.login(username.text, password.text)
                 }
                 Controls.BusyIndicator {

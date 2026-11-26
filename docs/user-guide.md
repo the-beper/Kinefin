@@ -141,7 +141,7 @@ While Kinefin connects, the **Servers** page shows **Cancel**.
 
 ### Sign in with a password or Quick Connect
 
-After the server answers, the sign-in page offers a password or Quick Connect. Users the server lists as public appear as tiles; selecting one fills in the name.
+After the server answers, the sign-in page offers a password or Quick Connect. Users the server lists as public appear as tiles; selecting one fills in the name. For a user without a password, leave **Password** empty and press **Sign In**.
 
 To use Quick Connect, choose it on the sign-in page and confirm the code it shows from a Jellyfin client that is already signed in to the same server.
 

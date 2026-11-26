@@ -797,7 +797,7 @@ void ConnectionController::onRestoreFinished()
     // A restored session already made this Authenticated; any other outcome (the wallet could not be read) goes to the sign-in of that user
     if (m_state != Connecting || m_client.isAuthenticated())
         return;
-    setError(i18n("Could not read the saved session. Enter the password"));
+    setError(i18n("Could not read the saved session. Sign in again"));
     askPasswordOf(m_restoringUserId);
 }
 
@@ -858,7 +858,7 @@ void ConnectionController::login(const QString &username, const QString &passwor
     setError({});
     setState(SigningIn);
     if (!m_client.authenticate(username, password) && m_state == SigningIn) {
-        setError(i18n("Enter a username and a password"));
+        setError(i18n("Enter a username"));
         setState(NeedsLogin);
     }
 }

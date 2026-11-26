@@ -306,6 +306,7 @@ class FakeJellyfin {
     QByteArray lastViewsAuth;
     QByteArray lastViewsRoute;
     QByteArray lastLoginAuth;
+    QByteArray lastLoginBody;
     // PlaybackInfo: the fixture to answer with, or a status / raw body override
     QString playbackInfoFixture = QStringLiteral("playbackinfo_direct");
     int playbackInfoStatus = 0;
@@ -1408,6 +1409,7 @@ class FakeJellyfin {
         }
         if (method == "POST" && route.endsWith("/Users/AuthenticateByName")) {
             lastLoginAuth = authorization;
+            lastLoginBody = body;
             if (!QJsonDocument::fromJson(body).isObject()) {
                 respond(socket, 400, {});
             } else if (denyLogin) {

@@ -1394,6 +1394,25 @@ class TestJellyfinClient : public QObject {
         QVERIFY(!client.fetchUserViews());
     }
 
+    void emptyPasswordSignsIn()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        Kinefin::JellyfinClient client;
+        QSignalSpy ready(&client, &Kinefin::JellyfinClient::serverReady);
+        QSignalSpy loggedIn(&client, &Kinefin::JellyfinClient::loginSucceeded);
+        QVERIFY(prepare(client, server));
+        QTRY_COMPARE(ready.size(), 1);
+        QVERIFY(!client.authenticate(QString(), QString()));
+        QVERIFY(client.authenticate(QStringLiteral("fixture-user"), QString()));
+        QTRY_COMPARE(loggedIn.size(), 1);
+        const QJsonObject body = QJsonDocument::fromJson(server.lastLoginBody).object();
+        QVERIFY(body.value(QStringLiteral("Pw")).isString());
+        QCOMPARE(body.value(QStringLiteral("Pw")).toString(), QString());
+        QCOMPARE(body.value(QStringLiteral("Username")).toString(), QStringLiteral("fixture-user"));
+        QVERIFY(client.isAuthenticated());
+    }
+
     void unauthorizedLibraryResponseInvalidatesSession()
     {
         FakeJellyfin server;

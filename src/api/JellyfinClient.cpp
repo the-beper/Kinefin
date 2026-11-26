@@ -802,7 +802,8 @@ QByteArray JellyfinClient::tokenAuthorization() const
 
 bool JellyfinClient::authenticate(const QString &username, const QString &password)
 {
-    if (m_state != State::Ready || m_deviceId.isEmpty() || username.isEmpty() || password.isEmpty())
+    // An empty password is valid: the server signs in an account that has none when `Pw` is empty
+    if (m_state != State::Ready || m_deviceId.isEmpty() || username.isEmpty())
         return false;
     if (!transportAllowsAuthentication()) {
         Q_EMIT requestFailed(
