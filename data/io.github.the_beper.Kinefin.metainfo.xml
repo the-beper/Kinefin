@@ -55,6 +55,7 @@
   <url type="vcs-browser">https://github.com/the-beper/Kinefin</url>
   <url type="help">https://github.com/the-beper/Kinefin/blob/main/docs/user-guide.md</url>
   <releases>
+    <release version="0.9.4" date="2026-11-26" />
     <release version="0.9.3" date="2026-11-26" />
     <release version="0.9.2" date="2026-11-26" />
     <release version="0.9.1" date="2026-11-25" />
