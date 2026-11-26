@@ -24,11 +24,11 @@ Controls.ApplicationWindow {
     onVideoAspectChanged: if (videoAspect > 0) aspect = shapeOf(videoAspect)
     readonly property bool mirrored: Qt.application.layoutDirection === Qt.RightToLeft
     // The strips along the edges that resize the window; the controls keep clear of them
-    readonly property int edgeWidth: Kirigami.Units.largeSpacing
-    // The side of a button, and the room around it on its panel: the least window at its widest shape is 16 grid units by 5.3, which holds a panel at the top, another at the bottom and the strips along the edges
-    readonly property int buttonSize: Math.round(Kirigami.Units.gridUnit * 1.75)
-    readonly property int panelPadding: Math.round(Kirigami.Units.smallSpacing / 2)
-    readonly property int panelSize: buttonSize + panelPadding * 2
+    readonly property int edgeWidth: OsdMetrics.edge
+    // The side of a button, and the room around it on its panel (shared with the mini player): the least window at its widest shape is 16 grid units by 5.3, which holds a panel at the top, another at the bottom and the strips along the edges
+    readonly property int buttonSize: OsdMetrics.buttonSize
+    readonly property int panelPadding: OsdMetrics.panelPadding
+    readonly property int panelSize: OsdMetrics.panelSize
     readonly property string volumeIcon: {
         const volume = player?.volume ?? 100;
         return player?.muted || volume === 0 ? "audio-volume-muted" : volume < 34 ? "audio-volume-low" : volume < 67 ? "audio-volume-medium" : "audio-volume-high";
@@ -304,7 +304,24 @@ Controls.ApplicationWindow {
                         from: 0
                         to: Math.max(1, (pip.player?.durationTicks ?? 0) / 10000000)
                         property real dragSeconds: 0
-                        value: pressed ? dragSeconds : (pip.player?.positionTicks ?? 0) / 10000000
+                        // Where the user asked to go, from the first move of a drag until the player reports a position near it (or the timeout), -1 for none: the handle shows it instead of the old position, which stays until the seek lands
+                        property real targetSeconds: -1
+                        readonly property real playerSeconds: (pip.player?.positionTicks ?? 0) / 10000000
+                        value: pressed ? dragSeconds : (targetSeconds >= 0 ? targetSeconds : playerSeconds)
+                        // The press switches the value to dragSeconds, which must already be what is shown for the handle not to jump
+                        onValueChanged: if (!pressed)
+                            dragSeconds = value
+                        onPlayerSecondsChanged: if (!pressed && targetSeconds >= 0 && Math.abs(playerSeconds - targetSeconds) <= 1)
+                            targetSeconds = -1
+                        // A new item has another length, and its position is not the target of the old one
+                        onToChanged: targetSeconds = -1
+                        function seekTo(seconds) {
+                            if (!pip.player)
+                                return;
+                            pip.player.seek(Math.round(seconds * 10000000));
+                            targetSeconds = Math.abs(seconds - playerSeconds) > 1 ? seconds : -1;
+                            targetTimeout.restart();
+                        }
                         Keys.onLeftPressed: pip.seekRelative(-10)
                         Keys.onRightPressed: pip.seekRelative(10)
                         Keys.onUpPressed: pip.seekRelative(60)
@@ -314,18 +331,23 @@ Controls.ApplicationWindow {
                             if (!pip.player)
                                 return;
                             if (!timeline.pressed) {
-                                pip.player.seek(Math.round(timeline.value * 10000000));
+                                timeline.seekTo(timeline.value);
                                 return;
                             }
                             timeline.dragSeconds = timeline.value;
+                            timeline.targetSeconds = timeline.value;
                         }
                         onPressedChanged: {
-                            if (!pip.player)
-                                return;
                             if (timeline.pressed)
-                                timeline.dragSeconds = pip.player.positionTicks / 10000000;
+                                targetTimeout.stop();
                             else
-                                pip.player.seek(Math.round(timeline.dragSeconds * 10000000));
+                                timeline.seekTo(timeline.dragSeconds);
+                        }
+                        // A seek the player never lands on (the server restarted its stream elsewhere, the player refused it) stops being shown after a few seconds
+                        Timer {
+                            id: targetTimeout
+                            interval: 5000
+                            onTriggered: timeline.targetSeconds = -1
                         }
                         Accessible.name: i18n("Playback position")
                     }
@@ -341,7 +363,7 @@ Controls.ApplicationWindow {
                         color: Kirigami.Theme.textColor
                         font.weight: Font.DemiBold
                         font.features: { "tnum": 1 }
-                        readonly property real shownTicks: timeline.pressed ? timeline.dragSeconds * 10000000 : (pip.player?.positionTicks ?? 0)
+                        readonly property real shownTicks: timeline.pressed ? timeline.dragSeconds * 10000000 : (timeline.targetSeconds >= 0 ? timeline.targetSeconds * 10000000 : (pip.player?.positionTicks ?? 0))
                         function spelled(elapsed, total) {
                             return pip.totalTimeShown ? i18nc("@info:status elapsed and total time of the video", "%1 / %2", elapsed, total) : elapsed;
                         }

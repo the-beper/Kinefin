@@ -8,6 +8,7 @@
 #include <QDebug>
 #include <QElapsedTimer>
 #include <QGuiApplication>
+#include <QScreen>
 #include <QVersionNumber>
 
 #include <KWindowShadow>
@@ -109,14 +110,14 @@ class PipShellSurface : public QtWaylandClient::QWaylandShellSurface,
         xx_pip_v1::resize(device->wl_seat(), device->serial(), *edge);
         return true;
     }
-    // The window takes the shape of a new aspect ratio at once, keeping its width as far as the bounds allow
+    // The window takes the shape of a new aspect ratio at once, keeping its width as far as the screen allows
     void refit()
     {
         QWindow *qwindow = window()->window();
         if (!m_configured || !qwindow)
             return;
         const QSize now = window()->windowContentGeometry().size();
-        const QSize fitted = fitToAspect(now, aspect(), Qt::Edges(), minimumWidth(), m_bounds);
+        const QSize fitted = fitToAspect(now, aspect(), Qt::Edges(), minimumWidth(), screenLimit());
         if (fitted != now)
             qwindow->resize(fitted);
     }
@@ -132,16 +133,19 @@ class PipShellSurface : public QtWaylandClient::QWaylandShellSurface,
             size.setWidth(m_pendingSize.width());
         if (m_pendingSize.height() > 0)
             size.setHeight(m_pendingSize.height());
-        // The compositor sizes this window to any shape: it is fitted to the video's, and to the bounds, since a surface larger than them is a protocol error that ends the connection
+        // The compositor sizes this window to any shape: it is fitted to the video's. KWin's bounds (a quarter of the work area each way) only shape the first size: like Firefox, the window then grows up to the screen, since KWin does not post the invalid_size error the protocol describes
         if (m_lastConfigure.isValid() && m_lastConfigure.elapsed() > ResizeGapMs)
             m_resizeEdges = {};
         m_lastConfigure.start();
         QWindow *qwindow = window()->window();
-        size = fitToAspect(size, aspect(), m_resizeEdges, minimumWidth(), m_bounds);
+        const QSize limit = m_sized ? screenLimit() : m_bounds;
+        size = fitToAspect(size, aspect(), m_resizeEdges, minimumWidth(), limit);
         resizeFromApplyConfigure(size);
-        // The window never grows past the bounds by itself either; set after the resize, which keeps the shape, since a smaller maximum would cut the size at once
-        if (qwindow && m_bounds.width() > 0 && m_bounds.height() > 0)
-            qwindow->setMaximumSize(m_bounds);
+        m_sized = true;
+        // The window never grows past the screen by itself either; set after the resize, which keeps the shape, since a smaller maximum would cut the size at once
+        if (const QSize screen = screenLimit();
+            qwindow && screen.width() > 0 && screen.height() > 0)
+            qwindow->setMaximumSize(screen);
         // Acknowledged once the size is applied, as Qt's xdg-shell does: the next commit already has it
         if (m_pendingSerial) {
             xdg_surface::ack_configure(*m_pendingSerial);
@@ -187,12 +191,20 @@ class PipShellSurface : public QtWaylandClient::QWaylandShellSurface,
         const QWindow *qwindow = window()->window();
         return qwindow ? qwindow->property(MinimumWidthProperty).toInt() : 0;
     }
+    QSize screenLimit()
+    {
+        const QWindow *qwindow = window()->window();
+        return qwindow && qwindow->screen() ? qwindow->screen()->availableGeometry().size()
+                                            : QSize();
+    }
 
     // Read by isExposed, which the render thread may call too
     std::atomic<bool> m_configured = false;
     std::optional<uint32_t> m_pendingSerial;
     QSize m_pendingSize;
     QSize m_bounds;
+    // Set once the first configure has been applied inside the bounds
+    bool m_sized = false;
     // The edges of the resize the user started last, which lead the shape of the sizes the compositor configures; none after a move
     Qt::Edges m_resizeEdges;
     QElapsedTimer m_lastConfigure;

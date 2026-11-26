@@ -2441,7 +2441,6 @@ class PlayerStub : public QObject {
     Q_PROPERTY(QVariantList subtitleTracks MEMBER subtitleTracks NOTIFY changed)
     Q_PROPERTY(QVariantList externalSubtitles MEMBER externalSubtitles NOTIFY changed)
     Q_PROPERTY(QString previewImage MEMBER previewImage NOTIFY changed)
-    Q_PROPERTY(QString screenshotPath MEMBER screenshotPath NOTIFY changed)
     Q_PROPERTY(QString skipLabel MEMBER skipLabel NOTIFY changed)
     Q_PROPERTY(int sleepRemainingMinutes MEMBER sleepRemainingMinutes NOTIFY changed)
     Q_PROPERTY(bool sleepAtEndOfItem MEMBER sleepAtEndOfItem NOTIFY changed)
@@ -2737,7 +2736,17 @@ class PlayerStub : public QObject {
         record(QStringLiteral("playItemOn"), call);
         return !castRefused;
     }
-    Q_INVOKABLE void screenshot() { record(QStringLiteral("screenshot")); }
+    Q_INVOKABLE bool screenshot() { return record(QStringLiteral("screenshot")); }
+    Q_INVOKABLE QUrl suggestedScreenshotUrl() const
+    {
+        return QUrl::fromLocalFile(QStringLiteral("/tmp/screenshot.png"));
+    }
+    Q_INVOKABLE bool saveScreenshot(const QUrl &destination)
+    {
+        Q_UNUSED(destination);
+        return record(QStringLiteral("saveScreenshot"));
+    }
+    Q_INVOKABLE void cancelScreenshot() { record(QStringLiteral("cancelScreenshot")); }
     Q_INVOKABLE void skipSegment() { record(QStringLiteral("skipSegment")); }
     Q_INVOKABLE bool downloadSubtitle(int index)
     {
@@ -2782,7 +2791,6 @@ class PlayerStub : public QObject {
     QVariantList subtitleTracks;
     QVariantList externalSubtitles;
     QString previewImage;
-    QString screenshotPath;
     QString skipLabel;
     int sleepRemainingMinutes = 0;
     bool sleepAtEndOfItem = false;
@@ -21450,15 +21458,18 @@ class TestUiPages : public QObject {
         QTRY_COMPARE(Ui::itemIn(mini, QStringLiteral("miniPlayerScrim"))->opacity(), 1.0);
         const QRectF dock = sceneRect(mini);
         const qreal unit = gridUnitOf(ui);
-        const qreal side = std::round(unit * 1.75);
-        QCOMPARE(mini->property("boxSize").toReal(), side);
+        // The sizes are the picture-in-picture window's: a corner box is a panel of the window's button and padding, and the margin from the edges is its edge strip
+        const qreal buttonSide = std::round(unit * 1.75);
+        const qreal side = mini->property("panelSize").toReal();
+        QCOMPARE(mini->property("buttonSize").toReal(), buttonSide);
+        QCOMPARE(side, buttonSide + 2 * mini->property("panelPadding").toReal());
         const QRectF expandRect = sceneRect(expand);
         const QRectF closeRect = sceneRect(close);
         const QRectF panelRect = sceneRect(panel);
         // Two squares of the same side, each the same small distance from its corner, the leading one for Expand
         for (const QRectF &rect : {expandRect, closeRect})
             QVERIFY(qAbs(rect.width() - side) <= 0.5 && qAbs(rect.height() - side) <= 0.5);
-        const qreal margin = expandRect.top() - dock.top();
+        const qreal margin = mini->property("margin").toReal();
         const qreal leadingInset =
             rightToLeft ? dock.right() - expandRect.right() : expandRect.left() - dock.left();
         const qreal trailingInset =
@@ -21468,10 +21479,20 @@ class TestUiPages : public QObject {
                                    .arg(leadingInset)
                                    .arg(trailingInset)
                                    .arg(closeRect.top() - dock.top());
-        QVERIFY2(margin > 0 && margin < unit && qAbs(leadingInset - margin) <= 0.5
-                     && qAbs(trailingInset - margin) <= 0.5
+        QVERIFY2(margin > 0 && margin < unit && qAbs(expandRect.top() - dock.top() - margin) <= 0.5
+                     && qAbs(leadingInset - margin) <= 0.5 && qAbs(trailingInset - margin) <= 0.5
                      && qAbs(closeRect.top() - dock.top() - margin) <= 0.5,
                  qPrintable(insets));
+        // The panel keeps the same margin from the left, the right and the bottom edge, and the corner boxes from the top one
+        const QString panelInsets = QStringLiteral("margin %1, left %2, right %3, bottom %4")
+                                        .arg(margin)
+                                        .arg(panelRect.left() - dock.left())
+                                        .arg(dock.right() - panelRect.right())
+                                        .arg(dock.bottom() - panelRect.bottom());
+        QVERIFY2(qAbs(panelRect.left() - dock.left() - margin) <= 0.5
+                     && qAbs(dock.right() - panelRect.right() - margin) <= 0.5
+                     && qAbs(dock.bottom() - panelRect.bottom() - margin) <= 0.5,
+                 qPrintable(panelInsets));
         // The corner buttons are drawn as the boxes, and so is the panel
         for (QQuickItem *button : {expand, close}) {
             const QByteArray name = button->objectName().toUtf8();
@@ -21498,8 +21519,8 @@ class TestUiPages : public QObject {
         for (const QQuickItem *part : {pause, title, progress})
             QVERIFY2(inner.contains(sceneRect(part)), qPrintable(part->objectName()));
         // Pause is a square at the leading end of the row, the title after it in the rest of the row, on the same line
-        const qreal playSize = std::round(unit * 1.5);
-        QCOMPARE(mini->property("playSize").toReal(), playSize);
+        const qreal playSize = mini->property("buttonSize").toReal();
+        const qreal padding = mini->property("panelPadding").toReal();
         QVERIFY(qAbs(pauseRect.width() - playSize) <= 0.5
                 && qAbs(pauseRect.height() - playSize) <= 0.5);
         const qreal nearGap = rightToLeft ? panelRect.right() - pauseRect.right()
@@ -21508,6 +21529,13 @@ class TestUiPages : public QObject {
                                              : titleRect.left() - pauseRect.right();
         const qreal farGap = rightToLeft ? titleRect.left() - panelRect.left()
                                          : panelRect.right() - titleRect.right();
+        // The padding inside the panel is the picture-in-picture window's: at the play button's side, above it and at the title's end
+        QVERIFY2(qAbs(nearGap - padding) <= 0.5 && qAbs(farGap - padding) <= 0.5
+                     && qAbs(pauseRect.top() - panelRect.top() - padding) <= 0.5,
+                 qPrintable(QStringLiteral("padding %1, pause at %2, title %3 short of the end")
+                                .arg(padding)
+                                .arg(nearGap)
+                                .arg(farGap)));
         QVERIFY2(nearGap >= 0 && nearGap < unit && betweenGap >= 0 && farGap >= 0 && farGap < unit,
                  qPrintable(QStringLiteral("pause at %1, title %2 after it, %3 short of the end")
                                 .arg(nearGap)
@@ -21518,7 +21546,12 @@ class TestUiPages : public QObject {
         QCOMPARE(title->property("text").toString(), stub.title);
         QVERIFY(showsPlainText(title));
         QVERIFY(title->property("font").value<QFont>().bold());
+        // Pause stays at the leading end and the title is aligned to the trailing end, cut at its end when it does not fit so its start stays readable
+        QCOMPARE(title->property("horizontalAlignment").toInt(), int(Qt::AlignRight));
         QCOMPARE(title->property("elide").toInt(), int(Qt::ElideRight));
+        if (!rightToLeft)
+            QTRY_COMPARE(title->property("effectiveHorizontalAlignment").toInt(),
+                         int(Qt::AlignRight));
         // The bar is inset by the radius of the panel, thin, under the row and along the bottom edge
         const qreal radius = panel->property("radius").toReal();
         QVERIFY(radius > 0);
@@ -22287,6 +22320,14 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(std::any_of(stub.calls.cbegin(), stub.calls.cend(), [](const QString &call) {
             return call.startsWith(QLatin1String("seek "));
         }));
+        // Until the player gets there the timeline and the time show the clicked point, not the old position
+        const double clicked = timeline->property("value").toDouble();
+        QVERIFY2(qAbs(clicked - 60.0) > 100.0, qPrintable(QString::number(clicked)));
+        QTRY_VERIFY(qAbs(time->property("text").toString().section(u' ', 0, 0).toDouble() - clicked)
+                    <= 1.0);
+        stub.positionTicks = qRound64(clicked * 10'000'000) + 4'000'000;
+        Q_EMIT stub.changed();
+        QTRY_VERIFY(qAbs(timeline->property("value").toDouble() - (clicked + 0.4)) < 0.001);
         QCOMPARE(ui.window->property("playbackMode").toString(), QStringLiteral("pip"));
     }
 
@@ -25296,6 +25337,59 @@ class TestUiPages : public QObject {
         QTRY_COMPARE(stub.calls.count(QStringLiteral("seekRelative 10")), 1);
         QTRY_COMPARE(stub.calls.count(QStringLiteral("seekRelative -60")), 1);
         QCOMPARE(stub.calls.count(QStringLiteral("seekRelative -10")), 0);
+    }
+
+    // A click on the timeline shows the clicked point from the press on and keeps it until the player reaches it: the handle never goes back to the old position while the seek is on its way
+    void playerTimelineKeepsAClickedPointUntilThePlayerReachesIt()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(1000));
+        QVERIFY(ui.signIn());
+        QVERIFY(openPlayer(ui, stub));
+        QQuickItem *timeline = ui.item(QStringLiteral("playbackTimeline"));
+        QVERIFY(timeline);
+        const double start = 600.0;
+        stub.positionTicks = qRound64(start * 10'000'000);
+        Q_EMIT stub.changed();
+        const auto shown = [timeline] { return timeline->property("value").toDouble(); };
+        const auto atStart = [&] { return qAbs(shown() - start) < 100.0; };
+        QTRY_VERIFY(atStart());
+        stub.calls.clear();
+
+        // The press jumps the handle to the clicked point, which is far from the start
+        const QPoint at =
+            timeline->mapToScene(QPointF(timeline->width() * 0.75, timeline->height() / 2))
+                .toPoint();
+        QTest::mousePress(ui.window, Qt::LeftButton, Qt::NoModifier, at);
+        QTRY_VERIFY(timeline->property("pressed").toBool());
+        QVERIFY2(!atStart(), qPrintable(QString::number(shown())));
+        const double target = shown();
+
+        // The release seeks there, and the player is still at the old position: the handle stays at the clicked point
+        QTest::mouseRelease(ui.window, Qt::LeftButton, Qt::NoModifier, at);
+        QTRY_VERIFY(!timeline->property("pressed").toBool());
+        QVERIFY2(!atStart(), qPrintable(QString::number(shown())));
+        QVERIFY(qAbs(shown() - target) < 0.001);
+        const QString wanted = QStringLiteral("seek %1").arg(qRound64(target * 10'000'000));
+        QTRY_VERIFY(stub.calls.contains(wanted));
+        QVERIFY(!atStart());
+
+        // The playback goes on from the old position meanwhile, and the handle does not follow it
+        stub.positionTicks += 3 * 10'000'000LL;
+        Q_EMIT stub.changed();
+        QVERIFY(!atStart());
+        QVERIFY(qAbs(shown() - target) < 0.001);
+
+        // The player reaches the point: the handle follows its position again
+        stub.positionTicks = qRound64(target * 10'000'000) + 4'000'000;
+        Q_EMIT stub.changed();
+        QTRY_VERIFY(qAbs(shown() - (target + 0.4)) < 0.001);
+        stub.positionTicks += 5 * 10'000'000LL;
+        Q_EMIT stub.changed();
+        QTRY_VERIFY(qAbs(shown() - (target + 5.4)) < 0.001);
     }
 
     void playerControlRowTurnsToIconsWhenNarrow()

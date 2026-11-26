@@ -17,9 +17,12 @@
 
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QRegularExpression>
 #include <QSignalSpy>
+#include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QUrlQuery>
 #include <QtTest/QtTest>
@@ -3734,6 +3737,145 @@ class TestPlayerController : public QObject {
         QCOMPARE(QDir(clips).entryList(QDir::Files), QStringList());
     }
 
+    // A screenshot is taken at once into a file of the profile's own folder, and a playback that ran waits while the Save dialog is open; Save copies the frame to the chosen file (a file that is there is replaced), removes it and the playback goes on
+    void aScreenshotWaitsForTheDialogAndSaveCopiesTheFrame()
+    {
+        const QString profile = QStringLiteral("shotsave");
+        Chain chain({}, profile);
+        QVERIFY(chain.ok);
+        QVERIFY(playsAFilm(chain));
+        if (!takesFrames(chain))
+            QSKIP("this mpv takes no frame without a renderer");
+        QVERIFY(!chain.controller.paused());
+        QVERIFY(chain.controller.screenshot());
+        const QStringList staged = stagedScreenshots(profile);
+        QCOMPARE(staged.size(), 1);
+        const QByteArray frame =
+            readFile(screenshotsFolder(profile) + QLatin1Char('/') + staged.constFirst());
+        QVERIFY(frame.startsWith(QByteArray::fromHex("89504e470d0a1a0a")));
+        QTRY_VERIFY(chain.controller.paused());
+        // The dialog starts in the Pictures folder with the title and the time of the frame
+        const QUrl suggested = chain.controller.suggestedScreenshotUrl();
+        QVERIFY(suggested.isLocalFile());
+        const QFileInfo suggestedInfo(suggested.toLocalFile());
+        QVERIFY2(QRegularExpression(QStringLiteral("^Local Movie \\d\\d-\\d\\d-\\d\\d\\.png$"))
+                     .match(suggestedInfo.fileName())
+                     .hasMatch(),
+                 qPrintable(suggestedInfo.fileName()));
+        const QString pictures = QStandardPaths::writableLocation(QStandardPaths::PicturesLocation);
+        if (!pictures.isEmpty())
+            QCOMPARE(suggestedInfo.absolutePath(), pictures);
+        const QString target = chain.dir.filePath(QStringLiteral("saved.png"));
+        QFile old(target);
+        QVERIFY(old.open(QIODevice::WriteOnly));
+        QVERIFY(old.write("old") == 3);
+        old.close();
+        QVERIFY(chain.controller.saveScreenshot(QUrl::fromLocalFile(target)));
+        QCOMPARE(readFile(target), frame);
+        QVERIFY(stagedScreenshots(profile).isEmpty());
+        QTRY_VERIFY(!chain.controller.paused());
+    }
+
+    // Cancel removes the frame and resumes the playback that ran; nothing is left for a Save that comes late
+    void cancellingTheScreenshotDialogRemovesTheFrameAndResumes()
+    {
+        const QString profile = QStringLiteral("shotcancel");
+        Chain chain({}, profile);
+        QVERIFY(chain.ok);
+        QVERIFY(playsAFilm(chain));
+        if (!takesFrames(chain))
+            QSKIP("this mpv takes no frame without a renderer");
+        QVERIFY(chain.controller.screenshot());
+        QCOMPARE(stagedScreenshots(profile).size(), 1);
+        QTRY_VERIFY(chain.controller.paused());
+        chain.controller.cancelScreenshot();
+        QVERIFY(stagedScreenshots(profile).isEmpty());
+        QTRY_VERIFY(!chain.controller.paused());
+        const QString late = chain.dir.filePath(QStringLiteral("late.png"));
+        QVERIFY(!chain.controller.saveScreenshot(QUrl::fromLocalFile(late)));
+        QVERIFY(!QFileInfo::exists(late));
+    }
+
+    // A playback the user had paused stays paused whichever way the dialog ends
+    void aPausedPlaybackStaysPausedAfterTheScreenshotDialog()
+    {
+        Chain chain({}, QStringLiteral("shotpaused"));
+        QVERIFY(chain.ok);
+        QVERIFY(playsAFilm(chain));
+        if (!takesFrames(chain))
+            QSKIP("this mpv takes no frame without a renderer");
+        chain.controller.pause();
+        QTRY_VERIFY(chain.controller.paused());
+        QVERIFY(chain.controller.screenshot());
+        chain.controller.cancelScreenshot();
+        QTest::qWait(300);
+        QVERIFY(chain.controller.paused());
+        QVERIFY(chain.controller.screenshot());
+        QVERIFY(chain.controller.saveScreenshot(
+            QUrl::fromLocalFile(chain.dir.filePath(QStringLiteral("kept.png")))));
+        QTest::qWait(300);
+        QVERIFY(chain.controller.paused());
+    }
+
+    // A folder, a path that is not absolute and a URL that is not a local file are refused: the frame is gone and the playback goes on all the same
+    void aScreenshotIsNotSavedToAFolderARelativePathOrARemoteUrl()
+    {
+        const QString profile = QStringLiteral("shotrefused");
+        Chain chain({}, profile);
+        QVERIFY(chain.ok);
+        QVERIFY(playsAFilm(chain));
+        if (!takesFrames(chain))
+            QSKIP("this mpv takes no frame without a renderer");
+        const QString relative = QStringLiteral("kinefin-relative-screenshot.png");
+        for (const QUrl &destination :
+             {QUrl::fromLocalFile(chain.dir.path()), QUrl::fromLocalFile(relative),
+              QUrl(QStringLiteral("https://example.invalid/shot.png"))}) {
+            QVERIFY(chain.controller.screenshot());
+            QCOMPARE(stagedScreenshots(profile).size(), 1);
+            QVERIFY(!chain.controller.saveScreenshot(destination));
+            QVERIFY(stagedScreenshots(profile).isEmpty());
+            QTRY_VERIFY(!chain.controller.paused());
+        }
+        QVERIFY(!QFileInfo::exists(relative));
+    }
+
+    // Nothing plays: nothing to take. A second capture replaces a frame that waits, and the playback stays paused by the first; stopping the playback drops the frame
+    void aScreenshotNeedsAPlaybackAndEndsWithIt()
+    {
+        const QString profile = QStringLiteral("shotstop");
+        Chain chain({}, profile);
+        QVERIFY(chain.ok);
+        QVERIFY(!chain.controller.screenshot());
+        QVERIFY(stagedScreenshots(profile).isEmpty());
+        QVERIFY(playsAFilm(chain));
+        if (!takesFrames(chain))
+            QSKIP("this mpv takes no frame without a renderer");
+        QVERIFY(chain.controller.screenshot());
+        QVERIFY(chain.controller.screenshot());
+        QCOMPARE(stagedScreenshots(profile).size(), 1);
+        QTRY_VERIFY(chain.controller.paused());
+        chain.controller.stop();
+        QTRY_VERIFY_WITH_TIMEOUT(stagedScreenshots(profile).isEmpty(), 10000);
+        QVERIFY(!chain.controller.saveScreenshot(
+            QUrl::fromLocalFile(chain.dir.filePath(QStringLiteral("after-stop.png")))));
+    }
+
+    // A frame the app stopped with, waiting for its dialog, goes at the profile's next start; screenshots that earlier versions saved in the folder stay
+    void screenshotLeftoversGoAtStart()
+    {
+        const QString profile = QStringLiteral("shotleft");
+        const QString folder = screenshotsFolder(profile);
+        QVERIFY(QDir().mkpath(folder));
+        const QString kept = QStringLiteral("kinefin-20250101-000000-000.png");
+        for (const QString &name : {QStringLiteral("screenshot-20260101-000000-000.png"), kept}) {
+            QFile file(folder + QLatin1Char('/') + name);
+            QVERIFY(file.open(QIODevice::WriteOnly));
+        }
+        Chain chain({}, profile);
+        QVERIFY(chain.ok);
+        QCOMPARE(QDir(folder).entryList(QDir::Files), QStringList{kept});
+    }
+
     // The clip of a transcode is encoded from a dump of mpv's cache, which starts at the keyframe before the start mark: the clip lasts what the marks span, and neither the dump nor the staging file stays
     void clipOfATranscodeIsEncodedFromTheCache()
     {
@@ -4557,6 +4699,43 @@ class TestPlayerController : public QObject {
         return chain.server.url(QStringLiteral("/jellyfin")).toString() + QStringLiteral("/Videos/")
                + kMovie + QLatin1Char('/') + kSourceId + QStringLiteral("/Subtitles/2/")
                + QString::number(startTicks) + QStringLiteral("/Stream.vtt");
+    }
+    // A local film of 20 s plays on a started engine, titled "Local Movie", in the profile of `chain`
+    static bool playsAFilm(Chain &chain)
+    {
+        const QString film = makeTransportStream(chain.dir, 20);
+        return !film.isEmpty()
+               && chain.engine()->init({QStringLiteral("vo=null"), QStringLiteral("ao=null")})
+               && chain.controller.playLocalFile(film, kMovie, QStringLiteral("Local Movie"), {})
+               && QTest::qWaitFor([&chain] { return chain.controller.canSeek(); }, 10000);
+    }
+    // Whether this mpv takes a frame of the film without a renderer: the screenshot tests skip where it does not
+    static bool takesFrames(Chain &chain)
+    {
+        const QString probe = chain.dir.filePath(QStringLiteral("probe.png"));
+        return QTest::qWaitFor(
+            [&chain, &probe] {
+                return chain.engine()->mpvCommand(
+                           {QStringLiteral("screenshot-to-file"), probe, QStringLiteral("video")})
+                       && QFileInfo(probe).size() > 0;
+            },
+            5000);
+    }
+    QString screenshotsFolder(const QString &profile) const
+    {
+        return m_data.filePath(QStringLiteral("kinefin/profiles/") + profile
+                               + QStringLiteral("/screenshots"));
+    }
+    // The frames a profile holds for a Save dialog
+    QStringList stagedScreenshots(const QString &profile) const
+    {
+        return QDir(screenshotsFolder(profile))
+            .entryList({QStringLiteral("screenshot-*.png")}, QDir::Files);
+    }
+    static QByteArray readFile(const QString &path)
+    {
+        QFile file(path);
+        return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
     }
     std::unique_ptr<CastTestPki> m_castPki;
     std::unique_ptr<CastTestPki> m_otherCastPki;

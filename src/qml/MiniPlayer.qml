@@ -15,9 +15,11 @@ Item {
     readonly property var player: shell.player
     // The video item of the shell sits here while the mini player shows
     readonly property Item videoSlot: slot
-    readonly property real margin: Kirigami.Units.largeSpacing
-    readonly property real boxSize: Math.round(Kirigami.Units.gridUnit * 1.75)
-    readonly property real playSize: Math.round(Kirigami.Units.gridUnit * 1.5)
+    // The margins, the button size and the padding of a panel are the picture-in-picture window's (OsdMetrics): the boxes keep this distance from every edge of the dock, and the dock from the content area's
+    readonly property real margin: OsdMetrics.edge
+    readonly property real buttonSize: OsdMetrics.buttonSize
+    readonly property real panelPadding: OsdMetrics.panelPadding
+    readonly property real panelSize: OsdMetrics.panelSize
     readonly property bool mirrored: Qt.application.layoutDirection === Qt.RightToLeft
     // A tap on a touch screen shows the controls for a few seconds: a press on a control that is not shown only does that, so a touch never acts on what it cannot see
     property bool touchRevealed: false
@@ -185,9 +187,9 @@ Item {
             objectName: "miniPlayerExpandButton"
             anchors.left: parent.left
             anchors.top: parent.top
-            anchors.margins: Kirigami.Units.smallSpacing
-            implicitWidth: mini.boxSize
-            implicitHeight: mini.boxSize
+            anchors.margins: mini.margin
+            implicitWidth: mini.panelSize
+            implicitHeight: mini.panelSize
             icon.name: "window-restore-pip"
             text: i18nc("@action:button", "Expand Player")
             background: OsdBox { control: expandButton }
@@ -198,9 +200,9 @@ Item {
             objectName: "miniPlayerCloseButton"
             anchors.right: parent.right
             anchors.top: parent.top
-            anchors.margins: Kirigami.Units.smallSpacing
-            implicitWidth: mini.boxSize
-            implicitHeight: mini.boxSize
+            anchors.margins: mini.margin
+            implicitWidth: mini.panelSize
+            implicitHeight: mini.panelSize
             icon.name: "window-close"
             text: i18nc("@action:button stops playback and closes the mini player", "Close Mini Player")
             background: OsdBox { control: closeButton }
@@ -214,22 +216,22 @@ Item {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.bottom: parent.bottom
-            anchors.margins: Kirigami.Units.smallSpacing
-            height: Kirigami.Units.smallSpacing + bottomRow.implicitHeight + Kirigami.Units.smallSpacing / 2 + progressBar.height + progressBar.anchors.bottomMargin
+            anchors.margins: mini.margin
+            height: mini.panelPadding + bottomRow.implicitHeight + Kirigami.Units.smallSpacing / 2 + progressBar.height + progressBar.anchors.bottomMargin
             RowLayout {
                 id: bottomRow
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.top: parent.top
-                anchors.leftMargin: Kirigami.Units.smallSpacing
-                anchors.rightMargin: Kirigami.Units.smallSpacing
-                anchors.topMargin: Kirigami.Units.smallSpacing
+                anchors.leftMargin: mini.panelPadding
+                anchors.rightMargin: mini.panelPadding
+                anchors.topMargin: mini.panelPadding
                 spacing: Kirigami.Units.smallSpacing
                 MiniButton {
                     id: playButton
                     objectName: "miniPlayerPauseButton"
-                    implicitWidth: mini.playSize
-                    implicitHeight: mini.playSize
+                    implicitWidth: mini.buttonSize
+                    implicitHeight: mini.buttonSize
                     text: mini.player?.paused ? i18n("Resume") : i18n("Pause")
                     icon.name: mini.player?.paused ? "media-playback-start" : "media-playback-pause"
                     enabled: !!mini.player?.active && !mini.player.loading
@@ -239,6 +241,7 @@ Item {
                     objectName: "miniPlayerTitle"
                     Layout.fillWidth: true
                     textFormat: Text.PlainText
+                    horizontalAlignment: Text.AlignRight
                     elide: Text.ElideRight
                     font.bold: true
                     color: Kirigami.Theme.textColor

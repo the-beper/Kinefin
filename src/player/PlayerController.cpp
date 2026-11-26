@@ -133,6 +133,17 @@ int indexOfItem(const QStringList &ids, const QString &id)
     }
     return -1;
 }
+
+// The folder a Save dialog starts in: `location`, else Documents, else the home folder
+QString exportFolder(QStandardPaths::StandardLocation location)
+{
+    QString folder = QStandardPaths::writableLocation(location);
+    if (folder.isEmpty())
+        folder = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    if (folder.isEmpty())
+        folder = QDir::homePath();
+    return folder;
+}
 } // namespace
 
 QString playbackTimeText(qint64 ticks, bool withHours)
@@ -342,6 +353,11 @@ PlayerController::PlayerController(JellyfinClient &client, PlayQueue &queue,
         QDir clips(m_profileDataDir + QStringLiteral("/clips"));
         for (const QString &name : clips.entryList({QStringLiteral("clip-*")}, QDir::Files))
             clips.remove(name);
+        // A frame taken for a Save dialog that the app stopped during
+        QDir screenshots(m_profileDataDir + QStringLiteral("/screenshots"));
+        for (const QString &name :
+             screenshots.entryList({QStringLiteral("screenshot-*")}, QDir::Files))
+            screenshots.remove(name);
     }
     m_cast = new CastController(this);
     m_castSeek.setSingleShot(true);
@@ -867,6 +883,7 @@ void PlayerController::onAccountLeaving()
 {
     // A streamed source needs the token: nothing outlives the account
     cancelClipExport();
+    finishScreenshot(false);
     dropClipMarks();
     // The end-file comes after the local flag is gone: the position is stored now
     reportLocalPosition(false);
@@ -1209,6 +1226,7 @@ bool PlayerController::startItem(const QString &id, qint64 resumeTicks, bool gro
     // Clips belong to the item that made them
     if (!sameItem) {
         cancelClipExport();
+        finishScreenshot(false);
         dropClipMarks();
         m_localSourcePath.clear();
     }
@@ -1370,6 +1388,7 @@ bool PlayerController::playLocalFile(const QString &path, const QString &itemId,
     reportLocalPosition(false);
     // Its clips are the file's own: the marks of the previous item do not carry over
     cancelClipExport();
+    finishScreenshot(false);
     dropClipMarks();
     m_localSourcePath = path;
     m_pendingLocal.path = path;
@@ -2636,6 +2655,7 @@ void PlayerController::clearCurrent()
     m_pendingSubtitleSecondary = false;
     m_pendingSecondaryFile.clear();
     cancelClipExport();
+    finishScreenshot(false);
     dropClipMarks();
     m_localSourcePath.clear();
     dropFallback();
@@ -3483,26 +3503,71 @@ int PlayerController::sleepRemainingMinutes() const
 {
     return m_sleep.isActive() ? std::max(1, (m_sleep.remainingTime() + 59'999) / 60'000) : 0;
 }
-void PlayerController::screenshot()
+bool PlayerController::screenshot()
 {
-    if (!active() || !m_engine.isInitialized() || m_profileDataDir.isEmpty())
-        return;
+    if (!active() || m_casting || !m_engine.isInitialized() || m_profileDataDir.isEmpty())
+        return false;
     const QString directory = m_profileDataDir + QStringLiteral("/screenshots");
     if (!ensurePrivateDirectory(directory))
-        return;
+        return false;
     const QString file =
-        directory + QStringLiteral("/kinefin-")
+        directory + QStringLiteral("/screenshot-")
         + QDateTime::currentDateTimeUtc().toString(QStringLiteral("yyyyMMdd-HHmmss-zzz"))
         + QStringLiteral(".png");
     if (!m_engine.mpvCommand(
             {QStringLiteral("screenshot-to-file"), file, QStringLiteral("video")})) {
-        m_errorText = i18n("Could not save the screenshot.");
-        Q_EMIT changed();
-        return;
+        QFile::remove(file);
+        return false;
     }
-    // The path is within the profile's private data directory, writable even inside Flatpak. A portal export can be added independently
-    m_screenshotPath = file;
-    Q_EMIT changed();
+    // A frame still waiting for the dialog is replaced, and the playback stays as the first capture left it
+    if (!m_screenshotFile.isEmpty() && m_screenshotFile != file)
+        QFile::remove(m_screenshotFile);
+    m_screenshotFile = file;
+    m_screenshotTicks = positionTicks();
+    if (!m_screenshotPaused && !paused()) {
+        m_screenshotPaused = true;
+        pause();
+    }
+    return true;
+}
+
+QUrl PlayerController::suggestedScreenshotUrl() const
+{
+    return QUrl::fromLocalFile(exportFolder(QStandardPaths::PicturesLocation) + QLatin1Char('/')
+                               + exportFileName(m_screenshotTicks, QStringLiteral(".png")));
+}
+
+bool PlayerController::saveScreenshot(const QUrl &destination)
+{
+    if (m_screenshotFile.isEmpty())
+        return false;
+    const QString target = destination.toLocalFile();
+    const QFileInfo targetInfo(target);
+    bool ok = false;
+    if (destination.isLocalFile() && targetInfo.isAbsolute() && !targetInfo.isDir()) {
+        // The dialog has asked about replacing a file that is there
+        if (targetInfo.exists())
+            QFile::remove(target);
+        ok = QFile::copy(m_screenshotFile, target);
+        if (!ok)
+            QFile::remove(target);
+    }
+    finishScreenshot(true);
+    return ok;
+}
+
+void PlayerController::cancelScreenshot()
+{
+    finishScreenshot(true);
+}
+
+void PlayerController::finishScreenshot(bool resumeIfPaused)
+{
+    if (!m_screenshotFile.isEmpty())
+        QFile::remove(m_screenshotFile);
+    m_screenshotFile.clear();
+    if (std::exchange(m_screenshotPaused, false) && resumeIfPaused && active())
+        resume();
 }
 
 qint64 PlayerController::clipLengthTicks() const
@@ -3808,31 +3873,31 @@ void PlayerController::frameBackStep()
     m_engine.mpvCommand({QStringLiteral("frame-back-step")});
 }
 
-QString PlayerController::suggestedClipName(bool gif) const
+QString PlayerController::exportFileName(qint64 ticks, const QString &extension) const
 {
     const QString title = m_title.isEmpty() ? m_subtitle : m_title;
     const QString stem = ExportNames::component(title, QStringLiteral("Kinefin"));
-    const qint64 start = m_clipStart >= 0 ? m_clipStart : positionTicks();
-    const qint64 seconds = start / TicksPerSecond;
+    const qint64 seconds = ticks / TicksPerSecond;
     const QString time = QStringLiteral("%1-%2-%3")
                              .arg(seconds / 3600, 2, 10, QLatin1Char('0'))
                              .arg(seconds / 60 % 60, 2, 10, QLatin1Char('0'))
                              .arg(seconds % 60, 2, 10, QLatin1Char('0'));
+    return stem + QLatin1Char(' ') + time + extension;
+}
+
+QString PlayerController::suggestedClipName(bool gif) const
+{
     const QString extension = gif ? QStringLiteral(".gif")
                               : ClipExporter::hasEncoder(QStringLiteral("libx264"))
                                   ? QStringLiteral(".mp4")
                                   : QStringLiteral(".webm");
-    return stem + QLatin1Char(' ') + time + extension;
+    return exportFileName(m_clipStart >= 0 ? m_clipStart : positionTicks(), extension);
 }
 
 QUrl PlayerController::suggestedClipUrl(bool gif) const
 {
-    QString folder = QStandardPaths::writableLocation(QStandardPaths::MoviesLocation);
-    if (folder.isEmpty())
-        folder = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
-    if (folder.isEmpty())
-        folder = QDir::homePath();
-    return QUrl::fromLocalFile(folder + QLatin1Char('/') + suggestedClipName(gif));
+    return QUrl::fromLocalFile(exportFolder(QStandardPaths::MoviesLocation) + QLatin1Char('/')
+                               + suggestedClipName(gif));
 }
 
 bool PlayerController::saveClip(bool gif, const QUrl &destination)

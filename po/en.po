@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: kinefin 0\n"
 "Report-Msgid-Bugs-To: https://github.com/the-beper/Kinefin/issues\n"
-"POT-Creation-Date: 2026-11-26 18:34+0000\n"
+"POT-Creation-Date: 2026-11-26 19:48+0000\n"
 "PO-Revision-Date: 2026-11-07 00:00+0000\n"
 "Last-Translator: the-beper\n"
 "Language-Team: English\n"
@@ -126,62 +126,62 @@ msgctxt "episode number spoken"
 msgid "Episode %1"
 msgstr "Episode %1"
 
-#: src/app/HdrOutput.cpp:76
+#: src/app/HdrOutput.cpp:78
 msgctxt "@info why the HDR Output setting cannot be used"
 msgid "This build of Kinefin has no HDR output"
 msgstr "This build of Kinefin has no HDR output"
 
-#: src/app/HdrOutput.cpp:82
+#: src/app/HdrOutput.cpp:84
 msgctxt "@info why the HDR Output setting cannot be used"
 msgid "The desktop does not offer HDR output to applications"
 msgstr "The desktop does not offer HDR output to applications"
 
-#: src/app/HdrOutput.cpp:90
+#: src/app/HdrOutput.cpp:92
 msgctxt "@info:status HDR output in Playback Info, %1 is the screen's peak"
 msgid "On · peak %1 cd/m²"
 msgstr "On · peak %1 cd/m²"
 
-#: src/app/HdrOutput.cpp:93
+#: src/app/HdrOutput.cpp:95
 msgctxt "@info:status HDR output in Playback Info"
 msgid "Off: This build of Kinefin has no HDR output"
 msgstr "Off: This build of Kinefin has no HDR output"
 
-#: src/app/HdrOutput.cpp:96
+#: src/app/HdrOutput.cpp:98
 msgctxt "@info:status HDR output in Playback Info"
 msgid "Off: The desktop does not offer HDR output to applications"
 msgstr "Off: The desktop does not offer HDR output to applications"
 
-#: src/app/HdrOutput.cpp:98
+#: src/app/HdrOutput.cpp:100
 msgctxt "@info:status HDR output in Playback Info"
 msgid "Off: HDR Output is set to Off"
 msgstr "Off: HDR Output is set to Off"
 
-#: src/app/HdrOutput.cpp:101
+#: src/app/HdrOutput.cpp:103
 msgctxt "@info:status HDR output in Playback Info"
 msgid "Off: The video was sent to another device"
 msgstr "Off: The video was sent to another device"
 
-#: src/app/HdrOutput.cpp:104
+#: src/app/HdrOutput.cpp:106
 msgctxt "@info:status HDR output in Playback Info"
 msgid "Off: Only the full player shows HDR video"
 msgstr "Off: Only the full player shows HDR video"
 
-#: src/app/HdrOutput.cpp:106
+#: src/app/HdrOutput.cpp:108
 msgctxt "@info:status HDR output in Playback Info"
 msgid "Off: The video is not HDR"
 msgstr "Off: The video is not HDR"
 
-#: src/app/HdrOutput.cpp:109
+#: src/app/HdrOutput.cpp:111
 msgctxt "@info:status HDR output in Playback Info"
 msgid "Off: The brightness range of the screen is not known"
 msgstr "Off: The brightness range of the screen is not known"
 
-#: src/app/HdrOutput.cpp:112
+#: src/app/HdrOutput.cpp:114
 msgctxt "@info:status HDR output in Playback Info"
 msgid "Off: HDR is off for the screen, or its SDR brightness is too high"
 msgstr "Off: HDR is off for the screen, or its SDR brightness is too high"
 
-#: src/app/HdrOutput.cpp:115
+#: src/app/HdrOutput.cpp:117
 msgctxt "@info:status HDR output in Playback Info"
 msgid "Off: The HDR video could not be shown"
 msgstr "Off: The HDR video could not be shown"
@@ -229,51 +229,51 @@ msgctxt "episode label and episode title"
 msgid "%1 — %2"
 msgstr "%1 — %2"
 
-#: src/player/PlayerController.cpp:426
+#: src/player/PlayerController.cpp:442
 msgid "The secondary subtitles could not be downloaded"
 msgstr "The secondary subtitles could not be downloaded"
 
-#: src/player/PlayerController.cpp:427
+#: src/player/PlayerController.cpp:443
 msgid "Could not download the subtitle."
 msgstr "Could not download the subtitle."
 
-#: src/player/PlayerController.cpp:512
+#: src/player/PlayerController.cpp:528
 msgid "The video could not be opened. Try again."
 msgstr "The video could not be opened. Try again."
 
-#: src/player/PlayerController.cpp:1495
+#: src/player/PlayerController.cpp:1514
 msgid "The downloaded file could not be opened."
 msgstr "The downloaded file could not be opened."
 
-#: src/player/PlayerController.cpp:1571 src/player/PlayerController.cpp:2014
+#: src/player/PlayerController.cpp:1590 src/player/PlayerController.cpp:2033
 msgid "The device is no longer available: search for it again from Cast."
 msgstr "The device is no longer available: search for it again from Cast."
 
-#: src/player/PlayerController.cpp:1579 src/player/PlayerController.cpp:1622
+#: src/player/PlayerController.cpp:1598 src/player/PlayerController.cpp:1641
 msgid "Unable to request playback from the server."
 msgstr "Unable to request playback from the server."
 
-#: src/player/PlayerController.cpp:1731
+#: src/player/PlayerController.cpp:1750
 msgctxt "@item:inmenu maximum bit rate in Mbit/s"
 msgid "%1 Mbps"
 msgstr "%1 Mbps"
 
-#: src/player/PlayerController.cpp:1734
+#: src/player/PlayerController.cpp:1753
 msgid "Automatic"
 msgstr "Automatic"
 
-#: src/player/PlayerController.cpp:1737
+#: src/player/PlayerController.cpp:1756
 msgctxt "@item:inmenu automatic quality lowered on a slow connection"
 msgid "Automatic (%1 Mbps)"
 msgstr "Automatic (%1 Mbps)"
 
-#: src/player/PlayerController.cpp:1789
+#: src/player/PlayerController.cpp:1808
 msgid ""
 "The selected quality could not be opened. Try again at the previous quality."
 msgstr ""
 "The selected quality could not be opened. Try again at the previous quality."
 
-#: src/player/PlayerController.cpp:1790
+#: src/player/PlayerController.cpp:1809
 msgid ""
 "The lower quality stream could not be opened. Try again at the previous "
 "quality."
@@ -281,15 +281,15 @@ msgstr ""
 "The lower quality stream could not be opened. Try again at the previous "
 "quality."
 
-#: src/player/PlayerController.cpp:1959
+#: src/player/PlayerController.cpp:1978
 msgid "External subtitle %1"
 msgstr "External subtitle %1"
 
-#: src/player/PlayerController.cpp:1966
+#: src/player/PlayerController.cpp:1985
 msgid "The selected media source could not be opened."
 msgstr "The selected media source could not be opened."
 
-#: src/player/PlayerController.cpp:2024
+#: src/player/PlayerController.cpp:2043
 msgid ""
 "The server's stream link would give the device your sign-in, so it was not "
 "sent."
@@ -297,21 +297,21 @@ msgstr ""
 "The server's stream link would give the device your sign-in, so it was not "
 "sent."
 
-#: src/player/PlayerController.cpp:2031
+#: src/player/PlayerController.cpp:2050
 msgctxt "@info %1 is a device name"
 msgid "%1 cannot play this kind of video: play it on this computer instead."
 msgstr "%1 cannot play this kind of video: play it on this computer instead."
 
-#: src/player/PlayerController.cpp:2055
+#: src/player/PlayerController.cpp:2074
 msgid "The playback session could not be opened."
 msgstr "The playback session could not be opened."
 
-#: src/player/PlayerController.cpp:2076 src/player/PlayerController.cpp:2175
+#: src/player/PlayerController.cpp:2095 src/player/PlayerController.cpp:2194
 msgctxt "@info %1 is a device name"
 msgid "%1 could not play this video: check that it can reach the server."
 msgstr "%1 could not play this video: check that it can reach the server."
 
-#: src/player/PlayerController.cpp:2180
+#: src/player/PlayerController.cpp:2199
 msgctxt "@info %1 is a device name"
 msgid ""
 "Kinefin could not verify that %1 is a Google Cast device, so nothing was "
@@ -320,7 +320,7 @@ msgstr ""
 "Kinefin could not verify that %1 is a Google Cast device, so nothing was "
 "sent to it: play on this computer or choose another device."
 
-#: src/player/PlayerController.cpp:2186
+#: src/player/PlayerController.cpp:2205
 msgctxt "@info %1 is a device name"
 msgid ""
 "%1 stopped responding: check that it is turned on and connected to this "
@@ -329,7 +329,7 @@ msgstr ""
 "%1 stopped responding: check that it is turned on and connected to this "
 "network."
 
-#: src/player/PlayerController.cpp:2191
+#: src/player/PlayerController.cpp:2210
 msgid ""
 "The server does not let other devices play its videos without a sign-in, so "
 "this video cannot be cast."
@@ -337,112 +337,108 @@ msgstr ""
 "The server does not let other devices play its videos without a sign-in, so "
 "this video cannot be cast."
 
-#: src/player/PlayerController.cpp:2295
+#: src/player/PlayerController.cpp:2314
 msgctxt "@item a chapter the server gives no name"
 msgid "Chapter %1"
 msgstr "Chapter %1"
 
-#: src/player/PlayerController.cpp:3138
+#: src/player/PlayerController.cpp:3158
 msgid "Audio track %1"
 msgstr "Audio track %1"
 
-#: src/player/PlayerController.cpp:3139
+#: src/player/PlayerController.cpp:3159
 msgid "Subtitle %1"
 msgstr "Subtitle %1"
 
-#: src/player/PlayerController.cpp:3499
-msgid "Could not save the screenshot."
-msgstr "Could not save the screenshot."
-
-#: src/player/PlayerController.cpp:3538
+#: src/player/PlayerController.cpp:3603
 msgid "Clips cannot be saved from HDR video"
 msgstr "Clips cannot be saved from HDR video"
 
-#: src/player/PlayerController.cpp:3540
+#: src/player/PlayerController.cpp:3605
 msgid "The start of the clip is no longer buffered"
 msgstr "The start of the clip is no longer buffered"
 
-#: src/player/PlayerController.cpp:3552 src/player/PlayerController.cpp:3573
+#: src/player/PlayerController.cpp:3617 src/player/PlayerController.cpp:3638
 msgid "Set a start and an end"
 msgstr "Set a start and an end"
 
-#: src/player/PlayerController.cpp:3557 src/player/PlayerController.cpp:3605
+#: src/player/PlayerController.cpp:3622 src/player/PlayerController.cpp:3670
 msgid "A GIF lasts at most 15 seconds"
 msgstr "A GIF lasts at most 15 seconds"
 
-#: src/player/PlayerController.cpp:3558 src/player/PlayerController.cpp:3603
+#: src/player/PlayerController.cpp:3623 src/player/PlayerController.cpp:3668
 msgid "A video clip lasts at most 60 seconds"
 msgstr "A video clip lasts at most 60 seconds"
 
-#: src/player/PlayerController.cpp:3564 src/player/PlayerController.cpp:3594
+#: src/player/PlayerController.cpp:3629 src/player/PlayerController.cpp:3659
 msgid "No usable video encoder"
 msgstr "No usable video encoder"
 
-#: src/player/PlayerController.cpp:3575
+#: src/player/PlayerController.cpp:3640
 msgid "End at %1; set a start"
 msgstr "End at %1; set a start"
 
-#: src/player/PlayerController.cpp:3577
+#: src/player/PlayerController.cpp:3642
 msgid "Start at %1; set an end"
 msgstr "Start at %1; set an end"
 
-#: src/player/PlayerController.cpp:3579
+#: src/player/PlayerController.cpp:3644
 msgid "The end of the clip is before its start"
 msgstr "The end of the clip is before its start"
 
-#: src/player/PlayerController.cpp:3580
+#: src/player/PlayerController.cpp:3645
 msgid "%1 to %2 (%3 s)"
 msgstr "%1 to %2 (%3 s)"
 
-#: src/player/PlayerController.cpp:3615
+#: src/player/PlayerController.cpp:3680
 msgid "Clip start at %1"
 msgstr "Clip start at %1"
 
-#: src/player/PlayerController.cpp:3625
+#: src/player/PlayerController.cpp:3690
 msgid "Clip end at %1"
 msgstr "Clip end at %1"
 
-#: src/player/PlayerController.cpp:3666
+#: src/player/PlayerController.cpp:3731
 msgid "Mark a start and an end to loop the part"
 msgstr "Mark a start and an end to loop the part"
 
-#: src/player/PlayerController.cpp:3673
+#: src/player/PlayerController.cpp:3738
 msgid "Looping the marked part"
 msgstr "Looping the marked part"
 
-#: src/player/PlayerController.cpp:3673
+#: src/player/PlayerController.cpp:3738
 msgid "Loop off"
 msgstr "Loop off"
 
-#: src/player/PlayerController.cpp:4085
+#: src/player/PlayerController.cpp:4150
 msgid "Skip Intro"
 msgstr "Skip Intro"
 
-#: src/player/PlayerController.cpp:4086
+#: src/player/PlayerController.cpp:4151
 msgid "Skip Recap"
 msgstr "Skip Recap"
 
-#: src/player/PlayerController.cpp:4087
+#: src/player/PlayerController.cpp:4152
 msgid "Skip Outro"
 msgstr "Skip Outro"
 
-#: src/player/PlayerController.cpp:4318
+#: src/player/PlayerController.cpp:4383
 msgid "Nothing is playing to add a subtitle to"
 msgstr "Nothing is playing to add a subtitle to"
 
-#: src/player/PlayerController.cpp:4320
+#: src/player/PlayerController.cpp:4385
 msgid "A subtitle cannot be added while casting"
 msgstr "A subtitle cannot be added while casting"
 
-#: src/player/PlayerController.cpp:4323
+#: src/player/PlayerController.cpp:4388
 msgid "Wait until the video has started to add a subtitle"
 msgstr "Wait until the video has started to add a subtitle"
 
-#: src/player/PlayerController.cpp:4325
+#: src/player/PlayerController.cpp:4390
 msgid "Only a subtitle file on this computer can be added"
 msgstr "Only a subtitle file on this computer can be added"
 
-#: src/player/PlayerController.cpp:4329
+#: src/player/PlayerController.cpp:4394
 msgid ""
 "The file cannot be opened from here. Choose it with Add Subtitle File in the "
 "Subtitles menu"
@@ -450,25 +446,25 @@ msgstr ""
 "The file cannot be opened from here. Choose it with Add Subtitle File in the "
 "Subtitles menu"
 
-#: src/player/PlayerController.cpp:4336 src/qml/EditSubtitlesDialog.qml:103
+#: src/player/PlayerController.cpp:4401 src/qml/EditSubtitlesDialog.qml:103
 msgid "The file is not an srt, ass, ssa, or vtt subtitle"
 msgstr "The file is not an srt, ass, ssa, or vtt subtitle"
 
-#: src/player/PlayerController.cpp:4338
+#: src/player/PlayerController.cpp:4403
 msgid "No more subtitle files can be added to this item"
 msgstr "No more subtitle files can be added to this item"
 
-#: src/player/PlayerController.cpp:4345
+#: src/player/PlayerController.cpp:4410
 msgid "The subtitle must be a readable file of at most 2 MiB"
 msgstr "The subtitle must be a readable file of at most 2 MiB"
 
-#: src/player/PlayerController.cpp:4348 src/player/PlayerController.cpp:4355
+#: src/player/PlayerController.cpp:4413 src/player/PlayerController.cpp:4420
 msgid ""
 "The subtitle could not be added. Check the free disk space and try again"
 msgstr ""
 "The subtitle could not be added. Check the free disk space and try again"
 
-#: src/player/PlayerController.cpp:4359
+#: src/player/PlayerController.cpp:4424
 msgid "The file could not be read as a subtitle"
 msgstr "The file could not be read as a subtitle"
 
@@ -536,8 +532,8 @@ msgstr "Play"
 
 #: src/integration/KRunnerProvider.cpp:177 src/qml/ItemDetailsPage.qml:147
 #: src/qml/DownloadsPage.qml:425 src/qml/MediaCard.qml:477
-#: src/qml/CardMenu.qml:78 src/qml/PlayerPage.qml:196
-#: src/qml/MiniPlayer.qml:233 src/qml/PictureInPictureWindow.qml:277
+#: src/qml/CardMenu.qml:78 src/qml/PlayerPage.qml:204
+#: src/qml/MiniPlayer.qml:235 src/qml/PictureInPictureWindow.qml:277
 msgid "Resume"
 msgstr "Resume"
 
@@ -678,7 +674,7 @@ msgstr "Device"
 msgid "Normalize"
 msgstr "Normalize"
 
-#: src/settings/SettingDefinitions.cpp:206 src/qml/PlayerPage.qml:1821
+#: src/settings/SettingDefinitions.cpp:206 src/qml/PlayerPage.qml:1856
 msgid "Night Mode"
 msgstr "Night Mode"
 
@@ -737,7 +733,7 @@ msgid "Deinterlace"
 msgstr "Deinterlace"
 
 #: src/settings/SettingDefinitions.cpp:292 src/qml/ItemDetailsPage.qml:527
-#: src/qml/PlayerPage.qml:2110
+#: src/qml/PlayerPage.qml:2145
 msgid "Off"
 msgstr "Off"
 
@@ -1314,13 +1310,13 @@ msgctxt "@action:button"
 msgid "Continue"
 msgstr "Continue"
 
-#: src/qml/ItemDetailsPage.qml:163 src/qml/PlayerPage.qml:989
+#: src/qml/ItemDetailsPage.qml:163 src/qml/PlayerPage.qml:997
 msgctxt "@action:button"
 msgid "Cast…"
 msgstr "Cast…"
 
 #: src/qml/ItemDetailsPage.qml:167 src/qml/CardMenu.qml:119
-#: src/qml/PlayerPage.qml:991
+#: src/qml/PlayerPage.qml:999
 msgctxt "@info:tooltip"
 msgid "Not available while following a SyncPlay group"
 msgstr "Not available while following a SyncPlay group"
@@ -2690,7 +2686,7 @@ msgstr ""
 msgid "Choose a Subtitle"
 msgstr "Choose a Subtitle"
 
-#: src/qml/EditSubtitlesDialog.qml:99 src/qml/PlayerPage.qml:152
+#: src/qml/EditSubtitlesDialog.qml:99 src/qml/PlayerPage.qml:160
 msgid "Subtitles (*.srt *.ass *.ssa *.vtt)"
 msgstr "Subtitles (*.srt *.ass *.ssa *.vtt)"
 
@@ -2957,7 +2953,7 @@ msgid "Play %1"
 msgstr "Play %1"
 
 #: src/qml/SyncPlayDialog.qml:319 src/qml/ItemListRow.qml:233
-#: src/qml/MediaCard.qml:549 src/qml/PlayerPage.qml:1580
+#: src/qml/MediaCard.qml:549 src/qml/PlayerPage.qml:1615
 msgid "More Actions"
 msgstr "More Actions"
 
@@ -3293,8 +3289,8 @@ msgstr "Delete this download? The file stays on the server"
 msgid "Export Download"
 msgstr "Export Download"
 
-#: src/qml/DownloadsPage.qml:426 src/qml/PlayerPage.qml:196
-#: src/qml/MiniPlayer.qml:233 src/qml/PictureInPictureWindow.qml:277
+#: src/qml/DownloadsPage.qml:426 src/qml/PlayerPage.qml:204
+#: src/qml/MiniPlayer.qml:235 src/qml/PictureInPictureWindow.qml:277
 msgid "Pause"
 msgstr "Pause"
 
@@ -3857,7 +3853,7 @@ msgctxt "@info accessible name of the list of filter categories"
 msgid "Filter categories"
 msgstr "Filter categories"
 
-#: src/qml/FilterDialog.qml:799 src/qml/PlayerPage.qml:937
+#: src/qml/FilterDialog.qml:799 src/qml/PlayerPage.qml:945
 #: src/qml/PageBackButton.qml:12 src/qml/ShellHeader.qml:94
 msgctxt "@action:button"
 msgid "Back"
@@ -4196,7 +4192,7 @@ msgstr "Quick Connect code %1"
 msgid "Waiting for approval…"
 msgstr "Waiting for approval…"
 
-#: src/qml/LoginPage.qml:354 src/qml/PlayerPage.qml:717
+#: src/qml/LoginPage.qml:354 src/qml/PlayerPage.qml:725
 #: src/qml/ServersPage.qml:285
 msgid "Cancel"
 msgstr "Cancel"
@@ -4245,7 +4241,7 @@ msgctxt "@info:tooltip"
 msgid "Asks for the password"
 msgstr "Asks for the password"
 
-#: src/qml/UserTile.qml:118 src/qml/PlayerPage.qml:1373
+#: src/qml/UserTile.qml:118 src/qml/PlayerPage.qml:1403
 msgctxt "@action:button"
 msgid "More Actions"
 msgstr "More Actions"
@@ -4490,8 +4486,8 @@ msgstr ""
 "Could not add this to the queue: check the connection to the server and try "
 "again"
 
-#: src/qml/PlayerPage.qml:21 src/qml/PlayerPage.qml:952
-#: src/qml/MiniPlayer.qml:245 src/qml/PictureInPictureWindow.qml:73
+#: src/qml/PlayerPage.qml:21 src/qml/PlayerPage.qml:960
+#: src/qml/MiniPlayer.qml:248 src/qml/PictureInPictureWindow.qml:73
 msgid "Now Playing"
 msgstr "Now Playing"
 
@@ -4505,259 +4501,267 @@ msgctxt "@info:status"
 msgid "Ends at %1"
 msgstr "Ends at %1"
 
-#: src/qml/PlayerPage.qml:140
+#: src/qml/PlayerPage.qml:123 src/qml/PlayerPage.qml:1465
+msgid "Could not save the screenshot"
+msgstr "Could not save the screenshot"
+
+#: src/qml/PlayerPage.qml:148
 msgctxt ""
 "@info seek bar bubble: the part of the item the server marks as its intro"
 msgid "Intro"
 msgstr "Intro"
 
-#: src/qml/PlayerPage.qml:141
+#: src/qml/PlayerPage.qml:149
 msgctxt ""
 "@info seek bar bubble: the part of the item the server marks as a recap"
 msgid "Recap"
 msgstr "Recap"
 
-#: src/qml/PlayerPage.qml:142
+#: src/qml/PlayerPage.qml:150
 msgctxt ""
 "@info seek bar bubble: the part of the item the server marks as its outro"
 msgid "Outro"
 msgstr "Outro"
 
-#: src/qml/PlayerPage.qml:151
+#: src/qml/PlayerPage.qml:159
 msgid "Add Subtitle File"
 msgstr "Add Subtitle File"
 
-#: src/qml/PlayerPage.qml:165
+#: src/qml/PlayerPage.qml:173
 msgid "Drop one subtitle file at a time"
 msgstr "Drop one subtitle file at a time"
 
-#: src/qml/PlayerPage.qml:198
+#: src/qml/PlayerPage.qml:206
 msgctxt "@action:button"
 msgid "Exit Full Screen Mode"
 msgstr "Exit Full Screen Mode"
 
-#: src/qml/PlayerPage.qml:198
+#: src/qml/PlayerPage.qml:206
 msgctxt "@action:button"
 msgid "Full Screen Mode"
 msgstr "Full Screen Mode"
 
-#: src/qml/PlayerPage.qml:208 src/qml/PlayerPage.qml:2053
+#: src/qml/PlayerPage.qml:216 src/qml/PlayerPage.qml:2088
 msgid "Audio delay: %1 s"
 msgstr "Audio delay: %1 s"
 
-#: src/qml/PlayerPage.qml:211 src/qml/PlayerPage.qml:2058
+#: src/qml/PlayerPage.qml:219 src/qml/PlayerPage.qml:2093
 msgid "Subtitle delay: %1 s"
 msgstr "Subtitle delay: %1 s"
 
-#: src/qml/PlayerPage.qml:439 src/qml/MiniPlayer.qml:143
+#: src/qml/PlayerPage.qml:447 src/qml/MiniPlayer.qml:145
 msgctxt "@info:status %1 is a device name"
 msgid "Opening on %1…"
 msgstr "Opening on %1…"
 
-#: src/qml/PlayerPage.qml:439 src/qml/MiniPlayer.qml:143
+#: src/qml/PlayerPage.qml:447 src/qml/MiniPlayer.qml:145
 msgctxt "@info:status %1 is a device name"
 msgid "Playing on %1"
 msgstr "Playing on %1"
 
-#: src/qml/PlayerPage.qml:446
+#: src/qml/PlayerPage.qml:454
 msgctxt "@action:button"
 msgid "Stop Casting"
 msgstr "Stop Casting"
 
-#: src/qml/PlayerPage.qml:536
+#: src/qml/PlayerPage.qml:544
 msgid "Waiting for the others…"
 msgstr "Waiting for the others…"
 
-#: src/qml/PlayerPage.qml:571 src/qml/PlayerPage.qml:1319
+#: src/qml/PlayerPage.qml:579 src/qml/PlayerPage.qml:1349
 #, javascript-format
 msgctxt "@info volume level"
 msgid "Volume %1%"
 msgstr "Volume %1%"
 
-#: src/qml/PlayerPage.qml:591
+#: src/qml/PlayerPage.qml:599
 msgctxt "@info %1 is a user name"
 msgid "%1 joined the SyncPlay group"
 msgstr "%1 joined the SyncPlay group"
 
-#: src/qml/PlayerPage.qml:591 src/qml/ShellHeader.qml:655
+#: src/qml/PlayerPage.qml:599 src/qml/ShellHeader.qml:655
 msgid "Someone joined the SyncPlay group"
 msgstr "Someone joined the SyncPlay group"
 
-#: src/qml/PlayerPage.qml:595
+#: src/qml/PlayerPage.qml:603
 msgctxt "@info %1 is a user name"
 msgid "%1 left the SyncPlay group"
 msgstr "%1 left the SyncPlay group"
 
-#: src/qml/PlayerPage.qml:595 src/qml/ShellHeader.qml:659
+#: src/qml/PlayerPage.qml:603 src/qml/ShellHeader.qml:659
 msgid "Someone left the SyncPlay group"
 msgstr "Someone left the SyncPlay group"
 
-#: src/qml/PlayerPage.qml:615
+#: src/qml/PlayerPage.qml:623
 msgid "Opening video…"
 msgstr "Opening video…"
 
-#: src/qml/PlayerPage.qml:626
+#: src/qml/PlayerPage.qml:634
 msgctxt "@action:button"
 msgid "Try Again"
 msgstr "Try Again"
 
-#: src/qml/PlayerPage.qml:635
+#: src/qml/PlayerPage.qml:643
 msgctxt "@action:button"
 msgid "Continue Here"
 msgstr "Continue Here"
 
-#: src/qml/PlayerPage.qml:642
+#: src/qml/PlayerPage.qml:650
 msgid "Close Player"
 msgstr "Close Player"
 
-#: src/qml/PlayerPage.qml:691
+#: src/qml/PlayerPage.qml:699
 msgctxt "@info accessible name of the card"
 msgid "Saving the clip"
 msgstr "Saving the clip"
 
-#: src/qml/PlayerPage.qml:703
+#: src/qml/PlayerPage.qml:711
 #, javascript-format
 msgid "Saving the GIF: %1%"
 msgstr "Saving the GIF: %1%"
 
-#: src/qml/PlayerPage.qml:704
+#: src/qml/PlayerPage.qml:712
 #, javascript-format
 msgid "Saving the clip: %1%"
 msgstr "Saving the clip: %1%"
 
-#: src/qml/PlayerPage.qml:757
+#: src/qml/PlayerPage.qml:765
 msgctxt "@info accessible name of the card"
 msgid "Up Next"
 msgstr "Up Next"
 
-#: src/qml/PlayerPage.qml:782
+#: src/qml/PlayerPage.qml:790
 msgctxt "@title the card of the next item"
 msgid "Up Next"
 msgstr "Up Next"
 
-#: src/qml/PlayerPage.qml:807
+#: src/qml/PlayerPage.qml:815
 msgid "Starts in %1 second"
 msgid_plural "Starts in %1 seconds"
 msgstr[0] "Starts in %1 second"
 msgstr[1] "Starts in %1 seconds"
 
-#: src/qml/PlayerPage.qml:818
+#: src/qml/PlayerPage.qml:826
 msgctxt "@action:button starts the next item at once"
 msgid "Play Now"
 msgstr "Play Now"
 
-#: src/qml/PlayerPage.qml:819
+#: src/qml/PlayerPage.qml:827
 msgctxt "@action:button accessible name"
 msgid "Play the Next Item Now"
 msgstr "Play the Next Item Now"
 
-#: src/qml/PlayerPage.qml:827
+#: src/qml/PlayerPage.qml:835
 msgctxt "@action:button the next item does not start"
 msgid "Cancel"
 msgstr "Cancel"
 
-#: src/qml/PlayerPage.qml:828
+#: src/qml/PlayerPage.qml:836
 msgctxt "@action:button accessible name"
 msgid "Cancel Up Next"
 msgstr "Cancel Up Next"
 
-#: src/qml/PlayerPage.qml:977
+#: src/qml/PlayerPage.qml:985
 msgctxt "@action:button"
 msgid "Show SyncPlay Group"
 msgstr "Show SyncPlay Group"
 
-#: src/qml/PlayerPage.qml:999
+#: src/qml/PlayerPage.qml:1007
 msgctxt "@action:button"
 msgid "Picture-in-Picture"
 msgstr "Picture-in-Picture"
 
-#: src/qml/PlayerPage.qml:1002
+#: src/qml/PlayerPage.qml:1010
 msgctxt "@info:tooltip"
 msgid "Not available while casting"
 msgstr "Not available while casting"
 
-#: src/qml/PlayerPage.qml:1089 src/qml/MiniPlayer.qml:263
-#: src/qml/PictureInPictureWindow.qml:330
+#: src/qml/PlayerPage.qml:1119 src/qml/MiniPlayer.qml:266
+#: src/qml/PictureInPictureWindow.qml:352
 msgid "Playback position"
 msgstr "Playback position"
 
-#: src/qml/PlayerPage.qml:1270
+#: src/qml/PlayerPage.qml:1300
 msgctxt "@action:button accessible name"
 msgid "Remaining time %1"
 msgstr "Remaining time %1"
 
-#: src/qml/PlayerPage.qml:1270
+#: src/qml/PlayerPage.qml:1300
 msgctxt "@action:button accessible name"
 msgid "Total time %1"
 msgstr "Total time %1"
 
-#: src/qml/PlayerPage.qml:1272
+#: src/qml/PlayerPage.qml:1302
 msgctxt "@info:tooltip"
 msgid "Show total time"
 msgstr "Show total time"
 
-#: src/qml/PlayerPage.qml:1272
+#: src/qml/PlayerPage.qml:1302
 msgctxt "@info:tooltip"
 msgid "Show remaining time"
 msgstr "Show remaining time"
 
-#: src/qml/PlayerPage.qml:1293 src/qml/PlayerPage.qml:1538
+#: src/qml/PlayerPage.qml:1323 src/qml/PlayerPage.qml:1573
 msgid "Previous"
 msgstr "Previous"
 
-#: src/qml/PlayerPage.qml:1308 src/qml/PlayerPage.qml:1545
+#: src/qml/PlayerPage.qml:1338 src/qml/PlayerPage.qml:1580
 msgid "Next"
 msgstr "Next"
 
-#: src/qml/PlayerPage.qml:1318 src/qml/PictureInPictureWindow.qml:288
+#: src/qml/PlayerPage.qml:1348 src/qml/PictureInPictureWindow.qml:288
 msgid "Unmute"
 msgstr "Unmute"
 
-#: src/qml/PlayerPage.qml:1318 src/qml/PictureInPictureWindow.qml:288
+#: src/qml/PlayerPage.qml:1348 src/qml/PictureInPictureWindow.qml:288
 msgid "Mute"
 msgstr "Mute"
 
-#: src/qml/PlayerPage.qml:1350 src/qml/PlayerPage.qml:1553
+#: src/qml/PlayerPage.qml:1380 src/qml/PlayerPage.qml:1588
 msgctxt "@action:button audio tracks"
 msgid "Audio"
 msgstr "Audio"
 
-#: src/qml/PlayerPage.qml:1359 src/qml/PlayerPage.qml:1560
+#: src/qml/PlayerPage.qml:1389 src/qml/PlayerPage.qml:1595
 msgctxt "@action:button subtitle tracks"
 msgid "Subtitles"
 msgstr "Subtitles"
 
-#: src/qml/PlayerPage.qml:1382
-msgid "Screenshot saved to %1"
-msgstr "Screenshot saved to %1"
-
-#: src/qml/PlayerPage.qml:1429
+#: src/qml/PlayerPage.qml:1451
 msgid "Save GIF"
 msgstr "Save GIF"
 
-#: src/qml/PlayerPage.qml:1429
+#: src/qml/PlayerPage.qml:1451
 msgid "Save Video Clip"
 msgstr "Save Video Clip"
 
-#: src/qml/PlayerPage.qml:1430
+#: src/qml/PlayerPage.qml:1452
 msgid "GIF images (*.gif)"
 msgstr "GIF images (*.gif)"
 
-#: src/qml/PlayerPage.qml:1430
+#: src/qml/PlayerPage.qml:1452
 msgid "Video clips (*.mp4 *.webm)"
 msgstr "Video clips (*.mp4 *.webm)"
 
-#: src/qml/PlayerPage.qml:1440
+#: src/qml/PlayerPage.qml:1461
+msgid "Save Screenshot"
+msgstr "Save Screenshot"
+
+#: src/qml/PlayerPage.qml:1462
+msgid "PNG images (*.png)"
+msgstr "PNG images (*.png)"
+
+#: src/qml/PlayerPage.qml:1475
 msgid "Subtitle downloaded"
 msgstr "Subtitle downloaded"
 
-#: src/qml/PlayerPage.qml:1443
+#: src/qml/PlayerPage.qml:1478
 msgid ""
 "The subtitle could not be downloaded: check the connection and try again"
 msgstr ""
 "The subtitle could not be downloaded: check the connection and try again"
 
-#: src/qml/PlayerPage.qml:1446
+#: src/qml/PlayerPage.qml:1481
 msgid ""
 "The server could not save the subtitle: its administrator can check where "
 "the library stores subtitles"
@@ -4765,297 +4769,297 @@ msgstr ""
 "The server could not save the subtitle: its administrator can check where "
 "the library stores subtitles"
 
-#: src/qml/PlayerPage.qml:1449
+#: src/qml/PlayerPage.qml:1484
 msgid "Night mode is on: passthrough is off until it is turned off"
 msgstr "Night mode is on: passthrough is off until it is turned off"
 
-#: src/qml/PlayerPage.qml:1468 src/qml/PlayerPage.qml:1573
+#: src/qml/PlayerPage.qml:1503 src/qml/PlayerPage.qml:1608
 msgctxt "@action:button"
 msgid "Show Mini Player"
 msgstr "Show Mini Player"
 
-#: src/qml/PlayerPage.qml:1495
+#: src/qml/PlayerPage.qml:1530
 msgctxt "@action:inmenu"
 msgid "Try Again"
 msgstr "Try Again"
 
-#: src/qml/PlayerPage.qml:1503
+#: src/qml/PlayerPage.qml:1538
 msgctxt "@action:inmenu"
 msgid "Close Player"
 msgstr "Close Player"
 
-#: src/qml/PlayerPage.qml:1511
+#: src/qml/PlayerPage.qml:1546
 msgctxt "@action:inmenu"
 msgid "Cancel Saving the GIF"
 msgstr "Cancel Saving the GIF"
 
-#: src/qml/PlayerPage.qml:1511
+#: src/qml/PlayerPage.qml:1546
 msgctxt "@action:inmenu"
 msgid "Cancel Saving the Clip"
 msgstr "Cancel Saving the Clip"
 
-#: src/qml/PlayerPage.qml:1519
+#: src/qml/PlayerPage.qml:1554
 msgctxt "@action:inmenu"
 msgid "Show SyncPlay Group"
 msgstr "Show SyncPlay Group"
 
-#: src/qml/PlayerPage.qml:1625 src/qml/PlayerPage.qml:1632
+#: src/qml/PlayerPage.qml:1660 src/qml/PlayerPage.qml:1667
 #, javascript-format
 msgctxt "@label volume level"
 msgid "%1%"
 msgstr "%1%"
 
-#: src/qml/PlayerPage.qml:1649
+#: src/qml/PlayerPage.qml:1684
 msgid "Volume"
 msgstr "Volume"
 
-#: src/qml/PlayerPage.qml:1690 src/qml/PlayerPage.qml:2154
+#: src/qml/PlayerPage.qml:1725 src/qml/PlayerPage.qml:2189
 msgid "Now Playing Queue"
 msgstr "Now Playing Queue"
 
-#: src/qml/PlayerPage.qml:1833
+#: src/qml/PlayerPage.qml:1868
 msgctxt "@item:inmenu no subtitles"
 msgid "Off"
 msgstr "Off"
 
-#: src/qml/PlayerPage.qml:1855
+#: src/qml/PlayerPage.qml:1890
 msgid "Secondary Subtitles"
 msgstr "Secondary Subtitles"
 
-#: src/qml/PlayerPage.qml:1859
+#: src/qml/PlayerPage.qml:1894
 msgctxt "@item:inmenu no second subtitle"
 msgid "Off"
 msgstr "Off"
 
-#: src/qml/PlayerPage.qml:1883
+#: src/qml/PlayerPage.qml:1918
 msgid "Add Subtitle File…"
 msgstr "Add Subtitle File…"
 
-#: src/qml/PlayerPage.qml:1890
+#: src/qml/PlayerPage.qml:1925
 msgid "Search Online Subtitles…"
 msgstr "Search Online Subtitles…"
 
-#: src/qml/PlayerPage.qml:1897
+#: src/qml/PlayerPage.qml:1932
 msgid "Download External Subtitles"
 msgstr "Download External Subtitles"
 
-#: src/qml/PlayerPage.qml:1928
+#: src/qml/PlayerPage.qml:1963
 msgid "Shuffle"
 msgstr "Shuffle"
 
-#: src/qml/PlayerPage.qml:1938
+#: src/qml/PlayerPage.qml:1973
 msgid "Repeat"
 msgstr "Repeat"
 
-#: src/qml/PlayerPage.qml:1942
+#: src/qml/PlayerPage.qml:1977
 msgctxt "@item:inmenu repeat"
 msgid "Off"
 msgstr "Off"
 
-#: src/qml/PlayerPage.qml:1950
+#: src/qml/PlayerPage.qml:1985
 msgctxt "@item:inmenu repeat"
 msgid "All"
 msgstr "All"
 
-#: src/qml/PlayerPage.qml:1960
+#: src/qml/PlayerPage.qml:1995
 msgctxt "@item:inmenu repeat"
 msgid "Current Item"
 msgstr "Current Item"
 
-#: src/qml/PlayerPage.qml:1972
+#: src/qml/PlayerPage.qml:2007
 msgid "Playback Speed"
 msgstr "Playback Speed"
 
-#: src/qml/PlayerPage.qml:1981
+#: src/qml/PlayerPage.qml:2016
 msgctxt "@item:inmenu playback speed, %1 is the factor"
 msgid "%1×"
 msgstr "%1×"
 
-#: src/qml/PlayerPage.qml:1995
+#: src/qml/PlayerPage.qml:2030
 msgctxt "@title:menu"
 msgid "Aspect Ratio"
 msgstr "Aspect Ratio"
 
-#: src/qml/PlayerPage.qml:1998
+#: src/qml/PlayerPage.qml:2033
 msgctxt "@item:inmenu aspect ratio"
 msgid "Auto"
 msgstr "Auto"
 
-#: src/qml/PlayerPage.qml:1999
+#: src/qml/PlayerPage.qml:2034
 msgctxt "@item:inmenu aspect ratio"
 msgid "Zoom"
 msgstr "Zoom"
 
-#: src/qml/PlayerPage.qml:2000
+#: src/qml/PlayerPage.qml:2035
 msgctxt "@item:inmenu aspect ratio"
 msgid "Stretch"
 msgstr "Stretch"
 
-#: src/qml/PlayerPage.qml:2001
+#: src/qml/PlayerPage.qml:2036
 msgctxt "@item:inmenu aspect ratio"
 msgid "4:3"
 msgstr "4:3"
 
-#: src/qml/PlayerPage.qml:2002
+#: src/qml/PlayerPage.qml:2037
 msgctxt "@item:inmenu aspect ratio"
 msgid "16:9"
 msgstr "16:9"
 
-#: src/qml/PlayerPage.qml:2003
+#: src/qml/PlayerPage.qml:2038
 msgctxt "@item:inmenu aspect ratio"
 msgid "Widescreen for 4:3 Video"
 msgstr "Widescreen for 4:3 Video"
 
-#: src/qml/PlayerPage.qml:2004
+#: src/qml/PlayerPage.qml:2039
 msgctxt "@item:inmenu aspect ratio"
 msgid "Original Size"
 msgstr "Original Size"
 
-#: src/qml/PlayerPage.qml:2010
+#: src/qml/PlayerPage.qml:2045
 msgid "Quality"
 msgstr "Quality"
 
-#: src/qml/PlayerPage.qml:2030
+#: src/qml/PlayerPage.qml:2065
 msgctxt "@title:menu"
 msgid "Chapters"
 msgstr "Chapters"
 
-#: src/qml/PlayerPage.qml:2039
+#: src/qml/PlayerPage.qml:2074
 msgctxt "@item:inmenu chapter, %1 is its start time and %2 its name"
 msgid "%1 — %2"
 msgstr "%1 — %2"
 
-#: src/qml/PlayerPage.qml:2050
+#: src/qml/PlayerPage.qml:2085
 msgid "AV Sync"
 msgstr "AV Sync"
 
-#: src/qml/PlayerPage.qml:2054
+#: src/qml/PlayerPage.qml:2089
 msgid "Audio earlier (−0.1 s)"
 msgstr "Audio earlier (−0.1 s)"
 
-#: src/qml/PlayerPage.qml:2055
+#: src/qml/PlayerPage.qml:2090
 msgid "Audio later (+0.1 s)"
 msgstr "Audio later (+0.1 s)"
 
-#: src/qml/PlayerPage.qml:2056
+#: src/qml/PlayerPage.qml:2091
 msgid "Reset the Audio Delay"
 msgstr "Reset the Audio Delay"
 
-#: src/qml/PlayerPage.qml:2059
+#: src/qml/PlayerPage.qml:2094
 msgid "Subtitles earlier (−0.1 s)"
 msgstr "Subtitles earlier (−0.1 s)"
 
-#: src/qml/PlayerPage.qml:2060
+#: src/qml/PlayerPage.qml:2095
 msgid "Subtitles later (+0.1 s)"
 msgstr "Subtitles later (+0.1 s)"
 
-#: src/qml/PlayerPage.qml:2061
+#: src/qml/PlayerPage.qml:2096
 msgid "Reset the Subtitle Delay"
 msgstr "Reset the Subtitle Delay"
 
-#: src/qml/PlayerPage.qml:2067
+#: src/qml/PlayerPage.qml:2102
 msgctxt "@title:menu"
 msgid "Video Enhancement"
 msgstr "Video Enhancement"
 
-#: src/qml/PlayerPage.qml:2073
+#: src/qml/PlayerPage.qml:2108
 msgctxt "@action:inmenu"
 msgid "Deband"
 msgstr "Deband"
 
-#: src/qml/PlayerPage.qml:2081
+#: src/qml/PlayerPage.qml:2116
 msgctxt "@info:status in a menu"
 msgid "No shader files in the profile’s shaders folder"
 msgstr "No shader files in the profile’s shaders folder"
 
-#: src/qml/PlayerPage.qml:2104
+#: src/qml/PlayerPage.qml:2139
 msgid "Sleep: End of Current Item"
 msgstr "Sleep: End of Current Item"
 
-#: src/qml/PlayerPage.qml:2105
+#: src/qml/PlayerPage.qml:2140
 msgid "Sleep: End of Queue"
 msgstr "Sleep: End of Queue"
 
-#: src/qml/PlayerPage.qml:2106
+#: src/qml/PlayerPage.qml:2141
 msgid "Sleep: %1 min"
 msgstr "Sleep: %1 min"
 
-#: src/qml/PlayerPage.qml:2107
+#: src/qml/PlayerPage.qml:2142
 msgid "Sleep Timer"
 msgstr "Sleep Timer"
 
-#: src/qml/PlayerPage.qml:2117
+#: src/qml/PlayerPage.qml:2152
 msgid "End of Current Item"
 msgstr "End of Current Item"
 
-#: src/qml/PlayerPage.qml:2124
+#: src/qml/PlayerPage.qml:2159
 msgid "End of Queue"
 msgstr "End of Queue"
 
-#: src/qml/PlayerPage.qml:2135
+#: src/qml/PlayerPage.qml:2170
 msgid "%1 minute"
 msgid_plural "%1 minutes"
 msgstr[0] "%1 minute"
 msgstr[1] "%1 minutes"
 
-#: src/qml/PlayerPage.qml:2146
+#: src/qml/PlayerPage.qml:2181
 msgctxt "@action:inmenu"
 msgid "Forget Series Choices"
 msgstr "Forget Series Choices"
 
-#: src/qml/PlayerPage.qml:2160
+#: src/qml/PlayerPage.qml:2195
 msgid "Screenshot"
 msgstr "Screenshot"
 
-#: src/qml/PlayerPage.qml:2173
+#: src/qml/PlayerPage.qml:2207
 msgid "Clip"
 msgstr "Clip"
 
-#: src/qml/PlayerPage.qml:2178
+#: src/qml/PlayerPage.qml:2212
 msgid "Set Start"
 msgstr "Set Start"
 
-#: src/qml/PlayerPage.qml:2184
+#: src/qml/PlayerPage.qml:2218
 msgid "Set End"
 msgstr "Set End"
 
-#: src/qml/PlayerPage.qml:2190
+#: src/qml/PlayerPage.qml:2224
 msgid "Loop the Marked Part"
 msgstr "Loop the Marked Part"
 
-#: src/qml/PlayerPage.qml:2218
+#: src/qml/PlayerPage.qml:2252
 msgid "Save Video Clip…"
 msgstr "Save Video Clip…"
 
-#: src/qml/PlayerPage.qml:2227
+#: src/qml/PlayerPage.qml:2261
 msgid "Save GIF…"
 msgstr "Save GIF…"
 
-#: src/qml/PlayerPage.qml:2237
+#: src/qml/PlayerPage.qml:2271
 msgid "Clear Clip"
 msgstr "Clear Clip"
 
-#: src/qml/PlayerPage.qml:2244
+#: src/qml/PlayerPage.qml:2278
 msgctxt "@action:inmenu"
 msgid "Playback Info"
 msgstr "Playback Info"
 
-#: src/qml/PlayerPage.qml:2255
+#: src/qml/PlayerPage.qml:2289
 msgctxt "@action:inmenu"
 msgid "Keep Controls Visible"
 msgstr "Keep Controls Visible"
 
-#: src/qml/MiniPlayer.qml:43
+#: src/qml/MiniPlayer.qml:45
 msgctxt "@info accessible name of the docked player"
 msgid "Mini Player"
 msgstr "Mini Player"
 
-#: src/qml/MiniPlayer.qml:192
+#: src/qml/MiniPlayer.qml:194
 msgctxt "@action:button"
 msgid "Expand Player"
 msgstr "Expand Player"
 
-#: src/qml/MiniPlayer.qml:205
+#: src/qml/MiniPlayer.qml:207
 msgctxt "@action:button stops playback and closes the mini player"
 msgid "Close Mini Player"
 msgstr "Close Mini Player"
@@ -5072,12 +5076,12 @@ msgctxt ""
 msgid "Stop Playback and Close"
 msgstr "Stop Playback and Close"
 
-#: src/qml/PictureInPictureWindow.qml:346
+#: src/qml/PictureInPictureWindow.qml:368
 msgctxt "@info:status elapsed and total time of the video"
 msgid "%1 / %2"
 msgstr "%1 / %2"
 
-#: src/qml/PictureInPictureWindow.qml:349
+#: src/qml/PictureInPictureWindow.qml:371
 msgctxt "@info accessible name of the elapsed and total time"
 msgid "%1 of %2"
 msgstr "%1 of %2"
