@@ -34,11 +34,13 @@ filesystems=xdg-config/kdeglobals:ro;
 [Session Bus Policy]
 org.mpris.MediaPlayer2.Kinefin.*=own
 org.freedesktop.ScreenSaver=talk
-org.kde.kwalletd6=talk
 org.freedesktop.portal.Desktop=talk
 com.canonical.AppMenu.Registrar=talk
 org.kde.KGlobalSettings=talk
 org.kde.kconfig.notify=talk
+
+[Environment]
+QTKEYCHAIN_BACKEND=libsecret
 """
 
 
@@ -191,8 +193,9 @@ class FlatpakSandboxPermissionsTest(unittest.TestCase):
     def test_installed_bus_policy_expansion_or_missing_grant_fails(self) -> None:
         original = self.metadata.read_text(encoding="utf-8")
         for old, new, error in (
-            ("org.kde.kwalletd6=talk", "org.kde.kwalletd6=own", "[Session Bus Policy]"),
-            ("org.kde.kwalletd6=talk", "", "[Session Bus Policy]"),
+            ("org.freedesktop.portal.Desktop=talk", "org.freedesktop.portal.Desktop=own", "[Session Bus Policy]"),
+            ("org.freedesktop.portal.Desktop=talk", "", "[Session Bus Policy]"),
+            ("org.freedesktop.ScreenSaver=talk", "org.freedesktop.ScreenSaver=talk\norg.kde.kwalletd6=talk", "[Session Bus Policy]"),
             ("[Session Bus Policy]\n", "[System Bus Policy]\norg.freedesktop.NetworkManager=talk\n\n[Session Bus Policy]\n", "[System Bus Policy]"),
             ("[Session Bus Policy]\n", "[System Bus Policy]\norg.freedesktop.*=talk\n\n[Session Bus Policy]\n", "[System Bus Policy]"),
         ):
@@ -200,16 +203,47 @@ class FlatpakSandboxPermissionsTest(unittest.TestCase):
                 self.metadata.write_text(original.replace(old, new), encoding="utf-8")
                 self.reject(error, with_metadata=True)
 
+    def test_kwallet_talk_name_is_rejected(self) -> None:
+        self.replace("  - --share=network", "  - --share=network\n  - --talk-name=org.kde.kwalletd6")
+        self.reject("unapproved finish-args")
+        self.assertNotIn("kwalletd6", (SOURCE / MANIFEST).read_text(encoding="utf-8"))
+        self.metadata.write_text(INSTALLED.replace("org.freedesktop.ScreenSaver=talk\n", "org.freedesktop.ScreenSaver=talk\norg.kde.kwalletd6=talk\n"), encoding="utf-8")
+        with self.assertRaises(SandboxError) as raised:
+            check_metadata(self.metadata.read_text(encoding="utf-8"))
+        self.assertIn("[Session Bus Policy]", str(raised.exception))
+
+    def test_keychain_backend_pin_is_required_and_exact(self) -> None:
+        pin = "  - --env=QTKEYCHAIN_BACKEND=libsecret\n"
+        original = self.manifest.read_text(encoding="utf-8")
+        self.assertIn(pin, original)
+        for new in ("", "  - --env=QTKEYCHAIN_BACKEND=kwallet6\n", "  - --env=QTKEYCHAIN_BACKEND=libsecret\n  - --env=LD_PRELOAD=payload.so\n",
+                    "  - --env=QTKEYCHAIN_BACKEND=libsecret\n  - --env=SECRET_TEST=1\n"):
+            with self.subTest(new=new):
+                self.manifest.write_text(original.replace(pin, new, 1), encoding="utf-8")
+                self.reject("unapproved finish-args")
+        self.manifest.write_text(original, encoding="utf-8")
+        for old, new in (
+            ("QTKEYCHAIN_BACKEND=libsecret\n", "QTKEYCHAIN_BACKEND=kwallet6\n"),
+            ("QTKEYCHAIN_BACKEND=libsecret\n", "QTKEYCHAIN_BACKEND=libsecret\nSECRET_TEST=1\n"),
+            ("QTKEYCHAIN_BACKEND=libsecret\n", "QTKEYCHAIN_BACKEND=libsecret\nLD_PRELOAD=/app/payload.so\n"),
+            ("QTKEYCHAIN_BACKEND=libsecret\n", ""),
+            ("\n[Environment]\nQTKEYCHAIN_BACKEND=libsecret\n", ""),
+        ):
+            with self.subTest(old=old, new=new):
+                self.metadata.write_text(INSTALLED.replace(old, new, 1), encoding="utf-8")
+                self.reject("installed [Environment]", with_metadata=True)
+
     def test_installed_unreviewed_environment_and_usb_permissions_rejected(self) -> None:
         original = self.metadata.read_text(encoding="utf-8")
         for block, error in (
-            ("[Environment]\nLD_PRELOAD=/app/payload.so", "[Environment]"),
             ("[USB Devices]\nenumerable-devices=all", "[USB Devices]"),
             ("[A11y Bus Policy]\norg.example.Other=own", "[A11y Bus Policy]"),
         ):
             with self.subTest(block=block):
                 self.metadata.write_text(original + "\n" + block + "\n", encoding="utf-8")
                 self.reject(error, with_metadata=True)
+        self.metadata.write_text(original.replace("[Environment]\n", "[Environment]\nLD_PRELOAD=/app/payload.so\n"), encoding="utf-8")
+        self.reject("[Environment]", with_metadata=True)
 
     def test_corrupted_or_duplicated_installed_metadata_rejected(self) -> None:
         original = self.metadata.read_text(encoding="utf-8")

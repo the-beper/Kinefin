@@ -17,9 +17,9 @@ finish-args:
   - --own-name=org.mpris.MediaPlayer2.Kinefin.*
   # Inhibit the screensaver while playing, and release it otherwise (org.freedesktop.ScreenSaver).
   - --talk-name=org.freedesktop.ScreenSaver
-  # The access tokens live in the user's KWallet (KWalletTokenStore): the daemon is the only way to them from the sandbox, and there is no plaintext fallback.
-  - --talk-name=org.kde.kwalletd6
-  # Portals: the browser links (server web UI, externallinks) and the folder picker of the download export (a per-folder Document-portal grant, never a --filesystem=home).
+  # The access tokens live in libsecret's encrypted keyring inside the sandbox (KeychainTokenStore through QtKeychain); pinned so that no auto-detection can ever pick another backend, KWallet included, and there is no plaintext fallback
+  - --env=QTKEYCHAIN_BACKEND=libsecret
+  # Portals: the browser links (server web UI, externallinks), the folder picker of the download export (a per-folder Document-portal grant, never a --filesystem=home) and the Secret portal that hands libsecret the key of that keyring
   - --talk-name=org.freedesktop.portal.Desktop
   # Cast out finds DLNA renderers with SSDP and Google Cast devices with mDNS: both are multicast UDP on --share=network, so there is no Avahi bus name here
 # xdg-download is not needed: downloads live inside the sandbox and reach a host folder only through a portal grant
@@ -172,6 +172,18 @@ modules:
       - type: archive
         url: https://download.kde.org/stable/kirigami-addons/kirigami-addons-1.13.1.tar.xz
         sha256: 76026f0abe8c948208ce75a02a9ecac60c618ac5288ca546e09da64bc4af7050
+
+  # The token store's library: org.kde.Platform does not ship QtKeychain. Qt 6 is the default of 0.18 (BUILD_WITH_QT5 is off), and the libsecret backend comes from the runtime's libsecret
+  - name: qtkeychain
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DBUILD_TRANSLATIONS=NO
+      - -DBUILD_TEST_APPLICATION=OFF
+    sources:
+      - type: archive
+        url: https://github.com/frankosterfeld/qtkeychain/archive/0.18.0.tar.gz
+        sha256: 837af59f2b950760a73eff81ccae817f7d3051183b447438dc610bb984a41691
 
   - name: kinefin
     buildsystem: cmake-ninja

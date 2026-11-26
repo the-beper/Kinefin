@@ -18,7 +18,7 @@
 #include "player/MpvConfValidator.h"
 #include "player/PlayerController.h"
 #include "settings/ClientSettings.h"
-#include "settings/KWalletTokenStore.h"
+#include "settings/KeychainTokenStore.h"
 #include "settings/ProfileIdentity.h"
 #include "settings/ProfileIndex.h"
 #include "settings/ProfilePaths.h"
@@ -83,7 +83,7 @@ void applyInterfaceScale(int argc, char **argv)
 }
 
 #ifdef KINEFIN_DEV_AUTOLOGIN
-// Tokens stay in memory in a dev run of build/dev-run.sh, so its throw-away profile never asks a wallet to open
+// Tokens stay in memory in a dev run of build/dev-run.sh, so its throw-away profile never asks a keyring to open
 class DevTokenStore final : public Kinefin::TokenStore {
   public:
     void read(const QString &key, ReadDone done) override
@@ -245,7 +245,7 @@ int main(int argc, char *argv[])
     {
         QTextStream out(stdout);
         QTextStream err(stderr);
-        Kinefin::KWalletTokenStore store;
+        Kinefin::KeychainTokenStore store;
         if (const auto exitCode = Kinefin::runProfileCommand(parser, store, out, err))
             return *exitCode;
     }

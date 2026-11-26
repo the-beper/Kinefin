@@ -59,7 +59,7 @@ class FlatpakSourcesTest(unittest.TestCase):
         original = self.manifest.read_bytes()
         result = self.run_verify()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("10 immutable or approved local sources", result.stdout)
+        self.assertIn("11 immutable or approved local sources", result.stdout)
         self.assertEqual(self.manifest.read_bytes(), original)
 
     def test_real_flathub_generator_output_accepted_with_matching_tag_and_commit(self) -> None:
@@ -69,7 +69,7 @@ class FlatpakSourcesTest(unittest.TestCase):
             "--flathub-commit", COMMIT,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("10 immutable", result.stdout)
+        self.assertIn("11 immutable", result.stdout)
 
     def test_flathub_fails_without_both_release_identifiers(self) -> None:
         generated = self.generated()

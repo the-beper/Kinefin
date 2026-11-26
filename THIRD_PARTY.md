@@ -16,9 +16,10 @@ The Flatpak runs on `org.kde.Platform` 6.11 from Flathub. These libraries come w
 | Component | Used for | License |
 | --- | --- | --- |
 | [Qt 6](https://www.qt.io) (Core, Gui, Widgets, Quick, Qml, Quick Controls 2, D-Bus, Network) | The application framework | LGPL-3.0-only |
-| [KDE Frameworks 6](https://develop.kde.org/products/frameworks/) (Kirigami, KConfig, KCoreAddons, KI18n, KDBusAddons, KWallet, KWindowSystem) | The interface, settings, translations, single instance, the token store, the shadow of the picture-in-picture window | LGPL, per file |
+| [KDE Frameworks 6](https://develop.kde.org/products/frameworks/) (Kirigami, KConfig, KCoreAddons, KI18n, KDBusAddons, KWindowSystem) | The interface, settings, translations, single instance, the shadow of the picture-in-picture window | LGPL, per file |
 | [OpenSSL 3](https://www.openssl.org) | TLS (as Qt Network's backend), and the signature and chain checks of Google Cast device authentication | Apache-2.0 |
 | [SDL 3](https://www.libsdl.org) | Gamepad input | Zlib |
+| [libsecret](https://gitlab.gnome.org/GNOME/libsecret) | The Secret portal client under QtKeychain | LGPL-2.1-or-later |
 
 FFmpeg and the other system libraries that mpv and Qt load also come from the runtime.
 
@@ -34,6 +35,7 @@ The manifest, `build/flatpak/io.github.the_beper.Kinefin.yml`, builds these from
 | [uchardet](https://www.freedesktop.org/wiki/Software/uchardet/) | 0.0.8 | Character set detection of subtitle files in mpv | MPL-1.1 OR GPL-2.0-or-later OR LGPL-2.1-or-later |
 | [Qt WebSockets](https://github.com/qt/qtwebsockets) | 6.11.3 | The server's live events (the runtime does not ship it) | LGPL-3.0-only |
 | [Kirigami Addons](https://invent.kde.org/libraries/kirigami-addons) | 1.13.1 | The forms of the Settings page | LGPL, per file |
+| [QtKeychain](https://github.com/frankosterfeld/qtkeychain) | 0.18.0 | The token store, with its libsecret backend (the runtime does not ship it) | BSD-3-Clause |
 | [mpvqt](https://invent.kde.org/libraries/mpvqt) | 1.2.1 | The Qt Quick item that shows mpv's video; compiled into Kinefin, not installed on its own | LGPL-2.1-only OR LGPL-3.0-only OR LicenseRef-KDE-Accepted-LGPL |
 
 A native build takes the same libraries from the system, except mpvqt, which CMake always fetches at the pinned version.

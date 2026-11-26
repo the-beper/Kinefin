@@ -496,7 +496,7 @@ struct Ui {
         if (!reach(ConnectionController::NeedsLogin, QStringLiteral("loginPage"))
             || !signInAs(QStringLiteral("Alice")))
             return false;
-        // The record of a user is written once the wallet has taken the token: Switch User opens the picker only for saved users
+        // The record of a user is written once the keyring has taken the token: Switch User opens the picker only for saved users
         if (!qWaitForScaled([this] { return savedUsers().size() == 1; }, 5000))
             return false;
         controller.switchUser();

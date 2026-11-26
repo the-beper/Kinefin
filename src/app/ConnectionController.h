@@ -126,7 +126,7 @@ class ConnectionController : public QObject {
     };
     Q_ENUM(State)
 
-    // `deviceId` is the profile's stable device id (profileDeviceId()). Tokens go to `store`, which must outlive the controller; without one the user's KWallet is used
+    // `deviceId` is the profile's stable device id (profileDeviceId()). Tokens go to `store`, which must outlive the controller; without one the user's keyring is used
     ConnectionController(const QString &profileId, const QString &deviceId, const QString &version,
                          TokenStore *store = nullptr, QObject *parent = nullptr);
     ~ConnectionController() override;
@@ -442,7 +442,7 @@ class ConnectionController : public QObject {
     void resetHomeProjection();
     bool hidePlayedInLatest() const { return m_hasPreferences && m_preferences.hidePlayedInLatest; }
 
-    std::unique_ptr<TokenStore> m_ownedStore; // KWallet, unless a store was passed in
+    std::unique_ptr<TokenStore> m_ownedStore; // The keyring, unless a store was passed in
     // Declared before the client so it outlives the signals the client emits while it goes: the models showing a one-off view and the state it was opened with, which is not what is stored for the scope
     QHash<const LibraryItemsModel *, LibraryItemsModel::ViewState> m_oneOff;
     JellyfinClient m_client;

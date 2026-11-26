@@ -29,7 +29,7 @@ QString startupProfileId(const QCommandLineParser &parser, QString *error);
 int listProfilesCommand(QTextStream &out, QTextStream &err);
 int createProfileCommand(const QString &name, QTextStream &out, QTextStream &err);
 int setDefaultProfileCommand(const QString &name, QTextStream &out, QTextStream &err);
-// Refuses the default profile and one that is in use. Removes, in this order: the index entry, the wallet entries of the profile's servers, then its data and cache directories (downloads included). A wallet that cannot be reached is reported but does not keep the files
+// Refuses the default profile and one that is in use. Removes, in this order: the index entry, the keyring entries of the profile's servers, then its data and cache directories (downloads included). A keyring that cannot be reached is reported but does not keep the files
 int deleteProfileCommand(const QString &name, TokenStore &store, QTextStream &out,
                          QTextStream &err);
 } // namespace Kinefin

@@ -15,18 +15,16 @@ namespace Kinefin {
 class JellyfinClient;
 class TokenStore;
 
-// The key of one user's token on one server in the TokenStore: `<profile>/<serverId>/<userId>`, in the KWallet folder of the app
+// The key of one user's token on one server in the TokenStore: `<profile>/<serverId>/<userId>`
 QString serverTokenKey(const QString &profileId, const QString &serverId, const QString &userId);
-// The key one token per server used before several users per server were kept: `<profile>/<serverId>`, read once to migrate, removed by every forget. The migration is one-way, done at the first restore of the user that owns it once the per-user key is written: an older build does not see the per-user keys
-QString legacyServerTokenKey(const QString &profileId, const QString &serverId);
 
-// Removes the tokens of every user of every server recorded in the profile's `servers.json` from `store`, under both key forms; `done(ok)` runs once, from the event loop, with ok false when any removal failed. Nothing to remove is a success
+// Removes the tokens of every user of every server recorded in the profile's `servers.json` from `store`; `done(ok)` runs once, from the event loop, with ok false when any removal failed. Nothing to remove is a success
 void forgetProfileTokens(const QString &profileId, TokenStore &store,
                          std::function<void(bool ok)> done);
 
-// Keeps one profile's sessions in step with a JellyfinClient: a session survives a restart without a password and a revoked one is forgotten. The token goes to the TokenStore (KWallet), the rest of the record to the profile's `servers.json`; nothing secret is ever written to a file. There is one record per (server, user)
+// Keeps one profile's sessions in step with a JellyfinClient: a session survives a restart without a password and a revoked one is forgotten. The token goes to the TokenStore (the keyring), the rest of the record to the profile's `servers.json`; nothing secret is ever written to a file. There is one record per (server, user)
 // - `loginSucceeded` saves the session: the token first, and only when that succeeded the record (the last entry is the most recently used, a login or a restore moves its entry there). A failed save leaves the session in memory only and emits saveFailed(). The token already stored for that user is forgotten first (the server ended that session by the new login). A user with `askPassword` gets a record but never a token
-// - restoreUser() restores one stored user on the probed server (same server id, same base URL, same device id, a transport that may carry credentials; see restorableUsers()) and re-verifies the session against the server. The read is asynchronous: restorePending() is true meanwhile, and restoreFinished() follows whatever the result. A probe never restores by itself: the caller picks the user. The legacy key belongs to one user, the one whose record came from a file without `remembered` (`ownsLegacyKey`): only that user reads it, it is moved to the per-user key and the legacy key removed once that write succeeded, and every forget, sign-in or removal of that user removes it too
+// - restoreUser() restores one stored user on the probed server (same server id, same base URL, same device id, a transport that may carry credentials; see restorableUsers()) and re-verifies the session against the server. The read is asynchronous: restorePending() is true meanwhile, and restoreFinished() follows whatever the result. A probe never restores by itself: the caller picks the user
 // - `sessionExpired` forgets the token of the user that was signed in and keeps the record (remembered=false, the user is asked for the password next time); signOut() and forgetUser() drop the record too. `credentialsCleared` is deliberately not used: it also fires when the app merely closes or switches server, and the credential must survive that
 // A `servers.json` that cannot be read is deleted (nothing is merged, and a kept copy would only hold ids); if even that fails, nothing is written for this profile. A record whose server or user id is not a valid id is ignored. A `token` key left by an older snapshot is dropped by rewriting the file at once. When a rewrite after a forget fails, the file is removed so a revoked session cannot come back
 class ServerCredentialSync final : public QObject {
@@ -74,13 +72,12 @@ class ServerCredentialSync final : public QObject {
     void onServerReady();
     void onLoginSucceeded();
     void onSessionExpired(const QString &expiredUserId);
-    void finishRestore(const ServerCredential &entry, bool ok, const QString &token, bool legacy);
+    void finishRestore(const ServerCredential &entry, bool ok, const QString &token);
     bool isProbedServer(const ServerCredential &entry) const;
     void writeToken(const QString &serverId, const QString &userId, const QString &token,
                     std::function<void(bool ok)> stored);
     void dropToken(const QString &serverId, const QString &userId);
     void removeKey(const QString &key);
-    void releaseLegacyKey(const QString &serverId, const QString &userId);
     ServerCredential *find(const QString &serverId, const QString &userId);
     void moveToEnd(const QString &serverId, const QString &userId);
     void upsert(const ServerCredential &entry);

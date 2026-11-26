@@ -22,7 +22,8 @@ find_package(OpenSSL 3.0 REQUIRED COMPONENTS Crypto)
 if(QT_KNOWN_POLICY_QTP0004)
     qt_policy(SET QTP0004 OLD)
 endif()
-find_package(KF6 6.24 REQUIRED COMPONENTS Config CoreAddons I18n DBusAddons Wallet WindowSystem)
+find_package(KF6 6.24 REQUIRED COMPONENTS Config CoreAddons I18n DBusAddons WindowSystem)
+find_package(Qt6Keychain REQUIRED)
 # The KDE runtime 6.11 ships SDL 3.2; the gamepad input needs nothing but the library
 find_package(SDL3 3.2 REQUIRED CONFIG)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
@@ -158,8 +159,8 @@ add_library(kinefin_core STATIC
     src/settings/BrowseStateStore.h
     src/settings/ClientSettings.cpp
     src/settings/ClientSettings.h
-    src/settings/KWalletTokenStore.cpp
-    src/settings/KWalletTokenStore.h
+    src/settings/KeychainTokenStore.cpp
+    src/settings/KeychainTokenStore.h
     src/settings/ProfileIdentity.cpp
     src/settings/ProfileIdentity.h
     src/settings/ProfileIndex.cpp
@@ -182,7 +183,8 @@ target_include_directories(kinefin_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 # Lets the QML module see the core library's types that src/app/ClientSettingsQml.h exposes.
 qt_extract_metatypes(kinefin_core)
 target_compile_definitions(kinefin_core PRIVATE TRANSLATION_DOMAIN="kinefin")
-target_link_libraries(kinefin_core PUBLIC Qt6::Core Qt6::DBus Qt6::Network Qt6::WebSockets KF6::Wallet KF6::ConfigCore KF6::I18n)
+target_link_libraries(kinefin_core PUBLIC Qt6::Core Qt6::Gui Qt6::DBus Qt6::Network Qt6::WebSockets KF6::ConfigCore KF6::I18n)
+target_link_libraries(kinefin_core PRIVATE Qt6Keychain::Qt6Keychain)
 
 add_library(kinefin_player STATIC
     src/player/BitrateFallback.cpp
@@ -959,9 +961,13 @@ if(BUILD_TESTING)
     target_link_libraries(test_profile_commands PRIVATE kinefin_core Qt6::Test)
     add_test(NAME profile_commands COMMAND test_profile_commands)
 
-    add_executable(test_kwallet_host tests/test_kwallet_host.cpp)
-    target_link_libraries(test_kwallet_host PRIVATE kinefin_core Qt6::Test KF6::Wallet)
-    add_test(NAME kwallet_host COMMAND test_kwallet_host)
+    add_executable(test_keychain_token_store tests/test_keychain_token_store.cpp)
+    target_link_libraries(test_keychain_token_store PRIVATE kinefin_core Qt6::Test)
+    add_test(NAME keychain_token_store COMMAND test_keychain_token_store)
+
+    add_executable(test_keychain_host tests/test_keychain_host.cpp)
+    target_link_libraries(test_keychain_host PRIVATE kinefin_core Qt6::Test)
+    add_test(NAME keychain_host COMMAND test_keychain_host)
 
     add_executable(test_server_credential_sync tests/test_server_credential_sync.cpp)
     target_compile_definitions(test_server_credential_sync PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")

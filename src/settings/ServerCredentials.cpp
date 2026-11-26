@@ -80,7 +80,6 @@ QList<ServerCredential> loadServerCredentials(const QString &profileId, QString 
             entry.imageTag.clear();
         entry.askPassword = object.value(QStringLiteral("askPassword")).toBool(false);
         entry.remembered = object.value(QStringLiteral("remembered")).toBool(true);
-        entry.ownsLegacyKey = !object.contains(QStringLiteral("remembered"));
         if (entry.serverId.isEmpty() || entry.url.isEmpty()) {
             if (error)
                 *error = QStringLiteral("Server credential entry is incomplete");
@@ -112,9 +111,8 @@ bool saveServerCredentials(const QString &profileId, const QList<ServerCredentia
                            {QStringLiteral("deviceName"), entry.deviceName},
                            {QStringLiteral("username"), entry.username},
                            {QStringLiteral("imageTag"), entry.imageTag},
-                           {QStringLiteral("askPassword"), entry.askPassword}};
-        if (!entry.ownsLegacyKey)
-            object.insert(QStringLiteral("remembered"), entry.remembered);
+                           {QStringLiteral("askPassword"), entry.askPassword},
+                           {QStringLiteral("remembered"), entry.remembered}};
         array.append(object);
     }
     const QJsonObject root{{QStringLiteral("servers"), array}};

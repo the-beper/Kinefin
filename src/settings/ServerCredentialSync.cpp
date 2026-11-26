@@ -9,7 +9,6 @@
 #include <QTimer>
 #include <QUrl>
 
-#include <algorithm>
 #include <memory>
 #include <utility>
 
@@ -38,30 +37,11 @@ ServerCredentialSync::ServerCredentialSync(JellyfinClient *client, TokenStore *s
             m_writable = false;
         }
     } else {
-        // An id that is not an id would alias another wallet key
-        QStringList orphanedServers;
+        // An id that is not an id would alias another keyring key
         const qsizetype before = m_entries.size();
-        m_entries.removeIf([&](const ServerCredential &entry) {
-            if (hasValidIds(entry))
-                return false;
-            // A server id that is not an id could alias another wallet key, so only a valid one has its legacy key removed
-            if (isValidJellyfinId(entry.serverId))
-                orphanedServers.append(entry.serverId);
-            return true;
-        });
-        if (m_entries.size() != before) {
+        m_entries.removeIf([](const ServerCredential &entry) { return !hasValidIds(entry); });
+        if (m_entries.size() != before)
             qCWarning(credentialsLog) << "ignoring records with an invalid id";
-            orphanedServers.removeDuplicates();
-            for (const QString &serverId : std::as_const(orphanedServers)) {
-                // The legacy key belongs to the record that owned it; another record of the server may be that owner
-                const bool ownedByAnother = std::any_of(
-                    m_entries.cbegin(), m_entries.cend(), [&](const ServerCredential &entry) {
-                        return entry.serverId == serverId && entry.ownsLegacyKey;
-                    });
-                if (!ownedByAnother)
-                    removeKey(legacyServerTokenKey(m_profileId, serverId));
-            }
-        }
         if (legacyToken) {
             // An older snapshot kept the token in this file: rewrite it without, now
             qCWarning(credentialsLog) << "dropping a token stored in the credentials file";
@@ -82,11 +62,6 @@ QString serverTokenKey(const QString &profileId, const QString &serverId, const 
     return profileId + QLatin1Char('/') + serverId + QLatin1Char('/') + userId;
 }
 
-QString legacyServerTokenKey(const QString &profileId, const QString &serverId)
-{
-    return profileId + QLatin1Char('/') + serverId;
-}
-
 QString ServerCredentialSync::tokenKey(const QString &serverId, const QString &userId) const
 {
     return serverTokenKey(m_profileId, serverId, userId);
@@ -99,10 +74,9 @@ void forgetProfileTokens(const QString &profileId, TokenStore &store,
     const QList<ServerCredential> entries = loadServerCredentials(profileId, &error);
     // An unreadable record may hide servers whose tokens are then left in the store
     const bool listed = error.isEmpty();
-    // Not filtered by validity: every record that could have left a token behind is covered, under both key forms
+    // Not filtered by validity: every record that could have left a token behind is covered
     QStringList keys;
     for (const ServerCredential &entry : entries) {
-        keys.append(legacyServerTokenKey(profileId, entry.serverId));
         if (!entry.userId.isEmpty())
             keys.append(serverTokenKey(profileId, entry.serverId, entry.userId));
     }
@@ -185,23 +159,13 @@ bool ServerCredentialSync::restoreUser(const QString &userId)
                   [self, serial, entry](bool ok, const QString &token) {
                       if (!self || serial != self->m_restoreSerial)
                           return;
-                      // The legacy key held one token per server: it is only the token of the user whose record predates per-user keys
-                      if (ok || !entry.ownsLegacyKey) {
-                          self->finishRestore(entry, ok, token, false);
-                          return;
-                      }
-                      self->m_store->read(legacyServerTokenKey(self->m_profileId, entry.serverId),
-                                          [self, serial, entry](bool ok, const QString &token) {
-                                              if (!self || serial != self->m_restoreSerial)
-                                                  return;
-                                              self->finishRestore(entry, ok, token, true);
-                                          });
+                      self->finishRestore(entry, ok, token);
                   });
     return true;
 }
 
 void ServerCredentialSync::finishRestore(const ServerCredential &entry, bool ok,
-                                         const QString &token, bool legacy)
+                                         const QString &token)
 {
     m_restorePending = false;
     // The client moved on while the store answered (cancelled, another server): nobody is waiting for this one any more
@@ -214,17 +178,6 @@ void ServerCredentialSync::finishRestore(const ServerCredential &entry, bool ok,
         m_restoring = false;
         if (restored) {
             m_activeUserId = entry.userId;
-            if (legacy) {
-                // The legacy key goes only after the new one was written: a failed write keeps the session restorable
-                QPointer<ServerCredentialSync> self(this);
-                writeToken(entry.serverId, entry.userId, token,
-                           [self, serverId = entry.serverId, userId = entry.userId](bool written) {
-                               if (self && written)
-                                   self->releaseLegacyKey(serverId, userId);
-                           });
-            } else {
-                releaseLegacyKey(entry.serverId, entry.userId);
-            }
             moveToEnd(entry.serverId, entry.userId);
             m_client->verifySession();
         }
@@ -288,11 +241,10 @@ void ServerCredentialSync::onLoginSucceeded()
         Q_EMIT saveFailed();
         return;
     }
-    // The token stored for this user, under either key, is dead now: the server ends the older session of a user who signs in again on the same device. It goes first, so a save that fails or never finishes leaves nothing to restore
+    // The token stored for this user is dead now: the server ends the older session of a user who signs in again on the same device. It goes first, so a save that fails or never finishes leaves nothing to restore
     if (known) {
         forgetToken(entry.serverId, entry.userId);
         m_activeUserId = entry.userId;
-        entry.ownsLegacyKey = false;
     }
     if (entry.askPassword) {
         // Remembered by name only: the token stays in memory
@@ -382,27 +334,12 @@ void ServerCredentialSync::dropToken(const QString &serverId, const QString &use
     const QString key = tokenKey(serverId, userId);
     ++m_forgetEpoch[key];
     removeKey(key);
-    // The legacy key is the token of the one user whose record predates per-user keys; the caller persists the record
-    if (ServerCredential *entry = find(serverId, userId); entry && entry->ownsLegacyKey) {
-        entry->ownsLegacyKey = false;
-        removeKey(legacyServerTokenKey(m_profileId, serverId));
-    }
-}
-
-void ServerCredentialSync::releaseLegacyKey(const QString &serverId, const QString &userId)
-{
-    ServerCredential *entry = find(serverId, userId);
-    if (!entry || !entry->ownsLegacyKey)
-        return;
-    entry->ownsLegacyKey = false;
-    removeKey(legacyServerTokenKey(m_profileId, serverId));
-    persist();
 }
 
 void ServerCredentialSync::forgetToken(const QString &serverId, const QString &userId)
 {
     ServerCredential *entry = find(serverId, userId);
-    const bool changed = entry && (entry->remembered || entry->ownsLegacyKey);
+    const bool changed = entry && entry->remembered;
     dropToken(serverId, userId);
     if (m_activeUserId == userId && m_client->serverId() == serverId)
         m_activeUserId.clear();
@@ -445,7 +382,6 @@ void ServerCredentialSync::forgetServer(const QString &serverId)
         ++m_forgetEpoch[tokenKey(serverId, userId)];
         removeKey(tokenKey(serverId, userId));
     }
-    removeKey(legacyServerTokenKey(m_profileId, serverId));
     if (m_client->serverId() == serverId)
         m_activeUserId.clear();
     const qsizetype before = m_entries.size();

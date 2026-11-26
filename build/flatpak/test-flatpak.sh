@@ -1,5 +1,5 @@
 #!/bin/sh
-# Smoke test of the Flatpak bundle in a throw-away container (no desktop: offscreen Qt, a private session bus): install with non-default XDG folders, check the version, start the app offscreen, check it owns its D-Bus name and its MPRIS name, check the private remote-control socket and its welcome, check a second launch hands over and exits, check a restart takes back the socket a killed instance left, and check that the profile data lands under ~/.var/app. Playback, portal dialogs and theming need a real Plasma session and are untested here.
+# Smoke test of the Flatpak bundle in a throw-away container (no desktop: offscreen Qt, a private session bus): install with non-default XDG folders, check the version, start the app offscreen, check it owns its D-Bus name and its MPRIS name, check the private remote-control socket and its welcome, check a second launch hands over and exits, check a restart takes back the socket a killed instance left, check that the profile data lands under ~/.var/app, check that the token store's library has the libsecret backend, and check that deleting a profile with a saved session fails fast and names the keyring when there is no Secret portal. Playback, portal dialogs and theming need a real Plasma session and are untested here.
 # Usage: [KINEFIN_EXPECT_VERSION=X.Y.Z] build/flatpak/test-flatpak.sh dist/Kinefin-x86_64.flatpak
 # KINEFIN_EXPECT_VERSION (optional): main.cpp uses QCommandLineParser::addVersionOption(); KAboutData provides QCoreApplication::applicationVersion. Upper/lower-case app labels and optional colon are accepted.
 set -eu
@@ -75,6 +75,12 @@ grep -ao 'List of enabled features:[ -~]*' "$libmpv" | grep -qw vaapi-drm ||
     fail "libmpv has no vaapi-drm: hardware decoding in copy mode cannot start"
 echo "ok: libmpv has the VA-API DRM backend"
 
+# Token store gate: QtKeychain is built here against the runtime's libsecret, and the libsecret backend is the only one the sandbox allows (QTKEYCHAIN_BACKEND is pinned in the manifest). A build without it would keep every session in memory
+keychain=$(find "$install_root/files/lib" -name 'libqt6keychain.so.*' -type f | head -n 1)
+[ -n "$keychain" ] || fail "libqt6keychain is not in the installed Flatpak"
+grep -aq secret_password_lookup "$keychain" || fail "libqt6keychain has no libsecret backend: no token could be stored"
+echo "ok: QtKeychain has the libsecret backend"
+
 if [ -n "${KINEFIN_EXPECT_VERSION:-}" ]; then
     out=$(flatpak run --env=QT_QPA_PLATFORM=offscreen "$id" --version 2>&1) || fail "--version failed: $out"
     printf '%s\n' "$out" | grep -qxF -e "Kinefin $KINEFIN_EXPECT_VERSION" -e "Kinefin: $KINEFIN_EXPECT_VERSION" \
@@ -145,6 +151,22 @@ for _ in $(seq 20); do welcome_of "$socket" >/dev/null 2>&1 && break; sleep 1; d
 welcome_of "$socket" 2>/dev/null | grep -q '"version"' || { cat "$HOME/app2.log"; fail "a restart did not take the socket back"; }
 echo "ok: a restart takes the socket back"
 flatpak kill "$id"
+
+# The container has no Secret portal and no secret service, so the keyring cannot be reached: deleting a profile that holds a saved session must still finish (the token removal fails, it never waits for the 30 s limit), say so naming the keyring, and must not create a plaintext or empty keyring folder as a side effect
+flatpak run --env=QT_QPA_PLATFORM=offscreen "$id" --create-profile keyringgate >/dev/null 2>&1 || fail "could not create the keyring gate profile"
+gate_data="$HOME/.var/app/$id/data/kinefin/profiles/keyringgate"
+mkdir -p "$gate_data"
+printf '%s\n' '{"servers": [{"serverId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "url": "https://jellyfin.invalid", "userId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "deviceId": "gate", "deviceName": "gate", "username": "gate", "remembered": true}]}' >"$gate_data/servers.json"
+started=$(date +%s)
+status=0
+out=$(timeout 40 flatpak run --env=QT_QPA_PLATFORM=offscreen "$id" --delete-profile keyringgate 2>&1) || status=$?
+elapsed=$(($(date +%s) - started))
+[ "$status" -eq 1 ] || fail "deleting a profile with a saved session exited $status, not 1: $out"
+[ "$elapsed" -lt 20 ] || fail "deleting a profile with a saved session took $elapsed s"
+printf '%s\n' "$out" | grep -qi keyring || fail "the deletion failure does not name the keyring: $out"
+[ ! -e "$gate_data" ] || fail "the profile files of the keyring gate are still there"
+[ ! -e "$HOME/.var/app/$id/data/keyrings" ] || fail "a keyrings folder was created without a Secret portal"
+echo "ok: deleting a profile with a saved session fails within $elapsed s, names the keyring and creates no keyring"
 assert_pin "$sdk" "$sdk_commit"
 assert_pin "$platform" "$platform_commit"
 echo "done"

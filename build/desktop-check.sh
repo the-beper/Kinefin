@@ -8,7 +8,7 @@ here=$(cd "$(dirname "$0")/.." && pwd)
 
 usage() {
     cat <<'USAGE'
-Reads a running Plasma session and says whether Kinefin's desktop integrations show up: MPRIS, the screen and suspend inhibitions, KWallet and KRunner. It runs in the build image with no network and the session bus and the system bus mounted, so the host gets nothing installed and the container is trusted as much as the user's session. Start Kinefin first (the installed Flatpak or a native build), signed in, with a video playing for the player checks.
+Reads a running Plasma session and says whether Kinefin's desktop integrations show up: MPRIS, the screen and suspend inhibitions, the token keyring and KRunner. It runs in the build image with no network and the session bus and the system bus mounted, so the host gets nothing installed and the container is trusted as much as the user's session. Start Kinefin first (the installed Flatpak or a native build), signed in, with a video playing for the player checks.
 
 Usage: build/desktop-check.sh [--act] [--cast] [--term WORD] [--profile-dir DIR]
   --act              also control the player (Pause, Play, Seek) and run the first KRunner match: it changes what plays and opens an item in the app
@@ -38,11 +38,12 @@ if [ -z "${KINEFIN_DESKTOP_CHECK_INNER:-}" ] && [ ! -e /run/.containerenv ]; the
     *) echo "--profile-dir needs an absolute path: the container does not start in your working directory" >&2; exit 2 ;;
     esac
     set -- "$image" "$here/build/desktop-check.sh" "$@"
-    # The system bus tells the suspend inhibitors; the profile folders tell whether a token sits on disk
+    # The system bus tells the suspend inhibitors; the profile folders tell whether a token sits on disk, and the Flatpak's keyring folder is only looked at (file mode), never read
     if [ -S /run/dbus/system_bus_socket ]; then set -- -v /run/dbus/system_bus_socket:/run/dbus/system_bus_socket "$@"; fi
     flatpak_profiles=$HOME/.var/app/io.github.the_beper.Kinefin/data/kinefin/profiles
     native_profiles=$HOME/.local/share/kinefin/profiles
-    for dir in "$flatpak_profiles" "$native_profiles"; do
+    flatpak_keyrings=$HOME/.var/app/io.github.the_beper.Kinefin/data/keyrings
+    for dir in "$flatpak_profiles" "$native_profiles" "$flatpak_keyrings"; do
         if [ -d "$dir" ]; then set -- -v "$dir:$dir:ro" "$@"; fi
     done
     if [ -d "$given" ] && [ "$given" != "$flatpak_profiles" ] && [ "$given" != "$native_profiles" ]; then set -- -v "$given:$given:ro" "$@"; fi
@@ -203,35 +204,20 @@ else
     skip "Suspend inhibition" "pass --cast while a cast plays"
 fi
 
-# --- KWallet ---
-if entries=$(kwallet-query -l kdewallet -f Kinefin 2>/dev/null); then
-    count=0
-    bad=0
-    legacy=0
-    id='[0-9A-Za-z-]{1,64}'
-    for key in $entries; do
-        count=$((count + 1))
-        # The key is the profile, the server and the user (the ids are what isValidJellyfinId accepts): the values are never read
-        if printf '%s' "$key" | LC_ALL=C grep -Eq "^[^/]+/$id/$id\$"; then
-            :
-        # Without a user it is the older per-server key, which stays until that user signs in again
-        elif printf '%s' "$key" | LC_ALL=C grep -Eq "^[^/]+/$id\$"; then
-            legacy=$((legacy + 1))
-        else
-            bad=$((bad + 1))
-        fi
-    done
-    if [ "$count" -eq 0 ]; then
-        fail "KWallet entries" "the folder Kinefin of kdewallet is empty: is a user signed in, with the wallet open?"
-    elif [ "$bad" -gt 0 ]; then
-        fail "KWallet entries" "$bad of $count keys are not <profile>/<serverId>/<userId>"
-    else
-        note=
-        if [ "$legacy" -gt 0 ]; then note=" ($legacy of them <profile>/<serverId>, the older per-server key)"; fi
-        pass "KWallet entries" "$count, named <profile>/<serverId>/<userId>$note"
-    fi
+# --- Token keyring ---
+# The Flatpak keeps the tokens in libsecret's encrypted file inside its data folder; a native build uses the desktop's keyring, which this check cannot look at. The file is never read, only its mode
+keyring=${HOME:-/nonexistent}/.var/app/io.github.the_beper.Kinefin/data/keyrings/default.keyring
+if [ ! -e "$keyring" ]; then
+    skip "Token keyring" "no $keyring (a native build, nobody signed in with a remembered session, or no Secret portal: the session then lives in memory only)"
+elif [ ! -f "$keyring" ] || [ -L "$keyring" ]; then
+    fail "Token keyring" "$keyring is not a regular file"
+elif ! mode=$(stat -c %a "$keyring" 2>/dev/null); then
+    fail "Token keyring" "$keyring could not be inspected"
 else
-    skip "KWallet entries" "kwallet-query could not read the folder Kinefin of kdewallet (wallet closed, disabled or absent)"
+    case $mode in
+    ?00) pass "Token keyring" "default.keyring in the Flatpak data folder, private (mode $mode)" ;;
+    *) fail "Token keyring" "default.keyring is readable by others (mode $mode)" ;;
+    esac
 fi
 found=0
 leaked=0

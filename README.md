@@ -32,7 +32,7 @@ Kinefin is written for Plasma instead. The interface is Kirigami and follows the
 
 - Home with Continue Watching, Next Up, Favorites and Recently Added; Movies and Shows pages with filters, saved filter sets, sort orders and grid or list views.
 - Details pages for movies, series, seasons and episodes, with the audio and subtitle track chosen before you play. Search, Favorites, video playlists and a play queue.
-- Several servers, and several users per server. Sign in with a password or Quick Connect; the access token is kept in KWallet, never in a file.
+- Several servers, and several users per server. Sign in with a password or Quick Connect; the access token is kept in the system keyring through the Secret portal, never in plain text.
 
 ### Play
 

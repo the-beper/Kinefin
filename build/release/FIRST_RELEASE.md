@@ -83,13 +83,15 @@ working tree is dirty, or the release metadata is inconsistent.
   three episodes, a film that needs a transcode, and a second Jellyfin client
   (jellyfin-web in a browser) for the remote-control and SyncPlay steps. A
   missing prerequisite is recorded as blocked, never as passed. Go in this
-  order, sign-in first and the destructive KWallet cases last:
+  order, sign-in first and the destructive keyring cases last (on Plasma and
+  on GNOME):
   1. Launch: `--version`; start twice; open a `jellyfin://item/<id>` link while
      the app runs. One instance stays, the second start and the link raise it,
      and the About page shows the bundle version.
   2. Sign-in: add the server, sign in, quit, start again. No password prompt
-     appears, KWalletManager shows the `Kinefin` entry and `servers.json`
-     holds no token.
+     appears, `servers.json` holds no token and
+     `~/.var/app/io.github.the_beper.Kinefin/data/keyrings/default.keyring`
+     exists. After an update from 0.x every remembered user signs in once more.
   3. Browsing: Home, Movies, TV Shows, a series, an item and Search (Ctrl+F)
      with the keyboard only and then with Orca, in the light and dark theme and
      at a window width of 560 px. The Tab order follows the layout, every
@@ -137,9 +139,13 @@ working tree is dirty, or the release metadata is inconsistent.
      refused with a message.
   15. Italian: start with `LANGUAGE=it`. Main pages, player and dialogs are in
      Italian, with no English fallback in new strings.
-  16. Wallet: with the wallet locked, closed or removed, check that Kinefin
-     asks for the password again instead of failing; then sign out. The entry
-     is gone after the sign-out.
+  16. Keyring: on Plasma and on GNOME, with the keyring locked, check that
+     Kinefin asks for the unlock or for the password again instead of failing;
+     on a session without a Secret portal, check that sign-in works and the
+     next start asks for the password. Then sign out and run
+     `--delete-profile` on a second profile. `flatpak info --show-permissions`
+     lists no `kwalletd6`, and `flatpak uninstall --delete-data` removes
+     `keyrings/`.
 
   Not in this round: other distributions, GPUs and compositors, OpenSubtitles
   (needs an OpenSubtitles.com account), Cast to a DLNA renderer and to a Google
