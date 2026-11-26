@@ -64,6 +64,8 @@ class ItemDetailsModel final : public QObject {
     Q_PROPERTY(int episodeNumberEnd READ episodeNumberEnd NOTIFY detailsChanged)
     Q_PROPERTY(int episodeNumber READ episodeNumber NOTIFY detailsChanged)
     Q_PROPERTY(QUrl backdropUrl READ backdropUrl NOTIFY detailsChanged)
+    // The blurred picture of the backdrop that the server describes in a few characters, as an image:// URL of the BlurHash provider; empty without one
+    Q_PROPERTY(QUrl backdropPlaceholderUrl READ backdropPlaceholderUrl NOTIFY detailsChanged)
     Q_PROPERTY(QUrl logoUrl READ logoUrl NOTIFY detailsChanged)
     Q_PROPERTY(QUrl posterUrl READ posterUrl NOTIFY detailsChanged)
     // Entries: name, role, type, id, imageUrl (empty without an image)
@@ -142,6 +144,9 @@ class ItemDetailsModel final : public QObject {
     int episodeNumber() const { return m_details.episodeNumber; }
     int episodeNumberEnd() const { return m_details.episodeNumberEnd; }
     QUrl backdropUrl() const;
+    QUrl backdropPlaceholderUrl() const;
+    // The backdrop at the width a view of `pixelWidth` device pixels needs, in steps (640, 960, 1280, 1920) so the server resizes and sends no more than that and a resize of the window rarely asks again; empty without a backdrop or without a width. Read `backdropUrl` too in a binding, to follow the change of the details
+    Q_INVOKABLE QUrl backdropUrlFor(qreal pixelWidth) const;
     QUrl logoUrl() const;
     QUrl posterUrl() const;
     QVariantList people() const;

@@ -5,8 +5,10 @@
 #include "ItemSummary.h"
 
 #include "api/MediaSourceSelection.h"
+#include "imagecache/BlurHash.h"
 
 #include <QJsonArray>
+#include <QJsonObject>
 #include <QJsonValue>
 #include <QRegularExpression>
 #include <QUrl>
@@ -18,6 +20,8 @@ namespace {
 constexpr qint64 kMaxTicks = 100'000'000'000'000;
 constexpr qint64 kTicksPerMinute = 600'000'000;
 constexpr int kMaxToken = 64;
+// 4 + 2 * 9 * 9 characters: the longest BlurHash there is
+constexpr int kMaxBlurHash = 166;
 
 QString text(const QJsonValue &value, int limit)
 {
@@ -263,6 +267,13 @@ ItemDetails parseItemDetails(const QJsonObject &item)
     if (!ownBackdrop.isEmpty()) {
         details.backdropItemId = details.id;
         details.backdropTag = ownBackdrop;
+        const QJsonObject hashes = item.value(QStringLiteral("ImageBlurHashes"))
+                                       .toObject()
+                                       .value(QStringLiteral("Backdrop"))
+                                       .toObject();
+        const QString hash = text(hashes.value(ownBackdrop), kMaxBlurHash);
+        if (isValidBlurHash(hash))
+            details.backdropBlurHash = hash;
     } else {
         const QString parent = validId(item.value(QStringLiteral("ParentBackdropItemId")));
         const QString parentTag = firstTag(item.value(QStringLiteral("ParentBackdropImageTags")));

@@ -137,6 +137,8 @@ class PlayerController final : public QObject {
     Q_PROPERTY(bool sleepAtEndOfItem READ sleepAtEndOfItem NOTIFY changed)
     Q_PROPERTY(bool sleepAtEndOfQueue READ sleepAtEndOfQueue NOTIFY changed)
     Q_PROPERTY(QString aspectMode READ aspectMode NOTIFY changed)
+    // The width over the height that mpv shows the video at: the file's own shape, or the shape that an Aspect Ratio choice (4:3, 16:9, Widescreen for 4:3 Video) forces, which mpv applies to its display size; Zoom, Stretch and Original Size leave it as it is. Zero while no video size is known, and read once after a burst of size changes
+    Q_PROPERTY(qreal videoAspect READ videoAspect NOTIFY videoAspectChanged)
     // The night-mode filter of the audio chain, remembered per profile: the OSD's check and the Settings switch are one setting
     Q_PROPERTY(bool nightMode READ nightMode NOTIFY changed)
     // Clip and GIF marks of the playing item, -1 when unset: the line the Clip menu states and the two Save entries
@@ -246,6 +248,7 @@ class PlayerController final : public QObject {
     QString skipLabel() const { return m_skipLabel; }
     // The aspect mode of this playback: the `video.aspect` setting until a choice is made, and again for the next item
     QString aspectMode() const { return m_mpvSettings.aspectMode(); }
+    qreal videoAspect() const { return m_videoAspect; }
     bool nightMode() const;
     qint64 clipStartTicks() const { return m_clipStart; }
     qint64 clipEndTicks() const { return m_clipEnd; }
@@ -462,6 +465,7 @@ class PlayerController final : public QObject {
 
   Q_SIGNALS:
     void changed();
+    void videoAspectChanged();
     void localPlaybackChanged();
     // A local file's position, and whether it reached its end; the shell stores it on the download
     void localPositionChanged(const QString &itemId, qint64 ticks, bool played);
@@ -736,6 +740,9 @@ class PlayerController final : public QObject {
     // The audio and subtitle tracks of the file in mpv's order, with their language and forced flag
     QList<TrackFact> m_audioFacts;
     QList<TrackFact> m_subtitleFacts;
+    // The aspect of the video as last read from mpv's dwidth and dheight, zero when unknown
+    qreal m_videoAspect = 0;
+    bool m_videoAspectPending = false;
     bool m_rememberAudio = true;
     bool m_rememberSubtitles = true;
     // The speed of this playback is decided (a repeat kept it, or the user chose one); a track was chosen since the file loaded; the file is loaded; the series' speed and aspect were applied

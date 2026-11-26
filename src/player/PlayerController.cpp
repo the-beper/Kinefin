@@ -60,6 +60,24 @@ QUrl withStartTicks(QUrl url, qint64 ticks, bool freshSession = false)
     return url;
 }
 constexpr int MaxRememberedItems = 1000;
+// Past the cap the items chosen longest ago go first, those stored before entries carried a time ("at") before all; `spare` is the choice just made, which stays whatever its time says
+void evictOldestChoices(QJsonObject &memory, const QString &spare)
+{
+    const auto chosenAt = [](QJsonObject::const_iterator it) {
+        return it.value().toObject().value(QStringLiteral("at")).toInteger();
+    };
+    while (memory.size() > MaxRememberedItems) {
+        auto oldest = memory.constEnd();
+        for (auto it = memory.constBegin(); it != memory.constEnd(); ++it) {
+            if (it.key() != spare
+                && (oldest == memory.constEnd() || chosenAt(it) < chosenAt(oldest)))
+                oldest = it;
+        }
+        if (oldest == memory.constEnd())
+            return;
+        memory.remove(oldest.key());
+    }
+}
 // An item that played for less wall-clock time than this since it loaded is not repeated
 constexpr qint64 MinimumPlayedMs = 2000;
 // The most episodes of one series the player lists to step through
@@ -609,6 +627,26 @@ PlayerController::PlayerController(JellyfinClient &client, PlayQueue &queue,
     });
     connect(&m_engine, &PlaybackEngine::videoParamsChanged, &m_mpvSettings,
             &PlayerSettings::applyLoadedAspect);
+    connect(&m_engine, &PlaybackEngine::videoSizeChanged, this, [this] {
+        // dwidth and dheight arrive one after the other: the aspect is read once both are in, not from a mix of the old size and the new
+        if (m_videoAspectPending)
+            return;
+        m_videoAspectPending = true;
+        QMetaObject::invokeMethod(
+            this,
+            [this] {
+                m_videoAspectPending = false;
+                const QVariantMap facts = m_engine.videoFacts();
+                const double width = facts.value(QStringLiteral("videoWidth")).toDouble();
+                const double height = facts.value(QStringLiteral("videoHeight")).toDouble();
+                const qreal aspect = width > 0 && height > 0 ? width / height : 0;
+                if (qFuzzyCompare(aspect + 1, m_videoAspect + 1))
+                    return;
+                m_videoAspect = aspect;
+                Q_EMIT videoAspectChanged();
+            },
+            Qt::QueuedConnection);
+    });
     connect(&m_engine, &PlaybackEngine::streamEnded, this, &PlayerController::onEnd);
     connect(&m_clipExporter, &ClipExporter::progress, this, [this](double fraction) {
         m_clipProgress = fraction;
@@ -4045,9 +4083,6 @@ void PlayerController::saveMemory()
 {
     if (m_memoryFile.isEmpty())
         return;
-    // Past its cap the track memory starts again, on disk too
-    if (m_memory.size() > MaxRememberedItems)
-        m_memory = {};
     const QByteArray bytes = QJsonDocument(QJsonObject{{QStringLiteral("version"), 1},
                                                        {QStringLiteral("tracks"), m_memory},
                                                        {QStringLiteral("queue"), m_queueMemory}})
@@ -4062,11 +4097,15 @@ void PlayerController::rememberTracks(int audioId, int subtitleId, int secondary
     if (m_itemId.isEmpty() || m_memoryFile.isEmpty() || m_client.serverId().isEmpty()
         || m_client.userId().isEmpty())
         return;
-    QJsonObject entry{{QStringLiteral("audio"), audioId}, {QStringLiteral("subtitle"), subtitleId}};
+    QJsonObject entry{{QStringLiteral("audio"), audioId},
+                      {QStringLiteral("subtitle"), subtitleId},
+                      {QStringLiteral("at"), QDateTime::currentMSecsSinceEpoch()}};
     // Absent for none: a track's mpv id means nothing once the file is replaced
     if (secondaryId > 0)
         entry.insert(QStringLiteral("subtitle2"), secondaryId);
-    m_memory.insert(memoryKey(), entry);
+    const QString key = memoryKey();
+    m_memory.insert(key, entry);
+    evictOldestChoices(m_memory, key);
     saveMemory();
 }
 void PlayerController::restoreTracks()

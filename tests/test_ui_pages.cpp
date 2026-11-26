@@ -5,6 +5,7 @@
 #include "FakeJellyfin.h"
 #include "MemoryTokenStore.h"
 
+#include "app/BlurHashImageProvider.h"
 #include "app/ConnectionController.h"
 #include "app/ImageNetworkFactory.h"
 #include "app/PipSurface.h"
@@ -28,6 +29,7 @@
 #include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
+#include <QFontDatabase>
 #include <QGuiApplication>
 #include <QImage>
 #include <QJSValue>
@@ -103,6 +105,8 @@ const QStringList kKnownNoise = {
     QStringLiteral("QUnifiedTimer::stopAnimationDriver: driver is not running"),
     // The offscreen platform has no window stacking: the return from picture in picture raises the main window
     QStringLiteral("This plugin does not support raise()"),
+    // The offscreen platform cannot hand size hints on: the picture-in-picture window's minimum height follows the video's shape
+    QStringLiteral("This plugin does not support propagateSizeHints()"),
     // The thumbnails of the offers on the online images page are provider URLs (the fixture's): a test has no provider to answer them, and the image reports the failure whatever it is (no network, or the real site's 404)
     QStringLiteral("QQuickImage: Error transferring https://"),
     // KIconTheme looks for the compiled breeze-icons resource the first time the desktop style draws an icon; inferred: the Fedora build image has no such resource file and the icons come from /usr/share/icons/breeze
@@ -248,6 +252,7 @@ struct Ui {
         // The Favorites row is off here so that the rows and the Items requests stay as the other tests count them; the tests of the row switch it on
         settings.setValue(QStringLiteral("library"), QStringLiteral("home.favorites"), false);
         engine.setNetworkAccessManagerFactory(&imageFactory);
+        engine.addImageProvider(QStringLiteral("blurhash"), new Kinefin::BlurHashImageProvider);
         KLocalization::setupLocalizedContext(&engine);
         engine.setInitialProperties(
             {{QStringLiteral("connection"), QVariant::fromValue(&controller)},
@@ -379,15 +384,23 @@ struct Ui {
     // Scrolls the page so the item sits a little under the top of the view, then clicks it
     void revealAndClick(QQuickItem *page, QQuickItem *target)
     {
+        // A click that worked may take the page away with the target: a later turn finds nothing to reveal
+        const QPointer<QQuickItem> pageGuard(page);
+        const QPointer<QQuickItem> targetGuard(target);
         auto *flickable = page->property("flickable").value<QQuickItem *>();
         // The Settings page scrolls its form in a plain scroll view and has no such property
         if (!flickable)
             flickable = enclosingFlickable(target);
+        if (!flickable)
+            return;
         const qreal itemTop = target->mapToScene(QPointF(0, 0)).y();
         const qreal viewTop = flickable->mapToScene(QPointF(0, 0)).y();
         flickable->setProperty("contentY",
                                flickable->property("contentY").toReal() + itemTop - viewTop - 100);
         QTest::qWait(100);
+        // The click waits for the column to settle too, and the layout may move meanwhile: settle first, so the position checked is the one clicked
+        if (!qWaitForScaled([this] { return columnSettled(); }, 1000) || !pageGuard || !targetGuard)
+            return;
         // Under load the layout may still move after the reveal: a target outside the window gets no
         // click (Qt would log the dropped event), the caller tries again
         const QPointF center =
@@ -398,16 +411,19 @@ struct Ui {
         clickCenter(target);
     }
 
-    // Reveals and clicks again until `done` holds: under load the layout may still move after the first reveal and the click lands beside its target
+    // Reveals and clicks again until `done` holds: under load the layout may still move after the first reveal and the click lands beside its target. A click that worked may take the target away while the page still leaves: then only `done` is waited for
     bool revealAndClickUntil(QQuickItem *page, QQuickItem *target,
                              const std::function<bool()> &done, int timeoutMs = 8000)
     {
+        const QPointer<QQuickItem> pageGuard(page);
+        const QPointer<QQuickItem> targetGuard(target);
         QElapsedTimer timer;
         timer.start();
         while (!done()) {
             if (timer.elapsed() > scaled(timeoutMs))
                 return false;
-            revealAndClick(page, target);
+            if (pageGuard && targetGuard)
+                revealAndClick(pageGuard, targetGuard);
             QTest::qWait(250);
         }
         return true;
@@ -1153,6 +1169,14 @@ QQuickItem *openPreferences(Ui &ui)
                : nullptr;
 }
 
+// True for an instance of the app's one drop-down, ChoiceBox (its type is named by the QML file)
+bool isChoiceBox(const QQuickItem *item)
+{
+    return item
+           && QString::fromLatin1(item->metaObject()->className())
+                  .contains(QLatin1String("ChoiceBox"));
+}
+
 QQuickItem *comboBoxIn(QQuickItem *root)
 {
     for (QQuickItem *candidate : allItems(root)) {
@@ -1760,6 +1784,33 @@ qreal gridUnitOf(const Ui &ui)
 QRectF sceneRect(const QQuickItem *item)
 {
     return item->mapRectToScene(QRectF(0, 0, item->width(), item->height()));
+}
+
+// The background item of a control: for a button of the bars, its box
+QQuickItem *backgroundOf(const QQuickItem *control)
+{
+    return control->property("background").value<QQuickItem *>();
+}
+
+// Empty when `box` is drawn as a box of the bars (OsdBox): a rounded rectangle in the OSD's background colour a little see-through, outlined by one pixel at about a fifth of the opacity, with no gradient; else what is wrong with it
+QString osdBoxProblem(QQuickItem *box)
+{
+    if (!box || !box->inherits("QQuickRectangle"))
+        return QStringLiteral("it is no rectangle");
+    if (box->property("radius").toReal() <= 0)
+        return QStringLiteral("it is not rounded");
+    if (qAbs(box->property("color").value<QColor>().alphaF() - 0.9) >= 0.02)
+        return QStringLiteral("it is not about 0.9 opaque");
+    if (QQmlProperty(box, QStringLiteral("border.width")).read().toInt() != 1)
+        return QStringLiteral("its outline is not one pixel wide");
+    const QColor outline = QQmlProperty(box, QStringLiteral("border.color")).read().value<QColor>();
+    if (qAbs(outline.alphaF() - 0.2) >= 0.02)
+        return QStringLiteral("its outline is not about 0.2 opaque");
+    for (const QObject *child : box->children()) {
+        if (child->inherits("QQuickGradient"))
+            return QStringLiteral("it has a gradient");
+    }
+    return {};
 }
 
 // The FormCards showing under root (a FormHeader has a maximum width too, but no delegates); the item spans the space its parent gives it, the card surface is inside
@@ -2399,6 +2450,7 @@ class PlayerStub : public QObject {
     Q_PROPERTY(bool localPlayback MEMBER localPlayback NOTIFY changed)
     Q_PROPERTY(QObject *cast MEMBER cast NOTIFY changed)
     Q_PROPERTY(QString aspectMode MEMBER aspectMode NOTIFY changed)
+    Q_PROPERTY(double videoAspect MEMBER videoAspect NOTIFY changed)
     Q_PROPERTY(bool nightMode MEMBER nightMode NOTIFY changed)
     Q_PROPERTY(QString clipLine MEMBER clipLine NOTIFY changed)
     Q_PROPERTY(QString clipReason MEMBER clipReason NOTIFY changed)
@@ -2741,6 +2793,7 @@ class PlayerStub : public QObject {
     bool castRefused = false;
     QObject *cast = nullptr;
     QString aspectMode = QStringLiteral("normal");
+    double videoAspect = 0;
     bool nightMode = false;
     QString clipLine;
     QString clipReason;
@@ -3227,8 +3280,8 @@ bool clickPictureInPictureControl(QQuickWindow *pip, const QString &objectName)
             return button && button->isVisible() && button->isEnabled();
         }))
         return false;
-    const QQuickItem *scrim = pictureInPictureItem(pip, QStringLiteral("pictureInPictureScrim"));
-    if (!scrim || !qWaitForScaled([&] { return scrim->opacity() == 1.0; }))
+    const QQuickItem *osd = pictureInPictureItem(pip, QStringLiteral("pictureInPictureOsd"));
+    if (!osd || !qWaitForScaled([&] { return osd->opacity() == 1.0; }))
         return false;
     QTest::mouseClick(
         pip, Qt::LeftButton, Qt::NoModifier,
@@ -3559,6 +3612,56 @@ bool confirmReplacing(Ui &ui, qsizetype downloadsBefore = 0)
     });
     return confirm && ui.server.remoteImageDownloads.size() == downloadsBefore
            && QMetaObject::invokeMethod(confirm, "trigger");
+}
+
+// The served item as the record of a download that the fake's Download route answers in full: that route sends 64 KiB
+void serveDownloadable(Ui &ui, const QString &id)
+{
+    QJsonObject item = QJsonDocument::fromJson(ui.server.itemsById.value(id)).object();
+    QJsonArray sources = item.value(QStringLiteral("MediaSources")).toArray();
+    QJsonObject source = sources.first().toObject();
+    source.insert(QStringLiteral("Size"), 64 * 1024);
+    source.insert(QStringLiteral("ETag"), QStringLiteral("etag-1"));
+    sources.replace(0, source);
+    item.insert(QStringLiteral("MediaSources"), sources);
+    ui.server.itemsById.insert(id, QJsonDocument(item).toJson(QJsonDocument::Compact));
+}
+
+// What is wrong with a row of the Downloads page: a button outside the row's content, two buttons or a button and the status line on top of each other, or a status line with no room left. Empty when all is well
+QString downloadRowProblem(const Ui &ui, const QString &id)
+{
+    const QQuickItem *row = ui.item(QStringLiteral("downloadRow_") + id);
+    const QQuickItem *status = ui.item(QStringLiteral("downloadStatus_") + id);
+    if (!row || !status || !status->isVisible())
+        return QStringLiteral("the row or its status line is not there");
+    const qreal content = sceneRect(row).right() - row->property("rightPadding").toReal();
+    QList<QRectF> buttons;
+    for (const char *name :
+         {"downloadPlay_", "downloadExport_", "downloadCancel_", "downloadDelete_"}) {
+        const QQuickItem *button = ui.item(QString::fromLatin1(name) + id);
+        if (button && button->isVisible())
+            buttons << sceneRect(button);
+    }
+    if (buttons.isEmpty())
+        return QStringLiteral("the row has no button");
+    std::sort(buttons.begin(), buttons.end(),
+              [](const QRectF &a, const QRectF &b) { return a.left() < b.left(); });
+    if (buttons.last().right() > content + 0.5)
+        return QStringLiteral("a button ends at %1, the content of the row at %2")
+            .arg(buttons.last().right())
+            .arg(content);
+    for (qsizetype i = 1; i < buttons.size(); ++i) {
+        if (buttons.at(i).left() < buttons.at(i - 1).right() - 0.5)
+            return QStringLiteral("two buttons overlap");
+    }
+    const QRectF line = sceneRect(status);
+    if (line.right() > buttons.first().left() + 0.5)
+        return QStringLiteral("the status line ends at %1, under the first button at %2")
+            .arg(line.right())
+            .arg(buttons.first().left());
+    if (line.width() < 8 * gridUnitOf(ui))
+        return QStringLiteral("the status line is %1 px wide").arg(line.width());
+    return {};
 }
 
 } // namespace
@@ -5058,6 +5161,68 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(ui.item(QStringLiteral("itemDetailsPage")) == nullptr);
     }
 
+    // The backdrop of a details page is held by a blurred picture from the BlurHash the server sent until the image is ready, and the photos of the cast ask the server only once the cover has come or has failed
+    void theBackdropHasABlurredPlaceholderAndTheCastPhotosFollowIt_data()
+    {
+        QTest::addColumn<int>("imageStatus");
+        QTest::newRow("the image comes") << 200;
+        QTest::newRow("the image fails") << 404;
+    }
+
+    void theBackdropHasABlurredPlaceholderAndTheCastPhotosFollowIt()
+    {
+        QFETCH(int, imageStatus);
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QJsonObject movie = QJsonDocument::fromJson(ui.server.itemsById.value(kMovieId)).object();
+        const QString tag =
+            movie.value(QStringLiteral("BackdropImageTags")).toArray().first().toString();
+        // 1 by 1 component, a dark grey
+        movie.insert(QStringLiteral("ImageBlurHashes"),
+                     QJsonObject{{QStringLiteral("Backdrop"),
+                                  QJsonObject{{tag, QStringLiteral("00~~~~")}}}});
+        ui.server.itemsById.insert(kMovieId, QJsonDocument(movie).toJson(QJsonDocument::Compact));
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QTRY_VERIFY(ui.item(QStringLiteral("libraryCard_") + kMovies) != nullptr);
+        QVERIFY(ui.openLibraryTile(kMovies));
+        QQuickItem *card = nullptr;
+        QTRY_VERIFY((card = Ui::itemIn(ui.item(QStringLiteral("libraryPage")),
+                                       QStringLiteral("mediaCard_") + kMovieId))
+                    != nullptr);
+        // The cards are drawn: from here the server answers the images of the page as the case says
+        ui.server.imageStatus = imageStatus;
+        ui.clickCenter(card);
+        QTRY_VERIFY(ui.item(QStringLiteral("itemDetailsPage")) != nullptr);
+        QQuickItem *backdrop = nullptr;
+        QTRY_VERIFY((backdrop = ui.item(QStringLiteral("detailsBackdrop"))) != nullptr);
+        QQuickItem *placeholder = nullptr;
+        QTRY_VERIFY(([&] {
+            for (QQuickItem *candidate : allItems(backdrop)) {
+                if (candidate->inherits("QQuickImage")
+                    && candidate->property("source").toUrl().toString().startsWith(
+                        QStringLiteral("image://blurhash/")))
+                    placeholder = candidate;
+            }
+            return placeholder != nullptr;
+        }()));
+        // Image.Ready
+        QTRY_COMPARE(placeholder->property("status").toInt(), 1);
+        // The image decides whether the placeholder stays: it fades out under a backdrop that came and holds the place of one that did not
+        if (imageStatus == 200)
+            QTRY_VERIFY(placeholder->property("opacity").toReal() < 0.01);
+        else
+            QVERIFY(placeholder->property("opacity").toReal() > 0.99);
+        // The cast photos are asked for after the cover has come or given up: at the end the page has asked for more than the cover
+        QTRY_VERIFY(ui.server.imageRequests >= 2);
+        QTRY_VERIFY(ui.item(QStringLiteral("itemDetailsPage"))->property("coverSettled").toBool());
+        // An image that the server refuses is reported by QML, which is what the case is about
+        QMutexLocker locker(&gWarningsMutex);
+        gWarnings.removeIf([](const QString &warning) {
+            return warning.contains(QStringLiteral("Error transferring http://127.0.0.1"));
+        });
+    }
+
     void aCastCardOpensThePersonPage()
     {
         Ui ui(m_home->path());
@@ -5578,6 +5743,57 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(ui.showsText(QStringLiteral("Abyss Station")));
         QTRY_VERIFY(ui.showsText(QStringLiteral("28 min"), false));
         QTRY_VERIFY(ui.showsText(QStringLiteral("S2:E6"), false));
+    }
+
+    // The series reads at least as large as what it holds: over an episode, whose name is the largest, a step above the text and bold; over a season, as large as the season's name
+    void theSeriesNameIsAsLargeAsTheSeasonAndBold_data()
+    {
+        QTest::addColumn<QString>("itemId");
+        QTest::addColumn<bool>("episode");
+        QTest::newRow("an episode") << kEpisodeId << true;
+        QTest::newRow("a season") << kSeasonId << false;
+    }
+
+    void theSeriesNameIsAsLargeAsTheSeasonAndBold()
+    {
+        QFETCH(QString, itemId);
+        QFETCH(bool, episode);
+        Ui ui(m_home->path());
+        ui.serveShow();
+        QVERIFY(ui.load());
+        ui.window->setProperty("requestedItemId", itemId);
+        QVERIFY(ui.signIn());
+        QQuickItem *series = nullptr;
+        QTRY_VERIFY((series = Ui::itemIn(ui.currentDetails(), QStringLiteral("seriesLink")))
+                    != nullptr);
+        QTRY_VERIFY(series->isVisible());
+        QQuickItem *title = Ui::itemIn(ui.currentDetails(), QStringLiteral("detailsTitle"));
+        QVERIFY(title);
+        const QFont seriesFont = series->property("font").value<QFont>();
+        const QFont titleFont = title->property("font").value<QFont>();
+        const qreal bodyPoints = QFontDatabase::systemFont(QFontDatabase::GeneralFont).pointSizeF();
+        QVERIFY2(seriesFont.weight() >= QFont::DemiBold,
+                 qPrintable(QString::number(int(seriesFont.weight()))));
+        if (episode) {
+            // Larger than the text and smaller than the episode's name
+            QVERIFY2(seriesFont.pointSizeF() > bodyPoints * 1.05,
+                     qPrintable(QString::number(seriesFont.pointSizeF())));
+            QVERIFY(seriesFont.pointSizeF() < titleFont.pointSizeF());
+            // The season follows it in the same size, with a mark between the two, as the path reads
+            QQuickItem *season = Ui::itemIn(ui.currentDetails(), QStringLiteral("seasonLink"));
+            QQuickItem *separator =
+                Ui::itemIn(ui.currentDetails(), QStringLiteral("contextSeparator"));
+            QVERIFY(season && separator);
+            QTRY_VERIFY(season->isVisible() && separator->isVisible());
+            QCOMPARE(season->property("font").value<QFont>().pointSizeF(), seriesFont.pointSizeF());
+            QVERIFY(sceneRect(series).right() <= sceneRect(separator).left() + 1);
+            QVERIFY(sceneRect(separator).right() <= sceneRect(season).left() + 1);
+        } else {
+            QVERIFY2(seriesFont.pointSizeF() >= titleFont.pointSizeF() - 0.01,
+                     qPrintable(QStringLiteral("%1 against %2")
+                                    .arg(seriesFont.pointSizeF())
+                                    .arg(titleFont.pointSizeF())));
+        }
     }
 
     void aSeriesLinkOpensTheSeriesWhenItIsNotBelow()
@@ -8995,6 +9211,341 @@ class TestUiPages : public QObject {
                      qPrintable(problems.join(QLatin1Char('\n'))));
     }
 
+    // The drawer of a Compact window holds what the rail holds, as rows with the labels beside the icons and no title of its own: the sections, then Search, the queue with its count and the user; the header keeps its own search and user buttons
+    void theCompactDrawerHasTheRowsOfTheRailAndNoTitle()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(ui.signInAsUser(QStringLiteral("Alice")));
+        QVERIFY(ui.opensWindowOfWidth(ui.window->property("compactLimit").toInt() - 40));
+        QTRY_VERIFY(ui.window->property("compactHeader").toBool());
+        QTRY_VERIFY(ui.item(QStringLiteral("headerSearchButton"))->isVisible());
+        QVERIFY(ui.item(QStringLiteral("mainMenuButton"))->isVisible());
+        QVERIFY(ui.openNavigationDrawer());
+        QTRY_COMPARE(ui.tabButtons().size(), 8);
+        const auto top = [](const QQuickItem *item) { return item->mapToScene(QPointF(0, 0)).y(); };
+        // No title row: the first section stands above where the height of the header would put it, and no label shows the name of the application
+        QVERIFY2(top(ui.tabButtons().constFirst()) < ui.headerHeight(),
+                 qPrintable(QString::number(top(ui.tabButtons().constFirst()))));
+        const QString application = QCoreApplication::applicationName();
+        QVERIFY(!application.isEmpty());
+        for (QQuickItem *label : ui.itemsWithText(application))
+            QVERIFY2(!label->isVisible(), qPrintable(Ui::describe(label)));
+        QQuickItem *search = ui.item(QStringLiteral("drawerSearch"));
+        QQuickItem *queue = ui.item(QStringLiteral("drawerQueue"));
+        QQuickItem *group = ui.item(QStringLiteral("drawerSyncPlayGroup"));
+        QQuickItem *user = ui.item(QStringLiteral("drawerUser"));
+        QVERIFY(search && queue && group && user);
+        QVERIFY(search->isVisible() && queue->isVisible() && user->isVisible());
+        // Not in a SyncPlay group: no row for it
+        QVERIFY(!group->isVisible());
+        QCOMPARE(search->property("text").toString(), QStringLiteral("Search"));
+        QCOMPARE(queue->property("text").toString(), QStringLiteral("Queue"));
+        // After the sections, in the order of the rail, each as tall and as wide as a section's row and inside the drawer
+        QQuickItem *downloads = ui.sectionEntry(QStringLiteral("downloads"));
+        QVERIFY(downloads);
+        QVERIFY(top(downloads) < top(search) && top(search) < top(queue) && top(queue) < top(user));
+        const QObject *drawer = ui.popup(QStringLiteral("navigationDrawer"));
+        QVERIFY(drawer);
+        const qreal drawerWidth = drawer->property("width").toReal();
+        for (const QQuickItem *row : {search, queue, user}) {
+            QCOMPARE(row->height(), downloads->height());
+            QVERIFY2(qAbs(row->width() - downloads->width()) < 1, qPrintable(Ui::describe(row)));
+            const QRectF rect = row->mapRectToScene(row->boundingRect());
+            QVERIFY2(rect.left() >= 0 && rect.right() <= drawerWidth + 0.5,
+                     qPrintable(Ui::describe(row)));
+        }
+        // The count of the queue on its row, as the rail shows it, and in its accessible name
+        const QQuickItem *badge = ui.item(QStringLiteral("drawerQueueBadge"));
+        QVERIFY(badge && !badge->isVisible());
+        QCOMPARE(accessibleNameOf(queue), QStringLiteral("Queue"));
+        ui.fillQueue();
+        QTRY_COMPARE(ui.controller.queue()->count(), 5);
+        QTRY_VERIFY(badge->isVisible());
+        QCOMPARE(badge->property("count").toInt(), 5);
+        QCOMPARE(accessibleNameOf(queue), QStringLiteral("Queue, 5 items"));
+        // The user: the avatar and the name, and the accessible name of the header's button
+        QTRY_COMPARE(user->property("text").toString(), QStringLiteral("Alice"));
+        QTRY_COMPARE(accessibleNameOf(user), QStringLiteral("Main Menu, signed in as Alice"));
+        const QQuickItem *avatar = nullptr;
+        QTRY_VERIFY((avatar = ui.item(QStringLiteral("drawerUserAvatar"))) != nullptr
+                    && avatar->isVisible());
+        QTRY_COMPARE(avatar->property("name").toString(), QStringLiteral("Alice"));
+        // The row opens a menu, which the arrow at its end says
+        const QQuickItem *chevron = ui.item(QStringLiteral("drawerUserChevron"));
+        QVERIFY(chevron && chevron->isVisible());
+        const auto arrowEndsTheRow = [&] {
+            const QRectF row = user->mapRectToScene(user->boundingRect());
+            const QRectF arrow = chevron->mapRectToScene(chevron->boundingRect());
+            return row.contains(arrow) && arrow.center().x() > row.center().x();
+        };
+        QTRY_VERIFY(arrowEndsTheRow());
+        // Down and Up walk the sections and the foot as one list, skipping the group row while it is hidden
+        downloads->forceActiveFocus(Qt::TabFocusReason);
+        QTRY_VERIFY(downloads->hasActiveFocus());
+        for (const QQuickItem *next : {search, queue, user}) {
+            QTest::keyClick(ui.window, Qt::Key_Down);
+            QTRY_VERIFY(next->hasActiveFocus());
+        }
+        QTest::keyClick(ui.window, Qt::Key_Down);
+        QVERIFY(user->hasActiveFocus());
+        for (const QQuickItem *previous : {queue, search, downloads}) {
+            QTest::keyClick(ui.window, Qt::Key_Up);
+            QTRY_VERIFY(previous->hasActiveFocus());
+        }
+    }
+
+    // Search, the queue and the user work from the drawer as they do from the rail and the header, and each closes the drawer
+    void theCompactDrawerRowsOpenSearchTheQueueAndTheMainMenu()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(ui.signInAsUser(QStringLiteral("Alice")));
+        QVERIFY(ui.opensWindowOfWidth(ui.window->property("compactLimit").toInt() - 40));
+        QTRY_VERIFY(ui.window->property("compactHeader").toBool());
+        QObject *drawer = ui.popup(QStringLiteral("navigationDrawer"));
+        QVERIFY(drawer);
+        // Search opens the popup that Ctrl+F opens, and its field takes the keyboard from the drawer that is going
+        QVERIFY(ui.openNavigationDrawer());
+        ui.clickCenter(ui.item(QStringLiteral("drawerSearch")));
+        QTRY_VERIFY(!drawer->property("visible").toBool());
+        QTRY_VERIFY(ui.searchPopupOpen());
+        QTRY_VERIFY(ui.item(QStringLiteral("searchField"))
+                    && ui.item(QStringLiteral("searchField"))->hasActiveFocus());
+        QVERIFY(ui.closeSearchPopup());
+        // The queue opens its page
+        QVERIFY(ui.openNavigationDrawer());
+        ui.clickCenter(ui.item(QStringLiteral("drawerQueue")));
+        QTRY_VERIFY(!drawer->property("visible").toBool());
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("queuePage"));
+        // Its row marks the page while it shows
+        QVERIFY(ui.openNavigationDrawer());
+        QTRY_VERIFY(ui.item(QStringLiteral("drawerQueue"))->property("marked").toBool());
+        // The user opens the main menu of the header, under the header's button
+        ui.clickCenter(ui.item(QStringLiteral("drawerUser")));
+        QTRY_VERIFY(!drawer->property("visible").toBool());
+        QObject *menu = ui.popup(QStringLiteral("mainMenu"));
+        QVERIFY(menu);
+        QTRY_VERIFY(menu->property("opened").toBool());
+        QVERIFY(ui.shownMenuNames(QStringLiteral("mainMenu"))
+                    .contains(QStringLiteral("menuSettingsItem")));
+        const QQuickItem *button = ui.item(QStringLiteral("mainMenuButton"));
+        QVERIFY(button && button->isVisible());
+        QTRY_VERIFY2(popupProblem(menu, button, ui.window, false).isEmpty(),
+                     qPrintable(popupProblem(menu, button, ui.window, false)));
+        QVERIFY(Ui::closeMenu(menu));
+    }
+
+    // The group has a row only while one is joined: it is named as the main menu names it, says in words under the label when the playback does not keep in step or the group waits (the label stays at full strength, the icon dims, the dot shows as the rail's button shows it), ends with an arrow, and its menu hangs from the row while the drawer stays open
+    void theCompactDrawerShowsTheSyncPlayGroupWhileOneIsJoined()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(ui.signInAsUser(QStringLiteral("Alice")));
+        QVERIFY(ui.opensWindowOfWidth(ui.window->property("compactLimit").toInt() - 40));
+        QTRY_VERIFY(ui.window->property("compactHeader").toBool());
+        QObject *drawer = ui.popup(QStringLiteral("navigationDrawer"));
+        QVERIFY(drawer);
+        QVERIFY(ui.openNavigationDrawer());
+        QQuickItem *group = ui.item(QStringLiteral("drawerSyncPlayGroup"));
+        QQuickItem *dot = ui.item(QStringLiteral("drawerSyncPlayWaitingBadge"));
+        QVERIFY(group && dot);
+        QVERIFY(!group->isVisible());
+        QTRY_VERIFY(ui.syncPlay.available() && ui.server.lastConnection());
+        QVERIFY(ui.syncPlay.joinGroup(kSyncPlayGroup));
+        const QStringList people{QStringLiteral("Alice"), QStringLiteral("Bob")};
+        ui.server.lastConnection()->sendText(syncPlayUpdate(
+            QStringLiteral("GroupJoined"),
+            QJsonObject{{QStringLiteral("GroupId"), kSyncPlayGroup},
+                        {QStringLiteral("GroupName"), QStringLiteral("<b>Night</b> & day")},
+                        {QStringLiteral("State"), QStringLiteral("Idle")},
+                        {QStringLiteral("Participants"), QJsonArray::fromStringList(people)},
+                        {QStringLiteral("LastUpdatedAt"),
+                         QStringLiteral("2026-11-16T16:37:42.0164616Z")}}));
+        // Between the queue and the user, with the label of the rail and the words of its tooltip as the accessible name
+        QTRY_VERIFY(group->isVisible());
+        const auto top = [](const QQuickItem *item) { return item->mapToScene(QPointF(0, 0)).y(); };
+        QTRY_VERIFY(top(ui.item(QStringLiteral("drawerQueue"))) < top(group));
+        QTRY_VERIFY(top(group) < top(ui.item(QStringLiteral("drawerUser"))));
+        QCOMPARE(group->property("text").toString(), QStringLiteral("SyncPlay Group"));
+        QCOMPARE(group->property("summary").toString(),
+                 QStringLiteral("SyncPlay group <b>Night</b> & day: 2 people"));
+        QCOMPARE(accessibleNameOf(group), group->property("summary").toString());
+        QVERIFY(!dot->isVisible());
+        // The label shows the name, with no line under it while the playback keeps in step, and an arrow ends the row at the height of the others
+        QQuickItem *label = ui.item(QStringLiteral("drawerSyncPlayGroupLabel"));
+        QQuickItem *state = ui.item(QStringLiteral("drawerSyncPlayGroupState"));
+        const QQuickItem *chevron = ui.item(QStringLiteral("drawerSyncPlayGroupChevron"));
+        QVERIFY(label && state && chevron);
+        QCOMPARE(label->property("text").toString(), QStringLiteral("SyncPlay Group"));
+        QVERIFY(label->isVisible());
+        QVERIFY(!state->isVisible());
+        QVERIFY(chevron->isVisible());
+        const auto arrowEndsTheRow = [&] {
+            const QRectF row = group->mapRectToScene(group->boundingRect());
+            const QRectF arrow = chevron->mapRectToScene(chevron->boundingRect());
+            return row.contains(arrow) && arrow.center().x() > row.center().x();
+        };
+        QTRY_VERIFY(arrowEndsTheRow());
+        QCOMPARE(group->height(), ui.sectionEntry(QStringLiteral("downloads"))->height());
+        // The label is never dimmed: not by the row, and not by itself
+        const auto opacityOf = [group](const QQuickItem *item) {
+            qreal opacity = 1;
+            for (; item; item = item->parentItem()) {
+                opacity *= item->opacity();
+                if (item == group)
+                    break;
+            }
+            return opacity;
+        };
+        QCOMPARE(opacityOf(label), 1.0);
+        QCOMPARE(label->property("color").value<QColor>(),
+                 group->property("foreground").value<QColor>());
+        QCOMPARE(group->property("iconOpacity").toDouble(), 1.0);
+        // The group waits: the words show under the label, inside the row, and the dot shows on the icon
+        ui.server.lastConnection()->sendText(
+            syncPlayUpdate(QStringLiteral("StateUpdate"),
+                           QJsonObject{{QStringLiteral("State"), QStringLiteral("Waiting")},
+                                       {QStringLiteral("Reason"), QStringLiteral("Buffer")}}));
+        QTRY_VERIFY(dot->isVisible());
+        QTRY_VERIFY(state->isVisible());
+        QCOMPARE(state->property("text").toString(), QStringLiteral("Waiting for others"));
+        QCOMPARE(state->property("textFormat").toInt(), int(Qt::PlainText));
+        QVERIFY(
+            group->property("summary").toString().endsWith(QStringLiteral("Waiting for others")));
+        const auto fitsInTheRow = [&] {
+            const QRectF row =
+                group->mapRectToScene(group->boundingRect()).adjusted(-0.5, -0.5, 0.5, 0.5);
+            const QRectF under = state->mapRectToScene(state->boundingRect());
+            const QRectF named = label->mapRectToScene(label->boundingRect());
+            return row.contains(under) && row.contains(named)
+                   && named.bottom() <= under.top() + 0.5;
+        };
+        QTRY_VERIFY(fitsInTheRow());
+        QCOMPARE(group->height(), ui.sectionEntry(QStringLiteral("downloads"))->height());
+        QCOMPARE(opacityOf(label), 1.0);
+        // Not following: the words change, the dot goes, the icon dims and the label stays at full strength
+        ui.syncPlay.stopFollowing();
+        QTRY_COMPARE(state->property("text").toString(), QStringLiteral("Not following"));
+        QVERIFY(state->isVisible());
+        QTRY_VERIFY(!dot->isVisible());
+        QVERIFY(group->property("iconOpacity").toDouble() < 1.0);
+        QVERIFY(group->property("summary").toString().endsWith(QStringLiteral("Not following")));
+        QTRY_VERIFY(fitsInTheRow());
+        QCOMPARE(group->height(), ui.sectionEntry(QStringLiteral("downloads"))->height());
+        QCOMPARE(opacityOf(label), 1.0);
+        QCOMPARE(opacityOf(state), 1.0);
+        ui.syncPlay.resumeFollowing();
+        QTRY_COMPARE(group->property("iconOpacity").toDouble(), 1.0);
+        // The row opens the menu of the group beside it, and the drawer stays
+        QObject *menu = ui.popup(QStringLiteral("syncPlayGroupMenu"));
+        QVERIFY(menu);
+        ui.clickCenter(group);
+        QTRY_VERIFY(menu->property("opened").toBool());
+        QTRY_VERIFY(group->property("opened").toBool());
+        QVERIFY(drawer->property("opened").toBool());
+        QTRY_VERIFY2(popupProblem(menu, group, ui.window, false, true).isEmpty(),
+                     qPrintable(popupProblem(menu, group, ui.window, false, true)));
+        // Leave Group leaves, and the row goes
+        QQuickItem *leave = nullptr;
+        for (QQuickItem *entry : ui.menuItems(QStringLiteral("syncPlayGroupMenu"))) {
+            if (entry->objectName() == QLatin1String("syncPlayMenuLeave"))
+                leave = entry;
+        }
+        QVERIFY(leave && QMetaObject::invokeMethod(leave, "click"));
+        QTRY_COMPARE(syncPlayRequests(ui, QStringLiteral("Leave")), 1);
+        ui.server.lastConnection()->sendText(
+            QString::fromUtf8(fixture(QStringLiteral("ws_syncplay_group_left"))));
+        QTRY_VERIFY(!group->isVisible());
+        // The menu that closed may have handed the keyboard back to the row that went: a row that shows holds it
+        const auto keyboardOnAShownRow = [&] {
+            const QQuickItem *focused = ui.window->activeFocusItem();
+            const auto *content = drawer->property("contentItem").value<QQuickItem *>();
+            return focused && focused != group && focused->isVisible() && content
+                   && content->isAncestorOf(focused);
+        };
+        QTRY_VERIFY(keyboardOnAShownRow());
+        QVERIFY(QMetaObject::invokeMethod(drawer, "close"));
+        QTRY_VERIFY(!drawer->property("visible").toBool());
+    }
+
+    // Leaving the group with the drawer open takes the row away while it holds the keyboard: the row above takes it, and Down goes on from there
+    void theCompactDrawerMovesTheKeyboardOffTheSyncPlayRowThatGoes()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(ui.signInAsUser(QStringLiteral("Alice")));
+        QVERIFY(ui.opensWindowOfWidth(ui.window->property("compactLimit").toInt() - 40));
+        QTRY_VERIFY(ui.window->property("compactHeader").toBool());
+        QVERIFY(syncPlayJoined(ui));
+        QVERIFY(ui.openNavigationDrawer());
+        QQuickItem *group = ui.item(QStringLiteral("drawerSyncPlayGroup"));
+        QQuickItem *queue = ui.item(QStringLiteral("drawerQueue"));
+        QQuickItem *user = ui.item(QStringLiteral("drawerUser"));
+        QVERIFY(group && queue && user);
+        QTRY_VERIFY(group->isVisible());
+        group->forceActiveFocus(Qt::TabFocusReason);
+        QTRY_VERIFY(group->hasActiveFocus());
+        ui.syncPlay.leaveGroup();
+        QTRY_VERIFY(!group->isVisible());
+        QTRY_VERIFY(queue->hasActiveFocus());
+        QVERIFY(!group->hasActiveFocus());
+        QTest::keyClick(ui.window, Qt::Key_Down);
+        QTRY_VERIFY(user->hasActiveFocus());
+        QTest::keyClick(ui.window, Qt::Key_Up);
+        QTRY_VERIFY(queue->hasActiveFocus());
+    }
+
+    // The sections of the drawer scroll in the smallest window as the rail's do, and the foot stays in reach below them
+    void aShortWindowScrollsTheDrawerSectionsAndKeepsTheFootInReach()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        const int width = ui.window->property("compactLimit").toInt() - 40;
+        QVERIFY(ui.opensWindowOfWidth(width));
+        const int low = ui.window->minimumHeight();
+        QVERIFY(low > 0);
+        ui.window->resize(width, low);
+        QTRY_COMPARE(ui.window->size(), QSize(width, low));
+        QTRY_VERIFY(ui.window->property("compactHeader").toBool());
+        QObject *drawer = ui.popup(QStringLiteral("navigationDrawer"));
+        QVERIFY(drawer);
+        QVERIFY(ui.openNavigationDrawer());
+        QTRY_COMPARE(ui.tabButtons().size(), 8);
+        QQuickItem *view = ui.item(QStringLiteral("drawerEntriesView"));
+        QQuickItem *bar = ui.item(QStringLiteral("drawerScrollBar"));
+        QQuickItem *last = ui.item(QStringLiteral("drawerEntry_downloads"));
+        QQuickItem *user = ui.item(QStringLiteral("drawerUser"));
+        QVERIFY(view && bar && last && user);
+        // The sections do not all fit: a bar shows, the last one is out of reach until the view moves, and the foot stands below the view inside the window
+        QTRY_VERIFY(view->property("contentHeight").toReal() > view->height() + 1);
+        QTRY_VERIFY(bar->isVisible());
+        const auto lastShown = [&] {
+            const QRectF rect = last->mapRectToItem(view, last->boundingRect());
+            return rect.bottom() <= view->height() + 0.5;
+        };
+        QVERIFY(!lastShown());
+        const QRectF viewRect = view->mapRectToScene(view->boundingRect());
+        const QRectF userRect = user->mapRectToScene(user->boundingRect());
+        QVERIFY(userRect.top() >= viewRect.bottom() - 1);
+        QVERIFY(userRect.bottom() <= ui.window->height() + 0.5);
+        // The keyboard moves down the sections and brings each one into view; the foot follows the last
+        QTRY_VERIFY(ui.sectionEntry(QStringLiteral("home"))->hasActiveFocus());
+        for (int i = 0; i < 7; ++i)
+            QTest::keyClick(ui.window, Qt::Key_Down);
+        QTRY_VERIFY(last->hasActiveFocus());
+        QTRY_VERIFY(lastShown());
+        QTest::keyClick(ui.window, Qt::Key_Down);
+        QTRY_VERIFY(ui.item(QStringLiteral("drawerSearch"))->hasActiveFocus());
+        // The section that came into view takes Return
+        QTest::keyClick(ui.window, Qt::Key_Up);
+        QTRY_VERIFY(last->hasActiveFocus());
+        QTest::keyClick(ui.window, Qt::Key_Return);
+        QTRY_COMPARE(ui.rootTab(), QStringLiteral("downloads"));
+        QTRY_VERIFY(!drawer->property("visible").toBool());
+    }
+
     void theEntriesKeepTheirGeometryWhateverSectionIsCurrent_data()
     {
         QTest::addColumn<int>("width");
@@ -9599,7 +10150,9 @@ class TestUiPages : public QObject {
         QCOMPARE(button->property("summary").toString(),
                  QStringLiteral("SyncPlay group <b>Night</b> & day: 12 people"));
         QCOMPARE(accessibleNameOf(button), button->property("summary").toString());
-        QCOMPARE(button->property("opacity").toDouble(), 1.0);
+        // The rail keeps the short label under the icon
+        QCOMPARE(button->property("text").toString(), QStringLiteral("Group"));
+        QCOMPARE(button->property("iconOpacity").toDouble(), 1.0);
         QVERIFY(!ui.item(QStringLiteral("syncPlayWaitingBadge"))->isVisible());
         // The button stands in the rail, under the queue and above the user button
         const QQuickItem *rail = ui.sidebar();
@@ -9643,11 +10196,11 @@ class TestUiPages : public QObject {
         QTRY_VERIFY2(popupProblem(menu, button, ui.window, false, true).isEmpty(),
                      qPrintable(popupProblem(menu, button, ui.window, false, true)));
 
-        // Stop Following sends what the dialog's button sends, and the button dims
+        // Stop Following sends what the dialog's button sends, and the icon of the button dims
         QVERIFY(QMetaObject::invokeMethod(named(QStringLiteral("syncPlayMenuFollow")).constFirst(),
                                           "click"));
         QTRY_COMPARE(syncPlayRequests(ui, QStringLiteral("SetIgnoreWait")), 1);
-        QTRY_VERIFY(button->property("opacity").toDouble() < 1.0);
+        QTRY_VERIFY(button->property("iconOpacity").toDouble() < 1.0);
         QVERIFY(button->property("summary").toString().endsWith(QStringLiteral("Not following")));
         QTRY_VERIFY(!menu->property("visible").toBool());
         QVERIFY(QMetaObject::invokeMethod(button, "click"));
@@ -9658,7 +10211,7 @@ class TestUiPages : public QObject {
         QVERIFY(QMetaObject::invokeMethod(named(QStringLiteral("syncPlayMenuFollow")).constFirst(),
                                           "click"));
         QTRY_COMPARE(syncPlayRequests(ui, QStringLiteral("SetIgnoreWait")), 2);
-        QTRY_COMPARE(button->property("opacity").toDouble(), 1.0);
+        QTRY_COMPARE(button->property("iconOpacity").toDouble(), 1.0);
 
         // The group waits for someone: a badge on the icon and the words in the tooltip
         ui.server.lastConnection()->sendText(
@@ -11068,26 +11621,26 @@ class TestUiPages : public QObject {
                                 .entryList(QDir::AllEntries | QDir::NoDotAndDotDot)
                                 .join(QLatin1Char(','))));
         QVERIFY(QFile::exists(host.path() + QStringLiteral("/Movies/Arcturus (2012) (2012).mkv")));
-        // The completed row has Play and one More menu; Delete Download asks first, then drops the row and the record
-        QQuickItem *more = ui.item(QStringLiteral("downloadMore_") + kMovieId);
-        QVERIFY(more && more->isVisible());
-        // At most two trailing controls: the primary action and the menu, each with a distinct name
-        QCOMPARE(ui.itemsStartingWith(QStringLiteral("downloadPlay_")).size(), 1);
-        QVERIFY(ui.itemsStartingWith(QStringLiteral("downloadRemove_")).isEmpty());
-        // In a window at its least height the menu still hangs from its button, inside the window
-        const int low = ui.window->minimumHeight();
-        ui.window->resize(1000, low);
-        QTRY_COMPARE(ui.window->height(), low);
-        ui.clickCenter(more);
+        // The completed row has Play, Export and Delete Download as buttons of their own, each named after the item, and no overflow menu; Delete Download asks first, then drops the row and the record
         QQuickItem *remove = nullptr;
         QTRY_VERIFY((remove = ui.item(QStringLiteral("downloadDelete_") + kMovieId)) != nullptr
                     && remove->isVisible());
         QVERIFY(remove->isEnabled());
-        QObject *rowMenu = remove->property("menu").value<QObject *>();
-        QVERIFY(rowMenu);
-        QTRY_VERIFY(rowMenu->property("opened").toBool());
-        QTRY_VERIFY2(popupProblem(rowMenu, more, ui.window).isEmpty(),
-                     qPrintable(popupProblem(rowMenu, more, ui.window)));
+        QQuickItem *exportButton = ui.item(QStringLiteral("downloadExport_") + kMovieId);
+        QVERIFY(exportButton && exportButton->isVisible() && exportButton->isEnabled());
+        QCOMPARE(exportButton->property("text").toString(), QStringLiteral("Export…"));
+        QCOMPARE(accessibleNameOf(exportButton), QStringLiteral("Export Arcturus (2012)"));
+        QCOMPARE(accessibleNameOf(remove), QStringLiteral("Delete Download of Arcturus (2012)"));
+        QCOMPARE(accessibleNameOf(ui.item(QStringLiteral("downloadPlay_") + kMovieId)),
+                 QStringLiteral("Play Arcturus (2012)"));
+        QVERIFY(!ui.item(QStringLiteral("downloadCancel_") + kMovieId)->isVisible());
+        QVERIFY(ui.itemsStartingWith(QStringLiteral("downloadMore_")).isEmpty());
+        QCOMPARE(ui.itemsStartingWith(QStringLiteral("downloadPlay_")).size(), 1);
+        // In a window at its least size the three buttons stay inside the row and leave its status line room
+        ui.window->resize(ui.window->minimumWidth(), ui.window->minimumHeight());
+        QTRY_COMPARE(ui.window->width(), ui.window->minimumWidth());
+        QTRY_VERIFY2(downloadRowProblem(ui, kMovieId).isEmpty(),
+                     qPrintable(downloadRowProblem(ui, kMovieId)));
         QObject *dialog =
             ui.currentDetails()->findChild<QObject *>(QStringLiteral("downloadsPageRemoveDialog"));
         QVERIFY(dialog);
@@ -11104,6 +11657,173 @@ class TestUiPages : public QObject {
         QTRY_VERIFY_WITH_TIMEOUT(ui.controller.downloads()->downloadState(kMovieId).isEmpty(),
                                  scaled(5000));
         QTRY_VERIFY(ui.showsText(QStringLiteral("No downloads yet")));
+    }
+
+    // A download the server holds back stays active: Pause and Cancel Download are buttons of the row, and Cancel Download acts without a question
+    void anActiveDownloadRowHasPauseAndACancelButtonThatActsAtOnce()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        ui.serveMovie();
+        serveDownloadable(ui, kMovieId);
+        QVERIFY(QMetaObject::invokeMethod(ui.shellAction(QStringLiteral("downloadsTabAction")),
+                                          "trigger"));
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("downloadsPage"));
+        ui.server.holdDownload = true;
+        QVERIFY(ui.controller.downloads()->downloadItem(kMovieId));
+        QQuickItem *cancel = nullptr;
+        QTRY_VERIFY_WITH_TIMEOUT((cancel = ui.item(QStringLiteral("downloadCancel_") + kMovieId))
+                                         != nullptr
+                                     && cancel->isVisible(),
+                                 scaled(10000));
+        QQuickItem *pause = ui.item(QStringLiteral("downloadPlay_") + kMovieId);
+        QVERIFY(pause && pause->isVisible());
+        QCOMPARE(pause->property("text").toString(), QStringLiteral("Pause"));
+        QCOMPARE(accessibleNameOf(pause), QStringLiteral("Pause Arcturus (2012)"));
+        QCOMPARE(cancel->property("text").toString(), QStringLiteral("Cancel Download"));
+        QCOMPARE(accessibleNameOf(cancel), QStringLiteral("Cancel Download of Arcturus (2012)"));
+        // Nothing to delete or export yet, and no overflow menu on any row
+        QVERIFY(!ui.item(QStringLiteral("downloadDelete_") + kMovieId)->isVisible());
+        QVERIFY(!ui.item(QStringLiteral("downloadExport_") + kMovieId)->isVisible());
+        QVERIFY(ui.itemsStartingWith(QStringLiteral("downloadMore_")).isEmpty());
+        // In a window at its least width the two buttons stay inside the row and leave its status line room
+        QVERIFY(ui.opensWindowOfWidth(ui.window->minimumWidth()));
+        QTRY_VERIFY2(downloadRowProblem(ui, kMovieId).isEmpty(),
+                     qPrintable(downloadRowProblem(ui, kMovieId)));
+        // Cancel Download removes the download and the row at once: the confirmation dialog stays closed
+        QObject *dialog =
+            ui.currentDetails()->findChild<QObject *>(QStringLiteral("downloadsPageRemoveDialog"));
+        QVERIFY(dialog);
+        QVERIFY(QMetaObject::invokeMethod(ui.item(QStringLiteral("downloadCancel_") + kMovieId),
+                                          "click"));
+        QTRY_VERIFY_WITH_TIMEOUT(ui.controller.downloads()->downloadState(kMovieId).isEmpty(),
+                                 scaled(5000));
+        QVERIFY(!dialog->property("visible").toBool());
+        QTRY_VERIFY(ui.showsText(QStringLiteral("No downloads yet")));
+        QVERIFY(ui.itemsStartingWith(QStringLiteral("downloadRow_")).isEmpty());
+    }
+
+    // A paused row has Resume and Delete Download as buttons of its own; Delete Download asks first
+    void aPausedDownloadRowHasADeleteButtonThatAsksFirst()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        ui.serveMovie();
+        serveDownloadable(ui, kMovieId);
+        QVERIFY(QMetaObject::invokeMethod(ui.shellAction(QStringLiteral("downloadsTabAction")),
+                                          "trigger"));
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("downloadsPage"));
+        ui.server.holdDownload = true;
+        QVERIFY(ui.controller.downloads()->downloadItem(kMovieId));
+        QQuickItem *pause = nullptr;
+        QTRY_VERIFY_WITH_TIMEOUT(
+            (pause = ui.item(QStringLiteral("downloadPlay_") + kMovieId)) != nullptr
+                && pause->isVisible()
+                && pause->property("text").toString() == QLatin1String("Pause"),
+            scaled(10000));
+        QVERIFY(QMetaObject::invokeMethod(pause, "click"));
+        QTRY_COMPARE_WITH_TIMEOUT(ui.controller.downloads()->downloadState(kMovieId),
+                                  QStringLiteral("paused"), scaled(5000));
+        QQuickItem *resume = nullptr;
+        QTRY_VERIFY((resume = ui.item(QStringLiteral("downloadPlay_") + kMovieId)) != nullptr
+                    && resume->property("text").toString() == QLatin1String("Resume"));
+        QCOMPARE(accessibleNameOf(resume), QStringLiteral("Resume Arcturus (2012)"));
+        QQuickItem *remove = nullptr;
+        QTRY_VERIFY((remove = ui.item(QStringLiteral("downloadDelete_") + kMovieId)) != nullptr
+                    && remove->isVisible());
+        QVERIFY(remove->isEnabled());
+        QCOMPARE(remove->property("text").toString(), QStringLiteral("Delete Download…"));
+        QCOMPARE(accessibleNameOf(remove), QStringLiteral("Delete Download of Arcturus (2012)"));
+        QVERIFY(!ui.item(QStringLiteral("downloadCancel_") + kMovieId)->isVisible());
+        QVERIFY(!ui.item(QStringLiteral("downloadExport_") + kMovieId)->isVisible());
+        QVERIFY(ui.itemsStartingWith(QStringLiteral("downloadMore_")).isEmpty());
+        QVERIFY(ui.opensWindowOfWidth(ui.window->minimumWidth()));
+        QTRY_VERIFY2(downloadRowProblem(ui, kMovieId).isEmpty(),
+                     qPrintable(downloadRowProblem(ui, kMovieId)));
+        // The button asks first: closing the dialog keeps the download, the confirmation removes it
+        QObject *dialog =
+            ui.currentDetails()->findChild<QObject *>(QStringLiteral("downloadsPageRemoveDialog"));
+        QVERIFY(dialog);
+        QVERIFY(QMetaObject::invokeMethod(remove, "click"));
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QVERIFY(QMetaObject::invokeMethod(dialog, "close"));
+        QTRY_VERIFY(!dialog->property("opened").toBool());
+        QCOMPARE(ui.controller.downloads()->downloadState(kMovieId), QStringLiteral("paused"));
+        QVERIFY(QMetaObject::invokeMethod(remove, "click"));
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QObject *confirm = dialog->findChild<QObject *>(QStringLiteral("removeDownloadConfirm"));
+        QVERIFY(confirm);
+        QVERIFY(QMetaObject::invokeMethod(confirm, "trigger"));
+        QTRY_VERIFY_WITH_TIMEOUT(ui.controller.downloads()->downloadState(kMovieId).isEmpty(),
+                                 scaled(5000));
+        QTRY_VERIFY(ui.showsText(QStringLiteral("No downloads yet")));
+    }
+
+    // The first heading of the list sits as far under the bar as the first row of another list, whichever section comes first; a heading under rows keeps the header's own top padding
+    void theFirstHeadingOfTheDownloadsPageSitsAsFarUnderTheBarAsAnotherPagesFirstRow()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        ui.serveMovie();
+        ui.serveShow();
+        serveDownloadable(ui, kMovieId);
+        serveDownloadable(ui, kEpisodeId);
+
+        // The room the Playlists list leaves above its first row
+        QVERIFY(QMetaObject::invokeMethod(ui.shellAction(QStringLiteral("playlistsTabAction")),
+                                          "trigger"));
+        QTRY_COMPARE(ui.rootTab(), QStringLiteral("playlists"));
+        QQuickItem *grid = nullptr;
+        QTRY_VERIFY((grid = ui.item(QStringLiteral("playlistsGrid"))) != nullptr);
+        const qreal reference = grid->property("topMargin").toReal();
+        QVERIFY(reference > 0);
+
+        QVERIFY(QMetaObject::invokeMethod(ui.shellAction(QStringLiteral("downloadsTabAction")),
+                                          "trigger"));
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("downloadsPage"));
+        QTRY_VERIFY(!ui.tabSwitching());
+        // The top of a heading under the top of the list, whose edge is the bottom of the bar
+        const auto under = [&ui](const QString &section) {
+            const QQuickItem *list = ui.item(QStringLiteral("downloadsList"));
+            const QQuickItem *header = ui.item(QStringLiteral("downloadsSection_") + section);
+            const QQuickItem *heading =
+                header ? header->property("contentItem").value<QQuickItem *>() : nullptr;
+            return list && heading ? heading->mapToItem(list, QPointF(0, 0)).y() : -1000.0;
+        };
+
+        // A finished download alone: its heading is the first
+        QVERIFY(ui.controller.downloads()->downloadItem(kEpisodeId));
+        QTRY_COMPARE_WITH_TIMEOUT(ui.controller.downloads()->downloadState(kEpisodeId),
+                                  QStringLiteral("completed"), scaled(10000));
+        QTRY_VERIFY2(qAbs(under(QStringLiteral("completed")) - reference) < 1,
+                     qPrintable(QStringLiteral("%1 px under the bar, %2 wanted")
+                                    .arg(under(QStringLiteral("completed")))
+                                    .arg(reference)));
+
+        // A running one comes first and takes that place; the finished ones are under its rows
+        ui.server.holdDownload = true;
+        QVERIFY(ui.controller.downloads()->downloadItem(kMovieId));
+        QTRY_VERIFY_WITH_TIMEOUT(ui.item(QStringLiteral("downloadsSection_active")) != nullptr,
+                                 scaled(10000));
+        QTRY_VERIFY2(qAbs(under(QStringLiteral("active")) - reference) < 1,
+                     qPrintable(QStringLiteral("%1 px under the bar, %2 wanted")
+                                    .arg(under(QStringLiteral("active")))
+                                    .arg(reference)));
+        const QQuickItem *list = ui.item(QStringLiteral("downloadsList"));
+        const QQuickItem *later = ui.item(QStringLiteral("downloadsSection_completed"));
+        const QQuickItem *rows = ui.item(QStringLiteral("downloadRow_") + kMovieId);
+        QVERIFY(list && later && rows);
+        const qreal padding = later->property("topPadding").toReal();
+        QVERIFY(padding > 0);
+        const qreal between = under(QStringLiteral("completed"))
+                              - rows->mapToItem(list, QPointF(0, rows->height())).y();
+        QVERIFY2(
+            qAbs(between - padding) < 1,
+            qPrintable(
+                QStringLiteral("%1 px above the heading, %2 wanted").arg(between).arg(padding)));
     }
 
     void aSeriesRuleFollowsTheSeriesPage()
@@ -12546,6 +13266,87 @@ class TestUiPages : public QObject {
         QTRY_COMPARE(ui.rootTab(), QStringLiteral("downloads"));
     }
 
+    void aScrollingEntriesListLeavesItsScrollBarAStripOfItsOwn_data()
+    {
+        QTest::addColumn<bool>("inDrawer");
+        QTest::newRow("rail") << false;
+        QTest::newRow("drawer") << true;
+    }
+
+    // While the entries scroll, the bar takes a strip of its own along the end side: they are narrower by its width and none, the current one included, reaches under it; in a tall window with no bar they use the whole width
+    void aScrollingEntriesListLeavesItsScrollBarAStripOfItsOwn()
+    {
+        QFETCH(bool, inDrawer);
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        const int width = inDrawer ? ui.window->property("compactLimit").toInt() - 40 : 1000;
+        QVERIFY(ui.opensWindowOfWidth(width));
+        const QString prefix = inDrawer ? QStringLiteral("drawer") : QStringLiteral("sidebar");
+        // Tall enough for every entry
+        ui.window->resize(width, 900);
+        QTRY_COMPARE(ui.window->size(), QSize(width, 900));
+        if (inDrawer) {
+            QTRY_VERIFY(ui.window->property("compactHeader").toBool());
+            QVERIFY(ui.openNavigationDrawer());
+        } else {
+            QTRY_VERIFY(ui.railShows());
+        }
+        QTRY_COMPARE(ui.tabButtons().size(), 8);
+        QQuickItem *view = ui.item(prefix + QStringLiteral("EntriesView"));
+        QQuickItem *bar = ui.item(prefix + QStringLiteral("ScrollBar"));
+        QQuickItem *home = ui.sectionEntry(QStringLiteral("home"));
+        QVERIFY(view && bar && home);
+        // The space between an entry and the two edges of the view: at the start and at the end
+        const auto gaps = [view](const QQuickItem *entry) {
+            const QRectF rect = sceneRect(entry);
+            const QRectF area = sceneRect(view);
+            return std::pair<qreal, qreal>(rect.left() - area.left(), area.right() - rect.right());
+        };
+        QTRY_COMPARE(view->property("barInset").toReal(), 0.0);
+        QVERIFY(view->property("contentHeight").toReal() <= view->height());
+        const qreal margin = gaps(home).first;
+        QVERIFY(margin >= 0);
+        for (const QQuickItem *entry : ui.tabButtons()) {
+            const auto [start, end] = gaps(entry);
+            QVERIFY2(qAbs(start - margin) <= 0.5 && qAbs(end - margin) <= 0.5,
+                     qPrintable(entry->objectName()));
+        }
+        // Too short for them: the bar shows and the entries give up its width
+        const int low = ui.window->minimumHeight();
+        ui.window->resize(width, low);
+        QTRY_COMPARE(ui.window->size(), QSize(width, low));
+        if (inDrawer)
+            QVERIFY(ui.openNavigationDrawer());
+        QTRY_VERIFY(view->property("contentHeight").toReal() > view->height() + 1);
+        QTRY_VERIFY(bar->isVisible());
+        const qreal inset = bar->property("implicitWidth").toReal();
+        QVERIFY(inset > 0);
+        QTRY_COMPARE(view->property("barInset").toReal(), inset);
+        const auto clearOfTheBar = [&] {
+            const QRectF area = sceneRect(view);
+            const QRectF strip = sceneRect(bar);
+            int shown = 0;
+            for (const QQuickItem *entry : ui.tabButtons()) {
+                const auto [start, end] = gaps(entry);
+                if (qAbs(start - margin) > 0.5 || qAbs(end - margin - inset) > 0.5)
+                    return false;
+                // An entry the view shows stops at the left edge of the bar
+                const QRectF rect = sceneRect(entry);
+                if (!rect.intersects(area))
+                    continue;
+                ++shown;
+                if (rect.right() > strip.left() + 0.5)
+                    return false;
+            }
+            return shown > 0;
+        };
+        QTRY_VERIFY(clearOfTheBar());
+        // Home is the current entry and shows at the top, with the bar beside it
+        QVERIFY(sceneRect(home).intersects(sceneRect(view)));
+        QVERIFY(sceneRect(home).right() <= sceneRect(bar).left() + 0.5);
+    }
+
     void theFocusRingFollowsTheLastInput()
     {
         Ui ui(m_home->path());
@@ -13704,10 +14505,10 @@ class TestUiPages : public QObject {
         QVERIFY(ui.signIn());
         QQuickItem *editPage = openEditImagesPage(ui);
         QVERIFY(editPage);
-        // The toolbar action looks for the usual first type
-        QObject *search = editPage->findChild<QObject *>(QStringLiteral("editImagesSearchOnline"));
+        // The button of the Primary section looks for the usual first type
+        QQuickItem *search = ui.item(QStringLiteral("editImageSearch_Primary"));
         QVERIFY(search);
-        QVERIFY(QMetaObject::invokeMethod(search, "trigger"));
+        QVERIFY(QMetaObject::invokeMethod(search, "click"));
         QQuickItem *grid = nullptr;
         QTRY_VERIFY((grid = ui.item(QStringLiteral("remoteImagesGrid"))) != nullptr);
         QTRY_VERIFY(ui.item(QStringLiteral("remoteImage_1")) != nullptr);
@@ -13727,6 +14528,85 @@ class TestUiPages : public QObject {
                      + QUrl::toPercentEncoding(
                          QStringLiteral("http://image.tmdb.org/t/p/original/poster-b.jpg")));
         QTRY_COMPARE(ui.currentDetails(), editPage);
+    }
+
+    // The drop-downs of Search Online are the shared ChoiceBox: the list that opens is a menu with one menu item per choice, each drawn by a plain label
+    void theSearchOnlineBoxesAreChoiceBoxesThatOpenMenus()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *editPage = openEditImagesPage(ui);
+        QVERIFY(editPage);
+        QQuickItem *search = ui.item(QStringLiteral("editImageSearch_Backdrop"));
+        QVERIFY(search);
+        QVERIFY(QMetaObject::invokeMethod(search, "click"));
+        QTRY_VERIFY(ui.item(QStringLiteral("remoteImage_0")) != nullptr);
+        for (const char *name : {"remoteImagesTypeBox", "remoteImagesProviderBox"}) {
+            QQuickItem *box = ui.item(QString::fromLatin1(name));
+            QVERIFY2(isChoiceBox(box), name);
+            QTRY_VERIFY2(box->property("count").toInt() >= 2, name);
+            QObject *popup = box->property("popup").value<QObject *>();
+            QVERIFY2(popup && popup->inherits("QQuickMenu"), name);
+            QVERIFY(QMetaObject::invokeMethod(popup, "open"));
+            QTRY_VERIFY2(popup->property("opened").toBool(), name);
+            const auto rows = [popup] {
+                QList<QQuickItem *> found;
+                for (QQuickItem *candidate :
+                     allItems(popup->property("contentItem").value<QQuickItem *>())) {
+                    if (candidate->inherits("QQuickMenuItem"))
+                        found.append(candidate);
+                }
+                return found;
+            };
+            QTRY_VERIFY2(rows().size() >= 2, name);
+            const QString current = box->property("currentText").toString();
+            bool showsCurrent = false;
+            for (QQuickItem *row : rows()) {
+                const QString text = row->property("text").toString();
+                showsCurrent = showsCurrent || text == current;
+                int drawn = 0;
+                for (QQuickItem *part : allItems(row)) {
+                    if (part->inherits("QQuickText") && part->property("text").toString() == text) {
+                        QVERIFY2(showsPlainText(part), name);
+                        ++drawn;
+                    }
+                }
+                QVERIFY2(drawn >= 1, qPrintable(text));
+            }
+            QVERIFY2(showsCurrent, name);
+            QVERIFY(Ui::closeMenu(popup));
+        }
+    }
+
+    // The page's bar has no Search Online: each section of a type has its own button, which opens the offers for that type
+    void theEditImagesBarHasNoSearchOnlineWhileEachSectionHasOne()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *page = openEditImagesPage(ui);
+        QVERIFY(page);
+        QQuickItem *toolbar = ui.item(QStringLiteral("editImagesToolbar"));
+        QVERIFY(toolbar);
+        QQmlListReference actions(toolbar, "actions");
+        QVERIFY(actions.isValid());
+        QCOMPARE(actions.count(), 0);
+        QVERIFY(page->findChild<QObject *>(QStringLiteral("editImagesSearchOnline")) == nullptr);
+        for (QQuickItem *part : allItems(toolbar))
+            QVERIFY2(!part->property("text").toString().contains(QStringLiteral("Search Online")),
+                     qPrintable(Ui::describe(part)));
+        const QString prefix = QStringLiteral("editImagesGroup_");
+        const QList<QQuickItem *> sections = ui.itemsStartingWith(prefix);
+        QVERIFY(sections.size() >= 7);
+        for (QQuickItem *section : sections) {
+            const QString type = section->objectName().mid(prefix.size());
+            QQuickItem *button = Ui::itemIn(section, QStringLiteral("editImageSearch_") + type);
+            QVERIFY2(button, qPrintable(type));
+            QCOMPARE(button->property("text").toString(), QStringLiteral("Search Online…"));
+        }
     }
 
     void aFailedDownloadStaysOnTheOnlineImagesPage()
@@ -14029,6 +14909,7 @@ class TestUiPages : public QObject {
         QQuickItem *subtitles = Ui::itemIn(page, QStringLiteral("subtitleSelector"));
         QVERIFY(audio);
         QVERIFY(subtitles);
+        QVERIFY(isChoiceBox(audio) && isChoiceBox(subtitles));
         QTRY_VERIFY(audio->isVisible() && subtitles->isVisible());
         // The boxes line up at one width; the cap and the full track names in the popup are checked with long names in theTrackListOpensWideEnoughForLongNames
         QTRY_COMPARE(audio->width(), subtitles->width());
@@ -16343,6 +17224,7 @@ class TestUiPages : public QObject {
         QVERIFY(buildState(ui, QStringLiteral("moviesTwoLibraries")));
         QQuickItem *selector = ui.item(QStringLiteral("librarySelector"));
         QVERIFY(selector);
+        QVERIFY(isChoiceBox(selector));
         // The selector sits in the toolbar's row: the filter bar stays the page's top row
         QQuickItem *toolbar = ui.item(QStringLiteral("libraryToolbar"));
         QVERIFY(toolbar);
@@ -16401,10 +17283,18 @@ class TestUiPages : public QObject {
         QVERIFY(popup);
         QVERIFY(QMetaObject::invokeMethod(popup, "open"));
         QTRY_VERIFY(popup->property("opened").toBool());
-        QTRY_VERIFY(ui.itemsWithText(hostile).size() >= 2);
-        for (const QQuickItem *label : ui.itemsWithText(hostile)) {
+        // The rows of the list are menu items, which hold the name as data: the labels that draw it are the ones that matter, the box's and the row's
+        const auto drawn = [&ui, &hostile] {
+            QList<const QQuickItem *> labels;
+            for (const QQuickItem *label : ui.itemsWithText(hostile)) {
+                if (!label->inherits("QQuickAbstractButton"))
+                    labels.append(label);
+            }
+            return labels;
+        };
+        QTRY_VERIFY(drawn().size() >= 2);
+        for (const QQuickItem *label : drawn())
             QVERIFY2(showsPlainText(label), qPrintable(Ui::describe(label)));
-        }
         QVERIFY(QMetaObject::invokeMethod(popup, "close"));
         QTest::qWait(300);
         QVERIFY(gWarnings.filter(QStringLiteral("evil.invalid")).isEmpty());
@@ -17374,6 +18264,7 @@ class TestUiPages : public QObject {
         QVERIFY(openPreferences(ui) != nullptr);
         QQuickItem *box = comboBoxIn(ui.item(QStringLiteral("prefAudioLanguage")));
         QVERIFY(box);
+        QVERIFY(isChoiceBox(box));
         QTRY_COMPARE(box->property("displayText").toString(), language);
         // The name of the library shows in the order list and in the two lists of check boxes
         int found = 0;
@@ -19023,7 +19914,9 @@ class TestUiPages : public QObject {
         QVERIFY(topBar && topBar->isVisible());
         QVERIFY(bottomBar && bottomBar->isVisible());
         QCOMPARE(topBar->mapRectToScene(topBar->boundingRect()).top(), 0.0);
-        QCOMPARE(bottomBar->mapRectToScene(bottomBar->boundingRect()).bottom(), window.bottom());
+        // The bottom bar is a panel that floats, with the video showing in its margin
+        QTRY_VERIFY(bottomBar->mapRectToScene(bottomBar->boundingRect()).bottom()
+                    < window.bottom());
         // The title once, in the top bar, with the numbered episode under it, both plain text
         QQuickItem *title = Ui::itemIn(topBar, QStringLiteral("playerTitle"));
         QQuickItem *subtitle = Ui::itemIn(topBar, QStringLiteral("playerSubtitle"));
@@ -19035,6 +19928,276 @@ class TestUiPages : public QObject {
         for (const QQuickItem *item : allItems(page))
             titles += item->isVisible() && item->property("text").toString() == stub.title;
         QCOMPARE(titles, 1);
+    }
+
+    // The top line floats over the picture: Back is a square box, the title is plain text beside it with no panel and the actions are buttons that stand alone; the timeline and the controls are on one solid rounded panel at the bottom; no gradient anywhere
+    void playerOsdIsFloatingSolidPanelsWithoutAGradient()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(1000));
+        QVERIFY(ui.signIn());
+        QVERIFY(openPlayer(ui, stub));
+        QQuickItem *osd = ui.item(QStringLiteral("playerOsd"));
+        QQuickItem *topBar = ui.item(QStringLiteral("playerTopBar"));
+        QQuickItem *back = ui.item(QStringLiteral("playerBackButton"));
+        QQuickItem *title = ui.item(QStringLiteral("playerTitle"));
+        QQuickItem *subtitle = ui.item(QStringLiteral("playerSubtitle"));
+        QQuickItem *cast = ui.item(QStringLiteral("playerCastButton"));
+        QQuickItem *pip = ui.item(QStringLiteral("playerPictureInPictureButton"));
+        QQuickItem *bottom = ui.item(QStringLiteral("playerBottomBar"));
+        QVERIFY(osd && topBar && back && title && subtitle && cast && pip && bottom);
+        QTRY_VERIFY(sceneRect(back).width() > 0 && sceneRect(cast).width() > 0
+                    && sceneRect(pip).width() > 0 && bottom->width() > 0);
+        const QRectF window(QPointF(0, 0), QSizeF(ui.window->size()));
+        // The bar of the top line draws nothing, and the two panels of the title and of the actions are gone
+        QVERIFY(!topBar->inherits("QQuickRectangle"));
+        QVERIFY(!ui.item(QStringLiteral("playerTopLeadingPanel")));
+        QVERIFY(!ui.item(QStringLiteral("playerTopTrailingPanel")));
+        for (const QQuickItem *item : {back, title, subtitle, cast, pip})
+            QVERIFY2(topBar->isAncestorOf(item), qPrintable(item->objectName()));
+        // Back is a square box of two grid units, standing off the corner of the window, and it is the button itself that is drawn as the box
+        const qreal side = 2 * gridUnitOf(ui);
+        QCOMPARE(topBar->property("boxSize").toReal(), side);
+        const QRectF backRect = sceneRect(back);
+        QVERIFY(qAbs(backRect.width() - side) <= 0.5 && qAbs(backRect.height() - side) <= 0.5);
+        QVERIFY(backRect.left() > 0 && backRect.top() > 0);
+        QQuickItem *box = backgroundOf(back);
+        QVERIFY(box && back->isAncestorOf(box));
+        QVERIFY2(osdBoxProblem(box).isEmpty(), qPrintable(osdBoxProblem(box)));
+        QVERIFY(qAbs(sceneRect(box).width() - backRect.width()) <= 0.5
+                && qAbs(sceneRect(box).height() - backRect.height()) <= 0.5);
+        // The title is text on the picture: nothing of its own behind it, between it and the bar
+        for (const QQuickItem *text : {title, subtitle}) {
+            const QByteArray name = text->objectName().toUtf8();
+            QVERIFY2(!backgroundOf(text), name.constData());
+            for (const QQuickItem *parent = text->parentItem(); parent && parent != topBar;
+                 parent = parent->parentItem())
+                QVERIFY2(!parent->inherits("QQuickRectangle"), name.constData());
+            for (const QQuickItem *child : text->childItems())
+                QVERIFY2(!child->inherits("QQuickRectangle"), name.constData());
+        }
+        // The actions stand alone, in no panel, as high as the box of Back
+        for (const QQuickItem *action : {cast, pip}) {
+            const QByteArray name = action->objectName().toUtf8();
+            for (const QQuickItem *parent = action->parentItem(); parent && parent != osd;
+                 parent = parent->parentItem())
+                QVERIFY2(!parent->inherits("QQuickRectangle"), name.constData());
+            QVERIFY2(qAbs(sceneRect(action).height() - backRect.height()) <= 0.5, name.constData());
+            QVERIFY2(sceneRect(action).right() < window.right(), name.constData());
+        }
+        // The bottom panel is solid and rounded, standing off the edges of the window so the video shows around it
+        const QRectF base = sceneRect(bottom);
+        QVERIFY(base.left() > 0 && base.right() < window.right()
+                && base.bottom() < window.bottom());
+        QVERIFY2(bottom->inherits("QQuickRectangle"), "playerBottomBar");
+        QVERIFY2(bottom->property("radius").toReal() > 0, "playerBottomBar");
+        QVERIFY2(qAbs(bottom->property("color").value<QColor>().alphaF() - 0.9) < 0.02,
+                 "playerBottomBar");
+        // The timeline and the control row are on the bottom panel
+        for (const QString &row :
+             {QStringLiteral("playerTimelineRow"), QStringLiteral("playerControlRow")}) {
+            const QQuickItem *item = Ui::itemIn(bottom, row);
+            QVERIFY2(item, qPrintable(row));
+            QVERIFY2(base.adjusted(-0.5, -0.5, 0.5, 0.5).contains(sceneRect(item)),
+                     qPrintable(row));
+        }
+        // No gradient in the bars: none among the objects of an item that is no control (a control draws itself with the style)
+        const auto insideControl = [osd](const QQuickItem *item) {
+            for (; item && item != osd; item = item->parentItem()) {
+                if (item->inherits("QQuickControl"))
+                    return true;
+            }
+            return false;
+        };
+        for (const QQuickItem *item : allItems(osd)) {
+            if (insideControl(item))
+                continue;
+            for (const QObject *object : item->findChildren<QObject *>(Qt::FindDirectChildrenOnly))
+                QVERIFY2(!object->inherits("QQuickGradient"), qPrintable(item->objectName()));
+        }
+    }
+
+    // The title gives way, the line never gets crowded: elided between Back and the actions at the narrowest window, whole again when there is room
+    void playerTitleGivesWayToTheTopLineAtTheNarrowestWindow()
+    {
+        PlayerStub stub;
+        stub.title = QStringLiteral("The Long Way Down to Abyss Station and Home");
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(1000));
+        QVERIFY(ui.signIn());
+        QVERIFY(openPlayer(ui, stub));
+        QQuickItem *back = ui.item(QStringLiteral("playerBackButton"));
+        QQuickItem *title = ui.item(QStringLiteral("playerTitle"));
+        QQuickItem *cast = ui.item(QStringLiteral("playerCastButton"));
+        QQuickItem *pip = ui.item(QStringLiteral("playerPictureInPictureButton"));
+        QVERIFY(back && title && cast && pip);
+        QTRY_VERIFY(title->width() > 0);
+        QTRY_VERIFY(!title->property("truncated").toBool());
+        QVERIFY(ui.opensWindowOfWidth(ui.window->minimumWidth()));
+        // In the order of the line, Back, the title, Cast and Picture-in-Picture: each clear of the next and all inside the window
+        const auto apart = [&] {
+            const QList<QRectF> line{sceneRect(back), sceneRect(title), sceneRect(cast),
+                                     sceneRect(pip)};
+            for (const QRectF &rect : line) {
+                if (rect.width() <= 0 || rect.left() < 0 || rect.right() > ui.window->width())
+                    return false;
+            }
+            for (qsizetype i = 1; i < line.size(); ++i) {
+                if (line.at(i - 1).right() >= line.at(i).left())
+                    return false;
+            }
+            return true;
+        };
+        QTRY_VERIFY(apart());
+        QTRY_VERIFY(title->property("truncated").toBool());
+        // The buttons keep their height while the title gives way
+        QVERIFY(qAbs(sceneRect(cast).height() - sceneRect(back).height()) <= 0.5);
+        QVERIFY(qAbs(sceneRect(pip).height() - sceneRect(back).height()) <= 0.5);
+        QVERIFY(ui.opensWindowOfWidth(1000));
+        QTRY_VERIFY(!title->property("truncated").toBool());
+        QTRY_VERIFY(apart());
+    }
+
+    void playerTopLineHasBackTheTitleAndTheActionsOnOneLine_data()
+    {
+        QTest::addColumn<bool>("withSubtitle");
+        QTest::newRow("title and subtitle") << true;
+        QTest::newRow("title only") << false;
+    }
+
+    // Back, the title and the actions share one line: their centres are at the same height, the title block centred on it with a subtitle or without, and the actions are as high as the box of Back
+    void playerTopLineHasBackTheTitleAndTheActionsOnOneLine()
+    {
+        QFETCH(bool, withSubtitle);
+        PlayerStub stub;
+        stub.title = QStringLiteral("Snowpiercer");
+        if (!withSubtitle)
+            stub.subtitle.clear();
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(1000));
+        QVERIFY(ui.signIn());
+        QVERIFY(openPlayer(ui, stub));
+        QQuickItem *topBar = ui.item(QStringLiteral("playerTopBar"));
+        QQuickItem *back = ui.item(QStringLiteral("playerBackButton"));
+        QQuickItem *title = ui.item(QStringLiteral("playerTitle"));
+        QQuickItem *subtitle = ui.item(QStringLiteral("playerSubtitle"));
+        QQuickItem *cast = ui.item(QStringLiteral("playerCastButton"));
+        QQuickItem *pip = ui.item(QStringLiteral("playerPictureInPictureButton"));
+        QVERIFY(topBar && back && title && subtitle && cast && pip);
+        QTRY_VERIFY(sceneRect(back).width() > 0 && title->width() > 0
+                    && sceneRect(pip).width() > 0);
+        QTRY_VERIFY(!title->property("truncated").toBool());
+        QCOMPARE(!subtitle->property("text").toString().isEmpty(), withSubtitle);
+        // The title block is the title with the subtitle under it, when there is one
+        QRectF block = sceneRect(title);
+        if (withSubtitle)
+            block = block.united(sceneRect(subtitle));
+        const QRectF backRect = sceneRect(back);
+        const QRectF castRect = sceneRect(cast);
+        const QRectF pipRect = sceneRect(pip);
+        // Side by side in the order of the line, and the box of Back is square
+        QVERIFY(backRect.right() <= block.left() && block.right() <= castRect.left()
+                && castRect.right() <= pipRect.left());
+        QVERIFY(qAbs(backRect.width() - backRect.height()) <= 0.5);
+        // The centres of all four, and of the bar they stand in, are one height
+        const QList<QRectF> line{backRect, block, castRect, pipRect, sceneRect(topBar)};
+        for (const QRectF &rect : line) {
+            QVERIFY2(qAbs(rect.center().y() - backRect.center().y()) <= 1.5,
+                     qPrintable(QStringLiteral("centre %1 against %2")
+                                    .arg(rect.center().y())
+                                    .arg(backRect.center().y())));
+        }
+        QVERIFY(qAbs(castRect.height() - backRect.height()) <= 0.5);
+        QVERIFY(qAbs(pipRect.height() - backRect.height()) <= 0.5);
+    }
+
+    // The pointer on the top line, on Back, the title or an action, keeps the bars as one on the bottom panel does; over the picture, also just under the line, it does not
+    void playerBarsStayUnderThePointerOnTheTopLineButNotOnThePicture()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(1000));
+        QVERIFY(ui.signIn());
+        QQuickItem *page = openPlayer(ui, stub);
+        QVERIFY(page);
+        QObject *timer = page->findChild<QObject *>(QStringLiteral("playerChromeTimer"));
+        QQuickItem *osd = ui.item(QStringLiteral("playerOsd"));
+        QQuickItem *topBar = ui.item(QStringLiteral("playerTopBar"));
+        QQuickItem *back = ui.item(QStringLiteral("playerBackButton"));
+        QQuickItem *title = ui.item(QStringLiteral("playerTitle"));
+        QQuickItem *cast = ui.item(QStringLiteral("playerCastButton"));
+        QVERIFY(timer && osd && topBar && back && title && cast);
+        timer->setProperty("interval", 300);
+        QTRY_VERIFY(sceneRect(back).width() > 0 && title->width() > 0
+                    && sceneRect(cast).width() > 0);
+        const QPoint onVideo(ui.window->width() / 2, ui.window->height() / 2);
+        // Under the line, further than the margin the page counts around it
+        const QPoint underTheLine(int(sceneRect(title).center().x()),
+                                  int(sceneRect(topBar).bottom() + gridUnitOf(ui)));
+        int nudge = 0;
+        const auto wake = [&] {
+            QTest::mouseMove(ui.window, onVideo + QPoint(++nudge % 2 ? 3 : -3, 0));
+        };
+        restPointerOnVideo(ui);
+        QTRY_VERIFY(!osd->isVisible());
+        for (const QQuickItem *part : {back, title, cast}) {
+            wake();
+            QTRY_VERIFY(osd->isVisible());
+            QTest::mouseMove(ui.window, sceneRect(part).center().toPoint());
+            QTest::qWait(900);
+            QVERIFY2(osd->isVisible(), qPrintable(part->objectName()));
+        }
+        for (const QPoint &onThePicture : {underTheLine, onVideo}) {
+            wake();
+            QTRY_VERIFY(osd->isVisible());
+            QTest::mouseMove(ui.window, onThePicture);
+            QTRY_VERIFY(!osd->isVisible());
+        }
+    }
+
+    void playerShowMiniPlayerEntryDocksTheVideo_data()
+    {
+        QTest::addColumn<QString>("menuName");
+        QTest::addColumn<QString>("entryName");
+        QTest::newRow("context menu")
+            << QStringLiteral("playerContextMenu") << QStringLiteral("playerContextMiniItem");
+        QTest::newRow("more actions")
+            << QStringLiteral("playerMoreMenu") << QStringLiteral("playerMoreMiniItem");
+    }
+
+    // The right click menu offers Show Mini Player as More Actions does: the same label and the same way out, the playback going on
+    void playerShowMiniPlayerEntryDocksTheVideo()
+    {
+        QFETCH(QString, menuName);
+        QFETCH(QString, entryName);
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(openPlayer(ui, stub));
+        QObject *menu = ui.popup(menuName);
+        QVERIFY(menu);
+        QVERIFY(QMetaObject::invokeMethod(menu, "open"));
+        QTRY_VERIFY(menu->property("opened").toBool());
+        auto *entry = menu->findChild<QQuickItem *>(entryName);
+        QVERIFY(entry);
+        QCOMPARE(entry->property("text").toString(), QStringLiteral("Show Mini Player"));
+        QVERIFY(entry->isVisible() && entry->isEnabled());
+        QVERIFY(QMetaObject::invokeMethod(entry, "click"));
+        QTRY_VERIFY(shownMiniPlayer(ui));
+        QCOMPARE(ui.window->property("playbackMode").toString(), QStringLiteral("mini"));
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("homePage"));
+        QVERIFY(!stub.calls.contains(QStringLiteral("stop")));
     }
 
     void playerBackLeavesItsFullScreenFirst_data()
@@ -19829,6 +20992,188 @@ class TestUiPages : public QObject {
                             : sceneRect(mini).left() >= ui.sidebarWidth());
     }
 
+    void miniPlayerBoxesStandInTheCornersAndAlongTheBottom_data()
+    {
+        QTest::addColumn<bool>("rightToLeft");
+        QTest::newRow("left to right") << false;
+        QTest::newRow("right to left") << true;
+    }
+
+    // The controls are boxes over the picture: Expand in the leading top corner, Close in the trailing one, each a rounded square, and one low panel along the bottom with Pause, the title and, along its bottom edge, the thin bar of how much is played
+    void miniPlayerBoxesStandInTheCornersAndAlongTheBottom()
+    {
+        QFETCH(bool, rightToLeft);
+        const Qt::LayoutDirection direction = QGuiApplication::layoutDirection();
+        QGuiApplication::setLayoutDirection(rightToLeft ? Qt::RightToLeft : Qt::LeftToRight);
+        const auto restoreDirection =
+            qScopeGuard([direction] { QGuiApplication::setLayoutDirection(direction); });
+        PlayerStub stub;
+        stub.positionTicks = stub.durationTicks / 4;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(1000));
+        QVERIFY(ui.signIn());
+        QQuickItem *mini = openMiniPlayer(ui, stub);
+        QVERIFY(mini);
+        QQuickItem *expand = Ui::itemIn(mini, QStringLiteral("miniPlayerExpandButton"));
+        QQuickItem *close = Ui::itemIn(mini, QStringLiteral("miniPlayerCloseButton"));
+        QQuickItem *panel = Ui::itemIn(mini, QStringLiteral("miniPlayerBottomPanel"));
+        QQuickItem *pause = Ui::itemIn(mini, QStringLiteral("miniPlayerPauseButton"));
+        QQuickItem *title = Ui::itemIn(mini, QStringLiteral("miniPlayerTitle"));
+        QQuickItem *progress = Ui::itemIn(mini, QStringLiteral("miniPlayerProgress"));
+        QVERIFY(expand && close && panel && pause && title && progress);
+        // The boxes show with the pointer on the player
+        hoverMiniPlayer(ui, mini);
+        QTRY_VERIFY(mini->property("controlsShown").toBool());
+        QTRY_COMPARE(Ui::itemIn(mini, QStringLiteral("miniPlayerScrim"))->opacity(), 1.0);
+        const QRectF dock = sceneRect(mini);
+        const qreal unit = gridUnitOf(ui);
+        const qreal side = std::round(unit * 1.75);
+        QCOMPARE(mini->property("boxSize").toReal(), side);
+        const QRectF expandRect = sceneRect(expand);
+        const QRectF closeRect = sceneRect(close);
+        const QRectF panelRect = sceneRect(panel);
+        // Two squares of the same side, each the same small distance from its corner, the leading one for Expand
+        for (const QRectF &rect : {expandRect, closeRect})
+            QVERIFY(qAbs(rect.width() - side) <= 0.5 && qAbs(rect.height() - side) <= 0.5);
+        const qreal margin = expandRect.top() - dock.top();
+        const qreal leadingInset =
+            rightToLeft ? dock.right() - expandRect.right() : expandRect.left() - dock.left();
+        const qreal trailingInset =
+            rightToLeft ? closeRect.left() - dock.left() : dock.right() - closeRect.right();
+        const QString insets = QStringLiteral("margin %1, leading %2, trailing %3, close top %4")
+                                   .arg(margin)
+                                   .arg(leadingInset)
+                                   .arg(trailingInset)
+                                   .arg(closeRect.top() - dock.top());
+        QVERIFY2(margin > 0 && margin < unit && qAbs(leadingInset - margin) <= 0.5
+                     && qAbs(trailingInset - margin) <= 0.5
+                     && qAbs(closeRect.top() - dock.top() - margin) <= 0.5,
+                 qPrintable(insets));
+        // The corner buttons are drawn as the boxes, and so is the panel
+        for (QQuickItem *button : {expand, close}) {
+            const QByteArray name = button->objectName().toUtf8();
+            QQuickItem *box = backgroundOf(button);
+            QVERIFY2(box && button->isAncestorOf(box), name.constData());
+            QVERIFY2(osdBoxProblem(box).isEmpty(),
+                     qPrintable(button->objectName() + QStringLiteral(": ") + osdBoxProblem(box)));
+            QVERIFY2(qAbs(sceneRect(box).width() - sceneRect(button).width()) <= 0.5
+                         && qAbs(sceneRect(box).height() - sceneRect(button).height()) <= 0.5,
+                     name.constData());
+        }
+        QVERIFY2(osdBoxProblem(panel).isEmpty(), qPrintable(osdBoxProblem(panel)));
+        // The panel is low, along the bottom with the same margin as the corners, and below the corner boxes
+        QVERIFY(panelRect.height() < 3 * unit);
+        QVERIFY(qAbs(dock.bottom() - panelRect.bottom() - margin) <= 0.5);
+        QVERIFY(qAbs(panelRect.left() - dock.left() - margin) <= 0.5
+                && qAbs(dock.right() - panelRect.right() - margin) <= 0.5);
+        QVERIFY(expandRect.bottom() <= panelRect.top() && closeRect.bottom() <= panelRect.top());
+        // Pause, the title and the bar are on the panel
+        const QRectF pauseRect = sceneRect(pause);
+        const QRectF titleRect = sceneRect(title);
+        const QRectF progressRect = sceneRect(progress);
+        const QRectF inner = panelRect.adjusted(-0.5, -0.5, 0.5, 0.5);
+        for (const QQuickItem *part : {pause, title, progress})
+            QVERIFY2(inner.contains(sceneRect(part)), qPrintable(part->objectName()));
+        // Pause is a square at the leading end of the row, the title after it in the rest of the row, on the same line
+        const qreal playSize = std::round(unit * 1.5);
+        QCOMPARE(mini->property("playSize").toReal(), playSize);
+        QVERIFY(qAbs(pauseRect.width() - playSize) <= 0.5
+                && qAbs(pauseRect.height() - playSize) <= 0.5);
+        const qreal nearGap = rightToLeft ? panelRect.right() - pauseRect.right()
+                                          : pauseRect.left() - panelRect.left();
+        const qreal betweenGap = rightToLeft ? pauseRect.left() - titleRect.right()
+                                             : titleRect.left() - pauseRect.right();
+        const qreal farGap = rightToLeft ? titleRect.left() - panelRect.left()
+                                         : panelRect.right() - titleRect.right();
+        QVERIFY2(nearGap >= 0 && nearGap < unit && betweenGap >= 0 && farGap >= 0 && farGap < unit,
+                 qPrintable(QStringLiteral("pause at %1, title %2 after it, %3 short of the end")
+                                .arg(nearGap)
+                                .arg(betweenGap)
+                                .arg(farGap)));
+        QVERIFY(qAbs(titleRect.center().y() - pauseRect.center().y()) <= 1.5);
+        // The title is the player's, plain text, bold and elided at its end
+        QCOMPARE(title->property("text").toString(), stub.title);
+        QVERIFY(showsPlainText(title));
+        QVERIFY(title->property("font").value<QFont>().bold());
+        QCOMPARE(title->property("elide").toInt(), int(Qt::ElideRight));
+        // The bar is inset by the radius of the panel, thin, under the row and along the bottom edge
+        const qreal radius = panel->property("radius").toReal();
+        QVERIFY(radius > 0);
+        QVERIFY(qAbs(progressRect.left() - panelRect.left() - radius) <= 0.5
+                && qAbs(panelRect.right() - progressRect.right() - radius) <= 0.5);
+        QVERIFY(progressRect.height() < unit / 2);
+        QVERIFY(progressRect.top() >= pauseRect.bottom() - 0.5
+                && progressRect.top() >= titleRect.bottom() - 0.5);
+        QVERIFY(progressRect.bottom() <= panelRect.bottom()
+                && panelRect.bottom() - progressRect.bottom() < unit / 2);
+        QTRY_VERIFY(qAbs(progress->property("value").toReal() - 0.25) < 1e-6);
+        // A title too long for the row is elided inside it: the panel neither grows nor lets it out
+        const qreal height = panelRect.height();
+        stub.title = QStringLiteral("The Long Way Down to Abyss Station and Home, Part Two of the "
+                                    "Second Season of the Anthology");
+        Q_EMIT stub.changed();
+        QTRY_VERIFY(title->property("truncated").toBool());
+        QCOMPARE(sceneRect(panel).height(), height);
+        QVERIFY(sceneRect(panel).adjusted(-0.5, -0.5, 0.5, 0.5).contains(sceneRect(title)));
+        // No gradient under the player: none among the objects of an item that is no control (a control draws itself with the style)
+        const auto insideControl = [mini](const QQuickItem *item) {
+            for (; item && item != mini; item = item->parentItem()) {
+                if (item->inherits("QQuickControl"))
+                    return true;
+            }
+            return false;
+        };
+        for (const QQuickItem *item : allItems(mini)) {
+            if (insideControl(item))
+                continue;
+            for (const QObject *object : item->findChildren<QObject *>(Qt::FindDirectChildrenOnly))
+                QVERIFY2(!object->inherits("QQuickGradient"), qPrintable(item->objectName()));
+        }
+    }
+
+    void miniPlayerCornerBoxesActOverTheWholeBox_data()
+    {
+        QTest::addColumn<QString>("name");
+        QTest::addColumn<bool>("expands");
+        QTest::newRow("expand") << QStringLiteral("miniPlayerExpandButton") << true;
+        QTest::newRow("close") << QStringLiteral("miniPlayerCloseButton") << false;
+    }
+
+    // A click near the edge of a corner box acts as one on its centre does: Expand docks the full player, Close stops the playback
+    void miniPlayerCornerBoxesActOverTheWholeBox()
+    {
+        QFETCH(QString, name);
+        QFETCH(bool, expands);
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *mini = openMiniPlayer(ui, stub);
+        QVERIFY(mini);
+        QQuickItem *box = ui.item(name);
+        QVERIFY(box);
+        hoverMiniPlayer(ui, mini);
+        QTRY_VERIFY(mini->property("controlsShown").toBool());
+        QTRY_COMPARE(ui.item(QStringLiteral("miniPlayerScrim"))->opacity(), 1.0);
+        stub.calls.clear();
+        // Three pixels inside the middle of its bottom edge, away from the rounded corners
+        const QRectF rect = sceneRect(box);
+        QTest::mouseClick(ui.window, Qt::LeftButton, Qt::NoModifier,
+                          QPointF(rect.center().x(), rect.bottom() - 3).toPoint());
+        if (expands) {
+            QTRY_COMPARE(ui.window->property("playbackMode").toString(), QStringLiteral("full"));
+            QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("playerPage"));
+            QVERIFY(!stub.calls.contains(QStringLiteral("stop")));
+        } else {
+            QTRY_VERIFY(stub.calls.contains(QStringLiteral("stop")));
+            QTRY_COMPARE(ui.window->property("playbackMode").toString(), QStringLiteral("none"));
+            QTRY_VERIFY(!mini->isVisible());
+        }
+    }
+
     void remotePlayerCommandsWorkInEveryMode()
     {
         PlayerStub stub;
@@ -20028,11 +21373,11 @@ class TestUiPages : public QObject {
     void pictureInPictureReturnsToTheFullPlayer_data()
     {
         QTest::addColumn<QString>("way");
-        for (const char *way : {"close button", "window close", "double click", "shortcut"})
+        for (const char *way : {"back button", "double click", "shortcut"})
             QTest::newRow(way) << QString::fromLatin1(way);
     }
 
-    // Closing the window, from its own X or the window manager, gives the video back to the full player, as a double click and the shortcut do: the playback goes on
+    // The button at the leading corner, a double click and the shortcut give the video back to the full player: the playback goes on
     void pictureInPictureReturnsToTheFullPlayer()
     {
         QFETCH(QString, way);
@@ -20045,15 +21390,13 @@ class TestUiPages : public QObject {
         QVERIFY(pip);
         QPointer<QQuickWindow> pipGuard(pip);
         stub.calls.clear();
-        QCOMPARE(pictureInPictureItem(pip, QStringLiteral("pictureInPictureCloseButton"))
+        QCOMPARE(pictureInPictureItem(pip, QStringLiteral("pictureInPictureBackButton"))
                      ->property("text")
                      .toString(),
-                 QStringLiteral("Close Picture-in-Picture"));
-        if (way == QLatin1String("close button")) {
+                 QStringLiteral("Back to Player"));
+        if (way == QLatin1String("back button")) {
             QVERIFY(
-                clickPictureInPictureControl(pip, QStringLiteral("pictureInPictureCloseButton")));
-        } else if (way == QLatin1String("window close")) {
-            pip->close();
+                clickPictureInPictureControl(pip, QStringLiteral("pictureInPictureBackButton")));
         } else if (way == QLatin1String("double click")) {
             QTest::mouseDClick(pip, Qt::LeftButton, Qt::NoModifier,
                                QPoint(pip->width() / 2, pip->height() / 4));
@@ -20079,6 +21422,335 @@ class TestUiPages : public QObject {
             QVERIFY(!stub.calls.contains(QStringLiteral("togglePause")));
     }
 
+    void pictureInPictureStops_data()
+    {
+        QTest::addColumn<QString>("way");
+        for (const char *way : {"close button", "window close"})
+            QTest::newRow(way) << QString::fromLatin1(way);
+    }
+
+    // The X and a close by the window manager end the playback and take the window away
+    void pictureInPictureStops()
+    {
+        QFETCH(QString, way);
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickWindow *pip = openPictureInPicture(ui, stub);
+        QVERIFY(pip);
+        QPointer<QQuickWindow> pipGuard(pip);
+        stub.calls.clear();
+        // The X says what it does: the tooltip and the accessible name are the same text
+        QQuickItem *close =
+            pictureInPictureItem(pip, QStringLiteral("pictureInPictureCloseButton"));
+        QVERIFY(close);
+        QCOMPARE(close->property("text").toString(), QStringLiteral("Stop Playback and Close"));
+        QCOMPARE(QQmlProperty(close, QStringLiteral("Controls.ToolTip.text"), qmlContext(close))
+                     .read()
+                     .toString(),
+                 QStringLiteral("Stop Playback and Close"));
+        QCOMPARE(accessibleNameOf(close), QStringLiteral("Stop Playback and Close"));
+        if (way == QLatin1String("close button"))
+            QVERIFY(
+                clickPictureInPictureControl(pip, QStringLiteral("pictureInPictureCloseButton")));
+        else
+            pip->close();
+        QTRY_VERIFY(stub.calls.contains(QStringLiteral("stop")));
+        QTRY_COMPARE(ui.window->property("playbackMode").toString(), QStringLiteral("none"));
+        QTRY_VERIFY(pipGuard.isNull());
+        QVERIFY(pictureInPictureWindow(ui) == nullptr);
+        QTRY_VERIFY(ui.item(QStringLiteral("videoRenderer")) == nullptr);
+        QVERIFY(!stub.active);
+    }
+
+    // The mute button does what the speaker of the full player does, and shows the state
+    void pictureInPictureHasAMuteButton()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickWindow *pip = openPictureInPicture(ui, stub);
+        QVERIFY(pip);
+        QQuickItem *mute = pictureInPictureItem(pip, QStringLiteral("pictureInPictureMuteButton"));
+        QVERIFY(mute);
+        const auto icon = [&] {
+            return QQmlProperty(mute, QStringLiteral("icon.name")).read().toString();
+        };
+        QCOMPARE(mute->property("text").toString(), QStringLiteral("Mute"));
+        QCOMPARE(icon(), QStringLiteral("audio-volume-high"));
+        stub.calls.clear();
+        QVERIFY(clickPictureInPictureControl(pip, QStringLiteral("pictureInPictureMuteButton")));
+        QTRY_VERIFY(stub.calls.contains(QStringLiteral("toggleMute")));
+        QVERIFY(!stub.calls.contains(QStringLiteral("stop")));
+        QCOMPARE(ui.window->property("playbackMode").toString(), QStringLiteral("pip"));
+        // Muted, it offers to unmute, and a click toggles again
+        stub.muted = true;
+        Q_EMIT stub.changed();
+        QTRY_COMPARE(mute->property("text").toString(), QStringLiteral("Unmute"));
+        QCOMPARE(icon(), QStringLiteral("audio-volume-muted"));
+        stub.calls.clear();
+        QVERIFY(clickPictureInPictureControl(pip, QStringLiteral("pictureInPictureMuteButton")));
+        QTRY_VERIFY(stub.calls.contains(QStringLiteral("toggleMute")));
+        // The icon has the levels of the full player's speaker: low below 34, medium below 67, high from there
+        stub.muted = false;
+        const QList<std::pair<int, QString>> levels{
+            {100, QStringLiteral("audio-volume-high")},
+            {67, QStringLiteral("audio-volume-high")},
+            {66, QStringLiteral("audio-volume-medium")},
+            {34, QStringLiteral("audio-volume-medium")},
+            {33, QStringLiteral("audio-volume-low")},
+            {1, QStringLiteral("audio-volume-low")},
+        };
+        for (const auto &[volume, name] : levels) {
+            stub.volume = volume;
+            Q_EMIT stub.changed();
+            QTRY_COMPARE(icon(), name);
+        }
+        // A volume turned down to nothing shows the muted icon too
+        stub.volume = 0;
+        Q_EMIT stub.changed();
+        QTRY_COMPARE(icon(), QStringLiteral("audio-volume-muted"));
+        QCOMPARE(mute->property("text").toString(), QStringLiteral("Mute"));
+    }
+
+    // The time is as large as the window's text, bold and light on the dark bottom panel, whatever picture is behind; the total joins the elapsed time from twenty grid units of width, below that the time is the elapsed one alone, and in each form the time and the timeline keep their widths while the numbers change
+    void pictureInPictureTimeIsEasyToRead()
+    {
+        PlayerStub stub;
+        stub.durationTicks = 600 * 10000000LL;
+        stub.positionTicks = 60 * 10000000LL;
+        stub.canSeek = true;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickWindow *pip = openPictureInPicture(ui, stub);
+        QVERIFY(pip);
+        const int unit = pip->property("minimumShapeWidth").toInt() / 16;
+        const QSize wide(unit * 20, qRound(unit * 20 * 9.0 / 16));
+        pip->resize(wide);
+        QTRY_COMPARE(pip->size(), wide);
+        QQuickItem *time = pictureInPictureItem(pip, QStringLiteral("pictureInPictureTime"));
+        QQuickItem *timeline =
+            pictureInPictureItem(pip, QStringLiteral("pictureInPictureTimeline"));
+        QQuickItem *backing =
+            pictureInPictureItem(pip, QStringLiteral("pictureInPictureBottomPanel"));
+        QVERIFY(time && timeline && backing);
+        QTRY_COMPARE(time->property("text").toString(), QStringLiteral("60 / 600"));
+        const QFont base = pip->property("font").value<QFont>();
+        const QFont font = time->property("font").value<QFont>();
+        QVERIFY(font.pointSizeF() >= base.pointSizeF());
+        QVERIFY(font.weight() >= QFont::DemiBold);
+        const QRectF backingRect = sceneRect(backing);
+        const QRectF timeRect = sceneRect(time);
+        QVERIFY(backingRect.contains(timeRect));
+        QVERIFY(backingRect.width() > timeRect.width() && backingRect.height() > timeRect.height());
+        QVERIFY(backing->property("radius").toReal() > 0);
+        // The contrast of the text with its backing over a white picture, the worst case, is the 4.5 that WCAG asks of normal text
+        const QColor text = time->property("color").value<QColor>();
+        const QColor back = backing->property("color").value<QColor>();
+        QVERIFY(back.alphaF() >= 0.85);
+        const auto luminance = [](double red, double green, double blue) {
+            const auto channel = [](double value) {
+                return value <= 0.03928 ? value / 12.92 : std::pow((value + 0.055) / 1.055, 2.4);
+            };
+            return 0.2126 * channel(red) + 0.7152 * channel(green) + 0.0722 * channel(blue);
+        };
+        const double alpha = back.alphaF();
+        const double shown =
+            luminance(back.redF() * alpha + 1 - alpha, back.greenF() * alpha + 1 - alpha,
+                      back.blueF() * alpha + 1 - alpha);
+        const double ink = luminance(text.redF(), text.greenF(), text.blueF());
+        QVERIFY((std::max(ink, shown) + 0.05) / (std::min(ink, shown) + 0.05) >= 4.5);
+        // A shorter text does not move the timeline
+        const qreal timelineWidth = timeline->width();
+        const qreal timeWidth = time->width();
+        stub.positionTicks = 5 * 10000000LL;
+        Q_EMIT stub.changed();
+        QTRY_COMPARE(time->property("text").toString(), QStringLiteral("5 / 600"));
+        QCOMPARE(timeline->width(), timelineWidth);
+        QCOMPARE(time->width(), timeWidth);
+        // Narrower, only the elapsed time shows, the label is as wide as the widest of that form, and the accessible name still has both times
+        const QSize narrow(unit * 16, qRound(unit * 16 * 9.0 / 16));
+        pip->resize(narrow);
+        QTRY_COMPARE(pip->size(), narrow);
+        QTRY_COMPARE(time->property("text").toString(), QStringLiteral("5"));
+        QCOMPARE(accessibleNameOf(time), QStringLiteral("5 of 600"));
+        QTRY_VERIFY(time->width() < timeWidth);
+        const qreal narrowTimeWidth = time->width();
+        const qreal narrowTimelineWidth = timeline->width();
+        stub.positionTicks = 600 * 10000000LL;
+        Q_EMIT stub.changed();
+        QTRY_COMPARE(time->property("text").toString(), QStringLiteral("600"));
+        QCOMPARE(time->width(), narrowTimeWidth);
+        QCOMPARE(timeline->width(), narrowTimelineWidth);
+    }
+
+    void pictureInPictureControlsFitTheSmallestWindow_data()
+    {
+        QTest::addColumn<double>("aspect");
+        QTest::newRow("16:9") << 16.0 / 9;
+        QTest::newRow("3:1") << 3.0;
+        QTest::newRow("3:4") << 0.75;
+    }
+
+    // At the least width, in the common shape and in the widest and the tallest, and at the width where the total time joins the elapsed one, with the times of a film of an hour or more: the two corner boxes, which are the buttons themselves, and the bottom panel keep clear of each other and of the strips along the edges that resize the window, each control of the bottom panel is on it and touches no other, the time is not cut, and the timeline keeps at least four grid units
+    void pictureInPictureControlsFitTheSmallestWindow()
+    {
+        QFETCH(double, aspect);
+        PlayerStub stub;
+        stub.spelledTimes = true;
+        stub.videoAspect = aspect;
+        stub.durationTicks = (3600 + 60 + 40) * 10000000LL;
+        stub.positionTicks = 60 * 10000000LL;
+        stub.canSeek = true;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickWindow *pip = openPictureInPicture(ui, stub);
+        QVERIFY(pip);
+        QTRY_VERIFY(qAbs(pip->property("aspect").toDouble() - aspect) < 1e-9);
+        const int unit = pip->property("minimumShapeWidth").toInt() / 16;
+        const int edge = pip->property("edgeWidth").toInt();
+        // The boxes: the two buttons of the corners are the boxes themselves, the bottom panel holds the other controls
+        const QStringList panels{
+            QStringLiteral("pictureInPictureBackButton"),
+            QStringLiteral("pictureInPictureCloseButton"),
+            QStringLiteral("pictureInPictureBottomPanel"),
+        };
+        const qreal side = pip->property("panelSize").toReal();
+        QVERIFY(side >= qRound(unit * 1.75));
+        const QString timelineName = QStringLiteral("pictureInPictureTimeline");
+        const QString timeName = QStringLiteral("pictureInPictureTime");
+        // Each control with the panel it sits on
+        const QList<std::pair<QString, QString>> controls{
+            {QStringLiteral("pictureInPicturePauseButton"), panels.at(2)},
+            {QStringLiteral("pictureInPictureMuteButton"), panels.at(2)},
+            {timelineName, panels.at(2)},
+            {timeName, panels.at(2)},
+        };
+        // What is wrong with the layout at this size, or nothing
+        const auto problem = [&](const QSize &size) -> QString {
+            const auto where = [&](const QString &name, const QQuickItem *item) {
+                const QRectF rect = sceneRect(item);
+                return QStringLiteral("%1 at %2,%3 %4x%5 in %6x%7")
+                    .arg(name)
+                    .arg(rect.x())
+                    .arg(rect.y())
+                    .arg(rect.width())
+                    .arg(rect.height())
+                    .arg(size.width())
+                    .arg(size.height());
+            };
+            const QRectF clear =
+                QRectF(edge, edge, size.width() - 2 * edge, size.height() - 2 * edge)
+                    .adjusted(-0.1, -0.1, 0.1, 0.1);
+            QList<QRectF> placed;
+            for (const QString &name : panels) {
+                const QQuickItem *panel = pictureInPictureItem(pip, name);
+                if (!panel)
+                    return name + QStringLiteral(" is missing");
+                const QRectF rect = sceneRect(panel);
+                if (rect.width() <= 0 || rect.height() <= 0 || !clear.contains(rect))
+                    return where(name, panel);
+                // A corner box is a square of the side of a panel, and the bottom panel is as high
+                if (qAbs(rect.height() - side) > 0.5
+                    || (name != panels.at(2) && qAbs(rect.width() - side) > 0.5))
+                    return QStringLiteral("not of the side %1: ").arg(side) + where(name, panel);
+                for (const QRectF &other : std::as_const(placed)) {
+                    if (rect.adjusted(0.1, 0.1, -0.1, -0.1).intersects(other))
+                        return where(name, panel);
+                }
+                placed.append(rect);
+            }
+            QList<QRectF> taken;
+            for (const auto &[name, panelName] : controls) {
+                const QQuickItem *item = pictureInPictureItem(pip, name);
+                const QQuickItem *panel = pictureInPictureItem(pip, panelName);
+                if (!item || !panel)
+                    return name + QStringLiteral(" is missing");
+                const QRectF rect = sceneRect(item);
+                if (rect.width() <= 0 || rect.height() <= 0
+                    || !sceneRect(panel).adjusted(-0.1, -0.1, 0.1, 0.1).contains(rect))
+                    return where(name, item);
+                for (const QRectF &other : std::as_const(taken)) {
+                    if (rect.adjusted(0.1, 0.1, -0.1, -0.1).intersects(other))
+                        return where(name, item);
+                }
+                taken.append(rect);
+            }
+            const QQuickItem *shownTime = pictureInPictureItem(pip, timeName);
+            if (shownTime->property("contentWidth").toReal() > shownTime->width() + 0.5)
+                return QStringLiteral("the time is cut: ") + where(timeName, shownTime);
+            const QQuickItem *timeline = pictureInPictureItem(pip, timelineName);
+            if (timeline->width() < 4 * unit)
+                return QStringLiteral("the timeline is too short: ")
+                       + where(timelineName, timeline);
+            return {};
+        };
+        QQuickItem *time = pictureInPictureItem(pip, timeName);
+        QVERIFY(time);
+        for (const int width : {unit * 16, unit * 20}) {
+            const QSize size(width, qRound(width / aspect));
+            pip->resize(size);
+            QTRY_COMPARE(pip->size(), size);
+            // Elapsed time alone below twenty grid units, with the total from there
+            QTRY_COMPARE(time->property("text").toString(),
+                         width < unit * 20 ? QStringLiteral("00:01:00")
+                                           : QStringLiteral("00:01:00 / 01:01:40"));
+            QTRY_VERIFY2(problem(size).isEmpty(), qPrintable(problem(size)));
+        }
+    }
+
+    // The corner buttons are drawn as boxes themselves and the bottom panel is a box too: solid, rounded, a little see-through and outlined like the full player's, with no gradient in the window
+    void pictureInPictureControlsAreOnSolidPanelsWithoutAGradient()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickWindow *pip = openPictureInPicture(ui, stub);
+        QVERIFY(pip);
+        // No panel stands behind a corner button, the button is the box
+        QVERIFY(!pictureInPictureItem(pip, QStringLiteral("pictureInPictureBackPanel")));
+        QVERIFY(!pictureInPictureItem(pip, QStringLiteral("pictureInPictureClosePanel")));
+        for (const QString &name : {QStringLiteral("pictureInPictureBackButton"),
+                                    QStringLiteral("pictureInPictureCloseButton")}) {
+            QQuickItem *button = pictureInPictureItem(pip, name);
+            QVERIFY2(button, qPrintable(name));
+            QQuickItem *box = backgroundOf(button);
+            QVERIFY2(box && button->isAncestorOf(box), qPrintable(name));
+            QVERIFY2(osdBoxProblem(box).isEmpty(),
+                     qPrintable(name + QStringLiteral(": ") + osdBoxProblem(box)));
+            // The box is the whole of the button, which is highlighted as a whole
+            QVERIFY2(qAbs(sceneRect(box).width() - sceneRect(button).width()) <= 0.5
+                         && qAbs(sceneRect(box).height() - sceneRect(button).height()) <= 0.5,
+                     qPrintable(name));
+        }
+        QQuickItem *bottom =
+            pictureInPictureItem(pip, QStringLiteral("pictureInPictureBottomPanel"));
+        QVERIFY(bottom);
+        QVERIFY2(osdBoxProblem(bottom).isEmpty(), qPrintable(osdBoxProblem(bottom)));
+        // No gradient among the objects of an item that is no control (a control draws itself with the style)
+        QQuickItem *root = pip->contentItem();
+        for (QQuickItem *item : allItems(root)) {
+            bool insideControl = false;
+            for (const QQuickItem *parent = item; parent && parent != root;
+                 parent = parent->parentItem())
+                insideControl = insideControl || parent->inherits("QQuickControl");
+            if (insideControl)
+                continue;
+            for (const QObject *object : item->findChildren<QObject *>(Qt::FindDirectChildrenOnly))
+                QVERIFY2(!object->inherits("QQuickGradient"), qPrintable(item->objectName()));
+        }
+    }
+
     // On a touch screen the first tap only shows the controls, on the video and on a hidden control alike, as on the mini player
     void pictureInPictureTouchShowsTheControlsFirst()
     {
@@ -20089,12 +21761,12 @@ class TestUiPages : public QObject {
         QVERIFY(ui.signIn());
         QQuickWindow *pip = openPictureInPicture(ui, stub);
         QVERIFY(pip);
-        QQuickItem *scrim = pictureInPictureItem(pip, QStringLiteral("pictureInPictureScrim"));
+        QQuickItem *osd = pictureInPictureItem(pip, QStringLiteral("pictureInPictureOsd"));
         QQuickItem *close =
             pictureInPictureItem(pip, QStringLiteral("pictureInPictureCloseButton"));
         QObject *timer = pip->findChild<QObject *>(QStringLiteral("pictureInPictureRevealTimer"));
-        QVERIFY(scrim && close && timer);
-        QTRY_COMPARE(scrim->opacity(), 0.0);
+        QVERIFY(osd && close && timer);
+        QTRY_COMPARE(osd->opacity(), 0.0);
         QPointingDevice *touch = QTest::createTouchDevice();
         const auto tap = [&](const QPoint &at) {
             QTest::touchEvent(pip, touch).press(0, at);
@@ -20107,22 +21779,56 @@ class TestUiPages : public QObject {
         timer->setProperty("interval", 60000);
         // A tap on the video shows the controls and neither pauses nor returns
         tap(onVideo);
-        QTRY_COMPARE(scrim->opacity(), 1.0);
+        QTRY_COMPARE(osd->opacity(), 1.0);
         QTest::qWait(400);
         QVERIFY(stub.calls.isEmpty());
         QCOMPARE(ui.window->property("playbackMode").toString(), QStringLiteral("pip"));
         // Hidden again, a tap on the X only shows the controls: the window stays
         timer->setProperty("interval", 50);
-        QTRY_COMPARE(scrim->opacity(), 0.0);
+        QTRY_COMPARE(osd->opacity(), 0.0);
         timer->setProperty("interval", 60000);
         tap(onClose);
-        QTRY_COMPARE(scrim->opacity(), 1.0);
+        QTRY_COMPARE(osd->opacity(), 1.0);
         QTest::qWait(100);
         QCOMPARE(ui.window->property("playbackMode").toString(), QStringLiteral("pip"));
-        // Shown, the same tap closes the window and the full player takes the video back
+        // Shown, the same tap stops the playback and takes the window away
         tap(onClose);
-        QTRY_COMPARE(ui.window->property("playbackMode").toString(), QStringLiteral("full"));
-        QVERIFY(!stub.calls.contains(QStringLiteral("stop")));
+        QTRY_COMPARE(ui.window->property("playbackMode").toString(), QStringLiteral("none"));
+        QVERIFY(stub.calls.contains(QStringLiteral("stop")));
+    }
+
+    void thePictureInPictureWindowTakesTheShapeOfTheVideo()
+    {
+        PlayerStub stub;
+        stub.videoAspect = 2.39;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickWindow *pip = openPictureInPicture(ui, stub);
+        QVERIFY(pip);
+        // Without a compositor to size it, the window opens in the video's shape
+        QTRY_VERIFY(qAbs(pip->width() / double(pip->height()) - 2.39) < 0.03);
+        QCOMPARE(pip->property("aspect").toDouble(), 2.39);
+        QCOMPARE(pip->minimumHeight(), qRound(pip->minimumWidth() / 2.39));
+        // The file ends before the next one has a size: the window keeps its shape, it does not fall back to 16:9
+        stub.videoAspect = 0;
+        Q_EMIT stub.changed();
+        QTest::qWait(200);
+        QCOMPARE(pip->property("aspect").toDouble(), 2.39);
+        // The next video has another shape: the window's aspect and its minimum follow
+        stub.videoAspect = 4.0 / 3.0;
+        Q_EMIT stub.changed();
+        QTRY_COMPARE(pip->property("aspect").toDouble(), 4.0 / 3.0);
+        QCOMPARE(pip->minimumHeight(), qRound(pip->minimumWidth() * 3.0 / 4.0));
+        // A video wider than the controls have room for gets the widest shape that does
+        stub.videoAspect = 5.0;
+        Q_EMIT stub.changed();
+        QTRY_COMPARE(pip->property("aspect").toDouble(), 3.0);
+        // And a video taller than the window can be gets the tallest
+        stub.videoAspect = 0.4;
+        Q_EMIT stub.changed();
+        QTRY_COMPARE(pip->property("aspect").toDouble(), 0.75);
     }
 
     // The timeline seeks where a drag lets go, and the time shows where the video is
@@ -20139,18 +21845,23 @@ class TestUiPages : public QObject {
         Q_EMIT stub.changed();
         QQuickWindow *pip = openPictureInPicture(ui, stub);
         QVERIFY(pip);
+        // Wide enough for the total time beside the elapsed one
+        const int unit = pip->property("minimumShapeWidth").toInt() / 16;
+        const QSize wide(unit * 20, qRound(unit * 20 * 9.0 / 16));
+        pip->resize(wide);
+        QTRY_COMPARE(pip->size(), wide);
         QQuickItem *timeline =
             pictureInPictureItem(pip, QStringLiteral("pictureInPictureTimeline"));
         QQuickItem *time = pictureInPictureItem(pip, QStringLiteral("pictureInPictureTime"));
         QVERIFY(timeline && time);
         QVERIFY(timeline->isEnabled());
         QCOMPARE(timeline->property("value").toDouble(), 60.0);
-        QCOMPARE(time->property("text").toString(), QStringLiteral("60 / 600"));
+        QTRY_COMPARE(time->property("text").toString(), QStringLiteral("60 / 600"));
         stub.calls.clear();
         // Over the window, so the controls show, then a click at three quarters of the groove
         QTest::mouseMove(pip, QPoint(pip->width() / 2, pip->height() / 2));
-        QQuickItem *scrim = pictureInPictureItem(pip, QStringLiteral("pictureInPictureScrim"));
-        QTRY_COMPARE(scrim->opacity(), 1.0);
+        QQuickItem *osd = pictureInPictureItem(pip, QStringLiteral("pictureInPictureOsd"));
+        QTRY_COMPARE(osd->opacity(), 1.0);
         const QPoint at =
             timeline->mapToScene(QPointF(timeline->width() * 0.75, timeline->height() / 2))
                 .toPoint();
@@ -22134,6 +23845,7 @@ class TestUiPages : public QObject {
         QQuickItem *languageBox =
             dialog->findChild<QQuickItem *>(QStringLiteral("subtitleLanguageBox"));
         QVERIFY(languageBox);
+        QVERIFY(isChoiceBox(languageBox));
         QObject *languages = languageBox->property("popup").value<QObject *>();
         QVERIFY(languages);
         QVERIFY(QMetaObject::invokeMethod(languages, "open"));
@@ -23443,7 +25155,7 @@ class TestUiPages : public QObject {
         QVERIFY(timer && pointer && osd && bottomBar);
         timer->setProperty("interval", 300);
         const QPoint onVideo(ui.window->width() / 2, ui.window->height() / 2);
-        // The shade above the controls is part of the bar, with no control under the pointer
+        // The padding above the controls is part of the panel, with no control under the pointer
         const QPoint onBar = bottomBar->mapToScene(QPointF(bottomBar->width() / 2, 4)).toPoint();
         int nudge = 0;
         const auto wake = [&] {
@@ -23484,7 +25196,7 @@ class TestUiPages : public QObject {
         stub.paused = false;
         Q_EMIT stub.changed();
         QTRY_VERIFY(!osd->isVisible());
-        // The pointer resting on a bar keeps them, on its shade as on one of its controls
+        // The pointer resting on a panel keeps them, on its padding as on one of its controls
         QQuickItem *pause = ui.item(QStringLiteral("playerPauseButton"));
         QVERIFY(pause);
         for (const QPoint &on :
@@ -23635,7 +25347,7 @@ class TestUiPages : public QObject {
         QTest::qWait(400);
         QVERIFY(!stub.calls.contains(QStringLiteral("togglePause")));
         QCOMPARE(ui.window->visibility(), QWindow::Windowed);
-        // The entries, separators aside: the bars' controls, the two track menus, the window, then every entry of More Actions, the lock included
+        // The entries, separators aside: the bars' controls, the two track menus, the window, the mini player, then every entry of More Actions, the lock included
         QStringList entries;
         for (int i = 0; i < menu->property("count").toInt(); ++i) {
             QQuickItem *entry = nullptr;
@@ -23648,7 +25360,7 @@ class TestUiPages : public QObject {
                  QStringList({QStringLiteral("Pause"), QStringLiteral("Previous"),
                               QStringLiteral("Next"), QStringLiteral("Audio"),
                               QStringLiteral("Subtitles"), QStringLiteral("Full Screen Mode"),
-                              QStringLiteral("More Actions")}));
+                              QStringLiteral("Show Mini Player"), QStringLiteral("More Actions")}));
         QObject *contextMore = ui.popup(QStringLiteral("playerContextMoreMenu"));
         QVERIFY(contextMore);
         QVERIFY(contextMore->findChild<QQuickItem *>(QStringLiteral("playerContextMoreLockItem")));

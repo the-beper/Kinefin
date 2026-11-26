@@ -120,7 +120,8 @@ The Downloads category is hidden when the server does not allow you to download 
 
 Besides that setting, the profile's own `mpv.conf` is read from the profile folder (`~/.local/share/kinefin/profiles/<profile>/mpv.conf`, under `~/.var/app/io.github.the_beper.Kinefin/` in the Flatpak). The category's **mpv.conf file** card says whether the file is there, how many of its lines apply and what is wrong with the others, with a **Check Again** button.
 
-- The file is applied first, then the settings above, then Manual MPV Configuration: a line for an option that a setting manages is overridden by it.
+- Kinefin first sets `video-timing-offset` to `0.01` (mpv's default is `0.05`). The file is applied next, then the settings above, then Manual MPV Configuration: a line for an option that a setting manages is overridden by it, and a `video-timing-offset` line in the file or in Manual MPV Configuration replaces the default. Taking the line away restores `0.01` the next time the settings are applied.
+- A video that drops frames with heavy shaders (a render of more than 10 ms) may need `video-timing-offset=0.05`.
 - A line is `option=value`, `option` alone (a flag, set to `yes`), `no-option` (set to `no`), a `#` comment, a blank line, and a value may be in single or double quotes.
 - A `[profile]` section is reported, and the lines under it are left out.
 - `script`, `scripts`, `load-scripts`, `include`, `input-conf`, `config`, `config-dir`, `profile`, `input-ipc-server`, `input-ipc-client`, `ytdl`, `ytdl-format`, `ytdl-raw-options` and `http-*` are refused, as are the options and values that mpv itself does not accept. That list guards against the obvious and is not a sandbox: the file is yours, and mpv runs the other lines as written. A refused line is reported with its line number and skipped, and the others apply.

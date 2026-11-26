@@ -6,7 +6,7 @@ import QtQuick.Dialogs
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 
-// The images of one item, above its details page (administrators only): what it has now by type, each with its picture and size and the buttons to move it among the others of its type or delete it, an Upload button per type, and Search Online, which opens the page of the images the providers offer. A backdrop upload adds an image after the others, any other type is replaced. The details page reads the item again after every write
+// The images of one item, above its details page (administrators only): what it has now by type, each with its picture and size and the buttons to move it among the others of its type or delete it, an Upload and a Search Online button per type, the latter opening the page of the images the providers offer. A backdrop upload adds an image after the others, any other type is replaced. The details page reads the item again after every write
 Kirigami.ScrollablePage {
     id: page
     objectName: "editImagesPage"
@@ -172,15 +172,6 @@ Kirigami.ScrollablePage {
             title: page.title
             toolbarObjectName: "editImagesToolbar"
             titleObjectName: "editImagesHeading"
-            actions: [
-                Kirigami.Action {
-                    objectName: "editImagesSearchOnline"
-                    text: i18nc("@action:intoolbar", "Search Online…")
-                    icon.name: "edit-find"
-                    enabled: !page.writing
-                    onTriggered: page.searchOnline("Primary")
-                }
-            ]
         }
 
         MessageBox {

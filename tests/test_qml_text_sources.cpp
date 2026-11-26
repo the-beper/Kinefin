@@ -44,6 +44,8 @@ const QList<std::pair<QString, QString>> &knownTooltipBindings()
         // The text of an action of the application, or a button whose text is set by the page that uses it
         {QStringLiteral("LibraryPage.qml"), QStringLiteral("text")},
         {QStringLiteral("OsdButton.qml"), QStringLiteral("text")},
+        // The icon-only buttons of a download row: their texts are the application's own strings (Play, Resume, Retry, Pause, Export, Cancel, Delete)
+        {QStringLiteral("DownloadsPage.qml"), QStringLiteral("text")},
         {QStringLiteral("ShellHeader.qml"),
          QStringLiteral("display === QQC2.AbstractButton.IconOnly ? text : \"\"")},
         // Properties that hold a translated string

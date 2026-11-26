@@ -160,7 +160,6 @@ Kirigami.ApplicationWindow {
 
         shell: window
         navigation: navigation
-        headerHeight: shellHeader.height
         onDrawerDismissed: shellHeader.focusNavigationButton()
     }
 

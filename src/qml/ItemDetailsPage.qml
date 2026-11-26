@@ -26,6 +26,14 @@ Kirigami.ScrollablePage {
     readonly property bool showLoading: !showContent && (details.status === ItemDetailsModel.Loading || details.status === ItemDetailsModel.Idle)
     // The images are dropped while the page is out of view, which frees their textures
     readonly property bool inView: Kirigami.ColumnView.inViewport
+    // The cover (the backdrop) has come or has given up: the photos below it ask the server only then, so they do not take its time and the decoder's from the cover. Without a backdrop, or after a few seconds, it is true as well
+    property bool coverSettled: false
+    readonly property bool noCover: details.status === ItemDetailsModel.Ready && details.backdropUrl.toString().length === 0
+    Timer {
+        interval: 2500
+        running: page.inView && !page.coverSettled && !page.noCover && details.status === ItemDetailsModel.Ready
+        onTriggered: page.coverSettled = true
+    }
     readonly property bool showSimilar: details.similarStatus === ItemDetailsModel.Loading || details.similarStatus === ItemDetailsModel.Failed || (details.similarStatus === ItemDetailsModel.Ready && details.similar.count > 0)
     // The one message box the page shows, the first with something to report in this order: the item, the main section (seasons, collection, episodes), the similar items, the favorite and watched updates, then the partial episodes warning. A section title never stays without its box. Each box shows only when it is the one named here
     readonly property string shownBox: {
@@ -607,6 +615,26 @@ Kirigami.ScrollablePage {
     }
 
     // A bordered label for a short fact; `accessibleName` says what it is when the caption alone does not
+    // The series and the season over an episode or a season: links in the size the page asks for, the series' name bold, a ring for the keyboard focus instead of the bold the style gives focus
+    component ContextLink: Kirigami.LinkButton {
+        id: contextLink
+
+        // The size of the text and whether it is bold whatever the focus
+        property real size: Kirigami.Theme.defaultFont.pointSize
+        property bool strong: false
+
+        textFormat: Text.PlainText
+        font.pointSize: contextLink.size
+        font.bold: contextLink.strong || contextLink.activeFocus
+        background: Rectangle {
+            visible: contextLink.activeFocus
+            color: "transparent"
+            border.width: 2
+            border.color: Kirigami.Theme.highlightColor
+            radius: Kirigami.Units.cornerRadius
+        }
+    }
+
     component Badge: Rectangle {
         id: badge
 
@@ -710,7 +738,7 @@ Kirigami.ScrollablePage {
                             fillMode: Image.PreserveAspectCrop
                             sourceSize.width: width * Screen.devicePixelRatio
                             // Only URLs built by JellyfinClient::imageUrl belong here
-                            source: page.inView ? person.modelData.imageUrl : ""
+                            source: page.inView && (page.coverSettled || page.noCover) ? person.modelData.imageUrl : ""
                             Accessible.ignored: true
                         }
                     }
@@ -974,13 +1002,33 @@ Kirigami.ScrollablePage {
                             color: Kirigami.Theme.alternateBackgroundColor
                             clip: true
 
+                            // The blurred picture the server describes in a few characters, drawn at once by the BlurHash provider (nothing from the network): it holds the place until the backdrop is ready and fades out under it
+                            Image {
+                                anchors.fill: parent
+                                fillMode: Image.PreserveAspectCrop
+                                sourceSize: Qt.size(32, 18)
+                                smooth: true
+                                source: page.inView ? page.details.backdropPlaceholderUrl : ""
+                                // Under the backdrop while it fades in over it: gone only once the backdrop is whole, so the blur gives way gradually and never shows a gap
+                                opacity: backdropImage.opacity >= 1 ? 0 : 1
+                                Accessible.ignored: true
+                            }
+
                             // Only URLs built by JellyfinClient::imageUrl belong here: the image fetcher allows nothing else, but a raw server string must never become a source
                             Image {
+                                id: backdropImage
                                 anchors.fill: parent
                                 asynchronous: true
                                 fillMode: Image.PreserveAspectCrop
                                 sourceSize.width: width * Screen.devicePixelRatio
-                                source: page.inView ? page.details.backdropUrl : ""
+                                // At the width of the view in steps, not the largest every time; the URL of the details is read too, so a reload of them follows
+                                source: page.inView && page.details.backdropUrl.toString().length > 0 ? page.details.backdropUrlFor(width * Screen.devicePixelRatio) : ""
+                                // The picture comes in slowly over the blurred one, which it hides in the end
+                                opacity: status === Image.Ready ? 1 : 0
+                                Behavior on opacity {
+                                    NumberAnimation { duration: Kirigami.Units.veryLongDuration * 2; easing.type: Easing.InOutQuad }
+                                }
+                                onStatusChanged: if (status === Image.Ready || status === Image.Error) page.coverSettled = true
                                 Accessible.ignored: true
                             }
 
@@ -989,13 +1037,8 @@ Kirigami.ScrollablePage {
                                 id: scrim
 
                                 readonly property color fade: Kirigami.Theme.backgroundColor
-                                // The fade above the text: up to seven grid units, less where the image has no more room above the text block
-                                readonly property real fadeLength: hero.overlay ? Math.max(Kirigami.Units.gridUnit * 3, Math.min(parent.height - heroText.implicitHeight - page.margin, Kirigami.Units.gridUnit * 7)) : Kirigami.Units.gridUnit * 4
-                                // Where the text block starts inside the scrim: the fade is measured from it, not from the image's bottom
-                                readonly property real textTop: Math.max(0, height - page.margin - heroText.implicitHeight)
-                                readonly property real fadeTop: hero.overlay ? Math.min(1, textTop / height) : 1
-                                // How opaque the fade is where it ends, at the top of the text block; under the text it goes on to the full colour
-                                readonly property real topAlpha: hero.overlay ? 0.75 : 1
+                                // The fade above the text block, where the ramp begins: the picture shows clear above it
+                                readonly property real fadeLength: hero.overlay ? Kirigami.Units.gridUnit * 5 : Kirigami.Units.gridUnit * 4
 
                                 anchors {
                                     left: parent.left
@@ -1003,39 +1046,39 @@ Kirigami.ScrollablePage {
                                     bottom: parent.bottom
                                 }
                                 height: hero.overlay ? Math.min(parent.height, heroText.implicitHeight + page.margin + fadeLength) : fadeLength
-                                // A smoothstep ramp (3t² - 2t³) sampled at t = 0, .15, .3, .45, .6, .75, .9, 1: it starts and ends level, so neither end of the fade shows as an edge
+                                // One long, even ramp over the whole height of the fade, with no flat part: the opacity is t^1.4 (t from 0 at the top to 1 at the bottom) sampled at eighths, so it starts level, climbs steadily through the text block and reaches the full colour only at the bottom edge
                                 gradient: Gradient {
                                     GradientStop {
                                         position: 0
-                                        color: Qt.alpha(scrim.fade, 0)
+                                        color: Qt.alpha(scrim.fade, 0.0)
                                     }
                                     GradientStop {
-                                        position: scrim.fadeTop * 0.15
-                                        color: Qt.alpha(scrim.fade, scrim.topAlpha * 0.06)
+                                        position: 0.125
+                                        color: Qt.alpha(scrim.fade, 0.0545)
                                     }
                                     GradientStop {
-                                        position: scrim.fadeTop * 0.3
-                                        color: Qt.alpha(scrim.fade, scrim.topAlpha * 0.22)
+                                        position: 0.25
+                                        color: Qt.alpha(scrim.fade, 0.1436)
                                     }
                                     GradientStop {
-                                        position: scrim.fadeTop * 0.45
-                                        color: Qt.alpha(scrim.fade, scrim.topAlpha * 0.43)
+                                        position: 0.375
+                                        color: Qt.alpha(scrim.fade, 0.2536)
                                     }
                                     GradientStop {
-                                        position: scrim.fadeTop * 0.6
-                                        color: Qt.alpha(scrim.fade, scrim.topAlpha * 0.65)
+                                        position: 0.5
+                                        color: Qt.alpha(scrim.fade, 0.379)
                                     }
                                     GradientStop {
-                                        position: scrim.fadeTop * 0.75
-                                        color: Qt.alpha(scrim.fade, scrim.topAlpha * 0.84)
+                                        position: 0.625
+                                        color: Qt.alpha(scrim.fade, 0.518)
                                     }
                                     GradientStop {
-                                        position: scrim.fadeTop * 0.9
-                                        color: Qt.alpha(scrim.fade, scrim.topAlpha * 0.97)
+                                        position: 0.75
+                                        color: Qt.alpha(scrim.fade, 0.668)
                                     }
                                     GradientStop {
-                                        position: scrim.fadeTop
-                                        color: Qt.alpha(scrim.fade, scrim.topAlpha)
+                                        position: 0.875
+                                        color: Qt.alpha(scrim.fade, 0.829)
                                     }
                                     GradientStop {
                                         position: 1
@@ -1078,6 +1121,10 @@ Kirigami.ScrollablePage {
                                 id: titleBlock
 
                                 readonly property bool seriesBeside: page.details.type === "Season" && page.showSeriesLink && !hero.narrow
+                                // The series is the parent of a season, which it must not be smaller than: it takes the size of the season's name; over an episode, whose name is the largest, a step above the text
+                                readonly property real contextSize: page.details.type === "Season" ? detailsTitle.font.pointSize : Kirigami.Theme.defaultFont.pointSize * 1.15
+                                // A season in a narrow window has its series first, over its name
+                                readonly property bool seriesFirst: page.details.type === "Season" && page.showSeriesLink && !seriesBeside
 
                                 Layout.fillWidth: true
                                 columns: seriesBeside ? 3 : 1
@@ -1090,7 +1137,7 @@ Kirigami.ScrollablePage {
                                     objectName: "detailsTitle"
                                     readonly property bool underParentLogo: logo.status === Image.Ready && (page.details.type === "Episode" || page.details.type === "Season")
                                     Layout.fillWidth: true
-                                    Layout.row: 0
+                                    Layout.row: titleBlock.seriesFirst ? 1 : 0
                                     Layout.column: titleBlock.seriesBeside ? 2 : 0
                                     Layout.alignment: titleBlock.seriesBeside ? Qt.AlignBottom : Qt.AlignTop
                                     visible: logo.status !== Image.Ready || underParentLogo
@@ -1103,27 +1150,39 @@ Kirigami.ScrollablePage {
 
                                 Flow {
                                     Layout.fillWidth: !titleBlock.seriesBeside
-                                    Layout.row: titleBlock.seriesBeside ? 0 : 1
+                                    Layout.row: titleBlock.seriesBeside || titleBlock.seriesFirst ? 0 : 1
                                     Layout.column: 0
                                     Layout.alignment: titleBlock.seriesBeside ? Qt.AlignBottom : Qt.AlignTop
                                     spacing: Kirigami.Units.largeSpacing
                                     // The data decides, not the links: a child reads back its effective visibility, which follows this Flow
                                     visible: page.showSeriesLink || page.showSeasonLink
 
-                                    Kirigami.LinkButton {
+                                    ContextLink {
                                         id: seriesLink
                                         objectName: "seriesLink"
                                         visible: page.showSeriesLink
-                                        textFormat: Text.PlainText
+                                        size: titleBlock.contextSize
+                                        strong: true
                                         text: page.details.seriesName
                                         onClicked: page.Window.window.openAncestor(page.details.seriesId, page)
                                     }
 
-                                    Kirigami.LinkButton {
+                                    // Between the two, as the season's page writes the path: the series, then the season
+                                    Controls.Label {
+                                        objectName: "contextSeparator"
+                                        visible: page.showSeriesLink && page.showSeasonLink
+                                        opacity: 0.7
+                                        font.pointSize: titleBlock.contextSize
+                                        textFormat: Text.PlainText
+                                        Accessible.ignored: true
+                                        text: Qt.application.layoutDirection === Qt.RightToLeft ? "‹" : "›"
+                                    }
+
+                                    ContextLink {
                                         id: seasonLink
                                         objectName: "seasonLink"
                                         visible: page.showSeasonLink
-                                        textFormat: Text.PlainText
+                                        size: titleBlock.contextSize
                                         text: page.details.seasonNumber > 0 ? i18n("Season %1", page.details.seasonNumber) : (page.details.seasonNumber === 0 ? i18n("Specials") : i18n("Season"))
                                         onClicked: page.Window.window.openAncestor(page.details.seasonId, page)
                                     }
@@ -1135,6 +1194,7 @@ Kirigami.ScrollablePage {
                                     Layout.alignment: Qt.AlignBottom
                                     visible: titleBlock.seriesBeside
                                     opacity: 0.7
+                                    font.pointSize: titleBlock.contextSize
                                     textFormat: Text.PlainText
                                     Accessible.ignored: true
                                     text: Qt.application.layoutDirection === Qt.RightToLeft ? "‹" : "›"
@@ -1422,9 +1482,10 @@ Kirigami.ScrollablePage {
                                 font: audioSelector.font
                                 text: page.longestLabel(page.audioChoices)
                             }
-                            Controls.ComboBox {
+                            ChoiceBox {
                                 id: audioSelector
                                 objectName: "audioSelector"
+                                choicePrefix: "audioChoice_"
                                 visible: page.audioChoices.length > 1
                                 enabled: !(page.Window.window?.groupRouting ?? false)
                                 Layout.preferredWidth: streamSelectors.boxWidth
@@ -1435,34 +1496,12 @@ Kirigami.ScrollablePage {
                                 textRole: "label"
                                 Accessible.name: i18n("Audio track")
                                 onActivated: index => page.audioStreamIndex = page.audioChoices[index].index
-                                // The list opens below the box and above it when there is no room below, never over it
-                                PopupPlacement { popup: audioSelector.popup; anchor: audioSelector }
                                 // Written by the Binding so a reload that drops the choice can move it back
                                 Binding {
                                     target: audioSelector
                                     property: "currentIndex"
                                     value: page.choiceIndex(page.audioChoices, page.audioStreamIndex)
                                     restoreMode: Binding.RestoreNone
-                                }
-                                // The style's own rows read server titles as mnemonic rich text: a plain label keeps them literal
-                                delegate: Controls.MenuItem {
-                                    id: audioChoice
-
-                                    required property int index
-                                    required property var modelData
-
-                                    objectName: "audioChoice_" + index
-                                    text: modelData.label
-                                    highlighted: audioSelector.highlightedIndex === index
-                                    Kirigami.MnemonicData.enabled: false
-                                    contentItem: Controls.Label {
-                                        text: audioChoice.text
-                                        textFormat: Text.PlainText
-                                        elide: Text.ElideRight
-                                        font: audioChoice.font
-                                        verticalAlignment: Text.AlignVCenter
-                                        color: audioChoice.highlighted || audioChoice.pressed ? Kirigami.Theme.highlightedTextColor : Kirigami.Theme.textColor
-                                    }
                                 }
                             }
                         }
@@ -1490,9 +1529,10 @@ Kirigami.ScrollablePage {
                                 font: subtitleSelector.font
                                 text: page.longestLabel(page.subtitleChoices)
                             }
-                            Controls.ComboBox {
+                            ChoiceBox {
                                 id: subtitleSelector
                                 objectName: "subtitleSelector"
+                                choicePrefix: "subtitleChoice_"
                                 visible: page.subtitleChoices.length > 2
                                 enabled: !(page.Window.window?.groupRouting ?? false)
                                 Layout.preferredWidth: streamSelectors.boxWidth
@@ -1503,34 +1543,12 @@ Kirigami.ScrollablePage {
                                 textRole: "label"
                                 Accessible.name: i18n("Subtitle track")
                                 onActivated: index => page.subtitleStreamIndex = page.subtitleChoices[index].index
-                                // The list opens below the box and above it when there is no room below, never over it
-                                PopupPlacement { popup: subtitleSelector.popup; anchor: subtitleSelector }
                                 // Written by the Binding so a reload that drops the choice can move it back
                                 Binding {
                                     target: subtitleSelector
                                     property: "currentIndex"
                                     value: page.choiceIndex(page.subtitleChoices, page.subtitleStreamIndex)
                                     restoreMode: Binding.RestoreNone
-                                }
-                                // The style's own rows read server titles as mnemonic rich text: a plain label keeps them literal
-                                delegate: Controls.MenuItem {
-                                    id: subtitleChoice
-
-                                    required property int index
-                                    required property var modelData
-
-                                    objectName: "subtitleChoice_" + index
-                                    text: modelData.label
-                                    highlighted: subtitleSelector.highlightedIndex === index
-                                    Kirigami.MnemonicData.enabled: false
-                                    contentItem: Controls.Label {
-                                        text: subtitleChoice.text
-                                        textFormat: Text.PlainText
-                                        elide: Text.ElideRight
-                                        font: subtitleChoice.font
-                                        verticalAlignment: Text.AlignVCenter
-                                        color: subtitleChoice.highlighted || subtitleChoice.pressed ? Kirigami.Theme.highlightedTextColor : Kirigami.Theme.textColor
-                                    }
                                 }
                             }
                         }

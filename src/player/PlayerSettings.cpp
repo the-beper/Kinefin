@@ -142,6 +142,8 @@ void PlayerSettings::apply()
 {
     if (!m_engine.isInitialized())
         return;
+    // A default that mpv.conf may replace: with mpv's 50 ms the render call sleeps the thread that draws the interface too until the frame is due, and a scroll beside a playing video loses frames; a render of more than 10 ms (heavy shaders) then shows its frame late
+    m_engine.setMpvProperty(QStringLiteral("video-timing-offset"), 0.01);
     applyConfFile();
     applyAudio();
     applyVideo();

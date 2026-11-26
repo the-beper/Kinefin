@@ -603,6 +603,55 @@ class TestPlayerController : public QObject {
         QVERIFY(!chain.controller.hasSeriesChoices());
     }
 
+    void theTrackMemoryPastItsCapDropsTheItemsChosenLongestAgo()
+    {
+        // 1000 choices stamped 1 to 1000, plus three that sort before them: one stored before entries carried a time, one that is no object and one with a negative time
+        QJsonObject tracks{
+            {QStringLiteral("fill/legacy"),
+             QJsonObject{{QStringLiteral("audio"), 1}, {QStringLiteral("subtitle"), 0}}},
+            {QStringLiteral("fill/junk"), QStringLiteral("junk")},
+            {QStringLiteral("fill/negative"),
+             QJsonObject{{QStringLiteral("audio"), 1}, {QStringLiteral("at"), -5}}}};
+        for (int at = 1; at <= 1000; ++at)
+            tracks.insert(QStringLiteral("fill/%1").arg(at), choice(at));
+        const QString file = seedTrackMemory(QStringLiteral("memorycap"), tracks);
+        QVERIFY(!file.isEmpty());
+
+        Chain chain({}, QStringLiteral("memorycap"));
+        QVERIFY(chain.ok);
+        const QString key = choosesAnAudioTrack(chain);
+        QVERIFY(!key.isEmpty());
+        const QJsonObject kept = storedTracks(file);
+        QCOMPARE(kept.size(), 1000);
+        QVERIFY(kept.contains(key));
+        // The three that sort first and the one chosen first are gone, the rest stays
+        for (const QString &gone : {QStringLiteral("legacy"), QStringLiteral("junk"),
+                                    QStringLiteral("negative"), QStringLiteral("1")})
+            QVERIFY2(!kept.contains(QStringLiteral("fill/") + gone), qPrintable(gone));
+        QVERIFY(kept.contains(QStringLiteral("fill/2")));
+        QVERIFY(kept.contains(QStringLiteral("fill/1000")));
+    }
+
+    void aChoiceIsKeptEvenWhenTheClockWentBackSinceTheOthers()
+    {
+        // Every stored choice is from far in the future, as after a clock set back: the new one has the lowest time and must still stay
+        QJsonObject tracks;
+        const qint64 future = QDateTime::currentMSecsSinceEpoch() + 10'000'000'000;
+        for (int i = 0; i < 1000; ++i)
+            tracks.insert(QStringLiteral("fill/%1").arg(i), choice(future + i));
+        const QString file = seedTrackMemory(QStringLiteral("memoryclock"), tracks);
+        QVERIFY(!file.isEmpty());
+
+        Chain chain({}, QStringLiteral("memoryclock"));
+        QVERIFY(chain.ok);
+        const QString key = choosesAnAudioTrack(chain);
+        QVERIFY(!key.isEmpty());
+        const QJsonObject kept = storedTracks(file);
+        QCOMPARE(kept.size(), 1000);
+        QVERIFY(kept.contains(key));
+        QVERIFY(!kept.contains(QStringLiteral("fill/0")));
+    }
+
     void movieTitleComesFromTheServer()
     {
         Chain chain;
@@ -809,6 +858,105 @@ class TestPlayerController : public QObject {
         // Within the duration only one is left, which counts as none
         Q_EMIT mpv->propertyChanged(QStringLiteral("duration"), 40.0);
         QVERIFY(chain.controller.chapters().isEmpty());
+    }
+
+    void mpvRendersAFrameJustBeforeItIsDueUnlessTheUserSaysOtherwise()
+    {
+        enum class Source { Default, MpvConf, ManualConfiguration };
+        for (const auto source : {Source::Default, Source::MpvConf, Source::ManualConfiguration}) {
+            Chain chain;
+            QVERIFY(chain.ok);
+            if (source == Source::MpvConf) {
+                QFile conf(chain.dir.filePath(QStringLiteral("mpv.conf")));
+                QVERIFY(conf.open(QIODevice::WriteOnly));
+                QVERIFY(conf.write("video-timing-offset=0.03\n") > 0);
+            }
+            if (source == Source::ManualConfiguration)
+                QVERIFY(chain.settings.setValue(QStringLiteral("other"),
+                                                QStringLiteral("other_conf"),
+                                                QStringLiteral("video-timing-offset=0.02")));
+            chain.server.trickplayMetadataBody = movieBody(kMovie, QStringLiteral("Big Movie"));
+            // The settings are applied by the play of an item, to an engine that is running
+            QVERIFY(chain.engine()->init({QStringLiteral("vo=null"), QStringLiteral("ao=null")}));
+            QVERIFY(chain.controller.playItem(kMovie, 0));
+            // The render call sleeps until the frame is due, at most this long before it: the thread that draws the interface sleeps with it
+            const double expected = source == Source::MpvConf               ? 0.03
+                                    : source == Source::ManualConfiguration ? 0.02
+                                                                            : 0.01;
+            const double offset =
+                chain.engine()->mpvProperty(QStringLiteral("video-timing-offset")).toDouble();
+            QVERIFY2(qAbs(offset - expected) < 1e-9, qPrintable(QString::number(offset)));
+        }
+    }
+
+    void theVideoAspectFollowsTheSizeMpvShowsTheVideoAt()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        chain.server.trickplayMetadataBody = movieBody(kMovie, QStringLiteral("Big Movie"));
+        QVERIFY(chain.controller.playItem(kMovie, 0));
+        QVERIFY(chain.engine()->init({QStringLiteral("vo=null"), QStringLiteral("ao=null")}));
+        QTRY_COMPARE(chain.controller.title(), QStringLiteral("Big Movie"));
+        // The item's own source is refused and a clip plays: the end of file of the refused source is behind, so none comes between the events of the test
+        Q_EMIT chain.client.playbackInfoFailed(kMovie, 500, QString());
+        QVERIFY(chain.opensClip(kMovie, 30));
+        auto *mpv = chain.engine()->controller();
+        QSignalSpy changes(&chain.controller, &PlayerController::videoAspectChanged);
+        QCOMPARE(chain.controller.videoAspect(), 0.0);
+        // The width alone tells nothing
+        Q_EMIT mpv->propertyChanged(QStringLiteral("dwidth"), qlonglong(1920));
+        QTest::qWait(50);
+        QCOMPARE(chain.controller.videoAspect(), 0.0);
+        QCOMPARE(changes.size(), 0);
+        // The two sizes arrive one after the other and the aspect is told once, from both
+        Q_EMIT mpv->propertyChanged(QStringLiteral("dheight"), qlonglong(804));
+        QTRY_COMPARE(changes.size(), 1);
+        QVERIFY(qAbs(chain.controller.videoAspect() - 1920.0 / 804.0) < 1e-9);
+        // The same size again is no change
+        Q_EMIT mpv->propertyChanged(QStringLiteral("dheight"), qlonglong(804));
+        QTest::qWait(50);
+        QCOMPARE(changes.size(), 1);
+        // A choice of aspect in the player changes both sizes: one change, never a mix of the old size and the new
+        Q_EMIT mpv->propertyChanged(QStringLiteral("dwidth"), qlonglong(1440));
+        Q_EMIT mpv->propertyChanged(QStringLiteral("dheight"), qlonglong(1080));
+        QTRY_COMPARE(changes.size(), 2);
+        QTest::qWait(50);
+        QCOMPARE(changes.size(), 2);
+        QVERIFY(qAbs(chain.controller.videoAspect() - 4.0 / 3.0) < 1e-9);
+        // The other facts of mpv are no change of size
+        Q_EMIT mpv->propertyChanged(QStringLiteral("frame-drop-count"), qlonglong(3));
+        QTest::qWait(50);
+        QCOMPARE(changes.size(), 2);
+        // A size mpv takes back leaves no aspect
+        Q_EMIT mpv->propertyChanged(QStringLiteral("dwidth"), QVariant());
+        QTRY_COMPARE(changes.size(), 3);
+        QCOMPARE(chain.controller.videoAspect(), 0.0);
+    }
+
+    void theVideoAspectGoesWithTheFile()
+    {
+        Chain chain;
+        QVERIFY(chain.ok);
+        chain.server.trickplayMetadataBody = movieBody(kMovie, QStringLiteral("Big Movie"));
+        QVERIFY(chain.controller.playItem(kMovie, 0));
+        QVERIFY(chain.engine()->init({QStringLiteral("vo=null"), QStringLiteral("ao=null")}));
+        QTRY_COMPARE(chain.controller.title(), QStringLiteral("Big Movie"));
+        // The item's own source is refused and a clip plays: the end of file of the refused source is behind, so none comes between the events of the test
+        Q_EMIT chain.client.playbackInfoFailed(kMovie, 500, QString());
+        QVERIFY(chain.opensClip(kMovie, 30));
+        auto *mpv = chain.engine()->controller();
+        QSignalSpy changes(&chain.controller, &PlayerController::videoAspectChanged);
+        // No size, so nothing to take away: the end of the file is no change
+        Q_EMIT mpv->endFile(QStringLiteral("stop"));
+        QTest::qWait(50);
+        QCOMPARE(changes.size(), 0);
+        Q_EMIT mpv->propertyChanged(QStringLiteral("dwidth"), qlonglong(1920));
+        Q_EMIT mpv->propertyChanged(QStringLiteral("dheight"), qlonglong(1080));
+        QTRY_COMPARE(changes.size(), 1);
+        // The next file has its own size: until it is known there is no aspect
+        Q_EMIT mpv->endFile(QStringLiteral("stop"));
+        QTRY_COMPARE(changes.size(), 2);
+        QCOMPARE(chain.controller.videoAspect(), 0.0);
     }
 
     void chapterStepsLandOnChapterStarts()
@@ -3928,6 +4076,50 @@ class TestPlayerController : public QObject {
     }
 
   private:
+    // A stored track choice, chosen `at` ms since the epoch
+    static QJsonObject choice(qint64 at)
+    {
+        return {{QStringLiteral("audio"), 1},
+                {QStringLiteral("subtitle"), 0},
+                {QStringLiteral("at"), at}};
+    }
+    // Writes the track memory of the profile `profileId` before its controller exists; returns the file, or nothing when it could not be written
+    QString seedTrackMemory(const QString &profileId, const QJsonObject &tracks)
+    {
+        const QString data = m_data.filePath(QStringLiteral("kinefin/profiles/") + profileId);
+        const QString path = data + QStringLiteral("/storage.json");
+        QFile seed(path);
+        const QByteArray bytes = QJsonDocument(QJsonObject{{QStringLiteral("version"), 1},
+                                                           {QStringLiteral("tracks"), tracks}})
+                                     .toJson(QJsonDocument::Compact);
+        return QDir().mkpath(data) && seed.open(QIODevice::WriteOnly)
+                       && seed.write(bytes) == bytes.size()
+                   ? path
+                   : QString();
+    }
+    static QJsonObject storedTracks(const QString &path)
+    {
+        QFile file(path);
+        return file.open(QIODevice::ReadOnly) ? QJsonDocument::fromJson(file.readAll())
+                                                    .object()
+                                                    .value(QStringLiteral("tracks"))
+                                                    .toObject()
+                                              : QJsonObject();
+    }
+    // Plays the third episode and picks its first audio track; returns the key the choice is stored under, or nothing when playback did not get there
+    static QString choosesAnAudioTrack(Chain &chain)
+    {
+        if (!chain.episodeThreeOpened() || !chain.opensClip(episodeId(3), 30)
+            || !QTest::qWaitFor([&chain] { return !chain.controller.audioTracks().isEmpty(); }))
+            return {};
+        chain.controller.selectAudioTrack(chain.controller.audioTracks()
+                                              .constFirst()
+                                              .toMap()
+                                              .value(QStringLiteral("id"))
+                                              .toInt());
+        return chain.client.serverId().toLower() + QLatin1Char('/')
+               + chain.client.userId().toLower() + QLatin1Char('/') + episodeId(3);
+    }
     static constexpr qint64 kSourceBitrate = 18'300'000;
     inline static const QString kSourceId = QStringLiteral("c1b2a3d4e5f6071829304a5b6c7d8e9f");
     // mpv tells a cache stall begins or ends, as it would on a slow connection

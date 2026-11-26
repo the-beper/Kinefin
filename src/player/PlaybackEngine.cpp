@@ -456,12 +456,16 @@ void PlaybackEngine::onPropertyChanged(const QString &property, const QVariant &
         const QString name = QString::fromLatin1(key);
         const bool isText = value.typeId() == QMetaType::QString;
         // An unavailable property arrives as an invalid value: the fact is unknown again
+        const QVariant before = m_videoFacts.value(name);
         if (!value.isValid() || (isText && value.toString().isEmpty()))
             m_videoFacts.remove(name);
         else if (isText)
             m_videoFacts.insert(name, value.toString().left(64));
         else
             m_videoFacts.insert(name, value);
+        if ((name == QLatin1String("videoWidth") || name == QLatin1String("videoHeight"))
+            && m_videoFacts.value(name) != before)
+            Q_EMIT videoSizeChanged();
     } else if (property == QLatin1String("paused-for-cache")) {
         // Cache stalls only mean Buffering around an actually Playing session: the state machine refuses every other path silently
         if (isFlag)
@@ -532,7 +536,11 @@ void PlaybackEngine::restoreVideo(bool afterLoad)
 void PlaybackEngine::onEndFile(const QString &reason)
 {
     qCDebug(playerLog) << "end file:" << reason;
+    const bool hadSize = m_videoFacts.contains(QStringLiteral("videoWidth"))
+                         || m_videoFacts.contains(QStringLiteral("videoHeight"));
     m_videoFacts.clear();
+    if (hadSize)
+        Q_EMIT videoSizeChanged();
     settleSeek();
     const bool eofish = reason == QLatin1String("eof");
     switch (m_session.state()) {

@@ -2,9 +2,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "PipSurface.h"
 
+#include "PipAspect.h"
+#include "PipShadow.h"
+
+#include <QDebug>
+#include <QElapsedTimer>
 #include <QGuiApplication>
 #include <QVersionNumber>
-#include <QtMath>
+
+#include <KWindowShadow>
 
 #ifdef KINEFIN_HAVE_XX_PIP
 #include <QtWaylandClient/QWaylandClientExtensionTemplate>
@@ -24,6 +30,12 @@
 namespace Kinefin {
 #ifdef KINEFIN_HAVE_XX_PIP
 namespace {
+// The properties of the window that carry its aspect ratio and least width to the shell surface, which Qt creates when the window first shows
+constexpr const char AspectProperty[] = "kinefinPipAspect";
+constexpr const char MinimumWidthProperty[] = "kinefinPipMinimumWidth";
+// The compositor sends no end of a resize: a gap this long between its configures is one
+constexpr qint64 ResizeGapMs = 1000;
+
 // A binding of its own to xdg-shell, through the wrapper QtWaylandClient exports: the picture-in-picture role is an xdg_surface role, created from this application's wl_surface
 class XdgWmBase : public QWaylandClientExtensionTemplate<XdgWmBase>, public QtWayland::xdg_wm_base {
   public:
@@ -82,6 +94,8 @@ class PipShellSurface : public QtWaylandClient::QWaylandShellSurface,
     {
         if (!m_configured || !device)
             return false;
+        m_resizeEdges = {};
+        m_lastConfigure.start();
         xx_pip_v1::move(device->wl_seat(), device->serial());
         return true;
     }
@@ -90,8 +104,21 @@ class PipShellSurface : public QtWaylandClient::QWaylandShellSurface,
         const std::optional<uint32_t> edge = protocolEdges(edges);
         if (!m_configured || !device || !edge)
             return false;
+        m_resizeEdges = edges;
+        m_lastConfigure.start();
         xx_pip_v1::resize(device->wl_seat(), device->serial(), *edge);
         return true;
+    }
+    // The window takes the shape of a new aspect ratio at once, keeping its width as far as the bounds allow
+    void refit()
+    {
+        QWindow *qwindow = window()->window();
+        if (!m_configured || !qwindow)
+            return;
+        const QSize now = window()->windowContentGeometry().size();
+        const QSize fitted = fitToAspect(now, aspect(), Qt::Edges(), minimumWidth(), m_bounds);
+        if (fitted != now)
+            qwindow->resize(fitted);
     }
     void setContentGeometry(const QRect &rect) override
     {
@@ -105,18 +132,15 @@ class PipShellSurface : public QtWaylandClient::QWaylandShellSurface,
             size.setWidth(m_pendingSize.width());
         if (m_pendingSize.height() > 0)
             size.setHeight(m_pendingSize.height());
-        // A surface larger than the bounds is a protocol error, which ends the connection: it shrinks to them, keeping its shape
-        if (m_bounds.width() > 0 && m_bounds.height() > 0 && size.width() > 0 && size.height() > 0
-            && (size.width() > m_bounds.width() || size.height() > m_bounds.height())) {
-            const double scale = qMin(double(m_bounds.width()) / size.width(),
-                                      double(m_bounds.height()) / size.height());
-            size = QSize(qMin(m_bounds.width(), qFloor(size.width() * scale)),
-                         qMin(m_bounds.height(), qFloor(size.height() * scale)));
-        }
+        // The compositor sizes this window to any shape: it is fitted to the video's, and to the bounds, since a surface larger than them is a protocol error that ends the connection
+        if (m_lastConfigure.isValid() && m_lastConfigure.elapsed() > ResizeGapMs)
+            m_resizeEdges = {};
+        m_lastConfigure.start();
+        QWindow *qwindow = window()->window();
+        size = fitToAspect(size, aspect(), m_resizeEdges, minimumWidth(), m_bounds);
         resizeFromApplyConfigure(size);
         // The window never grows past the bounds by itself either; set after the resize, which keeps the shape, since a smaller maximum would cut the size at once
-        if (QWindow *qwindow = window()->window();
-            qwindow && m_bounds.width() > 0 && m_bounds.height() > 0)
+        if (qwindow && m_bounds.width() > 0 && m_bounds.height() > 0)
             qwindow->setMaximumSize(m_bounds);
         // Acknowledged once the size is applied, as Qt's xdg-shell does: the next commit already has it
         if (m_pendingSerial) {
@@ -152,11 +176,26 @@ class PipShellSurface : public QtWaylandClient::QWaylandShellSurface,
     }
 
   private:
+    // Not const: QWaylandShellSurface::window() is not
+    qreal aspect()
+    {
+        const QWindow *qwindow = window()->window();
+        return qwindow ? qwindow->property(AspectProperty).toReal() : 0;
+    }
+    int minimumWidth()
+    {
+        const QWindow *qwindow = window()->window();
+        return qwindow ? qwindow->property(MinimumWidthProperty).toInt() : 0;
+    }
+
     // Read by isExposed, which the render thread may call too
     std::atomic<bool> m_configured = false;
     std::optional<uint32_t> m_pendingSerial;
     QSize m_pendingSize;
     QSize m_bounds;
+    // The edges of the resize the user started last, which lead the shape of the sizes the compositor configures; none after a move
+    Qt::Edges m_resizeEdges;
+    QElapsedTimer m_lastConfigure;
 };
 
 class PipShellIntegration : public QtWaylandClient::QWaylandShellIntegration {
@@ -192,6 +231,17 @@ PipShellIntegration *integration()
 } // namespace
 #endif
 
+namespace {
+// Stores a value of a shadow property; true when it changed
+bool changed(qreal &member, qreal value)
+{
+    if (qFuzzyCompare(value + 1, member + 1))
+        return false;
+    member = value;
+    return true;
+}
+} // namespace
+
 PipSurface::PipSurface(QObject *parent) : QObject(parent) {}
 
 bool PipSurface::available() const
@@ -201,6 +251,92 @@ bool PipSurface::available() const
 #else
     return false;
 #endif
+}
+
+void PipSurface::setAspectRatio(qreal ratio)
+{
+    if (qFuzzyCompare(ratio + 1, m_aspectRatio + 1))
+        return;
+    m_aspectRatio = ratio;
+    Q_EMIT aspectRatioChanged();
+#ifdef KINEFIN_HAVE_XX_PIP
+    if (!m_window)
+        return;
+    m_window->setProperty(AspectProperty, m_aspectRatio);
+    auto *waylandWindow = dynamic_cast<QtWaylandClient::QWaylandWindow *>(m_window->handle());
+    if (auto *surface = waylandWindow
+                            ? dynamic_cast<PipShellSurface *>(waylandWindow->shellSurface())
+                            : nullptr)
+        surface->refit();
+#endif
+}
+
+void PipSurface::setMinimumWidth(int width)
+{
+    if (width == m_minimumWidth)
+        return;
+    m_minimumWidth = width;
+    Q_EMIT minimumWidthChanged();
+#ifdef KINEFIN_HAVE_XX_PIP
+    if (m_window)
+        m_window->setProperty(MinimumWidthProperty, m_minimumWidth);
+#endif
+}
+
+void PipSurface::setShadowSize(qreal size)
+{
+    if (!changed(m_shadowSize, size))
+        return;
+    Q_EMIT shadowSizeChanged();
+    applyShadow();
+}
+
+void PipSurface::setShadowYOffset(qreal offset)
+{
+    if (!changed(m_shadowYOffset, offset))
+        return;
+    Q_EMIT shadowYOffsetChanged();
+    applyShadow();
+}
+
+void PipSurface::setShadowOpacity(qreal opacity)
+{
+    if (!changed(m_shadowOpacity, opacity))
+        return;
+    Q_EMIT shadowOpacityChanged();
+    applyShadow();
+}
+
+void PipSurface::applyShadow()
+{
+    delete m_shadow;
+    m_shadow = nullptr;
+    m_shadowCreated = false;
+    if (!m_window)
+        return;
+    const PipShadow shadow =
+        pipShadow(m_shadowSize, m_shadowYOffset, m_shadowOpacity, m_window->devicePixelRatio());
+    if (shadow.top.isNull())
+        return;
+    const auto tile = [](const QImage &image) {
+        auto shared = KWindowShadowTile::Ptr::create();
+        shared->setImage(image);
+        return shared;
+    };
+    m_shadow = new KWindowShadow(this);
+    m_shadow->setTopLeftTile(tile(shadow.topLeft));
+    m_shadow->setTopTile(tile(shadow.top));
+    m_shadow->setTopRightTile(tile(shadow.topRight));
+    m_shadow->setRightTile(tile(shadow.right));
+    m_shadow->setBottomRightTile(tile(shadow.bottomRight));
+    m_shadow->setBottomTile(tile(shadow.bottom));
+    m_shadow->setBottomLeftTile(tile(shadow.bottomLeft));
+    m_shadow->setLeftTile(tile(shadow.left));
+    m_shadow->setPadding(shadow.padding.toMargins());
+    m_shadow->setWindow(m_window);
+    m_shadowCreated = m_shadow->create();
+    if (!m_shadowCreated)
+        qWarning() << "the compositor shadow of the picture-in-picture window could not be created";
 }
 
 bool PipSurface::assign(QWindow *window)
@@ -213,7 +349,19 @@ bool PipSurface::assign(QWindow *window)
     auto *waylandWindow = dynamic_cast<QtWaylandClient::QWaylandWindow *>(window->handle());
     if (!waylandWindow)
         return false;
+    window->setProperty(AspectProperty, m_aspectRatio);
+    window->setProperty(MinimumWidthProperty, m_minimumWidth);
+    m_window = window;
+    // The shadow needs the surface of the window: when it was not there yet it is made once the window shows
+    connect(
+        window, &QWindow::visibleChanged, this,
+        [this](bool visible) {
+            if (visible && !m_shadowCreated)
+                applyShadow();
+        },
+        Qt::SingleShotConnection);
     waylandWindow->setShellIntegration(shell);
+    applyShadow();
     return true;
 #else
     Q_UNUSED(window)

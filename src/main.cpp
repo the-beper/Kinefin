@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Kinefin contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
+#include "app/BlurHashImageProvider.h"
 #include "app/ConnectionController.h"
 #include "app/EarlyUiScale.h"
 #include "app/ImageNetworkFactory.h"
@@ -424,6 +425,7 @@ int main(int argc, char *argv[])
         });
     QQmlApplicationEngine engine;
     engine.setNetworkAccessManagerFactory(&imageFactory);
+    engine.addImageProvider(QStringLiteral("blurhash"), new Kinefin::BlurHashImageProvider);
     // "fullscreen" or "windowed" when a flag decides this run; empty to follow the setting
     const QString windowMode =
         parser.isSet(QStringLiteral("fullscreen")) ? QStringLiteral("fullscreen")
