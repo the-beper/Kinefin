@@ -23,6 +23,9 @@ Loader {
     // --ignore-certificate-errors forces ignoreSSLErrors on for the run: its switch shows on and cannot be turned off
     property bool certificateErrorsForced: false
     readonly property bool forced: key === "ignoreSSLErrors" && certificateErrorsForced
+    // The HDR output of the shell: the row is disabled with the reason it gives while the build or the desktop cannot offer it
+    readonly property var hdrOutput: row.Window.window?.hdrOutput ?? null
+    readonly property bool hdrUnavailable: key === "hdr_output" && hdrOutput !== null && !hdrOutput.available
     readonly property string accessibleLabel: groupTitle.length > 0 ? i18nc("@info:accessible a settings group heading and a setting under it", "%1: %2", groupTitle, label) : label
 
     Layout.fillWidth: true
@@ -71,10 +74,10 @@ Loader {
     Component {
         id: choiceDelegate
         FormCard.FormComboBoxDelegate {
-            enabled: !row.disabled
+            enabled: !row.disabled && !row.hdrUnavailable
             Accessible.name: row.accessibleLabel
             text: row.label
-            description: row.key === "uiScale" ? i18n("Takes effect the next time Kinefin starts") : ""
+            description: row.hdrUnavailable ? row.hdrOutput.unavailableReason : row.key === "uiScale" ? i18n("Takes effect the next time Kinefin starts") : ""
             model: row.options
             textRole: "text"
             valueRole: "value"

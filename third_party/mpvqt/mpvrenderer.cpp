@@ -5,7 +5,7 @@
  * SPDX-License-Identifier: LGPL-2.1-only OR LGPL-3.0-only OR LicenseRef-KDE-Accepted-LGPL
  */
 
-// Kinefin changes to mpvqt 1.2.1: the render context has one owning renderer, a renderer created while another one still owns it waits for it to be freed (the item moves between windows that render on different threads), `ready` is emitted only when a renderer becomes ready, and a failed creation calls the item's `rendererFailed` if it has one
+// Kinefin changes to mpvqt 1.2.1: the render context has one owning renderer, a renderer created while another one still owns it waits for it to be freed (the item moves between windows that render on different threads), `ready` is emitted only when a renderer becomes ready, a failed creation calls the item's `rendererFailed` if it has one, and while the item's `renderElsewhereRequest` property is not zero the renderer clears its framebuffer, frees the render context, creates none and calls the item's `renderContextReleased` with that number once no renderer owns one (another renderer of the item's mpv core can then create its own)
 
 #include "mpvrenderer.h"
 
@@ -15,6 +15,7 @@
 #include <QMutex>
 #include <QOpenGLContext>
 #include <QOpenGLFramebufferObject>
+#include <QOpenGLFunctions>
 #include <QPointer>
 #include <QQuickWindow>
 #include <QTimer>
@@ -72,6 +73,13 @@ void MpvRenderer::synchronize(QQuickFramebufferObject *item)
         m_mpvResourceManager = mpvAItem->d_ptr->m_mpvResourceManager;
     }
 
+    // read by name, as rendererFailed is called: MpvAbstractItem has no such property. A new request may come between two synchronizations, so the number and not only zero or not is compared
+    const int request = mpvAItem->property("renderElsewhereRequest").toInt();
+    if (request != m_elsewhereRequest) {
+        m_elsewhereRequest = request;
+        m_releaseSignalled = false;
+    }
+
     if (mpvAItem->d_ptr->m_isRendererReady != m_isFramebufferReady) {
         mpvAItem->d_ptr->m_isRendererReady = m_isFramebufferReady;
 
@@ -83,6 +91,11 @@ void MpvRenderer::synchronize(QQuickFramebufferObject *item)
 
 void MpvRenderer::render()
 {
+    if (m_elsewhereRequest != 0) {
+        releaseForElsewhere();
+        return;
+    }
+
     if (!ensureRenderContext()) {
         // another renderer still owns the context: its window frees it when it next renders, so try again a little later
         if (!m_contextFailed) {
@@ -124,9 +137,43 @@ void MpvRenderer::render()
 
 QOpenGLFramebufferObject *MpvRenderer::createFramebufferObject(const QSize &size)
 {
-    ensureRenderContext();
+    if (m_elsewhereRequest == 0) {
+        ensureRenderContext();
+    }
 
     return QQuickFramebufferObject::Renderer::createFramebufferObject(size);
+}
+
+void MpvRenderer::releaseForElsewhere()
+{
+    // black, never the frame from before: the item shows it again when the video comes back (a new framebuffer of a resize holds undefined pixels too)
+    if (QOpenGLContext *context = QOpenGLContext::currentContext()) {
+        QOpenGLFunctions *gl = context->functions();
+        gl->glClearColor(0, 0, 0, 1);
+        gl->glClear(GL_COLOR_BUFFER_BIT);
+    }
+    if (!m_mpvResourceManager || m_releaseSignalled) {
+        return;
+    }
+    {
+        QMutexLocker locker(&s_ownersMutex);
+        MpvResourceManager *manager = m_mpvResourceManager.get();
+        if (manager->mpvRenderContext) {
+            if (s_owners.value(manager) != this) {
+                // the previous window's renderer still owns it and frees it when it goes
+                locker.unlock();
+                requestUpdateLater();
+                return;
+            }
+            manager->freeContext();
+            s_owners.remove(manager);
+            m_isFramebufferReady = false;
+        }
+    }
+    m_releaseSignalled = true;
+    if (m_mpvAItem) {
+        QMetaObject::invokeMethod(m_mpvAItem.data(), "renderContextReleased", Qt::QueuedConnection, Q_ARG(int, m_elsewhereRequest));
+    }
 }
 
 bool MpvRenderer::ensureRenderContext()

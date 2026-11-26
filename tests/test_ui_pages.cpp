@@ -7,6 +7,7 @@
 
 #include "app/BlurHashImageProvider.h"
 #include "app/ConnectionController.h"
+#include "app/HdrOutput.h"
 #include "app/ImageNetworkFactory.h"
 #include "app/PipSurface.h"
 #include "imagecache/ImageOrigin.h"
@@ -3068,6 +3069,119 @@ QQuickItem *openPlayer(Ui &ui, PlayerStub &stub)
                && ui.window->property("headerOpacity").toReal() == 0.0;
     });
     return ready ? page : nullptr;
+}
+
+// The HdrOutput that Main.qml declares, or null
+Kinefin::HdrOutput *hdrOutputOf(const Ui &ui)
+{
+    const QVariant variant = ui.window->property("hdrOutput");
+    QObject *object = variant.value<QObject *>();
+    if (!object && variant.metaType() == QMetaType::fromType<QJSValue>())
+        object = variant.value<QJSValue>().toQObject();
+    return qobject_cast<Kinefin::HdrOutput *>(object);
+}
+
+// The rectangles under the player's video: the page's own background and the black behind the picture
+QList<QPointer<QQuickItem>> playerBackdrops(QQuickItem *page, const QQuickItem *, const QRectF &)
+{
+    QList<QPointer<QQuickItem>> found;
+    for (QQuickItem *item : allItems(page)) {
+        const QString name = item->objectName();
+        if (name == QLatin1String("playerPageBackground")
+            || name == QLatin1String("playerBackdrop"))
+            found.append(item);
+    }
+    return found;
+}
+
+// What the HDR tests look at on the player page
+struct HdrPlayer {
+    QQuickItem *page = nullptr;
+    QQuickItem *video = nullptr;
+    QQuickItem *bottomBar = nullptr;
+    Kinefin::HdrOutput *hdr = nullptr;
+    QRectF window;
+    QList<QPointer<QQuickItem>> backdrops;
+};
+
+// Plays the fixture movie on the stub and collects what the HDR tests look at, once the video fills the window and the bars are fully up; false when something is missing
+bool openHdrPlayer(Ui &ui, PlayerStub &stub, HdrPlayer &player)
+{
+    player.page = openPlayer(ui, stub);
+    if (!player.page)
+        return false;
+    // The bars stay up while the test looks
+    if (QObject *timer = player.page->findChild<QObject *>(QStringLiteral("playerChromeTimer")))
+        timer->setProperty("interval", 600000);
+    player.video = ui.item(QStringLiteral("videoRenderer"));
+    player.bottomBar = ui.item(QStringLiteral("playerBottomBar"));
+    const QQuickItem *osd = ui.item(QStringLiteral("playerOsd"));
+    player.hdr = hdrOutputOf(ui);
+    if (!player.video || !player.bottomBar || !osd || !player.hdr)
+        return false;
+    player.window = QRectF(QPointF(0, 0), QSizeF(ui.window->size()));
+    const auto settled = [&] {
+        return sceneRect(player.video) == player.window && osd->opacity() == 1.0
+               && player.bottomBar->isVisible();
+    };
+    if (!qWaitForScaled(settled))
+        return false;
+    player.backdrops = playerBackdrops(player.page, player.video, player.window);
+    return true;
+}
+
+// Empty when the player draws as `hole` says: the window, the page and the black behind the video all clear, the video item out of the way and the bottom bar still solid, or all of it opaque; else the first thing that differs. With the hole there is no painted rectangle in the page row above the page either
+QString playerHoleProblem(const Ui &ui, const HdrPlayer &player, bool hole)
+{
+    const QString flag = hole ? QStringLiteral("false") : QStringLiteral("true");
+    if (ui.window->property("hdrActive").toBool() != hole)
+        return QStringLiteral("the window's hdrActive is %1").arg(flag);
+    if (player.page->property("hdrActive").toBool() != hole)
+        return QStringLiteral("the page's hdrActive is %1").arg(flag);
+    const int windowAlpha = ui.window->color().alpha();
+    if (windowAlpha != (hole ? 0 : 255))
+        return QStringLiteral("the window colour has alpha %1").arg(windowAlpha);
+    for (const QPointer<QQuickItem> &backdrop : player.backdrops) {
+        if (!backdrop)
+            return QStringLiteral("a rectangle behind the video is gone");
+        const qreal alpha = backdrop->property("color").value<QColor>().alphaF();
+        if (qAbs(alpha - (hole ? 0.0 : 1.0)) > 0.01)
+            return QStringLiteral("a rectangle behind the video has alpha %1").arg(alpha);
+    }
+    if (player.video->opacity() != (hole ? 0.0 : 1.0))
+        return QStringLiteral("the video item has opacity %1").arg(player.video->opacity());
+    // The bars are not part of the hole
+    if (!player.bottomBar->isVisible()
+        || qAbs(player.bottomBar->property("color").value<QColor>().alphaF() - 0.9) > 0.02)
+        return QStringLiteral("the bottom bar is not solid");
+    if (!hole)
+        return {};
+    for (const QQuickItem *parent = player.page->parentItem(); parent;
+         parent = parent->parentItem()) {
+        if (parent->inherits("QQuickRectangle") && parent->isVisible() && parent->opacity() > 0
+            && parent->property("color").value<QColor>().alpha() > 0)
+            return QStringLiteral("an item of the page row paints a colour behind the page: %1")
+                .arg(QString::fromUtf8(parent->metaObject()->className()));
+    }
+    const auto *background = ui.window->property("background").value<QQuickItem *>();
+    if (background && background->isVisible() && background->opacity() > 0
+        && background->property("color").value<QColor>().alpha() > 0)
+        return QStringLiteral("the window's background item paints a colour");
+    return {};
+}
+
+// Two points of the video area that no bar, overlay or control reaches: beside the middle of the picture
+QList<QPointF> videoAreaPoints(const HdrPlayer &player)
+{
+    return {QPointF(player.window.width() / 5, player.window.height() / 2),
+            QPointF(player.window.width() * 4 / 5, player.window.height() / 2)};
+}
+
+// The alpha of the pixel of a window grab at a point in the window's own coordinates
+int grabbedAlphaAt(const QImage &shot, const Ui &ui, const QPointF &point)
+{
+    const qreal ratio = ui.window->devicePixelRatio();
+    return shot.pixelColor(qRound(point.x() * ratio), qRound(point.y() * ratio)).alpha();
 }
 
 const QString kSyncPlayGroup = QStringLiteral("5f1e2d3c4b5a69788796a5b4c3d2e1f0");
@@ -12095,6 +12209,38 @@ class TestUiPages : public QObject {
         QFile::remove(ui.settings.mpvConfPath());
     }
 
+    // Offscreen there is no compositor to describe an HDR output: the row stays, disabled, and says why
+    void hdrSettingDisabledWithReason()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        QQuickItem *settings = openSettings(ui);
+        QVERIFY(settings);
+        QVERIFY(QMetaObject::invokeMethod(settings, "selectSection",
+                                          Q_ARG(QVariant, QStringLiteral("video"))));
+        const auto findRow = [&] {
+            for (QQuickItem *candidate : allItems(settings)) {
+                if (candidate->inherits("QQuickLoader")
+                    && candidate->property("key").toString() == QLatin1String("hdr_output"))
+                    return candidate;
+            }
+            return static_cast<QQuickItem *>(nullptr);
+        };
+        QQuickItem *row = nullptr;
+        QTRY_VERIFY((row = findRow()) != nullptr);
+        QVERIFY(row->isVisible());
+        QTRY_VERIFY(row->property("item").value<QQuickItem *>() != nullptr);
+        const auto *delegate = row->property("item").value<QQuickItem *>();
+        QVERIFY(!delegate->isEnabled());
+        // Either reason holds here (the build has no HDR output, or the desktop does not offer it): the row shows the shell's own text for it
+        Kinefin::HdrOutput *hdr = hdrOutputOf(ui);
+        QVERIFY(hdr);
+        QVERIFY(!hdr->available());
+        QVERIFY(!hdr->unavailableReason().isEmpty());
+        QCOMPARE(delegate->property("description").toString(), hdr->unavailableReason());
+    }
+
     void theSettingsLinkNamesHowManySeriesAreTrackedAndOpensThem()
     {
         Ui ui(m_home->path());
@@ -20108,6 +20254,105 @@ class TestUiPages : public QObject {
         QCOMPARE(titles, 1);
     }
 
+    // Without the HDR path nothing of the player is see-through: the window, the page and the black behind the video are opaque, the video item draws, and a grab of the window has no clear pixel in the video area
+    void playerOpaqueWithoutHdr()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        HdrPlayer player;
+        QVERIFY(openHdrPlayer(ui, stub, player));
+        QVERIFY(!player.hdr->active());
+        // The background of the page and the black behind the picture, at least
+        QVERIFY(player.backdrops.size() >= 2);
+        QVERIFY(player.backdrops.contains(backgroundOf(player.page)));
+        QTRY_VERIFY2(playerHoleProblem(ui, player, false).isEmpty(),
+                     qPrintable(playerHoleProblem(ui, player, false)));
+        const QImage shot = ui.window->grabWindow();
+        QVERIFY(!shot.isNull());
+        for (const QPointF &point : videoAreaPoints(player))
+            QCOMPARE(grabbedAlphaAt(shot, ui, point), 255);
+    }
+
+    // While the HDR video is drawn below the window the video area is a hole: the window, the page and the black behind the video turn clear and the video item draws nothing, while the bars stay solid; when the path leaves, everything is opaque again. `active` is set by the test hook, as the first HDR frame would, since offscreen there is no HDR surface
+    void playerHoleWhenHdrActive()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        HdrPlayer player;
+        QVERIFY(openHdrPlayer(ui, stub, player));
+        QVERIFY(player.backdrops.size() >= 2);
+        QVERIFY(player.backdrops.contains(backgroundOf(player.page)));
+        QVERIFY2(playerHoleProblem(ui, player, false).isEmpty(),
+                 qPrintable(playerHoleProblem(ui, player, false)));
+
+        player.hdr->setActiveForTesting(true);
+        QTRY_VERIFY2(playerHoleProblem(ui, player, true).isEmpty(),
+                     qPrintable(playerHoleProblem(ui, player, true)));
+        // A grab that has no alpha channel cannot tell: the properties above stand for the hole then
+        QImage shot = ui.window->grabWindow();
+        QVERIFY(!shot.isNull());
+        if (shot.hasAlphaChannel()) {
+            for (const QPointF &point : videoAreaPoints(player))
+                QCOMPARE(grabbedAlphaAt(shot, ui, point), 0);
+            // The bottom bar is solid in the hole
+            QVERIFY(grabbedAlphaAt(shot, ui, sceneRect(player.bottomBar).center()) > 200);
+        }
+
+        player.hdr->setActiveForTesting(false);
+        QTRY_VERIFY2(playerHoleProblem(ui, player, false).isEmpty(),
+                     qPrintable(playerHoleProblem(ui, player, false)));
+        shot = ui.window->grabWindow();
+        QVERIFY(!shot.isNull());
+        for (const QPointF &point : videoAreaPoints(player))
+            QCOMPARE(grabbedAlphaAt(shot, ui, point), 255);
+    }
+
+    // The HDR path is for the full player alone: a cast, a device the cast is being set up on and the mini player each take it away, and it comes back with the full player on this computer
+    void hdrPathOnlyForTheFullPlayerWithoutACast()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *page = openPlayer(ui, stub);
+        QVERIFY(page);
+        Kinefin::HdrOutput *hdr = hdrOutputOf(ui);
+        QVERIFY(hdr);
+        QTRY_VERIFY(hdr->mainView());
+        stub.casting = true;
+        stub.castTargetName = QStringLiteral("Living room");
+        Q_EMIT stub.changed();
+        QTRY_VERIFY(!hdr->mainView());
+        stub.casting = false;
+        Q_EMIT stub.changed();
+        QTRY_VERIFY(hdr->mainView());
+        // The device is chosen and opening the stream, before it plays
+        stub.castTargetId = QStringLiteral("uuid:tv");
+        Q_EMIT stub.changed();
+        QTRY_VERIFY(!hdr->mainView());
+        stub.castTargetId.clear();
+        Q_EMIT stub.changed();
+        QTRY_VERIFY(hdr->mainView());
+
+        QObject *menu = ui.popup(QStringLiteral("playerMoreMenu"));
+        QVERIFY(menu);
+        QVERIFY(QMetaObject::invokeMethod(menu, "open"));
+        QTRY_VERIFY(menu->property("opened").toBool());
+        auto *entry = menu->findChild<QQuickItem *>(QStringLiteral("playerMoreMiniItem"));
+        QVERIFY(entry);
+        QVERIFY(QMetaObject::invokeMethod(entry, "click"));
+        QTRY_VERIFY(shownMiniPlayer(ui));
+        QCOMPARE(ui.window->property("playbackMode").toString(), QStringLiteral("mini"));
+        QTRY_VERIFY(!hdr->mainView());
+    }
+
     // The top line floats over the picture: Back is a square box, the title is plain text beside it with no panel and the actions are buttons that stand alone; the timeline and the controls are on one solid rounded panel at the bottom; no gradient anywhere
     void playerOsdIsFloatingSolidPanelsWithoutAGradient()
     {
@@ -25750,6 +25995,16 @@ class TestUiPages : public QObject {
                      .arg(qRound(video->width() * ui.window->devicePixelRatio()))
                      .arg(qRound(video->height() * ui.window->devicePixelRatio())));
         QCOMPARE(value(QStringLiteral("hwdec")), QStringLiteral("vaapi"));
+        // Offscreen the desktop offers no HDR output: the row says Off and why
+        QVERIFY2(value(QStringLiteral("hdrOutput")).startsWith(QStringLiteral("Off")),
+                 qPrintable(value(QStringLiteral("hdrOutput"))));
+        QCOMPARE(ui.item(QStringLiteral("playbackInfoValue_hdrOutput"))
+                     ->parentItem()
+                     ->childItems()
+                     .constFirst()
+                     ->property("text")
+                     .toString(),
+                 QStringLiteral("HDR output"));
         QCOMPARE(value(QStringLiteral("dropped")), QStringLiteral("3"));
         QCOMPARE(value(QStringLiteral("decoderDropped")), QStringLiteral("0"));
         QCOMPARE(ui.item(QStringLiteral("playbackInfoValue_decoderDropped"))

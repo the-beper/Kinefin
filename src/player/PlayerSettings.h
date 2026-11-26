@@ -10,6 +10,7 @@
 #include <QStringList>
 #include <QVariant>
 
+#include <optional>
 #include <utility>
 
 class QScreen;
@@ -38,6 +39,8 @@ class PlayerSettings final : public QObject {
     static bool isAspectMode(const QString &mode);
     // Re-evaluates the aspect once a file is loaded, for the mode that needs the decoded picture; the other modes and `custom` are left as they are
     void applyLoadedAspect();
+    // The HDR path's output colour volume: `target-trc=pq`, `target-prim=bt.2020` and `target-peak` (cd/m²) over mpv.conf and the Manual MPV Configuration, and over every later `apply()`; empty gives the three back to auto and to what those two say
+    void setHdrTarget(std::optional<int> peak);
     // While held, `apply()` leaves the speed alone: a watching-together group plays at 1.0 whatever the settings say
     void setSpeedHeld(bool held) { m_speedHeld = held; }
     // A passthrough codec is selected for the device type: night mode decodes it instead
@@ -70,11 +73,12 @@ class PlayerSettings final : public QObject {
     void applySubtitles();
     // One entry: a plain value is set as a property, a list operation (`glsl-shaders-append`) goes through change-list
     void applyEntry(const MpvConfEntry &entry);
-    // The valid entries of the profile's mpv.conf, before any managed setting; a problem is logged
-    void applyConfFile();
+    // The valid entries of the profile's mpv.conf, before any managed setting, or only those named in `only`; a problem is logged when all of them are read
+    void applyConfFile(const QStringList &only = {});
     // Every entry of the Manual MPV Configuration setting, or only those named in `only`
     void applyOverrides(const QStringList &only = {});
     void applyDisplayRate();
+    void applyHdrTarget();
     void followScreen(QScreen *screen);
     void followRate();
     ClientSettings &m_settings;
@@ -83,6 +87,7 @@ class PlayerSettings final : public QObject {
     double m_subtitleOffset = 0;
     QString m_aspectOverride;
     bool m_speedHeld = false;
+    std::optional<int> m_hdrTarget;
     QPointer<QWindow> m_window;
     QPointer<QScreen> m_screen;
     QMetaObject::Connection m_windowConnection;

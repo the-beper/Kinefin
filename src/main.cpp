@@ -3,6 +3,7 @@
 #include "app/BlurHashImageProvider.h"
 #include "app/ConnectionController.h"
 #include "app/EarlyUiScale.h"
+#include "app/HdrOutput.h"
 #include "app/ImageNetworkFactory.h"
 #include "app/InputFilter.h"
 #include "app/Logging.h"
@@ -119,6 +120,7 @@ int main(int argc, char *argv[])
     applyPlatformOption(argc, argv);
     applyInterfaceScale(argc, argv);
     QApplication app(argc, argv);
+    Kinefin::HdrOutput::prepareApplication();
     // org.kde.desktop needs QApplication; an environment variable naming another style wins
     if (qEnvironmentVariableIsEmpty("QT_QUICK_CONTROLS_STYLE"))
         QQuickStyle::setStyle(QStringLiteral("org.kde.desktop"));

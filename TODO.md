@@ -10,7 +10,6 @@
 - Audiobooks
 - Edit Images for people
 - Seerr support
-- HDR output on HDR screens
 - ARM64 builds
 - AppImage, deb, rpm, Arch and portable tar.gz packages
 - Flathub

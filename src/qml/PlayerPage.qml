@@ -384,7 +384,17 @@ Kirigami.Page {
     }
     focus: true
     Component.onCompleted: { wakeChrome(); Qt.callLater(focusPrimary); }
-    Rectangle { anchors.fill: parent; color: "black" }
+    // The HDR video is drawn in a surface below the window: the page lets it show through while that path is on
+    readonly property bool hdrActive: page.Window.window?.hdrActive ?? false
+    background: Rectangle {
+        objectName: "playerPageBackground"
+        color: page.hdrActive ? "transparent" : Kirigami.Theme.backgroundColor
+    }
+    Rectangle {
+        objectName: "playerBackdrop"
+        anchors.fill: parent
+        color: page.hdrActive ? "transparent" : "black"
+    }
     Item {
         id: slot
         objectName: "playerVideoSlot"
@@ -1385,6 +1395,7 @@ Kirigami.Page {
         }
         player: page.player
         playerSize: page.videoPixelSize
+        hdrOutput: page.Window.window?.hdrOutput ?? null
         anchors.left: parent.left
         anchors.top: parent.top
         anchors.leftMargin: Kirigami.Units.largeSpacing

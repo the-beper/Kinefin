@@ -23,6 +23,7 @@
 #include <QTemporaryDir>
 #include <QWindow>
 #include <QtTest/QtTest>
+#include <optional>
 
 using Kinefin::ClientSettings;
 using Kinefin::JellyfinClient;
@@ -539,6 +540,95 @@ class TestPlaybackEngine : public QObject {
         QVERIFY(!audioFilterLabels(engine).contains(QStringLiteral("night")));
     }
 
+    // While the HDR path is on, Kinefin's target is applied after mpv.conf and the Manual MPV Configuration
+    void hdrTargetWinsOverConf()
+    {
+        JellyfinClient client;
+        PlaybackSession session;
+        PlaybackEngine engine(client, session);
+        QVERIFY(engine.init({QStringLiteral("vo=null"), QStringLiteral("ao=null")}));
+        QVERIFY(QDir(dir.path()).mkpath(QStringLiteral("hdr-wins")));
+        QFile conf(dir.filePath(QStringLiteral("hdr-wins/mpv.conf")));
+        QVERIFY(conf.open(QIODevice::WriteOnly));
+        conf.write("target-trc=srgb\ntarget-prim=bt.709\ntarget-peak=300\n");
+        conf.close();
+        ClientSettings settings(settingsFile(dir, QStringLiteral("hdr-wins/kinefin.conf"),
+                                             "[other]\nother_conf=target-peak=250\n"));
+        settings.setMpvConfValidator(&Kinefin::validateMpvConf);
+        PlayerSettings mpv(settings, engine);
+        mpv.apply();
+        QCOMPARE(propertyText(engine.mpvProperty(QStringLiteral("target-trc"))),
+                 QStringLiteral("srgb"));
+        QCOMPARE(propertyText(engine.mpvProperty(QStringLiteral("target-peak"))),
+                 QStringLiteral("250"));
+        mpv.setHdrTarget(609);
+        QCOMPARE(propertyText(engine.mpvProperty(QStringLiteral("target-trc"))),
+                 QStringLiteral("pq"));
+        QCOMPARE(propertyText(engine.mpvProperty(QStringLiteral("target-prim"))),
+                 QStringLiteral("bt.2020"));
+        QCOMPARE(propertyText(engine.mpvProperty(QStringLiteral("target-peak"))),
+                 QStringLiteral("609"));
+    }
+
+    // Leaving the HDR path puts back what mpv.conf and the Manual MPV Configuration say, and auto where they say nothing
+    void clearRestoresConfTargets()
+    {
+        JellyfinClient client;
+        PlaybackSession session;
+        PlaybackEngine engine(client, session);
+        QVERIFY(engine.init({QStringLiteral("vo=null"), QStringLiteral("ao=null")}));
+        const auto target = [&engine](const char *name) {
+            return propertyText(engine.mpvProperty(QString::fromLatin1(name)));
+        };
+        // Nothing sets the target: auto again
+        ClientSettings plain(dir.filePath(QStringLiteral("hdr-clear-plain.conf")));
+        PlayerSettings plainMpv(plain, engine);
+        plainMpv.apply();
+        plainMpv.setHdrTarget(1000);
+        QCOMPARE(target("target-trc"), QStringLiteral("pq"));
+        plainMpv.setHdrTarget(std::nullopt);
+        QCOMPARE(target("target-trc"), QStringLiteral("auto"));
+        QCOMPARE(target("target-prim"), QStringLiteral("auto"));
+        QCOMPARE(target("target-peak"), QStringLiteral("auto"));
+
+        // The files set it: their values come back, the Manual MPV Configuration last
+        QVERIFY(QDir(dir.path()).mkpath(QStringLiteral("hdr-clear")));
+        QFile conf(dir.filePath(QStringLiteral("hdr-clear/mpv.conf")));
+        QVERIFY(conf.open(QIODevice::WriteOnly));
+        conf.write("target-trc=srgb\ntarget-prim=bt.709\ntarget-peak=300\n");
+        conf.close();
+        ClientSettings settings(settingsFile(dir, QStringLiteral("hdr-clear/kinefin.conf"),
+                                             "[other]\nother_conf=target-peak=250\n"));
+        settings.setMpvConfValidator(&Kinefin::validateMpvConf);
+        PlayerSettings mpv(settings, engine);
+        mpv.apply();
+        mpv.setHdrTarget(609);
+        QCOMPARE(target("target-trc"), QStringLiteral("pq"));
+        mpv.setHdrTarget(std::nullopt);
+        QCOMPARE(target("target-trc"), QStringLiteral("srgb"));
+        QCOMPARE(target("target-prim"), QStringLiteral("bt.709"));
+        QCOMPARE(target("target-peak"), QStringLiteral("250"));
+    }
+
+    void hdrOutputChangeKeepsSpeed()
+    {
+        JellyfinClient client;
+        PlaybackSession session;
+        PlaybackEngine engine(client, session);
+        QVERIFY(engine.init({QStringLiteral("vo=null"), QStringLiteral("ao=null")}));
+        ClientSettings settings(dir.filePath(QStringLiteral("hdr-speed.conf")));
+        PlayerSettings mpv(settings, engine);
+        mpv.apply();
+        engine.setMpvProperty(QStringLiteral("speed"), 1.5);
+        // A full apply would reset the speed to the setting
+        QVERIFY(settings.setValue(QStringLiteral("video"), QStringLiteral("hdr_output"),
+                                  QStringLiteral("off")));
+        QCOMPARE(engine.mpvProperty(QStringLiteral("speed")).toDouble(), 1.5);
+        QVERIFY(settings.setValue(QStringLiteral("video"), QStringLiteral("hdr_output"),
+                                  QStringLiteral("auto")));
+        QCOMPARE(engine.mpvProperty(QStringLiteral("speed")).toDouble(), 1.5);
+    }
+
     void secondarySubtitleStylingFollowsThePrimary()
     {
         JellyfinClient client;
@@ -876,6 +966,64 @@ class TestPlaybackEngine : public QObject {
 
         controller.stop();
         QTRY_VERIFY(controller.playbackInfo().isEmpty());
+    }
+
+    // The colour facts come from `video-params` (emitted here, the clip has no picture): they stay while the property is unavailable, as it is while the video is off during a renderer handover, and go with the file
+    void videoParamsFactsCached()
+    {
+        QTemporaryDir dir;
+        Chain chain(dir, 30);
+        QVERIFY(chain.ok);
+        QVERIFY(chain.engine.open(chain.source));
+        QTRY_COMPARE(chain.session.state(), PlaybackSession::State::Playing);
+        auto *mpv = chain.engine.controller();
+        QVERIFY(mpv);
+        QVERIFY(chain.engine.hdrVideoFacts().gamma.isEmpty());
+        QSignalSpy changed(&chain.engine, &PlaybackEngine::hdrVideoFactsChanged);
+
+        const QVariantMap hdr10{{QStringLiteral("gamma"), QStringLiteral("pq")},
+                                {QStringLiteral("primaries"), QStringLiteral("bt.2020")},
+                                {QStringLiteral("max-cll"), 1000.0},
+                                {QStringLiteral("max-fall"), 400.0},
+                                {QStringLiteral("min-luma"), 0.005},
+                                {QStringLiteral("max-luma"), 1000.0}};
+        Q_EMIT mpv->propertyChanged(QStringLiteral("video-params"), hdr10);
+        Kinefin::HdrVideoFacts facts = chain.engine.hdrVideoFacts();
+        QCOMPARE(facts.gamma, QStringLiteral("pq"));
+        QCOMPARE(facts.primaries, QStringLiteral("bt.2020"));
+        QCOMPARE(facts.maxCll, 1000.0);
+        QCOMPARE(facts.maxFall, 400.0);
+        QCOMPARE(facts.minLuma, 0.005);
+        QCOMPARE(facts.maxLuma, 1000.0);
+        QCOMPARE(changed.count(), 1);
+        // The same facts again are no change
+        Q_EMIT mpv->propertyChanged(QStringLiteral("video-params"), hdr10);
+        QCOMPARE(changed.count(), 1);
+
+        // Unavailable: nothing changes
+        Q_EMIT mpv->propertyChanged(QStringLiteral("video-params"), QVariant());
+        QCOMPARE(chain.engine.hdrVideoFacts().gamma, QStringLiteral("pq"));
+        QCOMPARE(chain.engine.hdrVideoFacts().maxCll, 1000.0);
+        QCOMPARE(changed.count(), 1);
+
+        // Facts that mpv lacks read empty or 0, and the strings are capped
+        Q_EMIT mpv->propertyChanged(
+            QStringLiteral("video-params"),
+            QVariantMap{{QStringLiteral("gamma"), QString(100, QLatin1Char('x'))},
+                        {QStringLiteral("primaries"), QString(100, QLatin1Char('y'))}});
+        facts = chain.engine.hdrVideoFacts();
+        QCOMPARE(facts.gamma, QString(64, QLatin1Char('x')));
+        QCOMPARE(facts.primaries, QString(64, QLatin1Char('y')));
+        QCOMPARE(facts.maxCll, 0.0);
+        QCOMPARE(facts.maxLuma, 0.0);
+        QCOMPARE(changed.count(), 2);
+
+        // The facts of a file go with it
+        chain.engine.stop();
+        QTRY_COMPARE(chain.session.state(), PlaybackSession::State::Idle);
+        QVERIFY(chain.engine.hdrVideoFacts().gamma.isEmpty());
+        QVERIFY(chain.engine.hdrVideoFacts().primaries.isEmpty());
+        QCOMPARE(changed.count(), 3);
     }
 
     // mpv does not tell paused-for-cache again after a pause: a resume while the cache still holds the playback is a stall again

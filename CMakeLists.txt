@@ -191,6 +191,8 @@ add_library(kinefin_player STATIC
     src/player/BitrateFallback.h
     src/player/ClipExporter.cpp
     src/player/ClipExporter.h
+    src/player/HdrPolicy.cpp
+    src/player/HdrPolicy.h
     src/player/MpvConfValidator.cpp
     src/player/MpvConfValidator.h
     src/player/PlaybackEngine.cpp
@@ -401,6 +403,8 @@ qt_add_qml_module(kinefin_ui
         src/app/DownloadsController.h
         src/app/EpisodeLabelQml.cpp
         src/app/EpisodeLabelQml.h
+        src/app/HdrOutput.cpp
+        src/app/HdrOutput.h
         src/app/ImageNetworkFactory.cpp
         src/app/ImageNetworkFactory.h
         src/app/InputModality.cpp
@@ -429,7 +433,7 @@ target_link_libraries(kinefin_ui PUBLIC
     Qt6::Gui Qt6::Quick Qt6::Qml Qt6::QuickControls2
     KF6::I18n KF6::I18nQml KF6::WindowSystem
 )
-# KWin's picture-in-picture surface needs QtWaylandClient's private headers: the Flatpak SDK ships them, the Fedora build image has the CMake target without them. Without them PipSurface reports itself unavailable and the window stays an ordinary one
+# KWin's picture-in-picture surface needs QtWaylandClient's private headers: the Flatpak SDK ships them, and so does the Fedora build image (qt6-qtbase-private-devel). Without them PipSurface reports itself unavailable and the window stays an ordinary one
 find_package(Qt6 QUIET COMPONENTS WaylandClient WaylandClientPrivate WaylandScannerTools)
 find_program(KINEFIN_WAYLAND_SCANNER wayland-scanner)
 set(KINEFIN_XX_PIP OFF)
@@ -463,6 +467,28 @@ if(TARGET Qt6::WaylandClientPrivate AND COMMAND qt6_generate_wayland_protocol_cl
     endif()
 endif()
 message(STATUS "KWin picture-in-picture surface (xx_pip_v1): ${KINEFIN_XX_PIP}")
+
+# HDR video on a subsurface below the window needs QtWaylandClient's private headers, among them Qt's own wrappers of color-management-v1 (the Fedora build image has them, and so does the Flatpak SDK; build/flatpak/test-flatpak.sh checks that the bundle has the path). Every request goes through those exported wrappers, so no interface tables of the protocol are built here. Without the headers HdrOutput reports that this build has no HDR output
+set(KINEFIN_HDR_OUTPUT OFF)
+if(TARGET Qt6::WaylandClientPrivate)
+    find_path(KINEFIN_COLOR_MANAGEMENT_DIR QtWaylandClient/private/qwayland-color-management-v1.h
+        PATHS "${QT6_INSTALL_PREFIX}/${QT6_INSTALL_HEADERS}/QtWaylandClient/${Qt6WaylandClient_VERSION}"
+              "${QT6_INSTALL_PREFIX}/include/QtWaylandClient/${Qt6WaylandClient_VERSION}"
+              "${QT6_INSTALL_PREFIX}/include/qt6/QtWaylandClient/${Qt6WaylandClient_VERSION}"
+        NO_DEFAULT_PATH)
+    if(KINEFIN_COLOR_MANAGEMENT_DIR AND EXISTS "${KINEFIN_COLOR_MANAGEMENT_DIR}/QtWaylandClient/private/qwaylandsubsurface_p.h")
+        target_sources(kinefin_ui PRIVATE
+            src/app/HdrColorManagement.cpp
+            src/app/HdrColorManagement.h
+            src/app/HdrVideoWindow.cpp
+            src/app/HdrVideoWindow.h
+        )
+        target_link_libraries(kinefin_ui PRIVATE Qt6::WaylandClientPrivate)
+        target_compile_definitions(kinefin_ui PRIVATE KINEFIN_HAVE_HDR_OUTPUT)
+        set(KINEFIN_HDR_OUTPUT ON)
+    endif()
+endif()
+message(STATUS "HDR video output (color-management-v1): ${KINEFIN_HDR_OUTPUT}")
 
 add_executable(kinefin src/main.cpp)
 qt_add_resources(kinefin "licenses"
@@ -942,6 +968,10 @@ if(BUILD_TESTING)
     add_executable(test_mpv_conf tests/test_mpv_conf.cpp)
     target_link_libraries(test_mpv_conf PRIVATE kinefin_player Qt6::Test)
     add_test(NAME mpv_conf COMMAND test_mpv_conf)
+
+    add_executable(test_hdr_policy tests/test_hdr_policy.cpp)
+    target_link_libraries(test_hdr_policy PRIVATE kinefin_player Qt6::Test)
+    add_test(NAME hdr_policy COMMAND test_hdr_policy)
 
     add_executable(test_settings_parity tests/test_settings_parity.cpp)
     target_compile_definitions(test_settings_parity PRIVATE KINEFIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")

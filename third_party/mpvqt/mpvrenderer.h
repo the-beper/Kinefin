@@ -38,10 +38,15 @@ private:
     void requestUpdateLater();
     // GL context current: creates the render context when none exists and this renderer has not failed before, and returns whether this renderer owns the context
     bool ensureRenderContext();
+    // GL context current and framebuffer bound, while the item renders elsewhere: clears the framebuffer, frees the render context this renderer owns and tells the item once no renderer owns one
+    void releaseForElsewhere();
     mpv_render_context *createMpvRenderContext();
     QPointer<MpvAbstractItem> m_mpvAItem{nullptr};
     bool m_isFramebufferReady{false};
     bool m_contextFailed{false};
+    // The item's renderElsewhereRequest as of the last synchronize (0 while the item renders here), and whether renderContextReleased went out for it
+    int m_elsewhereRequest{0};
+    bool m_releaseSignalled{false};
     QElapsedTimer m_waitClock;
     bool m_waitReported{false};
     std::shared_ptr<MpvResourceManager> m_mpvResourceManager;

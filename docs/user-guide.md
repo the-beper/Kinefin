@@ -34,6 +34,7 @@
   - [Choose a quality](#choose-a-quality)
   - [Save a clip or a GIF](#save-a-clip-or-a-gif)
   - [Shaders and debanding](#shaders-and-debanding)
+  - [HDR video](#hdr-video)
   - [Watch together with SyncPlay](#watch-together-with-syncplay)
   - [Control other sessions](#control-other-sessions)
 - [Download for offline use](#download-for-offline-use)
@@ -51,6 +52,7 @@
   - [Kinefin asks for the password again](#kinefin-asks-for-the-password-again)
   - [Playback stutters](#playback-stutters)
   - [A video transcodes when it should direct-play](#a-video-transcodes-when-it-should-direct-play)
+  - [HDR video looks dim or washed out](#hdr-video-looks-dim-or-washed-out)
   - [There is no sound over HDMI or S/PDIF passthrough](#there-is-no-sound-over-hdmi-or-spdif-passthrough)
   - [The Download actions are missing](#the-download-actions-are-missing)
   - [The Admin Dashboard entry is missing](#the-admin-dashboard-entry-is-missing)
@@ -469,7 +471,7 @@ A right click on the video, the Menu key or Shift+F10 open a context menu with t
 
 The Audio menu ends with **Night Mode**, which raises quiet dialogue and lowers loud scenes. It is the same switch as in **Settings**, **Audio**.
 
-**Playback Info**, also in **More Actions**, opens a panel over the video with the play method, stream sizes, hardware decoding, dropped frames and the reasons for a transcode.
+**Playback Info**, also in **More Actions**, opens a panel over the video with the play method, stream sizes, hardware decoding, whether HDR output is on (see [HDR video](#hdr-video)), dropped frames and the reasons for a transcode.
 
 ### Audio and subtitle tracks
 
@@ -556,6 +558,16 @@ A clip lasts 1 to 60 seconds and a GIF 1 to 15 seconds. The clip is MP4 (H.264 a
 **Video Enhancement** in **More Actions** switches mpv's debanding and your own GLSL shaders on and off while a video plays. Put `.glsl` or `.hook` files in the `shaders` folder of the profile (`~/.local/share/kinefin/profiles/<profile>/shaders/`, under `~/.var/app/io.github.the_beper.Kinefin/` in the Flatpak). The menu lists up to 32 files of at most 256 KiB, by name, and reads the folder each time it opens. Kinefin ships no shaders.
 
 A choice applies to the item that plays and is forgotten when the next one starts: lines in `mpv.conf` (see [mpv Configuration](settings.md#mpv-configuration-other)) still decide what is on at the start. A shader that mpv cannot compile does not show an error in the menu: add `log-file=/some/path` to `mpv.conf` and read mpv's log there. The menu is not available while casting. Kinefin starts frames 10 ms before they are due, which a shader that takes longer than that to draw a frame can make late: put `video-timing-offset=0.05` in `mpv.conf` to give it more time.
+
+### HDR video
+
+On an HDR screen, the full player shows HDR video (HDR10, HLG, Dolby Vision with an HDR base layer) as HDR instead of tone-mapping it to standard dynamic range (SDR). It needs HDR switched on for the screen in Plasma's display settings and a desktop that offers HDR to applications (KWin on Plasma 6.4 or later).
+
+- Only the full player shows HDR. The mini player and the picture-in-picture window stay SDR.
+- HDR switches on only when the screen's peak brightness is at least 1.5 times SDR white. Lowering the SDR brightness in the display settings gives HDR more room. Otherwise mpv tone-maps to SDR as before.
+- **Playback Info** has an **HDR output** row: On with the display's peak in cd/m², or Off with the reason.
+- While HDR output is on, shaders on the `OUTPUT` hook receive PQ values in BT.2020 primaries. Shaders on other hooks and debanding are unchanged.
+- **HDR Output** in **Settings**, **Video** turns it off. The [settings reference](settings.md#video-video) has the details.
 
 ### Watch together with SyncPlay
 
@@ -772,6 +784,11 @@ Playback stutters when the connection cannot keep up with the stream or the mach
 ### A video transcodes when it should direct-play
 
 The device rules force a transcode for some sources. Dolby Vision profile 5 transcodes by default. Several **Force Transcode** switches and **Always Force Transcode** in **Settings**, **Video**, force it for HEVC, AV1, 4K, HDR, 10-bit video and everything else. Check those switches. **Playback Info** shows the server's reasons.
+
+### HDR video looks dim or washed out
+
+1. Open **Playback Info** in **More Actions**. The **HDR output** row says whether HDR is on and, if not, why. Without HDR output, mpv tone-maps the picture to SDR.
+2. Act on the reason. If HDR is off for the screen, switch it on in Plasma's display settings. If the brightness range is the reason, lower the SDR brightness there: HDR switches on only with enough brightness above SDR white. If the reason is that the HDR video could not be shown, Kinefin does not try again until the playback ends; set **HDR Output** to Off and back to Auto to try at once.
 
 ### There is no sound over HDMI or S/PDIF passthrough
 
