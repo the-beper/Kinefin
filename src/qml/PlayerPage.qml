@@ -672,7 +672,7 @@ Kirigami.Page {
         width: Math.min(clipRow.implicitWidth + Kirigami.Units.largeSpacing * 2, page.availableWidth - Kirigami.Units.largeSpacing * 2)
         height: clipRow.implicitHeight + Kirigami.Units.largeSpacing * 2
         radius: Kirigami.Units.cornerRadius
-        Kirigami.Theme.colorSet: Kirigami.Theme.Complementary
+        Kirigami.Theme.colorSet: Kirigami.Theme.Window
         Kirigami.Theme.inherit: false
         color: Qt.alpha(Kirigami.Theme.backgroundColor, 0.9)
         border.width: 1
@@ -737,7 +737,7 @@ Kirigami.Page {
         width: Math.min(upNextRow.implicitWidth + Kirigami.Units.largeSpacing * 2, page.availableWidth - Kirigami.Units.largeSpacing * 2)
         height: upNextRow.implicitHeight + Kirigami.Units.largeSpacing * 2
         radius: Kirigami.Units.cornerRadius
-        Kirigami.Theme.colorSet: Kirigami.Theme.Complementary
+        Kirigami.Theme.colorSet: Kirigami.Theme.Window
         Kirigami.Theme.inherit: false
         color: Qt.alpha(Kirigami.Theme.backgroundColor, 0.9)
         // An outline keeps it apart from a dark picture
@@ -876,7 +876,7 @@ Kirigami.Page {
         }
     }
 
-    // The bars are solid panels that float above the video and fade together, with no shade over the picture; the complementary colour set gives their text, icons and background
+    // The bars are solid panels that float above the video and fade together, with no shade over the picture; the colour set of the window gives their text, icons and background
     Item {
         id: osd
         objectName: "playerOsd"
@@ -888,7 +888,7 @@ Kirigami.Page {
         opacity: wanted ? 1 : 0
         // Visible as soon as it is wanted, so the Tab that wakes the bars finds their controls while they fade in
         visible: wanted || opacity > 0
-        Kirigami.Theme.colorSet: Kirigami.Theme.Complementary
+        Kirigami.Theme.colorSet: Kirigami.Theme.Window
         Kirigami.Theme.inherit: false
         Behavior on opacity {
             NumberAnimation { duration: Kirigami.Units.longDuration; easing.type: Easing.OutCubic }
@@ -941,9 +941,10 @@ Kirigami.Page {
                         textFormat: Text.PlainText
                         text: page.player.title || i18n("Now Playing")
                         elide: Text.ElideRight
-                        // The text is on the picture: a faint shadow keeps it readable on a bright one
-                        style: Text.Raised
-                        styleColor: Qt.rgba(0, 0, 0, 0.6)
+                        // The text is on the picture whatever the colour scheme: white with a dark outline reads on a bright frame as on a dark one
+                        color: "white"
+                        style: Text.Outline
+                        styleColor: Qt.rgba(0, 0, 0, 0.85)
                     }
                     Controls.Label {
                         id: playerSubtitle
@@ -953,8 +954,9 @@ Kirigami.Page {
                         textFormat: Text.PlainText
                         text: page.player.subtitle
                         elide: Text.ElideRight
-                        style: Text.Raised
-                        styleColor: Qt.rgba(0, 0, 0, 0.6)
+                        color: "white"
+                        style: Text.Outline
+                        styleColor: Qt.rgba(0, 0, 0, 0.85)
                     }
                 }
                 // In a SyncPlay group: says so, and opens the group's dialog
@@ -1149,7 +1151,7 @@ Kirigami.Page {
                             // Read once here: the player notifies its duration with every position
                             readonly property real duration: page.player.durationTicks
                             anchors.fill: parent
-                            Kirigami.Theme.colorSet: Kirigami.Theme.Complementary
+                            Kirigami.Theme.colorSet: Kirigami.Theme.Window
                             Kirigami.Theme.inherit: false
                             Accessible.ignored: true
                             Repeater {
@@ -1716,15 +1718,49 @@ Kirigami.Page {
         anchors.fill: parent
         acceptedButtons: Qt.AllButtons
     }
-    // A button of the desktop style that stands alone on the top line, as high as the box of Back; its text is the tooltip when only the icon shows. The keys stay with the page: Tab reaches it
+    // A button that stands alone on the top line, a box of the bars as high as the one of Back; its text is the tooltip when only the icon shows. The keys stay with the page: Tab reaches it
     component TopAction: Controls.Button {
+        id: action
+
+        // The desktop style gives a button the colours of the Button set, the window's, as the other boxes have, are asked for again
+        Kirigami.Theme.colorSet: Kirigami.Theme.Window
+        Kirigami.Theme.inherit: false
         Layout.alignment: Qt.AlignVCenter
         Layout.preferredHeight: topBar.boxSize
         hoverEnabled: true
         focusPolicy: Qt.TabFocus
         display: page.narrow ? Controls.AbstractButton.IconOnly : Controls.AbstractButton.TextBesideIcon
+        leftPadding: Kirigami.Units.largeSpacing
+        rightPadding: Kirigami.Units.largeSpacing
+        topPadding: 0
+        bottomPadding: 0
         Controls.ToolTip.visible: display === Controls.AbstractButton.IconOnly && (hovered || visualFocus)
         Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
+        // The style draws the text and the icon in its own background: both are drawn here, with the box
+        background: OsdBox {
+            control: action
+            showIcon: false
+        }
+        contentItem: RowLayout {
+            spacing: Kirigami.Units.smallSpacing
+            opacity: action.enabled ? 1 : 0.4
+
+            Kirigami.Icon {
+                visible: action.icon.name !== ""
+                source: action.icon.name
+                color: Kirigami.Theme.textColor
+                Layout.preferredWidth: Kirigami.Units.iconSizes.smallMedium
+                Layout.preferredHeight: Kirigami.Units.iconSizes.smallMedium
+            }
+            Controls.Label {
+                visible: action.display !== Controls.AbstractButton.IconOnly
+                text: action.text
+                textFormat: Text.PlainText
+                color: Kirigami.Theme.textColor
+                elide: Text.ElideRight
+                Accessible.ignored: true
+            }
+        }
     }
     // A panel of the bars: a click on it is not a click on the video
     component OsdPanel: OsdBox {

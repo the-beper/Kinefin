@@ -26,7 +26,7 @@ Rectangle {
     height: Math.max(0, Math.min(implicitHeight, maximumHeight))
     radius: Kirigami.Units.smallSpacing
     color: Qt.alpha(Kirigami.Theme.backgroundColor, 0.85)
-    Kirigami.Theme.colorSet: Kirigami.Theme.Complementary
+    Kirigami.Theme.colorSet: Kirigami.Theme.Window
     Kirigami.Theme.inherit: false
     Accessible.role: Accessible.Pane
     Accessible.name: i18nc("@title:window accessible name of the panel", "Playback Info")

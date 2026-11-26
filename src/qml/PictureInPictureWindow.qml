@@ -222,7 +222,7 @@ Controls.ApplicationWindow {
             objectName: "pictureInPictureOsd"
             anchors.fill: parent
             opacity: pip.controlsShown ? 1 : 0
-            Kirigami.Theme.colorSet: Kirigami.Theme.Complementary
+            Kirigami.Theme.colorSet: Kirigami.Theme.Window
             Kirigami.Theme.inherit: false
             Behavior on opacity {
                 NumberAnimation { duration: Kirigami.Units.longDuration; easing.type: Easing.OutCubic }

@@ -5233,7 +5233,15 @@ class TestUiPages : public QObject {
         QVERIFY2(backdropAt >= 0, "the backdrop was never asked for");
         QVERIFY2(backdropAt < firstRoute(personPrefix),
                  "a cast photo was asked for before the cover");
-        // An image that the server refuses is reported by QML, which is what the case is about
+        // An image that the server refuses is reported by QML, which is what the case is about: every card of the page is refused in turn, so the warnings are taken away once the requests have stopped
+        int asked = -1;
+        QVERIFY(qWaitForScaled(
+            [&] {
+                QTest::qWait(300);
+                const int now = ui.server.imageRequests;
+                return std::exchange(asked, now) == now;
+            },
+            15000));
         QMutexLocker locker(&gWarningsMutex);
         gWarnings.removeIf([](const QString &warning) {
             return warning.contains(QStringLiteral("Error transferring http://127.0.0.1"));

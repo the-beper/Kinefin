@@ -173,7 +173,7 @@ Item {
         objectName: "miniPlayerScrim"
         anchors.fill: parent
         opacity: mini.controlsShown ? 1 : 0
-        Kirigami.Theme.colorSet: Kirigami.Theme.Complementary
+        Kirigami.Theme.colorSet: Kirigami.Theme.Window
         Kirigami.Theme.inherit: false
         Behavior on opacity {
             NumberAnimation { duration: Kirigami.Units.longDuration; easing.type: Easing.OutCubic }

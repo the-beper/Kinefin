@@ -3,11 +3,13 @@
 import QtQuick
 import org.kde.kirigami as Kirigami
 
-// A box of the bars of the player, the mini player and the picture-in-picture window: a rounded rectangle in the OSD's own colours, nearly opaque and outlined to stand apart from the picture. As the background of a button (`control`) it is a little lighter under the pointer, takes the colour of selection while pressed, shows a ring for the keyboard focus and draws the icon of the button, which the desktop style draws in its own background; without a control it is a panel
+// A box of the bars of the player, the mini player and the picture-in-picture window: a rounded rectangle in the colours of the window, nearly opaque and outlined to stand apart from the picture. As the background of a button (`control`) it is a little lighter under the pointer, takes the colour of selection while pressed, shows a ring for the keyboard focus and draws the icon of the button, which the desktop style draws in its own background; without a control it is a panel
 Rectangle {
     id: box
 
     property var control: null
+    // Off for a button that lays out its icon beside a text itself
+    property bool showIcon: true
 
     readonly property color base: Qt.alpha(Kirigami.Theme.backgroundColor, 0.9)
 
@@ -19,7 +21,7 @@ Rectangle {
     Kirigami.Icon {
         anchors.centerIn: parent
         readonly property bool hasIcon: !!box.control && (box.control.icon.name !== "" || box.control.icon.source.toString() !== "")
-        visible: hasIcon
+        visible: hasIcon && box.showIcon
         source: hasIcon ? (box.control.icon.name !== "" ? box.control.icon.name : box.control.icon.source) : ""
         implicitWidth: box.control?.icon.width > 0 ? box.control.icon.width : Kirigami.Units.iconSizes.smallMedium
         implicitHeight: box.control?.icon.height > 0 ? box.control.icon.height : Kirigami.Units.iconSizes.smallMedium
