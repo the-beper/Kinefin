@@ -565,6 +565,9 @@ Kirigami.Page {
     ColumnLayout {
         objectName: "playerGroupWaiting"
         anchors.centerIn: parent
+        // The player is black in every color scheme, so the spinner takes the Complementary (light on dark) colors, as the cast view does
+        Kirigami.Theme.colorSet: Kirigami.Theme.Complementary
+        Kirigami.Theme.inherit: false
         visible: page.groupFollowing && page.syncPlay.waiting && !page.player.loading && !page.player.errorText
         spacing: Kirigami.Units.largeSpacing
         FadeInOnShow {}
@@ -643,6 +646,9 @@ Kirigami.Page {
     ColumnLayout {
         objectName: "playerLoadingOverlay"
         anchors.centerIn: parent
+        // The player is black in every color scheme, so the spinner and the buttons take the Complementary (light on dark) colors, as the cast view does
+        Kirigami.Theme.colorSet: Kirigami.Theme.Complementary
+        Kirigami.Theme.inherit: false
         visible: (page.player.loading && !page.castActive) || !!page.player.errorText
         spacing: Kirigami.Units.largeSpacing
         FadeInOnShow {}

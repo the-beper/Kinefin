@@ -153,6 +153,12 @@ class TestSettingsParity : public QObject {
         QCOMPARE(fullscreenOnPlayback->defaultValue, QVariant(false));
         QCOMPARE(QString::fromUtf8(fullscreenOnPlayback->group.untranslatedText()),
                  QString::fromUtf8(fullscreen->group.untranslatedText()));
+        // The color scheme of the interface: follows the desktop until the user picks one
+        const auto *colorScheme =
+            Kinefin::findSetting(QStringLiteral("main"), QStringLiteral("colorScheme"));
+        QVERIFY(colorScheme && !colorScheme->hidden && !colorScheme->disabled);
+        QCOMPARE(colorScheme->type, SettingDefinition::Type::String);
+        QCOMPARE(colorScheme->defaultValue, QVariant(QStringLiteral("auto")));
         // The downloads: the number of parallel transfers is visible
         const auto *parallelDownloads =
             Kinefin::findSetting(QStringLiteral("downloads"), QStringLiteral("parallel"));

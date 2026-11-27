@@ -65,7 +65,7 @@
 
 ## What Kinefin is
 
-Kinefin is a native KDE Plasma client for Jellyfin media servers. The interface is built with Kirigami and the video is played by libmpv. It does not embed the Jellyfin web client.
+Kinefin is a native KDE Plasma client for Jellyfin media servers. The interface is built with Kirigami and the video is played by libmpv. It does not embed the Jellyfin web client. Its colors follow the color scheme of your desktop, unless you pick Light or Dark with **Color Scheme** in **Settings**, **General**.
 
 It needs:
 

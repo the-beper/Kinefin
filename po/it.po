@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: kinefin 0\n"
 "Report-Msgid-Bugs-To: https://github.com/the-beper/Kinefin/issues\n"
-"POT-Creation-Date: 2026-11-27 14:47+0000\n"
+"POT-Creation-Date: 2026-11-27 15:06+0000\n"
 "PO-Revision-Date: 2026-11-07 00:00+0000\n"
 "Last-Translator: the-beper\n"
 "Language-Team: Italian\n"
@@ -559,11 +559,11 @@ msgctxt "@info reason the desktop shows for staying awake"
 msgid "Casting a video to another device"
 msgstr "Trasmissione di un video su un altro dispositivo"
 
-#: src/main.cpp:142
+#: src/main.cpp:143
 msgid "A native Jellyfin client for KDE Plasma"
 msgstr "Un client Jellyfin nativo per KDE Plasma"
 
-#: src/main.cpp:457
+#: src/main.cpp:460
 msgid "The Kinefin interface could not be loaded"
 msgstr "Impossibile caricare l'interfaccia di Kinefin"
 
@@ -586,7 +586,7 @@ msgid "Force Full Screen Display"
 msgstr "Forza la visualizzazione a schermo intero"
 
 #: src/settings/SettingDefinitions.cpp:93
-#: src/settings/SettingDefinitions.cpp:676
+#: src/settings/SettingDefinitions.cpp:690
 msgid "100%"
 msgstr "100%"
 
@@ -615,574 +615,588 @@ msgid "Interface Scale"
 msgstr "Scala interfaccia"
 
 #: src/settings/SettingDefinitions.cpp:104
-#: src/settings/SettingDefinitions.cpp:115
-#: src/settings/SettingDefinitions.cpp:126
-#: src/settings/SettingDefinitions.cpp:137
-#: src/settings/SettingDefinitions.cpp:148
+#: src/settings/SettingDefinitions.cpp:118
+#: src/settings/SettingDefinitions.cpp:129
+#: src/settings/SettingDefinitions.cpp:140
+#: src/settings/SettingDefinitions.cpp:151
+#: src/settings/SettingDefinitions.cpp:162
 msgid "Application"
 msgstr "Applicazione"
 
-#: src/settings/SettingDefinitions.cpp:114
-msgid "Gamepad (Experimental)"
-msgstr "Gamepad (sperimentale)"
-
-#: src/settings/SettingDefinitions.cpp:125
-msgid "Enable Input Repeat"
-msgstr "Attiva la ripetizione dell'input"
-
-#: src/settings/SettingDefinitions.cpp:136
-msgid "Ignore Certificate Errors"
-msgstr "Ignora errori del certificato"
-
-#: src/settings/SettingDefinitions.cpp:147
-msgid "Auto-Detect Certificate Bundle"
-msgstr "Rileva automaticamente il pacchetto di certificati"
-
-#: src/settings/SettingDefinitions.cpp:164
-msgid "Basic"
-msgstr "Base"
-
-#: src/settings/SettingDefinitions.cpp:165
-msgid "S/PDIF"
-msgstr "S/PDIF"
-
-#: src/settings/SettingDefinitions.cpp:166
-msgid "HDMI"
-msgstr "HDMI"
-
-#: src/settings/SettingDefinitions.cpp:171
-msgid "Device Type"
-msgstr "Tipo di dispositivo"
-
-#: src/settings/SettingDefinitions.cpp:172
-#: src/settings/SettingDefinitions.cpp:186
-#: src/settings/SettingDefinitions.cpp:197
-#: src/settings/SettingDefinitions.cpp:208
-#: src/settings/SettingDefinitions.cpp:219
-msgid "Output"
-msgstr "Uscita"
-
-#: src/settings/SettingDefinitions.cpp:177
-#: src/settings/SettingDefinitions.cpp:304
+#: src/settings/SettingDefinitions.cpp:110
+#: src/settings/SettingDefinitions.cpp:191
+#: src/settings/SettingDefinitions.cpp:318
 msgid "Auto"
 msgstr "Automatico"
 
+#: src/settings/SettingDefinitions.cpp:111
+msgid "Light"
+msgstr "Chiaro"
+
+#: src/settings/SettingDefinitions.cpp:112
+msgid "Dark"
+msgstr "Scuro"
+
+#: src/settings/SettingDefinitions.cpp:117
+msgid "Color Scheme"
+msgstr "Schema di colori"
+
+#: src/settings/SettingDefinitions.cpp:128
+msgid "Gamepad (Experimental)"
+msgstr "Gamepad (sperimentale)"
+
+#: src/settings/SettingDefinitions.cpp:139
+msgid "Enable Input Repeat"
+msgstr "Attiva la ripetizione dell'input"
+
+#: src/settings/SettingDefinitions.cpp:150
+msgid "Ignore Certificate Errors"
+msgstr "Ignora errori del certificato"
+
+#: src/settings/SettingDefinitions.cpp:161
+msgid "Auto-Detect Certificate Bundle"
+msgstr "Rileva automaticamente il pacchetto di certificati"
+
 #: src/settings/SettingDefinitions.cpp:178
+msgid "Basic"
+msgstr "Base"
+
+#: src/settings/SettingDefinitions.cpp:179
+msgid "S/PDIF"
+msgstr "S/PDIF"
+
+#: src/settings/SettingDefinitions.cpp:180
+msgid "HDMI"
+msgstr "HDMI"
+
+#: src/settings/SettingDefinitions.cpp:185
+msgid "Device Type"
+msgstr "Tipo di dispositivo"
+
+#: src/settings/SettingDefinitions.cpp:186
+#: src/settings/SettingDefinitions.cpp:200
+#: src/settings/SettingDefinitions.cpp:211
+#: src/settings/SettingDefinitions.cpp:222
+#: src/settings/SettingDefinitions.cpp:233
+msgid "Output"
+msgstr "Uscita"
+
+#: src/settings/SettingDefinitions.cpp:192
 msgid "Stereo (2.0)"
 msgstr "Stereo (2.0)"
 
-#: src/settings/SettingDefinitions.cpp:179
+#: src/settings/SettingDefinitions.cpp:193
 msgid "5.1 surround"
 msgstr "Surround 5.1"
 
-#: src/settings/SettingDefinitions.cpp:180
+#: src/settings/SettingDefinitions.cpp:194
 msgid "7.1 surround"
 msgstr "Surround 7.1"
 
-#: src/settings/SettingDefinitions.cpp:185
+#: src/settings/SettingDefinitions.cpp:199
 msgid "Channels"
 msgstr "Canali"
 
-#: src/settings/SettingDefinitions.cpp:196
+#: src/settings/SettingDefinitions.cpp:210
 msgid "Device"
 msgstr "Dispositivo"
 
-#: src/settings/SettingDefinitions.cpp:207
+#: src/settings/SettingDefinitions.cpp:221
 msgid "Normalize"
 msgstr "Normalizza"
 
-#: src/settings/SettingDefinitions.cpp:218 src/qml/PlayerPage.qml:1890
+#: src/settings/SettingDefinitions.cpp:232 src/qml/PlayerPage.qml:1890
 msgid "Night Mode"
 msgstr "Modalità notte"
 
-#: src/settings/SettingDefinitions.cpp:229
+#: src/settings/SettingDefinitions.cpp:243
 msgid "AC3"
 msgstr "AC3"
 
-#: src/settings/SettingDefinitions.cpp:230
-#: src/settings/SettingDefinitions.cpp:241
-#: src/settings/SettingDefinitions.cpp:252
-#: src/settings/SettingDefinitions.cpp:263
-#: src/settings/SettingDefinitions.cpp:274
+#: src/settings/SettingDefinitions.cpp:244
+#: src/settings/SettingDefinitions.cpp:255
+#: src/settings/SettingDefinitions.cpp:266
+#: src/settings/SettingDefinitions.cpp:277
+#: src/settings/SettingDefinitions.cpp:288
 msgid "Passthrough"
 msgstr "Passthrough"
 
-#: src/settings/SettingDefinitions.cpp:240
+#: src/settings/SettingDefinitions.cpp:254
 msgid "DTS"
 msgstr "DTS"
 
-#: src/settings/SettingDefinitions.cpp:251
+#: src/settings/SettingDefinitions.cpp:265
 msgid "E-AC3"
 msgstr "E-AC3"
 
-#: src/settings/SettingDefinitions.cpp:262
+#: src/settings/SettingDefinitions.cpp:276
 msgid "DTS-HD"
 msgstr "DTS-HD"
 
-#: src/settings/SettingDefinitions.cpp:273
+#: src/settings/SettingDefinitions.cpp:287
 msgid "TrueHD"
 msgstr "TrueHD"
 
-#: src/settings/SettingDefinitions.cpp:279
+#: src/settings/SettingDefinitions.cpp:293
 msgid "Enabled"
 msgstr "Attivato"
 
-#: src/settings/SettingDefinitions.cpp:280
+#: src/settings/SettingDefinitions.cpp:294
 msgid "Copy"
 msgstr "Copia"
 
-#: src/settings/SettingDefinitions.cpp:281
+#: src/settings/SettingDefinitions.cpp:295
 msgid "Disabled"
 msgstr "Disattivato"
 
-#: src/settings/SettingDefinitions.cpp:286
+#: src/settings/SettingDefinitions.cpp:300
 msgid "Hardware Decoding"
 msgstr "Decodifica hardware"
 
-#: src/settings/SettingDefinitions.cpp:287
-#: src/settings/SettingDefinitions.cpp:298
-#: src/settings/SettingDefinitions.cpp:310
+#: src/settings/SettingDefinitions.cpp:301
+#: src/settings/SettingDefinitions.cpp:312
+#: src/settings/SettingDefinitions.cpp:324
 msgid "Decoding and Display"
 msgstr "Decodifica e visualizzazione"
 
-#: src/settings/SettingDefinitions.cpp:297
+#: src/settings/SettingDefinitions.cpp:311
 msgid "Deinterlace"
 msgstr "Deinterlacciamento"
 
-#: src/settings/SettingDefinitions.cpp:304 src/qml/ItemDetailsPage.qml:527
+#: src/settings/SettingDefinitions.cpp:318 src/qml/ItemDetailsPage.qml:527
 #: src/qml/PlayerPage.qml:2179
 msgid "Off"
 msgstr "Disattivato"
 
-#: src/settings/SettingDefinitions.cpp:309
+#: src/settings/SettingDefinitions.cpp:323
 msgid "HDR Output"
 msgstr "Uscita HDR"
 
-#: src/settings/SettingDefinitions.cpp:315 src/qml/ItemDetailsPage.qml:1582
+#: src/settings/SettingDefinitions.cpp:329 src/qml/ItemDetailsPage.qml:1582
 #: src/qml/MediaInfoDialog.qml:75 src/qml/SettingsPage.qml:61
 msgid "Audio"
 msgstr "Audio"
 
-#: src/settings/SettingDefinitions.cpp:316
+#: src/settings/SettingDefinitions.cpp:330
 msgid "Display resample"
 msgstr "Ricampionamento sul display"
 
-#: src/settings/SettingDefinitions.cpp:317
+#: src/settings/SettingDefinitions.cpp:331
 msgid "Display, drop audio"
 msgstr "Display, scarta l'audio"
 
-#: src/settings/SettingDefinitions.cpp:322
+#: src/settings/SettingDefinitions.cpp:336
 msgid "AV Sync Mode"
 msgstr "Modalità di sincronizzazione AV"
 
-#: src/settings/SettingDefinitions.cpp:323
 #: src/settings/SettingDefinitions.cpp:337
-#: src/settings/SettingDefinitions.cpp:366
-#: src/settings/SettingDefinitions.cpp:378
+#: src/settings/SettingDefinitions.cpp:351
+#: src/settings/SettingDefinitions.cpp:380
+#: src/settings/SettingDefinitions.cpp:392
 msgid "Playback"
 msgstr "Riproduzione"
 
-#: src/settings/SettingDefinitions.cpp:328
+#: src/settings/SettingDefinitions.cpp:342
 msgid "10 MB"
 msgstr "10 MB"
 
-#: src/settings/SettingDefinitions.cpp:329
+#: src/settings/SettingDefinitions.cpp:343
 msgid "75 MB"
 msgstr "75 MB"
 
-#: src/settings/SettingDefinitions.cpp:330
+#: src/settings/SettingDefinitions.cpp:344
 msgid "150 MB"
 msgstr "150 MB"
 
-#: src/settings/SettingDefinitions.cpp:331
+#: src/settings/SettingDefinitions.cpp:345
 msgid "500 MB"
 msgstr "500 MB"
 
-#: src/settings/SettingDefinitions.cpp:336
+#: src/settings/SettingDefinitions.cpp:350
 msgid "Cache Size"
 msgstr "Dimensione della cache"
 
-#: src/settings/SettingDefinitions.cpp:365
+#: src/settings/SettingDefinitions.cpp:379
 msgid "Default Playback Speed"
 msgstr "Velocità di riproduzione predefinita"
 
-#: src/settings/SettingDefinitions.cpp:377
+#: src/settings/SettingDefinitions.cpp:391
 msgid "Skip Intros Automatically"
 msgstr "Salta automaticamente le introduzioni"
 
-#: src/settings/SettingDefinitions.cpp:443
+#: src/settings/SettingDefinitions.cpp:457
 msgid "Prefer Transcode to H.265"
 msgstr "Preferisci la transcodifica in H.265"
 
-#: src/settings/SettingDefinitions.cpp:444
-#: src/settings/SettingDefinitions.cpp:455
-#: src/settings/SettingDefinitions.cpp:466
-#: src/settings/SettingDefinitions.cpp:477
-#: src/settings/SettingDefinitions.cpp:488
-#: src/settings/SettingDefinitions.cpp:499
-#: src/settings/SettingDefinitions.cpp:510
-#: src/settings/SettingDefinitions.cpp:521
-#: src/settings/SettingDefinitions.cpp:532
-#: src/settings/SettingDefinitions.cpp:544
+#: src/settings/SettingDefinitions.cpp:458
+#: src/settings/SettingDefinitions.cpp:469
+#: src/settings/SettingDefinitions.cpp:480
+#: src/settings/SettingDefinitions.cpp:491
+#: src/settings/SettingDefinitions.cpp:502
+#: src/settings/SettingDefinitions.cpp:513
+#: src/settings/SettingDefinitions.cpp:524
+#: src/settings/SettingDefinitions.cpp:535
+#: src/settings/SettingDefinitions.cpp:546
+#: src/settings/SettingDefinitions.cpp:558
 msgid "Transcoding"
 msgstr "Transcodifica"
 
-#: src/settings/SettingDefinitions.cpp:454
+#: src/settings/SettingDefinitions.cpp:468
 msgid "Allow Transcode to HEVC"
 msgstr "Consenti la transcodifica in HEVC"
 
-#: src/settings/SettingDefinitions.cpp:465
+#: src/settings/SettingDefinitions.cpp:479
 msgid "Force Transcode HEVC"
 msgstr "Forza la transcodifica HEVC"
 
-#: src/settings/SettingDefinitions.cpp:476
+#: src/settings/SettingDefinitions.cpp:490
 msgid "Force Transcode 4K"
 msgstr "Forza la transcodifica 4K"
 
-#: src/settings/SettingDefinitions.cpp:487
+#: src/settings/SettingDefinitions.cpp:501
 msgid "Force Transcode AV1"
 msgstr "Forza la transcodifica AV1"
 
-#: src/settings/SettingDefinitions.cpp:498
+#: src/settings/SettingDefinitions.cpp:512
 msgid "Force Transcode HDR"
 msgstr "Forza la transcodifica HDR"
 
-#: src/settings/SettingDefinitions.cpp:509
+#: src/settings/SettingDefinitions.cpp:523
 msgid "Force Transcode Hi10P"
 msgstr "Forza la transcodifica Hi10P"
 
-#: src/settings/SettingDefinitions.cpp:520
+#: src/settings/SettingDefinitions.cpp:534
 msgid "Force Transcode Dolby Vision"
 msgstr "Forza la transcodifica Dolby Vision"
 
-#: src/settings/SettingDefinitions.cpp:531
+#: src/settings/SettingDefinitions.cpp:545
 msgid "Always Force Transcode"
 msgstr "Forza sempre la transcodifica"
 
-#: src/settings/SettingDefinitions.cpp:543
+#: src/settings/SettingDefinitions.cpp:557
 msgid "Lower Quality on Slow Connections"
 msgstr "Riduci la qualità con le connessioni lente"
 
-#: src/settings/SettingDefinitions.cpp:549
-#: src/settings/SettingDefinitions.cpp:567
-#: src/settings/SettingDefinitions.cpp:583
-#: src/settings/SettingDefinitions.cpp:601
-#: src/settings/SettingDefinitions.cpp:618
-#: src/settings/SettingDefinitions.cpp:636
-#: src/settings/SettingDefinitions.cpp:653
-#: src/settings/SettingDefinitions.cpp:671
-#: src/settings/SettingDefinitions.cpp:698 src/qml/ItemDetailsPage.qml:519
+#: src/settings/SettingDefinitions.cpp:563
+#: src/settings/SettingDefinitions.cpp:581
+#: src/settings/SettingDefinitions.cpp:597
+#: src/settings/SettingDefinitions.cpp:615
+#: src/settings/SettingDefinitions.cpp:632
+#: src/settings/SettingDefinitions.cpp:650
+#: src/settings/SettingDefinitions.cpp:667
+#: src/settings/SettingDefinitions.cpp:685
+#: src/settings/SettingDefinitions.cpp:712 src/qml/ItemDetailsPage.qml:519
 #: src/qml/ItemDetailsPage.qml:527 src/qml/MediaInfoDialog.qml:56
 msgid "Default"
 msgstr "Predefinito"
 
-#: src/settings/SettingDefinitions.cpp:550
+#: src/settings/SettingDefinitions.cpp:564
 msgid "Serif"
 msgstr "Serif"
 
-#: src/settings/SettingDefinitions.cpp:551
+#: src/settings/SettingDefinitions.cpp:565
 msgid "Sans-Serif"
 msgstr "Sans-Serif"
 
-#: src/settings/SettingDefinitions.cpp:552
+#: src/settings/SettingDefinitions.cpp:566
 msgid "Script"
 msgstr "Script"
 
-#: src/settings/SettingDefinitions.cpp:553
+#: src/settings/SettingDefinitions.cpp:567
 msgid "Monospace"
 msgstr "Monospace"
 
-#: src/settings/SettingDefinitions.cpp:554
+#: src/settings/SettingDefinitions.cpp:568
 msgid "Display"
 msgstr "Display"
 
-#: src/settings/SettingDefinitions.cpp:555
+#: src/settings/SettingDefinitions.cpp:569
 msgid "Cursive"
 msgstr "Cursive"
 
-#: src/settings/SettingDefinitions.cpp:556
+#: src/settings/SettingDefinitions.cpp:570
 msgid "Fantasy"
 msgstr "Fantasy"
 
-#: src/settings/SettingDefinitions.cpp:561
+#: src/settings/SettingDefinitions.cpp:575
 msgid "Font"
 msgstr "Carattere"
 
-#: src/settings/SettingDefinitions.cpp:562
-#: src/settings/SettingDefinitions.cpp:578
-#: src/settings/SettingDefinitions.cpp:596
-#: src/settings/SettingDefinitions.cpp:613
+#: src/settings/SettingDefinitions.cpp:576
+#: src/settings/SettingDefinitions.cpp:592
+#: src/settings/SettingDefinitions.cpp:610
+#: src/settings/SettingDefinitions.cpp:627
 msgid "Text"
 msgstr "Testo"
 
-#: src/settings/SettingDefinitions.cpp:577
-#: src/settings/SettingDefinitions.cpp:647 src/qml/MediaInfoDialog.qml:70
+#: src/settings/SettingDefinitions.cpp:591
+#: src/settings/SettingDefinitions.cpp:661 src/qml/MediaInfoDialog.qml:70
 msgid "Size"
 msgstr "Dimensione"
 
-#: src/settings/SettingDefinitions.cpp:584
-#: src/settings/SettingDefinitions.cpp:619
-#: src/settings/SettingDefinitions.cpp:654
+#: src/settings/SettingDefinitions.cpp:598
+#: src/settings/SettingDefinitions.cpp:633
+#: src/settings/SettingDefinitions.cpp:668
 msgid "Black"
 msgstr "Nero"
 
-#: src/settings/SettingDefinitions.cpp:585
-#: src/settings/SettingDefinitions.cpp:620
-#: src/settings/SettingDefinitions.cpp:655
+#: src/settings/SettingDefinitions.cpp:599
+#: src/settings/SettingDefinitions.cpp:634
+#: src/settings/SettingDefinitions.cpp:669
 msgid "White"
 msgstr "Bianco"
 
-#: src/settings/SettingDefinitions.cpp:586
-#: src/settings/SettingDefinitions.cpp:621
-#: src/settings/SettingDefinitions.cpp:656
+#: src/settings/SettingDefinitions.cpp:600
+#: src/settings/SettingDefinitions.cpp:635
+#: src/settings/SettingDefinitions.cpp:670
 msgid "Light Grey"
 msgstr "Grigio chiaro"
 
-#: src/settings/SettingDefinitions.cpp:587
-#: src/settings/SettingDefinitions.cpp:622
-#: src/settings/SettingDefinitions.cpp:657
+#: src/settings/SettingDefinitions.cpp:601
+#: src/settings/SettingDefinitions.cpp:636
+#: src/settings/SettingDefinitions.cpp:671
 msgid "Blended Light Grey"
 msgstr "Grigio chiaro misto"
 
-#: src/settings/SettingDefinitions.cpp:588
-#: src/settings/SettingDefinitions.cpp:623
-#: src/settings/SettingDefinitions.cpp:658
+#: src/settings/SettingDefinitions.cpp:602
+#: src/settings/SettingDefinitions.cpp:637
+#: src/settings/SettingDefinitions.cpp:672
 msgid "Yellow"
 msgstr "Giallo"
 
-#: src/settings/SettingDefinitions.cpp:589
-#: src/settings/SettingDefinitions.cpp:624
-#: src/settings/SettingDefinitions.cpp:659
+#: src/settings/SettingDefinitions.cpp:603
+#: src/settings/SettingDefinitions.cpp:638
+#: src/settings/SettingDefinitions.cpp:673
 msgid "Light Yellow"
 msgstr "Giallo chiaro"
 
-#: src/settings/SettingDefinitions.cpp:590
-#: src/settings/SettingDefinitions.cpp:625
-#: src/settings/SettingDefinitions.cpp:660
+#: src/settings/SettingDefinitions.cpp:604
+#: src/settings/SettingDefinitions.cpp:639
+#: src/settings/SettingDefinitions.cpp:674
 msgid "Blended Light Yellow"
 msgstr "Giallo chiaro misto"
 
-#: src/settings/SettingDefinitions.cpp:595
-#: src/settings/SettingDefinitions.cpp:630
-#: src/settings/SettingDefinitions.cpp:665
+#: src/settings/SettingDefinitions.cpp:609
+#: src/settings/SettingDefinitions.cpp:644
+#: src/settings/SettingDefinitions.cpp:679
 msgid "Color"
 msgstr "Colore"
 
-#: src/settings/SettingDefinitions.cpp:602
+#: src/settings/SettingDefinitions.cpp:616
 msgid "Left, Bottom"
 msgstr "Sinistra, in basso"
 
-#: src/settings/SettingDefinitions.cpp:603
+#: src/settings/SettingDefinitions.cpp:617
 msgid "Right, Bottom"
 msgstr "Destra, in basso"
 
-#: src/settings/SettingDefinitions.cpp:604
+#: src/settings/SettingDefinitions.cpp:618
 msgid "Center, Bottom"
 msgstr "Centro, in basso"
 
-#: src/settings/SettingDefinitions.cpp:605
+#: src/settings/SettingDefinitions.cpp:619
 msgid "Left, Top"
 msgstr "Sinistra, in alto"
 
-#: src/settings/SettingDefinitions.cpp:606
+#: src/settings/SettingDefinitions.cpp:620
 msgid "Right, Top"
 msgstr "Destra, in alto"
 
-#: src/settings/SettingDefinitions.cpp:607
+#: src/settings/SettingDefinitions.cpp:621
 msgid "Center, Top"
 msgstr "Centro, in alto"
 
-#: src/settings/SettingDefinitions.cpp:612
+#: src/settings/SettingDefinitions.cpp:626
 msgid "Placement"
 msgstr "Posizionamento"
 
-#: src/settings/SettingDefinitions.cpp:631
-#: src/settings/SettingDefinitions.cpp:648
+#: src/settings/SettingDefinitions.cpp:645
+#: src/settings/SettingDefinitions.cpp:662
 msgid "Border"
 msgstr "Bordo"
 
-#: src/settings/SettingDefinitions.cpp:637
+#: src/settings/SettingDefinitions.cpp:651
 msgid "None"
 msgstr "Nessuno"
 
-#: src/settings/SettingDefinitions.cpp:638
+#: src/settings/SettingDefinitions.cpp:652
 msgid "Tiny"
 msgstr "Minuscolo"
 
-#: src/settings/SettingDefinitions.cpp:639
+#: src/settings/SettingDefinitions.cpp:653
 msgid "Small"
 msgstr "Piccolo"
 
-#: src/settings/SettingDefinitions.cpp:640
+#: src/settings/SettingDefinitions.cpp:654
 msgid "Normal"
 msgstr "Normale"
 
-#: src/settings/SettingDefinitions.cpp:641
+#: src/settings/SettingDefinitions.cpp:655
 msgid "Large"
 msgstr "Grande"
 
-#: src/settings/SettingDefinitions.cpp:642
+#: src/settings/SettingDefinitions.cpp:656
 msgid "Huge"
 msgstr "Enorme"
 
-#: src/settings/SettingDefinitions.cpp:666
-#: src/settings/SettingDefinitions.cpp:682
+#: src/settings/SettingDefinitions.cpp:680
+#: src/settings/SettingDefinitions.cpp:696
 msgid "Background"
 msgstr "Sfondo"
 
-#: src/settings/SettingDefinitions.cpp:672
+#: src/settings/SettingDefinitions.cpp:686
 msgid "0%"
 msgstr "0%"
 
-#: src/settings/SettingDefinitions.cpp:673
+#: src/settings/SettingDefinitions.cpp:687
 msgid "25%"
 msgstr "25%"
 
-#: src/settings/SettingDefinitions.cpp:674
+#: src/settings/SettingDefinitions.cpp:688
 msgid "50%"
 msgstr "50%"
 
-#: src/settings/SettingDefinitions.cpp:675
+#: src/settings/SettingDefinitions.cpp:689
 msgid "75%"
 msgstr "75%"
 
-#: src/settings/SettingDefinitions.cpp:681
+#: src/settings/SettingDefinitions.cpp:695
 msgid "Transparency"
 msgstr "Trasparenza"
 
-#: src/settings/SettingDefinitions.cpp:692
+#: src/settings/SettingDefinitions.cpp:706
 msgid "Scale Border and Shadow"
 msgstr "Scala bordo e ombra"
 
-#: src/settings/SettingDefinitions.cpp:693
-#: src/settings/SettingDefinitions.cpp:709
+#: src/settings/SettingDefinitions.cpp:707
+#: src/settings/SettingDefinitions.cpp:723
 msgid "ASS Subtitles"
 msgstr "Sottotitoli ASS"
 
-#: src/settings/SettingDefinitions.cpp:699
+#: src/settings/SettingDefinitions.cpp:713
 msgid "Yes"
 msgstr "Sì"
 
-#: src/settings/SettingDefinitions.cpp:700
+#: src/settings/SettingDefinitions.cpp:714
 msgid "No"
 msgstr "No"
 
-#: src/settings/SettingDefinitions.cpp:701
+#: src/settings/SettingDefinitions.cpp:715
 msgid "Force"
 msgstr "Forza"
 
-#: src/settings/SettingDefinitions.cpp:702
+#: src/settings/SettingDefinitions.cpp:716
 msgid "Scale"
 msgstr "Scala"
 
-#: src/settings/SettingDefinitions.cpp:703
+#: src/settings/SettingDefinitions.cpp:717
 msgid "Strip"
 msgstr "Rimuovi"
 
-#: src/settings/SettingDefinitions.cpp:708
+#: src/settings/SettingDefinitions.cpp:722
 msgid "Style Override"
 msgstr "Sovrascrivi lo stile"
 
-#: src/settings/SettingDefinitions.cpp:719
+#: src/settings/SettingDefinitions.cpp:733
 msgid "Manual MPV Configuration"
 msgstr "Configurazione manuale di MPV"
 
-#: src/settings/SettingDefinitions.cpp:731 src/qml/HomePage.qml:127
+#: src/settings/SettingDefinitions.cpp:745 src/qml/HomePage.qml:127
 msgid "Libraries"
 msgstr "Librerie"
 
-#: src/settings/SettingDefinitions.cpp:732
-#: src/settings/SettingDefinitions.cpp:743
+#: src/settings/SettingDefinitions.cpp:746
+#: src/settings/SettingDefinitions.cpp:757
 msgid "Show on Home"
 msgstr "Mostra nella Home"
 
-#: src/settings/SettingDefinitions.cpp:742
-#: src/settings/SettingDefinitions.cpp:776
-#: src/settings/SettingDefinitions.cpp:820 src/qml/HomePage.qml:213
+#: src/settings/SettingDefinitions.cpp:756
+#: src/settings/SettingDefinitions.cpp:790
+#: src/settings/SettingDefinitions.cpp:834 src/qml/HomePage.qml:213
 #: src/qml/FavoritesPage.qml:57
 msgid "Favorites"
 msgstr "Preferiti"
 
-#: src/settings/SettingDefinitions.cpp:753
+#: src/settings/SettingDefinitions.cpp:767
 msgid "Show New Badge on Recently Added Items"
 msgstr "Mostra il badge “Nuovo” sugli elementi aggiunti di recente"
 
-#: src/settings/SettingDefinitions.cpp:754
+#: src/settings/SettingDefinitions.cpp:768
 msgid "Cards"
 msgstr "Riquadri"
 
-#: src/settings/SettingDefinitions.cpp:765
-#: src/settings/SettingDefinitions.cpp:809
+#: src/settings/SettingDefinitions.cpp:779
+#: src/settings/SettingDefinitions.cpp:823
 msgid "Suggestions"
 msgstr "Suggerimenti"
 
-#: src/settings/SettingDefinitions.cpp:766
-#: src/settings/SettingDefinitions.cpp:777
-#: src/settings/SettingDefinitions.cpp:788
-#: src/settings/SettingDefinitions.cpp:799
+#: src/settings/SettingDefinitions.cpp:780
+#: src/settings/SettingDefinitions.cpp:791
+#: src/settings/SettingDefinitions.cpp:802
+#: src/settings/SettingDefinitions.cpp:813
 msgid "Show Tabs in Movies"
 msgstr "Mostra le schede nei film"
 
-#: src/settings/SettingDefinitions.cpp:787
-#: src/settings/SettingDefinitions.cpp:831 src/qml/SearchPopup.qml:293
+#: src/settings/SettingDefinitions.cpp:801
+#: src/settings/SettingDefinitions.cpp:845 src/qml/SearchPopup.qml:293
 msgid "Collections"
 msgstr "Raccolte"
 
-#: src/settings/SettingDefinitions.cpp:798
-#: src/settings/SettingDefinitions.cpp:853 src/qml/EditMetadataDialog.qml:210
+#: src/settings/SettingDefinitions.cpp:812
+#: src/settings/SettingDefinitions.cpp:867 src/qml/EditMetadataDialog.qml:210
 #: src/qml/GenreRailsPage.qml:18
 msgid "Genres"
 msgstr "Generi"
 
-#: src/settings/SettingDefinitions.cpp:810
-#: src/settings/SettingDefinitions.cpp:821
-#: src/settings/SettingDefinitions.cpp:832
-#: src/settings/SettingDefinitions.cpp:843
-#: src/settings/SettingDefinitions.cpp:854
-#: src/settings/SettingDefinitions.cpp:865
-#: src/settings/SettingDefinitions.cpp:876
+#: src/settings/SettingDefinitions.cpp:824
+#: src/settings/SettingDefinitions.cpp:835
+#: src/settings/SettingDefinitions.cpp:846
+#: src/settings/SettingDefinitions.cpp:857
+#: src/settings/SettingDefinitions.cpp:868
+#: src/settings/SettingDefinitions.cpp:879
+#: src/settings/SettingDefinitions.cpp:890
 msgid "Show Tabs in Shows"
 msgstr "Mostra le schede nelle serie TV"
 
-#: src/settings/SettingDefinitions.cpp:842
+#: src/settings/SettingDefinitions.cpp:856
 msgid "Upcoming"
 msgstr "In arrivo"
 
-#: src/settings/SettingDefinitions.cpp:864
+#: src/settings/SettingDefinitions.cpp:878
 msgid "Networks"
 msgstr "Reti"
 
-#: src/settings/SettingDefinitions.cpp:875 src/qml/ItemDetailsPage.qml:895
+#: src/settings/SettingDefinitions.cpp:889 src/qml/ItemDetailsPage.qml:895
 #: src/qml/ItemDetailsPage.qml:2102 src/qml/SearchPopup.qml:291
 #: src/qml/RuleDialog.qml:109
 msgid "Episodes"
 msgstr "Episodi"
 
-#: src/settings/SettingDefinitions.cpp:894
+#: src/settings/SettingDefinitions.cpp:908
 msgid "1 download"
 msgstr "1 download"
 
-#: src/settings/SettingDefinitions.cpp:895
+#: src/settings/SettingDefinitions.cpp:909
 msgid "2 downloads"
 msgstr "2 download"
 
-#: src/settings/SettingDefinitions.cpp:896
+#: src/settings/SettingDefinitions.cpp:910
 msgid "3 downloads"
 msgstr "3 download"
 
-#: src/settings/SettingDefinitions.cpp:897
+#: src/settings/SettingDefinitions.cpp:911
 msgid "4 downloads"
 msgstr "4 download"
 
-#: src/settings/SettingDefinitions.cpp:902
+#: src/settings/SettingDefinitions.cpp:916
 msgid "Parallel Downloads"
 msgstr "Download paralleli"
 
-#: src/settings/SettingDefinitions.cpp:913
+#: src/settings/SettingDefinitions.cpp:927
 msgid "Write Kodi Metadata Files"
 msgstr "Scrivi i file di metadati Kodi"
 
-#: src/settings/SettingDefinitions.cpp:924
+#: src/settings/SettingDefinitions.cpp:938
 msgid "Export When Download Completes"
 msgstr "Esporta al termine del download"
 

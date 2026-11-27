@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Kinefin contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/BlurHashImageProvider.h"
+#include "app/ColorSchemeSetting.h"
 #include "app/ConnectionController.h"
 #include "app/EarlyUiScale.h"
 #include "app/HdrOutput.h"
@@ -313,6 +314,8 @@ int main(int argc, char *argv[])
     settings.setMpvConfValidator(&Kinefin::validateMpvConf);
     settings.setCertificateErrorsIgnoredByCommandLine(
         parser.isSet(QStringLiteral("ignore-certificate-errors")));
+    // Before the engine loads Main.qml, so the window never shows the wrong scheme first
+    Kinefin::followColorScheme(settings);
     const auto settingsLevel = Kinefin::parseLogLevel(
         settings.value(QStringLiteral("main"), QStringLiteral("logLevel")).toString());
     // Warnings of the settings constructor (a newer-format file moved aside) precede the log file: they reach stderr only, because the log level is itself a setting

@@ -6,7 +6,7 @@
 
 <p align="center">
   <b>Native KDE Plasma client for Jellyfin servers.</b><br>
-  Browse your movies and shows, play them with mpv, cast them to a TV and keep them for offline viewing, in a Kirigami interface that follows your Plasma theme.
+  Browse your movies and shows, play them with mpv, cast them to a TV and keep them for offline viewing, in a Kirigami interface that follows your Plasma color scheme, or a light or dark one you pick.
 </p>
 
 <p align="center">
@@ -24,7 +24,7 @@
 
 Jellyfin Desktop, the official desktop client, shows the Jellyfin web interface in a Qt WebEngine window and plays the video with mpv. The app looks and behaves like the website, not like the rest of a Plasma desktop.
 
-Kinefin is written for Plasma instead. The interface is Kirigami and follows the KDE HIG and your color scheme, it talks to the server through its own client for the Jellyfin REST API, and libmpv plays the video. No browser engine is loaded. Where a client setting maps to mpv, Kinefin keeps Jellyfin Desktop's name, default and values, so the playback behaves the same.
+Kinefin is written for Plasma instead. The interface is Kirigami and follows the KDE HIG and your color scheme (or a light or dark one you pick), it talks to the server through its own client for the Jellyfin REST API, and libmpv plays the video. No browser engine is loaded. Where a client setting maps to mpv, Kinefin keeps Jellyfin Desktop's name, default and values, so the playback behaves the same.
 
 ## What it does
 

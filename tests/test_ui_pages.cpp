@@ -6,6 +6,7 @@
 #include "MemoryTokenStore.h"
 
 #include "app/BlurHashImageProvider.h"
+#include "app/ColorSchemeSetting.h"
 #include "app/ConnectionController.h"
 #include "app/HdrOutput.h"
 #include "app/ImageNetworkFactory.h"
@@ -8692,6 +8693,30 @@ class TestUiPages : public QObject {
             QVERIFY2(item->isVisible(), qPrintable(Ui::describe(item)));
             QVERIFY2(ui.insideWindow(item), qPrintable(Ui::describe(item)));
         }
+    }
+
+    // Color Scheme recolours the open window at once, through the palette that Kirigami follows, and Auto gives the platform's colors back
+    void theColorSchemeSettingRecoloursTheWindowAtOnce()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        Kinefin::followColorScheme(ui.settings);
+        // The palette is the process's: a failure half way must not leave the next tests of the shard dark
+        const auto restore = qScopeGuard([&ui] {
+            ui.settings.setValue(QStringLiteral("main"), QStringLiteral("colorScheme"),
+                                 QStringLiteral("auto"));
+        });
+        const QColor before = ui.window->color();
+        QVERIFY(before.lightness() > 128);
+        QVERIFY(ui.settings.setValue(QStringLiteral("main"), QStringLiteral("colorScheme"),
+                                     QStringLiteral("dark")));
+        QTRY_VERIFY(ui.window->color().lightness() < 128);
+        QVERIFY(ui.settings.setValue(QStringLiteral("main"), QStringLiteral("colorScheme"),
+                                     QStringLiteral("light")));
+        QTRY_VERIFY(ui.window->color().lightness() > 128);
+        QVERIFY(ui.settings.setValue(QStringLiteral("main"), QStringLiteral("colorScheme"),
+                                     QStringLiteral("auto")));
+        QTRY_COMPARE(ui.window->color(), before);
     }
 
     void theUiIsQuietWhenNothingChanges_data()

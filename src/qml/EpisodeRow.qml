@@ -183,6 +183,7 @@ Controls.ItemDelegate {
                     anchors.fill: parent
                     anchors.margins: Kirigami.Units.smallSpacing / 2
                     source: "emblem-favorite"
+                    color: "white"
                 }
             }
         }

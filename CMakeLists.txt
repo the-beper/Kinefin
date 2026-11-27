@@ -22,7 +22,7 @@ find_package(OpenSSL 3.0 REQUIRED COMPONENTS Crypto)
 if(QT_KNOWN_POLICY_QTP0004)
     qt_policy(SET QTP0004 OLD)
 endif()
-find_package(KF6 6.24 REQUIRED COMPONENTS Config CoreAddons I18n DBusAddons WindowSystem)
+find_package(KF6 6.24 REQUIRED COMPONENTS Config ColorScheme CoreAddons I18n DBusAddons WindowSystem)
 find_package(Qt6Keychain REQUIRED)
 # The KDE runtime 6.11 ships SDL 3.2; the gamepad input needs nothing but the library
 find_package(SDL3 3.2 REQUIRED CONFIG)
@@ -49,6 +49,8 @@ FetchContent_MakeAvailable(mpvqt)
 unset(BUILD_SHARED_LIBS)
 
 add_library(kinefin_core STATIC
+    src/app/ColorSchemeSetting.cpp
+    src/app/ColorSchemeSetting.h
     src/app/EarlyUiScale.cpp
     src/app/EarlyUiScale.h
     src/app/Logging.cpp
@@ -186,7 +188,7 @@ target_include_directories(kinefin_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 qt_extract_metatypes(kinefin_core)
 target_compile_definitions(kinefin_core PRIVATE TRANSLATION_DOMAIN="kinefin")
 target_link_libraries(kinefin_core PUBLIC Qt6::Core Qt6::Gui Qt6::DBus Qt6::Network Qt6::WebSockets KF6::ConfigCore KF6::I18n)
-target_link_libraries(kinefin_core PRIVATE Qt6Keychain::Qt6Keychain)
+target_link_libraries(kinefin_core PRIVATE Qt6Keychain::Qt6Keychain KF6::ColorScheme)
 
 add_library(kinefin_player STATIC
     src/player/BitrateFallback.cpp
@@ -758,6 +760,11 @@ if(BUILD_TESTING)
     add_executable(test_early_ui_scale tests/test_early_ui_scale.cpp)
     target_link_libraries(test_early_ui_scale PRIVATE kinefin_core Qt6::Test)
     add_test(NAME early_ui_scale COMMAND test_early_ui_scale)
+
+    add_executable(test_color_scheme tests/test_color_scheme.cpp)
+    target_link_libraries(test_color_scheme PRIVATE kinefin_core Qt6::Test Qt6::Gui KF6::ColorScheme)
+    add_test(NAME color_scheme COMMAND test_color_scheme)
+    set_tests_properties(color_scheme PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
     add_executable(test_profile_identity tests/test_profile_identity.cpp)
     target_link_libraries(test_profile_identity PRIVATE kinefin_core Qt6::Test)
