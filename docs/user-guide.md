@@ -161,19 +161,19 @@ Each user you sign in as is saved with the server. What happens at the next star
 | One, set to **Ask for Password** | Password prompt                                                                                           |
 | Two or more                      | The user picker: centred rows of avatars that wrap with the window, and an **Add User** button under them |
 
-In the picker, arrows move between the tiles and down to **Add User**, Return or Space chooses, and a lock badge marks a user without a stored token. The Menu key, a right click or the overflow button opens **Ask for Password** and **Remove User…**. **Switch Server** is in the main menu.
+In the picker, arrows move between the tiles and down to **Add User**, Return or Space chooses, and a lock badge marks a user without a stored token. **Switch Server**, beside the server address, returns to the **Servers** page and keeps the sessions.
 
-**Ask for Password** stores no token for that user, so Kinefin asks every time. It is off by default.
+While you are signed in, your avatar at the foot of the left rail (your row of the drawer in a [Compact window](#browse)) opens the user picker, the **Who is watching?** page, with **Signed in** under your tile. Choosing yourself goes back to Home and the session goes on. Choosing another user leaves the current session (its token and queue stay) and switches to that user. You are asked for the password if that user has no stored session or is set to **Ask for Password**.
 
-The main menu, opened from the avatar at the foot of the left rail (from your row of the drawer in a [Compact window](#browse), and from the right end of the bar while you work offline), has the account actions:
+The Menu key, Shift+F10, a right click or the overflow button of a tile opens its menu:
 
-| Action            | Effect                                                                                                     |
-| ----------------- | ---------------------------------------------------------------------------------------------------------- |
-| **Switch User**   | Opens the picker and keeps the current user's token and queue                                              |
-| **Sign Out**      | After confirmation, deletes the user's session and queue on this computer; the server session is not ended |
-| **Switch Server** | Returns to the **Servers** page and keeps the session                                                      |
+| Entry                 | Effect                                                                                                                                                                                                  |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Sign Out…**         | Only for a user with a stored session or the signed-in user. After confirmation, deletes that user's saved credentials and queue on this computer, and the tile stays with the lock badge; the server session and account are not changed. For the signed-in user it also ends the session and shows the picker |
+| **Ask for Password**  | Checkable. Stores no token for that user, so Kinefin asks every time. Off by default                                                                                                                    |
+| **Remove User…**      | After confirmation, removes the tile, the token and the queue                                                                                                                                           |
 
-**Remove User…** and removing a server delete the saved session the same way. Downloads stay on disk and come back when that user signs in to that server again.
+**Remove User…** and removing a server both delete the saved session and queue. Downloads stay on disk and come back when that user signs in to that server again.
 
 ## Browse
 
@@ -183,17 +183,30 @@ A rail down the left edge of the window holds the entries, each icon with its la
 | ------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | Top     | **Search**                                                                                                                                   |
 | Middle  | **Home**, **Movies** and **Shows** (each only when the server has a library of that type), **Music**, **Audiobooks**, then **Favorites**, **Playlists** and **Downloads** |
-| Foot    | **Queue** with its count, **Group** while you are in a SyncPlay group, and the main menu as your avatar                                      |
+| Foot    | **Queue** with its count, **Remote** (opens Remote Sessions), **SyncPlay**, **Menu** (opens the main menu beside it) and your avatar, larger than the icons and without a label, which opens the user picker |
+
+The main menu has these entries:
+
+| Entry                  | Shown                  | Shortcut     |
+| ---------------------- | ---------------------- | ------------ |
+| **Leave Offline**      | While you work offline |              |
+| **Admin Dashboard**    | To administrators      |              |
+| **Refresh**            | While you are signed in | Ctrl+R      |
+| **Settings**           | Always                 | Ctrl+,       |
+| **Keyboard Shortcuts** | Always                 | Ctrl+Shift+/ |
+| **About Kinefin**      | Always                 |              |
+
+It opens from **Menu** in the rail and from the **Main Menu** row of the drawer; the offline bar and the **Servers** and sign-in pages have a button of their own (see below).
 
 **Music** and **Audiobooks** open a page that says they are coming soon. **Downloads** also shows how many downloads are not finished. In a short window the middle entries scroll, with a scroll bar that shows when some are out of view and takes its own strip beside the entries, and the foot stays in view.
 
 Ctrl+1 to Ctrl+8 open the middle entries by their position among the visible ones, so without a Movies library **Shows** is Ctrl+2.
 
-In a window narrower than the smallest window plus the rail (Compact), the rail gives way to a drawer, and the window has no bar. A button in the top left corner (top right in a right-to-left layout) opens the drawer, and so does a swipe from the window edge. The pages leave the corner free: the toolbar of a page starts after the button, and a page without one keeps room above its content. The drawer repeats the rail as rows with the labels beside the icons: the sections, **Search**, **Queue** with its count, **SyncPlay Group** while you are in a group (with **Not following** or **Waiting for others** under it when that applies) and a row with your avatar and name. The **SyncPlay Group** and user rows end with an arrow because they open a menu; the user row opens the main menu, which in this window also holds **Queue** and the SyncPlay group and opens under the corner button. In a short window the sections of the drawer scroll and the rows below them stay in view. While you work offline Downloads is the only section, so the window has no drawer, only a bar with the main menu button, and the **Servers** and sign-in pages have only the main menu button in the top corner. The toolbar of every page has framed buttons and a full-width line under it, with a soft shadow below.
+In a window narrower than the smallest window plus the rail (Compact), the rail gives way to a drawer, and the window has no bar. A button in the top left corner (top right in a right-to-left layout) opens the drawer, and so does a swipe from the window edge. The pages leave the corner free: the toolbar of a page starts after the button, and a page without one keeps room above its content. The drawer repeats the rail as rows with the labels beside the icons: the sections, **Search**, **Queue** with its count, **Remote Sessions**, **SyncPlay**, **Main Menu** and a row with your avatar and name, which opens the user picker. The **SyncPlay** row works like the rail entry (see [Watch together with SyncPlay](#watch-together-with-syncplay)): in a group it shows the state under its label, and the group's menu hangs from the row while the drawer stays open. The rows that open a menu end with an arrow, and the main menu opens under the corner button. In a short window the sections of the drawer scroll and the rows below them stay in view. While you work offline Downloads is the only section, so the window has no drawer, only a bar with the main menu button, and the **Servers** and sign-in pages have only the main menu button in the top corner. The toolbar of every page has framed buttons and a full-width line under it, with a soft shadow below.
 
 Escape and Alt+Left go back. The mouse back button does too. Ctrl+R reloads the page in front.
 
-No card or row shows a focus ring when a page opens or scrolls. The ring appears after you press a key or use a gamepad, and a click or a touch hides it again.
+No card, row or user tile shows a focus ring when a page opens or scrolls. The ring appears after you press a key or use a gamepad, and a click or a touch hides it again.
 
 A middle click on a page that scrolls starts autoscroll: a marker shows where you clicked, and moving the pointer away from it scrolls the page, faster the farther the pointer is. Moving the pointer back to the marker pauses the scroll. A click of any mouse button, Escape, the wheel or a change of page ends it, and the click or the Escape does nothing else: it opens no card and goes back no page. If you hold the middle button for more than a moment, or drag with it held, the scroll lasts only while it is down. A middle click on a text field pastes as usual and starts nothing.
 
@@ -401,7 +414,7 @@ The queue is an ordered list of up to 500 movies, episodes and videos, each at m
 
 To add to it, use **Play Next** (top of the queue) or **Add to Queue** (end) on a card or a details page. On a season, series or collection they add the playable episodes or children: a season from its first unplayed episode, a series from its Next Up episode.
 
-**Queue** at the foot of the rail (a row of the drawer and an entry of the main menu in a Compact window) opens the page. Its toolbar has **Resume Queue**, **Play From Here**, **Undo** and **Clear Queue** (with confirmation). In the list:
+**Queue** at the foot of the rail (a row of the drawer in a Compact window) opens the page. Its toolbar has **Resume Queue**, **Play From Here**, **Undo** and **Clear Queue** (with confirmation). In the list:
 
 | Key                | Action               |
 | ------------------ | -------------------- |
@@ -576,7 +589,7 @@ On an HDR screen, the full player shows HDR video (HDR10, HLG, Dolby Vision with
 
 SyncPlay keeps playback in step with other people on the same server.
 
-1. Open the main menu and choose **SyncPlay**.
+1. Choose **SyncPlay** in the rail (the **SyncPlay** row of the drawer in a Compact window).
 2. Choose **Join** on a group, or enter a name and press **Create Group**.
 
 The entry shows only while you are signed in and the server permits SyncPlay. **Create Group** is hidden if your user may only join groups.
@@ -585,11 +598,11 @@ In a group the player waits for the others, and notifications name members who j
 
 Closing the player stops following the group but keeps you in it. **Follow Again** in the dialog catches up. A lost connection joins the group again.
 
-While you are in a group the rail has a **Group** button above your avatar. Its tooltip says the group's name and how many people are in it, **Not following** when the playback is not in step with the group (the icon dims) and **Waiting for others** when the group waits for someone (a dot appears on the icon). Its menu lists the group and its members, up to ten, and has **Stop Following** or **Follow Again**, **Leave Group** and **SyncPlay…**, which opens the dialog. In a Compact window the drawer has a **SyncPlay Group** row, which opens the same menu, and the main menu has it as the **SyncPlay Group** entry.
+While you are in a group, **SyncPlay** opens the group's menu instead of the dialog. The entry's tooltip says the group's name and how many people are in it, **Not following** when the playback is not in step with the group (the icon dims) and **Waiting for others** when the group waits for someone (a dot appears on the icon); in the drawer the row shows the state under its label. The menu lists the group and its members, up to ten, and has **Stop Following** or **Follow Again**, **Leave Group** and **SyncPlay…**, which opens the dialog.
 
 ### Control other sessions
 
-The main menu's **Remote Sessions** opens a dialog listing the other sessions on the server. It refreshes every 5 seconds while open. Each session has **Pause**, **Resume** and **Stop**.
+**Remote** in the rail (the **Remote Sessions** row of the drawer in a Compact window) opens a dialog listing the other sessions on the server. It refreshes every 5 seconds while open. Each session has **Pause**, **Resume** and **Stop**.
 
 Other Jellyfin clients can also control Kinefin while you are signed in: in the web interface or the Jellyfin app on a phone, open the list behind the cast button and pick Kinefin. They can play, pause, stop, seek, skip to the next or previous item, and send navigation keys, volume, mute, full screen, repeat, shuffle, track and quality choices. A remote **Play** of one video plays it. Several videos replace the queue and play from the one chosen, with an **Undo** notice when they replace a queue you had; a remote Play Next adds them after the current item, a remote Play Last at the end of the queue. Remote navigation keys are ignored while a text field or a dialog has focus. Remote text messages are not shown.
 

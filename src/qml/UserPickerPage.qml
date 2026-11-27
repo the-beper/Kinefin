@@ -5,7 +5,7 @@ import QtQuick.Controls as Controls
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 
-// Who is watching: one tile per user saved for the server and an Add User button under them. A user without a stored session, or set to ask for the password, shows a lock and leads to the sign-in page
+// Who is watching: the server's address with Switch Server, one tile per user saved for the server and an Add User button under them. A user without a stored session, or set to ask for the password, shows a lock and leads to the sign-in page. Signed out it is the page of the picker state; in a session it is the section the sidebar's avatar opens, with the signed-in user marked, and the session goes on until another user is chosen, added or signed out
 Kirigami.ScrollablePage {
     id: page
     objectName: "userPickerPage"
@@ -13,10 +13,12 @@ Kirigami.ScrollablePage {
     // The darker View background on every page: a page without a list (a plain flickable) would get the lighter Window one, and the pages would not match
     Kirigami.Theme.colorSet: Kirigami.Theme.View
     Kirigami.Theme.inherit: false
-    // The lone menu button stands in the top corner over the page: the content starts below it
+    // Signed out the lone menu button stands in the top corner over the page, in a Compact window the button of the drawer: the content starts below it
     topPadding: Kirigami.Units.gridUnit * 2
 
     required property ConnectionController connection
+    readonly property bool inSession: connection.state === ConnectionController.Authenticated
+    readonly property string signedInId: inSession ? connection.currentUserId : ""
 
     // The row toolbar is ToolBar everywhere (Main.qml): the pre-signin screens keep their identity in the top bar instead
     globalToolBarStyle: Kirigami.ApplicationHeaderStyle.None
@@ -33,6 +35,8 @@ Kirigami.ScrollablePage {
         const user = page.connection.users[tile.index];
         userMenu.userId = user.id;
         userMenu.userName = user.name;
+        // Only a stored session, or the live one of the signed-in user, has something to sign out
+        userMenu.canSignOut = user.remembered || user.id === page.signedInId;
         askPasswordItem.checked = user.askPassword;
         if (button)
             userMenuPlacement.openFor(button);
@@ -44,6 +48,47 @@ Kirigami.ScrollablePage {
         return page.connection.users.findIndex(entry => entry.id === userId);
     }
 
+    // An entry of the tile menu whose icon stands in the column of the Ask for Password check box: with `icon.name` the style would add a column of icons after the one it keeps for the check box, and the icons would not line up with it
+    component CheckColumnItem: Controls.MenuItem {
+        id: columnItem
+
+        property string iconName
+
+        // The style's own row, with the icon in the place of its check box column
+        contentItem: RowLayout {
+            Item {
+                readonly property real iconSize: Kirigami.Settings.hasTransientTouchInput ? Kirigami.Units.iconSizes.smallMedium : Kirigami.Units.iconSizes.small
+
+                Layout.preferredWidth: columnItem.indicator ? columnItem.indicator.width : iconSize
+                Layout.preferredHeight: iconSize
+
+                Kirigami.Icon {
+                    objectName: columnItem.objectName + "Icon"
+                    anchors.centerIn: parent
+                    width: parent.iconSize
+                    height: width
+                    source: columnItem.iconName
+                    selected: columnItem.pressed
+                }
+            }
+            Controls.Label {
+                objectName: columnItem.objectName + "Label"
+                Layout.fillWidth: true
+                Layout.alignment: Qt.AlignVCenter
+                // The desktop style fills the mnemonic's label; another style leaves it empty
+                text: columnItem.Kirigami.MnemonicData.richTextLabel || columnItem.text
+                font: columnItem.font
+                color: columnItem.pressed ? Kirigami.Theme.highlightedTextColor : Kirigami.Theme.textColor
+                elide: Text.ElideRight
+                horizontalAlignment: Text.AlignLeft
+                verticalAlignment: Text.AlignVCenter
+            }
+            Item {
+                Layout.preferredWidth: Kirigami.Units.smallSpacing
+            }
+        }
+    }
+
     // The button's menu goes below the button, above it when there is no room below; the pointer's and the keyboard's open at their point
     PopupPlacement { id: userMenuPlacement; popup: userMenu }
     Controls.Menu {
@@ -53,7 +98,19 @@ Kirigami.ScrollablePage {
         // The user the menu was opened for: the list may be rebuilt while it is open
         property string userId
         property string userName
+        property bool canSignOut
 
+        CheckColumnItem {
+            objectName: "userMenuSignOut"
+            visible: userMenu.canSignOut
+            text: i18nc("@action:inmenu", "Sign Out…")
+            iconName: "system-log-out"
+            onTriggered: {
+                signOutDialog.userId = userMenu.userId;
+                signOutDialog.userName = userMenu.userName;
+                signOutDialog.open();
+            }
+        }
         Controls.MenuItem {
             id: askPasswordItem
             objectName: "userMenuAskPassword"
@@ -71,15 +128,48 @@ Kirigami.ScrollablePage {
                 });
             }
         }
-        Controls.MenuItem {
+        Controls.MenuSeparator {}
+        CheckColumnItem {
             objectName: "userMenuRemove"
             text: i18nc("@action:inmenu", "Remove User…")
-            icon.name: "edit-delete-remove"
+            iconName: "edit-delete-remove"
             onTriggered: {
                 removeDialog.userId = userMenu.userId;
                 removeDialog.userName = userMenu.userName;
                 removeDialog.open();
             }
+        }
+    }
+
+    // Signing out keeps the tile: the token and the saved queue go, and the user is asked for the password next time
+    Kirigami.PromptDialog {
+        id: signOutDialog
+        objectName: "signOutDialog"
+
+        property string userId
+        property string userName
+
+        title: i18nc("@title:window", "Sign Out")
+        standardButtons: Kirigami.Dialog.Cancel
+        customFooterActions: [
+            Kirigami.Action {
+                objectName: "confirmSignOut"
+                text: i18nc("@action:button", "Sign Out")
+                icon.name: "system-log-out"
+                onTriggered: {
+                    signOutDialog.close();
+                    page.connection.signOutUser(signOutDialog.userId);
+                }
+            }
+        ]
+        onClosed: page.focusPrimary()
+
+        // The subtitle would render the user name as rich text: the name goes into a plain-text label
+        Controls.Label {
+            Layout.fillWidth: true
+            wrapMode: Text.Wrap
+            textFormat: Text.PlainText
+            text: i18nc("@info %1 is a user name", "Sign out %1? Saved credentials and the local queue will be removed. The server account stays unchanged.", signOutDialog.userName)
         }
     }
 
@@ -114,12 +204,13 @@ Kirigami.ScrollablePage {
     }
 
     ColumnLayout {
-        spacing: Kirigami.Units.smallSpacing
+        spacing: 0
 
-        // The heading and the address are one block
+        // The heading and the address are one block, set apart from the tiles
         ColumnLayout {
             Layout.fillWidth: true
-            spacing: 0
+            Layout.bottomMargin: Kirigami.Units.gridUnit
+            spacing: Kirigami.Units.largeSpacing
 
             Kirigami.Heading {
                 Layout.fillWidth: true
@@ -129,14 +220,31 @@ Kirigami.ScrollablePage {
                 text: page.title
             }
 
-            // The server address is server text: plain
-            Controls.Label {
-                Layout.fillWidth: true
-                horizontalAlignment: Text.AlignHCenter
-                wrapMode: Text.Wrap
-                textFormat: Text.PlainText
-                color: Kirigami.Theme.disabledTextColor
-                text: page.connection.serverUrl
+            // The server and the way to another one, in a row of its own width, centred (a layout fills the width by default)
+            RowLayout {
+                Layout.fillWidth: false
+                Layout.alignment: Qt.AlignHCenter
+                Layout.maximumWidth: parent.width
+                spacing: Kirigami.Units.largeSpacing
+
+                // The server address is server text: plain
+                Controls.Label {
+                    objectName: "userPickerServer"
+                    Layout.fillWidth: true
+                    Layout.maximumWidth: implicitWidth
+                    elide: Text.ElideMiddle
+                    textFormat: Text.PlainText
+                    color: Kirigami.Theme.disabledTextColor
+                    text: page.connection.serverUrl
+                }
+                Controls.Button {
+                    objectName: "userSwitchServerButton"
+                    text: i18nc("@action:button Goes back to the list of servers", "Switch Server")
+                    icon.name: "network-server"
+                    onClicked: page.connection.cancel()
+                    Keys.onReturnPressed: clicked()
+                    Keys.onEnterPressed: clicked()
+                }
             }
         }
 
@@ -246,12 +354,16 @@ Kirigami.ScrollablePage {
                         locked: !modelData.remembered || modelData.askPassword
                         showMenu: true
                         highlighted: grid.currentIndex === index && grid.activeFocus
+                        // In a session every tile keeps the line that marks the signed-in user, so the avatars stay the same size
+                        captionShown: page.inSession
+                        caption: modelData.id === page.signedInId ? i18nc("@info under the name of the user of the session", "Signed in") : ""
 
                         onPressed: {
                             grid.currentIndex = tile.index;
                             grid.forceActiveFocus(Qt.MouseFocusReason);
                         }
-                        onClicked: page.connection.chooseUser(modelData.id)
+                        // The signed-in user goes back to Home: the session goes on
+                        onClicked: modelData.id === page.signedInId ? page.Window.window.goHome() : page.connection.chooseUser(modelData.id)
                         onMenuRequested: (x, y, button) => {
                             grid.currentIndex = tile.index;
                             grid.forceActiveFocus(Qt.MouseFocusReason);

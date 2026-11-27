@@ -1107,18 +1107,22 @@ Kirigami.ScrollablePage {
                                 }
                             }
 
-                            // A second, soft fade in the corner behind the title, the links and the facts: a half ellipse on each side of the reading column's edge at the bottom (a circle of 200 by 100 stretched to its radii), level at its core and gone at its rim with no edge or seam
+                            // A second, soft fade behind the logo, the title and the facts: a half ellipse at the bottom centred on them (a circle of 200 by 100 stretched to its radii), level at its core and gone at its rim with no edge or seam. It follows the text, not the window: a wider window moves the column, never the fade off the text
                             Shape {
                                 id: cornerFade
                                 objectName: "detailsCornerFade"
 
                                 readonly property color fade: Kirigami.Theme.backgroundColor
-                                readonly property real radiusX: Math.min(hero.width * 0.55, Kirigami.Units.gridUnit * 40)
+                                // The text it stands behind: the widest of the logo, the title and the facts as drawn (the facts the Flow placed, the hidden ones keep a width), never wider than the column
+                                readonly property real factsWidth: Math.max(0, ...Array.from(facts.children).filter(fact => fact.visible).map(fact => fact.x + fact.width))
+                                readonly property real textWidth: Math.min(heroText.width, Math.max(logo.visible ? logo.paintedWidth : 0, detailsTitle.visible ? detailsTitle.x + detailsTitle.contentWidth : 0, factsWidth))
+                                // The fade goes on 20 grid units beyond the text on each side, where it dies out
+                                readonly property real radiusX: textWidth / 2 + Kirigami.Units.gridUnit * 20
                                 readonly property real radiusY: Math.min(hero.imageHeight, Math.max(hero.imageHeight * 0.45, heroText.implicitHeight + page.margin + Kirigami.Units.gridUnit * 3))
 
                                 visible: hero.overlay
-                                // Centred on the column's left edge, the backdrop (which clips) goes on beyond it on a wide window
-                                x: headerContent.x - width / 2
+                                // In the backdrop's frame, which starts at the page's edge and clips what goes beyond it
+                                x: headerContent.x + heroText.x + textWidth / 2 - width / 2
                                 y: parent.height - height
                                 width: 200
                                 height: 100

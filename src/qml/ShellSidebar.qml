@@ -20,7 +20,7 @@ Item {
     required property ShellNavigation navigation
 
     // Wide enough for the longest label in the rail's own font, never less than 4.5 grid units: the label of an entry is elided only if a translation still does not fit, and never wraps
-    readonly property real railWidth: Math.max(Kirigami.Units.gridUnit * 4.5, Math.ceil(Math.max(sidebarEntries.widestLabel, searchEntry.labelWidth, queueEntry.labelWidth, groupEntry.labelWidth)) + Kirigami.Units.smallSpacing * 3 + 1)
+    readonly property real railWidth: Math.max(Kirigami.Units.gridUnit * 4.5, Math.ceil(Math.max(sidebarEntries.widestLabel, searchEntry.labelWidth, queueEntry.labelWidth, remoteEntry.labelWidth, syncPlayEntry.labelWidth, menuEntry.labelWidth)) + Kirigami.Units.smallSpacing * 3 + 1)
     readonly property real drawerWidth: Kirigami.Units.gridUnit * 13
     // The room the page row leaves on the leading side: none in a Compact window and while there is nothing to choose from. It never animates: a resize of the page row ends the slide of a tab switch
     readonly property real inlineWidth: navigation.navigable && !shell.compactHeader ? railWidth : 0
@@ -30,12 +30,12 @@ Item {
     readonly property bool mirrored: Qt.application.layoutDirection === Qt.RightToLeft
     // Downloads that are not finished (queued, running, paused, waiting or failed), as the Active Downloads list of the page counts them
     readonly property int activeDownloads: navigation.connection.downloads.model.activeCount
-    // Where the header puts its user menu button while the rail shows: the last entry of the rail
-    readonly property Item userSlot: userSlotLayout
-    // Watching together, null when the application gives none; the group entry shows while one is joined
+    // What the header's main menu hangs from while the rail shows
+    readonly property Item menuButton: menuEntry
+    // Watching together, null when the application gives none; while a group is joined the SyncPlay entry opens its menu
     readonly property var syncPlay: shell.syncPlay ?? null
     readonly property bool groupJoined: navigation.signedIn && shell.groupJoined
-    // The signed-in user, as the header finds it among the saved users: the main menu and who is signed in belong to the header
+    // The signed-in user, as the header finds it among the saved users: the avatar entry shows it
     readonly property var currentUser: shell.header?.currentUser ?? null
 
     // The drawer closed without a choice: the keyboard goes back to the button that opened it
@@ -70,11 +70,11 @@ Item {
 
     // Every entry of the rail, top to bottom
     function railButtons() {
-        return [searchEntry].concat(sidebarEntries.buttons(), [queueEntry, groupEntry]);
+        return [searchEntry].concat(sidebarEntries.buttons(), [queueEntry, remoteEntry, syncPlayEntry, menuEntry, userEntry]);
     }
 
     function drawerButtons() {
-        return drawerEntries.buttons().concat([drawerSearch, drawerQueue, drawerGroup, drawerUser]);
+        return drawerEntries.buttons().concat([drawerSearch, drawerQueue, drawerRemote, drawerSyncPlay, drawerMenu, drawerUser]);
     }
 
     // A row of the open drawer that went away (the group was left) cannot keep the keyboard: the row above takes it
@@ -87,9 +87,17 @@ Item {
         shell.openSection("queuePage", "QueuePage.qml", { connection: shell.connection });
     }
 
-    // The main menu is the header's: it opens where the header's user button stands, or under the floating button in a Compact window
+    // The main menu is the header's: it opens beside the Menu entry, or under the floating button in a Compact window
     function openMainMenu() {
         shell.header?.openMainMenu();
+    }
+
+    // SyncPlay opens its dialog, or while a group is joined the menu of the group beside the entry
+    function openSyncPlay(entry) {
+        if (groupJoined)
+            shell.openGroupMenu(entry);
+        else
+            shell.header?.openSyncPlay();
     }
 
     onDrawerAllowedChanged: {
@@ -171,7 +179,7 @@ Item {
         property int accessibleRole: Accessible.PageTab
         readonly property bool marked: checked || current
         readonly property color foreground: marked ? Kirigami.Theme.highlightColor : Kirigami.Theme.textColor
-        readonly property real iconSize: Kirigami.Units.iconSizes.smallMedium
+        property real iconSize: Kirigami.Units.iconSizes.smallMedium
         // The rail uses the theme's small font, the rows of the drawer the default one
         readonly property font labelFont: labelled ? Kirigami.Theme.defaultFont : Kirigami.Theme.smallFont
         readonly property real labelWidth: labelMetrics.advanceWidth
@@ -192,10 +200,10 @@ Item {
             text: tab.text
         }
 
-        // The rail may elide a long label; the drawer shows it whole. The text can hold server text (a group name): plain. It follows the pointer only, and stands beside the entry so that it never covers the next one (a focused entry shows its label already)
+        // The rail may elide a long label; the drawer shows it whole. The text can hold server text (a group name): plain. It follows the pointer and the keyboard focus (the avatar has no label, and a count or the group's state is said only here), and stands beside the entry so that it never covers the next one
         PlainToolTip {
             text: tab.entryLabel
-            visible: !tab.labelled && tab.hovered && !tab.opened
+            visible: !tab.labelled && (tab.hovered || tab.visualFocus) && !tab.opened
             x: tab.mirrored ? -width - Kirigami.Units.smallSpacing : tab.width + Kirigami.Units.smallSpacing
             y: Math.round((tab.height - height) / 2)
         }
@@ -271,7 +279,9 @@ Item {
                     Accessible.ignored: true
                 }
             }
+            // The avatar entry of the rail has no label: no empty line under it, nor the spacing of one, so the avatar stays in the middle of its entry
             ColumnLayout {
+                visible: tab.labelled || tab.text.length > 0
                 spacing: 0
                 Layout.fillWidth: true
 
@@ -412,8 +422,18 @@ Item {
         accessibleRole: Accessible.Button
     }
 
-    // While a SyncPlay group is joined: whether the playback keeps in step with it and whether it waits for someone; the menu of the group belongs to the header
-    component GroupEntry: RailEntry {
+    // The remote control of the user's other sessions, a dialog of the header
+    component RemoteEntry: RailEntry {
+        visible: root.navigation.signedIn
+        // The rail has room for a short label only; the drawer names it whole
+        text: labelled ? entryLabel : i18nc("@action:button short label under the icon of the Remote Sessions button", "Remote")
+        entryLabel: i18nc("@action:inmenu", "Remote Sessions")
+        iconName: "input-tvremote"
+        accessibleRole: Accessible.Button
+    }
+
+    // Watching together: the dialog, or while a group is joined the menu of the group, with whether the playback keeps in step with it and whether it waits for someone; both belong to the header
+    component SyncPlayEntry: RailEntry {
         readonly property var syncPlay: root.syncPlay
         readonly property bool joined: root.groupJoined
         // The name of the group is server text: a plain text tooltip, and the accessible name says the same
@@ -427,12 +447,11 @@ Item {
             return parts.join(" · ");
         }
 
-        visible: joined
-        // The drawer names the group as the main menu does; the rail has room for a short label only
-        text: labelled ? i18nc("@action:button the SyncPlay group row of the navigation drawer, which opens the menu of the group", "SyncPlay Group") : i18nc("@action:button short label under the icon of the SyncPlay group button", "Group")
+        visible: root.navigation.signedIn && ((root.shell.header?.syncPlayOffered ?? false) || joined)
+        text: i18nc("@action:button Watching together with other users, the server's feature name", "SyncPlay")
         iconName: "system-users-symbolic"
-        entryLabel: summary
-        opened: root.shell.groupMenuOpened
+        entryLabel: joined ? summary : text
+        opened: joined && root.shell.groupMenuOpened
         // Not following or waiting: the drawer row says it under its label, the rail in its tooltip
         stateText: {
             if (!joined)
@@ -444,11 +463,43 @@ Item {
             return "";
         }
         // Not following is the state to see: the icon dims, the label does not
-        iconOpacity: syncPlay?.following ? 1 : 0.55
+        iconOpacity: joined && !syncPlay.following ? 0.55 : 1
         // The group waits for someone: the words say it too
-        dot: (syncPlay?.following ?? false) && (syncPlay?.waiting ?? false)
+        dot: joined && syncPlay.following && syncPlay.waiting
+        opensMenu: joined
+        accessibleRole: joined ? Accessible.ButtonMenu : Accessible.Button
+    }
+
+    // The header's main menu hangs from it; it marks where the menu's entries lead while one of them shows
+    component MenuEntry: RailEntry {
+        text: labelled ? entryLabel : i18nc("@action:button short label under the icon of the main menu button", "Menu")
+        entryLabel: i18nc("@action:button", "Main Menu")
+        // The drawer opens from the hamburger of the Compact window: its row shows the overflow icon, as the other menu buttons outside the rail do
+        iconName: labelled ? "view-more-symbolic" : "application-menu"
+        current: root.shell.currentSection === "settings"
+        opened: root.shell.header?.mainMenuOpened ?? false
         opensMenu: true
         accessibleRole: Accessible.ButtonMenu
+    }
+
+    // The users of the server, the signed-in one marked: in the rail the avatar alone, larger than an icon as it has no label; the row of the drawer names the user
+    component UserEntry: RailEntry {
+        readonly property string switchLabel: i18nc("@action:button Opens the users of this server", "Switch User")
+
+        visible: root.navigation.signedIn
+        // The user name is server text: the labels and the tooltip are plain text
+        text: labelled ? (root.currentUser?.name ?? switchLabel) : ""
+        entryLabel: root.currentUser ? i18nc("@info:tooltip %1 is a user name", "Switch User, signed in as %1", root.currentUser.name) : switchLabel
+        // The row of the drawer says under the name where it leads
+        stateText: labelled && root.currentUser ? switchLabel : ""
+        iconName: "system-switch-user"
+        withAvatar: root.navigation.signedIn
+        avatarName: root.currentUser?.name ?? ""
+        // Only URLs built by JellyfinClient::userImageUrl belong here: a raw server string must never become a source
+        avatarSource: root.currentUser?.imageUrl ?? ""
+        iconSize: labelled ? Kirigami.Units.iconSizes.smallMedium : Kirigami.Units.iconSizes.medium
+        current: root.shell.currentSection === "users"
+        accessibleRole: Accessible.Button
     }
 
     // The sections, as the rail or as the rows of the drawer; the divider and, in the drawer, the caption stand before the personal group
@@ -611,7 +662,7 @@ Item {
                 }
             }
 
-            // The queue, the group and the user menu: what stays in reach whatever the height of the window, below the entries that scroll
+            // The queue, the remote sessions, SyncPlay, the main menu and the user: what stays in reach whatever the height of the window, below the entries that scroll
             ColumnLayout {
                 id: bottomGroup
                 Layout.fillWidth: true
@@ -626,21 +677,37 @@ Item {
                     Keys.onDownPressed: root.stepFocus(root.railButtons(), queueEntry, 1)
                 }
 
-                GroupEntry {
-                    id: groupEntry
-                    objectName: "syncPlayGroupButton"
-                    dotObjectName: "syncPlayWaitingBadge"
-                    onClicked: root.shell.openGroupMenu(groupEntry)
-                    Keys.onUpPressed: root.stepFocus(root.railButtons(), groupEntry, -1)
-                    Keys.onDownPressed: root.stepFocus(root.railButtons(), groupEntry, 1)
+                RemoteEntry {
+                    id: remoteEntry
+                    objectName: "remoteSessionsButton"
+                    onClicked: root.shell.header?.openRemoteSessions()
+                    Keys.onUpPressed: root.stepFocus(root.railButtons(), remoteEntry, -1)
+                    Keys.onDownPressed: root.stepFocus(root.railButtons(), remoteEntry, 1)
                 }
 
-                // The header's menu button moves in here while the rail shows: the avatar of the user, with no label
-                ColumnLayout {
-                    id: userSlotLayout
-                    Layout.fillWidth: true
-                    Layout.minimumHeight: implicitHeight
-                    spacing: 0
+                SyncPlayEntry {
+                    id: syncPlayEntry
+                    objectName: "syncPlayButton"
+                    dotObjectName: "syncPlayWaitingBadge"
+                    onClicked: root.openSyncPlay(syncPlayEntry)
+                    Keys.onUpPressed: root.stepFocus(root.railButtons(), syncPlayEntry, -1)
+                    Keys.onDownPressed: root.stepFocus(root.railButtons(), syncPlayEntry, 1)
+                }
+
+                MenuEntry {
+                    id: menuEntry
+                    objectName: "sidebarMenuButton"
+                    onClicked: root.openMainMenu()
+                    Keys.onUpPressed: root.stepFocus(root.railButtons(), menuEntry, -1)
+                    Keys.onDownPressed: root.stepFocus(root.railButtons(), menuEntry, 1)
+                }
+
+                UserEntry {
+                    id: userEntry
+                    objectName: "sidebarUserButton"
+                    onClicked: root.shell.openUsers()
+                    Keys.onUpPressed: root.stepFocus(root.railButtons(), userEntry, -1)
+                    Keys.onDownPressed: root.stepFocus(root.railButtons(), userEntry, 1)
                 }
             }
         }
@@ -731,7 +798,7 @@ Item {
                 objectName: "drawerActionsDivider"
             }
 
-            // Search, the queue, the group and the user: in reach whatever the height of the window
+            // Search, the queue, the remote sessions, SyncPlay, the main menu and the user: in reach whatever the height of the window
             ColumnLayout {
                 Layout.fillWidth: true
                 spacing: Kirigami.Units.smallSpacing / 2
@@ -758,43 +825,52 @@ Item {
                     Keys.onDownPressed: root.stepFocus(root.drawerButtons(), drawerQueue, 1)
                 }
 
-                // The menu of the group hangs from the row, and the drawer stays open under it
-                GroupEntry {
-                    id: drawerGroup
-                    objectName: "drawerSyncPlayGroup"
-                    dotObjectName: "drawerSyncPlayWaitingBadge"
-                    labelObjectName: "drawerSyncPlayGroupLabel"
-                    stateObjectName: "drawerSyncPlayGroupState"
-                    chevronObjectName: "drawerSyncPlayGroupChevron"
+                // A dialog opens once the drawer has gone
+                RemoteEntry {
+                    id: drawerRemote
+                    objectName: "drawerRemoteSessions"
                     labelled: true
-                    onClicked: root.shell.openGroupMenu(drawerGroup)
+                    onClicked: navigationDrawer.closeThen(() => root.shell.header?.openRemoteSessions())
+                    Keys.onUpPressed: root.stepFocus(root.drawerButtons(), drawerRemote, -1)
+                    Keys.onDownPressed: root.stepFocus(root.drawerButtons(), drawerRemote, 1)
+                }
+
+                // The dialog opens once the drawer has gone; the menu of a joined group hangs from the row, and the drawer stays open under it
+                SyncPlayEntry {
+                    id: drawerSyncPlay
+                    objectName: "drawerSyncPlay"
+                    dotObjectName: "drawerSyncPlayWaitingBadge"
+                    labelObjectName: "drawerSyncPlayLabel"
+                    stateObjectName: "drawerSyncPlayState"
+                    chevronObjectName: "drawerSyncPlayChevron"
+                    labelled: true
+                    onClicked: drawerSyncPlay.joined ? root.shell.openGroupMenu(drawerSyncPlay) : navigationDrawer.closeThen(() => root.shell.header?.openSyncPlay())
                     // The menu that closes after Leave Group may hand the keyboard back to a row that has already gone
-                    onVisibleChanged: root.releaseHiddenRow(drawerGroup)
-                    onActiveFocusChanged: root.releaseHiddenRow(drawerGroup)
-                    Keys.onUpPressed: root.stepFocus(root.drawerButtons(), drawerGroup, -1)
-                    Keys.onDownPressed: root.stepFocus(root.drawerButtons(), drawerGroup, 1)
+                    onVisibleChanged: root.releaseHiddenRow(drawerSyncPlay)
+                    onActiveFocusChanged: root.releaseHiddenRow(drawerSyncPlay)
+                    Keys.onUpPressed: root.stepFocus(root.drawerButtons(), drawerSyncPlay, -1)
+                    Keys.onDownPressed: root.stepFocus(root.drawerButtons(), drawerSyncPlay, 1)
                 }
 
                 // The main menu is the header's: the drawer goes first, and the menu opens under the floating button
-                RailEntry {
+                MenuEntry {
+                    id: drawerMenu
+                    objectName: "drawerMenu"
+                    chevronObjectName: "drawerMenuChevron"
+                    labelled: true
+                    onClicked: navigationDrawer.closeThen(() => root.openMainMenu())
+                    Keys.onUpPressed: root.stepFocus(root.drawerButtons(), drawerMenu, -1)
+                    Keys.onDownPressed: root.stepFocus(root.drawerButtons(), drawerMenu, 1)
+                }
+
+                UserEntry {
                     id: drawerUser
                     objectName: "drawerUser"
-
-                    readonly property string menuLabel: i18nc("@action:button", "Main Menu")
-
-                    chevronObjectName: "drawerUserChevron"
                     labelled: true
-                    opensMenu: true
-                    withAvatar: root.navigation.signedIn
-                    avatarName: root.currentUser?.name ?? ""
-                    // Only URLs built by JellyfinClient::userImageUrl belong here: a raw server string must never become a source
-                    avatarSource: root.currentUser?.imageUrl ?? ""
-                    text: root.currentUser?.name ?? menuLabel
-                    iconName: "view-more-symbolic"
-                    entryLabel: root.currentUser ? i18nc("@label %1 is a user name", "Main Menu, signed in as %1", root.currentUser.name) : menuLabel
-                    current: root.shell.currentSection === "settings"
-                    accessibleRole: Accessible.ButtonMenu
-                    onClicked: navigationDrawer.closeThen(() => root.openMainMenu())
+                    onClicked: {
+                        root.shell.openUsers();
+                        navigationDrawer.choose();
+                    }
                     Keys.onUpPressed: root.stepFocus(root.drawerButtons(), drawerUser, -1)
                     Keys.onDownPressed: root.stepFocus(root.drawerButtons(), drawerUser, 1)
                 }

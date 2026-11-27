@@ -527,6 +527,16 @@ struct Ui {
                                      : QStringLiteral("userTile_") + userId);
     }
 
+    // The first tile of the users page that shows, whoever it is for
+    QQuickItem *firstUserTile() const
+    {
+        for (QQuickItem *tile : itemsStartingWith(QStringLiteral("userTile_"))) {
+            if (tile->isVisible())
+                return tile;
+        }
+        return nullptr;
+    }
+
     // Moves the current tile of the picker grid to the one of this user
     bool selectTile(const QString &userId)
     {
@@ -852,6 +862,14 @@ struct Ui {
         const bool inDrawer = !railShows();
         if (inDrawer && !openNavigationDrawer())
             return false;
+        // A window too short for every entry scrolls the list: the entry comes into view first
+        QQuickItem *list = item(inDrawer ? QStringLiteral("drawerEntriesView")
+                                         : QStringLiteral("sidebarEntriesView"));
+        for (QQuickItem *tab : tabButtons()) {
+            if (list && tab->property("text").toString() == name)
+                QMetaObject::invokeMethod(list, "reveal",
+                                          Q_ARG(QVariant, QVariant::fromValue(tab)));
+        }
         // The entries slide while one appears or goes: the click waits until the list holds still
         QList<qreal> before;
         const auto positions = [this] {
@@ -921,14 +939,21 @@ struct Ui {
         if (window->property("cornerNavigation").toBool()) {
             if (!openNavigationDrawer())
                 return nullptr;
-            clickCenter(item(QStringLiteral("drawerUser")));
+            clickCenter(item(QStringLiteral("drawerMenu")));
         } else {
-            clickCenter(item(QStringLiteral("mainMenuButton")));
+            clickCenter(mainMenuOrigin());
         }
         QObject *menu = popup(QStringLiteral("mainMenu"));
         if (!menu || !qWaitForScaled([menu] { return menu->property("opened").toBool(); }, 5000))
             return nullptr;
         return menu;
+    }
+
+    // What a click opens the main menu from outside a Compact window: the rail's Menu entry while the rail shows, else the button of the bar or of the signed-out corner
+    QQuickItem *mainMenuOrigin() const
+    {
+        return item(railShows() ? QStringLiteral("sidebarMenuButton")
+                                : QStringLiteral("mainMenuButton"));
     }
 
     // Opens the main menu through the header's own function, as a gamepad's Start does
@@ -973,7 +998,11 @@ struct Ui {
             {"navigationButton", compact},
             {"sidebarSearch", !compact},
             {"queueButton", !compact},
-            {"mainMenuButton", !compact},
+            {"remoteSessionsButton", !compact},
+            {"sidebarMenuButton", !compact},
+            {"sidebarUserButton", !compact},
+            // The bar's button belongs to an offline window and the signed-out corner only
+            {"mainMenuButton", false},
         };
         for (const auto &entry : cluster) {
             QQuickItem *control = item(QLatin1String(entry.name));
@@ -989,11 +1018,6 @@ struct Ui {
                                      control->isVisible() ? QStringLiteral("visible")
                                                           : QStringLiteral("hidden"));
         }
-        const QQuickItem *menuButton = item(QStringLiteral("mainMenuButton"));
-        const QQuickItem *rail = sidebar();
-        if (menuButton && rail && rail->isAncestorOf(menuButton) == compact)
-            problems << QStringLiteral("the user button is %1 the rail")
-                            .arg(compact ? QStringLiteral("in") : QStringLiteral("not in"));
         if (!compact && tabButtons().isEmpty())
             problems << QStringLiteral("the entries are not there");
         return problems;
@@ -9076,23 +9100,18 @@ class TestUiPages : public QObject {
             QVERIFY(QMetaObject::invokeMethod(menu, "close"));
             // The desktop style fades a menu out: opening it again before that ends leaves it closed
             QTRY_VERIFY(!menu->property("visible").toBool());
-            if (mode.compact) {
-                for (const char *name : {"compactQueueAction", "settingsAction", "shortcutsAction",
-                                         "aboutAction", "adminDashboardAction"})
-                    QVERIFY2(shown.contains(QLatin1String(name)),
-                             qPrintable(QStringLiteral("%1 px: %2 missing")
-                                            .arg(mode.width)
-                                            .arg(QLatin1String(name))));
-            } else {
-                for (const char *name : {"compactQueueAction"})
-                    QVERIFY2(!shown.contains(QLatin1String(name)),
-                             qPrintable(QStringLiteral("%1 px: %2 shown")
-                                            .arg(mode.width)
-                                            .arg(QLatin1String(name))));
-                for (const char *name : {"settingsAction", "shortcutsAction", "aboutAction"})
-                    QVERIFY2(shown.contains(QLatin1String(name)),
-                             qPrintable(shown.join(QLatin1Char('|'))));
-            }
+            // The menu holds the same entries in every mode: the queue, the remote sessions and SyncPlay are rail entries or rows of the drawer
+            for (const char *name : {"adminDashboardAction", "refreshAction", "settingsAction",
+                                     "shortcutsAction", "aboutAction"})
+                QVERIFY2(shown.contains(QLatin1String(name)),
+                         qPrintable(QStringLiteral("%1 px: %2 missing")
+                                        .arg(mode.width)
+                                        .arg(QLatin1String(name))));
+            for (const char *name : {"remoteSessionsAction", "syncPlayAction"})
+                QVERIFY2(!shown.contains(QLatin1String(name)),
+                         qPrintable(QStringLiteral("%1 px: %2 shown")
+                                        .arg(mode.width)
+                                        .arg(QLatin1String(name))));
             // The sections are entries of the rail in every wide mode: their old header buttons and menu entries are gone
             for (const char *name : {"compactFavoritesAction", "playlistsAction"})
                 QVERIFY2(!ui.shellAction(QLatin1String(name)), name);
@@ -9175,7 +9194,7 @@ class TestUiPages : public QObject {
         QTRY_COMPARE(ui.stackDepth(), 1);
     }
 
-    void theOneMenuHoldsTheAccountAndTheApp()
+    void theOneMenuHoldsTheAppEntries()
     {
         Ui ui(m_home->path());
         QVERIFY(ui.load());
@@ -9184,34 +9203,10 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(!ui.window->property("compactHeader").toBool());
         QObject *menu = ui.openMainMenuByClick();
         QVERIFY(menu);
-        QQuickItem *header = qobject_cast<QQuickItem *>(ui.popup(QStringLiteral("mainMenuHeader")));
-        QVERIFY(header && header->isVisible());
-        // A plain item: no action, and no entry for the pointer or the keys to stop on
-        QVERIFY(!header->property("action").isValid());
-        // The user name and the server address without its scheme, both as plain text
-        QString serverAddress = ui.controller.serverUrl();
-        serverAddress.remove(QRegularExpression(QStringLiteral("^https?://"),
-                                                QRegularExpression::CaseInsensitiveOption));
-        QVERIFY(!serverAddress.isEmpty());
-        int names = 0;
-        int addresses = 0;
-        for (QQuickItem *candidate : allItems(header)) {
-            if (!candidate->property("text").isValid())
-                continue;
-            const QString text = candidate->property("text").toString();
-            if (text != QLatin1String("Alice") && text != serverAddress)
-                continue;
-            QCOMPARE(candidate->property("textFormat").toInt(), int(Qt::PlainText));
-            (text == serverAddress ? addresses : names)++;
-        }
-        QCOMPARE(names, 1);
-        QCOMPARE(addresses, 1);
-        // The entries in the order of the contract, those the session and the width show: a subsequence of the full list
+        // The entries in the order of the contract, those the session and the mode show: a subsequence of the full list
         const QStringList contract =
-            QStringLiteral(
-                "mainMenuHeader switchUserItem signOutItem switchServerItem "
-                "menuQueueItem menuRemoteItem menuSyncPlayItem menuAdminItem menuRefreshItem "
-                "menuSettingsItem menuShortcutsItem menuAboutItem")
+            QStringLiteral("leaveOfflineItem menuAdminItem menuRefreshItem menuSettingsItem "
+                           "menuShortcutsItem menuAboutItem")
                 .split(QLatin1Char(' '));
         const QStringList shown = ui.shownMenuNames(QStringLiteral("mainMenu"));
         qsizetype at = -1;
@@ -9221,16 +9216,16 @@ class TestUiPages : public QObject {
             at = position;
         }
         for (const QString &name :
-             {QStringLiteral("mainMenuHeader"), QStringLiteral("switchUserItem"),
-              QStringLiteral("signOutItem"), QStringLiteral("switchServerItem"),
-              QStringLiteral("menuRefreshItem"), QStringLiteral("menuSettingsItem"),
+             {QStringLiteral("menuRefreshItem"), QStringLiteral("menuSettingsItem"),
               QStringLiteral("menuShortcutsItem"), QStringLiteral("menuAboutItem")})
             QVERIFY2(shown.contains(name), qPrintable(name));
-        // The queue stands in the rail at this width, not in the menu
-        QVERIFY(!shown.contains(QStringLiteral("menuQueueItem")));
-        // Beside the button, which stands at the foot of the rail, bottom-aligned with it and inside the window
-        const QQuickItem *button = ui.item(QStringLiteral("mainMenuButton"));
-        QVERIFY(ui.sidebar()->isAncestorOf(button));
+        // The account is on the users page: no header and no account entries in the menu
+        for (const char *name :
+             {"mainMenuHeader", "switchUserItem", "signOutItem", "switchServerItem"})
+            QVERIFY2(!ui.popup(QLatin1String(name)), name);
+        // Beside the Menu entry at the foot of the rail, bottom-aligned with it and inside the window
+        const QQuickItem *button = ui.item(QStringLiteral("sidebarMenuButton"));
+        QVERIFY(button && ui.sidebar()->isAncestorOf(button));
         QTRY_VERIFY2(popupProblem(menu, button, ui.window, false, true).isEmpty(),
                      qPrintable(popupProblem(menu, button, ui.window, false, true)));
         const QRectF rect = popupRect(menu);
@@ -9269,19 +9264,15 @@ class TestUiPages : public QObject {
                                   .arg(ui.window->height());
         };
         QTRY_VERIFY2(cornerProblem().isEmpty(), qPrintable(cornerProblem()));
-        const QQuickItem *avatar = ui.item(QStringLiteral("accountAvatar"));
-        QVERIFY(!avatar || !avatar->isVisible());
         QCOMPARE(accessibleNameOf(button), QStringLiteral("Main Menu"));
         QObject *menu = ui.openMainMenuByClick();
         QVERIFY(menu);
         QTRY_VERIFY2(popupProblem(menu, button, ui.window, false).isEmpty(),
                      qPrintable(popupProblem(menu, button, ui.window, false)));
         QStringList shown = ui.shownMenuNames(QStringLiteral("mainMenu"));
-        for (const char *name : {"mainMenuHeader", "switchUserItem", "signOutItem",
-                                 "switchServerItem", "menuQueueItem"})
-            QVERIFY2(!shown.contains(QLatin1String(name)), name);
-        for (const char *name : {"menuSettingsItem", "menuShortcutsItem", "menuAboutItem"})
-            QVERIFY2(shown.contains(QLatin1String(name)), name);
+        QCOMPARE(shown, QStringList({QStringLiteral("menuSettingsItem"),
+                                     QStringLiteral("menuShortcutsItem"),
+                                     QStringLiteral("menuAboutItem")}));
         // The hidden header and separators take no room: the first shown entry sits at the top of the list
         const QList<QQuickItem *> entries = ui.menuItems(QStringLiteral("mainMenu"));
         const auto first =
@@ -9290,21 +9281,14 @@ class TestUiPages : public QObject {
         QVERIFY(first != entries.cend());
         QVERIFY2((*first)->y() <= 1, qPrintable(QString::number((*first)->y())));
         QVERIFY(Ui::closeMenu(menu));
-        // A server is chosen and the sign-in shows: Switch Server joins, the account entries stay out
+        // A server is chosen and the sign-in shows: the page has its own Switch Server, and the menu the same entries
         QVERIFY(buildState(ui, QStringLiteral("login")));
         QVERIFY(!ui.headerShows());
-        avatar = ui.item(QStringLiteral("accountAvatar"));
-        QVERIFY(!avatar || !avatar->isVisible());
         QVERIFY(ui.item(QStringLiteral("mainMenuButton"))->isVisible());
         // A gamepad's Start opens the same menu
         menu = ui.openMainMenuWithoutButton();
         QVERIFY(menu);
-        shown = ui.shownMenuNames(QStringLiteral("mainMenu"));
-        for (const char *name : {"mainMenuHeader", "switchUserItem", "signOutItem"})
-            QVERIFY2(!shown.contains(QLatin1String(name)), name);
-        for (const char *name :
-             {"switchServerItem", "menuSettingsItem", "menuShortcutsItem", "menuAboutItem"})
-            QVERIFY2(shown.contains(QLatin1String(name)), name);
+        QCOMPARE(ui.shownMenuNames(QStringLiteral("mainMenu")), shown);
         QVERIFY(Ui::closeMenu(menu));
     }
 
@@ -9512,13 +9496,24 @@ class TestUiPages : public QObject {
         const QList<QQuickItem *> entries = ui.tabButtons();
         QVERIFY(bottom(search) <= top(searchDivider) && bottom(searchDivider) <= top(entries[0]));
         QVERIFY(bottom(entries[4]) <= top(divider) && bottom(divider) <= top(entries[5]));
-        // The user button and the queue stand in the rail, under the sections
+        // The queue, the remote sessions, SyncPlay when offered, the main menu and the user stand in the rail in that order, under the sections
         const QQuickItem *rail = ui.sidebar();
         QVERIFY(rail);
         QQuickItem *queue = ui.item(QStringLiteral("queueButton"));
-        QQuickItem *menuButton = ui.item(QStringLiteral("mainMenuButton"));
-        QVERIFY(queue && menuButton && rail->isAncestorOf(queue) && rail->isAncestorOf(menuButton));
-        QVERIFY(top(queue) >= bottom(entries[7]) && top(menuButton) >= bottom(queue));
+        QQuickItem *menuButton = ui.item(QStringLiteral("sidebarMenuButton"));
+        QList<QQuickItem *> foot;
+        for (const char *name : {"queueButton", "remoteSessionsButton", "syncPlayButton",
+                                 "sidebarMenuButton", "sidebarUserButton"}) {
+            QQuickItem *entry = ui.item(QLatin1String(name));
+            QVERIFY2(entry && rail->isAncestorOf(entry), name);
+            if (entry->isVisible())
+                foot.append(entry);
+        }
+        QVERIFY(foot.size() >= 4);
+        // Under the list of the sections, which scrolls in a window too short for all of them
+        QVERIFY(top(queue) >= bottom(ui.item(QStringLiteral("sidebarEntriesView"))));
+        for (qsizetype i = 1; i < foot.size(); ++i)
+            QVERIFY2(top(foot[i]) >= bottom(foot[i - 1]), qPrintable(foot[i]->objectName()));
         // Home marks itself, and only itself, wherever the front page belongs
         const auto tabChecked = [&](int index, bool expected) {
             return ui.tabButtons().value(index)->property("checked").toBool() == expected;
@@ -9534,13 +9529,13 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(!search->property("marked").toBool());
         QMetaObject::invokeMethod(ui.shellAction(QStringLiteral("settingsAction")), "trigger");
         QTRY_VERIFY(marked(false));
-        // The main menu button marks its own pages while one of them shows
-        QTRY_VERIFY(ui.item(QStringLiteral("mainMenuButton"))->property("down").toBool());
+        // The Menu entry marks its own pages while one of them shows
+        QTRY_VERIFY(menuButton->property("marked").toBool());
         QMetaObject::invokeMethod(ui.shellAction(QStringLiteral("aboutAction")), "trigger");
         QObject *about = ui.popup(QStringLiteral("aboutDialog"));
         QVERIFY(about);
         QTRY_VERIFY(about->property("opened").toBool());
-        QTRY_VERIFY(ui.item(QStringLiteral("mainMenuButton"))->property("down").toBool());
+        QTRY_VERIFY(menuButton->property("marked").toBool());
         QVERIFY(QMetaObject::invokeMethod(about, "close"));
         // A popup still fading out blocks every shortcut outside it: wait for the end of the exit transition
         QTRY_VERIFY(!about->property("visible").toBool());
@@ -9548,7 +9543,7 @@ class TestUiPages : public QObject {
         QTest::keyClick(ui.window, Qt::Key_1, Qt::ControlModifier);
         QTRY_VERIFY(ui.item(QStringLiteral("homePage")) != nullptr);
         QTRY_VERIFY(marked(true));
-        QTRY_VERIFY(!ui.item(QStringLiteral("mainMenuButton"))->property("down").toBool());
+        QTRY_VERIFY(!menuButton->property("marked").toBool());
         // The Movies tile opens the Movies tab, which alone is marked
         QVERIFY(ui.openLibraryTile(kMovies));
         QTRY_VERIFY(ui.item(QStringLiteral("libraryPage")) != nullptr);
@@ -9589,6 +9584,14 @@ class TestUiPages : public QObject {
             for (int other = 0; other < 8; ++other)
                 QTRY_VERIFY(tabChecked(other, other == entry.index));
         }
+        // The avatar opens the users page as a section of its own: it alone is marked, and the session goes on
+        QQuickItem *user = ui.item(QStringLiteral("sidebarUserButton"));
+        ui.clickCenter(user);
+        QTRY_VERIFY(ui.item(QStringLiteral("userPickerPage")) != nullptr);
+        QTRY_VERIFY(user->property("marked").toBool());
+        for (int other = 0; other < 8; ++other)
+            QTRY_VERIFY(tabChecked(other, false));
+        QCOMPARE(ui.controller.state(), ConnectionController::Authenticated);
     }
 
     void musicAndAudiobooksOpenPlaceholderPagesThatAskTheServerForNothing()
@@ -9759,22 +9762,30 @@ class TestUiPages : public QObject {
             QVERIFY2(!label->isVisible(), qPrintable(Ui::describe(label)));
         QQuickItem *search = ui.item(QStringLiteral("drawerSearch"));
         QQuickItem *queue = ui.item(QStringLiteral("drawerQueue"));
-        QQuickItem *group = ui.item(QStringLiteral("drawerSyncPlayGroup"));
+        QQuickItem *remote = ui.item(QStringLiteral("drawerRemoteSessions"));
+        QQuickItem *syncPlay = ui.item(QStringLiteral("drawerSyncPlay"));
+        QQuickItem *menu = ui.item(QStringLiteral("drawerMenu"));
         QQuickItem *user = ui.item(QStringLiteral("drawerUser"));
-        QVERIFY(search && queue && group && user);
-        QVERIFY(search->isVisible() && queue->isVisible() && user->isVisible());
-        // Not in a SyncPlay group: no row for it
-        QVERIFY(!group->isVisible());
+        QVERIFY(search && queue && remote && syncPlay && menu && user);
+        QTRY_VERIFY(ui.syncPlay.available());
+        const QList<QQuickItem *> foot{search, queue, remote, syncPlay, menu, user};
+        for (const QQuickItem *row : foot)
+            QTRY_VERIFY2(row->isVisible(), qPrintable(row->objectName()));
         QCOMPARE(search->property("text").toString(), QStringLiteral("Search"));
         QCOMPARE(queue->property("text").toString(), QStringLiteral("Queue"));
+        QCOMPARE(remote->property("text").toString(), QStringLiteral("Remote Sessions"));
+        QCOMPARE(syncPlay->property("text").toString(), QStringLiteral("SyncPlay"));
+        QCOMPARE(menu->property("text").toString(), QStringLiteral("Main Menu"));
         // After the sections, in the order of the rail, each as tall and as wide as a section's row and inside the drawer
         QQuickItem *downloads = ui.sectionEntry(QStringLiteral("downloads"));
         QVERIFY(downloads);
-        QVERIFY(top(downloads) < top(search) && top(search) < top(queue) && top(queue) < top(user));
+        QVERIFY(top(downloads) < top(search));
+        for (qsizetype i = 1; i < foot.size(); ++i)
+            QVERIFY2(top(foot[i - 1]) < top(foot[i]), qPrintable(foot[i]->objectName()));
         const QObject *drawer = ui.popup(QStringLiteral("navigationDrawer"));
         QVERIFY(drawer);
         const qreal drawerWidth = drawer->property("width").toReal();
-        for (const QQuickItem *row : {search, queue, user}) {
+        for (const QQuickItem *row : foot) {
             QCOMPARE(row->height(), downloads->height());
             QVERIFY2(qAbs(row->width() - downloads->width()) < 1, qPrintable(Ui::describe(row)));
             const QRectF rect = row->mapRectToScene(row->boundingRect());
@@ -9790,35 +9801,37 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(badge->isVisible());
         QCOMPARE(badge->property("count").toInt(), 5);
         QCOMPARE(accessibleNameOf(queue), QStringLiteral("Queue, 5 items"));
-        // The user: the avatar and the name, and the accessible name of the main menu button
+        // The user: the avatar and the name, and an accessible name that says who is signed in
         QTRY_COMPARE(user->property("text").toString(), QStringLiteral("Alice"));
-        QTRY_COMPARE(accessibleNameOf(user), QStringLiteral("Main Menu, signed in as Alice"));
+        QTRY_COMPARE(accessibleNameOf(user), QStringLiteral("Switch User, signed in as Alice"));
         const QQuickItem *avatar = nullptr;
         QTRY_VERIFY((avatar = ui.item(QStringLiteral("drawerUserAvatar"))) != nullptr
                     && avatar->isVisible());
         QTRY_COMPARE(avatar->property("name").toString(), QStringLiteral("Alice"));
-        // The row opens a menu, which the arrow at its end says
-        const QQuickItem *chevron = ui.item(QStringLiteral("drawerUserChevron"));
+        // The Main Menu row opens a menu, which the arrow at its end says
+        const QQuickItem *chevron = ui.item(QStringLiteral("drawerMenuChevron"));
         QVERIFY(chevron && chevron->isVisible());
         const auto arrowEndsTheRow = [&] {
-            const QRectF row = user->mapRectToScene(user->boundingRect());
+            const QRectF row = menu->mapRectToScene(menu->boundingRect());
             const QRectF arrow = chevron->mapRectToScene(chevron->boundingRect());
             return row.contains(arrow) && arrow.center().x() > row.center().x();
         };
         QTRY_VERIFY(arrowEndsTheRow());
-        // Down and Up walk the sections and the foot as one list, skipping the group row while it is hidden
+        // Down and Up walk the sections and the foot as one list
         downloads->forceActiveFocus(Qt::TabFocusReason);
         QTRY_VERIFY(downloads->hasActiveFocus());
-        for (const QQuickItem *next : {search, queue, user}) {
+        for (const QQuickItem *next : foot) {
             QTest::keyClick(ui.window, Qt::Key_Down);
-            QTRY_VERIFY(next->hasActiveFocus());
+            QTRY_VERIFY2(next->hasActiveFocus(), qPrintable(next->objectName()));
         }
         QTest::keyClick(ui.window, Qt::Key_Down);
         QVERIFY(user->hasActiveFocus());
-        for (const QQuickItem *previous : {queue, search, downloads}) {
+        for (qsizetype i = foot.size() - 2; i >= 0; --i) {
             QTest::keyClick(ui.window, Qt::Key_Up);
-            QTRY_VERIFY(previous->hasActiveFocus());
+            QTRY_VERIFY2(foot[i]->hasActiveFocus(), qPrintable(foot[i]->objectName()));
         }
+        QTest::keyClick(ui.window, Qt::Key_Up);
+        QTRY_VERIFY(downloads->hasActiveFocus());
     }
 
     // Search, the queue and the user work from the drawer as they do from the rail and the header, and each closes the drawer
@@ -9847,8 +9860,8 @@ class TestUiPages : public QObject {
         // Its row marks the page while it shows
         QVERIFY(ui.openNavigationDrawer());
         QTRY_VERIFY(ui.item(QStringLiteral("drawerQueue"))->property("marked").toBool());
-        // The user opens the main menu of the header, under the button of the corner: the window has no bar
-        ui.clickCenter(ui.item(QStringLiteral("drawerUser")));
+        // The Main Menu row opens the main menu of the header, under the button of the corner: the window has no bar
+        ui.clickCenter(ui.item(QStringLiteral("drawerMenu")));
         QTRY_VERIFY(!drawer->property("visible").toBool());
         QObject *menu = ui.popup(QStringLiteral("mainMenu"));
         QVERIFY(menu);
@@ -9861,9 +9874,27 @@ class TestUiPages : public QObject {
         QTRY_VERIFY2(popupProblem(menu, button, ui.window, false).isEmpty(),
                      qPrintable(popupProblem(menu, button, ui.window, false)));
         QVERIFY(Ui::closeMenu(menu));
+        QTRY_VERIFY(!menu->property("visible").toBool());
+        // The Remote Sessions row opens its dialog once the drawer has gone
+        QVERIFY(ui.openNavigationDrawer());
+        ui.clickCenter(ui.item(QStringLiteral("drawerRemoteSessions")));
+        QTRY_VERIFY(!drawer->property("visible").toBool());
+        QObject *remote = ui.popup(QStringLiteral("remoteSessionsDialog"));
+        QVERIFY(remote);
+        QTRY_VERIFY(remote->property("opened").toBool());
+        QVERIFY(QMetaObject::invokeMethod(remote, "close"));
+        QTRY_VERIFY(!remote->property("visible").toBool());
+        // The user's row opens the users page, with the session going on
+        QVERIFY(ui.openNavigationDrawer());
+        ui.clickCenter(ui.item(QStringLiteral("drawerUser")));
+        QTRY_VERIFY(!drawer->property("visible").toBool());
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("userPickerPage"));
+        QCOMPARE(ui.controller.state(), ConnectionController::Authenticated);
+        QVERIFY(ui.openNavigationDrawer());
+        QTRY_VERIFY(ui.item(QStringLiteral("drawerUser"))->property("marked").toBool());
     }
 
-    // The group has a row only while one is joined: it is named as the main menu names it, says in words under the label when the playback does not keep in step or the group waits (the label stays at full strength, the icon dims, the dot shows as the rail's button shows it), ends with an arrow, and its menu hangs from the row while the drawer stays open
+    // The SyncPlay row shows while the server offers SyncPlay; while a group is joined it says in words under the label when the playback does not keep in step or the group waits (the label stays at full strength, the icon dims, the dot shows as the rail's entry shows it), ends with an arrow, and the menu of the group hangs from the row while the drawer stays open
     void theCompactDrawerShowsTheSyncPlayGroupWhileOneIsJoined()
     {
         Ui ui(m_home->path());
@@ -9874,11 +9905,20 @@ class TestUiPages : public QObject {
         QObject *drawer = ui.popup(QStringLiteral("navigationDrawer"));
         QVERIFY(drawer);
         QVERIFY(ui.openNavigationDrawer());
-        QQuickItem *group = ui.item(QStringLiteral("drawerSyncPlayGroup"));
+        QQuickItem *group = ui.item(QStringLiteral("drawerSyncPlay"));
         QQuickItem *dot = ui.item(QStringLiteral("drawerSyncPlayWaitingBadge"));
-        QVERIFY(group && dot);
-        QVERIFY(!group->isVisible());
+        QQuickItem *label = ui.item(QStringLiteral("drawerSyncPlayLabel"));
+        QQuickItem *state = ui.item(QStringLiteral("drawerSyncPlayState"));
+        const QQuickItem *chevron = ui.item(QStringLiteral("drawerSyncPlayChevron"));
+        QVERIFY(group && dot && label && state && chevron);
         QTRY_VERIFY(ui.syncPlay.available() && ui.server.lastConnection());
+        // Outside a group the row opens the dialog: no arrow, no state, its label as its name
+        QTRY_VERIFY(group->isVisible());
+        QCOMPARE(group->property("text").toString(), QStringLiteral("SyncPlay"));
+        QCOMPARE(accessibleNameOf(group), QStringLiteral("SyncPlay"));
+        QVERIFY(!chevron->isVisible());
+        QVERIFY(!state->isVisible());
+        QVERIFY(!dot->isVisible());
         QVERIFY(ui.syncPlay.joinGroup(kSyncPlayGroup));
         const QStringList people{QStringLiteral("Alice"), QStringLiteral("Bob")};
         ui.server.lastConnection()->sendText(syncPlayUpdate(
@@ -9889,25 +9929,21 @@ class TestUiPages : public QObject {
                         {QStringLiteral("Participants"), QJsonArray::fromStringList(people)},
                         {QStringLiteral("LastUpdatedAt"),
                          QStringLiteral("2026-11-16T16:37:42.0164616Z")}}));
-        // Between the queue and the user, with the label of the rail and the words of its tooltip as the accessible name
-        QTRY_VERIFY(group->isVisible());
+        // Between the queue and the user, with the words of its tooltip as the accessible name
+        QTRY_VERIFY(!group->property("summary").toString().isEmpty());
         const auto top = [](const QQuickItem *item) { return item->mapToScene(QPointF(0, 0)).y(); };
         QTRY_VERIFY(top(ui.item(QStringLiteral("drawerQueue"))) < top(group));
         QTRY_VERIFY(top(group) < top(ui.item(QStringLiteral("drawerUser"))));
-        QCOMPARE(group->property("text").toString(), QStringLiteral("SyncPlay Group"));
+        QCOMPARE(group->property("text").toString(), QStringLiteral("SyncPlay"));
         QCOMPARE(group->property("summary").toString(),
                  QStringLiteral("SyncPlay group <b>Night</b> & day: 2 people"));
         QCOMPARE(accessibleNameOf(group), group->property("summary").toString());
         QVERIFY(!dot->isVisible());
-        // The label shows the name, with no line under it while the playback keeps in step, and an arrow ends the row at the height of the others
-        QQuickItem *label = ui.item(QStringLiteral("drawerSyncPlayGroupLabel"));
-        QQuickItem *state = ui.item(QStringLiteral("drawerSyncPlayGroupState"));
-        const QQuickItem *chevron = ui.item(QStringLiteral("drawerSyncPlayGroupChevron"));
-        QVERIFY(label && state && chevron);
-        QCOMPARE(label->property("text").toString(), QStringLiteral("SyncPlay Group"));
+        // The label stays, with no line under it while the playback keeps in step, and an arrow ends the row at the height of the others
+        QCOMPARE(label->property("text").toString(), QStringLiteral("SyncPlay"));
         QVERIFY(label->isVisible());
         QVERIFY(!state->isVisible());
-        QVERIFY(chevron->isVisible());
+        QTRY_VERIFY(chevron->isVisible());
         const auto arrowEndsTheRow = [&] {
             const QRectF row = group->mapRectToScene(group->boundingRect());
             const QRectF arrow = chevron->mapRectToScene(chevron->boundingRect());
@@ -9973,7 +10009,7 @@ class TestUiPages : public QObject {
         QVERIFY(drawer->property("opened").toBool());
         QTRY_VERIFY2(popupProblem(menu, group, ui.window, false, true).isEmpty(),
                      qPrintable(popupProblem(menu, group, ui.window, false, true)));
-        // Leave Group leaves, and the row goes
+        // Leave Group leaves: the row stays for the dialog, without the arrow
         QQuickItem *leave = nullptr;
         for (QQuickItem *entry : ui.menuItems(QStringLiteral("syncPlayGroupMenu"))) {
             if (entry->objectName() == QLatin1String("syncPlayMenuLeave"))
@@ -9983,21 +10019,22 @@ class TestUiPages : public QObject {
         QTRY_COMPARE(syncPlayRequests(ui, QStringLiteral("Leave")), 1);
         ui.server.lastConnection()->sendText(
             QString::fromUtf8(fixture(QStringLiteral("ws_syncplay_group_left"))));
-        QTRY_VERIFY(!group->isVisible());
-        // The menu that closed may have handed the keyboard back to the row that went: a row that shows holds it
+        QTRY_VERIFY(!chevron->isVisible());
+        QVERIFY(group->isVisible());
+        QCOMPARE(accessibleNameOf(group), QStringLiteral("SyncPlay"));
+        // The keyboard is on a row that shows
         const auto keyboardOnAShownRow = [&] {
             const QQuickItem *focused = ui.window->activeFocusItem();
             const auto *content = drawer->property("contentItem").value<QQuickItem *>();
-            return focused && focused != group && focused->isVisible() && content
-                   && content->isAncestorOf(focused);
+            return focused && focused->isVisible() && content && content->isAncestorOf(focused);
         };
         QTRY_VERIFY(keyboardOnAShownRow());
         QVERIFY(QMetaObject::invokeMethod(drawer, "close"));
         QTRY_VERIFY(!drawer->property("visible").toBool());
     }
 
-    // Leaving the group with the drawer open takes the row away while it holds the keyboard: the row above takes it, and Down goes on from there
-    void theCompactDrawerMovesTheKeyboardOffTheSyncPlayRowThatGoes()
+    // Leaving the group with the drawer open keeps the SyncPlay row, which keeps the keyboard; Up and Down go on from there
+    void theCompactDrawerKeepsTheKeyboardOnTheSyncPlayRowAfterLeaving()
     {
         Ui ui(m_home->path());
         QVERIFY(ui.load());
@@ -10006,21 +10043,24 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(ui.window->property("compactHeader").toBool());
         QVERIFY(syncPlayJoined(ui));
         QVERIFY(ui.openNavigationDrawer());
-        QQuickItem *group = ui.item(QStringLiteral("drawerSyncPlayGroup"));
-        QQuickItem *queue = ui.item(QStringLiteral("drawerQueue"));
-        QQuickItem *user = ui.item(QStringLiteral("drawerUser"));
-        QVERIFY(group && queue && user);
-        QTRY_VERIFY(group->isVisible());
+        QQuickItem *group = ui.item(QStringLiteral("drawerSyncPlay"));
+        QQuickItem *remote = ui.item(QStringLiteral("drawerRemoteSessions"));
+        QQuickItem *menu = ui.item(QStringLiteral("drawerMenu"));
+        const QQuickItem *chevron = ui.item(QStringLiteral("drawerSyncPlayChevron"));
+        QVERIFY(group && remote && menu && chevron);
+        QTRY_VERIFY(group->isVisible() && chevron->isVisible());
         group->forceActiveFocus(Qt::TabFocusReason);
         QTRY_VERIFY(group->hasActiveFocus());
         ui.syncPlay.leaveGroup();
-        QTRY_VERIFY(!group->isVisible());
-        QTRY_VERIFY(queue->hasActiveFocus());
-        QVERIFY(!group->hasActiveFocus());
+        QTRY_VERIFY(!chevron->isVisible());
+        QVERIFY(group->isVisible());
+        QVERIFY(group->hasActiveFocus());
         QTest::keyClick(ui.window, Qt::Key_Down);
-        QTRY_VERIFY(user->hasActiveFocus());
+        QTRY_VERIFY(menu->hasActiveFocus());
         QTest::keyClick(ui.window, Qt::Key_Up);
-        QTRY_VERIFY(queue->hasActiveFocus());
+        QTRY_VERIFY(group->hasActiveFocus());
+        QTest::keyClick(ui.window, Qt::Key_Up);
+        QTRY_VERIFY(remote->hasActiveFocus());
     }
 
     // The sections of the drawer scroll in the smallest window as the rail's do, and the foot stays in reach below them
@@ -10094,11 +10134,11 @@ class TestUiPages : public QObject {
             width += ui.window->property("compactLimit").toInt();
         QVERIFY(ui.opensWindowOfWidth(width));
         QTRY_VERIFY(!ui.window->property("compactHeader").toBool());
+        // Inside their column: a click may scroll the list of a short window, which moves them all alike
         const auto geometries = [&ui] {
             QList<QRectF> rects;
             for (QQuickItem *tab : ui.tabButtons())
-                rects << QRectF(tab->mapToScene(QPointF(0, 0)),
-                                QSizeF(tab->width(), tab->height()));
+                rects << QRectF(tab->position(), QSizeF(tab->width(), tab->height()));
             return rects;
         };
         // The bar on the leading edge of the current entry sits in its background, and shows on the checked one only
@@ -10478,40 +10518,63 @@ class TestUiPages : public QObject {
         ui.window->setProperty("playbackMode", QStringLiteral("none"));
     }
 
-    void theMenuButtonStandsAtTheFootOfTheRailAndNamesItself()
+    void theMenuAndTheUserStandAtTheFootOfTheRailAndNameThemselves()
     {
         Ui ui(m_home->path());
         QVERIFY(ui.load());
         QVERIFY(ui.signInAsUser(QStringLiteral("Alice")));
         QVERIFY(ui.opensWindowOfWidth(1200));
-        QQuickItem *button = ui.item(QStringLiteral("mainMenuButton"));
+        QQuickItem *menuEntry = ui.item(QStringLiteral("sidebarMenuButton"));
+        QQuickItem *user = ui.item(QStringLiteral("sidebarUserButton"));
         QQuickItem *queue = ui.item(QStringLiteral("queueButton"));
-        QVERIFY(button && queue);
-        QTRY_VERIFY(button->isVisible() && queue->isVisible());
+        QVERIFY(menuEntry && user && queue);
+        QTRY_VERIFY(menuEntry->isVisible() && user->isVisible() && queue->isVisible());
+        const auto top = [](const QQuickItem *item) { return item->mapToScene(QPointF(0, 0)).y(); };
 
-        // The foot of the rail, as wide as its neighbour and no narrower than tall, bare like the entries around it
-        QTRY_COMPARE(button->width(), queue->width());
-        QVERIFY(button->width() >= button->height());
-        QVERIFY(button->property("flat").toBool());
-        QVERIFY(ui.sidebar()->isAncestorOf(button));
-        QVERIFY(button->mapToScene(QPointF(0, 0)).y() > queue->mapToScene(QPointF(0, 0)).y());
-        QVERIFY(button->mapToScene(QPointF(0, 0)).x() < ui.window->width() / 2);
+        // The foot of the rail, as wide as the queue: the menu above the user, the user last
+        QTRY_COMPARE(menuEntry->width(), queue->width());
+        QTRY_COMPARE(user->width(), queue->width());
+        QVERIFY(ui.sidebar()->isAncestorOf(menuEntry) && ui.sidebar()->isAncestorOf(user));
+        QVERIFY(top(menuEntry) > top(queue) && top(user) > top(menuEntry));
+        QVERIFY(menuEntry->mapToScene(QPointF(0, 0)).x() < ui.window->width() / 2);
 
-        // No text for the style to draw beside the avatar; the tooltip names the button and the accessible name says who is signed in
-        QVERIFY(button->property("text").toString().isEmpty());
-        QCOMPARE(button->property("label").toString(), QStringLiteral("Main Menu"));
-        // The user list reaches the header just after the session does
-        QTRY_COMPARE(accessibleNameOf(button), QStringLiteral("Main Menu, signed in as Alice"));
-        QVERIFY(button->property("visualFocus").isValid());
-        QVERIFY(!button->property("visualFocus").toBool());
-        button->forceActiveFocus(Qt::TabFocusReason);
-        QTRY_VERIFY(button->property("visualFocus").toBool());
+        // The menu has a short label under its icon and names itself in full
+        QCOMPARE(menuEntry->property("text").toString(), QStringLiteral("Menu"));
+        QCOMPARE(accessibleNameOf(menuEntry), QStringLiteral("Main Menu"));
+        // The user has no label: the avatar is larger than an icon, and the name says who is signed in (the user list reaches the header just after the session does)
+        QVERIFY(user->property("text").toString().isEmpty());
+        QTRY_COMPARE(accessibleNameOf(user), QStringLiteral("Switch User, signed in as Alice"));
+        const QQuickItem *avatar = ui.item(QStringLiteral("sidebarUserButtonAvatar"));
+        QVERIFY(avatar && avatar->isVisible());
+        QVERIFY(avatar->width() > queue->property("iconSize").toReal());
+        QCOMPARE(avatar->width(), avatar->height());
+        // The avatar stands in the middle of its entry, with no room kept for a label under it
+        const QPointF avatarCentre =
+            avatar->mapToScene(QPointF(avatar->width() / 2, avatar->height() / 2));
+        const QPointF entryCentre =
+            user->mapToScene(QPointF(user->width() / 2, user->height() / 2));
+        QVERIFY2(qAbs(avatarCentre.x() - entryCentre.x()) <= 0.5
+                     && qAbs(avatarCentre.y() - entryCentre.y()) <= 0.5,
+                 qPrintable(QStringLiteral("avatar centre %1,%2, entry centre %3,%4")
+                                .arg(avatarCentre.x())
+                                .arg(avatarCentre.y())
+                                .arg(entryCentre.x())
+                                .arg(entryCentre.y())));
+        for (QQuickItem *entry : {menuEntry, user}) {
+            QVERIFY(entry->property("visualFocus").isValid());
+            QVERIFY(!entry->property("visualFocus").toBool());
+            entry->forceActiveFocus(Qt::TabFocusReason);
+            QTRY_VERIFY(entry->property("visualFocus").toBool());
+        }
 
-        // A Compact window has no bar and no rail: the button stays in the hidden header, and the main menu hangs from the button of the corner, which is framed like it and as tall
+        // A Compact window has no bar and no rail: the bar's button stays in the hidden header, and the main menu hangs from the button of the corner, which is framed like it and as tall
+        QQuickItem *button = ui.item(QStringLiteral("mainMenuButton"));
+        QVERIFY(button);
+        QVERIFY(!button->isVisible());
         QVERIFY(ui.opensWindowOfWidth(ui.window->property("compactLimit").toInt() - 40));
         QQuickItem *corner = ui.item(QStringLiteral("navigationButton"));
         QVERIFY(corner);
-        QTRY_VERIFY(!ui.sidebar()->isAncestorOf(button) && ui.shellHeader()->isAncestorOf(button));
+        QVERIFY(ui.shellHeader()->isAncestorOf(button));
         QTRY_VERIFY(corner->isVisible() && !button->isVisible());
         QVERIFY(!button->property("flat").toBool());
         QVERIFY(!corner->property("flat").toBool());
@@ -10647,18 +10710,27 @@ class TestUiPages : public QObject {
         QVERIFY(!failed->isVisible());
     }
 
-    // While a group is joined the rail has a button for it: its tooltip and accessible name say who is in it, whether the playback keeps in step and whether the group waits; its menu has the quick actions of the dialog; a window too narrow for the rail has the same menu inside the main menu
+    // The rail's SyncPlay entry opens the dialog; while a group is joined it opens the group's menu with the quick actions of the dialog, and its tooltip and accessible name say who is in it, whether the playback keeps in step and whether the group waits
     void theRailShowsTheJoinedSyncPlayGroupAndItsQuickActions()
     {
         Ui ui(m_home->path());
         QVERIFY(ui.load());
         QVERIFY(ui.opensWindowOfWidth(1200));
         QVERIFY(buildState(ui, QStringLiteral("home")));
-        QQuickItem *button = ui.item(QStringLiteral("syncPlayGroupButton"));
+        QQuickItem *button = ui.item(QStringLiteral("syncPlayButton"));
         QVERIFY(button);
-        QVERIFY(!button->isVisible());
-        // Joined, with a name that is markup and twelve people
         QTRY_VERIFY(ui.syncPlay.available() && ui.server.lastConnection());
+        // Outside a group the entry opens the dialog, under its own name
+        QTRY_VERIFY(button->isVisible());
+        QCOMPARE(button->property("text").toString(), QStringLiteral("SyncPlay"));
+        QCOMPARE(accessibleNameOf(button), QStringLiteral("SyncPlay"));
+        QVERIFY(QMetaObject::invokeMethod(button, "click"));
+        QObject *dialog = ui.popup(QStringLiteral("syncPlayDialog"));
+        QVERIFY(dialog);
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QVERIFY(QMetaObject::invokeMethod(dialog, "close"));
+        QTRY_VERIFY(!dialog->property("visible").toBool());
+        // Joined, with a name that is markup and twelve people
         QVERIFY(ui.syncPlay.joinGroup(kSyncPlayGroup));
         QStringList people;
         for (int i = 1; i <= 12; ++i)
@@ -10671,20 +10743,19 @@ class TestUiPages : public QObject {
                         {QStringLiteral("Participants"), QJsonArray::fromStringList(people)},
                         {QStringLiteral("LastUpdatedAt"),
                          QStringLiteral("2026-11-16T16:37:42.0164616Z")}}));
-        QTRY_VERIFY(button->isVisible());
-        QCOMPARE(button->property("summary").toString(),
-                 QStringLiteral("SyncPlay group <b>Night</b> & day: 12 people"));
+        QTRY_COMPARE(button->property("summary").toString(),
+                     QStringLiteral("SyncPlay group <b>Night</b> & day: 12 people"));
         QCOMPARE(accessibleNameOf(button), button->property("summary").toString());
-        // The rail keeps the short label under the icon
-        QCOMPARE(button->property("text").toString(), QStringLiteral("Group"));
+        // The label under the icon stays
+        QCOMPARE(button->property("text").toString(), QStringLiteral("SyncPlay"));
         QCOMPARE(button->property("iconOpacity").toDouble(), 1.0);
         QVERIFY(!ui.item(QStringLiteral("syncPlayWaitingBadge"))->isVisible());
-        // The button stands in the rail, under the queue and above the user button
+        // The entry stands in the rail, under the remote sessions and above the main menu
         const QQuickItem *rail = ui.sidebar();
         QVERIFY(rail && rail->isAncestorOf(button));
         const auto top = [](const QQuickItem *item) { return item->mapToScene(QPointF(0, 0)).y(); };
-        QVERIFY(top(ui.item(QStringLiteral("queueButton"))) < top(button));
-        QVERIFY(top(button) < top(ui.item(QStringLiteral("mainMenuButton"))));
+        QVERIFY(top(ui.item(QStringLiteral("remoteSessionsButton"))) < top(button));
+        QVERIFY(top(button) < top(ui.item(QStringLiteral("sidebarMenuButton"))));
 
         // The menu: the group, ten names and "and 2 more", then the actions
         QObject *menu = ui.popup(QStringLiteral("syncPlayGroupMenu"));
@@ -10747,36 +10818,17 @@ class TestUiPages : public QObject {
         QVERIFY(
             button->property("summary").toString().endsWith(QStringLiteral("Waiting for others")));
 
-        // A window too narrow for the button has the menu in the main menu, under SyncPlay
+        // A window too narrow for the rail keeps the group in the drawer's row: the main menu has no SyncPlay of its own
         QVERIFY(ui.opensWindowOfWidth(ui.window->minimumWidth()));
         QTRY_VERIFY(!button->isVisible());
         QObject *main = ui.openMainMenuByClick();
         QVERIFY(main);
-        QTRY_VERIFY(ui.shownMenuNames(QStringLiteral("mainMenu"))
-                        .contains(QStringLiteral("menuSyncPlayItem")));
-        QObject *submenu =
-            ui.shellHeader()->findChild<QObject *>(QStringLiteral("syncPlayGroupSubmenu"));
-        QVERIFY(submenu);
-        QCOMPARE(submenu->property("title").toString(), QStringLiteral("SyncPlay Group"));
-        // It is an entry of the main menu, after SyncPlay
-        const QList<QQuickItem *> entries = ui.menuItems(QStringLiteral("mainMenu"));
-        const auto entry =
-            std::find_if(entries.cbegin(), entries.cend(), [submenu](const QQuickItem *item) {
-                return item->property("subMenu").value<QObject *>() == submenu;
-            });
-        QVERIFY(entry != entries.cend());
-        const auto syncPlayEntry =
-            std::find_if(entries.cbegin(), entries.cend(), [](const QQuickItem *item) {
-                return item->objectName() == QLatin1String("menuSyncPlayItem");
-            });
-        QVERIFY(syncPlayEntry != entries.cend() && syncPlayEntry + 1 == entry);
-        // The SyncPlay entry right above opens the dialog: the submenu does not repeat it
-        const QObject *openEntry =
-            submenu->findChild<QObject *>(QStringLiteral("syncPlayMenuOpen"));
-        QVERIFY(!openEntry || !openEntry->property("visible").toBool());
+        QVERIFY(!ui.shellHeader()->findChild<QObject *>(QStringLiteral("syncPlayGroupSubmenu")));
+        QVERIFY(!ui.shownMenuNames(QStringLiteral("mainMenu"))
+                     .contains(QStringLiteral("menuSyncPlayItem")));
         QVERIFY(Ui::closeMenu(main));
 
-        // Leave Group leaves, and the button goes
+        // Leave Group leaves, and the entry stays for the dialog
         QVERIFY(ui.opensWindowOfWidth(1200));
         QTRY_VERIFY(button->isVisible());
         QVERIFY(QMetaObject::invokeMethod(button, "click"));
@@ -10786,7 +10838,10 @@ class TestUiPages : public QObject {
         QTRY_COMPARE(syncPlayRequests(ui, QStringLiteral("Leave")), 1);
         ui.server.lastConnection()->sendText(
             QString::fromUtf8(fixture(QStringLiteral("ws_syncplay_group_left"))));
-        QTRY_VERIFY(!button->isVisible());
+        QTRY_VERIFY(button->property("summary").toString().isEmpty());
+        QVERIFY(button->isVisible());
+        QCOMPARE(accessibleNameOf(button), QStringLiteral("SyncPlay"));
+        QCOMPARE(button->property("iconOpacity").toDouble(), 1.0);
     }
 
     void theSyncPlayDialogShowsAndEditsTheGroupQueue()
@@ -11146,18 +11201,18 @@ class TestUiPages : public QObject {
         QVERIFY(dialog);
         QTRY_VERIFY(dialog->property("opened").toBool());
         QTRY_COMPARE(ui.controller.remoteSessions()->status(), Kinefin::RemoteSessionsModel::Ready);
-        QVERIFY(QMetaObject::invokeMethod(ui.shellAction(QStringLiteral("switchServerAction")),
-                                          "trigger"));
+        // The session ends under the dialog, as Switch Server on the users page ends it
+        ui.controller.cancel();
         QTRY_VERIFY(!dialog->property("opened").toBool());
         QTRY_COMPARE(ui.controller.remoteSessions()->status(), Kinefin::RemoteSessionsModel::Idle);
     }
 
-    void theMenuButtonAtTheRightEndTakesTheClickAndOpensTheMenuUnderIt()
+    void theMenuEntryTakesTheClickAndOpensTheMenu()
     {
         Ui ui(m_home->path());
         QVERIFY(ui.load());
         QVERIFY(buildState(ui, QStringLiteral("home")));
-        QQuickItem *button = ui.item(QStringLiteral("mainMenuButton"));
+        QQuickItem *button = ui.mainMenuOrigin();
         QVERIFY(button);
         QVERIFY(ui.insideWindow(button));
         // A real click at its center must reach it
@@ -11422,27 +11477,30 @@ class TestUiPages : public QObject {
         QVERIFY(buildState(ui, QStringLiteral("home")));
         QTRY_VERIFY(ui.layoutProblems().isEmpty());
         QQuickItem *search = ui.item(QStringLiteral("sidebarSearch"));
-        QQuickItem *queue = ui.item(QStringLiteral("queueButton"));
-        QQuickItem *menuButton = ui.item(QStringLiteral("mainMenuButton"));
-        QVERIFY(search && queue && menuButton);
-        // The order inside the rail: Search, the eight sections, the queue and the user button last (Home has no Back button, and no group is joined)
+        QVERIFY(search);
+        // The order inside the rail: Search, the eight sections, then the foot from the queue to the user (Home has no Back button); SyncPlay is there once the server offers it
+        QTRY_VERIFY(ui.syncPlay.available());
+        QList<QQuickItem *> foot;
+        for (const char *name : {"queueButton", "remoteSessionsButton", "syncPlayButton",
+                                 "sidebarMenuButton", "sidebarUserButton"}) {
+            QQuickItem *entry = ui.item(QLatin1String(name));
+            QVERIFY2(entry, name);
+            if (entry->isVisible())
+                foot.append(entry);
+        }
+        QVERIFY(foot.size() >= 4);
         const QList<QQuickItem *> tabs = ui.tabButtons();
         QCOMPARE(tabs.size(), 8);
         search->forceActiveFocus(Qt::TabFocusReason);
         QTRY_VERIFY(search->hasActiveFocus());
-        for (const QQuickItem *tab : tabs) {
+        for (const QQuickItem *tab : tabs + foot) {
             QTest::keyClick(ui.window, Qt::Key_Tab);
             QTRY_VERIFY2(tab->hasActiveFocus(), qPrintable(Ui::describe(tab)));
         }
-        QTest::keyClick(ui.window, Qt::Key_Tab);
-        QTRY_VERIFY(queue->hasActiveFocus());
-        QTest::keyClick(ui.window, Qt::Key_Tab);
-        QTRY_VERIFY(menuButton->hasActiveFocus());
-        // Behind the user button the page content begins
+        // Behind the user the page content begins
         QTest::keyClick(ui.window, Qt::Key_Tab);
         QQuickItem *next = ui.window->activeFocusItem();
-        QVERIFY(next && !tabs.contains(next) && next != menuButton && next != search
-                && next != queue);
+        QVERIFY(next && !tabs.contains(next) && !foot.contains(next) && next != search);
         QVERIFY(ui.currentDetails()->isAncestorOf(next));
     }
 
@@ -12848,8 +12906,6 @@ class TestUiPages : public QObject {
         QVERIFY(!ui.shellAction(QStringLiteral("homeTabAction"))->property("visible").toBool());
         QVERIFY(ui.shellAction(QStringLiteral("downloadsTabAction"))->property("visible").toBool());
         QVERIFY(ui.shellAction(QStringLiteral("leaveOfflineAction"))->property("visible").toBool());
-        QVERIFY(
-            !ui.shellAction(QStringLiteral("switchServerAction"))->property("visible").toBool());
         // A downloaded item plays without a session: the player page opens in Offline and leaves with the playback
         QObject *root = ui.engine.rootObjects().constFirst();
         QVERIFY(root->setProperty("player", QVariant::fromValue<QObject *>(&stub)));
@@ -12914,54 +12970,110 @@ class TestUiPages : public QObject {
         // The server and session commands have nothing to act on yet
         QVERIFY(
             !ui.shellAction(QStringLiteral("adminDashboardAction"))->property("visible").toBool());
-        QVERIFY(!ui.shellAction(QStringLiteral("signOutAction"))->property("visible").toBool());
-        QVERIFY(!ui.shellAction(QStringLiteral("switchUserAction"))->property("visible").toBool());
+        QVERIFY(!ui.shellAction(QStringLiteral("refreshAction"))->property("visible").toBool());
         QVERIFY(
-            !ui.shellAction(QStringLiteral("switchServerAction"))->property("visible").toBool());
-        // The menu has the app entries and no avatar, and opens from its function while its button is not drawn
-        const QQuickItem *avatar = ui.item(QStringLiteral("accountAvatar"));
-        QVERIFY(!avatar || !avatar->isVisible());
+            !ui.shellAction(QStringLiteral("remoteSessionsAction"))->property("visible").toBool());
 
         QVERIFY(buildState(ui, QStringLiteral("login")));
-        // A chosen server brings Switch Server in, and only that of the account entries; the bar stays hidden on the sign-in page
+        // The bar stays hidden on the sign-in page, and the session commands still have nothing to act on
         QVERIFY(!ui.headerShows());
-        QVERIFY(ui.shellAction(QStringLiteral("switchServerAction"))->property("visible").toBool());
-        QVERIFY(!ui.shellAction(QStringLiteral("signOutAction"))->property("visible").toBool());
-        QVERIFY(!ui.shellAction(QStringLiteral("switchUserAction"))->property("visible").toBool());
+        QVERIFY(
+            !ui.shellAction(QStringLiteral("remoteSessionsAction"))->property("visible").toBool());
     }
 
-    void theMainMenuSwitchUserOpensPicker()
+    void theAvatarOpensTheUsersPageAndTheSessionGoesOn()
     {
         Ui ui(m_home->path());
         QVERIFY(ui.load());
         QVERIFY(buildState(ui, QStringLiteral("home")));
         QVERIFY(!ui.store.tokens.isEmpty());
         const int logins = ui.server.successfulLogins;
-        // The main menu opens from its button, and Switch User is one of its entries
-        ui.clickCenter(ui.item(QStringLiteral("mainMenuButton")));
-        QObject *menu = ui.popup(QStringLiteral("mainMenu"));
-        QVERIFY(menu);
-        QTRY_VERIFY(menu->property("opened").toBool());
-        QVERIFY(QMetaObject::invokeMethod(ui.popup(QStringLiteral("switchUserItem")), "click"));
-        // The picker takes the place of Home, the session stays saved and the server stays chosen
-        QTRY_COMPARE(ui.controller.state(), ConnectionController::ChoosingUser);
+        // The avatar at the foot of the rail opens the users page above Home, as a section: the session and the server stay
+        ui.clickCenter(ui.item(QStringLiteral("sidebarUserButton")));
         QTRY_VERIFY(ui.item(QStringLiteral("userPickerPage")) != nullptr);
-        QTRY_VERIFY(ui.item(QStringLiteral("homePage")) == nullptr);
-        QTRY_COMPARE(ui.stackDepth(), 1);
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("userPickerPage"));
+        QCOMPARE(ui.controller.state(), ConnectionController::Authenticated);
+        QTRY_COMPARE(ui.stackDepth(), 2);
         QVERIFY(!ui.store.tokens.isEmpty());
         QCOMPARE(ui.controller.servers().size(), 1);
         QCOMPARE(ui.savedUsers().size(), 1);
         QQuickItem *grid = ui.item(QStringLiteral("userPickerGrid"));
         QVERIFY(grid);
-        // The saved user, and the Add User button under the tiles
+        // The saved user, marked as the one signed in, and the server with Switch Server
         QTRY_COMPARE(grid->property("count").toInt(), 1);
-        QVERIFY(ui.userTile(QString()) != nullptr);
-        // The grid has the keys, and Return signs the saved user back in without a password
+        QQuickItem *tile = ui.firstUserTile();
+        QVERIFY(tile);
+        QCOMPARE(tile->property("caption").toString(), QStringLiteral("Signed in"));
+        QQuickItem *server = ui.item(QStringLiteral("userPickerServer"));
+        QVERIFY(server && server->isVisible());
+        QCOMPARE(server->property("text").toString(), ui.controller.serverUrl());
+        QCOMPARE(server->property("textFormat").toInt(), int(Qt::PlainText));
+        QVERIFY(ui.item(QStringLiteral("userSwitchServerButton"))->isVisible());
+        // Opened with the pointer, no tile is lit: the current one shows its ring once a key is pressed, and the style's fill never shows
         QTRY_VERIFY(grid->hasActiveFocus());
-        QTest::keyClick(ui.window, Qt::Key_Return);
-        QTRY_COMPARE(ui.controller.state(), ConnectionController::Authenticated);
-        QTRY_VERIFY(ui.item(QStringLiteral("homePage")) != nullptr);
+        QVERIFY(tile->property("highlighted").toBool());
+        QVERIFY(!tile->property("ring").toBool());
+        QQuickItem *background = Ui::itemIn(tile, QStringLiteral("userTileBackground"));
+        QVERIFY(background);
+        QCOMPARE(QQmlProperty(background, QStringLiteral("border.width")).read().toInt(), 0);
+        QTest::keyClick(ui.window, Qt::Key_Right);
+        QTRY_VERIFY(tile->property("ring").toBool());
+        QCOMPARE(QQmlProperty(background, QStringLiteral("border.width")).read().toInt(), 2);
+        // Choosing the signed-in user goes back to Home without signing in again
+        ui.clickCenter(tile);
+        QTRY_VERIFY(ui.item(QStringLiteral("userPickerPage")) == nullptr);
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("homePage"));
+        QCOMPARE(ui.controller.state(), ConnectionController::Authenticated);
         QCOMPARE(ui.server.successfulLogins, logins);
+    }
+
+    void theTileMenuLinesUpItsIconsWithTheCheckBox()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("home")));
+        ui.clickCenter(ui.item(QStringLiteral("sidebarUserButton")));
+        QQuickItem *tile = nullptr;
+        QTRY_VERIFY((tile = ui.firstUserTile()) != nullptr);
+        QObject *menu = ui.popup(QStringLiteral("userMenu"));
+        QVERIFY(menu);
+        ui.clickCenter(Ui::itemIn(tile, QStringLiteral("userMenuButton")));
+        QTRY_VERIFY(menu->property("opened").toBool());
+        // The menu of the signed-in user has the three entries: the two icons stand in the column of the check box, and the three labels start at one edge
+        QQuickItem *ask = ui.item(QStringLiteral("userMenuAskPassword"));
+        QVERIFY(ask);
+        const QQuickItem *box = ask->property("indicator").value<QQuickItem *>();
+        QVERIFY(box && box->isVisible());
+        const QQuickItem *askLabel = nullptr;
+        for (QQuickItem *label : ui.itemsWithText(QStringLiteral("Ask for"), false)) {
+            if (ask->isAncestorOf(label))
+                askLabel = label;
+        }
+        QVERIFY(askLabel);
+        const auto centreX = [](const QQuickItem *item) {
+            return item->mapToScene(QPointF(item->width() / 2, 0)).x();
+        };
+        const auto left = [](const QQuickItem *item) {
+            return item->mapToScene(QPointF(0, 0)).x();
+        };
+        for (const QString &name :
+             {QStringLiteral("userMenuSignOut"), QStringLiteral("userMenuRemove")}) {
+            QQuickItem *entry = ui.item(name);
+            QVERIFY(entry && entry->isVisible());
+            const QQuickItem *icon = Ui::itemIn(entry, name + QStringLiteral("Icon"));
+            const QQuickItem *label = Ui::itemIn(entry, name + QStringLiteral("Label"));
+            QVERIFY(icon && icon->isVisible() && label);
+            QVERIFY2(qAbs(centreX(icon) - centreX(box)) <= 0.5,
+                     qPrintable(QStringLiteral("%1: icon at %2, check box at %3")
+                                    .arg(name)
+                                    .arg(centreX(icon))
+                                    .arg(centreX(box))));
+            QVERIFY2(qAbs(left(label) - left(askLabel)) <= 0.5,
+                     qPrintable(QStringLiteral("%1: label at %2, Ask for Password at %3")
+                                    .arg(name)
+                                    .arg(left(label))
+                                    .arg(left(askLabel))));
+        }
     }
 
     void pickerNamesArePlainText()
@@ -12992,45 +13104,43 @@ class TestUiPages : public QObject {
         QVERIFY(ui.server.lastUserImageAuth.isEmpty());
     }
 
-    void theMenuButtonShowsTheAvatarOfTheUser()
+    void theRailShowsTheAvatarOfTheUser()
     {
         Ui ui(m_home->path());
         QVERIFY(ui.load());
         ui.serveUsers();
         ui.controller.connectTo(address(ui.server));
         QVERIFY(ui.reach(ConnectionController::NeedsLogin, QStringLiteral("loginPage")));
-        // Not signed in yet: no avatar, and no bar: the button stands alone in the top corner
+        // Not signed in yet: no rail and no bar, the menu button stands alone in the top corner
         QQuickItem *button = ui.item(QStringLiteral("mainMenuButton"));
         QVERIFY(button);
-        QVERIFY(!ui.item(QStringLiteral("accountAvatar"))
-                || !ui.item(QStringLiteral("accountAvatar"))->isVisible());
         QCOMPARE(accessibleNameOf(button), QStringLiteral("Main Menu"));
         QVERIFY(ui.signInAs(QStringLiteral("Alice")));
         const QQuickItem *avatar = nullptr;
-        QTRY_VERIFY((avatar = ui.item(QStringLiteral("accountAvatar"))) != nullptr
+        QTRY_VERIFY((avatar = ui.item(QStringLiteral("sidebarUserButtonAvatar"))) != nullptr
                     && avatar->isVisible());
         // Alice has an image, the avatar asks for it; the user list reaches the header just after the session does
         QTRY_COMPARE(avatar->property("name").toString(), QStringLiteral("Alice"));
         QTRY_VERIFY(!avatar->property("source").toUrl().isEmpty());
-        // The label stays static: the name is only in the accessible name
-        QVERIFY(button->property("text").toString().isEmpty());
-        QCOMPARE(button->property("label").toString(), QStringLiteral("Main Menu"));
-        QCOMPARE(accessibleNameOf(button), QStringLiteral("Main Menu, signed in as Alice"));
+        // No label: the name is only in the accessible name
+        QQuickItem *user = ui.item(QStringLiteral("sidebarUserButton"));
+        QVERIFY(user->property("text").toString().isEmpty());
+        QCOMPARE(accessibleNameOf(user), QStringLiteral("Switch User, signed in as Alice"));
     }
 
-    void theMenuButtonShowsTheInitialsOfAUserWithoutAnImage()
+    void theRailShowsTheInitialsOfAUserWithoutAnImage()
     {
         Ui ui(m_home->path());
         QVERIFY(ui.load());
         QVERIFY(ui.signInAsUser(QStringLiteral("Bob")));
         const QQuickItem *avatar = nullptr;
-        QTRY_VERIFY((avatar = ui.item(QStringLiteral("accountAvatar"))) != nullptr
+        QTRY_VERIFY((avatar = ui.item(QStringLiteral("sidebarUserButtonAvatar"))) != nullptr
                     && avatar->isVisible());
         // No image: the source stays empty and the avatar draws the initials of the name, once the user list reached the header
         QTRY_COMPARE(avatar->property("name").toString(), QStringLiteral("Bob"));
         QVERIFY(avatar->property("source").toUrl().isEmpty());
-        QTRY_COMPARE(accessibleNameOf(ui.item(QStringLiteral("mainMenuButton"))),
-                     QStringLiteral("Main Menu, signed in as Bob"));
+        QTRY_COMPARE(accessibleNameOf(ui.item(QStringLiteral("sidebarUserButton"))),
+                     QStringLiteral("Switch User, signed in as Bob"));
     }
 
     void pickerChoosesWithEnter_data()
@@ -13343,19 +13453,32 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(tilesInside());
     }
 
-    void signOutForgetsEverythingAndReturnsToTheServers()
+    void signOutKeepsTheTileAndAsksForThePassword()
     {
         Ui ui(m_home->path());
         QVERIFY(ui.load());
         QVERIFY(buildState(ui, QStringLiteral("home")));
-        ui.clickCenter(ui.item(QStringLiteral("mainMenuButton")));
-        QObject *menu = ui.popup(QStringLiteral("mainMenu"));
-        QTRY_VERIFY(menu->property("opened").toBool());
-        // A click on the menu item closes the menu first, then the action asks for a confirmation
-        QVERIFY(QMetaObject::invokeMethod(menu, "close"));
-        QTRY_VERIFY(!menu->property("visible").toBool());
-        QVERIFY(
-            QMetaObject::invokeMethod(ui.shellAction(QStringLiteral("signOutAction")), "trigger"));
+        // Sign Out is the first entry of the menu of the signed-in user's tile, on the users page the avatar opens
+        ui.clickCenter(ui.item(QStringLiteral("sidebarUserButton")));
+        QTRY_VERIFY(ui.item(QStringLiteral("userPickerPage")) != nullptr);
+        QQuickItem *tile = nullptr;
+        QTRY_VERIFY((tile = ui.firstUserTile()) != nullptr);
+        QObject *menu = ui.popup(QStringLiteral("userMenu"));
+        QVERIFY(menu);
+        const auto openSignOut = [&] {
+            ui.clickCenter(Ui::itemIn(tile, QStringLiteral("userMenuButton")));
+            if (!qWaitForScaled([menu] { return menu->property("opened").toBool(); }, 5000))
+                return false;
+            const QList<QQuickItem *> entries = ui.menuItems(QStringLiteral("userMenu"));
+            QQuickItem *first = nullptr;
+            for (QQuickItem *entry : entries) {
+                if (entry->isVisible() && !first)
+                    first = entry;
+            }
+            return first && first->objectName() == QLatin1String("userMenuSignOut")
+                   && QMetaObject::invokeMethod(first, "click");
+        };
+        QVERIFY(openSignOut());
         QObject *dialog = ui.popup(QStringLiteral("signOutDialog"));
         QVERIFY(dialog);
         QTRY_VERIFY(dialog->property("opened").toBool());
@@ -13372,9 +13495,9 @@ class TestUiPages : public QObject {
         QCOMPARE(ui.controller.state(), ConnectionController::Authenticated);
         QVERIFY(!ui.store.tokens.isEmpty());
 
-        // Confirming signs out
-        QVERIFY(
-            QMetaObject::invokeMethod(ui.shellAction(QStringLiteral("signOutAction")), "trigger"));
+        // Confirming signs out: the session ends on the picker, where the tile stays with its lock
+        QTRY_VERIFY(!menu->property("visible").toBool());
+        QVERIFY(openSignOut());
         QTRY_VERIFY(dialog->property("opened").toBool());
         QTRY_VERIFY(ui.showsText(question));
         QQuickItem *confirm = nullptr;
@@ -13386,12 +13509,30 @@ class TestUiPages : public QObject {
             }
             return confirm != nullptr;
         }());
+        // The picker state brings a page of its own: the users page of the session goes, with its menu
+        const QPointer<QQuickItem> sessionPage = ui.item(QStringLiteral("userPickerPage"));
+        QVERIFY(sessionPage);
         QVERIFY(QMetaObject::invokeMethod(confirm, "click"));
-        QTRY_COMPARE(ui.controller.state(), ConnectionController::Idle);
-        QTRY_VERIFY(ui.item(QStringLiteral("serversPage")) != nullptr);
+        QTRY_COMPARE(ui.controller.state(), ConnectionController::ChoosingUser);
+        QTRY_VERIFY(!sessionPage);
+        QTRY_VERIFY(ui.item(QStringLiteral("userPickerPage")) != nullptr);
         QTRY_VERIFY(ui.store.tokens.isEmpty());
-        // The server record went with the session, unlike Switch User's
-        QVERIFY(ui.controller.servers().isEmpty());
+        QCOMPARE(ui.controller.servers().size(), 1);
+        QCOMPARE(ui.savedUsers().size(), 1);
+        QVERIFY(!ui.savedUsers().constFirst().toMap().value(QStringLiteral("remembered")).toBool());
+        QTRY_VERIFY((tile = ui.firstUserTile()) != nullptr);
+        QTRY_VERIFY(Ui::itemIn(tile, QStringLiteral("userLock"))->isVisible());
+        // Signed out, the tile has nothing left to sign out
+        menu = ui.popup(QStringLiteral("userMenu"));
+        QVERIFY(menu);
+        ui.clickCenter(Ui::itemIn(tile, QStringLiteral("userMenuButton")));
+        QTRY_VERIFY(menu->property("opened").toBool());
+        QVERIFY(!ui.item(QStringLiteral("userMenuSignOut"))->isVisible());
+        QTest::keyClick(ui.window, Qt::Key_Escape);
+        QTRY_VERIFY(!menu->property("visible").toBool());
+        // Choosing it asks for the password
+        ui.clickCenter(tile);
+        QTRY_COMPARE(ui.controller.state(), ConnectionController::NeedsLogin);
     }
 
     void switchServerKeepsTheSessionAndReturnsToTheServers()
@@ -13399,10 +13540,12 @@ class TestUiPages : public QObject {
         Ui ui(m_home->path());
         QVERIFY(ui.load());
         QVERIFY(buildState(ui, QStringLiteral("home")));
-        ui.clickCenter(ui.item(QStringLiteral("mainMenuButton")));
-        QTRY_VERIFY(ui.popup(QStringLiteral("mainMenu"))->property("opened").toBool());
-        QVERIFY(QMetaObject::invokeMethod(ui.shellAction(QStringLiteral("switchServerAction")),
-                                          "trigger"));
+        // Switch Server is on the users page the avatar opens
+        ui.clickCenter(ui.item(QStringLiteral("sidebarUserButton")));
+        QQuickItem *switchServer = nullptr;
+        QTRY_VERIFY((switchServer = ui.item(QStringLiteral("userSwitchServerButton"))) != nullptr
+                    && switchServer->isVisible());
+        ui.clickCenter(switchServer);
         QTRY_COMPARE(ui.controller.state(), ConnectionController::Idle);
         QTRY_VERIFY(ui.item(QStringLiteral("serversPage")) != nullptr);
         // The session of the server stays: a start finds it again without a password
@@ -14973,6 +15116,35 @@ class TestUiPages : public QObject {
         QVERIFY(ui.server.remoteSearchApplies.constLast().contains("\"Tmdb\":\"123\""));
     }
 
+    // The soft fade behind the title follows the text: a window wider than the reading column moves both alike, and the fade's middle stays over the text
+    void theCornerFadeStaysBehindTheTitleAtEveryWidth()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(ui.opensWindowOfWidth(1400));
+        QVERIFY(openDetails(ui, kMovieId));
+        QQuickItem *fade = ui.item(QStringLiteral("detailsCornerFade"));
+        QQuickItem *text = ui.item(QStringLiteral("detailsHeroText"));
+        QVERIFY(fade && text);
+        // The scale of the shape keeps the middle of its bottom edge in place: that is the centre of the ellipse
+        const auto offset = [&] {
+            const qreal centre = fade->mapToScene(QPointF(fade->width() / 2, fade->height())).x();
+            return centre - text->mapToScene(QPointF(0, 0)).x();
+        };
+        // The middle of the text, once the page has laid it out, in a window as wide as the reading column and in one far wider
+        const auto centredOnTheText = [&] {
+            const qreal width = fade->property("textWidth").toReal();
+            return fade->isVisible() && width > 0 && qAbs(offset() - width / 2) < 1;
+        };
+        QTRY_VERIFY2(centredOnTheText(), qPrintable(QString::number(offset())));
+        const qreal wide = offset();
+        QVERIFY(ui.opensWindowOfWidth(2560));
+        QTRY_VERIFY2(centredOnTheText() && qAbs(offset() - wide) < 1,
+                     qPrintable(QStringLiteral("%1 then %2").arg(wide).arg(offset())));
+    }
+
     void theDetailsPageEditsImages()
     {
         Ui ui(m_home->path());
@@ -16087,8 +16259,8 @@ class TestUiPages : public QObject {
         QVERIFY(ui.load());
         QVERIFY(buildState(ui, QStringLiteral("home")));
         QVERIFY(
-            QMetaObject::invokeMethod(ui.shellAction(QStringLiteral("signOutAction")), "trigger"));
-        QObject *dialog = ui.popup(QStringLiteral("signOutDialog"));
+            QMetaObject::invokeMethod(ui.shellAction(QStringLiteral("aboutAction")), "trigger"));
+        QObject *dialog = ui.popup(QStringLiteral("aboutDialog"));
         QVERIFY(dialog);
         QTRY_VERIFY(dialog->property("opened").toBool());
         QTRY_VERIFY(ui.window->activeFocusItem() && inPopupItem(ui.window->activeFocusItem()));
@@ -17313,6 +17485,32 @@ class TestUiPages : public QObject {
         };
         QTRY_VERIFY(ui.item(QStringLiteral("libraryCard_") + kMovies) != nullptr);
         shot(QStringLiteral("home"));
+        // The main menu beside the rail's Menu entry, the users page its avatar opens, and the rows of a Compact window's drawer
+        QObject *mainMenu = ui.openMainMenuByClick();
+        QVERIFY(mainMenu);
+        shot(QStringLiteral("main-menu"));
+        QVERIFY(Ui::closeMenu(mainMenu));
+        QTRY_VERIFY(!mainMenu->property("visible").toBool());
+        ui.clickCenter(ui.item(QStringLiteral("sidebarUserButton")));
+        QTRY_VERIFY(ui.item(QStringLiteral("userPickerPage")) != nullptr);
+        shot(QStringLiteral("users"));
+        QQuickItem *userTile = ui.firstUserTile();
+        QObject *userMenu = ui.popup(QStringLiteral("userMenu"));
+        QVERIFY(userTile && userMenu);
+        ui.clickCenter(Ui::itemIn(userTile, QStringLiteral("userMenuButton")));
+        QTRY_VERIFY(userMenu->property("opened").toBool());
+        shot(QStringLiteral("user-menu"));
+        QVERIFY(Ui::closeMenu(userMenu));
+        QTRY_VERIFY(!userMenu->property("visible").toBool());
+        QVERIFY(ui.opensWindowOfWidth(500));
+        QVERIFY(ui.openNavigationDrawer());
+        shot(QStringLiteral("drawer"));
+        QObject *drawer = ui.popup(QStringLiteral("navigationDrawer"));
+        QVERIFY(drawer && QMetaObject::invokeMethod(drawer, "close"));
+        QTRY_VERIFY(!drawer->property("visible").toBool());
+        QVERIFY(ui.opensWindowOfWidth(1400));
+        QVERIFY(QMetaObject::invokeMethod(ui.window, "goHome"));
+        QTRY_VERIFY(ui.item(QStringLiteral("libraryCard_") + kMovies) != nullptr);
         QVERIFY(ui.openLibraryTile(kMovies));
         QQuickItem *card = nullptr;
         QTRY_VERIFY((card = Ui::itemIn(ui.item(QStringLiteral("libraryPage")),
@@ -17344,6 +17542,9 @@ class TestUiPages : public QObject {
         QQuickItem *page = ui.item(QStringLiteral("itemDetailsPage"));
         QVERIFY(page);
         shot(QStringLiteral("details-wide"));
+        // A window wider than the reading column, as a full screen is: the column and what stands behind its text move together
+        QVERIFY(ui.opensWindowOfWidth(2560));
+        shot(QStringLiteral("details-full-screen"));
         QVERIFY(ui.opensWindowOfWidth(500));
         shot(QStringLiteral("details-narrow"));
         QVERIFY(ui.opensWindowOfWidth(1400));
@@ -18738,16 +18939,13 @@ class TestUiPages : public QObject {
         QVERIFY(ui.load());
         QVERIFY(ui.signIn());
         QVERIFY(ui.shellAction(QStringLiteral("userPreferencesAction")) == nullptr);
-        ui.clickCenter(ui.item(QStringLiteral("mainMenuButton")));
-        QObject *menu = ui.popup(QStringLiteral("mainMenu"));
+        QObject *menu = ui.openMainMenuByClick();
         QVERIFY(menu);
-        QTRY_VERIFY(menu->property("opened").toBool());
         QStringList names;
         for (const QQuickItem *entry : ui.menuItems(QStringLiteral("mainMenu")))
             names << entry->objectName();
-        // The account entries are there, and none of them is about preferences: those live in Settings
-        for (const char *name : {"switchUserItem", "signOutItem", "switchServerItem"})
-            QVERIFY2(names.contains(QLatin1String(name)), name);
+        // No entry is about preferences: those live in Settings
+        QVERIFY(names.contains(QLatin1String("menuSettingsItem")));
         for (const QString &name : std::as_const(names))
             QVERIFY2(!name.contains(QLatin1String("Preferences"), Qt::CaseInsensitive),
                      qPrintable(name));
@@ -18764,7 +18962,7 @@ class TestUiPages : public QObject {
         QVERIFY(openPreferences(ui) != nullptr);
         // Settings marks the menu button, no tab is marked, and the form is a page of its own no more
         QCOMPARE(ui.window->property("currentSection").toString(), QStringLiteral("settings"));
-        QVERIFY(ui.item(QStringLiteral("mainMenuButton"))->property("down").toBool());
+        QVERIFY(ui.item(QStringLiteral("sidebarMenuButton"))->property("marked").toBool());
         QCOMPARE(ui.stackDepth(), 2);
         // The stored values: the language names come from the catalog
         QQuickItem *audio = ui.item(QStringLiteral("prefAudioLanguage"));
@@ -18946,17 +19144,9 @@ class TestUiPages : public QObject {
         QVERIFY(!prefs->dirty());
     }
 
-    void accountActionsAskBeforeDroppingUnsavedPreferences_data()
+    // The account actions live on the users page: the avatar that opens it asks about unsaved preferences first, as every section does
+    void theUsersPageAsksBeforeDroppingUnsavedPreferences()
     {
-        QTest::addColumn<QString>("action");
-        QTest::newRow("switch user") << QStringLiteral("switchUserAction");
-        QTest::newRow("sign out") << QStringLiteral("signOutAction");
-        QTest::newRow("switch server") << QStringLiteral("switchServerAction");
-    }
-
-    void accountActionsAskBeforeDroppingUnsavedPreferences()
-    {
-        QFETCH(QString, action);
         Ui ui(m_home->path());
         RemotePreferences remote(ui);
         QVERIFY(ui.load());
@@ -18964,38 +19154,29 @@ class TestUiPages : public QObject {
         QVERIFY(openPreferences(ui) != nullptr);
         auto *prefs = ui.controller.userConfiguration();
         QObject *dialog = ui.popup(QStringLiteral("unsavedChangesDialog"));
-        QObject *signOut = ui.popup(QStringLiteral("signOutDialog"));
-        QVERIFY(dialog && signOut);
+        QQuickItem *user = ui.item(QStringLiteral("sidebarUserButton"));
+        QVERIFY(dialog && user);
         prefs->setSubtitleMode(QStringLiteral("Always"));
         QTRY_VERIFY(prefs->dirty());
-        // The unsaved changes are asked about first: the session and the draft are untouched, and Cancel keeps them
-        QVERIFY(QMetaObject::invokeMethod(ui.shellAction(action), "trigger"));
+        // The unsaved changes are asked about first: the draft is untouched, and Cancel keeps it
+        ui.clickCenter(user);
         QTRY_VERIFY(dialog->property("opened").toBool());
-        QVERIFY(!signOut->property("visible").toBool());
-        QCOMPARE(ui.controller.state(), ConnectionController::Authenticated);
+        QVERIFY(ui.item(QStringLiteral("userPickerPage")) == nullptr);
         QVERIFY(prefs->dirty());
         QVERIFY(
             clickInDialog(ui, QStringLiteral("unsavedChangesDialog"), QStringLiteral("Cancel")));
         QTRY_VERIFY(!dialog->property("visible").toBool());
-        QCOMPARE(ui.controller.state(), ConnectionController::Authenticated);
         QVERIFY(prefs->dirty());
         QCOMPARE(prefs->subtitleMode(), QStringLiteral("Always"));
         QVERIFY(ui.item(QStringLiteral("userPreferencesForm")) != nullptr);
-        // Discard settles the draft, then the action goes on
-        QVERIFY(QMetaObject::invokeMethod(ui.shellAction(action), "trigger"));
+        // Discard settles the draft, then the users page opens and the session goes on
+        ui.clickCenter(user);
         QTRY_VERIFY(dialog->property("opened").toBool());
         QVERIFY(
             clickInDialog(ui, QStringLiteral("unsavedChangesDialog"), QStringLiteral("Discard")));
         QVERIFY(!prefs->dirty());
-        if (action == QStringLiteral("switchUserAction")) {
-            QTRY_COMPARE(ui.controller.state(), ConnectionController::ChoosingUser);
-        } else if (action == QStringLiteral("switchServerAction")) {
-            QTRY_COMPARE(ui.controller.state(), ConnectionController::Idle);
-        } else {
-            // Sign Out still asks its own question
-            QTRY_VERIFY(signOut->property("opened").toBool());
-            QCOMPARE(ui.controller.state(), ConnectionController::Authenticated);
-        }
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("userPickerPage"));
+        QCOMPARE(ui.controller.state(), ConnectionController::Authenticated);
         QVERIFY(remote.posts.isEmpty());
     }
 
@@ -19621,9 +19802,9 @@ class TestUiPages : public QObject {
         // The tab names the page already: no title row
         QVERIFY(!ui.item(QStringLiteral("favoritesHeading")));
         QTRY_VERIFY(ui.layoutProblems().isEmpty());
-        // The queue has no section, the rail is away, and so the page names itself
-        QObject *queue = ui.shellAction(QStringLiteral("compactQueueAction"));
-        QVERIFY(queue && QMetaObject::invokeMethod(queue, "trigger"));
+        // The queue has no section, the rail is away, and so the page names itself; the drawer's row opens it
+        QVERIFY(ui.openNavigationDrawer());
+        ui.clickCenter(ui.item(QStringLiteral("drawerQueue")));
         QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("queuePage"));
         QTRY_VERIFY(ui.item(QStringLiteral("queueHeading"))->isVisible());
         QTRY_VERIFY(ui.layoutProblems().isEmpty());
@@ -24288,8 +24469,9 @@ class TestUiPages : public QObject {
                 .toJson(QJsonDocument::Compact));
         QVERIFY(ui.load());
         QVERIFY(buildState(ui, QStringLiteral("library")));
-        // The least height makes the facet list scroll as well
-        const int low = ui.window->minimumHeight();
+        // A height below the shell's least one, which holds every facet, makes the facet list scroll as well
+        const int low = 20 * int(gridUnitOf(ui));
+        ui.window->setMinimumHeight(low);
         ui.window->resize(1000, low);
         QTRY_COMPARE(ui.window->height(), low);
         auto *movies = ui.controller.movies();
@@ -24452,14 +24634,14 @@ class TestUiPages : public QObject {
         const int low = ui.window->minimumHeight();
         ui.window->resize(1000, low);
         QTRY_COMPARE(ui.window->height(), low);
-        QQuickItem *button = ui.item(QStringLiteral("mainMenuButton"));
+        QQuickItem *button = ui.item(QStringLiteral("sidebarMenuButton"));
         QObject *menu = ui.popup(QStringLiteral("mainMenu"));
         QVERIFY(button && menu);
         QVERIFY(QMetaObject::invokeMethod(button, "click"));
         QTRY_VERIFY(menu->property("opened").toBool());
         QTRY_VERIFY2(popupProblem(menu, button, ui.window, false, true).isEmpty(),
                      qPrintable(popupProblem(menu, button, ui.window, false, true)));
-        // The button is at the foot of the rail, on the start edge: the menu stands on its inner side (right in left to right, left mirrored), and moves up as far as the short window needs
+        // The Menu entry is at the foot of the rail, on the start edge: the menu stands on its inner side (right in left to right, left mirrored), and moves up as far as the short window needs
         const QRectF rect = popupRect(menu);
         const QRectF anchor = sceneRect(button);
         QVERIFY2(rightToLeft ? rect.right() <= anchor.left() + 2

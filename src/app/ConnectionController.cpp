@@ -997,6 +997,32 @@ void ConnectionController::removeUser(const QString &userId)
         leaveSession();
     // Once the session is left: the player keeps its place on leaving, and that has to go too
     Q_EMIT storedUserForgotten(serverId, userId);
+    landAfterSessionEnded();
+}
+
+void ConnectionController::signOutUser(const QString &userId)
+{
+    if (m_state != Authenticated && m_state != ChoosingUser && m_state != NeedsLogin)
+        return;
+    const bool signedIn = m_state == Authenticated && m_client.userId() == userId;
+    if (!signedIn && !savedUser(userId))
+        return;
+    const QString serverId = m_client.serverId();
+    m_queue.forgetStoredUser(serverId, userId);
+    m_sync.forgetToken(serverId, userId);
+    // No session of this user to end: the player forgets what it kept of the user
+    if (!signedIn) {
+        Q_EMIT storedUserForgotten(serverId, userId);
+        return;
+    }
+    leaveSession();
+    // Once the session is left: the player keeps its place on leaving, and that has to go too
+    Q_EMIT storedUserForgotten(serverId, userId);
+    landAfterSessionEnded();
+}
+
+void ConnectionController::landAfterSessionEnded()
+{
     if (m_sync.restorableUsers().isEmpty()) {
         m_client.disconnectFromServer();
         if (!m_libraries.isEmpty()) {
@@ -1028,11 +1054,18 @@ void ConnectionController::switchUser()
 
 void ConnectionController::chooseUser(const QString &userId)
 {
-    if (m_state != ChoosingUser && m_state != NeedsLogin)
+    const bool switching = m_state == Authenticated;
+    if (m_state != ChoosingUser && m_state != NeedsLogin && !switching)
         return;
     const auto user = savedUser(userId);
     if (!user)
         return;
+    if (switching) {
+        if (userId == m_client.userId())
+            return;
+        // The token and the saved queue of the user who leaves stay, as Switch User keeps them
+        leaveSession();
+    }
     setError({});
     if (user->remembered && !user->askPassword)
         restoreUser(userId);

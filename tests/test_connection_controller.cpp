@@ -3057,6 +3057,76 @@ class TestConnectionController : public QObject {
         QTRY_VERIFY(gStore->tokens.isEmpty());
     }
 
+    void signOutUserKeepsTheRecordAndAsksForThePassword()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        addTwoUsers(server);
+        auto controller = makeController();
+        QVERIFY(signInAndQueueTheMovie(*controller, server, QStringLiteral("Anna"), kAnna));
+        controller->addUser();
+        QCOMPARE(controller->state(), ConnectionController::NeedsLogin);
+        QVERIFY(signInUser(*controller, QStringLiteral("Ben"), 2));
+        QTRY_VERIFY(QFileInfo::exists(queueFile(kAnna)));
+        // The player forgets what it keeps of each user who signs out (its place in the queue among it)
+        QSignalSpy forgotten(controller.get(), &ConnectionController::storedUserForgotten);
+        // Another user signs out while this session carries on
+        controller->signOutUser(kAnna);
+        QCOMPARE(controller->state(), ConnectionController::Authenticated);
+        QCOMPARE(forgotten.size(), 1);
+        QCOMPARE(forgotten.constLast().at(1).toString(), kAnna);
+        QTRY_VERIFY(!QFileInfo::exists(queueFile(kAnna)));
+        QTRY_VERIFY(!gStore->tokens.contains(tokenKeyOf(kAnna)));
+        QTRY_VERIFY(!userEntry(*controller, kAnna).value(QStringLiteral("remembered")).toBool());
+        QCOMPARE(controller->users().size(), 2);
+        // The signed-in user signs out: the session ends on the picker, which keeps both
+        controller->signOutUser(kBen);
+        QCOMPARE(controller->state(), ConnectionController::ChoosingUser);
+        QCOMPARE(forgotten.size(), 2);
+        QCOMPARE(forgotten.constLast().at(1).toString(), kBen);
+        QVERIFY(controller->libraries().isEmpty());
+        QTRY_VERIFY(!gStore->tokens.contains(tokenKeyOf(kBen)));
+        QTRY_VERIFY(!userEntry(*controller, kBen).value(QStringLiteral("remembered")).toBool());
+        QCOMPARE(controller->users().size(), 2);
+        QCOMPARE(Kinefin::loadServerCredentials(kProfile).size(), 2);
+        // A user signed out is asked for the password
+        controller->chooseUser(kBen);
+        QCOMPARE(controller->state(), ConnectionController::NeedsLogin);
+        QCOMPARE(controller->loginUserName(), QStringLiteral("Ben"));
+        // An unknown id changes nothing
+        controller->signOutUser(QStringLiteral("00000000000000000000000000000000"));
+        QCOMPARE(controller->users().size(), 2);
+    }
+
+    void chooseUserFromASessionSwitchesToAnotherUserOnly()
+    {
+        FakeJellyfin server;
+        QVERIFY(server.listen());
+        addTwoUsers(server);
+        QVERIFY(saveBothUsers(server));
+        auto controller = makeController();
+        controller->start();
+        QTRY_COMPARE(controller->state(), ConnectionController::ChoosingUser);
+        controller->chooseUser(kBen);
+        QTRY_VERIFY(controller->state() == ConnectionController::Authenticated);
+        QTRY_COMPARE(controller->libraries().size(), 3);
+        // The signed-in user is already there, and an unknown id leaves the session alone
+        controller->chooseUser(kBen);
+        QCOMPARE(controller->state(), ConnectionController::Authenticated);
+        controller->chooseUser(QStringLiteral("00000000000000000000000000000000"));
+        QCOMPARE(controller->state(), ConnectionController::Authenticated);
+        QCOMPARE(controller->libraries().size(), 3);
+        // Another one ends this session and restores without a password; the token of the first stays
+        const int logins = server.successfulLogins;
+        controller->chooseUser(kAnna);
+        QCOMPARE(controller->state(), ConnectionController::Connecting);
+        QTRY_VERIFY(controller->state() == ConnectionController::Authenticated);
+        QCOMPARE(server.successfulLogins, logins);
+        QTRY_COMPARE(firstUserId(*controller), kAnna);
+        QVERIFY(gStore->tokens.contains(tokenKeyOf(kBen)));
+        QVERIFY(userEntry(*controller, kBen).value(QStringLiteral("remembered")).toBool());
+    }
+
     void removeServerForgetsAllUsers()
     {
         FakeJellyfin server;

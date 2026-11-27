@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: kinefin 0\n"
 "Report-Msgid-Bugs-To: https://github.com/the-beper/Kinefin/issues\n"
-"POT-Creation-Date: 2026-11-27 16:31+0000\n"
+"POT-Creation-Date: 2026-11-27 18:23+0000\n"
 "PO-Revision-Date: 2026-11-07 00:00+0000\n"
 "Last-Translator: the-beper\n"
 "Language-Team: Italian\n"
@@ -67,11 +67,11 @@ msgstr "Inserisci un nome utente"
 msgid "Quick Connect is not available"
 msgstr "Quick Connect non è disponibile"
 
-#: src/app/ConnectionController.cpp:1151
+#: src/app/ConnectionController.cpp:1184
 msgid "Your session has expired. Sign in again"
 msgstr "La sessione è scaduta. Accedi di nuovo"
 
-#: src/app/ConnectionController.cpp:1166
+#: src/app/ConnectionController.cpp:1199
 msgid ""
 "Could not reach a Jellyfin server. Check the address and your network "
 "connection"
@@ -79,23 +79,23 @@ msgstr ""
 "Impossibile raggiungere un server Jellyfin. Controlla l'indirizzo e la "
 "connessione di rete"
 
-#: src/app/ConnectionController.cpp:1170
+#: src/app/ConnectionController.cpp:1203
 msgid "Wrong username or password"
 msgstr "Nome utente o password errati"
 
-#: src/app/ConnectionController.cpp:1171
+#: src/app/ConnectionController.cpp:1204
 msgid "Signing in failed. Try again, or check the server"
 msgstr "Accesso non riuscito. Riprova o controlla il server"
 
-#: src/app/ConnectionController.cpp:1176
+#: src/app/ConnectionController.cpp:1209
 msgid "Quick Connect is not available on this server"
 msgstr "Quick Connect non è disponibile su questo server"
 
-#: src/app/ConnectionController.cpp:1177
+#: src/app/ConnectionController.cpp:1210
 msgid "Quick Connect failed or expired. Start it again"
 msgstr "Quick Connect non riuscito o scaduto. Avvialo di nuovo"
 
-#: src/app/ConnectionController.cpp:1184
+#: src/app/ConnectionController.cpp:1217
 msgid "Could not load the libraries. Try again"
 msgstr "Impossibile caricare le librerie. Riprova"
 
@@ -227,7 +227,7 @@ msgstr "Google Cast"
 #: src/qml/ResumeItemsPage.qml:150 src/qml/ResumeItemsPage.qml:157
 #: src/qml/SearchPopup.qml:349 src/qml/SearchPopup.qml:356
 #: src/qml/GenreRailsView.qml:226 src/qml/GenreRailsView.qml:233
-#: src/qml/ItemRowGrid.qml:78 src/qml/ItemRowGrid.qml:85 src/qml/Main.qml:1058
+#: src/qml/ItemRowGrid.qml:78 src/qml/ItemRowGrid.qml:85 src/qml/Main.qml:1056
 #: src/qml/MediaListRow.qml:31 src/qml/FavoriteCard.qml:17
 #: src/qml/FavoriteCard.qml:26
 msgctxt "episode label and episode title"
@@ -1455,7 +1455,7 @@ msgid "Only %1 of %2 downloads could be queued"
 msgstr "Solo %1 di %2 download sono stati messi in coda"
 
 #: src/qml/ItemDetailsPage.qml:367 src/qml/ItemDetailsPage.qml:369
-#: src/qml/Main.qml:1343
+#: src/qml/Main.qml:1341
 msgid "Show Downloads"
 msgstr "Mostra i download"
 
@@ -1617,7 +1617,7 @@ msgstr ""
 "Impossibile aggiornare i preferiti e lo stato di visione. Controlla la "
 "connessione e riprova"
 
-#: src/qml/ItemDetailsPage.qml:970 src/qml/Main.qml:2107
+#: src/qml/ItemDetailsPage.qml:970 src/qml/Main.qml:2113
 msgid "Could not update Favorites. Check the connection and try again"
 msgstr "Impossibile aggiornare i preferiti. Controlla la connessione e riprova"
 
@@ -2366,7 +2366,7 @@ msgstr ""
 "e riprova"
 
 #: src/qml/IdentifyDialog.qml:170 src/qml/SubtitleSearchDialog.qml:113
-#: src/qml/ShellSidebar.qml:395
+#: src/qml/ShellSidebar.qml:405
 msgctxt "@action:button"
 msgid "Search"
 msgstr "Cerca"
@@ -2893,22 +2893,22 @@ msgctxt "@title:window"
 msgid "SyncPlay"
 msgstr "SyncPlay"
 
-#: src/qml/SyncPlayDialog.qml:42 src/qml/ShellHeader.qml:345
+#: src/qml/SyncPlayDialog.qml:42 src/qml/ShellHeader.qml:237
 msgctxt "@action:button"
 msgid "Stop Following"
 msgstr "Smetti di seguire"
 
-#: src/qml/SyncPlayDialog.qml:42 src/qml/ShellHeader.qml:345
+#: src/qml/SyncPlayDialog.qml:42 src/qml/ShellHeader.qml:237
 msgctxt "@action:button"
 msgid "Follow Again"
 msgstr "Segui di nuovo"
 
-#: src/qml/SyncPlayDialog.qml:51 src/qml/Main.qml:296
+#: src/qml/SyncPlayDialog.qml:51 src/qml/Main.qml:294
 msgctxt "@action:button"
 msgid "Cancel"
 msgstr "Annulla"
 
-#: src/qml/SyncPlayDialog.qml:51 src/qml/ShellHeader.qml:352
+#: src/qml/SyncPlayDialog.qml:51 src/qml/ShellHeader.qml:244
 msgctxt "@action:button"
 msgid "Leave Group"
 msgstr "Esci dal gruppo"
@@ -2961,7 +2961,7 @@ msgid "Joining the group…"
 msgstr "Accesso al gruppo…"
 
 #: src/qml/SyncPlayDialog.qml:204 src/qml/SyncPlayDialog.qml:406
-#: src/qml/ShellHeader.qml:322 src/qml/ShellSidebar.qml:423
+#: src/qml/ShellHeader.qml:214 src/qml/ShellSidebar.qml:443
 msgid "Unnamed group"
 msgstr "Gruppo senza nome"
 
@@ -3346,7 +3346,7 @@ msgid "%1%"
 msgstr "%1%"
 
 #: src/qml/DownloadsPage.qml:206 src/qml/DownloadsPage.qml:211
-#: src/qml/Main.qml:2210 src/qml/Main.qml:2216
+#: src/qml/Main.qml:2216 src/qml/Main.qml:2222
 msgid "Delete Download"
 msgstr "Elimina download"
 
@@ -3354,7 +3354,7 @@ msgstr "Elimina download"
 msgid "Delete %1? The file stays on the server"
 msgstr "Eliminare %1? Il file resta sul server"
 
-#: src/qml/DownloadsPage.qml:226 src/qml/Main.qml:2229
+#: src/qml/DownloadsPage.qml:226 src/qml/Main.qml:2235
 msgid "Delete this download? The file stays on the server"
 msgstr "Eliminare questo download? Il file resta sul server"
 
@@ -3665,7 +3665,7 @@ msgstr ""
 "Nessun provider di sottotitoli online è installato sul server. Chiedi "
 "all'amministratore del server di installarne uno"
 
-#: src/qml/SubtitleSearchDialog.qml:60 src/qml/Main.qml:1309
+#: src/qml/SubtitleSearchDialog.qml:60 src/qml/Main.qml:1307
 msgid "Could not reach the server. Check the connection and try again"
 msgstr "Impossibile raggiungere il server. Controlla la connessione e riprova"
 
@@ -3928,7 +3928,7 @@ msgid "Filter categories"
 msgstr "Categorie di filtri"
 
 #: src/qml/FilterDialog.qml:799 src/qml/PlayerPage.qml:985
-#: src/qml/PageBackButton.qml:12 src/qml/ShellHeader.qml:70
+#: src/qml/PageBackButton.qml:12 src/qml/ShellHeader.qml:65
 msgctxt "@action:button"
 msgid "Back"
 msgstr "Indietro"
@@ -4025,7 +4025,7 @@ msgstr "Elimina %1"
 msgid "Saved filters deleted"
 msgstr "Filtri salvati eliminati"
 
-#: src/qml/SavedFiltersDialog.qml:257 src/qml/Main.qml:2119
+#: src/qml/SavedFiltersDialog.qml:257 src/qml/Main.qml:2125
 msgctxt "@action:button"
 msgid "Undo"
 msgstr "Annulla"
@@ -4246,7 +4246,7 @@ msgctxt "@action:button Opens the list of the saved users of this server"
 msgid "Choose Another User"
 msgstr "Scegli un altro utente"
 
-#: src/qml/LoginPage.qml:366
+#: src/qml/LoginPage.qml:366 src/qml/UserPickerPage.qml:201
 msgctxt "@action:button Goes back to the list of servers"
 msgid "Switch Server"
 msgstr "Cambia server"
@@ -4272,32 +4272,56 @@ msgstr "In attesa di approvazione…"
 msgid "Cancel"
 msgstr "Annulla"
 
-#: src/qml/UserPickerPage.qml:24
+#: src/qml/UserPickerPage.qml:26
 msgctxt "@title"
 msgid "Who is watching?"
 msgstr "Chi sta guardando?"
 
-#: src/qml/UserPickerPage.qml:60
+#: src/qml/UserPickerPage.qml:65
+msgctxt "@action:inmenu"
+msgid "Sign Out…"
+msgstr "Esci…"
+
+#: src/qml/UserPickerPage.qml:76
 msgctxt "@action:inmenu"
 msgid "Ask for Password"
 msgstr "Chiedi la password"
 
-#: src/qml/UserPickerPage.qml:76
+#: src/qml/UserPickerPage.qml:93
 msgctxt "@action:inmenu"
 msgid "Remove User…"
 msgstr "Rimuovi utente…"
 
-#: src/qml/UserPickerPage.qml:93
+#: src/qml/UserPickerPage.qml:111
+msgctxt "@title:window"
+msgid "Sign Out"
+msgstr "Esci"
+
+#: src/qml/UserPickerPage.qml:116
+msgctxt "@action:button"
+msgid "Sign Out"
+msgstr "Esci"
+
+#: src/qml/UserPickerPage.qml:131
+msgctxt "@info %1 is a user name"
+msgid ""
+"Sign out %1? Saved credentials and the local queue will be removed. The "
+"server account stays unchanged."
+msgstr ""
+"Uscire da %1? Le credenziali salvate e la coda locale verranno rimosse. "
+"L'account sul server non viene modificato."
+
+#: src/qml/UserPickerPage.qml:142
 msgctxt "@title:window"
 msgid "Remove User"
 msgstr "Rimuovi utente"
 
-#: src/qml/UserPickerPage.qml:97 src/qml/PlaylistPage.qml:164
+#: src/qml/UserPickerPage.qml:146 src/qml/PlaylistPage.qml:164
 msgctxt "@action:button"
 msgid "Remove"
 msgstr "Rimuovi"
 
-#: src/qml/UserPickerPage.qml:112
+#: src/qml/UserPickerPage.qml:161
 msgctxt "@info %1 is a user name"
 msgid ""
 "Remove %1 and the saved queue from this system? The account on the server is "
@@ -4306,36 +4330,41 @@ msgstr ""
 "Rimuovere %1 e la coda salvata da questo sistema? L'account sul server non "
 "viene modificato"
 
-#: src/qml/UserPickerPage.qml:270
+#: src/qml/UserPickerPage.qml:318
+msgctxt "@info under the name of the user of the session"
+msgid "Signed in"
+msgstr "Connesso"
+
+#: src/qml/UserPickerPage.qml:341
 msgctxt "@action:button"
 msgid "Add User"
 msgstr "Aggiungi utente"
 
-#: src/qml/UserTile.qml:22
+#: src/qml/UserTile.qml:25
 msgctxt "@info:tooltip"
 msgid "Asks for the password"
 msgstr "Chiede la password"
 
-#: src/qml/UserTile.qml:118 src/qml/PlayerPage.qml:1443
+#: src/qml/UserTile.qml:134 src/qml/PlayerPage.qml:1443
 msgctxt "@action:button"
 msgid "More Actions"
 msgstr "Altre azioni"
 
-#: src/qml/UserTile.qml:120
+#: src/qml/UserTile.qml:136
 msgctxt "@label %1 is a user name"
 msgid "More Actions for %1"
 msgstr "Altre azioni per %1"
 
-#: src/qml/Main.qml:181
+#: src/qml/Main.qml:179
 msgctxt "@action:button"
 msgid "Open Navigation"
 msgstr "Apri la navigazione"
 
-#: src/qml/Main.qml:290
+#: src/qml/Main.qml:288
 msgid "Preparing Kinefin…"
 msgstr "Preparazione di Kinefin…"
 
-#: src/qml/Main.qml:530
+#: src/qml/Main.qml:528
 msgid ""
 "The settings could not be saved: check the free space and the permissions of "
 "the profile folder. Changes last until Kinefin closes"
@@ -4344,35 +4373,35 @@ msgstr ""
 "della cartella del profilo. Le modifiche restano fino alla chiusura di "
 "Kinefin"
 
-#: src/qml/Main.qml:722
+#: src/qml/Main.qml:720
 msgid "The video could not be shown in its own window"
 msgstr "Non è stato possibile mostrare il video in una finestra separata"
 
-#: src/qml/Main.qml:1005
+#: src/qml/Main.qml:1003
 msgctxt "@info %1 is a bit rate in Mbit/s"
 msgid "Slow connection: playing at a lower quality (%1 Mbps)"
 msgstr "Connessione lenta: riproduzione a qualità inferiore (%1 Mbps)"
 
-#: src/qml/Main.qml:1008
+#: src/qml/Main.qml:1006
 msgid "No lower quality available. Playback continues at the current quality"
 msgstr ""
 "Nessuna qualità inferiore disponibile. La riproduzione continua con quella "
 "attuale"
 
-#: src/qml/Main.qml:1011
+#: src/qml/Main.qml:1009
 msgid "This quality is not available: playback goes on at the current one"
 msgstr ""
 "Questa qualità non è disponibile: la riproduzione continua a quella attuale"
 
-#: src/qml/Main.qml:1015
+#: src/qml/Main.qml:1013
 msgid "GIF saved: %1"
 msgstr "GIF salvata: %1"
 
-#: src/qml/Main.qml:1015
+#: src/qml/Main.qml:1013
 msgid "Clip saved: %1"
 msgstr "Clip salvata: %1"
 
-#: src/qml/Main.qml:1018
+#: src/qml/Main.qml:1016
 msgid ""
 "Another subtitle is still downloading: choose this one again once it has "
 "loaded"
@@ -4380,7 +4409,7 @@ msgstr ""
 "Un altro sottotitolo è ancora in fase di scaricamento: seleziona di nuovo "
 "questo quando sarà caricato"
 
-#: src/qml/Main.qml:1021
+#: src/qml/Main.qml:1019
 msgid ""
 "The server is extracting these subtitles from the video: the first time it "
 "can take a few minutes"
@@ -4388,16 +4417,16 @@ msgstr ""
 "Il server sta estraendo questi sottotitoli dal video: la prima volta può "
 "richiedere alcuni minuti"
 
-#: src/qml/Main.qml:1031 src/qml/Main.qml:1033
+#: src/qml/Main.qml:1029 src/qml/Main.qml:1031
 msgid "Subtitle added"
 msgstr "Sottotitolo aggiunto"
 
-#: src/qml/Main.qml:1031
+#: src/qml/Main.qml:1029
 msgctxt "@action:button"
 msgid "Upload to Server…"
 msgstr "Carica sul server…"
 
-#: src/qml/Main.qml:1039
+#: src/qml/Main.qml:1037
 msgid ""
 "The clip could not be saved: not enough free disk space. Free some space and "
 "try again"
@@ -4405,15 +4434,15 @@ msgstr ""
 "Impossibile salvare la clip: spazio su disco insufficiente. Libera spazio e "
 "riprova"
 
-#: src/qml/Main.qml:1039
+#: src/qml/Main.qml:1037
 msgid "The clip could not be saved. Try again"
 msgstr "Impossibile salvare la clip. Riprova"
 
-#: src/qml/Main.qml:1052
+#: src/qml/Main.qml:1050
 msgid "The downloaded file is not available: download the item again"
 msgstr "Il file scaricato non è disponibile: scarica di nuovo l’elemento"
 
-#: src/qml/Main.qml:1061
+#: src/qml/Main.qml:1059
 msgid ""
 "The downloaded file could not be played: try again, or download the item "
 "again"
@@ -4421,15 +4450,15 @@ msgstr ""
 "Impossibile riprodurre il file scaricato: riprova o scarica di nuovo "
 "l’elemento"
 
-#: src/qml/Main.qml:1137
+#: src/qml/Main.qml:1135
 msgid "Added to play next in the SyncPlay group"
 msgstr "Aggiunto a Riproduci dopo nel gruppo SyncPlay"
 
-#: src/qml/Main.qml:1137
+#: src/qml/Main.qml:1135
 msgid "Added to the SyncPlay group’s queue"
 msgstr "Aggiunto alla coda del gruppo SyncPlay"
 
-#: src/qml/Main.qml:1139
+#: src/qml/Main.qml:1137
 msgid ""
 "Could not add this to the SyncPlay group’s queue. Check the connection and "
 "try again"
@@ -4437,7 +4466,7 @@ msgstr ""
 "Impossibile aggiungere questo elemento alla coda del gruppo SyncPlay: "
 "controlla la connessione e riprova"
 
-#: src/qml/Main.qml:1303
+#: src/qml/Main.qml:1301
 msgid ""
 "The server does not allow downloads for this user: check the permissions of "
 "the account on the server or sign in again"
@@ -4445,40 +4474,40 @@ msgstr ""
 "Il server non consente i download per questo utente: controlla i permessi "
 "dell’account sul server o accedi di nuovo"
 
-#: src/qml/Main.qml:1305
+#: src/qml/Main.qml:1303
 msgid "The item is no longer on the server: refresh the page to update it"
 msgstr "L’elemento non è più presente sul server: aggiorna la pagina"
 
-#: src/qml/Main.qml:1307
+#: src/qml/Main.qml:1305
 msgid "This item cannot be downloaded"
 msgstr "Impossibile scaricare questo elemento"
 
-#: src/qml/Main.qml:1311
+#: src/qml/Main.qml:1309
 msgid "The download could not be queued: try again"
 msgstr "Impossibile accodare il download: riprova"
 
-#: src/qml/Main.qml:1313
+#: src/qml/Main.qml:1311
 msgid "The download could not be started: try again"
 msgstr "Impossibile avviare il download: riprova"
 
-#: src/qml/Main.qml:1333
+#: src/qml/Main.qml:1331
 msgctxt "@info %1 is a device name"
 msgid "Playback was stopped on %1"
 msgstr "La riproduzione è stata interrotta su %1"
 
-#: src/qml/Main.qml:1343
+#: src/qml/Main.qml:1341
 msgid "Download queued"
 msgstr "Download in coda"
 
-#: src/qml/Main.qml:1346
+#: src/qml/Main.qml:1344
 msgid "Another export is still running. Try again when it ends"
 msgstr "Un'altra esportazione è ancora in corso. Riprova quando è terminata"
 
-#: src/qml/Main.qml:1349
+#: src/qml/Main.qml:1347
 msgid "Exported to the chosen folder"
 msgstr "Esportato nella cartella scelta"
 
-#: src/qml/Main.qml:1349
+#: src/qml/Main.qml:1347
 msgid "Could not export the download. Choose another folder and try again"
 msgstr "Impossibile esportare il download. Scegli un'altra cartella e riprova"
 
@@ -4524,17 +4553,17 @@ msgstr "Annulla"
 msgid "Another device replaced the queue"
 msgstr "Un altro dispositivo ha sostituito la coda"
 
-#: src/qml/Main.qml:2111 src/qml/Main.qml:2124
+#: src/qml/Main.qml:2117 src/qml/Main.qml:2130
 msgid "Could not change the watched state. Check the connection and try again"
 msgstr ""
 "Impossibile aggiornare lo stato di visione. Controlla la connessione e "
 "riprova"
 
-#: src/qml/Main.qml:2119
+#: src/qml/Main.qml:2125
 msgid "Marked as watched"
 msgstr "Segnato come visto"
 
-#: src/qml/Main.qml:2137
+#: src/qml/Main.qml:2143
 msgid ""
 "Could not change the watched state: another change to this item is still "
 "being saved. Try again in a moment"
@@ -4542,23 +4571,23 @@ msgstr ""
 "Impossibile aggiornare lo stato di visione: un'altra modifica a questo "
 "elemento è ancora in salvataggio. Riprova tra poco"
 
-#: src/qml/Main.qml:2152
+#: src/qml/Main.qml:2158
 msgid "The queue is full: some items were left out, remove some to add more"
 msgstr ""
 "La coda è piena: alcuni elementi sono stati esclusi, rimuovine alcuni per "
 "aggiungerne altri"
 
-#: src/qml/Main.qml:2152
+#: src/qml/Main.qml:2158
 msgid "%1 item added to the queue"
 msgid_plural "%1 items added to the queue"
 msgstr[0] "%1 elemento aggiunto alla coda"
 msgstr[1] "%1 elementi aggiunti alla coda"
 
-#: src/qml/Main.qml:2155
+#: src/qml/Main.qml:2161
 msgid "There is nothing to play in this item"
 msgstr "Non c'è nulla da riprodurre in questo elemento"
 
-#: src/qml/Main.qml:2158
+#: src/qml/Main.qml:2164
 msgid ""
 "The queue could not be saved: check the free space and the permissions of "
 "the profile folder. It lasts until Kinefin closes"
@@ -4566,7 +4595,7 @@ msgstr ""
 "Impossibile salvare la coda: controlla lo spazio libero e i permessi della "
 "cartella del profilo. Resta fino alla chiusura di Kinefin"
 
-#: src/qml/Main.qml:2161
+#: src/qml/Main.qml:2167
 msgid ""
 "Could not add this to the queue: check the connection to the server and try "
 "again"
@@ -4667,7 +4696,7 @@ msgctxt "@info %1 is a user name"
 msgid "%1 joined the SyncPlay group"
 msgstr "Ingresso nel gruppo SyncPlay: %1"
 
-#: src/qml/PlayerPage.qml:636 src/qml/ShellHeader.qml:615
+#: src/qml/PlayerPage.qml:636 src/qml/ShellHeader.qml:357
 msgid "Someone joined the SyncPlay group"
 msgstr "Qualcuno è entrato nel gruppo SyncPlay"
 
@@ -4676,7 +4705,7 @@ msgctxt "@info %1 is a user name"
 msgid "%1 left the SyncPlay group"
 msgstr "Uscita dal gruppo SyncPlay: %1"
 
-#: src/qml/PlayerPage.qml:640 src/qml/ShellHeader.qml:619
+#: src/qml/PlayerPage.qml:640 src/qml/ShellHeader.qml:361
 msgid "Someone left the SyncPlay group"
 msgstr "Qualcuno è uscito dal gruppo SyncPlay"
 
@@ -5744,134 +5773,71 @@ msgctxt "@action:button"
 msgid "Close Playback Info"
 msgstr "Chiudi informazioni di riproduzione"
 
-#: src/qml/ShellHeader.qml:108 src/qml/ShellSidebar.qml:783
+#: src/qml/ShellHeader.qml:95 src/qml/ShellSidebar.qml:476
 msgctxt "@action:button"
 msgid "Main Menu"
 msgstr "Menu principale"
 
-#: src/qml/ShellHeader.qml:109 src/qml/ShellSidebar.qml:794
-msgctxt "@label %1 is a user name"
-msgid "Main Menu, signed in as %1"
-msgstr "Menu principale, connesso come %1"
-
-#: src/qml/ShellHeader.qml:181
+#: src/qml/ShellHeader.qml:115
 msgctxt "@action:inmenu"
 msgid "Settings"
 msgstr "Impostazioni"
 
-#: src/qml/ShellHeader.qml:190
+#: src/qml/ShellHeader.qml:124
 msgctxt "@action:inmenu"
 msgid "Keyboard Shortcuts"
 msgstr "Scorciatoie da tastiera"
 
-#: src/qml/ShellHeader.qml:199
+#: src/qml/ShellHeader.qml:133
 msgctxt "@action:inmenu"
 msgid "About Kinefin"
 msgstr "Informazioni su Kinefin"
 
-#: src/qml/ShellHeader.qml:208
+#: src/qml/ShellHeader.qml:142
 msgctxt "@action:inmenu"
 msgid "Refresh"
 msgstr "Aggiorna"
 
-#: src/qml/ShellHeader.qml:226
+#: src/qml/ShellHeader.qml:160
 msgctxt "@action:inmenu"
 msgid "Admin Dashboard"
 msgstr "Pannello di amministrazione"
 
-#: src/qml/ShellHeader.qml:231
+#: src/qml/ShellHeader.qml:165
 msgid "The admin dashboard could not be opened: check the default browser"
 msgstr ""
 "Impossibile aprire il pannello di amministrazione: controlla il browser "
 "predefinito"
 
-#: src/qml/ShellHeader.qml:240
-msgctxt "@action:inmenu"
-msgid "Queue"
-msgstr "Coda"
-
-#: src/qml/ShellHeader.qml:251
+#: src/qml/ShellHeader.qml:174 src/qml/ShellSidebar.qml:430
 msgctxt "@action:inmenu"
 msgid "Remote Sessions"
 msgstr "Sessioni remote"
 
-#: src/qml/ShellHeader.qml:261
+#: src/qml/ShellHeader.qml:184
 msgctxt ""
 "@action:inmenu Watching together with other users, the server's feature name"
 msgid "SyncPlay"
 msgstr "SyncPlay"
 
-#: src/qml/ShellHeader.qml:272
-msgctxt "@action:inmenu Opens the list of the saved users of this server"
-msgid "Switch User"
-msgstr "Cambia utente"
-
-#: src/qml/ShellHeader.qml:281
-msgctxt "@action:inmenu"
-msgid "Sign Out…"
-msgstr "Esci…"
-
-#: src/qml/ShellHeader.qml:282
-msgctxt "@info:tooltip"
-msgid "Remove this user’s saved session from this system"
-msgstr "Rimuovi da questo sistema la sessione salvata di questo utente"
-
-#: src/qml/ShellHeader.qml:292
+#: src/qml/ShellHeader.qml:195
 msgctxt "@action:inmenu Leaves the offline downloads and shows the servers"
 msgid "Leave Offline"
 msgstr "Esci dalla modalità offline"
 
-#: src/qml/ShellHeader.qml:301
-msgctxt "@action:inmenu Goes back to the list of servers"
-msgid "Switch Server"
-msgstr "Cambia server"
-
-#: src/qml/ShellHeader.qml:340
+#: src/qml/ShellHeader.qml:232
 msgctxt "@item:inmenu more people in the group than the menu lists"
 msgid "and %1 more"
 msgid_plural "and %1 more"
 msgstr[0] "e %1 altro"
 msgstr[1] "e altri %1"
 
-#: src/qml/ShellHeader.qml:362
+#: src/qml/ShellHeader.qml:251
 msgctxt "@action:inmenu"
 msgid "SyncPlay…"
 msgstr "SyncPlay…"
 
-#: src/qml/ShellHeader.qml:374
-msgctxt "@title:menu"
-msgid "SyncPlay Group"
-msgstr "Gruppo SyncPlay"
-
-#: src/qml/ShellHeader.qml:551
-msgctxt "@title:window"
-msgid "Sign Out"
-msgstr "Esci"
-
-#: src/qml/ShellHeader.qml:557
-msgctxt "@action:button"
-msgid "Sign Out"
-msgstr "Esci"
-
-#: src/qml/ShellHeader.qml:572
-msgctxt "@info %1 is a user name"
-msgid ""
-"Sign out %1? Saved credentials and the local queue will be removed. The "
-"server account stays unchanged."
-msgstr ""
-"Uscire da %1? Le credenziali salvate e la coda locale verranno rimosse. "
-"L'account sul server non viene modificato."
-
-#: src/qml/ShellHeader.qml:573
-msgctxt "@info"
-msgid ""
-"Sign out? Saved credentials and the local queue will be removed. The server "
-"account stays unchanged."
-msgstr ""
-"Uscire? Le credenziali salvate e la coda locale verranno rimosse. L'account "
-"sul server non viene modificato."
-
-#: src/qml/ShellHeader.qml:622
+#: src/qml/ShellHeader.qml:364
 msgid ""
 "Out of step with the SyncPlay group. Playback catches up at the next pause "
 "or seek"
@@ -5928,59 +5894,73 @@ msgid_plural "Downloads, %1 active"
 msgstr[0] "Download, %1 attivo"
 msgstr[1] "Download, %1 attivi"
 
-#: src/qml/ShellSidebar.qml:119 src/qml/ShellSidebar.qml:151
+#: src/qml/ShellSidebar.qml:127 src/qml/ShellSidebar.qml:159
 msgctxt "@label more than 99 downloads in the badge of the sidebar"
 msgid "99+"
 msgstr "99+"
 
-#: src/qml/ShellSidebar.qml:405
+#: src/qml/ShellSidebar.qml:415
 msgctxt "@action:button"
 msgid "Queue"
 msgstr "Coda"
 
-#: src/qml/ShellSidebar.qml:408
+#: src/qml/ShellSidebar.qml:418
 msgctxt "@info:tooltip the queue button and how many items the queue holds"
 msgid "Queue, %1 item"
 msgid_plural "Queue, %1 items"
 msgstr[0] "Coda, %1 elemento"
 msgstr[1] "Coda, %1 elementi"
 
-#: src/qml/ShellSidebar.qml:410
+#: src/qml/ShellSidebar.qml:420
 msgctxt "@label more than 99 items in the queue badge"
 msgid "99+"
 msgstr "99+"
 
-#: src/qml/ShellSidebar.qml:424
+#: src/qml/ShellSidebar.qml:429
+msgctxt ""
+"@action:button short label under the icon of the Remote Sessions button"
+msgid "Remote"
+msgstr "Remoto"
+
+#: src/qml/ShellSidebar.qml:444
 msgctxt "@info:tooltip %2 is the name of the group"
 msgid "SyncPlay group %2: %1 person"
 msgid_plural "SyncPlay group %2: %1 people"
 msgstr[0] "Gruppo SyncPlay %2: %1 persona"
 msgstr[1] "Gruppo SyncPlay %2: %1 persone"
 
-#: src/qml/ShellSidebar.qml:432
+#: src/qml/ShellSidebar.qml:451
 msgctxt ""
-"@action:button the SyncPlay group row of the navigation drawer, which opens "
-"the menu of the group"
-msgid "SyncPlay Group"
-msgstr "Gruppo SyncPlay"
+"@action:button Watching together with other users, the server's feature name"
+msgid "SyncPlay"
+msgstr "SyncPlay"
 
-#: src/qml/ShellSidebar.qml:432
-msgctxt ""
-"@action:button short label under the icon of the SyncPlay group button"
-msgid "Group"
-msgstr "Gruppo"
-
-#: src/qml/ShellSidebar.qml:441
+#: src/qml/ShellSidebar.qml:460
 msgctxt "@info:tooltip the playback does not keep in step with the group"
 msgid "Not following"
 msgstr "Non sincronizzato con il gruppo"
 
-#: src/qml/ShellSidebar.qml:443
+#: src/qml/ShellSidebar.qml:462
 msgctxt "@info:tooltip the group waits for someone"
 msgid "Waiting for others"
 msgstr "In attesa degli altri"
 
-#: src/qml/ShellSidebar.qml:515
+#: src/qml/ShellSidebar.qml:475
+msgctxt "@action:button short label under the icon of the main menu button"
+msgid "Menu"
+msgstr "Menu"
+
+#: src/qml/ShellSidebar.qml:487
+msgctxt "@action:button Opens the users of this server"
+msgid "Switch User"
+msgstr "Cambia utente"
+
+#: src/qml/ShellSidebar.qml:492
+msgctxt "@info:tooltip %1 is a user name"
+msgid "Switch User, signed in as %1"
+msgstr "Cambia utente, connesso come %1"
+
+#: src/qml/ShellSidebar.qml:566
 msgctxt ""
 "@title:group the sidebar group with Favorites, Playlists and Downloads"
 msgid "Personal"

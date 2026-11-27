@@ -221,8 +221,10 @@ class ConnectionController : public QObject {
     Q_INVOKABLE void signOut();
     // Leaves the session and opens the picker of the same server: the token and the saved queue stay, so choosing the user again needs no password. A session that could not be saved leaves no one to pick, so it goes to the sign-in
     Q_INVOKABLE void switchUser();
-    // Picks a saved user of the active server (from ChoosingUser or the sign-in page): one that is remembered and does not ask for the password is restored (Connecting), any other goes to the sign-in with its name in `loginUserName`. Ignored for an unknown id and in any other state, Connecting and SigningIn included
+    // Picks a saved user of the active server (from ChoosingUser, the sign-in page or, for another user than the signed-in one, a session, which it leaves as switchUser() does): one that is remembered and does not ask for the password is restored (Connecting), any other goes to the sign-in with its name in `loginUserName`. Ignored for an unknown id, for the signed-in user and in any other state, Connecting and SigningIn included
     Q_INVOKABLE void chooseUser(const QString &userId);
+    // Signs one saved user of the active server out: its token, its saved queue and what the player keeps of it (storedUserForgotten) go, its record (name, avatar, Ask for Password) stays, so the picker keeps it and choosing it asks for the password. Signing the signed-in user out ends its session and lands on the picker (on Idle when no record of the server is left). Ignored for an id that is neither a saved user nor the signed-in one
+    Q_INVOKABLE void signOutUser(const QString &userId);
     // Leaves the session, if any, and goes to the sign-in of the same server for a new user; the saved tokens stay
     Q_INVOKABLE void addUser();
     // Forgets one saved user of the active server: token, record and saved queue (the browse state stays). Removing the signed-in user ends its session. Lands on the picker when other users remain, else on Idle. Ignored for an id that is neither a saved user nor the signed-in one
@@ -389,6 +391,8 @@ class ConnectionController : public QObject {
     std::optional<ServerCredential> savedUser(const QString &userId) const;
     // Removes a user's token, record and saved queue; the downloads stay on disk for that user
     void forgetUserData(const QString &userId);
+    // Where a session that ended by a sign-out or a removal lands: the picker while users of the server remain, else Idle
+    void landAfterSessionEnded();
     // The saved user of the newest completed download whose file is there, remembered and not asked for the password
     std::optional<ServerCredential> offlineUser() const;
     void refreshOfflineAvailable();

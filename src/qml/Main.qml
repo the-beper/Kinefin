@@ -35,13 +35,11 @@ Kirigami.ApplicationWindow {
     readonly property bool signedIn: connection.state === ConnectionController.Authenticated
     // A saved owner's downloads, shown without a session; only the Downloads tab and the player work
     readonly property bool offline: connection.state === ConnectionController.Offline
-    // A server is chosen while its sign-in or a session is in progress: the main menu offers Switch Server for it
-    readonly property bool serverChosen: connection.state !== ConnectionController.Idle
     // The modes in pixels: Compact below the width where the sidebar's rail leaves a page as wide as the smallest window (the sidebar gives way to the header and its drawer), Wide from 36 grid units; tests derive their window sizes from these
     readonly property int compactLimit: Math.ceil(shellSidebar.railWidth + minimumWidth)
-    // The smallest window: the Compact header with its navigation button fits, and the pages keep room to show something
+    // The smallest window: the Compact header with its navigation button fits, the pages keep room to show something, and the rail keeps about three sections in view above the entries that stand at its foot
     minimumWidth: Kirigami.Units.gridUnit * 24
-    minimumHeight: Kirigami.Units.gridUnit * 20
+    minimumHeight: Kirigami.Units.gridUnit * 26
     readonly property int wideLimit: Kirigami.Units.gridUnit * 36
     // The widest a block of reading content (item header, queue rows) gets before it is centred: the pages read it from here so they agree
     readonly property real readingWidth: Kirigami.Units.gridUnit * 70
@@ -112,14 +110,14 @@ Kirigami.ApplicationWindow {
 
     // The width the sidebar takes inline (0 in a Compact window and while there is nothing to choose from), which the player page reaches out over
     readonly property real sidebarWidth: shellSidebar.inlineWidth
-    // Signed out (the server and sign-in pages) the window has no rail and no bar: the main menu button stands alone in the top corner, so that Settings, About and Switch Server stay in reach
+    // Signed out (the server, sign-in and user pages) the window has no rail and no bar: the main menu button stands alone in the top corner, so that Settings and About stay in reach
     readonly property bool cornerMenu: !startupVisible && !navigation.navigable && !offline
     readonly property Item cornerMenuSlot: cornerSlot
     // A Compact window with sections to choose from has no bar either: a button floating in the top corner opens the drawer, and the pages keep that corner free (PageMetrics)
     readonly property bool cornerNavigation: shellSidebar.drawerAllowed
     readonly property Item cornerNavigationButton: navigationButton
-    // Where the header's menu button stands while the sidebar shows, and the SyncPlay group menu the sidebar's entry opens: both belong to the header
-    readonly property Item sidebarUserSlot: shellSidebar.userSlot
+    // What the header's main menu hangs from while the sidebar shows, and the SyncPlay group menu the sidebar's entry opens: both menus belong to the header
+    readonly property Item sidebarMenuButton: shellSidebar.menuButton
     readonly property bool groupMenuOpened: shellHeader.groupMenuOpened
     function openGroupMenu(button) {
         shellHeader.openGroupMenu(button);
@@ -1451,6 +1449,8 @@ Kirigami.ApplicationWindow {
         }
         if (pageStack.currentItem?.objectName === "queuePage")
             return "queue";
+        if (pageStack.currentItem?.objectName === "userPickerPage")
+            return "users";
         return rootTab !== "" ? rootTab : "home";
     }
 
@@ -2053,6 +2053,12 @@ Kirigami.ApplicationWindow {
         if (!signedIn)
             return;
         openTab("favorites");
+    }
+
+    // The users of the server from a session, as a section: the session goes on until another user is chosen there
+    function openUsers() {
+        if (signedIn)
+            openSection("userPickerPage", "UserPickerPage.qml", { connection: connection });
     }
 
     // The Home tab; before a session it is the page the state wants
