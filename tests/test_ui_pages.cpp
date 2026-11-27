@@ -5480,6 +5480,67 @@ class TestUiPages : public QObject {
         QTRY_COMPARE(ui.stackDepth(), depth);
     }
 
+    // An administrator edits the images of a person from the person page, and the details page below reads the item again for the new cast photo
+    void aPersonPageEditsTheImagesOfThePerson()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(openDetails(ui, kMovieId));
+        const QString personId = QStringLiteral("a1b2c3d4e5f60718293a4b5c6d7e8f01");
+        QVERIFY(
+            QMetaObject::invokeMethod(ui.window, "openPerson", Q_ARG(QVariant, personId),
+                                      Q_ARG(QVariant, QStringLiteral("Mira Vale")),
+                                      Q_ARG(QVariant, QVariant::fromValue(ui.currentDetails()))));
+        QQuickItem *personPage = nullptr;
+        QTRY_VERIFY((personPage = ui.item(QStringLiteral("personPage"))) != nullptr);
+        QCOMPARE(personPage->property("personId").toString(), personId);
+        QObject *edit = personPage->findChild<QObject *>(QStringLiteral("editPersonImagesAction"));
+        QVERIFY(edit);
+        QTRY_VERIFY(edit->property("visible").toBool());
+        QVERIFY(QMetaObject::invokeMethod(edit, "trigger"));
+        QQuickItem *editPage = nullptr;
+        QTRY_VERIFY((editPage = ui.item(QStringLiteral("editImagesPage"))) != nullptr);
+        QCOMPARE(ui.currentDetails(), editPage);
+        QCOMPARE(editPage->property("itemId").toString(), personId);
+        QCOMPARE(editPage->property("itemName").toString(), QStringLiteral("Mira Vale"));
+        const QByteArray personImages = QByteArray("/Items/") + personId.toLatin1() + "/Images";
+        QTRY_VERIFY(
+            std::any_of(ui.server.itemImageRoutes.cbegin(), ui.server.itemImageRoutes.cend(),
+                        [&](const QByteArray &route) { return route.contains(personImages); }));
+        const QByteArray detailsQuery = QByteArray("ids=") + kMovieId.toLatin1();
+        const auto detailsReads = [&] {
+            return std::count_if(
+                ui.server.itemsRoutes.cbegin(), ui.server.itemsRoutes.cend(),
+                [&](const QByteArray &route) { return route.contains(detailsQuery); });
+        };
+        const auto readsBefore = detailsReads();
+        const QString path = m_home->filePath(QStringLiteral("person.png"));
+        QImage image(2, 2, QImage::Format_ARGB32);
+        image.fill(Qt::blue);
+        QVERIFY(image.save(path));
+        QSignalSpy imageUpdated(&ui.controller, &ConnectionController::itemImageUpdated);
+        QVERIFY(ui.controller.uploadImage(personId, QStringLiteral("Primary"), -1,
+                                          QUrl::fromLocalFile(path)));
+        QTRY_COMPARE(imageUpdated.size(), 1);
+        QVERIFY(ui.server.imageUploads.constLast().contains(QByteArray(personImages + "/Primary")));
+        QTRY_VERIFY(detailsReads() > readsBefore);
+        // Another person reuses the person page, and its Edit Images follows the new person
+        const QString otherId = QStringLiteral("b2c3d4e5f60718293a4b5c6d7e8f0102");
+        QVERIFY(
+            QMetaObject::invokeMethod(ui.window, "openPerson", Q_ARG(QVariant, otherId),
+                                      Q_ARG(QVariant, QStringLiteral("Ari Stone")),
+                                      Q_ARG(QVariant, QVariant::fromValue(ui.currentDetails()))));
+        QTRY_COMPARE(ui.currentDetails(), personPage);
+        QCOMPARE(personPage->property("personId").toString(), otherId);
+        QVERIFY(QMetaObject::invokeMethod(edit, "trigger"));
+        QTRY_VERIFY((editPage = ui.item(QStringLiteral("editImagesPage"))) != nullptr
+                    && editPage->property("itemId").toString() == otherId);
+        QCOMPARE(ui.currentDetails(), editPage);
+        QCOMPARE(editPage->property("itemName").toString(), QStringLiteral("Ari Stone"));
+    }
+
     // The person page shows a card for each show the person only has episodes in, with their count, and that card opens the person's episodes of the show by season
     void aPersonPageGroupsGuestEpisodesIntoOneCardPerShow()
     {
@@ -15531,6 +15592,18 @@ class TestUiPages : public QObject {
         QCOMPARE(ui.stackDepth(), depth);
         QVERIFY(ui.item(QStringLiteral("editImagesPage")) == nullptr);
         QVERIFY(ui.item(QStringLiteral("remoteImagesPage")) == nullptr);
+        // A person page offers no Edit Images action either
+        QVERIFY(QMetaObject::invokeMethod(
+            ui.window, "openPerson",
+            Q_ARG(QVariant, QStringLiteral("a1b2c3d4e5f60718293a4b5c6d7e8f01")),
+            Q_ARG(QVariant, QStringLiteral("Mira Vale")),
+            Q_ARG(QVariant, QVariant::fromValue(ui.currentDetails()))));
+        QQuickItem *personPage = nullptr;
+        QTRY_VERIFY((personPage = ui.item(QStringLiteral("personPage"))) != nullptr);
+        QObject *editPerson =
+            personPage->findChild<QObject *>(QStringLiteral("editPersonImagesAction"));
+        QVERIFY(editPerson);
+        QVERIFY(!editPerson->property("visible").toBool());
     }
 
     void theDetailsPageEditsSubtitles()

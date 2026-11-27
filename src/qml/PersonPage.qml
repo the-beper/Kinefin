@@ -14,9 +14,20 @@ Kirigami.ScrollablePage {
     Kirigami.Theme.inherit: false
 
     required property ConnectionController connection
+    required property string personId
     required property string personName
 
     readonly property PersonItemsModel model: connection.personItems
+
+    actions: [
+        Kirigami.Action {
+            objectName: "editPersonImagesAction"
+            text: i18n("Edit Images…")
+            icon.name: "edit-image"
+            visible: page.connection.currentUserIsAdministrator
+            onTriggered: page.Window.window.openEditImages(page.personId, page.personName, page)
+        }
+    ]
 
     // The model belongs to the page: the last one to go releases the listing channel
     Component.onDestruction: model.close()
@@ -46,6 +57,8 @@ Kirigami.ScrollablePage {
             Layout.fillWidth: true
             backShown: true
             title: page.personName
+            actions: page.actions
+            toolbarObjectName: "personToolbar"
         }
 
         MessageBox {

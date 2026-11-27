@@ -824,9 +824,9 @@ Kirigami.ScrollablePage {
             if (page.sameId(itemId, page.details.itemId))
                 page.Window.window.showPassiveNotification(i18n("The metadata could not be saved: check the connection to the server and try again"));
         }
-        // The poster, the backdrop and the logo follow what the Edit Images pages above this one write
+        // The poster, the backdrop, the logo and the cast photos (their Primary image) follow what the Edit Images pages above this one write
         function onItemImageUpdated(itemId, imageType, index) {
-            if (page.sameId(itemId, page.details.itemId))
+            if (page.sameId(itemId, page.details.itemId) || (imageType === "Primary" && page.details.people.some(person => page.sameId(itemId, person.id))))
                 page.details.reload();
         }
     }

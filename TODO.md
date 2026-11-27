@@ -9,7 +9,6 @@
 - Music, with lyrics
 - Audiobooks
 - Choosing between the versions of an item
-- Edit Images for people
 - Seerr support
 - Desktop notifications
 - Plasma Bigscreen support, with theme songs, theme videos and a backdrop screensaver

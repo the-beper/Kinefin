@@ -1182,8 +1182,10 @@ Kirigami.ApplicationWindow {
         for (let i = pageStack.depth - 1; i >= 0; --i) {
             const candidate = pageStack.get(i);
             if (candidate?.objectName === "personPage") {
+                if (!connection.personItems.open(personId))
+                    return;
+                candidate.personId = personId;
                 candidate.personName = personName;
-                connection.personItems.open(personId);
                 popTo(candidate);
                 candidate.resetView();
                 return;
@@ -1192,7 +1194,7 @@ Kirigami.ApplicationWindow {
         if (!connection.personItems.open(personId))
             return;
         popTo(fromPage);
-        pageStack.push(Qt.resolvedUrl("PersonPage.qml"), { connection: connection, personName: personName });
+        pageStack.push(Qt.resolvedUrl("PersonPage.qml"), { connection: connection, personId: personId, personName: personName });
     }
 
     // The episodes one person has in a series, from a series card of the person page
