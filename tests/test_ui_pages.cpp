@@ -21213,7 +21213,7 @@ class TestUiPages : public QObject {
             pause->mapToScene(QPointF(pause->width() / 2, pause->height() / 2)).toPoint());
         QTRY_COMPARE(stub.calls.count(QStringLiteral("togglePause")), 1);
         QCOMPARE(ui.window->activeFocusItem(), page);
-        // A pointer at rest on the video, off the bars, lets them go (sooner than the five seconds of the app; the change restarts the timer)
+        // A pointer at rest on the video, off the bars, lets them go (sooner than the three seconds of the app; the change restarts the timer)
         restPointerOnVideo(ui);
         timer->setProperty("interval", 1000);
         QTRY_VERIFY(!osd->isVisible());
@@ -21229,7 +21229,7 @@ class TestUiPages : public QObject {
                               QStringLiteral("seekRelative -10"), QStringLiteral("seekRelative 10"),
                               QStringLiteral("seekRelative 60"), QStringLiteral("seekRelative -60"),
                               QStringLiteral("setVolume 95"), QStringLiteral("setVolume 100")}));
-        // A key shows the bars again, and so does a move of the pointer once they are gone
+        // A key shows the bars again (Space does not: it pauses, and the pause shows them), and so does a move of the pointer once they are gone
         QTRY_VERIFY(osd->isVisible());
         QTRY_VERIFY(!osd->isVisible());
         QTest::mouseMove(ui.window, QPoint(ui.window->width() / 3, ui.window->height() / 3));
@@ -21247,14 +21247,14 @@ class TestUiPages : public QObject {
         QVERIFY(focused && osd->isAncestorOf(focused));
         QTRY_VERIFY(!osd->isVisible());
         QCOMPARE(ui.window->activeFocusItem(), page);
-        // A key shows the bars again with the keys still on the page: Space pauses, it does not press the control Tab had reached
+        // A key shows the bars again with the keys still on the page: M mutes and Space pauses, neither presses the control Tab had reached
         stub.calls.clear();
-        QTest::keyClick(ui.window, Qt::Key_Space);
+        QTest::keyClick(ui.window, Qt::Key_M);
         QTRY_VERIFY(osd->isVisible());
         QCOMPARE(ui.window->activeFocusItem(), page);
         QTest::keyClick(ui.window, Qt::Key_Space);
         QCOMPARE(stub.calls,
-                 QStringList({QStringLiteral("togglePause"), QStringLiteral("togglePause")}));
+                 QStringList({QStringLiteral("toggleMute"), QStringLiteral("togglePause")}));
     }
 
     void playerLeavesToTheMiniPlayerByEveryRoute_data()
@@ -26102,10 +26102,12 @@ class TestUiPages : public QObject {
         QVERIFY(page);
         QObject *timer = page->findChild<QObject *>(QStringLiteral("playerChromeTimer"));
         QObject *pointer = page->findChild<QObject *>(QStringLiteral("playerPointer"));
+        QObject *release = page->findChild<QObject *>(QStringLiteral("playerChromeReleaseTimer"));
         QQuickItem *osd = ui.item(QStringLiteral("playerOsd"));
         QQuickItem *bottomBar = ui.item(QStringLiteral("playerBottomBar"));
-        QVERIFY(timer && pointer && osd && bottomBar);
+        QVERIFY(timer && release && pointer && osd && bottomBar);
         timer->setProperty("interval", 300);
+        release->setProperty("interval", 200);
         const QPoint onVideo(ui.window->width() / 2, ui.window->height() / 2);
         // The padding above the controls is part of the panel, with no control under the pointer
         const QPoint onBar = bottomBar->mapToScene(QPointF(bottomBar->width() / 2, 4)).toPoint();
@@ -26139,7 +26141,7 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(!page->property("osdLocked").toBool());
         wake();
         QTRY_VERIFY(!osd->isVisible());
-        // A pause keeps them, and once it ends they get their time again
+        // A pause keeps them, and once it ends they go after a short wait
         stub.paused = true;
         Q_EMIT stub.changed();
         QTRY_VERIFY(osd->isVisible());
@@ -26168,6 +26170,290 @@ class TestUiPages : public QObject {
         QTest::mouseMove(ui.window, onBar);
         QEvent leave(QEvent::Leave);
         QCoreApplication::sendEvent(ui.window, &leave);
+        QTRY_VERIFY(!osd->isVisible());
+    }
+
+    // Commands from outside the window, another Jellyfin client's included, move the playback and leave the bars as they are
+    void playerBarsStayHiddenForRemoteCommandsAndRemoteSeeks()
+    {
+        PlayerStub stub;
+        // A pause would show the bars on its own: the commands below change nothing in the pause state
+        stub.pauseChangesNothing = true;
+        RemoteStub remote;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(1000));
+        QVERIFY(ui.signIn());
+        QVERIFY(attach(ui, "remoteInput", &remote));
+        QQuickItem *page = openPlayer(ui, stub);
+        QVERIFY(page);
+        QObject *timer = page->findChild<QObject *>(QStringLiteral("playerChromeTimer"));
+        QQuickItem *osd = ui.item(QStringLiteral("playerOsd"));
+        QVERIFY(timer && osd);
+        timer->setProperty("interval", 300);
+        restPointerOnVideo(ui);
+        QTRY_VERIFY(!osd->isVisible());
+        QVERIFY(!page->property("showChrome").toBool());
+        stub.calls.clear();
+        for (const char *command : {"playpause", "fastforward", "rewind", "next", "previous",
+                                    "volumeup", "volumedown", "togglemute"})
+            Q_EMIT remote.actionRequested(QString::fromLatin1(command));
+        QCOMPARE(stub.calls.count(QStringLiteral("togglePause")), 1);
+        QVERIFY(stub.calls.contains(QStringLiteral("seekRelative 10")));
+        QVERIFY(stub.calls.contains(QStringLiteral("next")));
+        // Another session's seek goes through the connection's remote commands
+        ui.controller.remoteCommands()->handlePlaystate(QStringLiteral("Seek"), 600);
+        QVERIFY(stub.calls.contains(QStringLiteral("seek 600")));
+        QTest::qWait(300);
+        QVERIFY(!page->property("showChrome").toBool());
+        QVERIFY(!osd->isVisible());
+        QVERIFY(!timer->property("running").toBool());
+    }
+
+    // A pause from outside shows the bars and keeps them; the resume hands them to the short wait, unless the pointer moved shortly before, whose full time then decides
+    void playerPauseFromOutsideShowsTheBarsAndAResumeLetsThemGoAfterAShortWait()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(1000));
+        QVERIFY(ui.signIn());
+        QQuickItem *page = openPlayer(ui, stub);
+        QVERIFY(page);
+        QObject *timer = page->findChild<QObject *>(QStringLiteral("playerChromeTimer"));
+        QObject *release = page->findChild<QObject *>(QStringLiteral("playerChromeReleaseTimer"));
+        QQuickItem *osd = ui.item(QStringLiteral("playerOsd"));
+        QVERIFY(timer && release && osd);
+        timer->setProperty("interval", 300);
+        release->setProperty("interval", 200);
+        restPointerOnVideo(ui);
+        QTRY_VERIFY(!osd->isVisible());
+        // From here only the short wait can hide them
+        timer->setProperty("interval", 20000);
+        stub.paused = true;
+        Q_EMIT stub.changed();
+        QTRY_VERIFY(osd->isVisible());
+        QTest::qWait(600);
+        QVERIFY(osd->isVisible());
+        stub.paused = false;
+        Q_EMIT stub.changed();
+        QTRY_VERIFY(!osd->isVisible());
+        QVERIFY(!page->property("showChrome").toBool());
+        // A move of the pointer before the pause and the resume: its full time runs, the short wait does not cut it
+        const QPoint onVideo(ui.window->width() / 2, ui.window->height() / 2);
+        QTest::mouseMove(ui.window, onVideo + QPoint(5, 0));
+        QTRY_VERIFY(osd->isVisible());
+        stub.paused = true;
+        Q_EMIT stub.changed();
+        stub.paused = false;
+        Q_EMIT stub.changed();
+        QTest::qWait(600);
+        QVERIFY(osd->isVisible());
+        QVERIFY(page->property("showChrome").toBool());
+        timer->setProperty("interval", 300);
+        QTRY_VERIFY(!osd->isVisible());
+    }
+
+    // A pointer that has not moved since the bars went does not hold them when a pause brings them up; one that moved onto a panel does
+    void playerPointerThatDidNotMoveSinceTheBarsWentDoesNotHoldThem()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(1000));
+        QVERIFY(ui.signIn());
+        QQuickItem *page = openPlayer(ui, stub);
+        QVERIFY(page);
+        QObject *timer = page->findChild<QObject *>(QStringLiteral("playerChromeTimer"));
+        QObject *release = page->findChild<QObject *>(QStringLiteral("playerChromeReleaseTimer"));
+        QObject *pointer = page->findChild<QObject *>(QStringLiteral("playerPointer"));
+        QQuickItem *osd = ui.item(QStringLiteral("playerOsd"));
+        QQuickItem *bottomBar = ui.item(QStringLiteral("playerBottomBar"));
+        QVERIFY(timer && release && pointer && osd && bottomBar);
+        timer->setProperty("interval", 300);
+        release->setProperty("interval", 200);
+        const QPoint onVideo(ui.window->width() / 2, ui.window->height() / 2);
+        // The padding above the controls is part of the panel, with no control under the pointer
+        const QPoint onBar = bottomBar->mapToScene(QPointF(bottomBar->width() / 2, 4)).toPoint();
+        restPointerOnVideo(ui);
+        QTRY_VERIFY(!osd->isVisible());
+        // The pointer comes onto the panel and stays; the test clears `moved` by hand, as the hide of the bars does, to stand for a pointer parked there since before the bars went
+        QTest::mouseMove(ui.window, onBar);
+        QTRY_VERIFY(osd->isVisible());
+        QVERIFY(pointer->property("moved").toBool());
+        QVERIFY(pointer->setProperty("moved", false));
+        QTRY_VERIFY(!osd->isVisible());
+        // A pause brings the bars up, the pointer is still on their place, and the resume lets them go
+        stub.paused = true;
+        Q_EMIT stub.changed();
+        QTRY_VERIFY(osd->isVisible());
+        QTest::qWait(600);
+        QVERIFY(osd->isVisible());
+        stub.paused = false;
+        Q_EMIT stub.changed();
+        QTRY_VERIFY(!osd->isVisible());
+        QVERIFY(!pointer->property("moved").toBool());
+        // The pointer moving onto the panel holds them as long as it stays
+        QTest::mouseMove(ui.window, onVideo);
+        QTest::mouseMove(ui.window, onBar);
+        QTRY_VERIFY(osd->isVisible());
+        stub.paused = true;
+        Q_EMIT stub.changed();
+        stub.paused = false;
+        Q_EMIT stub.changed();
+        QTest::qWait(900);
+        QVERIFY(osd->isVisible());
+        QTest::mouseMove(ui.window, onVideo);
+        QTRY_VERIFY(!osd->isVisible());
+    }
+
+    // A pointer parked on the place of the bottom panel before the player opens, as a mouse left there during a remote play, does not hold the bars
+    void playerPointerParkedBeforeThePageOpensDoesNotHoldTheBars()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(1000));
+        QVERIFY(ui.signIn());
+        QQuickItem *first = openPlayer(ui, stub);
+        QVERIFY(first);
+        QQuickItem *firstBar = ui.item(QStringLiteral("playerBottomBar"));
+        QVERIFY(firstBar);
+        const QPoint onBar = firstBar->mapToScene(QPointF(firstBar->width() / 2, 4)).toPoint();
+        QTest::keyClick(ui.window, Qt::Key_Escape);
+        QTRY_COMPARE(ui.window->property("playbackMode").toString(), QStringLiteral("mini"));
+        QTest::mouseMove(ui.window, onBar);
+        QVERIFY(QMetaObject::invokeMethod(ui.window, "expandPlayer"));
+        QQuickItem *page = nullptr;
+        QTRY_VERIFY((page = ui.currentDetails()) && page != first
+                    && page->objectName() == QStringLiteral("playerPage")
+                    && page->property("isShowing").toBool());
+        QObject *timer = page->findChild<QObject *>(QStringLiteral("playerChromeTimer"));
+        QObject *pointer = page->findChild<QObject *>(QStringLiteral("playerPointer"));
+        QQuickItem *osd = page->findChild<QQuickItem *>(QStringLiteral("playerOsd"));
+        QVERIFY(timer && pointer && osd);
+        QVERIFY(osd->isVisible());
+        timer->setProperty("interval", 300);
+        QTRY_VERIFY(!osd->isVisible());
+        QVERIFY(!pointer->property("moved").toBool());
+        // A real move onto the panel holds them again
+        QTest::mouseMove(ui.window, onBar + QPoint(1, 0));
+        QTRY_VERIFY(osd->isVisible());
+        QTest::qWait(700);
+        QVERIFY(osd->isVisible());
+    }
+
+    // Space is no activity: the pause shows the bars, and after the resume only the short wait is left
+    void playerSpaceDoesNotWakeTheBarsButItsPauseShowsThem()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(1000));
+        QVERIFY(ui.signIn());
+        QQuickItem *page = openPlayer(ui, stub);
+        QVERIFY(page);
+        QObject *timer = page->findChild<QObject *>(QStringLiteral("playerChromeTimer"));
+        QObject *release = page->findChild<QObject *>(QStringLiteral("playerChromeReleaseTimer"));
+        QQuickItem *osd = ui.item(QStringLiteral("playerOsd"));
+        QVERIFY(timer && release && osd);
+        timer->setProperty("interval", 300);
+        release->setProperty("interval", 200);
+        restPointerOnVideo(ui);
+        QTRY_VERIFY(!osd->isVisible());
+        // The full time of the bars is long: only the short wait can hide them after the resume
+        timer->setProperty("interval", 20000);
+        stub.calls.clear();
+        QTest::keyClick(ui.window, Qt::Key_Space);
+        QCOMPARE(stub.calls, QStringList({QStringLiteral("togglePause")}));
+        QVERIFY(stub.paused);
+        QVERIFY(!timer->property("running").toBool());
+        QTRY_VERIFY(osd->isVisible());
+        QTest::qWait(600);
+        QVERIFY(osd->isVisible());
+        QTest::keyClick(ui.window, Qt::Key_Space);
+        QVERIFY(!stub.paused);
+        QVERIFY(!timer->property("running").toBool());
+        QTRY_VERIFY(!osd->isVisible());
+        // Another key does wake them
+        QTest::keyClick(ui.window, Qt::Key_M);
+        QTRY_VERIFY(osd->isVisible());
+        QVERIFY(timer->property("running").toBool());
+    }
+
+    // The time of the bars at the start does not pass while the item loads (the server's answer, then mpv opening the file): a timer that fired then runs again once the video plays
+    void playerBarsHideAfterASlowLoadOnceTheVideoPlays()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(1000));
+        QVERIFY(ui.signIn());
+        QQuickItem *page = openPlayer(ui, stub);
+        QVERIFY(page);
+        QObject *timer = page->findChild<QObject *>(QStringLiteral("playerChromeTimer"));
+        QQuickItem *osd = ui.item(QStringLiteral("playerOsd"));
+        QVERIFY(timer && osd);
+        QVERIFY(stub.active);
+        stub.loading = true;
+        Q_EMIT stub.changed();
+        timer->setProperty("interval", 300);
+        restPointerOnVideo(ui);
+        QTest::qWait(700);
+        QVERIFY(page->property("showChrome").toBool());
+        QVERIFY(osd->isVisible());
+        stub.loading = false;
+        Q_EMIT stub.changed();
+        QVERIFY(timer->property("running").toBool());
+        QTRY_VERIFY(!page->property("showChrome").toBool());
+        QTRY_VERIFY(!osd->isVisible());
+    }
+
+    // Between two items of a cast, casting is false while the server negotiates the stream for the device: the chosen device keeps the bars up through it, and they go once the cast ends
+    void playerBarsStayThroughTheGapBetweenTwoItemsOfACast()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(1000));
+        QVERIFY(ui.signIn());
+        QQuickItem *page = openPlayer(ui, stub);
+        QVERIFY(page);
+        QObject *timer = page->findChild<QObject *>(QStringLiteral("playerChromeTimer"));
+        QObject *release = page->findChild<QObject *>(QStringLiteral("playerChromeReleaseTimer"));
+        QQuickItem *osd = ui.item(QStringLiteral("playerOsd"));
+        QVERIFY(timer && release && osd);
+        timer->setProperty("interval", 300);
+        release->setProperty("interval", 200);
+        restPointerOnVideo(ui);
+        stub.castTargetId = QStringLiteral("uuid:tv");
+        stub.castTargetName = QStringLiteral("Living room");
+        stub.casting = true;
+        Q_EMIT stub.changed();
+        QTRY_VERIFY(osd->isVisible());
+        QTest::qWait(700);
+        QVERIFY(osd->isVisible());
+        // The next item: the device is still chosen while the server negotiates its stream; the controller also reports a load then, left out here so the chosen device alone holds the bars
+        stub.casting = false;
+        Q_EMIT stub.changed();
+        QVERIFY(page->property("barsHeld").toBool());
+        QTest::qWait(700);
+        QVERIFY(osd->isVisible());
+        stub.casting = true;
+        Q_EMIT stub.changed();
+        QTest::qWait(700);
+        QVERIFY(osd->isVisible());
+        // The cast ends here: nothing holds the bars any more
+        stub.casting = false;
+        stub.castTargetId.clear();
+        Q_EMIT stub.changed();
         QTRY_VERIFY(!osd->isVisible());
     }
 

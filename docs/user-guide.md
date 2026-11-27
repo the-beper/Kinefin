@@ -418,7 +418,7 @@ An episode played on its own is not added to the queue. The player still lets yo
 
 To play, press **Play** or **Resume** on a card or details page, or press Return on a focused card. Kinefin direct-plays the file when the server allows it and the file passes the device rules. Otherwise the server transcodes. **Media Info** and the player's **Playback Info** panel show which one is happening.
 
-The video fills the window. The controls float over it: a line at the top and a rounded panel at the bottom, with the picture visible around them. They appear when you move the pointer and hide 5 seconds later. They stay while playback is paused, while the pointer rests on them and while a menu is open.
+The video fills the window. The controls float over it: a line at the top and a rounded panel at the bottom, with the picture visible around them. They appear when you move the pointer, tap the video or press one of the player's keys other than Space, and hide 3 seconds later. They stay while the video opens or plays on another device, while playback is paused, while the pointer rests on them and while a menu is open. Once a pause ends they go after a second, unless you moved the pointer, clicked or pressed another key in the last 3 seconds. Playback, volume and full screen commands from other Jellyfin clients, media keys and gamepad buttons do not bring them up; arrows and other navigation input from a gamepad or another client do, as keys do. A pause from any of them keeps the controls up while it lasts.
 
 ### Control playback
 

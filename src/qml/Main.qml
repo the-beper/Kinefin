@@ -422,9 +422,6 @@ Kirigami.ApplicationWindow {
             break;
         default:
             playerAction(name);
-            // The bars of the full player show for what the remote did
-            if (playbackMode === "full")
-                playerPage?.wakeChrome();
         }
     }
     Connections {
@@ -1912,8 +1909,6 @@ Kirigami.ApplicationWindow {
             if (window.playbackMode === "none" || !window.player)
                 return;
             window.player.seek(ticks);
-            if (window.playbackMode === "full")
-                window.playerPage?.wakeChrome();
         }
         function onVolumeRequested(level) {
             window.player?.setVolume(level);

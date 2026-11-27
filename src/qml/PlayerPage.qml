@@ -84,14 +84,23 @@ Kirigami.Page {
     readonly property bool menuOpen: queuePanel.opened || audioMenu.opened || subtitlesMenu.opened || moreMenu.opened || contextMenu.opened
     // The lock keeps the bars up until it is opened again
     property bool osdLocked: false
-    // What else keeps the bars up whatever the timer says: the lock, a pause, the pointer on a bar, a drag of the timeline
     // A cast from its choice of a device on: casting is false while the server negotiates the stream for the device, also between two items of a cast
     readonly property bool castActive: page.player.casting || page.player.castTargetId.length > 0
-    readonly property bool barsHeld: osdLocked || page.player.paused || page.player.casting || pointerOnBars || timeline.pressed
-    // The pointer in the window over a panel of the bars or the margin around it, read from the one hover of the page: it follows every move and ends when the pointer leaves the window
-    readonly property bool pointerOnBars: pointer.hovered && osd.visible && (page.overPanel(topRow, topBar) || page.overPanel(bottomBar, osd))
-    // Once nothing holds them, the bars get their full time again before they go
-    onBarsHeldChanged: if (!barsHeld && showChrome) chromeTimer.restart()
+    // What else keeps the bars up whatever the timer says: the lock, a pause, a cast, the pointer on a bar, a drag of the timeline
+    readonly property bool barsHeld: osdLocked || page.player.paused || page.castActive || pointerOnBars || timeline.pressed
+    // The pointer in the window over a panel of the bars or the margin around it, read from the one hover of the page: it follows every move and ends when the pointer leaves the window; one that has not moved since the bars last went does not count, as a parked pointer stays hovering under the blank cursor
+    readonly property bool pointerOnBars: pointer.moved && pointer.hovered && osd.visible && (page.overPanel(topRow, topBar) || page.overPanel(bottomBar, osd))
+    // A hold shows the bars even when no local input did, and when it ends they go after a short wait, unless local input started the full time more recently
+    onBarsHeldChanged: {
+        if (barsHeld) {
+            showChrome = true;
+        } else if (showChrome && !chromeTimer.running) {
+            chromeReleaseTimer.restart();
+        }
+    }
+    // A slow load: the time of the bars at the start only begins once the video plays (loading covers the server's answer and mpv opening the file)
+    readonly property bool playerStarting: !page.player.active || page.player.loading
+    onPlayerStartingChanged: if (!playerStarting && showChrome) chromeTimer.restart()
     // The volume slider keeps the bars up only while the pointer is on it or on the speaker, or drags it: one opened by the keyboard or a long press goes with the bars
     readonly property bool volumeHeld: volumePopup.opened && (muteButton.hovered || volumeHover.hovered || volumeSlider.pressed)
 
@@ -104,7 +113,23 @@ Kirigami.Page {
     }
     // The page keeps the keyboard: the controls of the bars take it only through Tab, so the keys work whatever was clicked
     function focusPrimary() { page.forceActiveFocus(Qt.TabFocusReason); }
-    function wakeChrome() { showChrome = true; chromeTimer.restart(); }
+    function wakeChrome() {
+        showChrome = true;
+        chromeReleaseTimer.stop();
+        chromeTimer.restart();
+    }
+    function hideChrome() {
+        if (page.playerStarting || page.menuOpen || page.volumeHeld || page.barsHeld)
+            return;
+        // A control of a hidden bar would keep the keys: the page takes them back. The control gives its focus up first, or the page, a focus scope, would hand it back to it unseen when the bars show again
+        if (page.focusIsInOsd()) {
+            page.Window.window.activeFocusItem.focus = false;
+            page.focusPrimary();
+        }
+        page.showChrome = false;
+        pointer.moved = false;
+        volumePopup.close();
+    }
     // Leaving the page keeps the playback going: the shell parks the video in the mini player before the page goes
     // As Kirigami's Back does, the page in front only moves back one place; the shell takes the page left above once the stack settles, which deletes it (a pop of the page in front does not)
     function leavePlayer() {
@@ -284,7 +309,11 @@ Kirigami.Page {
             return;
         }
         switch (event.key) {
-        case Qt.Key_Space: page.playerAction("playpause"); break;
+        // Space is no activity: the pause hold shows the bars and a resume lets them go
+        case Qt.Key_Space:
+            page.Window.window.playerAction("playpause");
+            event.accepted = true;
+            return;
         case Qt.Key_M: page.playerAction("togglemute"); break;
         case Qt.Key_F: page.playerAction("togglefullscreen"); break;
         // Shift+I shows or hides Playback Info (the entry of More Actions has none for a local file either); I alone marks the clip start
@@ -361,17 +390,17 @@ Kirigami.Page {
     Timer {
         id: chromeTimer
         objectName: "playerChromeTimer"
-        interval: 5000
+        interval: 3000
+        onTriggered: page.hideChrome()
+    }
+    // The wait after a hold ends (a resume, the pointer leaving the window, the end of a cast) when no local input started the full time
+    Timer {
+        id: chromeReleaseTimer
+        objectName: "playerChromeReleaseTimer"
+        interval: 1000
         onTriggered: {
-            if (!page.player.active || page.menuOpen || page.volumeHeld || page.barsHeld)
-                return;
-            // A control of a hidden bar would keep the keys: the page takes them back. The control gives its focus up first, or the page, a focus scope, would hand it back to it unseen when the bars show again
-            if (page.focusIsInOsd()) {
-                page.Window.window.activeFocusItem.focus = false;
-                page.focusPrimary();
-            }
-            page.showChrome = false;
-            volumePopup.close();
+            if (!chromeTimer.running)
+                page.hideChrome();
         }
     }
     Timer {
@@ -456,16 +485,21 @@ Kirigami.Page {
             onClicked: page.player.stopCasting()
         }
     }
-    // Only a move of the pointer wakes the bars: the scene repeats the last hover position on every frame that changes something under it. The pointer hides with the bars
+    // Only a move of the pointer wakes the bars: the scene repeats the last hover position on every frame that changes something under it, and the page slides in under a parked pointer, so the position compared is the one in the scene. The pointer hides with the bars
     HoverHandler {
         id: pointer
         objectName: "playerPointer"
         cursorShape: osd.wanted ? Qt.ArrowCursor : Qt.BlankCursor
         property point lastPosition: Qt.point(-1, -1)
+        // Whether the pointer moved since the bars last went: a pointer parked on their place does not hold them
+        property bool moved: false
         onPointChanged: {
-            if (point.position.x === lastPosition.x && point.position.y === lastPosition.y)
+            if (point.scenePosition.x === lastPosition.x && point.scenePosition.y === lastPosition.y)
                 return;
-            lastPosition = point.position;
+            // The first position of the page can be a pointer parked there before it opened: it wakes the bars but does not hold them
+            if (lastPosition.x >= 0)
+                moved = true;
+            lastPosition = point.scenePosition;
             page.wakeChrome();
         }
     }
