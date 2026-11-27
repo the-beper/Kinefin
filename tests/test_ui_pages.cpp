@@ -21147,6 +21147,165 @@ class TestUiPages : public QObject {
         QTRY_COMPARE(ui.window->visibility(), QWindow::FullScreen);
     }
 
+    // Full Screen When Playing: the full player opens in full screen and every way out gives the window back as it was
+    void playerOpensFullScreenWhenTheSettingIsOn()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(ui.settings.setValue(QStringLiteral("main"), QStringLiteral("fullscreenOnPlayback"),
+                                     true));
+        QCOMPARE(ui.window->visibility(), QWindow::Windowed);
+        QQuickItem *page = openPlayer(ui, stub);
+        QVERIFY(page);
+        QTRY_COMPARE(ui.window->visibility(), QWindow::FullScreen);
+        // Back goes to the mini player and the window is a window again
+        QQuickItem *back = ui.item(QStringLiteral("playerBackButton"));
+        QVERIFY(back && back->isVisible());
+        QTest::mouseClick(
+            ui.window, Qt::LeftButton, Qt::NoModifier,
+            back->mapToScene(QPointF(back->width() / 2, back->height() / 2)).toPoint());
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("homePage"));
+        QTRY_VERIFY(shownMiniPlayer(ui));
+        QTRY_COMPARE(ui.window->visibility(), QWindow::Windowed);
+        // Expanding the mini player enters full screen again
+        QVERIFY(QMetaObject::invokeMethod(ui.window, "expandPlayer"));
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("playerPage"));
+        QTRY_COMPARE(ui.window->visibility(), QWindow::FullScreen);
+        QVERIFY(!stub.calls.contains(QStringLiteral("stop")));
+    }
+
+    void playerStaysWindowedWhenTheSettingIsOff()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(openPlayer(ui, stub));
+        QTest::qWait(200);
+        QCOMPARE(ui.window->visibility(), QWindow::Windowed);
+        // Switching it on while the player is open acts at the next full player, not live
+        QVERIFY(ui.settings.setValue(QStringLiteral("main"), QStringLiteral("fullscreenOnPlayback"),
+                                     true));
+        QTest::qWait(200);
+        QCOMPARE(ui.window->visibility(), QWindow::Windowed);
+        QTest::keyClick(ui.window, Qt::Key_Escape);
+        QTRY_COMPARE(ui.window->property("playbackMode").toString(), QStringLiteral("mini"));
+        QVERIFY(QMetaObject::invokeMethod(ui.window, "expandPlayer"));
+        QTRY_COMPARE(ui.window->visibility(), QWindow::FullScreen);
+    }
+
+    // The full screen command from the mini player or picture in picture opens the player in full screen, also when Full Screen When Playing already entered it as the player opened
+    void fullScreenCommandFromTheMiniPlayerEndsInFullScreenWithTheSettingOn_data()
+    {
+        QTest::addColumn<bool>("setting");
+        QTest::newRow("setting off") << false;
+        QTest::newRow("setting on") << true;
+    }
+    void fullScreenCommandFromTheMiniPlayerEndsInFullScreenWithTheSettingOn()
+    {
+        QFETCH(bool, setting);
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(ui.settings.setValue(QStringLiteral("main"), QStringLiteral("fullscreenOnPlayback"),
+                                     setting));
+        QVERIFY(openPlayer(ui, stub));
+        // Escape leaves the full screen of the player first, then the player
+        if (setting) {
+            QTRY_COMPARE(ui.window->visibility(), QWindow::FullScreen);
+            QTest::keyClick(ui.window, Qt::Key_Escape);
+            QTRY_COMPARE(ui.window->visibility(), QWindow::Windowed);
+        }
+        QTest::keyClick(ui.window, Qt::Key_Escape);
+        QTRY_COMPARE(ui.window->property("playbackMode").toString(), QStringLiteral("mini"));
+        QTRY_COMPARE(ui.window->visibility(), QWindow::Windowed);
+        QVERIFY(QMetaObject::invokeMethod(ui.window, "playerAction",
+                                          Q_ARG(QVariant, QStringLiteral("togglefullscreen"))));
+        QTRY_COMPARE(ui.window->property("playbackMode").toString(), QStringLiteral("full"));
+        QTRY_COMPARE(ui.window->visibility(), QWindow::FullScreen);
+        QTest::qWait(200);
+        QCOMPARE(ui.window->visibility(), QWindow::FullScreen);
+    }
+
+    void fKeyLeavesTheFullScreenOfPlaybackUntilThePlayerCloses()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(ui.settings.setValue(QStringLiteral("main"), QStringLiteral("fullscreenOnPlayback"),
+                                     true));
+        QQuickItem *page = openPlayer(ui, stub);
+        QVERIFY(page);
+        QTRY_COMPARE(ui.window->visibility(), QWindow::FullScreen);
+        QTest::keyClick(ui.window, Qt::Key_F);
+        QTRY_COMPARE(ui.window->visibility(), QWindow::Windowed);
+        // The page stays windowed: only a new push of the player page enters full screen again
+        QTest::qWait(200);
+        QCOMPARE(ui.currentDetails(), page);
+        QCOMPARE(ui.window->visibility(), QWindow::Windowed);
+        QTest::keyClick(ui.window, Qt::Key_Escape);
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("homePage"));
+        QCOMPARE(ui.window->visibility(), QWindow::Windowed);
+    }
+
+    void aWindowAlreadyFullScreenStaysSoWhenThePlayerLeaves()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        // Full screen through the Full Screen setting, as a user would have it
+        QVERIFY(ui.settings.setValue(QStringLiteral("main"), QStringLiteral("fullscreen"), true));
+        QTRY_COMPARE(ui.window->visibility(), QWindow::FullScreen);
+        QVERIFY(ui.settings.setValue(QStringLiteral("main"), QStringLiteral("fullscreenOnPlayback"),
+                                     true));
+        QVERIFY(openPlayer(ui, stub));
+        QCOMPARE(ui.window->visibility(), QWindow::FullScreen);
+        QTest::keyClick(ui.window, Qt::Key_Escape);
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("homePage"));
+        QTRY_COMPARE(ui.stackDepth(), 1);
+        QCOMPARE(ui.window->visibility(), QWindow::FullScreen);
+    }
+
+    void aCastKeepsTheWindowAsItIsWhenThePlayerOpens_data()
+    {
+        QTest::addColumn<QString>("state");
+        // The target is set before the page opens, while the stream is negotiated
+        QTest::newRow("cast target chosen") << QStringLiteral("castTargetId");
+        QTest::newRow("casting") << QStringLiteral("casting");
+        QTest::newRow("failed cast") << QStringLiteral("canContinueHere");
+    }
+
+    void aCastKeepsTheWindowAsItIsWhenThePlayerOpens()
+    {
+        QFETCH(QString, state);
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(ui.settings.setValue(QStringLiteral("main"), QStringLiteral("fullscreenOnPlayback"),
+                                     true));
+        if (state == QLatin1String("castTargetId"))
+            stub.castTargetId = QStringLiteral("uuid:tv");
+        else if (state == QLatin1String("casting"))
+            stub.casting = true;
+        else
+            stub.canContinueHere = true;
+        QVERIFY(openPlayer(ui, stub));
+        QTest::qWait(200);
+        QCOMPARE(ui.window->visibility(), QWindow::Windowed);
+    }
+
     void playerFullScreenGivesBackAMaximizedWindow()
     {
         PlayerStub stub;

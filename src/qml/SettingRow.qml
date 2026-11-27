@@ -51,6 +51,8 @@ Loader {
             text: row.label
             description: {
                 switch (row.key) {
+                case "fullscreenOnPlayback":
+                    return i18n("Also when another Jellyfin client starts the playback. Not while casting");
                 case "newBadge":
                     return i18n("Items added within the last 7 days are marked New until they are played");
                 case "ignoreSSLErrors":

@@ -433,6 +433,8 @@ The bottom panel has the timeline with a thumbnail preview while you drag, **Pre
 
 A right click on the video, the Menu key or Shift+F10 open a context menu with the main actions: **Pause** or **Resume**, **Previous**, **Next**, **Audio**, **Subtitles**, **Full Screen Mode**, **Show Mini Player** and **More Actions**. A single click on the video pauses or resumes, and a double click toggles full screen. The mouse wheel anywhere over the player changes the volume by 5.
 
+To have the player open in full screen, also when another Jellyfin client starts the playback, switch on **Full Screen When Playing** in **Settings**, **General**. It does not apply while casting, and leaving the player gives the window back as it was.
+
 | Key            | Action                                                                         |
 | -------------- | ------------------------------------------------------------------------------ |
 | Space          | Play or pause                                                                  |

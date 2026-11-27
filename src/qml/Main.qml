@@ -83,6 +83,7 @@ Kirigami.ApplicationWindow {
     property var remotePending: []
 
     property bool fullscreenSetting: settings.value("main", "fullscreen")
+    property bool fullscreenOnPlayback: settings.value("main", "fullscreenOnPlayback")
     property string fullscreenOutput: settings.value("main", "forceFSScreen")
     property bool newBadgeEnabled: settings.value("library", "newBadge")
     property bool homeLibrariesEnabled: settings.value("library", "home.libraries")
@@ -520,6 +521,7 @@ Kirigami.ApplicationWindow {
             if (section !== "main")
                 return;
             window.fullscreenSetting = window.settings.value("main", "fullscreen");
+            window.fullscreenOnPlayback = window.settings.value("main", "fullscreenOnPlayback");
             if (key === "fullscreen")
                 window.startupWindowMode = "";
             window.fullscreenOutput = window.settings.value("main", "forceFSScreen");
@@ -890,6 +892,9 @@ Kirigami.ApplicationWindow {
             window.raise();
             window.requestActivate();
         }
+        // The video plays in this window: a cast, a failed cast and a cast about to start (the target is set before the page opens) keep the window as it is
+        if (fullscreenOnPlayback && visibility !== Window.FullScreen && !player.casting && !player.castTargetId && !player.canContinueHere)
+            togglePlayerFullscreen();
         return true;
     }
 
@@ -953,8 +958,8 @@ Kirigami.ApplicationWindow {
         case "volumedown": stepVolume(-1); break;
         case "togglemute": player.toggleMute(); break;
         case "togglefullscreen":
-            // A full screen needs the full player
-            if ((playbackMode === "mini" || playbackMode === "pip") && !showPlayerPage())
+            // A full screen needs the full player; Full Screen When Playing may already have entered it as the player opened, which answers the command
+            if ((playbackMode === "mini" || playbackMode === "pip") && (!showPlayerPage() || visibilityBeforePlayer >= 0))
                 break;
             togglePlayerFullscreen();
             break;

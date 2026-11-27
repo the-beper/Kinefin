@@ -142,6 +142,17 @@ class TestSettingsParity : public QObject {
         QCOMPARE(homeFavorites->type, SettingDefinition::Type::Bool);
         QCOMPARE(QString::fromUtf8(homeFavorites->group.untranslatedText()),
                  QString::fromUtf8(homeLibraries->group.untranslatedText()));
+        // Full screen when the full player opens: visible, off by default, in the Window group beside Full Screen
+        const auto *fullscreen =
+            Kinefin::findSetting(QStringLiteral("main"), QStringLiteral("fullscreen"));
+        const auto *fullscreenOnPlayback =
+            Kinefin::findSetting(QStringLiteral("main"), QStringLiteral("fullscreenOnPlayback"));
+        QVERIFY(fullscreen && fullscreenOnPlayback && !fullscreenOnPlayback->hidden
+                && !fullscreenOnPlayback->label.isEmpty());
+        QCOMPARE(fullscreenOnPlayback->type, SettingDefinition::Type::Bool);
+        QCOMPARE(fullscreenOnPlayback->defaultValue, QVariant(false));
+        QCOMPARE(QString::fromUtf8(fullscreenOnPlayback->group.untranslatedText()),
+                 QString::fromUtf8(fullscreen->group.untranslatedText()));
         // The downloads: the number of parallel transfers is visible
         const auto *parallelDownloads =
             Kinefin::findSetting(QStringLiteral("downloads"), QStringLiteral("parallel"));
