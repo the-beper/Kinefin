@@ -1,0 +1,8 @@
+[Flatpak Repo]
+Title=Kinefin
+Url=https://the-beper.github.io/Kinefin/repo/
+Homepage=https://github.com/the-beper/Kinefin
+Comment=Browse Jellyfin movies and shows on KDE Plasma
+Description=Kinefin is a native KDE Plasma client for browsing movie and TV libraries on Jellyfin servers.
+Icon=https://the-beper.github.io/Kinefin/icon.svg
+GPGKey=mDMEawV3lRYJKwYBBAHaRw8BAQdAEkWamPKruR3+MamAbcasGpmy1ZAxQmtKpVA/pf6GBO+0GktpbmVmaW4gRmxhdHBhayByZXBvc2l0b3J5iJMEExYKADsWIQTMfQZk2xZoO2GDkn3ZTyvLaHZqPgUCawV3lQIbAwULCQgHAgIiAgYVCgkICwIEFgIDAQIeBwIXgAAKCRDZTyvLaHZqPtOFAPwJ7nXVNrL+kQQ9YrtO94deQZabnJNdMuKitmSFpo/zzgEAoYNwRlo61CAgElUfQSB9C86wemVZfSWjrvUDRyhMmgQ=

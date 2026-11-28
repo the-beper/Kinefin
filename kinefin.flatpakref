@@ -1,0 +1,11 @@
+[Flatpak Ref]
+Title=Kinefin
+Name=io.github.the_beper.Kinefin
+Branch=stable
+Url=https://the-beper.github.io/Kinefin/repo/
+Homepage=https://github.com/the-beper/Kinefin
+Icon=https://the-beper.github.io/Kinefin/icon.svg
+SuggestRemoteName=kinefin
+IsRuntime=false
+RuntimeRepo=https://dl.flathub.org/repo/flathub.flatpakrepo
+GPGKey=mDMEawV3lRYJKwYBBAHaRw8BAQdAEkWamPKruR3+MamAbcasGpmy1ZAxQmtKpVA/pf6GBO+0GktpbmVmaW4gRmxhdHBhayByZXBvc2l0b3J5iJMEExYKADsWIQTMfQZk2xZoO2GDkn3ZTyvLaHZqPgUCawV3lQIbAwULCQgHAgIiAgYVCgkICwIEFgIDAQIeBwIXgAAKCRDZTyvLaHZqPtOFAPwJ7nXVNrL+kQQ9YrtO94deQZabnJNdMuKitmSFpo/zzgEAoYNwRlo61CAgElUfQSB9C86wemVZfSWjrvUDRyhMmgQ=
