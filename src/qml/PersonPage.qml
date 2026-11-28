@@ -25,7 +25,8 @@ Kirigami.ScrollablePage {
             text: i18n("Edit Images…")
             icon.name: "edit-image"
             visible: page.connection.currentUserIsAdministrator
-            onTriggered: page.Window.window.openEditImages(page.personId, page.personName, page)
+            // A person has a Primary image only
+            onTriggered: page.Window.window.openEditImages(page.personId, page.personName, page, ["Primary"])
         }
     ]
 

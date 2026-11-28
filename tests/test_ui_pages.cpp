@@ -11,6 +11,7 @@
 #include "app/HdrOutput.h"
 #include "app/ImageNetworkFactory.h"
 #include "app/PipSurface.h"
+#include "downloads/DownloadStore.h"
 #include "imagecache/ImageOrigin.h"
 #include "integration/RemoteInputServer.h"
 #include "models/SearchModel.h"
@@ -32,6 +33,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QFontDatabase>
+#include <QFontMetricsF>
 #include <QGuiApplication>
 #include <QImage>
 #include <QJSValue>
@@ -443,7 +445,8 @@ struct Ui {
         return stack ? stack->property("depth").toInt() : -1;
     }
 
-    bool signIn()
+    // A session that starts on the sign-in keeps that page until its libraries are listed: a test that holds the libraries back waits for Home as long as the deadline of that wait (8 s) plus a margin
+    bool signIn(int homeTimeoutMs = 10000)
     {
         controller.connectTo(address(server));
         if (!qWaitForScaled(
@@ -454,7 +457,14 @@ struct Ui {
                    [this] { return controller.state() == ConnectionController::Authenticated; },
                    10000)
                && qWaitForScaled([this] { return item(QStringLiteral("homePage")) != nullptr; },
-                                 10000);
+                                 homeTimeoutMs)
+               && pageMotionEnded();
+    }
+
+    // The page of a new state fades in with the window's tab motion, and the shell hands the keyboard to the page in front while it runs: a test acts once it has ended
+    bool pageMotionEnded()
+    {
+        return qWaitForScaled([this] { return !window->property("tabSwitching").toBool(); }, 10000);
     }
 
     // The user table of the fake server: Alice with an avatar and a second user (Bob unless named otherwise, without an avatar unless given a tag)
@@ -470,7 +480,8 @@ struct Ui {
     bool reach(ConnectionController::State state, const QString &page)
     {
         return qWaitForScaled([this, state] { return controller.state() == state; }, 10000)
-               && qWaitForScaled([this, &page] { return item(page) != nullptr; }, 10000);
+               && qWaitForScaled([this, &page] { return item(page) != nullptr; }, 10000)
+               && pageMotionEnded();
     }
 
     // Signs in as the user of the table, from the sign-in page
@@ -706,7 +717,8 @@ struct Ui {
     bool tabSwitching() const { return window->property("tabSwitching").toBool(); }
     void clickCenter(QQuickItem *target)
     {
-        qWaitForScaled([this] { return columnSettled(); }, 1000);
+        // The rail clips its entries to the painted edge while it glides and moves while it slides: the click waits for the motion to end
+        qWaitForScaled([this] { return columnSettled() && !railChanging(); }, 1000);
         const QPointF center =
             target->mapToScene(QPointF(target->width() / 2, target->height() / 2));
         QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, center.toPoint());
@@ -814,6 +826,14 @@ struct Ui {
     QQuickItem *sidebar() const { return item(QStringLiteral("shellSidebar")); }
     qreal sidebarWidth() const { return window->property("sidebarWidth").toReal(); }
     bool railShows() const { return sidebarWidth() > 0; }
+    // True while the rail changes form: its painted edge glides or the whole rail slides, and a click on an entry may land beside it
+    bool railChanging() const
+    {
+        const QObject *rail = window->findChild<QObject *>(QStringLiteral("shellSidebar"));
+        if (!rail)
+            rail = sidebar();
+        return rail && rail->property("formChanging").toBool();
+    }
 
     // The Kirigami.Action of the header with this object name: the menus trigger through it like a click does
     QObject *shellAction(const QString &objectName) const
@@ -880,7 +900,7 @@ struct Ui {
         const bool inDrawer = !railShows();
         if (inDrawer && !openNavigationDrawer())
             return false;
-        // The entries slide while one appears or goes: the click waits until the list holds still
+        // The entries slide while one appears or goes, and the rail glides or slides when it changes form: the click waits until the list holds still
         QList<qreal> before;
         const auto positions = [this] {
             QList<qreal> ys;
@@ -891,7 +911,7 @@ struct Ui {
         qWaitForScaled(
             [&] {
                 const QList<qreal> now = positions();
-                const bool still = now == before;
+                const bool still = now == before && !railChanging();
                 before = now;
                 QTest::qWait(60);
                 return still;
@@ -954,8 +974,21 @@ struct Ui {
             clickCenter(mainMenuOrigin());
         }
         QObject *menu = popup(QStringLiteral("mainMenu"));
-        if (!menu || !qWaitForScaled([menu] { return menu->property("opened").toBool(); }, 5000))
+        if (!menu || !qWaitForScaled([menu] { return menu->property("opened").toBool(); }, 5000)) {
+            // Seen rarely under load and not reproduced: the state of the shell says which click was lost
+            const QQuickItem *entry = item(QStringLiteral("drawerMenu"));
+            const QObject *drawer = popup(QStringLiteral("navigationDrawer"));
+            qWarning().noquote() << "the main menu did not open: corner navigation"
+                                 << window->property("cornerNavigation").toBool() << "scene"
+                                 << window->contentItem()->size() << "drawer opened"
+                                 << (drawer && drawer->property("opened").toBool())
+                                 << "drawer entry"
+                                 << (entry ? entry->mapRectToScene(entry->boundingRect())
+                                           : QRectF())
+                                 << (entry && entry->isEnabled()) << "menu visible"
+                                 << (menu && menu->property("visible").toBool());
             return nullptr;
+        }
         return menu;
     }
 
@@ -1048,10 +1081,14 @@ struct Ui {
         // The header takes no height while it is hidden; the rail takes the leading edge
         const qreal headerHeight = this->headerHeight();
         const qreal railWidth = sidebarWidth();
+        const bool mirrored = QGuiApplication::layoutDirection() == Qt::RightToLeft;
+        // The page's room beside the rail, which stands on the right right to left
+        const qreal roomLeft = mirrored ? bounds.left() : bounds.left() + railWidth;
+        const qreal roomRight = mirrored ? bounds.right() - railWidth : bounds.right();
         const QRectF front =
             current->mapRectToScene(QRectF(0, 0, current->width(), current->height()));
-        if (front.top() < headerHeight - 1 || front.left() < railWidth - 1
-            || front.right() > bounds.right() + 1 || front.bottom() > bounds.bottom() + 1
+        if (front.top() < headerHeight - 1 || front.left() < roomLeft - 1
+            || front.right() > roomRight + 1 || front.bottom() > bounds.bottom() + 1
             || front.width() < bounds.width() - railWidth - 1)
             problems << QStringLiteral("front page %1 does not fill the window under the header "
                                        "and beside the rail (%2 px high, %3 px wide): x=%4 y=%5 "
@@ -1064,7 +1101,7 @@ struct Ui {
                             .arg(front.width())
                             .arg(bounds.width());
         // The rail is opaque and above the page row: a page below the one in front may lie under it
-        const QRectF shown(railWidth, 0, bounds.width() - railWidth, bounds.height());
+        const QRectF shown(roomLeft, 0, bounds.width() - railWidth, bounds.height());
         for (const QQuickItem *page : stackPages()) {
             if (page == current || !page->isVisible() || clippedAway(page))
                 continue;
@@ -1099,10 +1136,18 @@ struct Ui {
         return visited;
     }
 
-    bool opensWindowOfWidth(int width)
+    // The window reports its new size before the scene takes it on the resize event: the wait is for the scene, and for a rail that changes form with it to stand still
+    bool opensWindowOfWidth(int width, int height = 640)
     {
-        window->resize(width, 640);
-        return qWaitForScaled([this, width] { return window->width() == width; }, 3000);
+        window->resize(width, height);
+        return qWaitForScaled(
+            [this, width, height] {
+                const QQuickItem *rail = sidebar();
+                return window->width() == width && window->contentItem()->width() == width
+                       && window->contentItem()->height() == height
+                       && !(rail && rail->property("formChanging").toBool());
+            },
+            3000);
     }
 
     FakeJellyfin server;
@@ -3404,6 +3449,51 @@ void hoverMiniPlayer(const Ui &ui, const QQuickItem *mini)
     QTest::mouseMove(ui.window, middle);
 }
 
+// Takes the pointer off the mini player, which stands in a bottom corner, to the upper middle of the window: two moves, as in hoverMiniPlayer
+void leaveMiniPlayer(const Ui &ui)
+{
+    const QPoint away(ui.window->width() / 2, ui.window->height() / 4);
+    QTest::mouseMove(ui.window, away + QPoint(1, 1));
+    QTest::mouseMove(ui.window, away);
+}
+
+// Gives the mini player a title that is about `extra` pixels wider than the area its panel leaves the title (two fifths of the row), measured in the bold font of the label, and waits until the area has settled at that width; false when it did not
+bool giveMiniPlayerOverflowingTitle(PlayerStub &stub, QQuickItem *mini, qreal extra,
+                                    bool rightToLeftText = false)
+{
+    const QQuickItem *panel = Ui::itemIn(mini, QStringLiteral("miniPlayerBottomPanel"));
+    const QQuickItem *label = Ui::itemIn(mini, QStringLiteral("miniPlayerTitle"));
+    const QQuickItem *box = Ui::itemIn(mini, QStringLiteral("miniPlayerTitleBox"));
+    if (!panel || !label || !box)
+        return false;
+    const qreal area =
+        std::round((sceneRect(panel).width() - 2 * mini->property("panelPadding").toReal()) * 0.4);
+    const QFontMetricsF metrics(label->property("font").value<QFont>());
+    // A Hebrew title for a text that runs right to left
+    const QString words =
+        rightToLeftText
+            ? QStringLiteral("הדרך הארוכה לתח"
+                             "נת התהום ובחזרה "
+                             "הביתה חלק שני של "
+                             "העונה השנייה שו"
+                             "ב ושוב ושוב ושוב")
+            : QStringLiteral(
+                  "The Long Way Down to Abyss Station and Home, Part Two of the Second Season "
+                  "of the Anthology, Again and Again and Again and Again");
+    QString title;
+    for (const QChar letter : words) {
+        title += letter;
+        if (letter != QLatin1Char(' ') && metrics.horizontalAdvance(title) >= area + extra)
+            break;
+    }
+    stub.title = title;
+    Q_EMIT stub.changed();
+    return qWaitForScaled([&] {
+        return label->property("text").toString() == title && qAbs(box->width() - area) <= 1
+               && box->property("overflow").toReal() > 1;
+    });
+}
+
 // Leaves the full player for the mini player through the first entry of More Actions, as a user does; false when the menu or the entry is missing
 bool chooseShowMiniPlayer(Ui &ui)
 {
@@ -3776,6 +3866,45 @@ QQuickItem *openEditImagesPage(Ui &ui, bool waitForList = true)
     return page;
 }
 
+// The strings a `var` property holds, whether it comes back as a JS array or as a list value
+QStringList stringsOf(const QVariant &value)
+{
+    if (value.metaType() == QMetaType::fromType<QJSValue>())
+        return value.value<QJSValue>().toVariant().toStringList();
+    return value.toStringList();
+}
+
+// The Edit Images page of a person, opened from the person page over the details page of the fixture movie, as an administrator does; null when a step did not come up. With `waitForList` the page is returned once the card of the Primary image shows
+QQuickItem *openPersonEditImagesPage(Ui &ui, bool waitForList = true)
+{
+    QQuickItem *details = openDetails(ui, kMovieId);
+    if (!details
+        || !QMetaObject::invokeMethod(
+            ui.window, "openPerson",
+            Q_ARG(QVariant, QStringLiteral("a1b2c3d4e5f60718293a4b5c6d7e8f01")),
+            Q_ARG(QVariant, QStringLiteral("Mira Vale")),
+            Q_ARG(QVariant, QVariant::fromValue(details))))
+        return nullptr;
+    QObject *edit = nullptr;
+    if (!qWaitForScaled([&] {
+            QQuickItem *personPage = ui.item(QStringLiteral("personPage"));
+            edit = personPage
+                       ? personPage->findChild<QObject *>(QStringLiteral("editPersonImagesAction"))
+                       : nullptr;
+            return edit && edit->property("visible").toBool();
+        })
+        || !QMetaObject::invokeMethod(edit, "trigger"))
+        return nullptr;
+    QQuickItem *page = nullptr;
+    // Kirigami's column keeps a page disabled until it has slid into view: the page counts as open once it is enabled
+    qWaitForScaled([&] {
+        page = ui.item(QStringLiteral("editImagesPage"));
+        return page != nullptr && page->isEnabled() && ui.columnSettled()
+               && (!waitForList || ui.item(QStringLiteral("editImageCard_Primary")) != nullptr);
+    });
+    return page;
+}
+
 // Steps the card of a type with several images to the image at `place` with its Previous and Next buttons: the buttons that move or delete an image are in sight only while the card shows it
 bool showImageAt(Ui &ui, const QString &type, int place)
 {
@@ -3875,6 +4004,231 @@ QString downloadRowProblem(const Ui &ui, const QString &id)
     return {};
 }
 
+// Puts the fixture movie in the queue of the signed-in user in `state` (fetching unless said otherwise), with `bytesWritten` of `size` bytes written (-1 is a size the server did not give), and has the page list it. The engine holds no transfer for it, so its speed reads zero and the fake server is not asked for anything; a second call changes the same card in place
+bool putDownload(Ui &ui, qint64 size, qint64 bytesWritten,
+                 const QString &state = QStringLiteral("fetching"))
+{
+    Kinefin::DownloadsController *downloads = ui.controller.downloads();
+    Kinefin::DownloadRecord record;
+    record.serverId = downloads->ownerServerId();
+    record.userId = downloads->ownerUserId();
+    record.itemId = kMovieId;
+    record.name = QStringLiteral("Arcturus (2012)");
+    record.type = QStringLiteral("Movie");
+    record.container = QStringLiteral("mkv");
+    record.state = state;
+    record.size = size;
+    record.bytesWritten = bytesWritten;
+    record.addedAt = QDateTime::currentMSecsSinceEpoch();
+    record.updatedAt = record.addedAt;
+    if (!downloads->store()->upsert(record, false))
+        return false;
+    downloads->model()->refresh();
+    return true;
+}
+
+// One look at the rail and what follows it while it changes form; every field is read from items found beforehand, so that a look takes no search by name and many can be taken in a second
+struct RailSample {
+    qint64 nanos = 0;
+    QSize size;
+    bool compact = false;
+    bool compactHeader = false;
+    bool changing = false;
+    bool leaving = false;
+    // The painted width of the rail minus the width of its form
+    qreal lag = 0;
+    // The fade of the corner button as the rail holds it, 1 at rest
+    qreal cornerFade = 1;
+    // The page row, the rail's own item, the room the window says it leaves the page row, the width the form asks for and the width the panel paints
+    qreal pageWidth = 0;
+    qreal railWidth = 0;
+    qreal sidebarWidth = 0;
+    qreal formWidth = 0;
+    qreal panelWidth = 0;
+    // How far the painted rail stands past the leading edge of the window: 0 at rest, the width of the rail once it is out
+    qreal lead = 0;
+    bool railVisible = false;
+    bool railEnabled = false;
+    bool railIgnored = false;
+    bool cornerVisible = false;
+    qreal cornerOpacity = 0;
+    QList<QRectF> entries;
+};
+
+// The items a change of form is watched through: the rail, the panel it paints, the page row, the corner button and the entries of the rail, all found once
+struct RailWatch {
+    RailWatch(const Ui &ui, bool rightToLeft)
+        : window(ui.window), mirrored(rightToLeft), rail(ui.sidebar()),
+          panel(ui.item(QStringLiteral("shellSidebarPanel"))),
+          pages(qobject_cast<QQuickItem *>(ui.window->property("pageStack").value<QObject *>())),
+          corner(ui.item(QStringLiteral("navigationButton")))
+    {
+        if (rail)
+            ignored = QQmlProperty(rail, QStringLiteral("Accessible.ignored"), qmlContext(rail));
+        for (QQuickItem *entry : ui.itemsStartingWith(QStringLiteral("sidebarEntry_"))) {
+            if (entry->isVisible() && entry->width() > 0)
+                entries.append(entry);
+        }
+        for (const char *name : {"sidebarSearch", "queueButton", "remoteSessionsButton",
+                                 "syncPlayButton", "sidebarMenuButton", "sidebarUserButton"}) {
+            if (QQuickItem *entry = ui.item(QLatin1String(name)))
+                entries.append(entry);
+        }
+        clock.start();
+    }
+
+    bool ready() const
+    {
+        return rail && panel && pages && corner && ignored.isValid() && !entries.isEmpty();
+    }
+
+    // True when the window has this size and the rail has the form that goes with it: `compactForm` for the height, `cornerForm` for the width
+    static bool arrived(const RailSample &taken, const QSize &size, bool compactForm,
+                        bool cornerForm)
+    {
+        return taken.size == size && taken.compact == compactForm
+               && taken.compactHeader == cornerForm;
+    }
+
+    RailSample sample() const
+    {
+        RailSample s;
+        s.nanos = clock.nsecsElapsed();
+        s.size = window->size();
+        s.compact = rail->property("compact").toBool();
+        s.compactHeader = window->property("compactHeader").toBool();
+        s.changing = rail->property("formChanging").toBool();
+        s.leaving = rail->property("leaving").toBool();
+        s.lag = rail->property("widthLag").toReal();
+        s.cornerFade = rail->property("cornerOpacity").toReal();
+        s.pageWidth = pages->width();
+        s.railWidth = rail->width();
+        s.sidebarWidth = window->property("sidebarWidth").toReal();
+        s.formWidth = rail->property("railWidth").toReal();
+        s.panelWidth = panel->width();
+        const QRectF painted = sceneRect(panel);
+        s.lead = mirrored ? painted.right() - window->width() : -painted.left();
+        s.railVisible = rail->isVisible();
+        s.railEnabled = rail->isEnabled();
+        s.railIgnored = ignored.read().toBool();
+        s.cornerVisible = corner->isVisible();
+        s.cornerOpacity = corner->opacity();
+        for (const QPointer<QQuickItem> &entry : entries)
+            s.entries << (entry ? sceneRect(entry) : QRectF());
+        return s;
+    }
+
+    const QQuickWindow *window;
+    bool mirrored;
+    QQuickItem *rail;
+    QQuickItem *panel;
+    QQuickItem *pages;
+    QQuickItem *corner;
+    QQmlProperty ignored;
+    QList<QPointer<QQuickItem>> entries;
+    QElapsedTimer clock;
+};
+
+// Takes a look at the rail every few milliseconds into `samples` until `done` says that the series is complete; false when that took more than five seconds
+template <typename Done>
+bool sampleRailUntil(const RailWatch &watch, QList<RailSample> &samples, Done &&done)
+{
+    QElapsedTimer limit;
+    limit.start();
+    while (limit.elapsed() < scaled(5000)) {
+        samples.append(watch.sample());
+        if (done(samples.constLast()))
+            return true;
+        QTest::qWait(5);
+    }
+    return false;
+}
+
+// Resizes the window and waits until it has that size and the rail has been at rest for a while; false when that took more than five seconds
+bool settleRailAt(const Ui &ui, const QSize &size)
+{
+    ui.window->resize(size);
+    int quiet = 0;
+    return qWaitForScaled(
+        [&] {
+            quiet = ui.window->size() == size && !ui.railChanging() ? quiet + 1 : 0;
+            QTest::qWait(10);
+            return quiet >= 5;
+        },
+        5000);
+}
+
+// The rail holds all its entries: the six sections, and the SyncPlay entry that the server offers a moment after the sign-in
+bool railHoldsEveryEntry(const Ui &ui)
+{
+    const QQuickItem *syncPlay = ui.item(QStringLiteral("syncPlayButton"));
+    return ui.tabButtons().size() == 6 && syncPlay && syncPlay->isVisible();
+}
+
+// The longest animation duration of the shell's style, in milliseconds: the one the motions of the rail take
+int longDurationOf(Ui &ui)
+{
+    QQmlComponent component(&ui.engine);
+    component.setData("import QtQuick\nimport org.kde.kirigami as Kirigami\n"
+                      "QtObject { property int value: Kirigami.Units.longDuration }",
+                      QUrl());
+    QObject *object = component.create(ui.engine.rootContext());
+    if (!object)
+        return 0;
+    const int value = object->property("value").toInt();
+    delete object;
+    return value;
+}
+
+// The distinct values among `values`, two within a hundredth of a pixel counting as one
+QList<qreal> distinctValues(const QList<qreal> &values)
+{
+    QList<qreal> found;
+    for (const qreal value : values) {
+        const bool known = std::any_of(found.cbegin(), found.cend(),
+                                       [value](qreal other) { return qAbs(other - value) < 0.01; });
+        if (!known)
+            found << value;
+    }
+    return found;
+}
+
+// True when the values never step against `direction` (1 rising, -1 falling) by more than a tenth of a pixel
+bool movesOneWay(const QList<qreal> &values, int direction)
+{
+    for (qsizetype i = 1; i < values.size(); ++i) {
+        if ((values.at(i) - values.at(i - 1)) * direction < -0.1)
+            return false;
+    }
+    return true;
+}
+
+// What is wrong with the widths in the samples: the rail's own item is as wide as the room the window says it leaves the page row in every one, and the page row takes between two and `most` widths (a change of the window's width comes with its own step), never the many of an animation
+QStringList railWidthProblems(const QList<RailSample> &samples, int most)
+{
+    QStringList problems;
+    QList<qreal> pageWidths;
+    for (const RailSample &s : samples) {
+        pageWidths << s.pageWidth;
+        if (problems.isEmpty() && qAbs(s.railWidth - s.sidebarWidth) > 0.01)
+            problems << QStringLiteral(
+                            "the rail is %1 wide but the window leaves %2 to the page row")
+                            .arg(s.railWidth)
+                            .arg(s.sidebarWidth);
+    }
+    const QList<qreal> widths = distinctValues(pageWidths);
+    if (widths.size() < 2 || widths.size() > most) {
+        QStringList shown;
+        for (const qreal width : widths)
+            shown << QString::number(width);
+        problems << QStringLiteral("the page row took %1 widths, not 2 to %2: %3")
+                        .arg(widths.size())
+                        .arg(most)
+                        .arg(shown.join(QLatin1Char(' ')));
+    }
+    return problems;
+}
+
 } // namespace
 
 class TestUiPages : public QObject {
@@ -3935,9 +4289,22 @@ class TestUiPages : public QObject {
         ui.server.holdViews = true;
         ui.serveViews({});
         QVERIFY(ui.load());
-        QVERIFY(ui.signIn());
+        // The libraries never answer: the sign-in page gives way to Home at the deadline of the session's opening
+        QVERIFY(ui.signIn(20000));
+        QVERIFY(ui.window->property("sessionOpeningExpired").toBool());
         QVERIFY(!ui.controller.librariesLoaded());
         QVERIFY(!ui.showsText(QStringLiteral("No libraries to show")));
+        // Home without its libraries and without the flag of the session's own deadline, as after the start-up cover's: the signed-in user chosen on the picker goes straight back, with no new wait
+        QVERIFY(ui.window->setProperty("sessionOpeningExpired", false));
+        ui.clickCenter(ui.item(QStringLiteral("sidebarUserButton")));
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("userPickerPage"));
+        QQuickItem *own = nullptr;
+        QTRY_VERIFY((own = ui.userTile(ui.controller.currentUserId())) != nullptr);
+        QTRY_VERIFY(own->isEnabled());
+        ui.clickCenter(own);
+        QTRY_VERIFY_WITH_TIMEOUT(ui.currentDetails()->objectName() == QLatin1String("homePage"),
+                                 3000);
+        QVERIFY(!ui.controller.librariesLoaded());
 
         // The empty response is not a request failure: only now is the
         // placeholder correct. The first held request must not settle it.
@@ -5569,6 +5936,230 @@ class TestUiPages : public QObject {
         QCOMPARE(editPage->property("itemName").toString(), QStringLiteral("Ari Stone"));
     }
 
+    // Edit Images opened for a person offers the Primary image alone, whatever else the server lists for the person: no other type, no card, no way to step through or reorder images
+    void theEditImagesPageOfAPersonOffersThePrimaryImageAlone()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *page = openPersonEditImagesPage(ui);
+        QVERIFY(page);
+        QCOMPARE(stringsOf(page->property("imageTypes")), QStringList{QStringLiteral("Primary")});
+        QVERIFY(page->property("single").toBool());
+        // The fixture lists backdrops, a logo and a box for every item: the model keeps the one row
+        const auto *model =
+            qobject_cast<QAbstractItemModel *>(page->property("imageModel").value<QObject *>());
+        QVERIFY(model);
+        QTRY_COMPARE(model->rowCount(), 1);
+        QCOMPARE(ui.itemsStartingWith(QStringLiteral("editImagesGroup_")).size(), 1);
+        QVERIFY(ui.item(QStringLiteral("editImagesGroup_Primary")) != nullptr);
+        for (const char *type : {"Backdrop", "Logo", "Banner", "Thumb", "Art", "Disc", "Box",
+                                 "BoxRear", "Menu", "Screenshot"}) {
+            for (const char *prefix : {"editImagesGroup_", "editImageUpload_", "editImageSearch_"})
+                QVERIFY2(!ui.item(QString::fromLatin1(prefix) + QLatin1String(type)), type);
+        }
+        for (const char *name :
+             {"editImageCard_Backdrop_0", "editImageCard_Logo", "editImageCard_Box"})
+            QVERIFY2(!ui.item(QString::fromLatin1(name)), name);
+        // The image and its three buttons
+        for (const char *name : {"editImageCard_Primary", "editImageUpload_Primary",
+                                 "editImageSearch_Primary", "editImageDelete_Primary"}) {
+            QQuickItem *item = ui.item(QString::fromLatin1(name));
+            QVERIFY2(item && item->isVisible(), name);
+            if (item->inherits("QQuickAbstractButton"))
+                QVERIFY2(item->isEnabled(), name);
+        }
+        // Nothing steps through the images or moves them: whatever of it exists is out of sight
+        for (const char *prefix : {"editImagePrevious_", "editImageNext_", "editImageEarlier_",
+                                   "editImageLater_", "editImagesPlace_"}) {
+            for (QQuickItem *item : ui.itemsStartingWith(QString::fromLatin1(prefix)))
+                QVERIFY2(!item->isVisible(), qPrintable(item->objectName()));
+        }
+    }
+
+    // The one image of a person is shown large, with no card or title around it, and its buttons stand beside it where they fit and under it where they do not
+    void theEditImagesPageOfAPersonShowsItsImageLargeBesideItsButtons()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(1000));
+        QVERIFY(ui.signIn());
+        QQuickItem *page = openPersonEditImagesPage(ui);
+        QVERIFY(page);
+        QQuickItem *group = ui.item(QStringLiteral("editImagesGroup_Primary"));
+        QQuickItem *card = ui.item(QStringLiteral("editImageCard_Primary"));
+        QVERIFY(group && card);
+        QQuickItem *frame = card->parentItem();
+        QVERIFY(frame);
+        // No card: no padding, no fill, no border, and no title above the image, as the page names the person
+        QCOMPARE(group->property("padding").toReal(), 0.0);
+        QCOMPARE(group->property("color").value<QColor>().alpha(), 0);
+        QCOMPARE(QQmlProperty(group, QStringLiteral("border.width")).read().toInt(), 0);
+        for (QQuickItem *item : allItems(group)) {
+            if (item->inherits("QQuickText")
+                && item->property("text").toString() == QLatin1String("Primary"))
+                QVERIFY2(!item->isVisible(), qPrintable(Ui::describe(item)));
+        }
+        const QQuickItem *name = ui.item(QStringLiteral("editImagesItemName"));
+        QVERIFY(name && name->isVisible());
+        QCOMPARE(name->property("text").toString(), QStringLiteral("Mira Vale"));
+        // The frame has the shape of a poster, 2 to 3, and the height the page asks for
+        const qreal height = page->property("singlePreviewHeight").toReal();
+        QVERIFY(qAbs(height - gridUnitOf(ui) * 16) <= 0.5);
+        QTRY_VERIFY2(qAbs(frame->height() - height) <= 0.5
+                         && qAbs(frame->width() * 3 / 2 - height) <= 1,
+                     qPrintable(QStringLiteral("%1 x %2, %3 high wanted")
+                                    .arg(frame->width())
+                                    .arg(frame->height())
+                                    .arg(height)));
+        // Wide: the size and the three buttons are to the right of the image and inside its height, each button with its label and the delete button next to the others
+        QTRY_VERIFY(group->property("beside").toBool());
+        QQuickItem *upload = ui.item(QStringLiteral("editImageUpload_Primary"));
+        QQuickItem *search = ui.item(QStringLiteral("editImageSearch_Primary"));
+        QQuickItem *remove = ui.item(QStringLiteral("editImageDelete_Primary"));
+        QQuickItem *info = ui.item(QStringLiteral("editImageInfo_Primary"));
+        QVERIFY(upload && search && remove && info);
+        const QRectF pageRect = sceneRect(page);
+        const auto placement = [&](bool beside) -> QString {
+            const QRectF image = sceneRect(frame);
+            for (const QQuickItem *part : {upload, search, remove, info}) {
+                const QRectF rect = sceneRect(part);
+                if (beside
+                    && (rect.left() < image.right() - 0.5 || rect.top() < image.top() - 0.5
+                        || rect.bottom() > image.bottom() + 0.5))
+                    return QStringLiteral("%1 is not beside the image").arg(part->objectName());
+                if (!beside && rect.top() < image.bottom() - 0.5)
+                    return QStringLiteral("%1 is not under the image").arg(part->objectName());
+                if (rect.right() > pageRect.right() + 0.5)
+                    return QStringLiteral("%1 is out of the page").arg(part->objectName());
+            }
+            if (sceneRect(search).left() < sceneRect(upload).right() - 0.5
+                || sceneRect(remove).left() < sceneRect(search).right() - 0.5
+                || sceneRect(remove).left() - sceneRect(search).right() > gridUnitOf(ui))
+                return QStringLiteral("the buttons are not one row of neighbours");
+            return {};
+        };
+        QTRY_VERIFY2(placement(true).isEmpty(), qPrintable(placement(true)));
+        QVERIFY(!group->property("compact").toBool());
+        QVERIFY(upload->property("display").toInt() != 0);
+        // Narrow: the buttons go under the image, at the least width of the window; they lose their labels together only when the row is too narrow for them
+        QVERIFY(ui.opensWindowOfWidth(ui.window->minimumWidth()));
+        QTRY_VERIFY(!group->property("beside").toBool());
+        QTRY_VERIFY2(placement(false).isEmpty(), qPrintable(placement(false)));
+        QCOMPARE(upload->property("display").toInt() == 0, group->property("compact").toBool());
+        QCOMPARE(search->property("display").toInt() == 0, group->property("compact").toBool());
+        QVERIFY(qAbs(frame->height() - height) <= 0.5);
+    }
+
+    // A person with no image says so in the frame, offers Upload and Search Online, and has nothing to delete
+    void theEditImagesPageOfAPersonWithNoImageHasNoDeleteButton()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        ui.server.itemImagesBody = QByteArrayLiteral("[]");
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(openPersonEditImagesPage(ui, false));
+        QQuickItem *none = nullptr;
+        QTRY_VERIFY((none = ui.item(QStringLiteral("editImagesNone_Primary"))) != nullptr
+                    && none->isVisible());
+        QCOMPARE(ui.itemsStartingWith(QStringLiteral("editImagesGroup_")).size(), 1);
+        QVERIFY(ui.itemsStartingWith(QStringLiteral("editImageCard_")).isEmpty());
+        QVERIFY(ui.itemsStartingWith(QStringLiteral("editImageDelete_")).isEmpty());
+        for (const char *name : {"editImageUpload_Primary", "editImageSearch_Primary"}) {
+            QQuickItem *button = ui.item(QString::fromLatin1(name));
+            QVERIFY2(button && button->isVisible() && button->isEnabled(), name);
+        }
+        QVERIFY(ui.item(QStringLiteral("editImageInfo_Primary"))
+                    ->property("text")
+                    .toString()
+                    .isEmpty());
+    }
+
+    // Search Online opened for a person has no image type to pick, keeps the provider and the languages, and asks before replacing the image in words that name no type
+    void theSearchOnlineOfAPersonHasNoTypeBoxAndAsksBeforeReplacingItsImage()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *editPage = openPersonEditImagesPage(ui);
+        QVERIFY(editPage);
+        QQuickItem *search = ui.item(QStringLiteral("editImageSearch_Primary"));
+        QVERIFY(search);
+        QVERIFY(QMetaObject::invokeMethod(search, "click"));
+        QQuickItem *online = nullptr;
+        QTRY_VERIFY((online = ui.item(QStringLiteral("remoteImagesPage"))) != nullptr);
+        QTRY_COMPARE(ui.currentDetails(), online);
+        QCOMPARE(stringsOf(online->property("imageTypes")), QStringList{QStringLiteral("Primary")});
+        QVERIFY(online->property("single").toBool());
+        QTRY_VERIFY(!ui.server.remoteImageRoutes.isEmpty());
+        QVERIFY(ui.server.remoteImageRoutes.constFirst().contains("type=Primary"));
+        QQuickItem *tile = nullptr;
+        QTRY_VERIFY((tile = ui.item(QStringLiteral("remoteImage_0"))) != nullptr);
+        // Neither the box nor its label shows, and the box has the one choice the page offers
+        QQuickItem *typeBox = ui.item(QStringLiteral("remoteImagesTypeBox"));
+        QVERIFY(typeBox);
+        QVERIFY(!typeBox->isVisible());
+        QTRY_COMPARE(typeBox->property("count").toInt(), 1);
+        QVERIFY(!ui.showsText(QStringLiteral("Image type:")));
+        for (const char *name : {"remoteImagesProviderBox", "remoteImagesAllLanguages"}) {
+            QQuickItem *control = ui.item(QString::fromLatin1(name));
+            QVERIFY2(control && control->isVisible(), name);
+        }
+        // The person has an image: the choice asks first, and nothing goes before the answer
+        QVERIFY(ui.server.remoteImageDownloads.isEmpty());
+        QVERIFY(QMetaObject::invokeMethod(tile, "click"));
+        QObject *dialog = nullptr;
+        QTRY_VERIFY((dialog = ui.popup(QStringLiteral("replaceImageDialog"))) != nullptr
+                    && dialog->property("opened").toBool());
+        QVERIFY(ui.showsText(
+            QStringLiteral("Replace the current image on the server? It cannot be recovered")));
+        QVERIFY(!ui.showsText(QStringLiteral(
+            "Replace the current image of this type on the server? It cannot be recovered")));
+        QVERIFY(ui.server.remoteImageDownloads.isEmpty());
+        QObject *confirm = ui.popup(QStringLiteral("confirmReplaceImage"));
+        QVERIFY(confirm);
+        QVERIFY(QMetaObject::invokeMethod(confirm, "trigger"));
+        QTRY_VERIFY(!ui.server.remoteImageDownloads.isEmpty());
+        QVERIFY(ui.server.remoteImageDownloads.constFirst().contains("type=Primary"));
+        QTRY_COMPARE(ui.currentDetails(), editPage);
+    }
+
+    // The model of the Edit Images page offers the types it is given, in that order, and every type of the item when it is given none
+    void theEditImagesModelOffersOnlyTheTypesItIsGiven()
+    {
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        // The models die with it before the controller, as with a page: a model releases its channel on the controller's client
+        QObject owner;
+        // The types of the rows of a model made for `wanted`, once it has read the list
+        const auto rowTypes = [&](const QStringList &wanted) {
+            Kinefin::EditImagesModel *model =
+                ui.controller.createEditImages(kMovieId, &owner, wanted);
+            if (!model || !qWaitForScaled([model] {
+                    return model->status() == Kinefin::EditImagesModel::Ready;
+                }))
+                return QStringList{QStringLiteral("not ready")};
+            QStringList types;
+            for (int row = 0; row < model->rowCount(); ++row)
+                types << model->data(model->index(row), Kinefin::EditImagesModel::ImageTypeRole)
+                             .toString();
+            return types;
+        };
+        // The fixture lists Primary, backdrops, a logo and a box
+        QCOMPARE(rowTypes({QStringLiteral("Primary")}), QStringList{QStringLiteral("Primary")});
+        QCOMPARE(rowTypes({QStringLiteral("Logo"), QStringLiteral("Primary")}),
+                 (QStringList{QStringLiteral("Logo"), QStringLiteral("Primary")}));
+        const QStringList all = rowTypes({});
+        QVERIFY2(all.size() >= 8, qPrintable(all.join(QLatin1Char(','))));
+        QVERIFY(all.contains(QStringLiteral("Backdrop")) && all.contains(QStringLiteral("Box")));
+    }
+
     // The person page shows a card for each show the person only has episodes in, with their count, and that card opens the person's episodes of the show by season
     void aPersonPageGroupsGuestEpisodesIntoOneCardPerShow()
     {
@@ -5680,6 +6271,10 @@ class TestUiPages : public QObject {
         auto *stack = ui.window->property("pageStack").value<QObject *>();
         QVERIFY(QMetaObject::invokeMethod(stack, "pop", Q_ARG(QVariant, QVariant())));
         QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("personPage"));
+        // Kirigami gives the keyboard to its column while it takes the page out, and the shell hands it back to the page afterwards: the test moves it only then
+        QTRY_VERIFY(ui.columnSettled());
+        QTRY_VERIFY(ui.window->activeFocusItem()
+                    && ui.currentDetails()->isAncestorOf(ui.window->activeFocusItem()));
 
         // The keys do the same: Return on the other show's card, then Return on its episode
         int row = -1;
@@ -6321,6 +6916,82 @@ class TestUiPages : public QObject {
         QVERIFY2(rect.left() >= ui.sidebarWidth() - 0.5, qPrintable(QString::number(rect.left())));
         QVERIFY2(rect.height() >= ui.searchPopup()->property("minimumBodyHeight").toReal(),
                  qPrintable(QString::number(rect.height())));
+        // It keeps room on both sides, the one at the page's scroll bar included
+        const qreal sideMargin = ui.searchPopup()->property("sideMargin").toReal();
+        QVERIFY(sideMargin > 0);
+        QVERIFY2(rect.left() - ui.sidebarWidth() >= sideMargin - 0.5,
+                 qPrintable(QString::number(rect.left())));
+        QVERIFY2(ui.window->width() - rect.right() >= sideMargin - 0.5,
+                 qPrintable(QString::number(rect.right())));
+    }
+
+    void theSearchPopupKeepsRoomOnBothSidesOfItsArea_data()
+    {
+        QTest::addColumn<int>("width");
+        QTest::addColumn<bool>("rightToLeft");
+        QTest::newRow("wide") << 1000 << false;
+        QTest::newRow("least width") << 0 << false;
+        QTest::newRow("right to left") << 1000 << true;
+        QTest::newRow("right to left, least width") << 0 << true;
+    }
+
+    // The popup is centred in the area beside the rail and keeps the room of its side margin on both sides, which the page's scroll bar (at the trailing edge, the leading one when mirrored) never reaches; a width of 0 is the least width of the window
+    void theSearchPopupKeepsRoomOnBothSidesOfItsArea()
+    {
+        QFETCH(int, width);
+        QFETCH(bool, rightToLeft);
+        const Qt::LayoutDirection direction = QGuiApplication::layoutDirection();
+        QGuiApplication::setLayoutDirection(rightToLeft ? Qt::RightToLeft : Qt::LeftToRight);
+        const auto restoreDirection =
+            qScopeGuard([direction] { QGuiApplication::setLayoutDirection(direction); });
+        Ui ui(m_home->path());
+        // A page that scrolls is under the popup, so that its scroll bar is there
+        QVERIFY(openScrollingLibrary(ui) != nullptr);
+        QVERIFY(ui.opensWindowOfWidth(width > 0 ? width : ui.window->minimumWidth()));
+        QVERIFY(ui.openSearchPopup() != nullptr);
+        QObject *popup = ui.searchPopup();
+        const qreal sideMargin = popup->property("sideMargin").toReal();
+        QVERIFY(sideMargin > 0);
+        const qreal cap = gridUnitOf(ui) * 52;
+        // The rail stands at the leading edge, on the right when mirrored: the area is what it leaves
+        const auto gapsProblem = [&]() -> QString {
+            const qreal rail = ui.sidebarWidth();
+            const qreal areaStart = rightToLeft ? 0 : rail;
+            const qreal areaEnd = ui.window->width() - (rightToLeft ? rail : 0);
+            const QRectF rect = popupRect(popup);
+            const qreal before = rect.left() - areaStart;
+            const qreal after = areaEnd - rect.right();
+            const QString numbers = QStringLiteral("gaps %1 and %2, margin %3, popup %4 wide")
+                                        .arg(before)
+                                        .arg(after)
+                                        .arg(sideMargin)
+                                        .arg(rect.width());
+            if (rect.width() <= 0 || rect.width() > cap + 0.5)
+                return QStringLiteral("the width is off: ") + numbers;
+            if (before < sideMargin - 0.5 || after < sideMargin - 0.5)
+                return QStringLiteral("less than the side margin: ") + numbers;
+            if (qAbs(before - after) > 1)
+                return QStringLiteral("not centred: ") + numbers;
+            // Narrower than its cap it keeps exactly the margin
+            if (rect.width() < cap - 1 && qAbs(before - sideMargin) > 1)
+                return QStringLiteral("more than the side margin: ") + numbers;
+            return {};
+        };
+        QTRY_VERIFY2(gapsProblem().isEmpty(), qPrintable(gapsProblem()));
+        // The vertical scroll bars of the page in front, when it shows any, are clear of the popup
+        const QRectF rect = popupRect(popup);
+        for (QQuickItem *item : allItems(ui.currentDetails())) {
+            if (!item->inherits("QQuickScrollBar") || !item->isVisible()
+                || item->property("orientation").toInt() != int(Qt::Vertical))
+                continue;
+            const QRectF bar = sceneRect(item);
+            QVERIFY2(bar.right() <= rect.left() + 0.5 || bar.left() >= rect.right() - 0.5,
+                     qPrintable(QStringLiteral("scroll bar %1 to %2, popup %3 to %4")
+                                    .arg(bar.left())
+                                    .arg(bar.right())
+                                    .arg(rect.left())
+                                    .arg(rect.right())));
+        }
     }
 
     void typingShowsTheGroupedResults()
@@ -9419,7 +10090,8 @@ class TestUiPages : public QObject {
         const int compactLimit = ui.window->property("compactLimit").toInt();
         QStringList problems;
         for (const int width : {2400, compactLimit + 1}) {
-            QVERIFY(ui.opensWindowOfWidth(width));
+            // Tall enough for the labelled rail, which a window of 640 px no longer has room for
+            QVERIFY(ui.opensWindowOfWidth(width, 900));
             QTRY_VERIFY2((problems = ui.modeProblems(false)).isEmpty(),
                          qPrintable(problems.join(QLatin1Char('\n'))));
             QTRY_COMPARE(ui.tabButtons().size(), 6);
@@ -9589,13 +10261,13 @@ class TestUiPages : public QObject {
             for (int other = 0; other < 6; ++other)
                 QTRY_VERIFY(tabChecked(other, other == entry.index));
         }
-        // The avatar opens the users page as a section of its own: it alone is marked, and the session goes on
+        // The avatar opens the users page as a mode of the shell, not as a section: the rail goes with every entry, and the session goes on
         QQuickItem *user = ui.item(QStringLiteral("sidebarUserButton"));
         ui.clickCenter(user);
         QTRY_VERIFY(ui.item(QStringLiteral("userPickerPage")) != nullptr);
-        QTRY_VERIFY(user->property("marked").toBool());
-        for (int other = 0; other < 6; ++other)
-            QTRY_VERIFY(tabChecked(other, false));
+        QTRY_VERIFY(!ui.railShows());
+        QTRY_VERIFY(!user->isVisible());
+        QTRY_VERIFY(ui.tabButtons().isEmpty());
         QCOMPARE(ui.controller.state(), ConnectionController::Authenticated);
     }
 
@@ -9890,14 +10562,17 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(remote->property("opened").toBool());
         QVERIFY(QMetaObject::invokeMethod(remote, "close"));
         QTRY_VERIFY(!remote->property("visible").toBool());
-        // The user's row opens the users page, with the session going on
+        // The user's row opens the users page, with the session going on: the page takes the window, the drawer closes and has no button to open it again, and the keyboard goes to the page
         QVERIFY(ui.openNavigationDrawer());
         ui.clickCenter(ui.item(QStringLiteral("drawerUser")));
         QTRY_VERIFY(!drawer->property("visible").toBool());
         QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("userPickerPage"));
         QCOMPARE(ui.controller.state(), ConnectionController::Authenticated);
-        QVERIFY(ui.openNavigationDrawer());
-        QTRY_VERIFY(ui.item(QStringLiteral("drawerUser"))->property("marked").toBool());
+        QTRY_VERIFY(!ui.item(QStringLiteral("navigationButton"))->isVisible());
+        QTRY_VERIFY(ui.item(QStringLiteral("mainMenuButton"))->isVisible());
+        QTRY_VERIFY(ui.window->activeFocusItem() != nullptr
+                    && (ui.window->activeFocusItem() == ui.currentDetails()
+                        || ui.currentDetails()->isAncestorOf(ui.window->activeFocusItem())));
     }
 
     // The SyncPlay row shows while the server offers SyncPlay; while a group is joined it says in words under the label when the playback does not keep in step or the group waits (the label stays at full strength, the icon dims, the dot shows as the rail's entry shows it), ends with an arrow, and the menu of the group hangs from the row while the drawer stays open
@@ -12542,6 +13217,332 @@ class TestUiPages : public QObject {
                            >= movie->height() - 1);
     }
 
+    // The status line of a card that fetches keeps the written size and the percentage in the room of their widest text while the numbers change, so that what follows never moves; the card and its line stay one item with one accessible name
+    void theStatusLineOfAFetchingDownloadKeepsItsPartsInPlace()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(900));
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        QVERIFY(QMetaObject::invokeMethod(ui.shellAction(QStringLiteral("downloadsTabAction")),
+                                          "trigger"));
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("downloadsPage"));
+        Kinefin::DownloadsController *downloads = ui.controller.downloads();
+        const qint64 size = 21'800'000'000;
+        QVERIFY(putDownload(ui, size, 0));
+        const auto named = [&](const char *prefix) {
+            return ui.item(QString::fromLatin1(prefix) + kMovieId);
+        };
+        QQuickItem *status = nullptr;
+        QQuickItem *transfer = nullptr;
+        QQuickItem *percent = nullptr;
+        QQuickItem *speed = nullptr;
+        QQuickItem *left = nullptr;
+        QTRY_VERIFY((status = named("downloadStatus_")) != nullptr
+                    && (transfer = named("downloadStatusTransfer_")) != nullptr
+                    && (percent = named("downloadStatusPercent_")) != nullptr
+                    && (speed = named("downloadStatusSpeed_")) != nullptr
+                    && (left = named("downloadStatusLeft_")) != nullptr);
+        QQuickItem *parts = named("downloadStatusParts_");
+        QQuickItem *row = named("downloadRow_");
+        QVERIFY(parts && row);
+        // The line has the room for its parts at this width
+        QVERIFY2(sceneRect(status).width() > 15 * gridUnitOf(ui),
+                 qPrintable(QString::number(sceneRect(status).width())));
+        // What the line says, as the parts say it: no part is cut, and a part with nothing to say (no speed yet) is not there
+        const auto textProblem = [&](const QString &text) -> QString {
+            QString joined;
+            for (const QQuickItem *part : {transfer, percent, speed, left}) {
+                joined += part->property("text").toString();
+                if (part->property("truncated").toBool())
+                    return part->objectName() + QStringLiteral(" is cut");
+            }
+            if (joined != text)
+                return QStringLiteral("the parts say \"%1\", the line \"%2\"").arg(joined, text);
+            if (speed->isVisible() || left->isVisible())
+                return QStringLiteral("a part with nothing to say shows");
+            return {};
+        };
+        qreal transferWidth = -1;
+        qreal percentWidth = -1;
+        // Each part keeps the width it had and the next one its place, whatever the numbers
+        const auto placeProblem = [&]() -> QString {
+            if (qAbs(transfer->width() - transferWidth) > 0.5
+                || qAbs(percent->width() - percentWidth) > 0.5
+                || qAbs(percent->x() - transferWidth) > 0.5)
+                return QStringLiteral(
+                           "widths %1 and %2, the percentage at %3; %4, %5 and %6 wanted")
+                    .arg(transfer->width())
+                    .arg(percent->width())
+                    .arg(percent->x())
+                    .arg(transferWidth)
+                    .arg(percentWidth)
+                    .arg(transferWidth);
+            return {};
+        };
+        // From nothing to the whole file, across the units of the size and the digits of the percentage
+        const QList<qint64> steps{0,           512,           700'000,        55'000'000,
+                                  218'000'000, 2'180'000'000, 20'000'000'000, size};
+        for (const qint64 written : steps) {
+            const QString text =
+                QStringLiteral("%1 of %2 · %3%")
+                    .arg(downloads->formattedSize(written), downloads->formattedSize(size),
+                         QString::number(written * 100 / size));
+            QVERIFY(putDownload(ui, size, written));
+            QTRY_COMPARE(status->property("text").toString(), text);
+            QTRY_VERIFY2(textProblem(text).isEmpty(), qPrintable(textProblem(text)));
+            if (transferWidth < 0) {
+                transferWidth = transfer->width();
+                percentWidth = percent->width();
+                QVERIFY(transferWidth > 0 && percentWidth > 0);
+            }
+            QTRY_VERIFY2(placeProblem().isEmpty(), qPrintable(placeProblem()));
+            // It is still the same card and the same line
+            QCOMPARE(named("downloadRow_"), row);
+            QCOMPARE(named("downloadStatus_"), status);
+            QCOMPARE(named("downloadStatusParts_"), parts);
+        }
+        // The line is one item with one accessible name, its labels and the ones that measure out of the way of a screen reader
+        QCOMPARE(accessibleNameOf(status), status->property("text").toString());
+        int labels = 0;
+        for (QQuickItem *item : allItems(status)) {
+            if (!item->inherits("QQuickText"))
+                continue;
+            ++labels;
+            QVERIFY2(QQmlProperty(item, QStringLiteral("Accessible.ignored"), qmlContext(item))
+                         .read()
+                         .toBool(),
+                     qPrintable(Ui::describe(item)));
+        }
+        QVERIFY(labels >= 4);
+        // A pause turns it back into one label: the parts go, the words of the state take their place, and the card keeps its height
+        const qreal height = row->height();
+        QVERIFY(putDownload(ui, size, size / 2, QStringLiteral("paused")));
+        QTRY_VERIFY(named("downloadStatusParts_") == nullptr);
+        QTRY_COMPARE(status->property("text").toString(), QStringLiteral("Paused"));
+        QTRY_VERIFY2(qAbs(row->height() - height) <= 1, qPrintable(QString::number(row->height())));
+        QVERIFY(ui.showsText(QStringLiteral("Paused")));
+        QCOMPARE(accessibleNameOf(status), QStringLiteral("Paused"));
+        // Resumed, the parts come back, each in the place it had
+        QVERIFY(putDownload(ui, size, size / 2));
+        QTRY_VERIFY((parts = named("downloadStatusParts_")) != nullptr);
+        transfer = named("downloadStatusTransfer_");
+        percent = named("downloadStatusPercent_");
+        speed = named("downloadStatusSpeed_");
+        left = named("downloadStatusLeft_");
+        QVERIFY(transfer && percent && speed && left);
+        const QString half =
+            QStringLiteral("%1 of %2 · 50%")
+                .arg(downloads->formattedSize(size / 2), downloads->formattedSize(size));
+        QTRY_COMPARE(status->property("text").toString(), half);
+        QTRY_VERIFY2(textProblem(half).isEmpty(), qPrintable(textProblem(half)));
+        QTRY_VERIFY2(placeProblem().isEmpty(), qPrintable(placeProblem()));
+        QTRY_VERIFY2(qAbs(row->height() - height) <= 1, qPrintable(QString::number(row->height())));
+        // A size the server did not give has no percentage to hold a place for: the plain label shows what was written
+        QVERIFY(putDownload(ui, -1, 5'000'000));
+        QTRY_VERIFY(named("downloadStatusParts_") == nullptr);
+        QTRY_COMPARE(status->property("text").toString(), downloads->formattedSize(5'000'000));
+        QVERIFY(ui.showsText(downloads->formattedSize(5'000'000)));
+        QTRY_VERIFY2(qAbs(row->height() - height) <= 1, qPrintable(QString::number(row->height())));
+    }
+
+    // In a window at its least width the parts of the line stay inside it and clear of the buttons: a part is cut only to what the ones before it leave, and the written size is never cut while another part shows
+    void theStatusLineOfAFetchingDownloadFitsTheLeastWindow()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        QVERIFY(QMetaObject::invokeMethod(ui.shellAction(QStringLiteral("downloadsTabAction")),
+                                          "trigger"));
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("downloadsPage"));
+        QVERIFY(putDownload(ui, 21'800'000'000, 2'180'000'000));
+        QQuickItem *status = nullptr;
+        QTRY_VERIFY((status = ui.item(QStringLiteral("downloadStatus_") + kMovieId)) != nullptr
+                    && ui.item(QStringLiteral("downloadStatusParts_") + kMovieId) != nullptr);
+        QVERIFY(ui.opensWindowOfWidth(ui.window->minimumWidth()));
+        const auto problem = [&]() -> QString {
+            const QString row = downloadRowProblem(ui, kMovieId);
+            if (!row.isEmpty())
+                return row;
+            const QRectF line = sceneRect(status);
+            QList<const QQuickItem *> shown;
+            for (const char *prefix : {"downloadStatusTransfer_", "downloadStatusPercent_",
+                                       "downloadStatusSpeed_", "downloadStatusLeft_"}) {
+                const QQuickItem *part = ui.item(QString::fromLatin1(prefix) + kMovieId);
+                if (!part)
+                    return QStringLiteral("a part is missing");
+                if (part->isVisible())
+                    shown << part;
+            }
+            if (shown.isEmpty())
+                return QStringLiteral("no part shows");
+            for (qsizetype at = 0; at < shown.size(); ++at) {
+                const QRectF rect = sceneRect(shown.at(at));
+                if (rect.right() > line.right() + 0.5 || rect.left() < line.left() - 0.5)
+                    return QStringLiteral("%1 is out of the line").arg(shown.at(at)->objectName());
+                if (at > 0 && rect.left() < sceneRect(shown.at(at - 1)).right() - 0.5)
+                    return QStringLiteral("%1 is over the part before it")
+                        .arg(shown.at(at)->objectName());
+                // A part before another is whole
+                if (at + 1 < shown.size() && shown.at(at)->property("truncated").toBool())
+                    return QStringLiteral("%1 is cut while another part shows")
+                        .arg(shown.at(at)->objectName());
+            }
+            return {};
+        };
+        QTRY_VERIFY2(problem().isEmpty(), qPrintable(problem()));
+        // The window grows again: the line takes the room back
+        QVERIFY(ui.opensWindowOfWidth(900));
+        QTRY_VERIFY2(problem().isEmpty(), qPrintable(problem()));
+        QTRY_VERIFY(!ui.item(QStringLiteral("downloadStatusTransfer_") + kMovieId)
+                         ->property("truncated")
+                         .toBool());
+        QTRY_VERIFY(!ui.item(QStringLiteral("downloadStatusPercent_") + kMovieId)
+                         ->property("truncated")
+                         .toBool());
+    }
+
+    // The same line from right to left: the written size is at the leading end of the line and the percentage follows it toward the trailing end
+    void theStatusLineOfAFetchingDownloadFollowsTheLayoutDirection()
+    {
+        const Qt::LayoutDirection direction = QGuiApplication::layoutDirection();
+        QGuiApplication::setLayoutDirection(Qt::RightToLeft);
+        const auto restoreDirection =
+            qScopeGuard([direction] { QGuiApplication::setLayoutDirection(direction); });
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(900));
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        QVERIFY(QMetaObject::invokeMethod(ui.shellAction(QStringLiteral("downloadsTabAction")),
+                                          "trigger"));
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("downloadsPage"));
+        QVERIFY(putDownload(ui, 21'800'000'000, 2'180'000'000));
+        QQuickItem *status = nullptr;
+        QQuickItem *transfer = nullptr;
+        QQuickItem *percent = nullptr;
+        QTRY_VERIFY(
+            (status = ui.item(QStringLiteral("downloadStatus_") + kMovieId)) != nullptr
+            && (transfer = ui.item(QStringLiteral("downloadStatusTransfer_") + kMovieId)) != nullptr
+            && (percent = ui.item(QStringLiteral("downloadStatusPercent_") + kMovieId)) != nullptr);
+        // The first part starts at the right end of the line, and the next one is to its left without overlapping it
+        const auto problem = [&]() -> QString {
+            const QRectF line = sceneRect(status);
+            const QRectF first = sceneRect(transfer);
+            const QRectF next = sceneRect(percent);
+            const QString where =
+                QStringLiteral("line %1 to %2, size %3 to %4, percentage %5 to %6")
+                    .arg(line.left())
+                    .arg(line.right())
+                    .arg(first.left())
+                    .arg(first.right())
+                    .arg(next.left())
+                    .arg(next.right());
+            if (first.width() <= 0 || next.width() <= 0)
+                return QStringLiteral("a part has no width: ") + where;
+            if (qAbs(first.right() - line.right()) > 1)
+                return QStringLiteral("the size is not at the leading end: ") + where;
+            if (next.right() > first.left() + 0.5 || next.left() < line.left() - 0.5)
+                return QStringLiteral("the percentage is not after the size: ") + where;
+            return {};
+        };
+        QTRY_VERIFY2(problem().isEmpty(), qPrintable(problem()));
+        // The numbers change and the places stay
+        const QRectF before = sceneRect(percent);
+        QVERIFY(putDownload(ui, 21'800'000'000, 21'800'000'000));
+        QTRY_VERIFY(percent->property("text").toString().contains(QStringLiteral("100%")));
+        QTRY_VERIFY2(problem().isEmpty(), qPrintable(problem()));
+        QVERIFY(qAbs(sceneRect(percent).right() - before.right()) <= 0.5);
+    }
+
+    // The pieces the status line is built from: the parts of a download that fetches (the written size, the percentage, the speed, the time left, each empty when not known), the line they make, and the widest text a part can take with its digits as zeros
+    void theStatusLineOfADownloadIsBuiltFromItsParts()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(buildState(ui, QStringLiteral("library")));
+        QVERIFY(QMetaObject::invokeMethod(ui.shellAction(QStringLiteral("downloadsTabAction")),
+                                          "trigger"));
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("downloadsPage"));
+        QQuickItem *page = ui.currentDetails();
+        Kinefin::DownloadsController *downloads = ui.controller.downloads();
+        // The functions of the page, called with the values a delegate gives them; a call that does not go through returns an invalid value, which the checks below do not accept
+        const auto call = [&](const char *function, const QVariant &first) {
+            QVariant result;
+            QMetaObject::invokeMethod(page, function, Q_RETURN_ARG(QVariant, result),
+                                      Q_ARG(QVariant, first));
+            return result;
+        };
+        const auto callFour = [&](const char *function, const QVariant &first,
+                                  const QVariant &second, const QVariant &third,
+                                  const QVariant &fourth) {
+            QVariant result;
+            QMetaObject::invokeMethod(page, function, Q_RETURN_ARG(QVariant, result),
+                                      Q_ARG(QVariant, first), Q_ARG(QVariant, second),
+                                      Q_ARG(QVariant, third), Q_ARG(QVariant, fourth));
+            return result;
+        };
+        const qint64 size = 1'000'000;
+        // The parts of a download with a size, a speed and a time left
+        const QStringList known = stringsOf(callFour("fetchParts", size, 400'000, 0.4, 50'000));
+        QCOMPARE(known.size(), 4);
+        QCOMPARE(known.at(0),
+                 QStringLiteral("%1 of %2")
+                     .arg(downloads->formattedSize(400'000), downloads->formattedSize(size)));
+        QCOMPARE(known.at(1), QStringLiteral("40%"));
+        QCOMPARE(known.at(2), downloads->formattedSize(50'000) + QStringLiteral("/s"));
+        QVERIFY(known.at(3).contains(QStringLiteral("left")));
+        // The line joins what is known, with the dot between the parts
+        const auto line = [&](const QStringList &fetched) {
+            QVariant result;
+            QMetaObject::invokeMethod(page, "rowStatus", Q_RETURN_ARG(QVariant, result),
+                                      Q_ARG(QVariant, QStringLiteral("fetching")),
+                                      Q_ARG(QVariant, QString()), Q_ARG(QVariant, size),
+                                      Q_ARG(QVariant, fetched), Q_ARG(QVariant, false),
+                                      Q_ARG(QVariant, 0));
+            return result.toString();
+        };
+        QCOMPARE(line(known), known.join(QStringLiteral(" · ")));
+        // No speed yet: two parts, and the line says them with one dot
+        const QStringList slow = stringsOf(callFour("fetchParts", size, 400'000, 0.4, 0));
+        QCOMPARE(slow.size(), 4);
+        QCOMPARE(slow.at(0), known.at(0));
+        QCOMPARE(slow.at(1), known.at(1));
+        QVERIFY(slow.at(2).isEmpty() && slow.at(3).isEmpty());
+        QCOMPARE(line(slow), slow.at(0) + QStringLiteral(" · ") + slow.at(1));
+        // No size: what was written, and no percentage
+        const QStringList unsized = stringsOf(callFour("fetchParts", -1, 5'000'000, -1.0, 0));
+        QCOMPARE(unsized.at(0), downloads->formattedSize(5'000'000));
+        QVERIFY(unsized.at(1).isEmpty());
+        // Nothing known at all: the word of the state
+        QCOMPARE(line({QString(), QString(), QString(), QString()}), QStringLiteral("Downloading"));
+        // The widest text of a part, whatever the size: below one kilobyte, at the edge of a unit, and past it
+        const auto onlyZeros = [](const QString &text) {
+            return !text.contains(QRegularExpression(QStringLiteral("[1-9]")));
+        };
+        for (const qint64 total :
+             {qint64(1000), qint64(5) * 1024 * 1024, qint64(1) << 30, qint64(21'800'000'000)}) {
+            const QString widest = call("widestTransfer", total).toString();
+            QVERIFY2(!widest.isEmpty() && onlyZeros(widest), qPrintable(widest));
+            for (const qint64 written : {qint64(0), qint64(1), qint64(1023), qint64(1024),
+                                         qint64(1024) * 1024 - 1, total / 2, total}) {
+                const QString text = call("figures", QStringLiteral("%1 of %2")
+                                                         .arg(downloads->formattedSize(written),
+                                                              downloads->formattedSize(total)))
+                                         .toString();
+                QVERIFY2(text.size() <= widest.size(),
+                         qPrintable(QStringLiteral("%1 is wider than %2").arg(text, widest)));
+            }
+            const QString fastest = call("widestSpeed", total).toString();
+            QVERIFY2(!fastest.isEmpty() && onlyZeros(fastest), qPrintable(fastest));
+            for (const qint64 rate :
+                 {qint64(1), qint64(1023), qint64(1024) * 1024 - 1, total, total * 5}) {
+                const QString text = call("figures", call("speedText", rate).toString()).toString();
+                QVERIFY2(text.size() <= fastest.size(),
+                         qPrintable(QStringLiteral("%1 is wider than %2").arg(text, fastest)));
+            }
+        }
+    }
+
     // Each section is a tab stop of its own; Down from its last row reaches the first of the next and Up comes back, and the keyboard shows its ring on the current card only
     void theArrowsGoFromOneSectionOfTheDownloadsToTheOther()
     {
@@ -13086,19 +14087,30 @@ class TestUiPages : public QObject {
             !ui.shellAction(QStringLiteral("remoteSessionsAction"))->property("visible").toBool());
     }
 
-    void theAvatarOpensTheUsersPageAndTheSessionGoesOn()
+    // The avatar at the foot of the rail opens the user picker as a mode of the shell: the page is the only one of the stack, with no rail and no way back, and the lone corner menu stands in; the session and the server stay until another user is chosen
+    void theAvatarOpensThePickerAloneAndTheSignedInUserGoesBack()
     {
         Ui ui(m_home->path());
         QVERIFY(ui.load());
         QVERIFY(buildState(ui, QStringLiteral("home")));
         QVERIFY(!ui.store.tokens.isEmpty());
         const int logins = ui.server.successfulLogins;
-        // The avatar at the foot of the rail opens the users page above Home, as a section: the session and the server stay
+        QVERIFY(ui.railShows());
+        QVERIFY(ui.window->property("signedIn").toBool());
         ui.clickCenter(ui.item(QStringLiteral("sidebarUserButton")));
         QTRY_VERIFY(ui.item(QStringLiteral("userPickerPage")) != nullptr);
         QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("userPickerPage"));
         QCOMPARE(ui.controller.state(), ConnectionController::Authenticated);
-        QTRY_COMPARE(ui.stackDepth(), 2);
+        QTRY_COMPARE(ui.stackDepth(), 1);
+        QVERIFY(!ui.window->property("signedIn").toBool());
+        // No rail, no entry of the rail and nothing to open a drawer with: the menu button alone is in the corner
+        QTRY_VERIFY(!ui.railShows());
+        QTRY_VERIFY(!ui.item(QStringLiteral("sidebarUserButton"))->isVisible());
+        QTRY_VERIFY(ui.item(QStringLiteral("mainMenuButton"))->isVisible());
+        QCOMPARE(ui.item(QStringLiteral("mainMenuButton"))->parentItem(),
+                 ui.item(QStringLiteral("cornerMenuSlot")));
+        QVERIFY(ui.item(QStringLiteral("cornerMenuSlot"))->isVisible());
+        QVERIFY(!ui.item(QStringLiteral("navigationButton"))->isVisible());
         QVERIFY(!ui.store.tokens.isEmpty());
         QCOMPARE(ui.controller.servers().size(), 1);
         QCOMPARE(ui.savedUsers().size(), 1);
@@ -13124,12 +14136,463 @@ class TestUiPages : public QObject {
         QTest::keyClick(ui.window, Qt::Key_Right);
         QTRY_VERIFY(tile->property("ring").toBool());
         QCOMPARE(QQmlProperty(background, QStringLiteral("border.width")).read().toInt(), 2);
-        // Choosing the signed-in user goes back to Home without signing in again
+        // Nothing leads back but a user: Esc, Alt+Left and the back button of the mouse leave the picker where it is
+        QTest::keyClick(ui.window, Qt::Key_Escape);
+        QTest::keyClick(ui.window, Qt::Key_Left, Qt::AltModifier);
+        QTest::mouseClick(ui.window, Qt::BackButton, Qt::NoModifier,
+                          QPoint(ui.window->width() / 2, 4));
+        QTest::qWait(300);
+        QCOMPARE(ui.stackDepth(), 1);
+        QCOMPARE(ui.currentDetails()->objectName(), QStringLiteral("userPickerPage"));
+        QVERIFY(ui.item(QStringLiteral("homePage")) == nullptr);
+        // Choosing the signed-in user goes back to Home without signing in again, and Home fades in as after a sign-in
+        auto *stack = ui.window->property("pageStack").value<QObject *>();
+        QVERIFY(stack);
+        PropertyRecorder opacity(stack, "opacity");
+        PropertyRecorder switching(ui.window, "tabSwitching");
         ui.clickCenter(tile);
         QTRY_VERIFY(ui.item(QStringLiteral("userPickerPage")) == nullptr);
         QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("homePage"));
+        QTRY_VERIFY(!ui.tabSwitching());
+        QVERIFY(switching.values.contains(1.0));
+        QVERIFY(!opacity.values.isEmpty());
+        QCOMPARE(opacity.values.first(), 0.0);
+        QTRY_COMPARE(stack->property("opacity").toReal(), 1.0);
         QCOMPARE(ui.controller.state(), ConnectionController::Authenticated);
         QCOMPARE(ui.server.successfulLogins, logins);
+        QCOMPARE(ui.stackDepth(), 1);
+        // The session's pages are back: the rail with its entries
+        QVERIFY(ui.window->property("signedIn").toBool());
+        QTRY_VERIFY(ui.railShows());
+        QTRY_COMPARE(ui.tabButtons().size(), 6);
+        QVERIFY(ui.item(QStringLiteral("sidebarUserButton"))->isVisible());
+    }
+
+    void theSessionPickerStopsPlayback_data()
+    {
+        QTest::addColumn<QString>("mode");
+        QTest::newRow("mini player") << QStringLiteral("mini");
+        QTest::newRow("picture in picture") << QStringLiteral("pip");
+        QTest::newRow("mini player in a Compact window") << QStringLiteral("compact");
+    }
+
+    // The picker takes the whole window and nothing plays behind it: the mini player and the picture in picture window close, and Home of the session that goes on is not asked for its rows again while it is out of sight
+    void theSessionPickerStopsPlayback()
+    {
+        QFETCH(QString, mode);
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QTRY_VERIFY(ui.controller.homeRows()->rowCount() > 0);
+        QPointer<QQuickWindow> pip;
+        if (mode == QLatin1String("pip")) {
+            pip = openPictureInPicture(ui, stub);
+            QVERIFY(pip);
+        } else {
+            QVERIFY(openMiniPlayer(ui, stub));
+        }
+        QVERIFY(stub.active);
+        const auto resumeReads = [&ui] {
+            return ui.server.listingRoutes.value(QStringLiteral("Resume")).size();
+        };
+        const qsizetype resumeBefore = resumeReads();
+        if (mode == QLatin1String("compact")) {
+            QVERIFY(ui.opensWindowOfWidth(ui.window->property("compactLimit").toInt() - 40));
+            QTRY_VERIFY(ui.window->property("compactHeader").toBool());
+            QVERIFY(ui.openNavigationDrawer());
+            ui.clickCenter(ui.item(QStringLiteral("drawerUser")));
+            QObject *drawer = ui.popup(QStringLiteral("navigationDrawer"));
+            QTRY_VERIFY(!drawer->property("visible").toBool());
+        } else {
+            ui.clickCenter(ui.item(QStringLiteral("sidebarUserButton")));
+        }
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("userPickerPage"));
+        QTRY_VERIFY(stub.calls.contains(QStringLiteral("stop")));
+        QTRY_COMPARE(ui.window->property("playbackMode").toString(), QStringLiteral("none"));
+        QTRY_VERIFY(!shownMiniPlayer(ui));
+        QTRY_VERIFY(ui.item(QStringLiteral("videoRenderer")) == nullptr);
+        QTRY_VERIFY(pictureInPictureWindow(ui) == nullptr);
+        if (mode == QLatin1String("pip"))
+            QTRY_VERIFY(pip.isNull());
+        QVERIFY(!stub.active);
+        QCOMPARE(ui.stackDepth(), 1);
+        QCOMPARE(ui.controller.state(), ConnectionController::Authenticated);
+        if (mode == QLatin1String("compact")) {
+            // The drawer has no button to open it again, and the keyboard is on the page
+            QTRY_VERIFY(!ui.item(QStringLiteral("navigationButton"))->isVisible());
+            QTRY_VERIFY(ui.window->activeFocusItem() != nullptr
+                        && (ui.window->activeFocusItem() == ui.currentDetails()
+                            || ui.currentDetails()->isAncestorOf(ui.window->activeFocusItem())));
+        }
+        QTest::qWait(300);
+        QCOMPARE(resumeReads(), resumeBefore);
+    }
+
+    // With the picker of the session in front nothing of the session answers: not Search, not the shortcuts of the sections, not Home of a remote control, not the Play commands that another device sends. Back in Home, the same ones work
+    void theSessionPickerIgnoresShortcutsAndRemoteCommands()
+    {
+        PlayerStub stub;
+        RemoteStub remote;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(attach(ui, "remoteInput", &remote));
+        QVERIFY(attach(ui, "player", &stub));
+        Kinefin::RemoteCommands *commands = ui.controller.remoteCommands();
+        ui.clickCenter(ui.item(QStringLiteral("sidebarUserButton")));
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("userPickerPage"));
+        QTRY_VERIFY(!ui.tabSwitching());
+        const auto picker = [&ui] {
+            return ui.stackDepth() == 1 && ui.currentDetails()
+                   && ui.currentDetails()->objectName() == QStringLiteral("userPickerPage");
+        };
+        const auto pending = [&ui] {
+            const QVariant value = ui.window->property("remotePending");
+            return value.canConvert<QJSValue>()
+                       ? value.value<QJSValue>().property(QStringLiteral("length")).toInt()
+                       : int(value.toList().size());
+        };
+        QTest::keyClick(ui.window, Qt::Key_F, Qt::ControlModifier);
+        QTest::keyClick(ui.window, Qt::Key_Tab, Qt::ControlModifier);
+        QTest::keyClick(ui.window, Qt::Key_PageDown, Qt::ControlModifier);
+        QTest::keyClick(ui.window, Qt::Key_1, Qt::ControlModifier);
+        Q_EMIT remote.actionRequested(QStringLiteral("home"));
+        Q_EMIT remote.actionRequested(QStringLiteral("nexttab"));
+        commands->handlePlay({QStringLiteral("PlayNow"), {kMovieId}, 300, -1});
+        commands->handlePlay({QStringLiteral("PlayLast"), {kMovieId}, -1, -1});
+        QCOMPARE(pending(), 0);
+        QTest::qWait(300);
+        QVERIFY(!ui.searchPopupOpen());
+        QVERIFY(picker());
+        QCOMPARE(pending(), 0);
+        QVERIFY(!ui.window->property("remotePlayWaiting").toBool());
+        QVERIFY(!stub.calls.contains(QStringLiteral("playItem ") + kMovieId));
+        QCOMPARE(ui.window->property("playbackMode").toString(), QStringLiteral("none"));
+        QVERIFY(ui.controller.queue()->itemIds().isEmpty());
+        // The signed-in user goes back to Home, where Search and a Play command work again
+        QQuickItem *tile = nullptr;
+        QTRY_VERIFY((tile = ui.firstUserTile()) != nullptr);
+        ui.clickCenter(tile);
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("homePage"));
+        QTRY_VERIFY(!ui.tabSwitching());
+        QVERIFY(ui.openSearchPopup() != nullptr);
+        QVERIFY(ui.closeSearchPopup());
+        commands->handlePlay({QStringLiteral("PlayNow"), {kMovieId}, 300, -1});
+        QTRY_VERIFY(stub.calls.contains(QStringLiteral("playItem ") + kMovieId));
+    }
+
+    // The lone menu of the picker has what a window without a session has: Settings, Keyboard Shortcuts and About, nothing that needs the session; Settings opens above the picker and Back returns to it
+    void theCornerMenuOfTheSessionPickerOffersSettingsAndAbout()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(1200));
+        QVERIFY(buildState(ui, QStringLiteral("home")));
+        // In the session these are there
+        for (const char *name : {"refreshAction", "adminDashboardAction", "remoteSessionsAction"})
+            QVERIFY2(ui.shellAction(QLatin1String(name))->property("visible").toBool(), name);
+        ui.clickCenter(ui.item(QStringLiteral("sidebarUserButton")));
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("userPickerPage"));
+        QTRY_VERIFY(!ui.railShows());
+        for (const char *name :
+             {"refreshAction", "adminDashboardAction", "remoteSessionsAction", "syncPlayAction"})
+            QVERIFY2(!ui.shellAction(QLatin1String(name))->property("visible").toBool(), name);
+        QQuickItem *button = ui.item(QStringLiteral("mainMenuButton"));
+        QVERIFY(button);
+        QTRY_VERIFY(button->isVisible());
+        QCOMPARE(button->parentItem(), ui.item(QStringLiteral("cornerMenuSlot")));
+        QVERIFY(!ui.headerShows());
+        QObject *menu = ui.openMainMenuByClick();
+        QVERIFY(menu);
+        QCOMPARE(
+            ui.shownMenuNames(QStringLiteral("mainMenu")),
+            QStringList({QStringLiteral("menuSettingsItem"), QStringLiteral("menuShortcutsItem"),
+                         QStringLiteral("menuAboutItem")}));
+        QVERIFY(Ui::closeMenu(menu));
+        // Settings opens above the picker, and the back button of the mouse returns to it
+        QVERIFY(
+            QMetaObject::invokeMethod(ui.shellAction(QStringLiteral("settingsAction")), "trigger"));
+        QTRY_VERIFY(ui.item(QStringLiteral("settingsPage")) != nullptr);
+        QTRY_COMPARE(ui.stackDepth(), 2);
+        QTest::mouseClick(ui.window, Qt::BackButton, Qt::NoModifier,
+                          QPoint(ui.window->width() / 2, ui.window->height() / 2));
+        QTRY_COMPARE(ui.stackDepth(), 1);
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("userPickerPage"));
+        QTRY_VERIFY(ui.item(QStringLiteral("settingsPage")) == nullptr);
+        QVERIFY(!ui.railShows());
+        QCOMPARE(ui.controller.state(), ConnectionController::Authenticated);
+    }
+
+    // Add User from the picker of a session ends the session and shows the sign-in; Choose Another User there comes back to the picker of the saved users, the signed-out one: no rail, the corner menu, no caption on the tiles, and choosing the user opens a session again
+    void addUserFromTheSessionPickerReturnsToTheSamePicker()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(ui.signInAsUser(QStringLiteral("Alice")));
+        QTRY_COMPARE(ui.savedUsers().size(), 1);
+        ui.clickCenter(ui.item(QStringLiteral("sidebarUserButton")));
+        QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("userPickerPage"));
+        QQuickItem *add = nullptr;
+        QTRY_VERIFY((add = ui.userTile(QString())) != nullptr && add->isVisible());
+        ui.clickCenter(add);
+        QTRY_COMPARE(ui.controller.state(), ConnectionController::NeedsLogin);
+        QTRY_VERIFY(ui.item(QStringLiteral("loginPage")) != nullptr);
+        QVERIFY(!ui.window->property("userPickerOpen").toBool());
+        QVERIFY(!ui.railShows());
+        QTRY_VERIFY(ui.showsText(QStringLiteral("Choose Another User")));
+        QVERIFY(ui.clickButton(QStringLiteral("Choose Another User")));
+        QTRY_COMPARE(ui.controller.state(), ConnectionController::ChoosingUser);
+        QTRY_VERIFY(ui.item(QStringLiteral("userPickerPage")) != nullptr);
+        QTRY_VERIFY(ui.item(QStringLiteral("loginPage")) == nullptr);
+        QCOMPARE(ui.stackDepth(), 1);
+        QVERIFY(!ui.railShows());
+        QTRY_VERIFY(ui.item(QStringLiteral("mainMenuButton"))->isVisible());
+        QCOMPARE(ui.item(QStringLiteral("mainMenuButton"))->parentItem(),
+                 ui.item(QStringLiteral("cornerMenuSlot")));
+        QQuickItem *tile = nullptr;
+        QTRY_VERIFY((tile = ui.firstUserTile()) != nullptr);
+        QVERIFY(tile->property("caption").toString().isEmpty());
+        ui.clickCenter(tile);
+        QTRY_COMPARE(ui.controller.state(), ConnectionController::Authenticated);
+        QTRY_VERIFY(ui.item(QStringLiteral("homePage")) != nullptr);
+        QTRY_VERIFY(ui.railShows());
+    }
+
+    void aChosenUserKeepsItsPageUntilTheLibrariesAreListed_data()
+    {
+        QTest::addColumn<QString>("way");
+        QTest::addColumn<bool>("withSettings");
+        QTest::newRow("saved user on the picker") << QStringLiteral("picker") << false;
+        QTest::newRow("saved user on the picker, Settings above it")
+            << QStringLiteral("picker") << true;
+        QTest::newRow("sign-in") << QStringLiteral("sign-in") << false;
+        QTest::newRow("sign-in, Settings above it") << QStringLiteral("sign-in") << true;
+        QTest::newRow("user chosen on the picker of a session")
+            << QStringLiteral("session") << false;
+    }
+
+    // A session that opens on the picker or the sign-in keeps that page until its libraries are listed, so that Home never shows empty: no Home page, no rail and no session pages meanwhile (the sign-in page stays busy), and once the libraries are listed Home fades in whole with the rail
+    void aChosenUserKeepsItsPageUntilTheLibrariesAreListed()
+    {
+        QFETCH(QString, way);
+        QFETCH(bool, withSettings);
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QString kept;
+        int views = 0;
+        if (way == QLatin1String("sign-in")) {
+            ui.serveUsers();
+            ui.controller.connectTo(address(ui.server));
+            QVERIFY(ui.reach(ConnectionController::NeedsLogin, QStringLiteral("loginPage")));
+            kept = QStringLiteral("loginPage");
+            views = ui.server.viewRequests;
+            ui.server.holdViews = true;
+            ui.controller.login(QStringLiteral("Alice"), QStringLiteral("fixture-password"));
+        } else {
+            QVERIFY(ui.openPickerWithTwoUsers());
+            kept = QStringLiteral("userPickerPage");
+            QQuickItem *chosen = ui.userTile(kAliceId);
+            if (way == QLatin1String("session")) {
+                // Alice's session first, then Bob from the picker its avatar opens
+                ui.clickCenter(chosen);
+                QVERIFY(ui.reach(ConnectionController::Authenticated, QStringLiteral("homePage")));
+                QTRY_COMPARE(ui.tabButtons().size(), 6);
+                QTRY_VERIFY(!ui.tabSwitching());
+                ui.clickCenter(ui.item(QStringLiteral("sidebarUserButton")));
+                QTRY_COMPARE(ui.currentDetails()->objectName(), kept);
+                QTRY_VERIFY([&ui] {
+                    const QQuickItem *grid = ui.item(QStringLiteral("userPickerGrid"));
+                    return grid && grid->property("count").toInt() == 2;
+                }());
+                QTRY_VERIFY((chosen = ui.userTile(kBobId)) != nullptr);
+            }
+            QTRY_VERIFY(!ui.tabSwitching());
+            views = ui.server.viewRequests;
+            ui.server.holdViews = true;
+            ui.clickCenter(chosen);
+        }
+        QTRY_COMPARE(ui.controller.state(), ConnectionController::Authenticated);
+        // The libraries are asked for and never answered
+        QTRY_VERIFY(ui.server.viewRequests > views);
+        const auto busy = [&ui] {
+            for (QQuickItem *candidate : allItems(ui.currentDetails())) {
+                if (QString::fromLatin1(candidate->metaObject()->className())
+                        .contains(QLatin1String("BusyIndicator"))
+                    && candidate->isVisible() && candidate->property("running").toBool())
+                    return true;
+            }
+            return false;
+        };
+        // The page is busy while its session waits for the libraries, and the picker takes no other choice meanwhile
+        QTRY_VERIFY(busy());
+        if (way != QLatin1String("sign-in")) {
+            QVERIFY(!ui.item(QStringLiteral("userPickerGrid"))->isEnabled());
+            QVERIFY(!ui.item(QStringLiteral("userAddButton"))->isEnabled());
+        }
+        auto *stack = ui.window->property("pageStack").value<QObject *>();
+        QVERIFY(stack);
+        if (withSettings) {
+            QVERIFY(QMetaObject::invokeMethod(ui.shellAction(QStringLiteral("settingsAction")),
+                                              "trigger"));
+            QTRY_VERIFY(ui.item(QStringLiteral("settingsPage")) != nullptr);
+            QTRY_COMPARE(ui.stackDepth(), 2);
+        }
+        QTest::qWait(300);
+        QTRY_VERIFY(!ui.tabSwitching());
+        QTRY_COMPARE(stack->property("opacity").toReal(), 1.0);
+        QVERIFY(ui.window->property("sessionOpening").toBool());
+        QVERIFY(!ui.window->property("signedIn").toBool());
+        QVERIFY(!ui.window->property("sessionOpeningExpired").toBool());
+        QVERIFY(!ui.controller.librariesLoaded());
+        QVERIFY(ui.item(QStringLiteral("homePage")) == nullptr);
+        QVERIFY(!ui.railShows());
+        QCOMPARE(ui.currentDetails()->objectName(),
+                 withSettings ? QStringLiteral("settingsPage") : kept);
+        QCOMPARE(ui.stackDepth(), withSettings ? 2 : 1);
+        QVERIFY(ui.item(kept) != nullptr);
+        if (way == QLatin1String("sign-in")) {
+            // The form is busy: nothing of it can be pressed or typed in
+            QVERIFY(!ui.item(QStringLiteral("usernameField"))->isEnabled());
+            QVERIFY(!ui.item(QStringLiteral("passwordField"))->isEnabled());
+        } else {
+            // The tiles keep the layout they had: no caption names the signed-in user
+            for (QQuickItem *tile : ui.itemsStartingWith(QStringLiteral("userTile_")))
+                QVERIFY2(tile->property("caption").toString().isEmpty(),
+                         qPrintable(tile->objectName()));
+        }
+        // The libraries answer: Home fades in whole, with the rail, in place of what held the window
+        PropertyRecorder opacity(stack, "opacity");
+        PropertyRecorder switching(ui.window, "tabSwitching");
+        ui.server.holdViews = false;
+        ui.controller.reloadLibraries();
+        QTRY_VERIFY(ui.item(QStringLiteral("homePage")) != nullptr);
+        QVERIFY(ui.controller.librariesLoaded());
+        QTRY_VERIFY(!ui.tabSwitching());
+        QVERIFY(switching.values.contains(1.0));
+        QVERIFY(!opacity.values.isEmpty());
+        QCOMPARE(opacity.values.first(), 0.0);
+        QTRY_COMPARE(stack->property("opacity").toReal(), 1.0);
+        QVERIFY(!ui.window->property("sessionOpeningExpired").toBool());
+        QTRY_VERIFY(ui.window->property("signedIn").toBool());
+        QTRY_VERIFY(ui.railShows());
+        QTRY_COMPARE(ui.stackDepth(), 1);
+        QCOMPARE(ui.currentDetails()->objectName(), QStringLiteral("homePage"));
+        QTRY_VERIFY(ui.item(kept) == nullptr);
+    }
+
+    // A Quick Connect approval opens the session on the sign-in page: while it lists its libraries the page only shows that it is busy, with neither the code, which is gone, nor the form, which had no part in it
+    void aQuickConnectApprovalWaitsWithoutTheForm()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        ui.controller.setQuickConnectPollInterval(std::chrono::milliseconds(50));
+        ui.controller.connectTo(address(ui.server));
+        QVERIFY(ui.reach(ConnectionController::NeedsLogin, QStringLiteral("loginPage")));
+        QQuickItem *page = ui.item(QStringLiteral("loginPage"));
+        QQuickItem *username = ui.item(QStringLiteral("usernameField"));
+        QQuickItem *busy = ui.item(QStringLiteral("loginQuickOpeningBusy"));
+        QVERIFY(page && username && busy);
+        QVERIFY(username->isVisible());
+        ui.controller.startQuickConnect();
+        QTRY_VERIFY(page->property("quick").toBool());
+        QTRY_VERIFY(!ui.controller.quickConnectCode().isEmpty());
+        QVERIFY(!username->isVisible());
+        const int views = ui.server.viewRequests;
+        ui.server.holdViews = true;
+        ui.server.approveQuickConnect = true;
+        QTRY_COMPARE(ui.controller.state(), ConnectionController::Authenticated);
+        QTRY_VERIFY(ui.server.viewRequests > views);
+        QCOMPARE(ui.currentDetails(), page);
+        QVERIFY(ui.controller.quickConnectCode().isEmpty());
+        QTRY_VERIFY(page->property("quickOpening").toBool());
+        QVERIFY(!page->property("quick").toBool());
+        QTRY_VERIFY(busy->isVisible() && busy->property("running").toBool());
+        QVERIFY(!username->isVisible());
+        // The libraries answer: Home comes, and the page that waited goes
+        ui.server.holdViews = false;
+        ui.controller.reloadLibraries();
+        QTRY_VERIFY(ui.item(QStringLiteral("homePage")) != nullptr);
+        QTRY_VERIFY(ui.item(QStringLiteral("loginPage")) == nullptr);
+    }
+
+    // The libraries that never answer do not keep a session off Home for ever: the wait ends at its deadline and Home shows without them. The next session waits again, the end of the first one's wait is not the end of every wait
+    void aSessionWhoseLibrariesNeverAnswerOpensHomeAtTheDeadline()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        ui.serveUsers();
+        ui.server.holdViews = true;
+        ui.controller.connectTo(address(ui.server));
+        QVERIFY(ui.reach(ConnectionController::NeedsLogin, QStringLiteral("loginPage")));
+        ui.controller.login(QStringLiteral("Alice"), QStringLiteral("fixture-password"));
+        QTRY_COMPARE(ui.controller.state(), ConnectionController::Authenticated);
+        QTRY_VERIFY(ui.server.viewRequests > 0);
+        QVERIFY(ui.item(QStringLiteral("homePage")) == nullptr);
+        QCOMPARE(ui.currentDetails()->objectName(), QStringLiteral("loginPage"));
+        QVERIFY(!ui.window->property("sessionOpeningExpired").toBool());
+        // The deadline is 8 s: Home shows without the libraries, with its rail
+        QTRY_VERIFY_WITH_TIMEOUT(ui.item(QStringLiteral("homePage")) != nullptr, scaled(15000));
+        QVERIFY(ui.window->property("sessionOpeningExpired").toBool());
+        QVERIFY(!ui.controller.librariesLoaded());
+        QTRY_VERIFY(ui.window->property("signedIn").toBool());
+        QTRY_VERIFY(ui.railShows());
+        // Another session: the wait starts over and holds the sign-in page again
+        ui.controller.addUser();
+        QTRY_COMPARE(ui.controller.state(), ConnectionController::NeedsLogin);
+        QTRY_VERIFY(ui.item(QStringLiteral("loginPage")) != nullptr);
+        QVERIFY(!ui.window->property("sessionOpeningExpired").toBool());
+        const int views = ui.server.viewRequests;
+        ui.controller.login(QStringLiteral("Bob"), QStringLiteral("fixture-password"));
+        QTRY_COMPARE(ui.controller.state(), ConnectionController::Authenticated);
+        QTRY_VERIFY(ui.server.viewRequests > views);
+        QTest::qWait(300);
+        QVERIFY(ui.item(QStringLiteral("homePage")) == nullptr);
+        QCOMPARE(ui.currentDetails()->objectName(), QStringLiteral("loginPage"));
+        QVERIFY(!ui.window->property("sessionOpeningExpired").toBool());
+        ui.server.holdViews = false;
+        ui.controller.reloadLibraries();
+        QTRY_VERIFY(ui.item(QStringLiteral("homePage")) != nullptr);
+        QVERIFY(!ui.window->property("sessionOpeningExpired").toBool());
+    }
+
+    // A failed listing of the libraries ends the wait at once, not at its deadline: Home shows with the error of the listing
+    void aFailedLibraryListingReleasesTheOpeningOfASessionAtOnce()
+    {
+        Ui ui(m_home->path());
+        ui.server.viewsRawBody = QByteArrayLiteral("{}");
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QVERIFY(!ui.window->property("sessionOpeningExpired").toBool());
+        QTRY_VERIFY(!ui.controller.errorText().isEmpty());
+        QVERIFY(!ui.controller.librariesLoaded());
+        QTRY_VERIFY(ui.railShows());
+        QTRY_VERIFY(ui.showsText(ui.controller.errorText()));
+    }
+
+    // A saved user chosen on the picker keeps the picker for as long as its session is being restored, and the picker gives way to the Servers page when the connection ends instead
+    void thePickerGivesWayWhenTheConnectionOfAChosenUserEnds()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(ui.openPickerWithTwoUsers());
+        QQuickItem *chosen = ui.userTile(kAliceId);
+        QVERIFY(chosen);
+        // The keyring does not answer: the connection stays on Connecting
+        ui.store.hold = true;
+        ui.clickCenter(chosen);
+        QTRY_COMPARE(ui.controller.state(), ConnectionController::Connecting);
+        QTest::qWait(300);
+        QVERIFY(ui.item(QStringLiteral("serversPage")) == nullptr);
+        QVERIFY(ui.item(QStringLiteral("userPickerPage")) != nullptr);
+        QCOMPARE(ui.controller.state(), ConnectionController::Connecting);
+        ui.controller.cancel();
+        QTRY_COMPARE(ui.controller.state(), ConnectionController::Idle);
+        QTRY_VERIFY(ui.item(QStringLiteral("serversPage")) != nullptr);
+        QTRY_VERIFY(ui.item(QStringLiteral("userPickerPage")) == nullptr);
+        ui.store.release();
     }
 
     // The server and Switch Server stand at the foot of the users page, centred and as far from the bottom as the heading is from the top, under Add User; Down from Add User reaches Switch Server and Up comes back
@@ -13454,8 +14917,9 @@ class TestUiPages : public QObject {
         QVERIFY(toggle->isVisible());
         ui.clickCenter(toggle);
         QTRY_COMPARE(shownTiles(), 40);
-        ui.clickCenter(toggle);
-        QTRY_COMPARE(shownTiles(), twoRows());
+        // The rows push the toggle down, past the window when the page has not scrolled to it: scroll to it as a user would, again while the layout still moves under load
+        QVERIFY(ui.revealAndClickUntil(ui.item(QStringLiteral("loginPage")), toggle,
+                                       [&] { return shownTiles() == twoRows(); }));
     }
 
     void theMenuOfATileAsksForThePasswordAndRemovesTheUser()
@@ -15543,6 +17007,25 @@ class TestUiPages : public QObject {
                            > topLeft(card("Primary")).x() + card("Primary")->width());
         QTRY_VERIFY(even());
         QVERIFY(sameLook());
+        // A movie is not a person: it offers every type, and its cards keep their padding, their border, their title and the short wide frame
+        QVERIFY(!page->property("single").toBool());
+        QVERIFY(stringsOf(page->property("imageTypes")).isEmpty());
+        QQuickItem *primary = card("Primary");
+        QVERIFY(primary->property("padding").toReal() > 0);
+        QCOMPARE(QQmlProperty(primary, QStringLiteral("border.width")).read().toInt(), 1);
+        bool titled = false;
+        for (QQuickItem *item : allItems(primary)) {
+            titled = titled
+                     || (item->inherits("QQuickText")
+                         && item->property("text").toString() == QLatin1String("Primary")
+                         && item->isVisible());
+        }
+        QVERIFY(titled);
+        const QQuickItem *picture = Ui::itemIn(primary, QStringLiteral("editImageCard_Primary"));
+        QVERIFY(picture && picture->parentItem());
+        const qreal frameHeight = picture->parentItem()->height();
+        QVERIFY2(qAbs(frameHeight - page->property("previewHeight").toReal()) <= 0.5,
+                 qPrintable(QString::number(frameHeight)));
         // A narrow one: one column, each card under the one before it at the same left edge
         QVERIFY(ui.opensWindowOfWidth(ui.window->minimumWidth()));
         QTRY_COMPARE(onFirstRow(), 1);
@@ -15596,6 +17079,11 @@ class TestUiPages : public QObject {
         // The selectors: the type asked for, and the providers that offer it
         QQuickItem *typeBox = ui.item(QStringLiteral("remoteImagesTypeBox"));
         QVERIFY(typeBox);
+        // An item that is no person keeps the box, with its label and every type the providers offer
+        QVERIFY(typeBox->isVisible());
+        QVERIFY(ui.showsText(QStringLiteral("Image type:")));
+        QVERIFY(!online->property("single").toBool());
+        QTRY_VERIFY(typeBox->property("count").toInt() >= 2);
         QTRY_COMPARE(typeBox->property("currentText").toString(), QStringLiteral("Backdrop"));
         QQuickItem *providerBox = ui.item(QStringLiteral("remoteImagesProviderBox"));
         QVERIFY(providerBox);
@@ -15888,11 +17376,18 @@ class TestUiPages : public QObject {
         // The models are not made, and the shell does not push the pages
         QVERIFY(!ui.controller.createEditImages(kMovieId, &ui.controller));
         QVERIFY(
+            !ui.controller.createEditImages(kMovieId, &ui.controller, {QStringLiteral("Primary")}));
+        QVERIFY(
             !ui.controller.createRemoteImages(kMovieId, QStringLiteral("Primary"), &ui.controller));
         QVERIFY(!ui.controller.moveImage(kMovieId, QStringLiteral("Backdrop"), 0, 1));
         const int depth = ui.stackDepth();
+        // The last argument is the image types the page offers, none for every type
         QVERIFY(QMetaObject::invokeMethod(ui.window, "openEditImages", Q_ARG(QVariant, kMovieId),
-                                          Q_ARG(QVariant, QString()), Q_ARG(QVariant, QVariant())));
+                                          Q_ARG(QVariant, QString()), Q_ARG(QVariant, QVariant()),
+                                          Q_ARG(QVariant, QVariant())));
+        QVERIFY(QMetaObject::invokeMethod(ui.window, "openEditImages", Q_ARG(QVariant, kMovieId),
+                                          Q_ARG(QVariant, QString()), Q_ARG(QVariant, QVariant()),
+                                          Q_ARG(QVariant, QStringList{QStringLiteral("Primary")})));
         QVERIFY(QMetaObject::invokeMethod(
             ui.window, "openRemoteImages", Q_ARG(QVariant, kMovieId), Q_ARG(QVariant, QString()),
             Q_ARG(QVariant, QStringLiteral("Primary")), Q_ARG(QVariant, QVariant())));
@@ -17204,9 +18699,10 @@ class TestUiPages : public QObject {
         for (const int width : {660, 700, 760, 900}) {
             QVERIFY(ui.opensWindowOfWidth(width));
             QTest::qWait(600);
-            const QStringList problems = ui.layoutProblems();
-            QVERIFY2(problems.isEmpty(), qPrintable(QStringLiteral("%1 px: ").arg(width)
-                                                    + problems.join(QStringLiteral("; "))));
+            QStringList problems;
+            QTRY_VERIFY2((problems = ui.layoutProblems()).isEmpty(),
+                         qPrintable(QStringLiteral("%1 px: ").arg(width)
+                                    + problems.join(QStringLiteral("; "))));
         }
         QVERIFY(ui.opensWindowOfWidth(500));
         QTRY_VERIFY(!play->isVisible() && narrowPlay->isVisible());
@@ -17219,8 +18715,9 @@ class TestUiPages : public QObject {
         QVERIFY(narrowRestart->mapToScene(QPointF(narrowRestart->width(), 0)).x()
                 <= narrowPlay->mapToScene(QPointF(0, 0)).x());
         QTest::qWait(1000);
-        const QStringList narrowProblems = ui.layoutProblems();
-        QVERIFY2(narrowProblems.isEmpty(), qPrintable(narrowProblems.join(QStringLiteral("; "))));
+        QStringList narrowProblems;
+        QTRY_VERIFY2((narrowProblems = ui.layoutProblems()).isEmpty(),
+                     qPrintable(narrowProblems.join(QStringLiteral("; "))));
         QVERIFY(narrowPlay->activeFocusOnTab());
         QStringList names;
         QStringList texts;
@@ -17498,12 +18995,21 @@ class TestUiPages : public QObject {
             }
             focusSink->forceActiveFocus(Qt::OtherFocusReason);
             QTest::qWait(1200);
+            // A grab during the glide or the slide of the rail would show a half-drawn edge
+            QTRY_VERIFY(!ui.railChanging());
             const QImage image = fromKWin ? kwinActiveWindowShot() : ui.window->grabWindow();
             QVERIFY2(!image.isNull(), qPrintable(name));
             QVERIFY2(image.save(directory.filePath(name + QStringLiteral(".png")), "PNG", 0),
                      qPrintable(name));
         };
         QTRY_VERIFY(ui.item(QStringLiteral("libraryCard_") + kMovies) != nullptr);
+        // The pictures show the rail with its labels: a shorter window would have the compact one
+        QQuickItem *sidebar = ui.sidebar();
+        QVERIFY(sidebar);
+        QVERIFY2(!sidebar->property("compact").toBool(),
+                 qPrintable(QStringLiteral("labelledHeight %1 at a window of %2")
+                                .arg(sidebar->property("labelledHeight").toReal())
+                                .arg(ui.window->height())));
         shot(QStringLiteral("home"));
         QVERIFY(ui.openLibraryTile(kMovies));
         QQuickItem *card = nullptr;
@@ -17607,6 +19113,7 @@ class TestUiPages : public QObject {
         int number = 0;
         const auto shot = [&](const QString &name) {
             QTest::qWait(400);
+            QTRY_VERIFY(!ui.railChanging());
             const QImage image = ui.window->grabWindow();
             QVERIFY2(!image.isNull(), qPrintable(name));
             QVERIFY2(
@@ -17633,6 +19140,11 @@ class TestUiPages : public QObject {
         shot(QStringLiteral("user-menu"));
         QVERIFY(Ui::closeMenu(userMenu));
         QTRY_VERIFY(!userMenu->property("visible").toBool());
+        // The picker has no rail and no drawer: the signed-in user's tile goes back to Home, where the drawer's rows are
+        ui.clickCenter(userTile);
+        QTRY_VERIFY(ui.item(QStringLiteral("userPickerPage")) == nullptr);
+        QTRY_VERIFY(ui.item(QStringLiteral("libraryCard_") + kMovies) != nullptr);
+        QTRY_VERIFY(ui.railShows());
         QVERIFY(ui.opensWindowOfWidth(500));
         QVERIFY(ui.openNavigationDrawer());
         shot(QStringLiteral("drawer"));
@@ -19296,13 +20808,15 @@ class TestUiPages : public QObject {
         QVERIFY(prefs->dirty());
         QCOMPARE(prefs->subtitleMode(), QStringLiteral("Always"));
         QVERIFY(ui.item(QStringLiteral("userPreferencesForm")) != nullptr);
-        // Discard settles the draft, then the users page opens and the session goes on
+        // Discard settles the draft, then the users page opens in place of the Settings page and the session goes on
         ui.clickCenter(user);
         QTRY_VERIFY(dialog->property("opened").toBool());
         QVERIFY(
             clickInDialog(ui, QStringLiteral("unsavedChangesDialog"), QStringLiteral("Discard")));
         QVERIFY(!prefs->dirty());
         QTRY_COMPARE(ui.currentDetails()->objectName(), QStringLiteral("userPickerPage"));
+        QTRY_COMPARE(ui.stackDepth(), 1);
+        QTRY_VERIFY(ui.item(QStringLiteral("settingsPage")) == nullptr);
         QCOMPARE(ui.controller.state(), ConnectionController::Authenticated);
         QVERIFY(remote.posts.isEmpty());
     }
@@ -22126,8 +23640,11 @@ class TestUiPages : public QObject {
         ui.serveMovie();
         QVERIFY(ui.load());
         QVERIFY(ui.signIn());
-        if (compact)
+        if (compact) {
             QVERIFY(ui.opensWindowOfWidth(ui.window->property("compactLimit").toInt() - 40));
+            // The rail slides out while the button fades in: the player's slide starts once both are over
+            QTRY_VERIFY(!ui.railChanging());
+        }
         // What fades: the rail on a wide window, the button of the corner in a Compact one; either keeps its size while it fades (a resize of the row would end the slide at once)
         QQuickItem *header = compact ? ui.item(QStringLiteral("navigationButton")) : ui.sidebar();
         QVERIFY(header);
@@ -22229,6 +23746,450 @@ class TestUiPages : public QObject {
         QTRY_COMPARE(ui.stackDepth(), depth);
         QTRY_VERIFY(header->opacity() == 1.0 && header->isEnabled());
         QCOMPARE(extent(), headerHeight);
+    }
+
+    void aChangeOfFormResizesThePageRowOnce_data()
+    {
+        QTest::addColumn<QString>("change");
+        QTest::addColumn<bool>("rightToLeft");
+        for (const bool rightToLeft : {false, true}) {
+            for (const char *change : {"labelled to compact", "compact to labelled",
+                                       "rail to corner button", "corner button to rail"})
+                QTest::addRow("%s, %s", change, rightToLeft ? "right to left" : "left to right")
+                    << QString::fromLatin1(change) << rightToLeft;
+        }
+    }
+
+    // A change of form moves only the paint of the rail: its own item and the page row take their new width in the first frame and never follow the motion, since a resize of the row ends the slide of a page. The painted edge glides between the two widths with the entries laid out in the new form; the whole rail slides out past the leading edge while the corner button fades in, or slides back in
+    void aChangeOfFormResizesThePageRowOnce()
+    {
+        QFETCH(QString, change);
+        QFETCH(bool, rightToLeft);
+        const Qt::LayoutDirection direction = QGuiApplication::layoutDirection();
+        QGuiApplication::setLayoutDirection(rightToLeft ? Qt::RightToLeft : Qt::LeftToRight);
+        const auto restoreDirection =
+            qScopeGuard([direction] { QGuiApplication::setLayoutDirection(direction); });
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(ui.signInAsUser(QStringLiteral("Alice")));
+        QTRY_VERIFY(ui.syncPlay.available());
+        QTRY_VERIFY(railHoldsEveryEntry(ui));
+        QQuickItem *rail = ui.sidebar();
+        QVERIFY(rail);
+        QVERIFY2(rail->property("formAnimated").toBool(),
+                 "the motions of the rail are off: Kirigami.Units.longDuration is 0");
+        const qreal labelledWidth = rail->property("labelledWidth").toReal();
+        const qreal compactWidth = rail->property("compactWidth").toReal();
+        QVERIFY(labelledWidth > compactWidth && compactWidth > 0);
+        // A tall window has the labelled rail and one at the least height the compact rail; a wide window has the rail and a narrow one the corner button
+        const QSize tall(1000, 900);
+        const QSize low(1000, ui.window->minimumHeight());
+        const QSize narrow(ui.window->property("compactLimit").toInt() - 40, 900);
+        const struct {
+            const char *name;
+            QSize from;
+            bool fromCompact;
+            bool fromCorner;
+            QSize to;
+            bool toCompact;
+            bool toCorner;
+        } changes[] = {{"labelled to compact", tall, false, false, low, true, false},
+                       {"compact to labelled", low, true, false, tall, false, false},
+                       {"rail to corner button", tall, false, false, narrow, false, true},
+                       {"corner button to rail", narrow, false, true, tall, false, false}};
+        const auto *step =
+            std::find_if(std::begin(changes), std::end(changes), [&change](const auto &entry) {
+                return change == QLatin1String(entry.name);
+            });
+        QVERIFY(step != std::end(changes));
+        const RailWatch watch(ui, rightToLeft);
+        QVERIFY(watch.ready());
+        QVERIFY(settleRailAt(ui, step->from));
+        QTRY_COMPARE(rail->property("compact").toBool(), step->fromCompact);
+        QTRY_COMPARE(ui.window->property("compactHeader").toBool(), step->fromCorner);
+        QVERIFY(settleRailAt(ui, step->from));
+        // The first look is the rail at rest in the old form; the series goes on until the window has its new size and the rail has been still in the new form
+        QList<RailSample> samples{watch.sample()};
+        ui.window->resize(step->to);
+        int quiet = 0;
+        const bool settled = sampleRailUntil(watch, samples, [&](const RailSample &s) {
+            const bool still = RailWatch::arrived(s, step->to, step->toCompact, step->toCorner)
+                               && !s.changing && !s.leaving;
+            quiet = still ? quiet + 1 : 0;
+            return quiet >= 8;
+        });
+        QVERIFY2(settled, "the rail did not settle in its new form");
+        const auto firstFlipped =
+            std::find_if(samples.cbegin(), samples.cend(), [&](const RailSample &s) {
+                return RailWatch::arrived(s, step->to, step->toCompact, step->toCorner);
+            });
+        QVERIFY(firstFlipped != samples.cend());
+        const QList<RailSample> post(firstFlipped, samples.cend());
+        const RailSample &before = samples.constFirst();
+        const RailSample &after = samples.constLast();
+        const bool slideOut = !step->fromCorner && step->toCorner;
+        const bool slideIn = step->fromCorner && !step->toCorner;
+        // A change of the width of the window comes with a step of its own for the page row: up to three widths in all, never the many of an animation
+        QStringList problems = railWidthProblems(samples, slideOut || slideIn ? 3 : 2);
+        const auto note = [&problems](bool wrong, const QString &message) {
+            if (wrong && !problems.contains(message))
+                problems << message;
+        };
+        note(std::none_of(post.cbegin(), post.cend(),
+                          [](const RailSample &s) { return s.changing; }),
+             QStringLiteral("the rail was never in motion"));
+        if (slideOut || slideIn) {
+            QList<qreal> leads;
+            QList<qreal> fades;
+            for (const RailSample &s : post) {
+                note(qAbs(s.panelWidth - labelledWidth) > 0.1,
+                     QStringLiteral("the panel changed width during the slide"));
+                note(s.lead < -0.1 || s.lead > labelledWidth + 0.1,
+                     QStringLiteral("the rail went somewhere other than past the leading edge"));
+                fades << s.cornerOpacity;
+                if (slideOut) {
+                    note(!s.cornerVisible,
+                         QStringLiteral("the corner button was hidden while the rail slid out"));
+                    if (s.leaving) {
+                        leads << s.lead;
+                        note(!s.railVisible,
+                             QStringLiteral("the rail was hidden while it slid out"));
+                        note(s.railEnabled,
+                             QStringLiteral("the rail took input while it slid out"));
+                        note(!s.railIgnored,
+                             QStringLiteral("the rail was read out while it slid out"));
+                    }
+                } else {
+                    leads << s.lead;
+                    note(s.cornerVisible,
+                         QStringLiteral("the corner button stayed while the rail came in"));
+                    note(!s.railVisible, QStringLiteral("the rail was hidden while it came in"));
+                    note(!s.railEnabled, QStringLiteral("the rail was disabled while it came in"));
+                    note(s.leaving, QStringLiteral("the rail was leaving while it came in"));
+                }
+            }
+            // The slide goes one way, from the edge toward the window's leading edge when the rail leaves and from there back to its place when it comes
+            note(!movesOneWay(leads, slideOut ? 1 : -1),
+                 QStringLiteral("the slide went back on itself"));
+            note(std::none_of(leads.cbegin(), leads.cend(), [](qreal lead) { return lead > 1; }),
+                 QStringLiteral("the rail never stood outside its place"));
+            note(qAbs(after.lead) > 0.5, QStringLiteral("the rail did not end in its place"));
+            if (slideOut) {
+                note(after.railVisible, QStringLiteral("the rail still showed after the slide"));
+                note(!movesOneWay(fades, 1),
+                     QStringLiteral("the fade of the corner button stepped back"));
+                note(std::none_of(fades.cbegin(), fades.cend(),
+                                  [](qreal opacity) { return opacity > 0.01 && opacity < 0.99; }),
+                     QStringLiteral("the corner button did not fade in along with the slide"));
+                note(qAbs(after.cornerOpacity - 1) > 0.01,
+                     QStringLiteral("the corner button did not end whole"));
+            }
+        } else {
+            const qreal oldWidth = step->fromCompact ? compactWidth : labelledWidth;
+            const qreal newWidth = step->toCompact ? compactWidth : labelledWidth;
+            const qreal lowest = qMin(oldWidth, newWidth);
+            const qreal highest = qMax(oldWidth, newWidth);
+            QList<qreal> edge;
+            for (const RailSample &s : post) {
+                edge << s.panelWidth;
+                note(s.panelWidth < lowest - 0.1 || s.panelWidth > highest + 0.1,
+                     QStringLiteral("the painted edge left the range between the two forms"));
+                note(qAbs(s.lead) > 0.1, QStringLiteral("the rail slid during a glide"));
+            }
+            note(!movesOneWay(edge, newWidth > oldWidth ? 1 : -1),
+                 QStringLiteral("the painted edge stepped back"));
+            note(std::none_of(edge.cbegin(), edge.cend(),
+                              [lowest, highest](qreal width) {
+                                  return width > lowest + 0.5 && width < highest - 0.5;
+                              }),
+                 QStringLiteral("the painted edge never stood between the two forms"));
+            note(qAbs(after.panelWidth - newWidth) > 0.1,
+                 QStringLiteral("the painted edge did not end at the width of the new form"));
+            // Within a hundredth of a pixel: right to left the panel stands at a fractional offset during the glide, and the scene transforms carry float rounding of that order
+            const auto samePlaces = [](const QList<QRectF> &a, const QList<QRectF> &b) {
+                if (a.size() != b.size())
+                    return false;
+                for (qsizetype i = 0; i < a.size(); ++i) {
+                    if (qAbs(a[i].x() - b[i].x()) > 0.01 || qAbs(a[i].y() - b[i].y()) > 0.01
+                        || qAbs(a[i].width() - b[i].width()) > 0.01
+                        || qAbs(a[i].height() - b[i].height()) > 0.01)
+                        return false;
+                }
+                return true;
+            };
+            // The entries stand in the new form from the first layout on: no look shows them in between, and none shows them back in the old one after the new
+            bool reached = false;
+            for (const RailSample &s : samples) {
+                if (samePlaces(s.entries, after.entries)) {
+                    reached = true;
+                    continue;
+                }
+                note(reached, QStringLiteral("the entries moved after they stood in the new form"));
+                note(!samePlaces(s.entries, before.entries),
+                     QStringLiteral("the entries stood between their old and their new places"));
+            }
+            note(before.entries == after.entries,
+                 QStringLiteral("the entries did not change with the form"));
+        }
+        QVERIFY2(problems.isEmpty(), qPrintable(problems.join(QLatin1Char('\n'))));
+        // At rest nothing is left of the motion, and the shell is in the mode of the window
+        QVERIFY(!rail->property("formChanging").toBool());
+        QVERIFY(!rail->property("leaving").toBool());
+        QCOMPARE(rail->property("widthLag").toReal(), 0.0);
+        QCOMPARE(rail->property("cornerOpacity").toReal(), 1.0);
+        QStringList modeIssues;
+        QTRY_VERIFY2((modeIssues = ui.modeProblems(step->toCorner)).isEmpty(),
+                     qPrintable(modeIssues.join(QLatin1Char('\n'))));
+        QTRY_VERIFY(ui.layoutProblems().isEmpty());
+    }
+
+    void aDragBackAndForthAcrossAThresholdNeverJumps_data()
+    {
+        QTest::addColumn<bool>("byHeight");
+        QTest::newRow("height") << true;
+        QTest::newRow("width") << false;
+    }
+
+    // The window turns back while the rail is still moving: the motion goes on from where it is, so that no step between two looks is larger than the speed of the animation allows for the time between them, and the rail ends at rest in the form of the window
+    void aDragBackAndForthAcrossAThresholdNeverJumps()
+    {
+        QFETCH(bool, byHeight);
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(ui.signInAsUser(QStringLiteral("Alice")));
+        QTRY_VERIFY(ui.syncPlay.available());
+        QTRY_VERIFY(railHoldsEveryEntry(ui));
+        QQuickItem *rail = ui.sidebar();
+        QVERIFY(rail);
+        QVERIFY2(rail->property("formAnimated").toBool(),
+                 "the motions of the rail are off: Kirigami.Units.longDuration is 0");
+        const int duration = longDurationOf(ui);
+        QVERIFY(duration > 0);
+        const qreal labelledWidth = rail->property("labelledWidth").toReal();
+        const qreal compactWidth = rail->property("compactWidth").toReal();
+        QVERIFY(labelledWidth > compactWidth && compactWidth > 0);
+        const QSize tall(1000, 900);
+        const QSize away = byHeight ? QSize(1000, ui.window->minimumHeight())
+                                    : QSize(ui.window->property("compactLimit").toInt() - 40, 900);
+        const RailWatch watch(ui, false);
+        QVERIFY(watch.ready());
+        QVERIFY(settleRailAt(ui, tall));
+        QTRY_VERIFY(!rail->property("compact").toBool());
+        QVERIFY(!ui.window->property("compactHeader").toBool());
+        // What the first motion moves: the painted edge between the two widths for the height, the whole rail out of the window by its width for the width
+        const qreal range = byHeight ? labelledWidth - compactWidth : labelledWidth;
+        const auto progress = [&](const RailSample &s) {
+            return byHeight ? (labelledWidth - s.panelWidth) / range : s.lead / range;
+        };
+        QList<RailSample> samples{watch.sample()};
+        ui.window->resize(away);
+        bool reversed = false;
+        int quiet = 0;
+        const bool settled = sampleRailUntil(watch, samples, [&](const RailSample &s) {
+            if (!reversed && RailWatch::arrived(s, away, byHeight, !byHeight) && s.changing
+                && progress(s) >= 0.25) {
+                reversed = true;
+                ui.window->resize(tall);
+                return false;
+            }
+            const bool back =
+                reversed && RailWatch::arrived(s, tall, false, false) && !s.changing && !s.leaving;
+            quiet = back ? quiet + 1 : 0;
+            return quiet >= 8;
+        });
+        QVERIFY2(reversed, "the motion was over before the window turned back");
+        QVERIFY2(settled, "the rail did not settle once the window was back");
+        // The window goes there and back: the page row has the width of each form and no other, but for one step of its own with each change of the window's width
+        QStringList problems = railWidthProblems(samples, byHeight ? 2 : 4);
+        const auto note = [&problems](bool wrong, const QString &message) {
+            if (wrong && !problems.contains(message))
+                problems << message;
+        };
+        // A motion steps once a frame and the looks come more often: a step is measured against the time since the value before it first showed
+        const auto since = [&samples](qsizetype i, qreal (*value)(const RailSample &)) {
+            qsizetype start = i - 1;
+            while (start > 0 && value(samples.at(start - 1)) == value(samples.at(i - 1)))
+                --start;
+            return qreal(samples.at(i).nanos - samples.at(start).nanos) / 1e6;
+        };
+        const auto edgeOf = [](const RailSample &s) { return s.panelWidth; };
+        const auto leadOf = [](const RailSample &s) { return s.lead; };
+        for (qsizetype i = 1; i < samples.size(); ++i) {
+            const RailSample &a = samples.at(i - 1);
+            const RailSample &b = samples.at(i);
+            // The fastest an easing moves is three times the mean speed; half as much again is the margin for a look that comes late
+            const auto bound = [&](qreal milliseconds) {
+                return range * qMin(1.0, 4.5 * milliseconds / duration) + 0.5;
+            };
+            note(qAbs(b.panelWidth - a.panelWidth) > (byHeight ? bound(since(i, edgeOf)) : 0.5),
+                 QStringLiteral("the painted edge jumped between two looks"));
+            note(qAbs(b.lead - a.lead) > (byHeight ? 0.5 : bound(since(i, leadOf))),
+                 QStringLiteral("the rail jumped between two looks"));
+        }
+        for (const RailSample &s : samples) {
+            note(byHeight ? qAbs(s.lead) > 0.5 : qAbs(s.panelWidth - labelledWidth) > 0.5,
+                 QStringLiteral("the motion that belongs to the other threshold moved too"));
+            note(s.lead < -0.5 || s.lead > labelledWidth + 0.5,
+                 QStringLiteral("the rail went somewhere other than past the leading edge"));
+            note(s.panelWidth < compactWidth - 0.5 || s.panelWidth > labelledWidth + 0.5,
+                 QStringLiteral("the painted edge left the range between the two forms"));
+        }
+        QVERIFY2(problems.isEmpty(), qPrintable(problems.join(QLatin1Char('\n'))));
+        // Back at rest in the form of the window, with nothing left of either motion
+        QVERIFY(!rail->property("formChanging").toBool());
+        QVERIFY(!rail->property("leaving").toBool());
+        QCOMPARE(rail->property("widthLag").toReal(), 0.0);
+        QCOMPARE(rail->property("cornerOpacity").toReal(), 1.0);
+        const RailSample &after = samples.constLast();
+        QVERIFY(qAbs(after.lead) < 0.5);
+        QVERIFY(qAbs(after.panelWidth - labelledWidth) < 0.5);
+        QVERIFY(qAbs(after.railWidth - labelledWidth) < 0.5);
+        QStringList modeIssues;
+        QTRY_VERIFY2((modeIssues = ui.modeProblems(false)).isEmpty(),
+                     qPrintable(modeIssues.join(QLatin1Char('\n'))));
+        QTRY_VERIFY(ui.layoutProblems().isEmpty());
+    }
+
+    // The keyboard stays on its entry while the rail changes its labels with the height; when the window becomes Compact the rail slides out with the keyboard in it and the corner button takes the keyboard, so that Space on it opens the drawer
+    void theKeyboardFollowsTheRailThroughAChangeOfForm()
+    {
+        Ui ui(m_home->path());
+        QVERIFY(ui.load());
+        QVERIFY(ui.signInAsUser(QStringLiteral("Alice")));
+        QTRY_VERIFY(ui.syncPlay.available());
+        QTRY_VERIFY(railHoldsEveryEntry(ui));
+        QQuickItem *rail = ui.sidebar();
+        QQuickItem *button = ui.item(QStringLiteral("navigationButton"));
+        QObject *drawer = ui.popup(QStringLiteral("navigationDrawer"));
+        QVERIFY(rail && button && drawer);
+        QVERIFY2(rail->property("formAnimated").toBool(),
+                 "the motions of the rail are off: Kirigami.Units.longDuration is 0");
+        const QSize tall(1000, 900);
+        const QSize low(1000, ui.window->minimumHeight());
+        QVERIFY(settleRailAt(ui, tall));
+        QTRY_VERIFY(!rail->property("compact").toBool());
+        QQuickItem *entry = ui.sectionEntry(QStringLiteral("movies"));
+        QVERIFY(entry);
+        entry->forceActiveFocus(Qt::TabFocusReason);
+        QTRY_VERIFY(entry->hasActiveFocus());
+        // The height that gives the compact rail and the one that gives the labels back: the entry is the same item in both forms and keeps the keyboard
+        QVERIFY(settleRailAt(ui, low));
+        QTRY_VERIFY(rail->property("compact").toBool());
+        QVERIFY(entry->hasActiveFocus());
+        QVERIFY(settleRailAt(ui, tall));
+        QTRY_VERIFY(!rail->property("compact").toBool());
+        QVERIFY(entry->hasActiveFocus());
+        // The width that gives the corner button: the rail slides out and is inert, so the button takes the keyboard a turn later
+        ui.window->resize(ui.window->property("compactLimit").toInt() - 40, 900);
+        QTRY_VERIFY(ui.window->property("compactHeader").toBool());
+        QTRY_VERIFY(button->hasActiveFocus());
+        QVERIFY(!entry->hasActiveFocus());
+        // It still has the keyboard when the slide is over
+        QTRY_VERIFY(!ui.railChanging());
+        QVERIFY(button->hasActiveFocus());
+        QTest::keyClick(ui.window, Qt::Key_Space);
+        QTRY_VERIFY(drawer->property("opened").toBool());
+    }
+
+    void theRailChangesFormAtOnceWhereItIsNotSeen_data()
+    {
+        QTest::addColumn<bool>("playerInFront");
+        QTest::addColumn<bool>("byHeight");
+        QTest::newRow("start-up cover, height") << false << true;
+        QTest::newRow("start-up cover, width") << false << false;
+        QTest::newRow("player page, height") << true << true;
+        QTest::newRow("player page, width") << true << false;
+    }
+
+    // Under the start-up cover and under the player page nobody would see a motion: the rail takes its new form at once, with no glide, no slide and no lag
+    void theRailChangesFormAtOnceWhereItIsNotSeen()
+    {
+        QFETCH(bool, playerInFront);
+        QFETCH(bool, byHeight);
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signInAsUser(QStringLiteral("Alice")));
+        QTRY_VERIFY(ui.syncPlay.available());
+        QTRY_VERIFY(railHoldsEveryEntry(ui));
+        QQuickItem *rail = ui.sidebar();
+        QVERIFY(rail);
+        // The motions are on: only the cover or the player stops them
+        QVERIFY2(rail->property("formAnimated").toBool(),
+                 "the motions of the rail are off: Kirigami.Units.longDuration is 0");
+        const qreal compactWidth = rail->property("compactWidth").toReal();
+        const QSize tall(1000, 900);
+        const QSize away = byHeight ? QSize(1000, ui.window->minimumHeight())
+                                    : QSize(ui.window->property("compactLimit").toInt() - 40, 900);
+        const RailWatch watch(ui, false);
+        QVERIFY(watch.ready());
+        QVERIFY(settleRailAt(ui, tall));
+        QTRY_VERIFY(!rail->property("compact").toBool());
+        if (playerInFront) {
+            QVERIFY(openPlayer(ui, stub));
+        } else {
+            // The minimum time of the cover starts again with it, held long enough that nothing takes it away before the window has changed, however loaded the machine
+            QObject *minimum =
+                ui.window->findChild<QObject *>(QStringLiteral("startupMinimumTimer"));
+            QVERIFY(minimum);
+            minimum->setProperty("interval", 60000);
+            QVERIFY(ui.window->setProperty("startupMinimumElapsed", false));
+            QVERIFY(ui.window->setProperty("startupVisible", true));
+        }
+        QVERIFY(!rail->property("navigationShowing").toBool());
+        QList<RailSample> samples{watch.sample()};
+        ui.window->resize(away);
+        bool flipped = false;
+        bool coverUp = false;
+        int quiet = 0;
+        const bool settled = sampleRailUntil(watch, samples, [&](const RailSample &s) {
+            const bool there = RailWatch::arrived(s, away, byHeight, !byHeight);
+            if (there && !flipped) {
+                flipped = true;
+                coverUp = ui.window->property("startupVisible").toBool();
+            }
+            quiet = there ? quiet + 1 : 0;
+            return quiet >= 8;
+        });
+        QVERIFY2(settled, "the window did not take its new size");
+        QVERIFY2(playerInFront || coverUp, "the cover went before the window changed form: the "
+                                           "machine is too slow for this check");
+        for (const RailSample &s : samples) {
+            QVERIFY2(!s.changing && !s.leaving,
+                     qPrintable(QStringLiteral("the rail moved at %1 ms").arg(s.nanos / 1000000)));
+            QVERIFY2(qAbs(s.lag) < 0.01 && qAbs(s.lead) < 0.1 && qAbs(s.cornerFade - 1) < 0.01
+                         && qAbs(s.panelWidth - s.formWidth) < 0.1,
+                     qPrintable(QStringLiteral("lag %1, lead %2, corner fade %3, panel %4 for a "
+                                               "form of %5")
+                                    .arg(s.lag)
+                                    .arg(s.lead)
+                                    .arg(s.cornerFade)
+                                    .arg(s.panelWidth)
+                                    .arg(s.formWidth)));
+        }
+        // The room the window leaves the page row is that of the new form: the compact rail for the height, none for the width
+        QVERIFY(qAbs(samples.constLast().sidebarWidth - (byHeight ? compactWidth : 0.0)) < 0.1);
+        QStringList modeIssues;
+        if (playerInFront) {
+            // Leaving the player brings the header back, and the rail with it in the form it has now, with no motion of its own
+            QVERIFY(chooseShowMiniPlayer(ui));
+            QList<RailSample> back;
+            const bool faded = sampleRailUntil(watch, back, [&](const RailSample &) {
+                return ui.window->property("headerOpacity").toReal() == 1.0;
+            });
+            QVERIFY2(faded, "the header did not come back");
+            for (const RailSample &s : back)
+                QVERIFY2(!s.changing && !s.leaving, "the rail moved when the player left");
+        } else {
+            // The window has changed: the cover may go now, at its usual minimum
+            ui.window->findChild<QObject *>(QStringLiteral("startupMinimumTimer"))
+                ->setProperty("interval", 500);
+            QTRY_VERIFY(!ui.window->property("startupVisible").toBool());
+            QVERIFY(!rail->property("formChanging").toBool());
+        }
+        QTRY_VERIFY2((modeIssues = ui.modeProblems(!byHeight)).isEmpty(),
+                     qPrintable(modeIssues.join(QLatin1Char('\n'))));
     }
 
     void miniPlayerKeepsThePageFocus()
@@ -22450,8 +24411,9 @@ class TestUiPages : public QObject {
         QQuickItem *panel = Ui::itemIn(mini, QStringLiteral("miniPlayerBottomPanel"));
         QQuickItem *pause = Ui::itemIn(mini, QStringLiteral("miniPlayerPauseButton"));
         QQuickItem *title = Ui::itemIn(mini, QStringLiteral("miniPlayerTitle"));
+        QQuickItem *titleBox = Ui::itemIn(mini, QStringLiteral("miniPlayerTitleBox"));
         QQuickItem *progress = Ui::itemIn(mini, QStringLiteral("miniPlayerProgress"));
-        QVERIFY(expand && close && panel && pause && title && progress);
+        QVERIFY(expand && close && panel && pause && title && titleBox && progress);
         // The boxes show with the pointer on the player
         hoverMiniPlayer(ui, mini);
         QTRY_VERIFY(mini->property("controlsShown").toBool());
@@ -22513,10 +24475,11 @@ class TestUiPages : public QObject {
         QVERIFY(expandRect.bottom() <= panelRect.top() && closeRect.bottom() <= panelRect.top());
         // Pause, the title and the bar are on the panel
         const QRectF pauseRect = sceneRect(pause);
-        const QRectF titleRect = sceneRect(title);
+        // The title's own area, which holds the label while it is cut and while it slides
+        const QRectF titleRect = sceneRect(titleBox);
         const QRectF progressRect = sceneRect(progress);
         const QRectF inner = panelRect.adjusted(-0.5, -0.5, 0.5, 0.5);
-        for (const QQuickItem *part : {pause, title, progress})
+        for (const QQuickItem *part : {pause, titleBox, progress})
             QVERIFY2(inner.contains(sceneRect(part)), qPrintable(part->objectName()));
         // Pause is a square at the leading end of the row, the title after it in the rest of the row, on the same line
         const qreal playSize = mini->property("buttonSize").toReal();
@@ -22554,7 +24517,9 @@ class TestUiPages : public QObject {
         QVERIFY(title->property("font").value<QFont>().bold());
         // Pause stays at the leading end and the title is aligned to the trailing end, cut at its end when it does not fit so its start stays readable
         QCOMPARE(title->property("horizontalAlignment").toInt(), int(Qt::AlignRight));
-        QCOMPARE(title->property("elide").toInt(), int(Qt::ElideRight));
+        // Cut at its end at rest; a title wider than its area slides a second after the pointer comes, whole then
+        QVERIFY(title->property("elide").toInt() == int(Qt::ElideRight)
+                || titleBox->property("offset").toReal() > 0);
         if (!rightToLeft)
             QTRY_COMPARE(title->property("effectiveHorizontalAlignment").toInt(),
                          int(Qt::AlignRight));
@@ -22570,14 +24535,16 @@ class TestUiPages : public QObject {
         QVERIFY(progressRect.width() > unit);
         QVERIFY(titleRect.width() <= panelRect.width() * 0.4 + 1);
         QTRY_VERIFY(qAbs(progress->property("value").toReal() - 0.25) < 1e-6);
-        // A title too long for the row is elided inside it: the panel neither grows nor lets it out
+        // A title too long for the row is cut inside its own area: the panel neither grows nor lets it out. The pointer is on the player, so after a second the label slides inside the area, which clips it: the area is what stays in the panel, not the label
+        QVERIFY(titleBox->clip());
         const qreal height = panelRect.height();
         stub.title = QStringLiteral("The Long Way Down to Abyss Station and Home, Part Two of the "
                                     "Second Season of the Anthology");
         Q_EMIT stub.changed();
-        QTRY_VERIFY(title->property("truncated").toBool());
+        QTRY_VERIFY(titleBox->property("overflow").toReal() > 1);
         QCOMPARE(sceneRect(panel).height(), height);
-        QVERIFY(sceneRect(panel).adjusted(-0.5, -0.5, 0.5, 0.5).contains(sceneRect(title)));
+        QVERIFY(sceneRect(panel).adjusted(-0.5, -0.5, 0.5, 0.5).contains(sceneRect(titleBox)));
+        QVERIFY(sceneRect(titleBox).width() <= sceneRect(panel).width() * 0.4 + 1);
         // No gradient under the player: none among the objects of an item that is no control (a control draws itself with the style)
         const auto insideControl = [mini](const QQuickItem *item) {
             for (; item && item != mini; item = item->parentItem()) {
@@ -22591,6 +24558,303 @@ class TestUiPages : public QObject {
                 continue;
             for (const QObject *object : item->findChildren<QObject *>(Qt::FindDirectChildrenOnly))
                 QVERIFY2(!object->inherits("QQuickGradient"), qPrintable(item->objectName()));
+        }
+    }
+
+    void miniPlayerTitleSlidesOnceToItsEndAndBack_data()
+    {
+        QTest::addColumn<bool>("rightToLeft");
+        QTest::addColumn<bool>("rightToLeftText");
+        QTest::newRow("left to right") << false << false;
+        QTest::newRow("Latin title, right to left layout") << true << false;
+        QTest::newRow("Hebrew title, right to left layout") << true << true;
+        QTest::newRow("Hebrew title, left to right layout") << false << true;
+    }
+
+    // A title wider than its area waits a second under the pointer, slides once to its end and stays there, and slides back to be cut at its end again when the pointer goes
+    void miniPlayerTitleSlidesOnceToItsEndAndBack()
+    {
+        QFETCH(bool, rightToLeft);
+        const Qt::LayoutDirection direction = QGuiApplication::layoutDirection();
+        QGuiApplication::setLayoutDirection(rightToLeft ? Qt::RightToLeft : Qt::LeftToRight);
+        const auto restoreDirection =
+            qScopeGuard([direction] { QGuiApplication::setLayoutDirection(direction); });
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *mini = openMiniPlayer(ui, stub);
+        QVERIFY(mini);
+        QQuickItem *title = Ui::itemIn(mini, QStringLiteral("miniPlayerTitle"));
+        QQuickItem *box = Ui::itemIn(mini, QStringLiteral("miniPlayerTitleBox"));
+        QVERIFY(title && box);
+        // The test home has no desktop setting that turns the animations off
+        QVERIFY(box->property("animated").toBool());
+        leaveMiniPlayer(ui);
+        QTRY_VERIFY(!mini->property("controlsShown").toBool());
+        // The title slides by its own direction, whatever the layout's
+        QFETCH(bool, rightToLeftText);
+        QVERIFY(giveMiniPlayerOverflowingTitle(stub, mini, 60, rightToLeftText));
+        QCOMPARE(box->property("rightToLeftText").toBool(), rightToLeftText);
+        const QString whole = stub.title;
+        const qreal overflow = box->property("overflow").toReal();
+        QVERIFY2(overflow > 10 && overflow < 200, qPrintable(QString::number(overflow)));
+        // At rest the label is as big as its area and cut at its end, and its text is the whole title
+        const auto restProblem = [&]() -> QString {
+            const QRectF area = sceneRect(box);
+            const QRectF label = sceneRect(title);
+            if (title->property("text").toString() != whole)
+                return QStringLiteral("the text is not the whole title");
+            if (box->property("offset").toReal() != 0 || box->property("scrolling").toBool())
+                return QStringLiteral("the title moves");
+            if (title->property("elide").toInt() != int(Qt::ElideRight)
+                || !title->property("truncated").toBool())
+                return QStringLiteral("the title is not cut at its end");
+            if (qAbs(label.left() - area.left()) > 0.5 || qAbs(label.right() - area.right()) > 0.5)
+                return QStringLiteral("the label is not the size of its area");
+            return {};
+        };
+        QVERIFY2(restProblem().isEmpty(), qPrintable(restProblem()));
+        // Under the pointer the start stays for a second first, cut as it was; the timer starts before the pointer comes, so that it never reads less than the wait
+        QElapsedTimer pause;
+        pause.start();
+        hoverMiniPlayer(ui, mini);
+        QTRY_VERIFY(box->property("scrolling").toBool());
+        bool cutWhileWaiting = true;
+        QVERIFY(qWaitForScaled([&] {
+            if (box->property("offset").toReal() == 0
+                && title->property("elide").toInt() != int(Qt::ElideRight))
+                cutWhileWaiting = false;
+            return box->property("offset").toReal() >= 3;
+        }));
+        QVERIFY2(pause.elapsed() >= 900, qPrintable(QString::number(pause.elapsed())));
+        QVERIFY(cutWhileWaiting);
+        // Moving, the label is as wide as the whole title and elides nothing: the start leaves at the leading side and the end comes in from the trailing one
+        const auto movingProblem = [&]() -> QString {
+            const QRectF area = sceneRect(box);
+            const QRectF label = sceneRect(title);
+            const QString where = QStringLiteral("label %1 to %2, area %3 to %4")
+                                      .arg(label.left())
+                                      .arg(label.right())
+                                      .arg(area.left())
+                                      .arg(area.right());
+            if (title->property("elide").toInt() != int(Qt::ElideNone)
+                || title->property("truncated").toBool())
+                return QStringLiteral("the title is still cut: ") + where;
+            if (qAbs(label.width() - area.width() - box->property("overflow").toReal()) > 1)
+                return QStringLiteral("the label is not as wide as the whole title: ") + where;
+            if (rightToLeftText
+                    ? (label.right() < area.right() + 1 || label.left() > area.left() + 1)
+                    : (label.left() > area.left() - 1 || label.right() < area.right() - 1))
+                return QStringLiteral("the label does not slide toward its end: ") + where;
+            return {};
+        };
+        QVERIFY2(movingProblem().isEmpty(), qPrintable(movingProblem()));
+        // It ends with the end of the title against the trailing edge of the area
+        QTRY_VERIFY(qAbs(box->property("offset").toReal() - box->property("overflow").toReal())
+                    < 0.01);
+        QVERIFY2(movingProblem().isEmpty(), qPrintable(movingProblem()));
+        const QRectF area = sceneRect(box);
+        const QRectF label = sceneRect(title);
+        QVERIFY2(rightToLeftText ? qAbs(label.left() - area.left()) <= 1
+                                 : qAbs(label.right() - area.right()) <= 1,
+                 qPrintable(Ui::describe(title)));
+        QCOMPARE(title->property("text").toString(), whole);
+        // It stays there while the pointer does: no loop, no way back
+        QTest::qWait(300);
+        QVERIFY(box->property("scrolling").toBool());
+        QVERIFY(qAbs(box->property("offset").toReal() - box->property("overflow").toReal()) < 0.01);
+        QVERIFY2(movingProblem().isEmpty(), qPrintable(movingProblem()));
+        // The pointer goes: the title slides back and is cut at its end again
+        leaveMiniPlayer(ui);
+        QTRY_VERIFY(box->property("offset").toReal() == 0);
+        QTRY_VERIFY2(restProblem().isEmpty(), qPrintable(restProblem()));
+    }
+
+    // A title that fits its area never moves, however long the pointer stays
+    void miniPlayerTitleThatFitsNeverMoves()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *mini = openMiniPlayer(ui, stub);
+        QVERIFY(mini);
+        QQuickItem *title = Ui::itemIn(mini, QStringLiteral("miniPlayerTitle"));
+        QQuickItem *box = Ui::itemIn(mini, QStringLiteral("miniPlayerTitleBox"));
+        QVERIFY(title && box);
+        QVERIFY(box->property("animated").toBool());
+        stub.title = QStringLiteral("Up");
+        Q_EMIT stub.changed();
+        QTRY_COMPARE(title->property("text").toString(), QStringLiteral("Up"));
+        QTRY_VERIFY(box->property("overflow").toReal() < 1);
+        hoverMiniPlayer(ui, mini);
+        QTRY_VERIFY(mini->property("controlsShown").toBool());
+        // Past the second that a longer title would wait before it moved
+        QTest::qWait(1300);
+        QVERIFY(mini->property("controlsShown").toBool());
+        QVERIFY(!box->property("scrolling").toBool());
+        QCOMPARE(box->property("offset").toReal(), 0.0);
+        QCOMPARE(title->property("elide").toInt(), int(Qt::ElideRight));
+        QVERIFY(!title->property("truncated").toBool());
+        QVERIFY(qAbs(sceneRect(title).width() - sceneRect(box).width()) <= 0.5);
+    }
+
+    // The title slides at the same speed, the one of the box, whether it overflows its area by a little or by a lot
+    void miniPlayerTitleSlidesAtTheSameSpeedWhateverItsLength()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *mini = openMiniPlayer(ui, stub);
+        QVERIFY(mini);
+        QQuickItem *box = Ui::itemIn(mini, QStringLiteral("miniPlayerTitleBox"));
+        QVERIFY(box);
+        QVERIFY(box->property("animated").toBool());
+        const qreal speed = box->property("speed").toReal();
+        QVERIFY(speed > 0);
+        QList<qreal> rates;
+        QList<qreal> overflows;
+        for (const qreal extra : {150.0, 300.0}) {
+            leaveMiniPlayer(ui);
+            QTRY_VERIFY(!mini->property("controlsShown").toBool());
+            QVERIFY(giveMiniPlayerOverflowingTitle(stub, mini, extra));
+            overflows << box->property("overflow").toReal();
+            hoverMiniPlayer(ui, mini);
+            QTRY_VERIFY(box->property("offset").toReal() >= 3);
+            // Two readings of the place, a while apart and on the wall clock: a slow frame in between does not change the rate
+            const qreal from = box->property("offset").toReal();
+            QElapsedTimer clock;
+            clock.start();
+            QTest::qWait(400);
+            const qreal rate =
+                (box->property("offset").toReal() - from) / (clock.elapsed() / 1000.0);
+            QVERIFY2(rate > speed * 0.5 && rate < speed * 1.6,
+                     qPrintable(QStringLiteral("%1 px/s, %2 px/s wanted").arg(rate).arg(speed)));
+            rates << rate;
+        }
+        QVERIFY2(
+            overflows.at(1) > overflows.at(0) * 1.5,
+            qPrintable(QStringLiteral("%1 and %2 px").arg(overflows.at(0)).arg(overflows.at(1))));
+        QVERIFY2(qAbs(rates.at(0) - rates.at(1)) < speed * 0.5,
+                 qPrintable(QStringLiteral("%1 and %2 px/s").arg(rates.at(0)).arg(rates.at(1))));
+    }
+
+    // The title slides whenever the controls show: with the keyboard on one of them and after a touch tap as under the pointer, and it slides back when they hide
+    void miniPlayerTitleSlidesForTheKeyboardAndForATouchReveal()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *mini = openMiniPlayer(ui, stub);
+        QVERIFY(mini);
+        QQuickItem *box = Ui::itemIn(mini, QStringLiteral("miniPlayerTitleBox"));
+        QQuickItem *pause = Ui::itemIn(mini, QStringLiteral("miniPlayerPauseButton"));
+        QObject *timer = mini->findChild<QObject *>(QStringLiteral("miniPlayerRevealTimer"));
+        QVERIFY(box && pause && timer);
+        QVERIFY(box->property("animated").toBool());
+        leaveMiniPlayer(ui);
+        QTRY_VERIFY(!mini->property("controlsShown").toBool());
+        QVERIFY(giveMiniPlayerOverflowingTitle(stub, mini, 60));
+        QVERIFY(!box->property("scrolling").toBool());
+        // The keyboard on the pause button shows the controls and the title moves, as it goes back when the keyboard leaves
+        QVERIFY(pause->isEnabled());
+        pause->forceActiveFocus(Qt::TabFocusReason);
+        QTRY_VERIFY(mini->property("controlsShown").toBool());
+        QTRY_VERIFY(box->property("scrolling").toBool());
+        QTRY_VERIFY(box->property("offset").toReal() >= 3);
+        pause->setFocus(false, Qt::OtherFocusReason);
+        QTRY_VERIFY(!mini->property("controlsShown").toBool());
+        QTRY_VERIFY(!box->property("scrolling").toBool());
+        QTRY_VERIFY(box->property("offset").toReal() == 0);
+        // A touch tap shows the controls for a few seconds: the title moves while they show and goes back when they hide
+        timer->setProperty("interval", 60000);
+        QVERIFY(QMetaObject::invokeMethod(mini, "reveal"));
+        QTRY_VERIFY(box->property("scrolling").toBool());
+        QTRY_VERIFY(box->property("offset").toReal() >= 3);
+        timer->setProperty("interval", 50);
+        QTRY_VERIFY(!mini->property("controlsShown").toBool());
+        QTRY_VERIFY(!box->property("scrolling").toBool());
+        QTRY_VERIFY(box->property("offset").toReal() == 0);
+    }
+
+    // A new title starts the wait and the slide again from the start, and a title that fits does not slide
+    void miniPlayerTitleStartsAgainWhenTheTitleChanges()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *mini = openMiniPlayer(ui, stub);
+        QVERIFY(mini);
+        QQuickItem *title = Ui::itemIn(mini, QStringLiteral("miniPlayerTitle"));
+        QQuickItem *box = Ui::itemIn(mini, QStringLiteral("miniPlayerTitleBox"));
+        QVERIFY(title && box);
+        QVERIFY(box->property("animated").toBool());
+        QVERIFY(giveMiniPlayerOverflowingTitle(stub, mini, 60));
+        hoverMiniPlayer(ui, mini);
+        QTRY_VERIFY(box->property("offset").toReal() >= 10);
+        // Another title that overflows: it is cut again for its second of wait, then it slides to its own end
+        QVERIFY(giveMiniPlayerOverflowingTitle(stub, mini, 90));
+        const QString second = stub.title;
+        QTRY_VERIFY(box->property("offset").toReal() == 0
+                    && title->property("elide").toInt() == int(Qt::ElideRight));
+        QTRY_VERIFY(box->property("offset").toReal() >= 3);
+        QTRY_VERIFY(qAbs(box->property("offset").toReal() - box->property("overflow").toReal())
+                    < 0.01);
+        QCOMPARE(title->property("text").toString(), second);
+        // A title that fits has nothing to slide to, and what was moving is back at rest
+        stub.title = QStringLiteral("Up");
+        Q_EMIT stub.changed();
+        QTRY_COMPARE(title->property("text").toString(), QStringLiteral("Up"));
+        QTRY_VERIFY(box->property("overflow").toReal() < 1);
+        QTRY_VERIFY(!box->property("scrolling").toBool());
+        QCOMPARE(box->property("offset").toReal(), 0.0);
+        QCOMPARE(title->property("elide").toInt(), int(Qt::ElideRight));
+        QVERIFY(qAbs(sceneRect(title).width() - sceneRect(box).width()) <= 0.5);
+    }
+
+    // With the animations on, a title the pointer rests on slides and has no tooltip: the popup that gave the whole of it before would stand over the small player
+    void miniPlayerTitleShowsNoTooltipWhileItCanSlide()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.signIn());
+        QQuickItem *mini = openMiniPlayer(ui, stub);
+        QVERIFY(mini);
+        QQuickItem *title = Ui::itemIn(mini, QStringLiteral("miniPlayerTitle"));
+        QQuickItem *box = Ui::itemIn(mini, QStringLiteral("miniPlayerTitleBox"));
+        QVERIFY(title && box);
+        QVERIFY(box->property("animated").toBool());
+        QVERIFY(giveMiniPlayerOverflowingTitle(stub, mini, 60));
+        QObject *titleHover = nullptr;
+        for (QObject *child : box->children()) {
+            if (child->inherits("QQuickHoverHandler"))
+                titleHover = child;
+        }
+        QVERIFY(titleHover);
+        const QPoint onTitle =
+            box->mapToScene(QPointF(box->width() / 2, box->height() / 2)).toPoint();
+        QTest::mouseMove(ui.window, onTitle + QPoint(1, 1));
+        QTest::mouseMove(ui.window, onTitle);
+        QTRY_VERIFY(titleHover->property("hovered").toBool());
+        // The pointer rests on the title past the tooltip delay
+        QTest::qWait(1200);
+        QVERIFY(titleHover->property("hovered").toBool());
+        QVERIFY(box->property("scrolling").toBool());
+        for (QQuickItem *label : ui.itemsWithText(stub.title)) {
+            if (label != title)
+                QVERIFY2(!(label->inherits("QQuickText") && label->isVisible()),
+                         qPrintable(Ui::describe(label)));
         }
     }
 
@@ -26693,14 +28957,14 @@ class TestUiPages : public QObject {
             QTest::mouseMove(ui.window, onVideo + QPoint(++nudge % 2 ? 3 : -3, 0));
         };
         // At rest on the video the bars go, and the pointer with them
+        // The window's cursor is what counts: a shape set on an item that another covers never reaches it
         restPointerOnVideo(ui);
-        QCOMPARE(pointer->property("cursorShape").toInt(), int(Qt::ArrowCursor));
         QTRY_VERIFY(!osd->isVisible());
-        QCOMPARE(pointer->property("cursorShape").toInt(), int(Qt::BlankCursor));
+        QTRY_COMPARE(ui.window->cursor().shape(), Qt::BlankCursor);
         // The lock keeps them
         wake();
         QTRY_VERIFY(osd->isVisible());
-        QCOMPARE(pointer->property("cursorShape").toInt(), int(Qt::ArrowCursor));
+        QTRY_COMPARE(ui.window->cursor().shape(), Qt::ArrowCursor);
         // The lock is the last entry of More Actions, no button of the bars
         QVERIFY(ui.item(QStringLiteral("playerLockButton")) == nullptr);
         QObject *moreMenu = ui.popup(QStringLiteral("playerMoreMenu"));
@@ -26748,6 +29012,15 @@ class TestUiPages : public QObject {
         QEvent leave(QEvent::Leave);
         QCoreApplication::sendEvent(ui.window, &leave);
         QTRY_VERIFY(!osd->isVisible());
+        // Leaving the player with the pointer hidden and at rest brings it back over the page that takes its place
+        restPointerOnVideo(ui);
+        QTRY_VERIFY(!osd->isVisible());
+        QTRY_COMPARE(ui.window->cursor().shape(), Qt::BlankCursor);
+        // The shell deletes the page once the stack settles
+        const QPointer<QQuickItem> leaving(page);
+        QVERIFY(QMetaObject::invokeMethod(page, "leavePlayer"));
+        QTRY_VERIFY(!leaving || !leaving->property("isShowing").toBool());
+        QTRY_VERIFY(ui.window->cursor().shape() != Qt::BlankCursor);
     }
 
     // Commands from outside the window, another Jellyfin client's included, move the playback and leave the bars as they are
@@ -26917,11 +29190,57 @@ class TestUiPages : public QObject {
         timer->setProperty("interval", 300);
         QTRY_VERIFY(!osd->isVisible());
         QVERIFY(!pointer->property("moved").toBool());
+        // The pointer hides with them, from the place of a panel as from the video
+        QTRY_COMPARE(ui.window->cursor().shape(), Qt::BlankCursor);
         // A real move onto the panel holds them again
         QTest::mouseMove(ui.window, onBar + QPoint(1, 0));
         QTRY_VERIFY(osd->isVisible());
         QTest::qWait(700);
         QVERIFY(osd->isVisible());
+    }
+
+    // A dialog of the player keeps the pointer, over it and over the shade around it, while the bars go behind it
+    void playerPointerStaysOverADialogOfThePlayer()
+    {
+        PlayerStub stub;
+        Ui ui(m_home->path());
+        ui.serveMovie();
+        QVERIFY(ui.load());
+        QVERIFY(ui.opensWindowOfWidth(1000));
+        QVERIFY(ui.signIn());
+        QQuickItem *page = openPlayer(ui, stub);
+        QVERIFY(page);
+        QObject *timer = page->findChild<QObject *>(QStringLiteral("playerChromeTimer"));
+        QQuickItem *osd = ui.item(QStringLiteral("playerOsd"));
+        QVERIFY(timer && osd);
+        timer->setProperty("interval", 300);
+        QObject *menu = ui.popup(QStringLiteral("playerSubtitlesMenu"));
+        QVERIFY(menu);
+        QVERIFY(QMetaObject::invokeMethod(menu, "open"));
+        QTRY_VERIFY(menu->property("opened").toBool());
+        QQuickItem *searchEntry = nullptr;
+        for (QQuickItem *item : ui.menuItems(QStringLiteral("playerSubtitlesMenu"))) {
+            if (item->objectName() == QLatin1String("playerSearchOnline"))
+                searchEntry = item;
+        }
+        QVERIFY(searchEntry);
+        stub.canManageSubtitles = true;
+        Q_EMIT stub.changed();
+        QTRY_VERIFY(searchEntry->isVisible());
+        QVERIFY(QMetaObject::invokeMethod(searchEntry, "click"));
+        QObject *dialog = ui.popup(QStringLiteral("subtitleSearchDialog"));
+        QVERIFY(dialog);
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        // The second place is on the shade, beside the dialog
+        QVERIFY(dialog->property("x").toReal() > 4);
+        for (const QPoint at : {QPoint(ui.window->width() / 2, ui.window->height() / 2),
+                                QPoint(4, ui.window->height() / 2)}) {
+            QTest::mouseMove(ui.window, at + QPoint(1, 1));
+            QTest::mouseMove(ui.window, at);
+            QTRY_VERIFY(!osd->isVisible());
+            QTest::qWait(100);
+            QVERIFY(ui.window->cursor().shape() != Qt::BlankCursor);
+        }
     }
 
     // Space is no activity: the pause shows the bars, and after the resume only the short wait is left

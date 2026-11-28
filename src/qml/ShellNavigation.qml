@@ -11,7 +11,8 @@ Item {
     required property var shell
 
     readonly property ConnectionController connection: shell.connection
-    readonly property bool signedIn: connection.state === ConnectionController.Authenticated
+    // The window's rule: false on the user picker of a session and while a new session opens, so that no section shows there
+    readonly property bool signedIn: shell.signedIn
     readonly property bool offline: connection.state === ConnectionController.Offline
 
     // The sections in their visual order, which is also the order of the Ctrl+N shortcuts and of the slide of the tab switch: `group` is "home" or "content" (Movies and Shows, which need a library of the server) for the first block and "personal" for what follows the divider
@@ -75,7 +76,7 @@ Item {
         property string section: "movies"
         text: i18nc("@title:tab", "Movies")
         icon.name: "video-symbolic"
-        visible: root.connection.movieLibraries.length > 0
+        visible: root.signedIn && root.connection.movieLibraries.length > 0
         enabled: root.signedIn
         shortcut: root.tabShortcut(moviesAction)
         onTriggered: shell.openTab("movies")
@@ -87,7 +88,7 @@ Item {
         property string section: "tvshows"
         text: i18nc("@title:tab", "Shows")
         icon.name: "video-television"
-        visible: root.connection.showLibraries.length > 0
+        visible: root.signedIn && root.connection.showLibraries.length > 0
         enabled: root.signedIn
         shortcut: root.tabShortcut(tvShowsAction)
         onTriggered: shell.openTab("tvshows")

@@ -37,9 +37,11 @@ Item {
     }
     // The SyncPlay entry shows in a session where SyncPlay is offered or a group is joined
     readonly property bool syncPlayShown: navigation.signedIn && ((shell.header?.syncPlayOffered ?? false) || groupJoined)
-    readonly property real railWidth: compact ? compactSide + Kirigami.Units.smallSpacing * 2 + 1 : labelledWidth
+    // A square entry between the margins of the entries and the line on the trailing edge
+    readonly property real compactWidth: compactSide + Kirigami.Units.smallSpacing * 2 + 1
+    readonly property real railWidth: compact ? compactWidth : labelledWidth
     readonly property real drawerWidth: Kirigami.Units.gridUnit * 13
-    // The room the page row leaves on the leading side: none in a Compact window and while there is nothing to choose from. It never animates: a resize of the page row ends the slide of a tab switch
+    // The room the page row leaves on the leading side: none in a Compact window and while there is nothing to choose from (signed out, on the user picker of a session, while a new session opens). It never animates: a resize of the page row ends the slide of a tab switch
     readonly property real inlineWidth: navigation.navigable && !shell.compactHeader ? railWidth : 0
     // The rail shows: the header's rules, and not the rail's width, which follows the compact form
     readonly property bool shown: navigation.navigable && !shell.compactHeader && !shell.startupVisible && shell.headerOpacity > 0
@@ -57,8 +59,23 @@ Item {
     // The signed-in user, as the header finds it among the saved users: the avatar entry shows it
     readonly property var currentUser: shell.header?.currentUser ?? null
 
+    // The rail is in sight: under the start-up cover and the player page it changes form at once, since nobody would see a motion
+    readonly property bool navigationShowing: navigation.navigable && !shell.startupVisible && !shell.playbackPageShowing
+    // A change of form moves only the paint of the rail and follows the global animation speed: at zero it happens at once
+    readonly property bool formAnimated: navigationShowing && Kirigami.Units.longDuration > 0
+    // The painted width of the rail minus the width of its form, which glides to 0 at rest
+    property real widthLag: 0
+    // The window became Compact and the rail is still sliding out to the leading edge
+    property bool leaving: false
+    // The corner button fades in while the rail slides out
+    property real cornerOpacity: 1
+    // The rail is in motion between its forms
+    readonly property bool formChanging: glideMotion.running || slideInMotion.running || slideOutMotion.running
+
     // The drawer closed without a choice: the keyboard goes back to the button that opened it
     signal drawerDismissed
+    // The rail slid out with the keyboard in it: the corner button takes it
+    signal focusReleased
 
     function openDrawer() {
         if (drawerAllowed)
@@ -126,6 +143,126 @@ Item {
             navigationDrawer.close();
     }
 
+    // The entries lay out in the new form at once and fade in while the painted edge glides from the width it had, which a motion in progress leaves where it is
+    onCompactChanged: {
+        if (!formAnimated || !(shown || leaving)) {
+            finishFormMotion();
+            return;
+        }
+        const painted = (compact ? labelledWidth : compactWidth) + widthLag;
+        widthLag = painted - (compact ? compactWidth : labelledWidth);
+        glideMotion.restart();
+    }
+    onNavigationShowingChanged: finishFormMotion()
+
+    // The rail slides out to the leading edge in a Compact window and in from it again; a rail still leaving comes back from where it is
+    function followCompactHeader() {
+        if (!formAnimated) {
+            finishFormMotion();
+            return;
+        }
+        const away = (mirrored ? 1 : -1) * panel.width;
+        if (shell.compactHeader) {
+            const hadFocus = holdsFocus();
+            slideInMotion.stop();
+            leaving = true;
+            cornerOpacity = 0;
+            slideOutStep.to = away;
+            slideOutMotion.restart();
+            if (hadFocus)
+                Qt.callLater(() => root.focusReleased());
+        } else {
+            slideOutMotion.stop();
+            if (!leaving)
+                railShift.x = away;
+            leaving = false;
+            cornerOpacity = 1;
+            slideInMotion.restart();
+        }
+    }
+
+    // Every motion ends at once with the rail whole and in place: stop and explicit values, not complete, which can leave a group counted as running
+    function finishFormMotion() {
+        glideMotion.stop();
+        slideInMotion.stop();
+        slideOutMotion.stop();
+        widthLag = 0;
+        railColumn.opacity = 1;
+        railShift.x = 0;
+        leaving = false;
+        cornerOpacity = 1;
+    }
+
+    // The keyboard is in the rail
+    function holdsFocus() {
+        for (let item = shell.activeFocusItem; item; item = item.parent) {
+            if (item === root)
+                return true;
+        }
+        return false;
+    }
+
+    Connections {
+        target: root.shell
+
+        function onCompactHeaderChanged() {
+            root.followCompactHeader();
+        }
+    }
+
+    ParallelAnimation {
+        id: glideMotion
+
+        NumberAnimation {
+            target: root
+            property: "widthLag"
+            to: 0
+            duration: Kirigami.Units.longDuration
+            easing.type: Easing.InOutCubic
+        }
+        NumberAnimation {
+            target: railColumn
+            property: "opacity"
+            from: 0
+            to: 1
+            duration: Kirigami.Units.longDuration
+            easing.type: Easing.InOutCubic
+        }
+    }
+
+    NumberAnimation {
+        id: slideInMotion
+        target: railShift
+        property: "x"
+        to: 0
+        duration: Kirigami.Units.longDuration
+        easing.type: Easing.OutCubic
+    }
+
+    ParallelAnimation {
+        id: slideOutMotion
+
+        NumberAnimation {
+            id: slideOutStep
+            target: railShift
+            property: "x"
+            duration: Kirigami.Units.longDuration
+            easing.type: Easing.InCubic
+        }
+        NumberAnimation {
+            target: root
+            property: "cornerOpacity"
+            to: 1
+            duration: Kirigami.Units.longDuration
+            easing.type: Easing.InCubic
+        }
+
+        onFinished: {
+            root.leaving = false;
+            railShift.x = 0;
+        }
+    }
+
     // Beside the content item, above the header: both sit at z 1 with the header later, so a child of the content item can never paint over it, whatever its own z. Stacked before the content item it also comes before the pages in the Tab chain, which follows the order of the siblings
     parent: shell.contentItem.parent
     // Above the page row (z 1): a page pushed over another one leaves the first one drawn past the row's left edge, over this area
@@ -134,11 +271,11 @@ Item {
     y: 0
     width: inlineWidth
     height: parent?.height ?? 0
-    // The header's own rules: hidden under the start-up cover, faded and inert while the player page is in front; once faded out it is hidden too, since a disabled item still blocks the hover of the player's bar under it
-    visible: shown
+    // The header's own rules: hidden under the start-up cover, faded and inert while the player page is in front; once faded out it is hidden too, since a disabled item still blocks the hover of the player's bar under it. A rail sliding out of a Compact window shows meanwhile, inert and unread
+    visible: shown || leaving
     opacity: shell.headerOpacity
-    enabled: !shell.playbackPageShowing
-    Accessible.ignored: shell.playbackPageShowing
+    enabled: !shell.playbackPageShowing && !leaving
+    Accessible.ignored: shell.playbackPageShowing || leaving
 
     // A count, on the corner of an icon in the rail or at the end of a row in the drawer
     component CountBadge: Rectangle {
@@ -495,7 +632,6 @@ Item {
         // Only URLs built by JellyfinClient::userImageUrl belong here: a raw server string must never become a source
         avatarSource: root.currentUser?.imageUrl ?? ""
         railIconSize: Kirigami.Units.iconSizes.medium
-        current: root.shell.currentSection === "users"
         accessibleRole: Accessible.Button
     }
 
@@ -602,9 +738,18 @@ Item {
         }
     }
 
+    // What paints and moves: the width of the form plus the lag of the gliding edge, clipped while it glides; the item's own width stays that of the form, which the page row follows
     Rectangle {
-        anchors.fill: parent
+        id: panel
+        objectName: "shellSidebarPanel"
+        x: root.mirrored ? root.width - width : 0
+        width: root.railWidth + root.widthLag
+        height: root.height
+        clip: glideMotion.running
         color: Kirigami.Theme.backgroundColor
+        transform: Translate {
+            id: railShift
+        }
 
         Kirigami.Separator {
             anchors.top: parent.top
@@ -615,9 +760,12 @@ Item {
 
         ColumnLayout {
             id: railColumn
-            anchors.fill: parent
-            // The line on the trailing edge
-            anchors.rightMargin: 1
+            // Laid out at the width of its form and pinned to the window edge, so the entries never stretch or elide while the painted edge glides
+            x: root.mirrored ? parent.width - root.railWidth : 0
+            // Less the line on the trailing edge
+            width: root.railWidth - 1
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
             anchors.topMargin: Kirigami.Units.smallSpacing
             anchors.bottomMargin: Kirigami.Units.smallSpacing
             spacing: Kirigami.Units.smallSpacing / 2
@@ -851,8 +999,8 @@ Item {
                     objectName: "drawerUser"
                     labelled: true
                     onClicked: {
-                        root.shell.openUsers();
                         navigationDrawer.choose();
+                        root.shell.openUsers();
                     }
                     Keys.onUpPressed: root.stepFocus(root.drawerButtons(), drawerUser, -1)
                     Keys.onDownPressed: root.stepFocus(root.drawerButtons(), drawerUser, 1)

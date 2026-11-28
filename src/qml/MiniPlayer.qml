@@ -263,25 +263,90 @@ Item {
                         }
                     }
                 }
-                Controls.Label {
-                    id: titleLabel
-                    objectName: "miniPlayerTitle"
-                    // Its own width up to two fifths of the row, cut at its end past that
+                // The title's own area, clipping the label: its width is the label's up to two fifths of the row, cut at its end past that
+                Item {
+                    id: titleBox
+                    objectName: "miniPlayerTitleBox"
                     Layout.maximumWidth: Math.round(bottomRow.width * 0.4)
                     Layout.rightMargin: mini.titleEndGap
-                    textFormat: Text.PlainText
-                    horizontalAlignment: Text.AlignRight
-                    elide: Text.ElideRight
-                    font.bold: true
-                    color: Kirigami.Theme.textColor
-                    text: mini.player?.title || i18n("Now Playing")
+                    implicitWidth: titleLabel.implicitWidth
+                    implicitHeight: titleLabel.implicitHeight
+                    clip: true
+
+                    // With animations off the title does not move and a tooltip shows it whole instead
+                    readonly property bool animated: Kirigami.Units.longDuration > 0
+                    // How far the label has to travel to show its end, 0 when the title fits
+                    readonly property real overflow: Math.max(0, titleLabel.implicitWidth - width)
+                    // The title moves once while the controls show (pointer on the player, a touch tap, the keyboard on a control: the label takes no focus) and slides back when they hide
+                    readonly property bool scrolling: animated && overflow > 1 && mini.controlsShown
+                    // How far the label has moved toward its end; 0 at rest, where it is cut with an ellipsis
+                    property real offset: 0
+                    // Pixels per second whatever the length, scaled with the grid unit
+                    readonly property real speed: Kirigami.Units.gridUnit * 3
+                    // The title's own direction, from its first letter as Qt reads it, not the layout's: a Latin title in a right-to-left layout still starts at the left
+                    readonly property bool rightToLeftText: {
+                        // Letters only: digits, punctuation and the byte order mark are neutral, so they never decide; the second class is the right-to-left scripts among them (Hebrew, Arabic, Syriac, Thaana, NKo and their presentation forms)
+                        const first = /[A-Za-z\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u058F\u05D0-\u05EA\u0620-\u064A\u0671-\u06D3\u06FA-\u06FF\u0710-\u07EA\u0900-\u1FFF\u2C00-\u2DFF\u3040-\u9FFF\uAC00-\uD7AF\uF900-\uFDFF\uFE70-\uFEFC]/.exec(titleLabel.text);
+                        return first !== null && /[\u05D0-\u05EA\u0620-\u064A\u0671-\u06D3\u06FA-\u06FF\u0710-\u07EA\uFB1D-\uFDFF\uFE70-\uFEFC]/.test(first[0]);
+                    }
+
+                    function restart() {
+                        scrollAnimation.stop();
+                        returnAnimation.stop();
+                        if (scrolling) {
+                            scrollMove.duration = Math.round((overflow - offset) / speed * 1000);
+                            scrollAnimation.start();
+                        } else if (offset > 0) {
+                            returnAnimation.start();
+                        }
+                    }
+                    onScrollingChanged: restart()
+                    onOverflowChanged: {
+                        offset = 0;
+                        restart();
+                    }
+
+                    SequentialAnimation {
+                        id: scrollAnimation
+                        // Time to read the start before it moves
+                        PauseAnimation { duration: 1000 }
+                        // Linear, and it stops at the end: no loop
+                        NumberAnimation {
+                            id: scrollMove
+                            target: titleBox
+                            property: "offset"
+                            to: titleBox.overflow
+                        }
+                    }
+                    NumberAnimation {
+                        id: returnAnimation
+                        target: titleBox
+                        property: "offset"
+                        to: 0
+                        duration: Kirigami.Units.longDuration
+                        easing.type: Easing.OutCubic
+                    }
+
+                    Controls.Label {
+                        id: titleLabel
+                        objectName: "miniPlayerTitle"
+                        // Its box's width at rest, its whole width once it moves; the start of the text stays at its side of the box, so the end shows from the other one
+                        width: titleBox.offset > 0 ? implicitWidth : titleBox.width
+                        x: titleBox.rightToLeftText ? Math.round(titleBox.width - width + titleBox.offset) : -Math.round(titleBox.offset)
+                        textFormat: Text.PlainText
+                        horizontalAlignment: Text.AlignRight
+                        elide: titleBox.offset > 0 ? Text.ElideNone : Text.ElideRight
+                        font.bold: true
+                        color: Kirigami.Theme.textColor
+                        text: mini.player?.title || i18n("Now Playing")
+                    }
 
                     HoverHandler {
                         id: titleHover
                     }
-                    // Server text, cut at two fifths of the row: the whole of it on hover
+                    // Server text, cut at two fifths of the row: only where the title cannot move
                     PlainToolTip {
-                        visible: titleLabel.truncated && titleHover.hovered
+                        visible: !titleBox.animated && titleLabel.truncated && titleHover.hovered
                         text: titleLabel.text
                     }
                 }

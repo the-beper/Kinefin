@@ -441,6 +441,8 @@ Kirigami.Page {
     VolumeWheel {
         objectName: "playerWheel"
         anchors.fill: parent
+        // The pointer hides with the bars, here and not on the page's hover: a MouseArea always gives the cursor (an arrow by default), so the one of the hover below would never show
+        cursorShape: osd.wanted ? Qt.ArrowCursor : Qt.BlankCursor
         onStepped: steps => page.stepVolume(steps)
     }
     // A cast has no picture here: the device plays it, and this says where
@@ -485,11 +487,10 @@ Kirigami.Page {
             onClicked: page.player.stopCasting()
         }
     }
-    // Only a move of the pointer wakes the bars: the scene repeats the last hover position on every frame that changes something under it, and the page slides in under a parked pointer, so the position compared is the one in the scene. The pointer hides with the bars
+    // Only a move of the pointer wakes the bars: the scene repeats the last hover position on every frame that changes something under it, and the page slides in under a parked pointer, so the position compared is the one in the scene
     HoverHandler {
         id: pointer
         objectName: "playerPointer"
-        cursorShape: osd.wanted ? Qt.ArrowCursor : Qt.BlankCursor
         property point lastPosition: Qt.point(-1, -1)
         // Whether the pointer moved since the bars last went: a pointer parked on their place does not hold them
         property bool moved: false

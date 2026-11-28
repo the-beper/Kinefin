@@ -16,7 +16,8 @@ Item {
     required property ShellNavigation navigation
 
     readonly property ConnectionController connection: shell.connection
-    readonly property bool signedIn: connection.state === ConnectionController.Authenticated
+    // The window's rule: false on the user picker of a session, whose menu keeps the entries that need no session (Settings, Keyboard Shortcuts, About)
+    readonly property bool signedIn: shell.signedIn
     readonly property bool offline: connection.state === ConnectionController.Offline
     // Watching together; null when the application gives none
     readonly property var syncPlay: shell.syncPlay ?? null

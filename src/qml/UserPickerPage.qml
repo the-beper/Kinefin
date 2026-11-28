@@ -5,7 +5,7 @@ import QtQuick.Controls as Controls
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 
-// Who is watching: one tile per user saved for the server, an Add User button under them and, at the foot of the page, the server's address with Switch Server. A user without a stored session, or set to ask for the password, shows a lock and leads to the sign-in page. Signed out it is the page of the picker state; in a session it is the section the sidebar's avatar opens, with the signed-in user marked, and the session goes on until another user is chosen, added or signed out
+// Who is watching: one tile per user saved for the server, an Add User button under them and, at the foot of the page, the server's address with Switch Server. A user without a stored session, or set to ask for the password, shows a lock and leads to the sign-in page. Signed out it is the page of the picker state; in a session it is what the avatar of the sidebar or the drawer opens: it takes the whole window with the signed-in user marked and has no way back: it ends by choosing a user (the signed-in one goes back to Home, another one switches), Add User, Switch Server or signing the signed-in user out
 Kirigami.ScrollablePage {
     id: page
     objectName: "userPickerPage"
@@ -13,12 +13,15 @@ Kirigami.ScrollablePage {
     // The darker View background on every page: a page without a list (a plain flickable) would get the lighter Window one, and the pages would not match
     Kirigami.Theme.colorSet: Kirigami.Theme.View
     Kirigami.Theme.inherit: false
-    // Signed out the lone menu button stands in the top corner over the page, in a Compact window the button of the drawer: the content starts below it
+    // The lone menu button stands in the top corner over the page, signed out and in a session alike: the content starts below it
     topPadding: Kirigami.Units.gridUnit * 2
 
     required property ConnectionController connection
-    readonly property bool inSession: connection.state === ConnectionController.Authenticated
+    // A session that opens on this page (the user was just chosen) is not the session of a picker opened from the avatar: the tiles keep the layout they had, with no caption
+    readonly property bool inSession: connection.state === ConnectionController.Authenticated && !(page.Window.window?.sessionOpening ?? false)
     readonly property string signedInId: inSession ? connection.currentUserId : ""
+    // A chosen user is on its way in (the server is reached, then the session lists its libraries): the page says so and takes no other choice meanwhile, as the sign-in page does
+    readonly property bool opening: connection.state === ConnectionController.Connecting || (page.Window.window?.sessionOpening ?? false)
 
     // The row toolbar is ToolBar everywhere (Main.qml): the pre-signin screens keep their identity in the top bar instead
     globalToolBarStyle: Kirigami.ApplicationHeaderStyle.None
@@ -219,6 +222,7 @@ Kirigami.ScrollablePage {
         Item {
             id: grid
             objectName: "userPickerGrid"
+            enabled: !page.opening
 
             readonly property real gap: Kirigami.Units.largeSpacing
             readonly property real cellWidth: Kirigami.Units.gridUnit * 9 + gap
@@ -330,7 +334,7 @@ Kirigami.ScrollablePage {
                             grid.forceActiveFocus(Qt.MouseFocusReason);
                         }
                         // The signed-in user goes back to Home: the session goes on
-                        onClicked: modelData.id === page.signedInId ? page.Window.window.goHome() : page.connection.chooseUser(modelData.id)
+                        onClicked: modelData.id === page.signedInId ? page.Window.window.closeUsers() : page.connection.chooseUser(modelData.id)
                         onMenuRequested: (x, y, button) => {
                             grid.currentIndex = tile.index;
                             grid.forceActiveFocus(Qt.MouseFocusReason);
@@ -348,6 +352,7 @@ Kirigami.ScrollablePage {
             Layout.topMargin: Kirigami.Units.largeSpacing
             text: i18nc("@action:button", "Add User")
             icon.name: "list-add-user"
+            enabled: !page.opening
             onClicked: page.connection.addUser()
             Keys.onReturnPressed: clicked()
             Keys.onEnterPressed: clicked()
@@ -357,6 +362,16 @@ Kirigami.ScrollablePage {
                     grid.forceActiveFocus(Qt.BacktabFocusReason);
             }
             Keys.onDownPressed: switchServer.forceActiveFocus(Qt.TabFocusReason)
+        }
+
+        Controls.BusyIndicator {
+            objectName: "userPickerBusy"
+            Layout.alignment: Qt.AlignHCenter
+            Layout.topMargin: Kirigami.Units.largeSpacing
+            Accessible.name: i18n("Connecting…")
+            FadeInOnShow {}
+            visible: page.opening
+            running: page.opening
         }
     }
 

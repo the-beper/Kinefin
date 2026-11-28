@@ -38,6 +38,8 @@ Controls.Popup {
     readonly property real areaWidth: Math.max(0, (parent?.width ?? 0) - railWidth)
     // The area starts after the rail, which is on the right in a mirrored layout
     readonly property real areaStart: Qt.application.layoutDirection === Qt.RightToLeft ? 0 : railWidth
+    // The room kept on each side of the popup, centred in the area: wider than the scroll bar the page under it shows at its trailing edge (the leading one when mirrored), so that the popup never touches it
+    readonly property real sideMargin: Kirigami.Units.gridUnit * 2
 
     // The control that had the keyboard when the popup opened, which gets it back when the popup closes without a choice
     property Item focusBefore: null
@@ -72,7 +74,7 @@ Controls.Popup {
     closePolicy: Controls.Popup.CloseOnEscape | Controls.Popup.CloseOnPressOutside
     // The border takes one pixel of the popup, the content the rest
     padding: 1
-    width: Math.max(0, Math.min(areaWidth - Kirigami.Units.gridUnit * 2, Kirigami.Units.gridUnit * 52))
+    width: Math.max(0, Math.min(areaWidth - sideMargin * 2, Kirigami.Units.gridUnit * 52))
     height: Math.min(implicitHeight, maximumHeight)
     x: areaStart + Math.round((areaWidth - width) / 2)
     y: Math.round((parent?.height ?? 0) * 0.1)

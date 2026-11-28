@@ -12,7 +12,7 @@
 #include <vector>
 
 namespace Kinefin {
-// The images an item has now, for the Edit Images page: one row per image type the editor handles (the seven usual ones always, so a type with no image can be filled; Box, BoxRear, Menu and Screenshot only when the item has some), each with its images in index order. One model per open page, on a listing channel of its own. A reload keeps the old rows until the answer replaces them, and a reload that leaves the same types updates the rows in place, so a view keeps its items and focus. The model reads again after every image write of its item, whoever made it. Thumbnails are built by the API client's image URL builder only, and only for an image that has a cache tag. Everything shown is server data: render it as plain text
+// The images an item has now, for the Edit Images page: one row per image type the editor handles (the seven usual ones always, so a type with no image can be filled; Box, BoxRear, Menu and Screenshot only when the item has some), each with its images in index order. A page that is given the types it offers (a person has a Primary image only) gets those rows, whatever else the item has. One model per open page, on a listing channel of its own. A reload keeps the old rows until the answer replaces them, and a reload that leaves the same types updates the rows in place, so a view keeps its items and focus. The model reads again after every image write of its item, whoever made it. Thumbnails are built by the API client's image URL builder only, and only for an image that has a cache tag. Everything shown is server data: render it as plain text
 class EditImagesModel final : public QAbstractListModel {
     Q_OBJECT
     Q_PROPERTY(QString itemId READ itemId CONSTANT)
@@ -35,9 +35,9 @@ class EditImagesModel final : public QAbstractListModel {
     // Whether an image of the type is told apart by an index (a backdrop, a screenshot)
     static bool holdsSeveral(const QString &type);
 
-    // `channel` is the model's own listing channel (the controller hands them out); the model starts loading at once
+    // `channel` is the model's own listing channel (the controller hands them out); `types`, when not empty, are the only rows, in that order; the model starts loading at once
     EditImagesModel(JellyfinClient *client, const QString &itemId, int channel,
-                    QObject *parent = nullptr);
+                    const QStringList &types = {}, QObject *parent = nullptr);
     ~EditImagesModel() override;
 
     Q_INVOKABLE void reload();
@@ -72,6 +72,7 @@ class EditImagesModel final : public QAbstractListModel {
     JellyfinClient *m_client = nullptr;
     QString m_itemId;
     int m_channel = 0;
+    QStringList m_types;
     Status m_status = Idle;
     std::vector<Group> m_groups;
     int m_imageCount = 0;

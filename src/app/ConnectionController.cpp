@@ -1333,12 +1333,13 @@ int ConnectionController::takeImagesChannel()
     return m_nextImagesChannel++;
 }
 
-EditImagesModel *ConnectionController::createEditImages(const QString &itemId, QObject *owner)
+EditImagesModel *ConnectionController::createEditImages(const QString &itemId, QObject *owner,
+                                                        const QStringList &types)
 {
     if (m_state != Authenticated || !m_client.isAdministrator() || !owner
         || !isValidJellyfinId(itemId))
         return nullptr;
-    return new EditImagesModel(&m_client, itemId, takeImagesChannel(), owner);
+    return new EditImagesModel(&m_client, itemId, takeImagesChannel(), types, owner);
 }
 
 RemoteImagesModel *ConnectionController::createRemoteImages(const QString &itemId,

@@ -52,5 +52,6 @@ exec dbus-run-session -- sh -c '
         sleep 0.2
     done
     [ "$scaled" = yes ] || { echo "the virtual output did not take scale 2" >&2; exit 1; }
-    env KINEFIN_DOC_SHOTS="$1" QT_STYLE_OVERRIDE=Breeze QT_QPA_PLATFORM=wayland "$2" documentationScreenshotsWhenRequested
+    # The KDE platform theme gives the fonts of a Plasma session, as build/dev.Containerfile does for a dev run
+    env KINEFIN_DOC_SHOTS="$1" QT_STYLE_OVERRIDE=Breeze QT_QPA_PLATFORMTHEME=kde QT_QPA_PLATFORM=wayland "$2" documentationScreenshotsWhenRequested
 ' sh "$out" "$binary"

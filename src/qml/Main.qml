@@ -32,7 +32,18 @@ Kirigami.ApplicationWindow {
     property string requestedItemId: ""
     // Invalidates deferred link navigation when an account changes or a newer link arrives
     property int itemRequestGeneration: 0
-    readonly property bool signedIn: connection.state === ConnectionController.Authenticated
+    // The one switch for the pages of a session (the rail, the sections, the shortcuts, the player and the remote commands read it): there is a session, and neither the user picker that its avatar opens nor the page that a new session is still opening on takes the window
+    readonly property bool signedIn: connection.state === ConnectionController.Authenticated && !userPickerOpen && !sessionOpening
+    // The user picker opened from a session: it takes the whole window, with no rail, no way back and no playback; it ends by choosing a saved user (the signed-in one goes back to Home, another one leaves the session), Add User, Switch Server or signing the signed-in user out, and with the session
+    property bool userPickerOpen: false
+    // A session that starts on the user picker or the sign-in keeps that page (the first of the stack, a Settings page may be above it) until its libraries are listed, then Home fades in whole: Home never shows empty
+    readonly property bool sessionOpening: connection.state === ConnectionController.Authenticated && !userPickerOpen && firstPageOpensSession
+    // The first page of the stack is one a session can open on: the user picker or the sign-in
+    readonly property bool firstPageOpensSession: pageStack.depth > 0 && ["userPickerPage", "loginPage"].includes(pageStack.get(0)?.objectName ?? "")
+    // The wait for the libraries ran out: Home shows without them
+    property bool sessionOpeningExpired: false
+    // The longest the start-up cover and the opening of a session wait for the libraries, in milliseconds
+    readonly property int coverDeadline: 8000
     // A saved owner's downloads, shown without a session; only the Downloads tab and the player work
     readonly property bool offline: connection.state === ConnectionController.Offline
     // The modes in pixels: Compact below the width where the sidebar's rail leaves a page as wide as the smallest window (the sidebar gives way to the header and its drawer), Wide from 36 grid units; tests derive their window sizes from these
@@ -111,8 +122,8 @@ Kirigami.ApplicationWindow {
 
     // The width the sidebar takes inline (0 in a Compact window and while there is nothing to choose from), which the player page reaches out over
     readonly property real sidebarWidth: shellSidebar.inlineWidth
-    // Signed out (the server, sign-in and user pages) the window has no rail and no bar: the main menu button stands alone in the top corner, so that Settings and About stay in reach
-    readonly property bool cornerMenu: !startupVisible && !navigation.navigable && !offline
+    // With no session pages in reach (the server, sign-in and user pages, the picker of a session included) the window has no rail and no bar: the main menu button stands alone in the top corner, so that Settings and About stay in reach
+    readonly property bool cornerMenu: !startupVisible && !offline && !navigation.navigable
     readonly property Item cornerMenuSlot: cornerSlot
     // A Compact window with sections to choose from has no bar either: a button floating in the top corner opens the drawer, and the pages keep that corner free (PageMetrics)
     readonly property bool cornerNavigation: shellSidebar.drawerAllowed
@@ -169,8 +180,9 @@ Kirigami.ApplicationWindow {
         parent: window.contentItem.parent
         z: 3
         flat: false
-        visible: window.cornerNavigation && !window.startupVisible && opacity > 0
-        opacity: window.headerOpacity
+        // Visible while it fades in too, so that it can take the keyboard from a rail that slides out
+        visible: window.cornerNavigation && !window.startupVisible && window.headerOpacity > 0
+        opacity: window.headerOpacity * shellSidebar.cornerOpacity
         enabled: !window.playbackPageShowing
         Accessible.ignored: window.playbackPageShowing
         width: PageMetrics.cornerButton
@@ -193,14 +205,19 @@ Kirigami.ApplicationWindow {
         value: window.cornerNavigation
     }
 
+    function focusNavigationButton() {
+        navigationButton.forceActiveFocus(window.keyboardDriven ? Qt.TabFocusReason : Qt.OtherFocusReason);
+    }
+
     // The rail down the leading edge of the window, from its top, and in a Compact window the drawer the corner button opens, or an edge swipe. It fades out with the header while the player is in front
     ShellSidebar {
         id: shellSidebar
 
         shell: window
         navigation: navigation
-        // The drawer closed without a choice: the keyboard goes back to the button that opened it
-        onDrawerDismissed: navigationButton.forceActiveFocus(window.keyboardDriven ? Qt.TabFocusReason : Qt.OtherFocusReason)
+        // The drawer closed without a choice, or the rail that held the keyboard slid out: the keyboard goes to the corner button
+        onDrawerDismissed: window.focusNavigationButton()
+        onFocusReleased: window.focusNavigationButton()
     }
 
     // The initial shell never flashes an empty page. The delay is short enough
@@ -212,7 +229,7 @@ Kirigami.ApplicationWindow {
         if (!startupVisible || !startupMinimumElapsed || !pageStack.currentItem)
             return;
         if (!startupDeadlineElapsed && (connection.state === ConnectionController.Connecting
-                || (signedIn && !connection.librariesLoaded)))
+                || (connection.state === ConnectionController.Authenticated && !connection.librariesLoaded)))
             return;
         startupVisible = false;
     }
@@ -235,6 +252,7 @@ Kirigami.ApplicationWindow {
     }
     Timer {
         id: startupMinimumTimer
+        objectName: "startupMinimumTimer"
         interval: 500
         running: window.startupVisible
         repeat: false
@@ -242,7 +260,7 @@ Kirigami.ApplicationWindow {
     }
     Timer {
         id: startupDeadlineTimer
-        interval: 8000
+        interval: window.coverDeadline
         running: window.startupVisible
         repeat: false
         onTriggered: { window.startupDeadlineElapsed = true; window.settleStartup(); }
@@ -256,7 +274,26 @@ Kirigami.ApplicationWindow {
             else
                 Qt.callLater(window.settleStartup);
         }
-        function onHomeProjectionChanged() { Qt.callLater(window.settleStartup); }
+        function onHomeProjectionChanged() {
+            Qt.callLater(window.settleStartup);
+            Qt.callLater(window.releaseSessionOpening);
+        }
+        function onErrorTextChanged() { Qt.callLater(window.releaseSessionOpening); }
+    }
+    Timer {
+        id: sessionOpeningDeadline
+        interval: window.coverDeadline
+        onTriggered: {
+            if (!window.sessionOpening)
+                return;
+            window.sessionOpeningExpired = true;
+            window.showPageForState();
+        }
+    }
+    // A session that opens on the user picker or the sign-in shows Home once its libraries are listed, or once a failure says they will not be
+    function releaseSessionOpening() {
+        if (sessionOpening && (connection.librariesLoaded || connection.errorText.length > 0))
+            showPageForState();
     }
     Rectangle {
         id: startupCover
@@ -629,11 +666,23 @@ Kirigami.ApplicationWindow {
             settings.setWindowGeometry(geometryBeforeFullscreen);
     }
 
-    // The page follows the connection state: Servers until a server is chosen, the user picker while one of several saved users is to be chosen, sign-in until there is a session, Home after
+    // The page follows the connection state: Servers until a server is chosen, the user picker while one of several saved users is to be chosen (and in a session while its avatar's picker is open), sign-in until there is a session, Home after. A session that starts on the picker or the sign-in stays there until its libraries are listed (or a failure or the deadline ends the wait), so that Home fades in whole instead of showing empty
     function showPageForState() {
+        // The wait for the libraries and its deadline belong to one session: it ends with it, here and not in a handler of the state, which could run after the next session started waiting
+        if (connection.state !== ConnectionController.Authenticated) {
+            sessionOpeningDeadline.stop();
+            sessionOpeningExpired = false;
+        }
         let page = "ServersPage.qml";
         let properties = { connection: connection };
         switch (connection.state) {
+        case ConnectionController.Connecting:
+            // A saved user restored from the picker or the sign-in stays on the page it was chosen on: the Servers page never shows for the length of a keyring read
+            if (pageStack.depth > 0 && pageStack.currentItem?.objectName !== "serversPage") {
+                Qt.callLater(settleStartup);
+                return;
+            }
+            break;
         case ConnectionController.NeedsLogin:
         case ConnectionController.SigningIn:
         case ConnectionController.QuickConnectPending:
@@ -643,6 +692,16 @@ Kirigami.ApplicationWindow {
             page = "UserPickerPage.qml";
             break;
         case ConnectionController.Authenticated:
+            if (userPickerOpen) {
+                page = "UserPickerPage.qml";
+                break;
+            }
+            if (sessionOpening && !connection.librariesLoaded && connection.errorText.length === 0 && !sessionOpeningExpired) {
+                if (!sessionOpeningDeadline.running)
+                    sessionOpeningDeadline.restart();
+                return;
+            }
+            sessionOpeningDeadline.stop();
             page = "HomePage.qml";
             break;
         case ConnectionController.Offline:
@@ -1235,7 +1294,7 @@ Kirigami.ApplicationWindow {
 
     // Ctrl+F, the Search entry of the rail and the search button of a Compact window: the search popup opens over the page in front with the term it had, and its field takes the keyboard. A player page in front goes first, its video to the mini player, as for any page change from it
     function openSearch() {
-        if (connection.state !== ConnectionController.Authenticated)
+        if (!signedIn)
             return;
         if (searchPopup.visible) {
             searchPopup.focusSearchField();
@@ -1452,8 +1511,6 @@ Kirigami.ApplicationWindow {
             if (page?.objectName === "libraryPage" && page.tabType === "")
                 return "library:" + connection.library.libraryId;
         }
-        if (pageStack.currentItem?.objectName === "userPickerPage")
-            return "users";
         return rootTab !== "" ? rootTab : "home";
     }
 
@@ -1733,13 +1790,13 @@ Kirigami.ApplicationWindow {
         pageStack.push(Qt.resolvedUrl("PlaylistPage.qml"), { connection: connection, shell: window, playlistId: playlistId, name: name ?? "" });
     }
 
-    // The images of an item (administrators only) open above the details page that asks, the pages above it giving way; `itemName` is the name the page shows for the item
-    function openEditImages(itemId, itemName, fromPage) {
+    // The images of an item (administrators only) open above the details page that asks, the pages above it giving way; `itemName` is the name the page shows for the item, `imageTypes` (when not empty) the only image types it offers
+    function openEditImages(itemId, itemName, fromPage, imageTypes) {
         if (connection.state !== ConnectionController.Authenticated || !connection.currentUserIsAdministrator)
             return;
         if (fromPage)
             popTo(fromPage);
-        pageStack.push(Qt.resolvedUrl("EditImagesPage.qml"), { connection: connection, itemId: itemId, itemName: itemName ?? "" });
+        pageStack.push(Qt.resolvedUrl("EditImagesPage.qml"), { connection: connection, itemId: itemId, itemName: itemName ?? "", imageTypes: imageTypes ?? [] });
     }
 
     // The images the providers offer for an item, for the type `imageType`, open above the Edit Images page that asks, which stays below as it is
@@ -1748,7 +1805,7 @@ Kirigami.ApplicationWindow {
             return;
         if (fromPage)
             popTo(fromPage);
-        pageStack.push(Qt.resolvedUrl("RemoteImagesPage.qml"), { connection: connection, itemId: itemId, itemName: itemName ?? "", imageType: imageType, replaces: fromPage?.imageModel?.replaces(imageType) ?? false });
+        pageStack.push(Qt.resolvedUrl("RemoteImagesPage.qml"), { connection: connection, itemId: itemId, itemName: itemName ?? "", imageType: imageType, imageTypes: fromPage?.imageTypes ?? [], replaces: fromPage?.imageModel?.replaces(imageType) ?? false });
     }
 
     PlaylistDialogs {
@@ -2043,7 +2100,11 @@ Kirigami.ApplicationWindow {
             if (window.connection.state !== ConnectionController.Authenticated) {
                 window.remotePending = [];
                 window.remotePlayWaiting = false;
+                window.userPickerOpen = false;
             }
+            // A saved user that could not be reached leaves the page it was chosen on (that page stays through Connecting, which has no page group of its own)
+            if (window.connection.state === ConnectionController.Idle && window.firstPageOpensSession)
+                window.showPageForState();
         }
     }
 
@@ -2054,14 +2115,32 @@ Kirigami.ApplicationWindow {
         openTab("favorites");
     }
 
-    // The users of the server from a session, as a section: the session goes on until another user is chosen there
+    // The users of the server from a session: the picker replaces everything the window shows, as it does signed out. Playback stops (the mini player and the picture-in-picture window close), the rail and the way back go, and the page fades in like any page of a state change. The session stays connected until another user is chosen or added
     function openUsers() {
-        if (signedIn)
-            openSection("userPickerPage", "UserPickerPage.qml", { connection: connection });
+        if (!signedIn || askBeforeLeaving(() => openUsers()))
+            return;
+        // Set first: with the pages of the session out of reach the stop below reloads nothing of Home
+        userPickerOpen = true;
+        playerAction("stop");
+        // The pages of the session go with the stack, as they do when the tab changes: the sub-tabs of the type pages give their data back
+        connection.closeSubtabs();
+        showPageForState();
     }
 
-    // The Home tab; before a session it is the page the state wants
+    // The signed-in user chosen on the picker: the session's Home shows again, faded in as after a sign-in
+    function closeUsers() {
+        if (!userPickerOpen)
+            return;
+        // The session already showed Home, maybe before its libraries were listed (the start-up cover gives up at its deadline): going back is never a new wait for them
+        sessionOpeningExpired = true;
+        userPickerOpen = false;
+        showPageForState();
+    }
+
+    // The Home tab; before a session it is the page the state wants. The user picker of a session has no way out but a user
     function goHome() {
+        if (userPickerOpen)
+            return;
         if (signedIn)
             openTab("home");
         else if (offline)

@@ -301,8 +301,9 @@ class ConnectionController : public QObject {
     // Moves one image of a type with several (Backdrop, Screenshot) to another index; administrators only. The outcome is itemImageUpdated (with the new index) or itemImageUpdateFailed
     Q_INVOKABLE bool moveImage(const QString &itemId, const QString &imageType, int index,
                                int newIndex);
-    // The images of one item for the Edit Images page `owner`, and what the providers offer for it for the online image page `owner` (`imageType` is the type to look for first): each model is a child of `owner`, takes a listing channel of its own and dies with it. Null unless signed in as an administrator and `owner` exists
-    Q_INVOKABLE Kinefin::EditImagesModel *createEditImages(const QString &itemId, QObject *owner);
+    // The images of one item for the Edit Images page `owner`, and what the providers offer for it for the online image page `owner` (`imageType` is the type to look for first): each model is a child of `owner`, takes a listing channel of its own and dies with it. `types`, when not empty, are the only image types the Edit Images model offers. Null unless signed in as an administrator and `owner` exists
+    Q_INVOKABLE Kinefin::EditImagesModel *createEditImages(const QString &itemId, QObject *owner,
+                                                           const QStringList &types = {});
     Q_INVOKABLE Kinefin::RemoteImagesModel *
     createRemoteImages(const QString &itemId, const QString &imageType, QObject *owner);
     // Edit Subtitles: uploads a local srt/ass/ssa/vtt (UTF-8, at most 2 MiB) or deletes an external subtitle by index; administrators only. The outcomes are itemSubtitleUpdated/itemSubtitleUpdateFailed

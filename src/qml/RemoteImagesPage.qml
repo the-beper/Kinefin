@@ -5,7 +5,7 @@ import QtQuick.Controls as Controls
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 
-// The images the metadata providers offer for one item (administrators only), above its Edit Images page: pick the image type, a provider and whether to include every language, and choose one of the pictures, a page at a time, to have the server download it as that type of image of the item. The page goes back to Edit Images once the server has saved the image
+// The images the metadata providers offer for one item (administrators only), above its Edit Images page: pick the image type (not when the Edit Images page offers one type, as for a person), a provider and whether to include every language, and choose one of the pictures, a page at a time, to have the server download it as that type of image of the item. The page goes back to Edit Images once the server has saved the image
 Kirigami.ScrollablePage {
     id: page
     objectName: "remoteImagesPage"
@@ -18,6 +18,9 @@ Kirigami.ScrollablePage {
     required property string itemId
     // The type to look for first
     required property string imageType
+    // The only image types the page offers, as the Edit Images page it opens above does; empty for every type the providers offer. With one type there is nothing to pick
+    property var imageTypes: []
+    readonly property bool single: imageTypes.length === 1
     // The item's name as the caller knew it: server text, shown as plain text only
     property string itemName: ""
     // Choosing an image would take the place of one the item has: the choice asks first, since the old image cannot be recovered
@@ -29,7 +32,7 @@ Kirigami.ScrollablePage {
     readonly property RemoteImagesModel offers: connection.createRemoteImages(itemId, imageType, page)
     readonly property bool downloading: offers?.downloadState === RemoteImagesModel.Downloading
     // The choices of the two boxes: the types and the providers the model offers (provider names are server text)
-    readonly property var typeChoices: (offers?.imageTypes ?? []).map(type => ({ value: type, text: types.label(type) }))
+    readonly property var typeChoices: (offers?.imageTypes ?? []).filter(type => imageTypes.length === 0 || imageTypes.includes(type)).map(type => ({ value: type, text: types.label(type) }))
     readonly property var providerChoices: [{ value: "", text: i18n("All providers") }].concat((offers?.providerNames ?? []).map(name => ({ value: name, text: name })))
 
     title: i18n("Search Online")
@@ -141,7 +144,7 @@ Kirigami.ScrollablePage {
             Layout.fillWidth: true
             wrapMode: Text.Wrap
             textFormat: Text.PlainText
-            text: i18n("Replace the current image of this type on the server? It cannot be recovered")
+            text: page.single ? i18n("Replace the current image on the server? It cannot be recovered") : i18n("Replace the current image of this type on the server? It cannot be recovered")
         }
     }
 
@@ -189,12 +192,14 @@ Kirigami.ScrollablePage {
             enabled: !page.downloading
 
             Controls.Label {
+                visible: !page.single
                 textFormat: Text.PlainText
                 text: i18nc("@label:listbox", "Image type:")
             }
             ChoiceBox {
                 id: typeBox
                 objectName: "remoteImagesTypeBox"
+                visible: !page.single
                 Layout.fillWidth: true
                 Layout.preferredWidth: Kirigami.Units.gridUnit * 8
                 Layout.maximumWidth: Kirigami.Units.gridUnit * 14

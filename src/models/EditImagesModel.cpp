@@ -40,8 +40,9 @@ bool EditImagesModel::holdsSeveral(const QString &type)
 }
 
 EditImagesModel::EditImagesModel(JellyfinClient *client, const QString &itemId, int channel,
-                                 QObject *parent)
-    : QAbstractListModel(parent), m_client(client), m_itemId(itemId), m_channel(channel)
+                                 const QStringList &types, QObject *parent)
+    : QAbstractListModel(parent), m_client(client), m_itemId(itemId), m_channel(channel),
+      m_types(types)
 {
     if (m_client) {
         connect(m_client, &JellyfinClient::itemImagesReady, this, &EditImagesModel::onImagesReady);
@@ -146,10 +147,13 @@ void EditImagesModel::onImagesReady(const QString &itemId, const QVariantList &i
         const QVariantMap image = value.toMap();
         byType[image.value(QStringLiteral("imageType")).toString()].append(image);
     }
-    QStringList types = usualTypes();
-    for (const QString &type : otherTypes()) {
-        if (byType.contains(type))
-            types.append(type);
+    QStringList types = m_types;
+    if (types.isEmpty()) {
+        types = usualTypes();
+        for (const QString &type : otherTypes()) {
+            if (byType.contains(type))
+                types.append(type);
+        }
     }
     std::vector<Group> groups;
     int count = 0;

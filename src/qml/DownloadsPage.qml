@@ -152,6 +152,45 @@ Kirigami.ScrollablePage {
         return parts.join(" · ");
     }
 
+    // Between the parts of a status line
+    readonly property string partSeparator: " · "
+
+    // Every digit as wide as 0, which tabular figures make them all
+    function figures(text) {
+        return text.replace(/[0-9]/g, "0");
+    }
+
+    function transferText(written, total) {
+        return i18nc("@info download progress, bytes written of the total size", "%1 of %2", written, total);
+    }
+
+    function percentText(percent) {
+        return i18nc("@info download progress in percent", "%1%", percent);
+    }
+
+    // The widest text that `format` makes of a number of bytes up to `most`: the units differ in width, so it is the longest text among the values at the top of each unit (such as 1023.9 KB)
+    function widestText(most, format) {
+        let widest = "";
+        let top = 1;
+        do {
+            top *= 1024;
+            const text = format(Math.min(most, top - 1));
+            if (text.length > widest.length)
+                widest = text;
+        } while (top <= most);
+        return page.figures(widest);
+    }
+
+    function widestTransfer(size) {
+        const total = page.downloads.formattedSize(size);
+        return page.widestText(size, bytes => page.transferText(page.downloads.formattedSize(bytes), total));
+    }
+
+    // SpeedAverage divides what was written in the last 3 s, at most the whole file, by a span of at least 200 ms: a fifth of a second is the fastest it reads
+    function widestSpeed(size) {
+        return page.widestText(size * 5, bytes => page.speedText(bytes));
+    }
+
     // The speed in the unit family of the sizes: "12.4 MB/s"; empty when nothing moves
     function speedText(bytesPerSecond) {
         return bytesPerSecond > 0 ? i18nc("@info a transfer speed, %1 is a size such as 12.4 MB", "%1/s", page.downloads.formattedSize(bytesPerSecond)) : "";
@@ -171,23 +210,22 @@ Kirigami.ScrollablePage {
         return i18n("more than a day left");
     }
 
-    // The one muted line of a card: while it fetches the parts that are known (bytes of the total, percentage, speed, time left); once on this device its size, whether it was watched and when it was queued; else the state in plain words
-    function rowStatus(state, error, size, bytesWritten, progress, bytesPerSecond, played, addedAt) {
+    // The parts of the line of a download that fetches, each in the place it keeps: the bytes (written of the total once that is known), the percentage, the speed and the time left; a part that is not known is empty
+    function fetchParts(size, bytesWritten, progress, bytesPerSecond) {
+        const written = page.downloads.formattedSize(bytesWritten);
+        let transferred = "";
+        if (size > 0)
+            transferred = page.transferText(written, page.downloads.formattedSize(size));
+        else if (bytesWritten > 0)
+            transferred = written;
+        return [transferred, size > 0 ? page.percentText(Math.floor(Math.max(0, progress) * 100)) : "", page.speedText(bytesPerSecond), page.timeLeftText(size, bytesWritten, bytesPerSecond)];
+    }
+
+    // The one muted line of a card: while it fetches the parts that are known (see fetchParts); once on this device its size, whether it was watched and when it was queued; else the state in plain words
+    function rowStatus(state, error, size, fetched, played, addedAt) {
         if (state === "fetching") {
-            const parts = [];
-            if (size > 0) {
-                parts.push(i18nc("@info download progress, bytes written of the total size", "%1 of %2", page.downloads.formattedSize(bytesWritten), page.downloads.formattedSize(size)));
-                parts.push(i18nc("@info download progress in percent", "%1%", Math.floor(Math.max(0, progress) * 100)));
-            } else if (bytesWritten > 0) {
-                parts.push(page.downloads.formattedSize(bytesWritten));
-            }
-            const speed = page.speedText(bytesPerSecond);
-            if (speed.length > 0)
-                parts.push(speed);
-            const left = page.timeLeftText(size, bytesWritten, bytesPerSecond);
-            if (left.length > 0)
-                parts.push(left);
-            return parts.length > 0 ? parts.join(" · ") : page.stateText(state);
+            const parts = fetched.filter(part => part.length > 0);
+            return parts.length > 0 ? parts.join(page.partSeparator) : page.stateText(state);
         }
         if (state === "completed" || state === "exported") {
             const parts = [page.downloads.formattedSize(size)];
@@ -270,6 +308,17 @@ Kirigami.ScrollablePage {
 
         title: i18n("Export Download")
         onAccepted: page.connection.downloads.exportDownload(serverId, userId, itemId, selectedFolder)
+    }
+
+    // A label of a status line in the small font with tabular figures, so that the widest text of a part is measured the way the part is drawn
+    component FigureLabel: Controls.Label {
+        textFormat: Text.PlainText
+        elide: Text.ElideRight
+        color: Kirigami.Theme.disabledTextColor
+        font.family: Kirigami.Theme.smallFont.family
+        font.pointSize: Kirigami.Theme.smallFont.pointSize
+        font.features: { "tnum": 1 }
+        Accessible.ignored: true
     }
 
     // A section of the downloads as a grid of cards: two columns where the reading width holds two cards, one below that. It grows with its cards and the page scrolls. One tab stop: the arrows move inside it and on to the other section, Return plays a downloaded card, Delete asks to delete one
@@ -375,8 +424,11 @@ Kirigami.ScrollablePage {
             required property real runtimeTicks
             required property bool played
             required property real addedAt
+            readonly property var statusParts: recordState === "fetching" ? page.fetchParts(size, bytesWritten, progress, bytesPerSecond) : []
+            // A running download of a known size keeps the parts of its line in their places while the numbers change
+            readonly property bool steadyStatus: recordState === "fetching" && size > 0
             // One status line shared by the card and its accessible description
-            readonly property string statusText: page.rowStatus(recordState, error, size, bytesWritten, progress, bytesPerSecond, played, addedAt)
+            readonly property string statusText: page.rowStatus(recordState, error, size, statusParts, played, addedAt)
             readonly property string detailText: page.detailText(seriesName, seasonNumber, episodeNumber, year, runtimeTicks)
             readonly property bool cancellable: ["queued", "fetching", "waiting"].indexOf(recordState) >= 0
             readonly property bool removable: ["paused", "error", "completed", "exported"].indexOf(recordState) >= 0
@@ -479,17 +531,104 @@ Kirigami.ScrollablePage {
                         elide: Text.ElideRight
                         color: Kirigami.Theme.disabledTextColor
                     }
-                    Controls.Label {
+                    // The whole line as one item with one accessible name, drawn by the label or, while a running download has its parts in place, by the parts
+                    Item {
+                        id: statusLine
                         objectName: "downloadStatus_" + row.itemId
+                        readonly property string text: row.statusText
                         Layout.fillWidth: true
-                        text: row.statusText
-                        textFormat: Text.PlainText
-                        // An error ends with what to do: it wraps instead of losing that end, in the room the bar leaves
-                        wrapMode: row.recordState === "error" ? Text.Wrap : Text.NoWrap
-                        maximumLineCount: row.recordState === "error" ? 3 : 1
-                        elide: Text.ElideRight
-                        color: row.recordState === "error" ? Kirigami.Theme.negativeTextColor : Kirigami.Theme.disabledTextColor
-                        font: Kirigami.Theme.smallFont
+                        implicitWidth: statusLabel.implicitWidth
+                        implicitHeight: stepped.item ? stepped.item.implicitHeight : statusLabel.implicitHeight
+                        Accessible.role: Accessible.StaticText
+                        Accessible.name: text
+
+                        Controls.Label {
+                            id: statusLabel
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            visible: !row.steadyStatus
+                            text: row.statusText
+                            textFormat: Text.PlainText
+                            // An error ends with what to do: it wraps instead of losing that end, in the room the bar leaves
+                            wrapMode: row.recordState === "error" ? Text.Wrap : Text.NoWrap
+                            maximumLineCount: row.recordState === "error" ? 3 : 1
+                            elide: Text.ElideRight
+                            color: row.recordState === "error" ? Kirigami.Theme.negativeTextColor : Kirigami.Theme.disabledTextColor
+                            font: Kirigami.Theme.smallFont
+                            Accessible.ignored: true
+                        }
+                        // The parts that precede another are as wide as the widest text they can take for this download, so nothing after them moves while the numbers change; the time left ends the line and has nothing to hold. The separator leads its part and elides with it, and a part is cut only to what the ones before it leave, so the line elides at its end as one text does
+                        Loader {
+                            id: stepped
+                            anchors.fill: parent
+                            active: row.steadyStatus
+                            sourceComponent: Row {
+                                id: line
+                                objectName: "downloadStatusParts_" + row.itemId
+                                readonly property real room: statusLine.width
+                                readonly property real transferWidth: widthOf(transfer, transferWidest.implicitWidth, 0)
+                                readonly property real percentWidth: widthOf(percent, percentWidest.implicitWidth, transferWidth)
+                                readonly property real speedWidth: widthOf(speed, speedWidest.implicitWidth, transferWidth + percentWidth)
+                                readonly property real leftWidth: widthOf(timeLeft, 0, transferWidth + percentWidth + speedWidth)
+
+                                // The part that is at `index`, empty while the line has fewer
+                                function part(index) {
+                                    return row.statusParts[index] ?? "";
+                                }
+                                function led(index) {
+                                    const text = part(index);
+                                    return text.length > 0 ? page.partSeparator + text : "";
+                                }
+                                // The room a part takes: the width it keeps or its text when that is wider, no more than what is left after the `taken`, and none when it is empty
+                                function widthOf(label, kept, taken) {
+                                    return label.text.length > 0 ? Math.max(0, Math.min(Math.max(kept, label.implicitWidth), room - taken)) : 0;
+                                }
+
+                                FigureLabel {
+                                    id: transfer
+                                    objectName: "downloadStatusTransfer_" + row.itemId
+                                    width: line.transferWidth
+                                    text: line.part(0)
+                                }
+                                FigureLabel {
+                                    id: percent
+                                    objectName: "downloadStatusPercent_" + row.itemId
+                                    visible: text.length > 0 && line.percentWidth > 0
+                                    width: line.percentWidth
+                                    text: line.led(1)
+                                }
+                                FigureLabel {
+                                    id: speed
+                                    objectName: "downloadStatusSpeed_" + row.itemId
+                                    visible: text.length > 0 && line.speedWidth > 0
+                                    width: line.speedWidth
+                                    text: line.led(2)
+                                }
+                                FigureLabel {
+                                    id: timeLeft
+                                    objectName: "downloadStatusLeft_" + row.itemId
+                                    visible: text.length > 0 && line.leftWidth > 0
+                                    width: line.leftWidth
+                                    text: line.led(3)
+                                }
+                                // The parts at their widest, never shown
+                                FigureLabel {
+                                    id: transferWidest
+                                    visible: false
+                                    text: page.widestTransfer(row.size)
+                                }
+                                FigureLabel {
+                                    id: percentWidest
+                                    visible: false
+                                    text: page.partSeparator + page.figures(page.percentText(100))
+                                }
+                                FigureLabel {
+                                    id: speedWidest
+                                    visible: false
+                                    text: page.partSeparator + page.widestSpeed(row.size)
+                                }
+                            }
+                        }
                     }
                     Controls.ProgressBar {
                         Layout.topMargin: Kirigami.Units.smallSpacing

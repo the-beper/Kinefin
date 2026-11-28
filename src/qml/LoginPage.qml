@@ -20,8 +20,23 @@ Kirigami.ScrollablePage {
     // The row toolbar is ToolBar everywhere (Main.qml): the pre-signin screens keep their identity in the top bar instead
     globalToolBarStyle: Kirigami.ApplicationHeaderStyle.None
 
-    readonly property bool signingIn: connection.state === ConnectionController.SigningIn
+    // Busy through the sign-in and, once it succeeded, while the session lists its libraries and this page still shows
+    readonly property bool signingIn: connection.state === ConnectionController.SigningIn || (page.Window.window?.sessionOpening ?? false)
     readonly property bool quick: connection.state === ConnectionController.QuickConnectPending
+    // A Quick Connect approval opened the session: the code is gone and the form had no part in it, so the page only says it is busy until Home comes
+    property bool quickApproved: false
+    readonly property bool quickOpening: quickApproved && (page.Window.window?.sessionOpening ?? false)
+    // The form and its tiles give way to Quick Connect, and to the wait that follows its approval
+    readonly property bool formHidden: quick || quickOpening
+    property int lastState: connection.state
+    Connections {
+        target: page.connection
+        function onStateChanged() {
+            const state = page.connection.state;
+            page.quickApproved = state === ConnectionController.Authenticated && (page.quickApproved || page.lastState === ConnectionController.QuickConnectPending);
+            page.lastState = state;
+        }
+    }
 
     readonly property string usersTitle: i18nc("@title", "Users on This Server")
 
@@ -120,7 +135,7 @@ Kirigami.ScrollablePage {
 
                 Layout.fillWidth: true
                 Layout.preferredHeight: publicFlow.implicitHeight
-                visible: !page.quick && count > 0
+                visible: !page.formHidden && count > 0
                 enabled: !page.signingIn
                 activeFocusOnTab: true
                 Accessible.role: Accessible.List
@@ -233,7 +248,7 @@ Kirigami.ScrollablePage {
 
                 Layout.fillWidth: true
                 Layout.topMargin: publicUsers.visible ? Kirigami.Units.largeSpacing : 0
-                visible: !page.quick
+                visible: !page.formHidden
                 spacing: Kirigami.Units.largeSpacing
 
                 // Without room at the left a label stands above its box, as in a narrow form
@@ -340,7 +355,7 @@ Kirigami.ScrollablePage {
 
                 Layout.fillWidth: true
                 Layout.topMargin: Kirigami.Units.largeSpacing
-                visible: !page.quick
+                visible: !page.formHidden
                 uniformCellWidths: true
                 columns: neededWidth <= column.width ? Math.max(1, children.length) : 1
                 columnSpacing: Kirigami.Units.largeSpacing
@@ -404,6 +419,15 @@ Kirigami.ScrollablePage {
                     text: i18n("Cancel")
                     onClicked: page.connection.cancelQuickConnect()
                 }
+            }
+
+            Controls.BusyIndicator {
+                objectName: "loginQuickOpeningBusy"
+                Layout.alignment: Qt.AlignHCenter
+                Accessible.name: i18n("Connecting…")
+                FadeInOnShow {}
+                visible: page.quickOpening
+                running: page.quickOpening
             }
         }
     }
