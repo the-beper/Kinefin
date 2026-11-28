@@ -55,6 +55,8 @@ class TestDownloadsModel : public QObject {
         manager.setStoragePath(dir.filePath(QStringLiteral("index.json")));
         DownloadsModel model(&manager);
         QSignalSpy counts(&model, &DownloadsModel::countsChanged);
+        // The page's grids rebuild only the cards that change: rows come, go and move, the model never resets
+        QSignalSpy resets(&model, &QAbstractItemModel::modelAboutToBeReset);
 
         QVERIFY(manager.enqueue(record(1)));
         QCOMPARE(model.count(), 1);
@@ -67,6 +69,9 @@ class TestDownloadsModel : public QObject {
         QVERIFY(counts.count() >= 1);
 
         DownloadRecord done = record(2, QStringLiteral("completed"));
+        done.runtimeTicks = 36'000'000'000;
+        done.played = true;
+        done.addedAt = 1'700'000'000'000;
         QVERIFY(manager.store()->upsert(done, false));
         model.refresh();
         QCOMPARE(model.count(), 2);
@@ -88,9 +93,23 @@ class TestDownloadsModel : public QObject {
         QCOMPARE(model.data(model.index(1), DownloadsModel::ProgressRole).toDouble(), 1.0);
         QCOMPARE(model.data(model.index(1), DownloadsModel::PrimaryTagRole).toString(),
                  QStringLiteral("tag2"));
+        // The running time, whether it was watched and when it was queued, for the card of the page
+        QCOMPARE(model.data(model.index(1), DownloadsModel::RuntimeTicksRole).toLongLong(),
+                 36'000'000'000);
+        QVERIFY(model.data(model.index(1), DownloadsModel::PlayedRole).toBool());
+        QCOMPARE(model.data(model.index(1), DownloadsModel::AddedAtRole).toLongLong(),
+                 1'700'000'000'000);
+        QVERIFY(!model.data(model.index(0), DownloadsModel::PlayedRole).toBool());
         // Neither a waiting nor a completed row has a speed
         QCOMPARE(model.data(model.index(0), DownloadsModel::BytesPerSecondRole).toLongLong(), 0);
         QCOMPARE(model.data(model.index(1), DownloadsModel::BytesPerSecondRole).toLongLong(), 0);
+        // The waiting row completes and moves to the completed section, and the model still never reset
+        DownloadRecord finished = record(1, QStringLiteral("completed"));
+        QVERIFY(manager.store()->upsert(finished, false));
+        model.refresh();
+        QCOMPARE(model.activeCount(), 0);
+        QCOMPARE(model.completedCount(), 2);
+        QCOMPARE(resets.count(), 0);
     }
 
     void reportsProgress()

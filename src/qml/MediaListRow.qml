@@ -54,7 +54,8 @@ Controls.ItemDelegate {
     }
     // The list is the one tab stop, the arrow keys move inside it
     focusPolicy: Qt.NoFocus
-    highlighted: ListView.isCurrentItem && ListView.view.activeFocus
+    // The current row lights only once the keys drive the window, as the cards do: a list that opens with a current row shows nothing until the user moves
+    highlighted: ListView.isCurrentItem && ListView.view.activeFocus && (ListView.view.Window.window?.keyboardDriven ?? true)
     padding: Kirigami.Units.smallSpacing
 
     // A click makes this row the current one and gives the list the focus, so the focus comes back to this row after Back

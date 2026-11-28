@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Kinefin contributors
 # SPDX-License-Identifier: GPL-3.0-or-later
 cmake_minimum_required(VERSION 3.25)
-project(kinefin VERSION 0.9.4 LANGUAGES CXX)
+project(kinefin VERSION 0.9.5 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -301,7 +301,7 @@ qt_add_resources(kinefin_cast "cast_roots"
 target_link_libraries(kinefin_player PUBLIC kinefin_cast)
 
 # The QML module lives in a static library of its own so that the UI tests can import it like the application does
-foreach(page Main PageMetrics PlayerPage OsdButton OsdBox OsdMetrics MiniPlayer PictureInPictureWindow PlaybackInfoOverlay ShellHeader ShellNavigation ShellSidebar AboutDialog ShortcutsDialog DialogTitleBar RemoteSessionsDialog SyncPlayDialog MediaInfoDialog CastDialog CastTargetRow HomePage LibraryTile LibraryPage ResumeItemsPage PersonPage PersonSeriesEpisodesPage MediaCard CardMenu CardRow EpisodeRow ItemDetailsPage SearchPopup QueuePage FilterDialog FilterChips GenreRailsView GenreRailsPage LibraryContent ItemListRow ItemRowGrid LoginPage UserPickerPage UserTile MessageBox ServersPage SettingsPage SettingRow UserPreferencesForm UserPreferencesSaveBar FavoritesPage FavoriteCard FavoritesBanners FavoritesSectionPage TopShadow MediaListRow PlaylistsPage PlaylistPage PlaylistDialogs AddToPlaylistDialog AddToCollectionDialog CollectionDialogs EditMetadataDialog IdentifyDialog EditImagesPage RemoteImagesPage ImageTypes EditSubtitlesDialog PageToolbar CornerStrip PageBackButton FadeInOnShow PageTitle PlainToolTip PopupPlacement ChoiceBox AutoScroll DownloadsPage DownloadRulesPage DownloadAllDialog RuleDialog SubtitleSearchDialog SavedFiltersDialog UploadSubtitleDialog PlainMenuItem PlaceholderSectionPage)
+foreach(page Main PageMetrics PlayerPage OsdButton OsdBox OsdMetrics MiniPlayer PictureInPictureWindow PlaybackInfoOverlay ShellHeader ShellNavigation ShellSidebar AboutDialog ShortcutsDialog DialogTitleBar RemoteSessionsDialog SyncPlayDialog MediaInfoDialog CastDialog CastTargetRow HomePage LibraryTile LibraryPage ResumeItemsPage PersonPage PersonSeriesEpisodesPage MediaCard CardMenu CardRow EpisodeRow ItemDetailsPage SearchPopup QueueDialog FilterDialog FilterChips GenreRailsView GenreRailsPage LibraryContent ItemListRow ItemRowGrid LoginPage UserPickerPage UserTile MessageBox ServersPage SettingsPage SettingRow UserPreferencesForm UserPreferencesSaveBar FavoritesPage FavoriteCard FavoritesBanners FavoritesSectionPage TopShadow MediaListRow PlaylistsPage PlaylistPage PlaylistDialogs AddToPlaylistDialog AddToCollectionDialog CollectionDialogs EditMetadataDialog IdentifyDialog EditImagesPage RemoteImagesPage ImageTypes EditSubtitlesDialog PageToolbar CornerStrip PageBackButton FadeInOnShow PageTitle PlainToolTip PopupPlacement ChoiceBox AutoScroll DownloadsPage DownloadRulesPage DownloadAllDialog RuleDialog SubtitleSearchDialog SavedFiltersDialog UploadSubtitleDialog PlainMenuItem)
     set_source_files_properties(src/qml/${page}.qml PROPERTIES QT_RESOURCE_ALIAS ${page}.qml)
 endforeach()
 # The images the pages draw themselves, beside the QML files they belong to
@@ -371,7 +371,7 @@ qt_add_qml_module(kinefin_ui
         src/qml/EpisodeRow.qml
         src/qml/ItemDetailsPage.qml
         src/qml/SearchPopup.qml
-        src/qml/QueuePage.qml
+        src/qml/QueueDialog.qml
         src/qml/DownloadsPage.qml
         src/qml/DownloadRulesPage.qml
         src/qml/DownloadAllDialog.qml
@@ -382,7 +382,6 @@ qt_add_qml_module(kinefin_ui
         src/qml/SavedFiltersDialog.qml
         src/qml/UploadSubtitleDialog.qml
         src/qml/PlainMenuItem.qml
-        src/qml/PlaceholderSectionPage.qml
         src/qml/GenreRailsView.qml
         src/qml/GenreRailsPage.qml
         src/qml/LibraryContent.qml

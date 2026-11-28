@@ -5,44 +5,69 @@ import QtQuick.Controls as Controls
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 
-Kirigami.ScrollablePage {
-    id: page
-    objectName: "queuePage"
-
-    // The darker View background on every page: a page without a list (a plain flickable) would get the lighter Window one, and the sections would not match
-    Kirigami.Theme.colorSet: Kirigami.Theme.View
-    Kirigami.Theme.inherit: false
+// The queue as a dialog over the page in front, as Remote Sessions: the rows with their keys and menu (Play From Here is the menu's, on the row it was opened for), and its actions in the footer. Playing, opening an item and leaving the session close it first. Clear Queue asks nothing: Undo brings the queue back
+Kirigami.Dialog {
+    id: dialog
+    objectName: "queueDialogContent"
 
     required property ConnectionController connection
-
     readonly property PlayQueue queue: connection.queue
 
     title: i18n("Queue")
-    // No title bar, as in the Movies and Shows tabs: the actions sit in a toolbar on top of the list, the header's queue button says which page this is
-    globalToolBarStyle: Kirigami.ApplicationHeaderStyle.None
-    // Without Kirigami's title row the page names itself to a screen reader
-    Accessible.role: Accessible.Pane
-    Accessible.name: title
+    preferredWidth: Kirigami.Units.gridUnit * 40
+    maximumHeight: absoluteMaximumHeight - Kirigami.Units.gridUnit * 4
+    padding: 0
+    customFooterActions: [
+        Kirigami.Action {
+            objectName: "resumeQueueAction"
+            text: i18n("Resume Queue")
+            icon.name: "media-playlist-play"
+            enabled: dialog.queue.count > 0 && !dialog.queue.busy && !!list.Window.window?.player
+            onTriggered: dialog.closeThen(window => window.resumeQueue())
+        },
+        Kirigami.Action {
+            objectName: "undoQueueAction"
+            text: i18n("Undo")
+            icon.name: "edit-undo"
+            enabled: dialog.queue.canUndo && !dialog.queue.busy
+            onTriggered: dialog.undoLastEdit()
+        },
+        Kirigami.Action {
+            objectName: "clearQueueAction"
+            text: i18n("Clear Queue")
+            icon.name: "edit-clear-all"
+            enabled: dialog.queue.count > 0 && !dialog.queue.busy
+            onTriggered: {
+                dialog.queue.clear();
+                list.forceActiveFocus(Qt.TabFocusReason);
+            }
+        }
+    ]
 
-    // A Compact window hides the header's queue button, which otherwise names the page
-    header: PageToolbar {
-        actions: page.actions
-        title: (page.Window.window?.compactHeader ?? false) ? page.title : ""
-        toolbarObjectName: "queueToolbar"
-        titleObjectName: "queueHeading"
+    header: DialogTitleBar {
+        title: dialog.title
+        onCloseRequested: dialog.close()
     }
 
-    // The list takes the keys as soon as the page shows
+    // The list takes the keys as soon as the dialog shows
     function focusPrimary() {
         list.forceActiveFocus(Qt.TabFocusReason);
     }
 
-    // The row follows the item it moved
+    // What the dialog leads to runs once it has gone, with the window: a page or the player opened under the fading dialog would lose the keyboard to it
+    property var afterClose: null
+    function closeThen(action) {
+        const window = list.Window.window;
+        afterClose = () => action(window);
+        close();
+    }
+
     // The menu acts on the row it was opened for, as long as that row still holds the same item
     function menuRowIsCurrent() {
         return menu.row >= 0 && list.itemAtIndex(menu.row)?.itemId === menu.itemId;
     }
 
+    // The row follows the item it moved
     function moveRow(from, delta) {
         const to = from + delta;
         if (from < 0 || to < 0 || to >= queue.count)
@@ -67,15 +92,8 @@ Kirigami.ScrollablePage {
         list.forceActiveFocus(Qt.TabFocusReason);
     }
 
-    Shortcut {
-        sequences: [StandardKey.Undo]
-        enabled: page.Window.window?.pageStack.currentItem === page
-                 && page.queue.canUndo && !page.queue.busy && !clearQueueDialog.visible
-        onActivated: page.undoLastEdit()
-    }
-
     function openRow(itemId) {
-        page.Window.window.openItem(itemId, page);
+        dialog.closeThen(window => window.openItem(itemId, null));
     }
 
     function openMenu(row, anchorItem, x, y) {
@@ -84,58 +102,48 @@ Kirigami.ScrollablePage {
         menu.popup(anchorItem, x, y);
     }
 
-    actions: [
-        Kirigami.Action {
-            objectName: "resumeQueueAction"
-            text: i18n("Resume Queue")
-            icon.name: "media-playlist-play"
-            enabled: page.queue.count > 0 && !page.queue.busy && !!page.Window.window?.player
-            onTriggered: page.Window.window.resumeQueue()
-        },
-        Kirigami.Action {
-            objectName: "playQueueAction"
-            text: i18n("Play From Here")
-            icon.name: "media-playback-start"
-            enabled: page.queue.count > 0 && !page.queue.busy && !!page.Window.window?.player
-            onTriggered: page.Window.window.playQueue(Math.max(0, list.currentIndex))
-        },
-        Kirigami.Action {
-            objectName: "undoQueueAction"
-            text: i18n("Undo")
-            icon.name: "edit-undo"
-            enabled: page.queue.canUndo && !page.queue.busy
-            onTriggered: page.undoLastEdit()
-        },
-        Kirigami.Action {
-            text: i18n("Clear Queue…")
-            icon.name: "edit-clear-all"
-            enabled: page.queue.count > 0 && !page.queue.busy
-            onTriggered: clearQueueDialog.open()
-        }
-    ]
+    // Each opening starts at the top with the first row current, as the page did
+    onAboutToShow: {
+        list.currentIndex = queue.count > 0 ? 0 : -1;
+        list.positionViewAtBeginning();
+    }
+    onOpened: focusPrimary()
+    onAboutToHide: menu.close()
+    onClosed: {
+        const next = afterClose;
+        afterClose = null;
+        if (next)
+            Qt.callLater(next);
+    }
 
-    Kirigami.PromptDialog {
-        id: clearQueueDialog
-        objectName: "clearQueueDialog"
-        title: i18n("Clear Queue")
-        subtitle: i18n("Remove all items from the queue?")
-        standardButtons: Kirigami.Dialog.Cancel
-        customFooterActions: [
-            Kirigami.Action {
-                text: i18n("Clear Queue")
-                icon.name: "edit-clear-all"
-                onTriggered: {
-                    page.queue.clear();
-                    clearQueueDialog.close();
-                    page.focusPrimary();
-                }
-            }
-        ]
+    Shortcut {
+        sequences: [StandardKey.Undo]
+        enabled: dialog.opened && dialog.queue.canUndo && !dialog.queue.busy
+        onActivated: dialog.undoLastEdit()
+    }
+
+    // A session that ended must not leave the dialog over the server the user left
+    Connections {
+        target: dialog.connection
+        function onStateChanged() {
+            if (dialog.connection.state !== ConnectionController.Authenticated)
+                dialog.close();
+        }
+    }
+
+    // A playback that starts from elsewhere (another client, SyncPlay) brings the player to the front: the dialog does not stay over it
+    Connections {
+        target: list.Window.window
+        ignoreUnknownSignals: true
+        function onPlaybackPageShowingChanged() {
+            if (list.Window.window.playbackPageShowing)
+                dialog.close();
+        }
     }
 
     // Rows that move or go while a menu is open make it stale: it closes
     Connections {
-        target: page.queue
+        target: dialog.queue
         function onEdited() {
             menu.close();
         }
@@ -152,76 +160,83 @@ Kirigami.ScrollablePage {
         Controls.MenuItem {
             text: i18n("Play From Here")
             icon.name: "media-playback-start"
-            enabled: !!page.Window.window?.player
-            onTriggered: if (page.menuRowIsCurrent()) page.Window.window.playQueue(menu.row)
+            enabled: !!list.Window.window?.player
+            onTriggered: {
+                if (!dialog.menuRowIsCurrent())
+                    return;
+                // The row is looked up once the dialog has gone: an edit from elsewhere may have moved it meanwhile
+                const itemId = menu.itemId;
+                dialog.closeThen(window => {
+                    const row = window.connection.queue.indexOf(itemId);
+                    if (row >= 0)
+                        window.playQueue(row);
+                });
+            }
         }
         Controls.MenuItem {
             text: i18n("Move Up")
             icon.name: "arrow-up"
             enabled: menu.row > 0
-            onTriggered: if (page.menuRowIsCurrent()) page.moveRow(menu.row, -1)
+            onTriggered: if (dialog.menuRowIsCurrent()) dialog.moveRow(menu.row, -1)
         }
         Controls.MenuItem {
             text: i18n("Move Down")
             icon.name: "arrow-down"
-            enabled: menu.row >= 0 && menu.row < page.queue.count - 1
-            onTriggered: if (page.menuRowIsCurrent()) page.moveRow(menu.row, 1)
+            enabled: menu.row >= 0 && menu.row < dialog.queue.count - 1
+            onTriggered: if (dialog.menuRowIsCurrent()) dialog.moveRow(menu.row, 1)
         }
         Controls.MenuItem {
             text: i18n("Remove")
             icon.name: "edit-delete-remove"
-            onTriggered: if (page.menuRowIsCurrent()) page.removeRow(menu.row)
+            onTriggered: if (dialog.menuRowIsCurrent()) dialog.removeRow(menu.row)
         }
         Controls.MenuSeparator {}
         Controls.MenuItem {
             text: i18n("Go to Item")
             icon.name: "go-next"
-            onTriggered: page.openRow(menu.itemId)
+            onTriggered: dialog.openRow(menu.itemId)
         }
     }
 
     ListView {
         id: list
         objectName: "queueList"
-        // The page margin under the bar, as at its sides: the rows scroll up to its line, but open clear of it
-        topMargin: PageMetrics.margin
+        // One height whatever the queue holds, so the dialog does not move under the pointer as rows go and come; the rows scroll in it
+        implicitWidth: Kirigami.Units.gridUnit * 40
+        implicitHeight: Kirigami.Units.gridUnit * 28
+        topMargin: Kirigami.Units.smallSpacing
+        bottomMargin: Kirigami.Units.smallSpacing
+        clip: true
 
-        // On the view, not in its content: the fade stays under the toolbar while the rows scroll
-        TopShadow {
-            objectName: "queueTopShadow"
-            parent: list
-            z: 1
-            atStart: list.atYBeginning
-        }
-
-        model: page.queue
+        // The rows and their images exist only while the dialog shows
+        model: dialog.visible ? dialog.queue : null
         activeFocusOnTab: true
         keyNavigationEnabled: true
         currentIndex: 0
         Accessible.role: Accessible.List
-        Accessible.name: page.title
+        Accessible.name: dialog.title
 
         // The rows are not tab stops: the list is, and it opens the current item
         function openCurrent() {
             if (list.currentItem)
-                page.openRow(list.currentItem.itemId);
+                dialog.openRow(list.currentItem.itemId);
         }
         function openCurrentMenu() {
             const item = list.currentItem;
             if (item)
-                page.openMenu(list.currentIndex, item, item.sideMargin, item.height);
+                dialog.openMenu(list.currentIndex, item, item.sideMargin, item.height);
         }
         Keys.onReturnPressed: openCurrent()
         Keys.onEnterPressed: openCurrent()
         Keys.onSpacePressed: openCurrent()
         Keys.onMenuPressed: openCurrentMenu()
-        Keys.onDeletePressed: page.removeRow(list.currentIndex)
+        Keys.onDeletePressed: dialog.removeRow(list.currentIndex)
         Keys.onPressed: event => {
             if (event.modifiers === Qt.ControlModifier && event.key === Qt.Key_Up) {
-                page.moveRow(list.currentIndex, -1);
+                dialog.moveRow(list.currentIndex, -1);
                 event.accepted = true;
             } else if (event.modifiers === Qt.ControlModifier && event.key === Qt.Key_Down) {
-                page.moveRow(list.currentIndex, 1);
+                dialog.moveRow(list.currentIndex, 1);
                 event.accepted = true;
             } else if (event.modifiers === Qt.ShiftModifier && event.key === Qt.Key_F10) {
                 openCurrentMenu();
@@ -233,7 +248,7 @@ Kirigami.ScrollablePage {
         header: Item {
             width: list.width
             height: visible ? Kirigami.Units.gridUnit * 3 : 0
-            visible: page.queue.busy && list.count > 0
+            visible: dialog.queue.busy && list.count > 0
 
             RowLayout {
                 anchors.centerIn: parent
@@ -255,7 +270,7 @@ Kirigami.ScrollablePage {
         Kirigami.LoadingPlaceholder {
             FadeInOnShow {}
             anchors.centerIn: parent
-            visible: page.queue.busy && list.count === 0
+            visible: dialog.queue.busy && list.count === 0
             text: i18n("Loading…")
         }
 
@@ -263,14 +278,14 @@ Kirigami.ScrollablePage {
             x: Kirigami.Units.largeSpacing
             y: Kirigami.Units.largeSpacing
             width: list.width - Kirigami.Units.largeSpacing * 2
-            visible: page.queue.restoreFailed
+            visible: dialog.queue.restoreFailed
             type: Kirigami.MessageType.Error
             text: i18n("Could not restore the queue: check the connection to the server and try again")
             actions: [
                 Kirigami.Action {
                     text: i18n("Retry")
                     icon.name: "view-refresh"
-                    onTriggered: page.queue.retryRestore()
+                    onTriggered: dialog.queue.retryRestore()
                 }
             ]
         }
@@ -279,7 +294,7 @@ Kirigami.ScrollablePage {
             FadeInOnShow {}
             anchors.centerIn: parent
             width: parent.width - Kirigami.Units.gridUnit * 4
-            visible: page.queue.count === 0 && !page.queue.busy && !page.queue.restoreFailed
+            visible: dialog.queue.count === 0 && !dialog.queue.busy && !dialog.queue.restoreFailed
             icon.name: "media-track-queue-amarok"
             text: i18n("The queue is empty")
             explanation: i18n("Add a movie, an episode, a season, or a series with Add to Queue")
@@ -288,8 +303,8 @@ Kirigami.ScrollablePage {
         delegate: MediaListRow {
             id: queueRow
             objectName: "queueRow_" + index
-            onOpened: page.openRow(itemId)
-            onMenuRequested: (x, y) => page.openMenu(index, queueRow, x, y)
+            onOpened: dialog.openRow(itemId)
+            onMenuRequested: (x, y) => dialog.openMenu(index, queueRow, x, y)
         }
     }
 }

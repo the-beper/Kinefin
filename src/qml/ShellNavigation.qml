@@ -3,7 +3,7 @@
 import QtQuick
 import org.kde.kirigami as Kirigami
 
-// The sections of the shell (Home, Movies, Shows, Music, Audiobooks, Favorites, Playlists and Downloads) as actions, with their Ctrl+N shortcuts and the keys that cycle through them; a view that shows the sections reads them from here and binds no shortcut of its own, since two shortcuts on one sequence fire neither
+// The sections of the shell (Home, Movies, Shows, Favorites, Playlists and Downloads) as actions, with their Ctrl+N shortcuts and the keys that cycle through them; a view that shows the sections reads them from here and binds no shortcut of its own, since two shortcuts on one sequence fire neither
 Item {
     id: root
 
@@ -14,13 +14,11 @@ Item {
     readonly property bool signedIn: connection.state === ConnectionController.Authenticated
     readonly property bool offline: connection.state === ConnectionController.Offline
 
-    // The sections in their visual order, which is also the order of the Ctrl+N shortcuts and of the slide of the tab switch: `group` is "home" or "content" (Movies and Shows, which need a library of the server, and the Music and Audiobooks placeholders, which show whenever a user is signed in) for the first block and "personal" for what follows the divider
+    // The sections in their visual order, which is also the order of the Ctrl+N shortcuts and of the slide of the tab switch: `group` is "home" or "content" (Movies and Shows, which need a library of the server) for the first block and "personal" for what follows the divider
     readonly property var entries: [
         { section: homeAction.section, group: "home", action: homeAction },
         { section: moviesAction.section, group: "content", action: moviesAction },
         { section: tvShowsAction.section, group: "content", action: tvShowsAction },
-        { section: musicAction.section, group: "content", action: musicAction },
-        { section: audiobooksAction.section, group: "content", action: audiobooksAction },
         { section: favoritesTabAction.section, group: "personal", action: favoritesTabAction },
         { section: playlistsTabAction.section, group: "personal", action: playlistsTabAction },
         { section: downloadsAction.section, group: "personal", action: downloadsAction }
@@ -93,31 +91,6 @@ Item {
         enabled: root.signedIn
         shortcut: root.tabShortcut(tvShowsAction)
         onTriggered: shell.openTab("tvshows")
-    }
-    // Placeholders: the page says it is coming and asks the server for nothing
-    Kirigami.Action {
-        id: musicAction
-        objectName: "musicTabAction"
-
-        property string section: "music"
-        text: i18nc("@title:tab", "Music")
-        icon.name: "folder-music-symbolic"
-        visible: root.signedIn
-        enabled: root.signedIn
-        shortcut: root.tabShortcut(musicAction)
-        onTriggered: shell.openTab("music")
-    }
-    Kirigami.Action {
-        id: audiobooksAction
-        objectName: "audiobooksTabAction"
-
-        property string section: "audiobooks"
-        text: i18nc("@title:tab", "Audiobooks")
-        icon.name: "audio-headphones-symbolic"
-        visible: root.signedIn
-        enabled: root.signedIn
-        shortcut: root.tabShortcut(audiobooksAction)
-        onTriggered: shell.openTab("audiobooks")
     }
     Kirigami.Action {
         id: favoritesTabAction

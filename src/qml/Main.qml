@@ -36,10 +36,10 @@ Kirigami.ApplicationWindow {
     // A saved owner's downloads, shown without a session; only the Downloads tab and the player work
     readonly property bool offline: connection.state === ConnectionController.Offline
     // The modes in pixels: Compact below the width where the sidebar's rail leaves a page as wide as the smallest window (the sidebar gives way to the header and its drawer), Wide from 36 grid units; tests derive their window sizes from these
-    readonly property int compactLimit: Math.ceil(shellSidebar.railWidth + minimumWidth)
-    // The smallest window: the Compact header with its navigation button fits, the pages keep room to show something, and the rail keeps about three sections in view above the entries that stand at its foot
+    readonly property int compactLimit: Math.ceil(shellSidebar.labelledWidth + minimumWidth)
+    // The smallest window: the Compact header with its navigation button fits, the pages keep room to show something, and every entry of the compact rail and every row of the drawer shows, so neither scrolls
     minimumWidth: Kirigami.Units.gridUnit * 24
-    minimumHeight: Kirigami.Units.gridUnit * 26
+    minimumHeight: Kirigami.Units.gridUnit * 30
     readonly property int wideLimit: Kirigami.Units.gridUnit * 36
     // The widest a block of reading content (item header, queue rows) gets before it is centred: the pages read it from here so they agree
     readonly property real readingWidth: Kirigami.Units.gridUnit * 70
@@ -52,7 +52,7 @@ Kirigami.ApplicationWindow {
     // attached Window.window kept its load-time value and never followed a resize
     readonly property bool compactHeader: width < compactLimit
     readonly property bool wideHeader: width >= wideLimit
-    // The tab the first page of the stack stands for: "home", "movies", "tvshows", "music", "audiobooks", "favorites", "playlists" or "downloads"; empty on the sign-in and server pages and for a library opened from a tile. The depth and the current item change with every push and clear, and the first page is read after them
+    // The tab the first page of the stack stands for: "home", "movies", "tvshows", "favorites", "playlists" or "downloads"; empty on the sign-in and server pages and for a library opened from a tile. The depth and the current item change with every push and clear, and the first page is read after them
     readonly property string rootTab: pageStack.depth > 0 && pageStack.currentItem ? tabOfPage(pageStack.get(0)) : ""
     // The scroll position and the current tile of each tab left behind, so a tab comes back as the user left it; dropped with the session
     readonly property var tabState: ({})
@@ -91,7 +91,8 @@ Kirigami.ApplicationWindow {
     readonly property bool wantsFullscreen: startupWindowMode === "fullscreen" || (startupWindowMode !== "windowed" && fullscreenSetting)
 
     width: 1000
-    height: 640
+    // Tall enough for the rail with its labels at the first start; the size the window had comes back afterwards
+    height: Kirigami.Units.gridUnit * 41
     visible: true
     title: "Kinefin"
     flags: Qt.Window
@@ -592,8 +593,12 @@ Kirigami.ApplicationWindow {
     // The last window size comes back always; the position only where the compositor lets a client place its window (not Wayland) and only while it still lies on a screen
     function restoreGeometry() {
         const saved = settings.windowGeometry();
-        if (saved.width <= 0)
+        // The first start: the default height must not outgrow a short screen either
+        if (saved.width <= 0) {
+            if (window.screen.desktopAvailableHeight > 0)
+                window.height = Math.min(window.height, window.screen.desktopAvailableHeight);
             return;
+        }
         // A size saved on a larger screen must not outgrow this one
         window.width = Math.min(saved.width, window.screen.desktopAvailableWidth);
         window.height = Math.min(saved.height, window.screen.desktopAvailableHeight);
@@ -1447,8 +1452,6 @@ Kirigami.ApplicationWindow {
             if (page?.objectName === "libraryPage" && page.tabType === "")
                 return "library:" + connection.library.libraryId;
         }
-        if (pageStack.currentItem?.objectName === "queuePage")
-            return "queue";
         if (pageStack.currentItem?.objectName === "userPickerPage")
             return "users";
         return rootTab !== "" ? rootTab : "home";
@@ -1470,8 +1473,6 @@ Kirigami.ApplicationWindow {
             return "playlists";
         case "downloadsPage":
             return "downloads";
-        case "placeholderSectionPage":
-            return page.section;
         }
         return "";
     }
@@ -1481,7 +1482,7 @@ Kirigami.ApplicationWindow {
         return name === "movies" ? connection.movieLibraries.length > 0 : connection.showLibraries.length > 0;
     }
 
-    // The tab becomes the first page of the stack: what was there goes, the tab it leaves is remembered, and the one it comes back to is restored. A type tab opens its list (the stored library when `libraryId` is empty, else that library, which a Home tile persists); the tab already in front only drops the pages above it. Favorites, Playlists, Music and Audiobooks (a placeholder page) are root tabs too and open at the top. `recentlyAdded` opens the type tab on the one-off Recently Added view instead of the stored one
+    // The tab becomes the first page of the stack: what was there goes, the tab it leaves is remembered, and the one it comes back to is restored. A type tab opens its list (the stored library when `libraryId` is empty, else that library, which a Home tile persists); the tab already in front only drops the pages above it. Favorites and Playlists are root tabs too and open at the top. `recentlyAdded` opens the type tab on the one-off Recently Added view instead of the stored one
     function openTab(name, libraryId) {
         openTabScope(name, libraryId, false);
     }
@@ -1538,8 +1539,6 @@ Kirigami.ApplicationWindow {
             page = pageStack.push(Qt.resolvedUrl("PlaylistsPage.qml"), { connection: connection, shell: window });
         else if (name === "downloads")
             page = pageStack.push(Qt.resolvedUrl("DownloadsPage.qml"), { connection: connection });
-        else if (name === "music" || name === "audiobooks")
-            page = pageStack.push(Qt.resolvedUrl("PlaceholderSectionPage.qml"), { section: name });
         else
             page = pageStack.push(Qt.resolvedUrl("LibraryPage.qml"), { model: name === "movies" ? connection.movies : connection.shows, tabType: name, connection: connection });
         if (tabState[name] && page?.restoreViewPosition)

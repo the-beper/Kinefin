@@ -59,7 +59,7 @@ Kinefin is written for Plasma instead. The interface is Kirigami and follows the
 
 ### Not included
 
-- Music and audiobooks: their libraries show on Home but stay disabled for now, and their sidebar entries say they are coming soon. Both are planned (see the [TODO](TODO.md)).
+- Music, audiobooks and Live TV.
 - Server administration: **Admin Dashboard** opens the server's web interface in your browser.
 
 ## Gallery

@@ -66,7 +66,7 @@ build/build-env.sh build/check.sh
 
 Running one `test_ui_pages` function and the screenshot tour (`visualTourWhenRequested`) are under [Building](#building). Kirigami and Qt Quick behaviours that have failed these tests offscreen:
 
-- Two `Shortcut`s with the same sequence are ambiguous and neither fires, and Kirigami templates register their own. The section shortcuts (Ctrl+1 to Ctrl+8, Ctrl+PgUp, Ctrl+PgDown, Ctrl+[, Ctrl+], Ctrl+Tab and Ctrl+Shift+Tab) and Ctrl+F belong to the shell (`ShellNavigation`, `Main.qml`). Do not add a probe shortcut on a sequence already in use.
+- Two `Shortcut`s with the same sequence are ambiguous and neither fires, and Kirigami templates register their own. The section shortcuts (Ctrl+1 to Ctrl+6, Ctrl+PgUp, Ctrl+PgDown, Ctrl+[, Ctrl+], Ctrl+Tab and Ctrl+Shift+Tab) and Ctrl+F belong to the shell (`ShellNavigation`, `Main.qml`). Do not add a probe shortcut on a sequence already in use.
 - A popup with `CloseOnEscape` (the default) blocks the window's shortcuts while it is `visible`. `opened` turns false when the exit transition starts and `visible` when it ends, so wait for `visible` before pressing a key.
 - A `MenuItem` of a closed `Menu` reports `visible` false: open the menu first.
 - Pages outside the viewport are disabled, so a page sliding back in ignores `click()` for its first frame while `invokeMethod` still returns true. Wait until the target is `enabled` (`clickCenter` does), and never click mid-slide: a press on the page below makes that page current.

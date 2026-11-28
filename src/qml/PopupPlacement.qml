@@ -16,6 +16,8 @@ QtObject {
     property bool preferAbove: false
     // Opens at the side of the button instead of below or above it, bottom-aligned with it and moved up as far as the window needs: the menu of a button in a rail at the window's edge
     property bool beside: false
+    // The room left between the button and a popup at its side: the margin and the line of the rail or the drawer that holds the button, which the popup must not cover
+    property real besideGap: 0
 
     // `popup(parent, x, y)` of another opener changes the parent: the button counts only while the popup hangs from it
     readonly property Item control: openedFrom && openedFrom === popup.parent ? openedFrom : anchor
@@ -52,7 +54,14 @@ QtObject {
             return fitsAbove;
         return roomAbove > roomBelow || (roomAbove === roomBelow && preferAbove);
     }
-    readonly property real shownHeight: Math.min(fullHeight, Math.max(0, beside ? (window?.height ?? 0) : opensUp ? roomAbove : roomBelow))
+    // At the side of the button only when the popup fits there, on one side or the other; else below or above it like any other popup, never over the button
+    readonly property bool besideFits: {
+        if (!beside || !control || !window)
+            return false;
+        const width = popup.width;
+        return controlAt.x + control.width + besideGap + width <= window.width || controlAt.x - besideGap - width >= 0;
+    }
+    readonly property real shownHeight: Math.min(fullHeight, Math.max(0, besideFits ? (window?.height ?? 0) : opensUp ? roomAbove : roomBelow))
     readonly property bool cut: ready && shownHeight < fullHeight
 
     // In the window, as the scene counts: the popup's left edge, with the start edges aligned (the left ones, the right ones when mirrored) unless that leaves the window
@@ -61,9 +70,10 @@ QtObject {
             return 0;
         const width = placement.popup.width;
         const rtl = Qt.application.layoutDirection === Qt.RightToLeft;
-        if (placement.beside) {
-            const trailing = rtl ? placement.controlAt.x - width : placement.controlAt.x + placement.control.width;
-            const leading = rtl ? placement.controlAt.x + placement.control.width : placement.controlAt.x - width;
+        if (placement.besideFits) {
+            const gap = placement.besideGap;
+            const trailing = rtl ? placement.controlAt.x - gap - width : placement.controlAt.x + placement.control.width + gap;
+            const leading = rtl ? placement.controlAt.x + placement.control.width + gap : placement.controlAt.x - gap - width;
             const left = trailing >= 0 && trailing + width <= placement.window.width ? trailing : leading;
             return Math.max(0, Math.min(left, placement.window.width - width));
         }
@@ -75,7 +85,7 @@ QtObject {
         return Math.max(0, Math.min(left, placement.window.width - width));
     }
     readonly property real sceneY: {
-        if (beside)
+        if (besideFits)
             return Math.max(0, Math.min(controlAt.y + (control?.height ?? 0) - popup.height, (window?.height ?? 0) - popup.height));
         return opensUp ? controlAt.y - popup.height : controlAt.y + (control?.height ?? 0);
     }
@@ -92,6 +102,10 @@ QtObject {
         Connections {
             target: placement.popup
             function onAboutToShow() {
+                placement.openings++;
+            }
+            // A layout that was still settling when the popup was asked for (the window was just resized) has moved the button since: it is read once more
+            function onOpened() {
                 placement.openings++;
             }
             function onClosed() {

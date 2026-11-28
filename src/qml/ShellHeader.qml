@@ -24,10 +24,15 @@ Item {
     readonly property bool inSidebar: shell.sidebarWidth > 0
     readonly property bool groupMenuOpened: groupMenu.opened
     readonly property bool mainMenuOpened: mainMenu.opened
+    readonly property bool queueOpened: queueDialog.opened
     // Whether SyncPlay is offered: the sidebar's entry follows it
     readonly property bool syncPlayOffered: syncPlayAction.visible
-    // What the main menu hangs from: the sidebar's Menu entry, the floating navigation button of a Compact window, else the bar's button
-    readonly property Item menuOrigin: shell.cornerNavigation ? shell.cornerNavigationButton : inSidebar ? (shell.sidebarMenuButton ?? mainMenuButton) : mainMenuButton
+    // The drawer's Main Menu row while the menu hangs from it, with the drawer open under it, what runs a choice then (the drawer's own `closeThen`) and the choice made: it runs once the menu and then the drawer have gone, since either one, closing over a dialog the choice opened, would take the keyboard back from it
+    property Item drawerMenuRow: null
+    property var drawerMenuRunner: null
+    property var drawerMenuChoice: null
+    // What the main menu hangs from: the drawer's row, the sidebar's Menu entry, the floating navigation button of a Compact window, else the bar's button
+    readonly property Item menuOrigin: drawerMenuRow ?? (shell.cornerNavigation ? shell.cornerNavigationButton : inSidebar ? (shell.sidebarMenuButton ?? mainMenuButton) : mainMenuButton)
 
     // The signed-in user, found among the saved users by id: null when signed out or when the list has no such entry
     readonly property var currentUser: {
@@ -43,6 +48,27 @@ Item {
         mainMenu.open();
     }
 
+    // The main menu beside the drawer's row; `runner` takes each choice
+    function openMainMenuFromDrawer(row, runner) {
+        drawerMenuRow = row;
+        drawerMenuRunner = runner;
+        mainMenu.open();
+    }
+
+    // The drawer goes for another reason (the window grew past the Compact limit, the session ended): the menu hanging from its row goes too
+    function dismissDrawerMenu() {
+        if (drawerMenuRow)
+            mainMenu.close();
+    }
+
+    // A choice of the main menu runs at once, or once the menu opened from the drawer has closed; a shortcut runs at once, as no menu is open then
+    function runChoice(choice) {
+        if (drawerMenuRunner)
+            drawerMenuChoice = choice;
+        else
+            choice();
+    }
+
     // The menu of the SyncPlay group opens beside the button of the sidebar that asks
     function openGroupMenu(button) {
         groupPlacement.openFor(button);
@@ -50,6 +76,11 @@ Item {
 
     function openRemoteSessions() {
         remoteSessionsAction.trigger();
+    }
+
+    // The rail's Queue entry and the drawer's row open it
+    function openQueue() {
+        queueDialog.open();
     }
 
     // Only a narrow Settings page with an entry open has it: there the entry hides the list, and this is the pointer's way back to it (with the sidebar or the drawer the page has its own)
@@ -115,7 +146,7 @@ Item {
         text: i18nc("@action:inmenu", "Settings")
         icon.name: "configure"
         shortcut: "Ctrl+,"
-        onTriggered: shell.openSection("settingsPage", "SettingsPage.qml", { settings: shell.settings, connection: shell.connection })
+        onTriggered: root.runChoice(() => shell.openSection("settingsPage", "SettingsPage.qml", { settings: shell.settings, connection: shell.connection }))
     }
     Kirigami.Action {
         id: shortcutsAction
@@ -124,7 +155,7 @@ Item {
         text: i18nc("@action:inmenu", "Keyboard Shortcuts")
         icon.name: "input-keyboard-symbolic"
         shortcut: "Ctrl+Shift+/"
-        onTriggered: shortcutsDialog.open()
+        onTriggered: root.runChoice(() => shortcutsDialog.open())
     }
     Kirigami.Action {
         id: aboutAction
@@ -132,7 +163,7 @@ Item {
 
         text: i18nc("@action:inmenu", "About Kinefin")
         icon.name: "help-about"
-        onTriggered: aboutDialog.open()
+        onTriggered: root.runChoice(() => aboutDialog.open())
     }
     // The one Refresh of the app, on Ctrl+R (never a function key alone, per the HIG): no page binds it itself, or the two shortcuts would be ambiguous. One sequence, not StandardKey.Refresh: the style's MenuItem binds a single sequence and warns on a standard key that has several
     Kirigami.Action {
@@ -145,13 +176,13 @@ Item {
         visible: root.signedIn
         // Only a page that has something to refresh takes it: Home reloads the libraries, the others do it themselves
         enabled: typeof shell.pageStack.currentItem?.refreshPage === "function" || shell.pageStack.currentItem?.objectName === "homePage"
-        onTriggered: {
+        onTriggered: root.runChoice(() => {
             const page = shell.pageStack.currentItem;
             if (typeof page?.refreshPage === "function")
                 page.refreshPage();
             else if (page?.objectName === "homePage")
                 root.connection.reloadLibraries();
-        }
+        })
     }
     Kirigami.Action {
         id: adminDashboardAction
@@ -160,10 +191,10 @@ Item {
         text: i18nc("@action:inmenu", "Admin Dashboard")
         icon.name: "preferences-system-network"
         visible: root.signedIn && root.connection.currentUserIsAdministrator
-        onTriggered: {
+        onTriggered: root.runChoice(() => {
             if (!root.connection.openAdminDashboard())
                 shell.showPassiveNotification(i18n("The admin dashboard could not be opened: check the default browser"));
-        }
+        })
     }
 
     // The sidebar's Remote entry and the drawer's row trigger this one; the SyncPlay entries follow the visibility of the next and open its dialog through openSyncPlay()
@@ -198,8 +229,8 @@ Item {
         onTriggered: root.connection.cancel()
     }
 
-    // Under the button, right-aligned with it (left-aligned when mirrored) as the bar ends there, and above it in a window too short to hold the menu below; beside the sidebar's Menu entry, as high as the window allows, while the sidebar shows. A Compact window has no bar: the menu hangs from the floating navigation button, whose corner the drawer opened from
-    PopupPlacement { popup: mainMenu; anchor: root.menuOrigin; beside: root.inSidebar }
+    // Under the button, right-aligned with it (left-aligned when mirrored) as the bar ends there, and above it in a window too short to hold the menu below; beside the sidebar's Menu entry or the drawer's row, past the margin and the line of the rail or the drawer and a margin more, so that its frame does not double the line, as high as the window allows. A Compact window has no bar: Start opens the menu under the floating navigation button
+    PopupPlacement { popup: mainMenu; anchor: root.menuOrigin; beside: root.inSidebar || root.drawerMenuRow !== null; besideGap: Kirigami.Units.smallSpacing * 2 + 1 }
 
     // The quick actions of the group the viewer is in: the menu of the sidebar's SyncPlay entry and of the drawer's row while a group is joined
     component GroupMenu: QQC2.Menu {
@@ -259,12 +290,25 @@ Item {
         id: groupMenu
         objectName: "syncPlayGroupMenu"
     }
-    PopupPlacement { id: groupPlacement; popup: groupMenu; beside: true }
+    // Past the margin and the line of the rail or the drawer, and a margin more, as the main menu
+    PopupPlacement { id: groupPlacement; popup: groupMenu; beside: true; besideGap: Kirigami.Units.smallSpacing * 2 + 1 }
 
     QQC2.Menu {
         id: mainMenu
         objectName: "mainMenu"
         parent: root.menuOrigin
+        // Over the drawer a click outside closes the menu only, and no row or page under it takes the click
+        modal: root.drawerMenuRow !== null
+        dim: false
+        onClosed: {
+            const runner = root.drawerMenuRunner;
+            const choice = root.drawerMenuChoice;
+            root.drawerMenuRow = null;
+            root.drawerMenuRunner = null;
+            root.drawerMenuChoice = null;
+            if (runner && choice)
+                runner(choice);
+        }
         // The widest shown entry (its label plus the shortcut column, which the style's MenuItem counts in its implicit width) and the menu's paddings, never wider than the window
         readonly property real widestEntry: {
             let widest = 0;
@@ -329,6 +373,14 @@ Item {
 
         connection: root.connection
         maximumWidth: Math.min(Kirigami.Units.gridUnit * 34, root.shell.width - Kirigami.Units.largeSpacing * 2)
+    }
+
+    QueueDialog {
+        id: queueDialog
+        objectName: "queueDialog"
+
+        connection: root.connection
+        maximumWidth: Math.min(Kirigami.Units.gridUnit * 40, root.shell.width - Kirigami.Units.largeSpacing * 2)
     }
 
     SyncPlayDialog {

@@ -21,6 +21,7 @@
 #include <QNetworkRequest>
 #include <QRegularExpression>
 #include <QSslError>
+#include <QStorageInfo>
 #include <QThread>
 #include <QTimer>
 #include <QUuid>
@@ -278,6 +279,12 @@ DownloadsController::DownloadsController(JellyfinClient *client, const QString &
                                          QObject *parent)
     : QObject(parent), m_client(client)
 {
+    for (auto [proxy, section] : {std::pair{&m_activeModel, QStringLiteral("active")},
+                                  std::pair{&m_completedModel, QStringLiteral("completed")}}) {
+        proxy->setSourceModel(&m_model);
+        proxy->setFilterRole(DownloadsModel::SectionRole);
+        proxy->setFilterFixedString(section);
+    }
     // Connected before the first load: a record the load rewrites can fail to save too
     connect(&m_manager, &DownloadManager::storageError, this, [this] {
         qCWarning(downloadsLog) << "The download list could not be saved";
@@ -402,6 +409,8 @@ DownloadsController::DownloadsController(JellyfinClient *client, const QString &
     connect(&m_manager, &DownloadManager::recordsChanged, this, [this] {
         ++m_revision;
         Q_EMIT revisionChanged();
+        ++m_posterRevision;
+        Q_EMIT posterRevisionChanged();
     });
     connect(&m_manager, &DownloadManager::recordChanged, this, [this] {
         ++m_revision;
@@ -817,6 +826,8 @@ void DownloadsController::writeInfo(const DownloadRecord &record)
             if (writePrivateFile(directory + QStringLiteral("/poster.jpg"), data)) {
                 ++m_revision;
                 Q_EMIT revisionChanged();
+                ++m_posterRevision;
+                Q_EMIT posterRevisionChanged();
             }
         });
     }
@@ -1480,6 +1491,19 @@ QString DownloadsController::formattedSize(qint64 bytes) const
     if (bytes < 0)
         return {};
     return QLocale().formattedDataSize(bytes, 1, QLocale::DataSizeTraditionalFormat);
+}
+
+qint64 DownloadsController::freeBytes() const
+{
+    const QString path = store()->rootDirectory();
+    if (path.isEmpty())
+        return -1;
+    // The folder appears with the first download: the disk is the one of the nearest folder that exists
+    QFileInfo folder(path);
+    while (!folder.exists() && !folder.isRoot())
+        folder.setFile(folder.absolutePath());
+    const QStorageInfo storage(folder.absoluteFilePath());
+    return storage.isValid() && storage.isReady() ? storage.bytesAvailable() : -1;
 }
 
 void DownloadsController::reconcileOutbox()

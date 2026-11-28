@@ -34,7 +34,7 @@ src/qml/RemoteSessionsDialog.qml
 src/qml/SyncPlayDialog.qml
 src/qml/MediaInfoDialog.qml
 src/qml/SearchPopup.qml
-src/qml/QueuePage.qml
+src/qml/QueueDialog.qml
 src/qml/DownloadsPage.qml
 src/qml/DownloadRulesPage.qml
 src/qml/DownloadAllDialog.qml
@@ -81,4 +81,3 @@ src/qml/FavoritesPage.qml
 src/qml/FavoriteCard.qml
 src/qml/FavoritesBanners.qml
 src/qml/FavoritesSectionPage.qml
-src/qml/PlaceholderSectionPage.qml

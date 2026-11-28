@@ -6,7 +6,7 @@ import QtQuick.Dialogs
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 
-// The Downloads tab: the active queue first, then what is available on this device. Every row is an item the engine owns; the page never builds a path and never talks to the server. A server that denies downloads still lists what was downloaded before, with the reason at the top
+// The Downloads tab: the active queue first, then what is available on this device, each a grid of cards. Every card is an item the engine owns; the page never builds a path and never talks to the server. A server that denies downloads still lists what was downloaded before, with the reason at the top
 Kirigami.ScrollablePage {
     id: page
     objectName: "downloadsPage"
@@ -19,10 +19,15 @@ Kirigami.ScrollablePage {
 
     readonly property DownloadsController downloads: connection.downloads
     readonly property DownloadsModel downloadsModel: downloads.model
-    // The rows, their headers and the notes above them are capped at the shell's reading width and centred, as the other lists are
-    readonly property real sideMargin: Math.max(0, (list.width - (page.Window.window?.readingWidth ?? list.width)) / 2)
+    // The cards, their headings and the notes above them are capped at the shell's reading width and centred, as the other lists are, and keep the page margin from the edges below that width
+    readonly property real sideMargin: Math.max(PageMetrics.margin, (width - (page.Window.window?.readingWidth ?? width)) / 2)
 
     title: i18n("Downloads")
+    // The sections reach the edges of the page: the margins are the cards' own
+    leftPadding: 0
+    rightPadding: 0
+    topPadding: 0
+    bottomPadding: 0
     // As the Movies and Shows tabs: no title bar, the toolbar above the list names the page in a Compact window
     globalToolBarStyle: Kirigami.ApplicationHeaderStyle.None
     Accessible.role: Accessible.Pane
@@ -58,19 +63,35 @@ Kirigami.ScrollablePage {
     // The top padding of a section header, set on the headers with no top margin on the list: the first heading then sits as far under the bar as the first row of the other lists (the page margin)
     readonly property real sectionPadding: PageMetrics.margin
 
-    // An icon-only button of a row, with its text as the tooltip
+    // An icon-only button of a card, with its text as the tooltip, which a press held on a touch screen shows too (and the release then does nothing)
     component RowButton: Controls.ToolButton {
+        property bool held: false
+
         display: Controls.AbstractButton.IconOnly
-        // A click on a button leaves the keys on the list: Tab still reaches the buttons
+        // A click on a button leaves the keys on the grid: Tab still reaches the buttons
         focusPolicy: Qt.TabFocus
         Controls.ToolTip.text: text
-        Controls.ToolTip.visible: hovered || visualFocus
-        Controls.ToolTip.delay: Kirigami.Units.toolTipDelay
+        Controls.ToolTip.visible: hovered || visualFocus || held
+        Controls.ToolTip.delay: held ? 0 : Kirigami.Units.toolTipDelay
+        onPressAndHold: held = true
+        onReleased: held = false
+        onCanceled: held = false
     }
 
-    // The list takes the keys as soon as the page shows
+    // The first section with cards takes the keys as soon as the page shows
     function focusPrimary() {
-        list.forceActiveFocus(Qt.TabFocusReason);
+        (activeGrid.count > 0 ? activeGrid : completedGrid).forceActiveFocus(Qt.TabFocusReason);
+    }
+
+    // A section that empties while it holds the keys hands them to the other one; a page that opened with no cards gives them to the first section that gets one
+    function settleFocus() {
+        const grids = [activeGrid, completedGrid];
+        const focused = grids.find(grid => grid.activeFocus);
+        const filled = grids.find(grid => grid.count > 0);
+        if (!filled || (focused && focused.count > 0))
+            return;
+        if (focused || page.Window.window?.activeFocusItem === page || page.Window.window?.activeFocusItem === content)
+            filled.enter(0, false);
     }
 
     function stateText(state) {
@@ -115,13 +136,20 @@ Kirigami.ScrollablePage {
         return "";
     }
 
-    function detailText(seriesName, seasonNumber, episodeNumber, year) {
-        let line = seriesName;
+    // The series and the episode, or the year of a movie, then the running time
+    function detailText(seriesName, seasonNumber, episodeNumber, year, runtimeTicks) {
+        const parts = [];
+        if (seriesName.length > 0)
+            parts.push(seriesName);
         if (seasonNumber > 0 && episodeNumber > 0)
-            line += (line.length > 0 ? " · " : "") + EpisodeLabel.label(seasonNumber, episodeNumber);
+            parts.push(EpisodeLabel.label(seasonNumber, episodeNumber));
         else if (year > 0)
-            line += (line.length > 0 ? " · " : "") + year;
-        return line;
+            parts.push(String(year));
+        // 10 000 000 ticks a second
+        const minutes = Math.round(runtimeTicks / 600000000);
+        if (minutes > 0)
+            parts.push(minutes >= 60 ? i18n("%1 h %2 min", Math.floor(minutes / 60), minutes % 60) : i18n("%1 min", minutes));
+        return parts.join(" · ");
     }
 
     // The speed in the unit family of the sizes: "12.4 MB/s"; empty when nothing moves
@@ -143,8 +171,8 @@ Kirigami.ScrollablePage {
         return i18n("more than a day left");
     }
 
-    // The one muted line of a row: while it fetches the parts that are known (bytes of the total, percentage, speed, time left), else the state in plain words
-    function rowStatus(state, error, size, bytesWritten, progress, bytesPerSecond) {
+    // The one muted line of a card: while it fetches the parts that are known (bytes of the total, percentage, speed, time left); once on this device its size, whether it was watched and when it was queued; else the state in plain words
+    function rowStatus(state, error, size, bytesWritten, progress, bytesPerSecond, played, addedAt) {
         if (state === "fetching") {
             const parts = [];
             if (size > 0) {
@@ -161,8 +189,14 @@ Kirigami.ScrollablePage {
                 parts.push(left);
             return parts.length > 0 ? parts.join(" · ") : page.stateText(state);
         }
-        if (state === "completed" || state === "exported")
-            return page.downloads.formattedSize(size);
+        if (state === "completed" || state === "exported") {
+            const parts = [page.downloads.formattedSize(size)];
+            if (played)
+                parts.push(i18nc("@info the downloaded item was watched", "watched"));
+            if (addedAt > 0)
+                parts.push(i18nc("@info when the item was put in the download queue, %1 is a date", "added %1", Qt.formatDate(new Date(addedAt), Locale.ShortFormat)));
+            return parts.filter(part => part.length > 0).join(" · ");
+        }
         if (state === "error")
             return page.errorText(error);
         return page.stateText(state);
@@ -238,39 +272,84 @@ Kirigami.ScrollablePage {
         onAccepted: page.connection.downloads.exportDownload(serverId, userId, itemId, selectedFolder)
     }
 
-    ListView {
-        id: list
-        objectName: "downloadsList"
-        // No margin of its own: the first heading carries the page margin as its top padding
-        topMargin: 0
+    // A section of the downloads as a grid of cards: two columns where the reading width holds two cards, one below that. It grows with its cards and the page scrolls. One tab stop: the arrows move inside it and on to the other section, Return plays a downloaded card, Delete asks to delete one
+    component DownloadGrid: GridView {
+        id: grid
 
-        // On the view, not in its content: the shadow stays under the toolbar while the rows scroll
-        TopShadow {
-            parent: list
-            z: 1
-            atStart: list.atYBeginning
+        // The sections before and after this one, which Up and Down reach past the first and the last row
+        property GridView previous: null
+        property GridView next: null
+        readonly property real gap: Kirigami.Units.largeSpacing
+        readonly property int columns: width >= Kirigami.Units.gridUnit * 52 + gap ? 2 : 1
+
+        // The current card at `column` of the first or the last row, with the keys and in view
+        function enter(column, fromBelow) {
+            const lastRow = Math.floor((count - 1) / columns);
+            currentIndex = Math.min(count - 1, (fromBelow ? lastRow * columns : 0) + column);
+            forceActiveFocus(Qt.TabFocusReason);
+            if (currentItem)
+                Spatial.reveal(currentItem);
         }
 
-        model: page.downloadsModel
+        function playCurrent() {
+            const card = currentItem;
+            if (card && card.downloaded)
+                page.Window.window.playDownload(card.serverId, card.userId, card.itemId);
+        }
+
+        Layout.fillWidth: true
+        // The cards' outer edges line up with the headings: the gap is shared out to both sides of each card
+        Layout.leftMargin: page.sideMargin - gap / 2
+        Layout.rightMargin: page.sideMargin - gap / 2
+        Layout.preferredHeight: contentHeight
+        visible: count > 0
+        interactive: false
+        cellWidth: Math.floor(width / columns)
+        cellHeight: Kirigami.Units.gridUnit * 6 + Kirigami.Units.largeSpacing * 2 + gap
         activeFocusOnTab: true
         keyNavigationEnabled: true
-        // No row is current until the keyboard picks one: the list must not open with a full highlight
-        currentIndex: -1
+        // The first card is current, so Return and Delete act at once; its ring shows only once the keys drive the window
+        currentIndex: 0
         Accessible.role: Accessible.List
-        Accessible.name: page.title
-
-        Keys.onReturnPressed: {
-            const item = list.currentItem;
-            if (item && item.downloaded)
-                page.Window.window.playDownload(item.serverId, item.userId, item.itemId);
+        // The page scrolls, not the grid: the card the keys moved to comes into view
+        onCurrentItemChanged: {
+            if (currentItem && activeFocus)
+                Spatial.reveal(currentItem);
         }
+        onCountChanged: {
+            // A section that filled again has a current card, as when the page opened
+            if (count > 0 && currentIndex < 0)
+                currentIndex = 0;
+            page.settleFocus();
+        }
+
+        Keys.onDownPressed: event => {
+            const row = currentIndex < 0 ? -1 : Math.floor(currentIndex / columns);
+            const lastRow = Math.floor((count - 1) / columns);
+            if (count > 0 && row >= 0 && row === lastRow && grid.next !== null && grid.next.count > 0) {
+                grid.next.enter(currentIndex % columns, false);
+                event.accepted = true;
+            } else if (row >= 0 && row < lastRow && currentIndex + columns > count - 1) {
+                // A last row shorter than this one has no card right below: the last card is the next
+                currentIndex = count - 1;
+                event.accepted = true;
+            } else {
+                event.accepted = false;
+            }
+        }
+        Keys.onUpPressed: event => {
+            event.accepted = currentIndex >= 0 && currentIndex < columns && grid.previous !== null && grid.previous.count > 0;
+            if (event.accepted)
+                grid.previous.enter(currentIndex % columns, true);
+        }
+        Keys.onReturnPressed: playCurrent()
+        Keys.onEnterPressed: playCurrent()
         Keys.onDeletePressed: {
-            const item = list.currentItem;
-            if (item && item.removable)
-                page.askRemove(item.serverId, item.userId, item.itemId, item.name);
+            const card = grid.currentItem;
+            if (card && card.removable)
+                page.askRemove(card.serverId, card.userId, card.itemId, card.name);
         }
 
-        // A row is a record of the queue; the list takes the keys as the Queue page's does: Return plays, Delete asks to delete
         delegate: Controls.ItemDelegate {
             id: row
 
@@ -293,44 +372,59 @@ Kirigami.ScrollablePage {
             required property real bytesPerSecond
             required property bool active
             required property bool downloaded
-            // One status line shared by the row and its accessible description
-            readonly property string statusText: page.rowStatus(recordState, error, size, bytesWritten, progress, bytesPerSecond)
+            required property real runtimeTicks
+            required property bool played
+            required property real addedAt
+            // One status line shared by the card and its accessible description
+            readonly property string statusText: page.rowStatus(recordState, error, size, bytesWritten, progress, bytesPerSecond, played, addedAt)
+            readonly property string detailText: page.detailText(seriesName, seasonNumber, episodeNumber, year, runtimeTicks)
             readonly property bool cancellable: ["queued", "fetching", "waiting"].indexOf(recordState) >= 0
             readonly property bool removable: ["paused", "error", "completed", "exported"].indexOf(recordState) >= 0
+            // The ring the keyboard and the pad show, as the cards of the other pages
+            readonly property bool ring: GridView.isCurrentItem && GridView.view.activeFocus && (GridView.view.Window.window?.keyboardDriven ?? true)
 
             objectName: "downloadRow_" + itemId
-            // The row spans the list and its visible part is capped at the reading width and centred: a ListView resets the x of its delegates, so the side margins are insets
-            width: list.width
-            leftInset: page.sideMargin
-            rightInset: page.sideMargin
-            leftPadding: page.sideMargin + Kirigami.Units.largeSpacing
-            rightPadding: page.sideMargin + Kirigami.Units.largeSpacing
-            topPadding: Kirigami.Units.smallSpacing
-            bottomPadding: Kirigami.Units.smallSpacing
+            width: GridView.view.cellWidth
+            height: GridView.view.cellHeight
+            // The cell holds the gap around the card: only the card shows and takes the pointer
+            leftInset: grid.gap / 2
+            rightInset: grid.gap / 2
+            topInset: grid.gap / 2
+            bottomInset: grid.gap / 2
+            leftPadding: grid.gap / 2 + Kirigami.Units.largeSpacing
+            rightPadding: grid.gap / 2 + Kirigami.Units.largeSpacing
+            topPadding: grid.gap / 2 + Kirigami.Units.largeSpacing
+            bottomPadding: grid.gap / 2 + Kirigami.Units.largeSpacing
             containmentMask: QtObject {
                 function contains(point: point): bool {
-                    return point.x >= page.sideMargin && point.x <= row.width - page.sideMargin;
+                    return point.x >= row.leftInset && point.x <= row.width - row.rightInset && point.y >= row.topInset && point.y <= row.height - row.bottomInset;
                 }
             }
-            highlighted: ListView.isCurrentItem && ListView.view.activeFocus && (ListView.view.Window.window?.keyboardDriven ?? true)
-            // The style's row background reads this hint, not Kirigami.Theme.useAlternateBackgroundColor, and the row's index
-            Kirigami.StyleHints.useAlternateBackgroundColor: true
-            // Only a downloaded row acts on a click: no hover feedback elsewhere
+            // Only a downloaded card acts on a click: no hover feedback elsewhere
             hoverEnabled: downloaded
             onClicked: {
                 if (row.downloaded)
                     page.Window.window.playDownload(row.serverId, row.userId, row.itemId);
             }
+            Accessible.role: Accessible.ListItem
             Accessible.name: row.name
-            Accessible.description: row.statusText
+            Accessible.description: [row.detailText, row.statusText].filter(part => part.length > 0).join(", ")
+
+            // A card: the style's row highlight would fill it, so the hover is a tint and the keyboard a ring
+            background: Rectangle {
+                radius: Kirigami.Units.cornerRadius
+                color: row.downloaded && row.pressed ? Qt.alpha(Kirigami.Theme.highlightColor, 0.3) : row.hovered ? Qt.alpha(Kirigami.Theme.highlightColor, 0.15) : Kirigami.Theme.alternateBackgroundColor
+                border.width: row.ring ? 2 : 1
+                border.color: row.ring ? Kirigami.Theme.highlightColor : Kirigami.ColorUtils.linearInterpolation(Kirigami.Theme.backgroundColor, Kirigami.Theme.textColor, Kirigami.Theme.frameContrast)
+            }
 
             contentItem: RowLayout {
                 spacing: Kirigami.Units.largeSpacing
 
                 Item {
                     Layout.alignment: Qt.AlignVCenter
-                    Layout.preferredWidth: Kirigami.Units.gridUnit * 2.25
-                    Layout.preferredHeight: Kirigami.Units.gridUnit * 3.375
+                    Layout.preferredWidth: Kirigami.Units.gridUnit * 4
+                    Layout.preferredHeight: Kirigami.Units.gridUnit * 6
 
                     Kirigami.Icon {
                         anchors.centerIn: parent
@@ -346,9 +440,9 @@ Kirigami.ScrollablePage {
                         anchors.fill: parent
                         // Only URLs built by JellyfinClient::imageUrl reach the image fetcher's allowlist
                         source: {
-                            // The poster may be written after the completion: a finished row follows the queue, a running one has none to find and skips the progress updates
+                            // The poster may be written after the completion: a finished card looks again when one is written, a running one has none to find
                             if (row.downloaded)
-                                page.connection.downloads.revision;
+                                page.connection.downloads.posterRevision;
                             return page.connection.downloads.posterSource(row.serverId, row.userId, row.itemId, row.primaryTag);
                         }
                         fillMode: Image.PreserveAspectCrop
@@ -370,7 +464,6 @@ Kirigami.ScrollablePage {
                         textFormat: Text.PlainText
                         elide: Text.ElideRight
                         font.weight: Font.DemiBold
-                        color: row.highlighted ? Kirigami.Theme.highlightedTextColor : Kirigami.Theme.textColor
                         HoverHandler { id: nameHover }
                         PlainToolTip {
                             visible: nameLabel.truncated && nameHover.hovered
@@ -378,36 +471,37 @@ Kirigami.ScrollablePage {
                         }
                     }
                     Controls.Label {
+                        objectName: "downloadDetail_" + row.itemId
                         Layout.fillWidth: true
                         visible: text.length > 0
-                        text: page.detailText(row.seriesName, row.seasonNumber, row.episodeNumber, row.year)
+                        text: row.detailText
                         textFormat: Text.PlainText
                         elide: Text.ElideRight
-                        color: row.highlighted ? Kirigami.Theme.highlightedTextColor : Kirigami.Theme.disabledTextColor
-                        font: Kirigami.Theme.smallFont
-                    }
-                    Controls.ProgressBar {
-                        objectName: "downloadProgress_" + row.itemId
-                        Layout.fillWidth: true
-                        // Every unfinished row keeps its bar, so a queued row that starts does not change the height of the rows below it
-                        visible: row.active && row.recordState !== "error"
-                        from: 0
-                        to: 1
-                        // An unknown size has no fraction to show
-                        indeterminate: row.recordState === "fetching" && (row.size <= 0 || row.progress < 0)
-                        value: Math.max(0, row.progress)
+                        color: Kirigami.Theme.disabledTextColor
                     }
                     Controls.Label {
                         objectName: "downloadStatus_" + row.itemId
                         Layout.fillWidth: true
                         text: row.statusText
                         textFormat: Text.PlainText
-                        // An error ends with what to do: it wraps instead of losing that end
+                        // An error ends with what to do: it wraps instead of losing that end, in the room the bar leaves
                         wrapMode: row.recordState === "error" ? Text.Wrap : Text.NoWrap
-                        maximumLineCount: row.recordState === "error" ? 2 : 1
+                        maximumLineCount: row.recordState === "error" ? 3 : 1
                         elide: Text.ElideRight
-                        color: row.highlighted ? Kirigami.Theme.highlightedTextColor : (row.recordState === "error" ? Kirigami.Theme.negativeTextColor : Kirigami.Theme.disabledTextColor)
+                        color: row.recordState === "error" ? Kirigami.Theme.negativeTextColor : Kirigami.Theme.disabledTextColor
                         font: Kirigami.Theme.smallFont
+                    }
+                    Controls.ProgressBar {
+                        Layout.topMargin: Kirigami.Units.smallSpacing
+                        objectName: "downloadProgress_" + row.itemId
+                        Layout.fillWidth: true
+                        // Every unfinished card keeps its bar, so a queued card that starts does not change its height
+                        visible: row.active && row.recordState !== "error"
+                        from: 0
+                        to: 1
+                        // An unknown size has no fraction to show
+                        indeterminate: row.recordState === "fetching" && (row.size <= 0 || row.progress < 0)
+                        value: Math.max(0, row.progress)
                     }
                 }
                 RowLayout {
@@ -421,6 +515,8 @@ Kirigami.ScrollablePage {
                             : row.recordState === "error" ? "retry"
                             : row.cancellable ? "pause" : ""
                         visible: rowAction.length > 0
+                        // The card's main action stands out from the others
+                        flat: false
                         text: rowAction === "play" ? i18n("Play")
                             : rowAction === "resume" ? i18n("Resume")
                             : rowAction === "retry" ? i18n("Retry") : i18n("Pause")
@@ -474,85 +570,118 @@ Kirigami.ScrollablePage {
                 }
             }
         }
+    }
 
-        section.property: "section"
-        section.delegate: Item {
-            width: list.width
-            height: sectionHeader.implicitHeight
+    ColumnLayout {
+        id: content
+        objectName: "downloadsList"
+        spacing: 0
 
-            Kirigami.ListSectionHeader {
-                id: sectionHeader
-                objectName: "downloadsSection_" + section
-                x: page.sideMargin
-                width: parent.width - page.sideMargin * 2
-                topPadding: page.sectionPadding
-                text: section === "completed" ? i18n("Available on This Device") : i18n("Active Downloads")
-            }
+        // On the view, not in its content: the shadow stays under the toolbar while the cards scroll
+        TopShadow {
+            parent: page.flickable
+            z: 1
+            atStart: page.flickable.atYBeginning
         }
 
-        header: Item {
-            width: list.width
-            height: visible ? notices.implicitHeight + Kirigami.Units.largeSpacing * 2 : 0
+        // One box at a time, the first that applies: the conflicts, the storage warning, the permission note
+        ColumnLayout {
+            id: notices
             visible: (!page.downloads.canDownload && !page.connection.offline)
                      || page.downloads.storageFailed
                      || page.outboxConflicts.length > 0
+            Layout.fillWidth: true
+            Layout.topMargin: Kirigami.Units.largeSpacing
+            Layout.bottomMargin: Kirigami.Units.largeSpacing
+            Layout.leftMargin: page.sideMargin
+            Layout.rightMargin: page.sideMargin
+            spacing: Kirigami.Units.smallSpacing
 
-            ColumnLayout {
-                id: notices
-                anchors {
-                    left: parent.left
-                    right: parent.right
-                    top: parent.top
-                    margins: Kirigami.Units.largeSpacing
-                    leftMargin: page.sideMargin + Kirigami.Units.largeSpacing
-                    rightMargin: page.sideMargin + Kirigami.Units.largeSpacing
-                }
-                spacing: Kirigami.Units.smallSpacing
-
-                // One box at a time, the first that applies: the conflicts, the storage warning, the permission note
-                MessageBox {
-                    objectName: "downloadsOutboxConflicts"
-                    Layout.fillWidth: true
-                    visible: page.outboxConflicts.length > 0
-                    type: Kirigami.MessageType.Warning
-                    text: page.outboxConflicts.length === 1
-                        ? i18n("%1 was played on another device without being marked as watched there. Keep the server’s state or mark it as watched here", page.outboxConflicts[0].name)
-                        : i18n("Several downloads were played on another device without being marked as watched there. Keep the server’s state or mark them all as watched here")
-                    actions: [
-                        Kirigami.Action {
-                            text: i18n("Keep Server State")
-                            icon.name: "document-save"
-                            onTriggered: page.resolveConflicts(true)
-                        },
-                        Kirigami.Action {
-                            text: i18n("Mark as Watched")
-                            icon.name: "checkmark-symbolic"
-                            onTriggered: page.resolveConflicts(false)
-                        }
-                    ]
-                }
-                MessageBox {
-                    objectName: "downloadsStorageWarning"
-                    Layout.fillWidth: true
-                    visible: page.outboxConflicts.length === 0 && page.downloads.storageFailed
-                    type: Kirigami.MessageType.Warning
-                    text: i18n("The download list could not be saved. Downloads stay available for this session only")
-                }
-                MessageBox {
-                    objectName: "downloadsPermissionNote"
-                    Layout.fillWidth: true
-                    visible: page.outboxConflicts.length === 0 && !page.downloads.storageFailed && !page.downloads.canDownload && !page.connection.offline
-                    type: Kirigami.MessageType.Information
-                    text: i18n("This server does not allow downloads for this user. Downloaded items stay available on this device")
-                }
+            MessageBox {
+                objectName: "downloadsOutboxConflicts"
+                Layout.fillWidth: true
+                visible: page.outboxConflicts.length > 0
+                type: Kirigami.MessageType.Warning
+                text: page.outboxConflicts.length === 1
+                    ? i18n("%1 was played on another device without being marked as watched there. Keep the server’s state or mark it as watched here", page.outboxConflicts[0].name)
+                    : i18n("Several downloads were played on another device without being marked as watched there. Keep the server’s state or mark them all as watched here")
+                actions: [
+                    Kirigami.Action {
+                        text: i18n("Keep Server State")
+                        icon.name: "document-save"
+                        onTriggered: page.resolveConflicts(true)
+                    },
+                    Kirigami.Action {
+                        text: i18n("Mark as Watched")
+                        icon.name: "checkmark-symbolic"
+                        onTriggered: page.resolveConflicts(false)
+                    }
+                ]
             }
+            MessageBox {
+                objectName: "downloadsStorageWarning"
+                Layout.fillWidth: true
+                visible: page.outboxConflicts.length === 0 && page.downloads.storageFailed
+                type: Kirigami.MessageType.Warning
+                text: i18n("The download list could not be saved. Downloads stay available for this session only")
+            }
+            MessageBox {
+                objectName: "downloadsPermissionNote"
+                Layout.fillWidth: true
+                visible: page.outboxConflicts.length === 0 && !page.downloads.storageFailed && !page.downloads.canDownload && !page.connection.offline
+                type: Kirigami.MessageType.Information
+                text: i18n("This server does not allow downloads for this user. Downloaded items stay available on this device")
+            }
+        }
+
+        // The heading's text and line start and end where the cards do
+        Kirigami.ListSectionHeader {
+            objectName: "downloadsSection_active"
+            visible: activeGrid.count > 0
+            Layout.fillWidth: true
+            Layout.leftMargin: page.sideMargin
+            Layout.rightMargin: page.sideMargin
+            leftPadding: 0
+            rightPadding: 0
+            topPadding: page.sectionPadding
+            text: i18n("Active Downloads")
+        }
+        DownloadGrid {
+            id: activeGrid
+            objectName: "downloadsActive"
+            model: page.downloads.activeModel
+            next: completedGrid
+            Accessible.name: i18n("Active Downloads")
+        }
+        Kirigami.ListSectionHeader {
+            objectName: "downloadsSection_completed"
+            visible: completedGrid.count > 0
+            Layout.fillWidth: true
+            Layout.leftMargin: page.sideMargin
+            Layout.rightMargin: page.sideMargin
+            leftPadding: 0
+            rightPadding: 0
+            topPadding: page.sectionPadding
+            text: i18n("Available on This Device")
+        }
+        DownloadGrid {
+            id: completedGrid
+            objectName: "downloadsCompleted"
+            model: page.downloads.completedModel
+            previous: activeGrid
+            Accessible.name: i18n("Available on This Device")
+        }
+        // The last row of cards keeps the page margin above the footer
+        Item {
+            Layout.preferredHeight: Kirigami.Units.largeSpacing
         }
 
         Kirigami.PlaceholderMessage {
             FadeInOnShow {}
+            parent: page.flickable
             anchors.centerIn: parent
             width: parent.width - Kirigami.Units.gridUnit * 4
-            visible: list.count === 0 && (page.downloads.canDownload || page.connection.offline)
+            visible: page.downloadsModel.count === 0 && (page.downloads.canDownload || page.connection.offline)
             icon.name: "folder-download"
             text: i18n("No downloads yet")
             explanation: i18n("Use Download on a movie or an episode to keep it on this device")
@@ -610,6 +739,19 @@ Kirigami.ScrollablePage {
                 textFormat: Text.PlainText
                 color: Kirigami.Theme.disabledTextColor
                 text: i18nc("@info disk space used by the downloaded items", "%1 used", page.downloads.formattedSize(page.downloadsModel.storedBytes))
+            }
+            // Read again when a download is finished, added or removed, not at every step of the progress
+            Controls.Label {
+                objectName: "downloadsFooterFree"
+                readonly property real free: {
+                    page.downloadsModel.count;
+                    page.downloadsModel.completedCount;
+                    return page.downloads.freeBytes();
+                }
+                visible: free >= 0
+                textFormat: Text.PlainText
+                color: Kirigami.Theme.disabledTextColor
+                text: i18nc("@info free disk space where the downloads are kept", "%1 free", page.downloads.formattedSize(free))
             }
         }
     }

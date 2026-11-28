@@ -18,6 +18,7 @@
 #include <QObject>
 #include <QPointer>
 #include <QSet>
+#include <QSortFilterProxyModel>
 #include <QString>
 #include <QThread>
 #include <QUrl>
@@ -53,6 +54,9 @@ struct DownloadExtras {
 class DownloadsController final : public QObject {
     Q_OBJECT
     Q_PROPERTY(Kinefin::DownloadsModel *model READ model CONSTANT)
+    // The rows of one section of the model each, in its order: what is still to come and what is on this device
+    Q_PROPERTY(QAbstractItemModel *activeModel READ activeModel CONSTANT)
+    Q_PROPERTY(QAbstractItemModel *completedModel READ completedModel CONSTANT)
     // `Policy.EnableContentDownloading` of the signed-in user; false while unknown, so every action hides
     Q_PROPERTY(bool canDownload READ canDownload NOTIFY canDownloadChanged)
     Q_PROPERTY(bool online READ online NOTIFY onlineChanged)
@@ -60,6 +64,8 @@ class DownloadsController final : public QObject {
     Q_PROPERTY(qint64 bytesPerSecond READ bytesPerSecond NOTIFY speedChanged)
     // Bumped on every record change, so a QML binding that reads a record's state follows the queue
     Q_PROPERTY(int revision READ revision NOTIFY revisionChanged)
+    // Bumped when a poster is written or the records come and go, not on progress: what reads the posters of many cards follows this one
+    Q_PROPERTY(int posterRevision READ posterRevision NOTIFY posterRevisionChanged)
     // The index could not be written: the queue lives for this session only
     Q_PROPERTY(bool storageFailed READ storageFailed NOTIFY storageFailedChanged)
     // Watched-state events of the current owner waiting for the server
@@ -84,12 +90,15 @@ class DownloadsController final : public QObject {
     static constexpr qint64 MaxSubtitleBytes = 4 * 1024 * 1024;
 
     DownloadsModel *model() { return &m_model; }
+    QAbstractItemModel *activeModel() { return &m_activeModel; }
+    QAbstractItemModel *completedModel() { return &m_completedModel; }
     DownloadStore *store() { return m_manager.store(); }
     const DownloadStore *store() const { return m_manager.store(); }
     bool canDownload() const;
     bool online() const { return m_online; }
     qint64 bytesPerSecond() const { return m_speed; }
     int revision() const { return m_revision; }
+    int posterRevision() const { return m_posterRevision; }
     bool storageFailed() const { return m_storageFailed; }
     int pendingSyncCount() const;
     QVariantList outboxConflicts() const;
@@ -124,6 +133,8 @@ class DownloadsController final : public QObject {
     Q_INVOKABLE bool removeCurrentDownload(const QString &itemId);
     // A byte count in the user's locale and units ("1.5 GB"); empty for an unknown size
     Q_INVOKABLE QString formattedSize(qint64 bytes) const;
+    // The free space of the disk that holds the downloads, -1 when it cannot be read
+    Q_INVOKABLE qint64 freeBytes() const;
     // The local file of a completed download and what the player shows for it; empty when it is not playable
     Q_INVOKABLE QVariantMap playableDownload(const QString &serverId, const QString &userId,
                                              const QString &itemId) const;
@@ -172,6 +183,7 @@ class DownloadsController final : public QObject {
     void onlineChanged();
     void speedChanged();
     void revisionChanged();
+    void posterRevisionChanged();
     void storageFailedChanged();
     void outboxChanged();
     void rulesRevisionChanged();
@@ -230,6 +242,8 @@ class DownloadsController final : public QObject {
     JellyfinClient *m_client = nullptr;
     DownloadManager m_manager;
     DownloadsModel m_model{&m_manager};
+    QSortFilterProxyModel m_activeModel;
+    QSortFilterProxyModel m_completedModel;
     WatchedOutbox m_outbox;
     DownloadRules m_rules;
     QTimer m_ruleTimer;
@@ -263,6 +277,7 @@ class DownloadsController final : public QObject {
     QSet<QString> m_fetching;
     int m_nextChannel = 2'000'000;
     int m_revision = 0;
+    int m_posterRevision = 0;
     qint64 m_speed = 0;
     bool m_online = false;
     bool m_canDownload = false;

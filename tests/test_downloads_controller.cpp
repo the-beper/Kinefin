@@ -779,6 +779,11 @@ class TestDownloadsController : public QObject {
         Kinefin::DownloadsModel *model = rig.downloads->model();
 
         QCOMPARE(model->count(), 2);
+        // The page's two sections, each a view of the model: both records are on this device
+        QCOMPARE(rig.downloads->completedModel()->rowCount(), 2);
+        QCOMPARE(rig.downloads->activeModel()->rowCount(), 0);
+        // The disk of the downloads has some room left, read from the nearest folder that exists
+        QVERIFY(rig.downloads->freeBytes() >= 0);
         QCOMPARE(rig.downloads->ownerUserId(), rig.userId());
         QCOMPARE(rig.downloads->pendingSyncCount(), 2);
         QVariantList conflicts = rig.downloads->outboxConflicts();

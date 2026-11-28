@@ -19,11 +19,30 @@ Item {
     // The sections: their actions and the order they are shown in
     required property ShellNavigation navigation
 
-    // Wide enough for the longest label in the rail's own font, never less than 4.5 grid units: the label of an entry is elided only if a translation still does not fit, and never wraps
-    readonly property real railWidth: Math.max(Kirigami.Units.gridUnit * 4.5, Math.ceil(Math.max(sidebarEntries.widestLabel, searchEntry.labelWidth, queueEntry.labelWidth, remoteEntry.labelWidth, syncPlayEntry.labelWidth, menuEntry.labelWidth)) + Kirigami.Units.smallSpacing * 3 + 1)
+    // Wide enough for the longest label in the rail's own font, never less than 4.5 grid units: the label of an entry is elided only if a translation still does not fit, and never wraps. The window's Compact limit reads it in both forms of the rail, so the rail and the drawer never trade places as the rail's width changes
+    readonly property real labelledWidth: Math.max(Kirigami.Units.gridUnit * 4.5, Math.ceil(Math.max(sidebarEntries.widestLabel, searchEntry.labelWidth, queueEntry.labelWidth, remoteEntry.labelWidth, syncPlayEntry.labelWidth, menuEntry.labelWidth)) + Kirigami.Units.smallSpacing * 3 + 1)
+    // The side of an entry of the compact rail, a square
+    readonly property real compactSide: Kirigami.Units.gridUnit * 2
+    // A window too short for the labels has the compact rail: icons alone, their names in the tooltips
+    readonly property bool compact: railColumn.height < labelledHeight
+    // The set height of an entry over its label in the rail (the icon, the label's line and the paddings) and of the avatar entry, which has no label: the entries take these, so the rail knows them while the compact form shows
+    readonly property real labelledEntryHeight: Math.ceil(Kirigami.Units.iconSizes.smallMedium + Kirigami.Units.smallSpacing / 2 + smallFontMetrics.height + Kirigami.Units.smallSpacing * 2)
+    readonly property real labelledAvatarHeight: Math.ceil(Kirigami.Units.iconSizes.medium + Kirigami.Units.smallSpacing * 2)
+    // The height the rail's column takes with the labels and every entry a session can show, worked out rather than read from the layout, which holds the compact form while that is in use: the libraries and SyncPlay arrive after the session opens, and the rail keeps its form then, so only the height of the window decides it. Search and the menu, the sections, the queue, Remote, SyncPlay, the user, the two dividers, the gap before the foot and the spacing between them all
+    readonly property real labelledHeight: {
+        const entries = 2 + navigation.entries.length + 3;
+        const dividers = 2;
+        const dividerHeight = searchDivider.implicitHeight + searchDivider.Layout.topMargin + searchDivider.Layout.bottomMargin;
+        return entries * labelledEntryHeight + labelledAvatarHeight + dividers * dividerHeight + (entries + 1 + dividers) * railColumn.spacing;
+    }
+    // The SyncPlay entry shows in a session where SyncPlay is offered or a group is joined
+    readonly property bool syncPlayShown: navigation.signedIn && ((shell.header?.syncPlayOffered ?? false) || groupJoined)
+    readonly property real railWidth: compact ? compactSide + Kirigami.Units.smallSpacing * 2 + 1 : labelledWidth
     readonly property real drawerWidth: Kirigami.Units.gridUnit * 13
     // The room the page row leaves on the leading side: none in a Compact window and while there is nothing to choose from. It never animates: a resize of the page row ends the slide of a tab switch
     readonly property real inlineWidth: navigation.navigable && !shell.compactHeader ? railWidth : 0
+    // The rail shows: the header's rules, and not the rail's width, which follows the compact form
+    readonly property bool shown: navigation.navigable && !shell.compactHeader && !shell.startupVisible && shell.headerOpacity > 0
     // A Compact window with sections to choose from has the modal drawer
     readonly property bool drawerAllowed: shell.compactHeader && navigation.navigable
     readonly property bool drawerOpen: navigationDrawer.visible
@@ -73,8 +92,9 @@ Item {
         return [searchEntry].concat(sidebarEntries.buttons(), [queueEntry, remoteEntry, syncPlayEntry, menuEntry, userEntry]);
     }
 
+    // The rows of the drawer, the same entries in the same order as the rail
     function drawerButtons() {
-        return drawerEntries.buttons().concat([drawerSearch, drawerQueue, drawerRemote, drawerSyncPlay, drawerMenu, drawerUser]);
+        return [drawerSearch].concat(drawerEntries.buttons(), [drawerQueue, drawerRemote, drawerSyncPlay, drawerMenu, drawerUser]);
     }
 
     // A row of the open drawer that went away (the group was left) cannot keep the keyboard: the row above takes it
@@ -83,8 +103,9 @@ Item {
             stepFocus(drawerButtons(), row, -1);
     }
 
+    // The queue is a dialog of the header, over the page in front
     function openQueue() {
-        shell.openSection("queuePage", "QueuePage.qml", { connection: shell.connection });
+        shell.header?.openQueue();
     }
 
     // The main menu is the header's: it opens beside the Menu entry, or under the floating button in a Compact window
@@ -114,7 +135,7 @@ Item {
     width: inlineWidth
     height: parent?.height ?? 0
     // The header's own rules: hidden under the start-up cover, faded and inert while the player page is in front; once faded out it is hidden too, since a disabled item still blocks the hover of the player's bar under it
-    visible: inlineWidth > 0 && !shell.startupVisible && opacity > 0
+    visible: shown
     opacity: shell.headerOpacity
     enabled: !shell.playbackPageShowing
     Accessible.ignored: shell.playbackPageShowing
@@ -142,7 +163,13 @@ Item {
         }
     }
 
-    // One entry: the icon over a small label in the rail, a row in the drawer; the current section is marked, and a count sits on the icon's corner
+    // The line height of the rail's labels, part of the set height of an entry
+    FontMetrics {
+        id: smallFontMetrics
+        font: Kirigami.Theme.smallFont
+    }
+
+    // One entry: the icon over a small label in the rail, the icon alone in a square in the compact rail, a row in the drawer; the current section is marked, and a count sits on the icon's corner
     component RailEntry: Kirigami.NavigationTabButton {
         id: tab
 
@@ -151,6 +178,8 @@ Item {
         property string iconName
         // The label beside the icon, as a row of the drawer; else under it
         property bool labelled: false
+        // An entry of the compact rail: no label, a square
+        readonly property bool compact: !labelled && root.compact
         // The section it opens is the one showing: only a mark, while `checked` is the selection a screen reader reads
         property bool current: false
         // A menu of the entry is open
@@ -179,7 +208,11 @@ Item {
         property int accessibleRole: Accessible.PageTab
         readonly property bool marked: checked || current
         readonly property color foreground: marked ? Kirigami.Theme.highlightColor : Kirigami.Theme.textColor
-        property real iconSize: Kirigami.Units.iconSizes.smallMedium
+        // The icon over the label of the rail; the compact rail has its icons and the avatar at one size, which leaves the mark of the current entry its room
+        property real railIconSize: Kirigami.Units.iconSizes.smallMedium
+        readonly property real iconSize: labelled || compact ? Kirigami.Units.iconSizes.smallMedium : railIconSize
+        // Over its label in the rail the entry has the height the rail counts with; the avatar entry has no label
+        readonly property real labelledHeight: text.length > 0 ? root.labelledEntryHeight : root.labelledAvatarHeight
         // The rail uses the theme's small font, the rows of the drawer the default one
         readonly property font labelFont: labelled ? Kirigami.Theme.defaultFont : Kirigami.Theme.smallFont
         readonly property real labelWidth: labelMetrics.advanceWidth
@@ -193,6 +226,11 @@ Item {
         Accessible.name: entryLabel
         Keys.onReturnPressed: animateClick()
         Keys.onEnterPressed: animateClick()
+        // A touch has no hover: a press held on an entry names it in the tooltip until the finger lifts, and chooses nothing
+        property bool held: false
+        onPressAndHold: held = true
+        onReleased: held = false
+        onCanceled: held = false
 
         TextMetrics {
             id: labelMetrics
@@ -203,12 +241,12 @@ Item {
         // The rail may elide a long label; the drawer shows it whole. The text can hold server text (a group name): plain. It follows the pointer and the keyboard focus (the avatar has no label, and a count or the group's state is said only here), and stands beside the entry so that it never covers the next one
         PlainToolTip {
             text: tab.entryLabel
-            visible: !tab.labelled && (tab.hovered || tab.visualFocus) && !tab.opened
+            visible: !tab.labelled && (tab.hovered || tab.visualFocus || tab.held) && !tab.opened
             x: tab.mirrored ? -width - Kirigami.Units.smallSpacing : tab.width + Kirigami.Units.smallSpacing
             y: Math.round((tab.height - height) / 2)
         }
 
-        // The entries never give up their height to a short window: it is the list of the sections that shrinks and scrolls
+        // The entries never give up their height: the window is never shorter than the compact rail or the drawer
         Layout.minimumHeight: implicitHeight
         Layout.fillWidth: true
         Layout.leftMargin: Kirigami.Units.smallSpacing
@@ -224,8 +262,8 @@ Item {
         topInset: 0
         bottomInset: 0
         spacing: Kirigami.Units.smallSpacing
-        implicitWidth: implicitContentWidth + leftPadding + rightPadding
-        implicitHeight: labelled ? Math.round(Kirigami.Units.gridUnit * 2.2) : implicitContentHeight + topPadding + bottomPadding
+        implicitWidth: compact ? root.compactSide : implicitContentWidth + leftPadding + rightPadding
+        implicitHeight: labelled ? Math.round(Kirigami.Units.gridUnit * 2.2) : compact ? root.compactSide : labelledHeight
 
         contentItem: GridLayout {
             // Icon, label, badge and arrow side by side in the drawer; the icon over the label in the rail, where the badge sits on the icon
@@ -279,9 +317,9 @@ Item {
                     Accessible.ignored: true
                 }
             }
-            // The avatar entry of the rail has no label: no empty line under it, nor the spacing of one, so the avatar stays in the middle of its entry
+            // The compact rail and the avatar entry of the rail have no label: no empty line under the icon, nor the spacing of one, so the icon stays in the middle of its entry
             ColumnLayout {
-                visible: tab.labelled || tab.text.length > 0
+                visible: tab.labelled || (tab.text.length > 0 && !tab.compact)
                 spacing: 0
                 Layout.fillWidth: true
 
@@ -360,47 +398,6 @@ Item {
         Layout.bottomMargin: Kirigami.Units.smallSpacing
     }
 
-    // A list that scrolls in a window too short for all of it: the bar says that more lies below and is the pointer's way to it besides the wheel, a notch of the wheel moves about an entry (a bare flickable moves a few pixels), and the keyboard brings the entry it moved to into view
-    component ScrollingList: Flickable {
-        id: view
-
-        // Tells the objectNames of the rail's list from the drawer's
-        property string namePrefix: "sidebar"
-
-        function reveal(item) {
-            const top = item.mapToItem(contentItem, 0, 0).y;
-            if (top < contentY)
-                contentY = top;
-            else if (top + item.height > contentY + height)
-                contentY = top + item.height - height;
-        }
-
-        objectName: namePrefix + "EntriesView"
-        Layout.fillWidth: true
-        Layout.fillHeight: true
-        Layout.minimumHeight: 0
-        contentWidth: width
-        clip: true
-        boundsBehavior: Flickable.StopAtBounds
-
-        // The room the bar takes along the end side while it shows: the entries are as wide as what is left, so the bar never lies over the highlight of one
-        readonly property real barInset: contentHeight > height ? bar.implicitWidth : 0
-        readonly property bool mirrored: Qt.application.layoutDirection === Qt.RightToLeft
-
-        QQC2.ScrollBar.vertical: QQC2.ScrollBar {
-            id: bar
-            objectName: view.namePrefix + "ScrollBar"
-            policy: QQC2.ScrollBar.AsNeeded
-        }
-
-        Kirigami.WheelHandler {
-            target: view
-            filterMouseEvents: true
-            keyNavigationEnabled: false
-            verticalStepSize: Kirigami.Units.gridUnit * 3
-        }
-    }
-
     component SearchEntry: RailEntry {
         text: i18nc("@action:button", "Search")
         iconName: "search"
@@ -418,7 +415,7 @@ Item {
         entryLabel: queued > 0 ? i18ncp("@info:tooltip the queue button and how many items the queue holds", "Queue, %1 item", "Queue, %1 items", queued) : text
         badgeCount: queued
         overflowText: i18nc("@label more than 99 items in the queue badge", "99+")
-        current: root.shell.currentSection === "queue"
+        opened: root.shell.header?.queueOpened ?? false
         accessibleRole: Accessible.Button
     }
 
@@ -447,7 +444,7 @@ Item {
             return parts.join(" · ");
         }
 
-        visible: root.navigation.signedIn && ((root.shell.header?.syncPlayOffered ?? false) || joined)
+        visible: root.syncPlayShown
         text: i18nc("@action:button Watching together with other users, the server's feature name", "SyncPlay")
         iconName: "system-users-symbolic"
         entryLabel: joined ? summary : text
@@ -497,12 +494,12 @@ Item {
         avatarName: root.currentUser?.name ?? ""
         // Only URLs built by JellyfinClient::userImageUrl belong here: a raw server string must never become a source
         avatarSource: root.currentUser?.imageUrl ?? ""
-        iconSize: labelled ? Kirigami.Units.iconSizes.smallMedium : Kirigami.Units.iconSizes.medium
+        railIconSize: Kirigami.Units.iconSizes.medium
         current: root.shell.currentSection === "users"
         accessibleRole: Accessible.Button
     }
 
-    // The sections, as the rail or as the rows of the drawer; the divider and, in the drawer, the caption stand before the personal group
+    // The sections, as the rail or as the rows of the drawer; the divider stands before the personal group
     component Entries: ColumnLayout {
         id: list
 
@@ -526,8 +523,6 @@ Item {
         signal chosen
         // Up or Down on an entry: the owner of the list decides which entry is next
         signal moveRequested(var from, int step)
-        // An entry took the keyboard, so a scrolling list can bring it into view
-        signal entryFocused(var entry)
 
         function buttons() {
             const all = [];
@@ -544,6 +539,15 @@ Item {
             (all.find(button => button.checked) ?? all[0])?.forceActiveFocus(Qt.TabFocusReason);
         }
 
+        // As focusCurrent, but an entry outside the sections that marks the page in front (the queue, the users, the menu's Settings) is the current one too
+        function focusMarked(others) {
+            const marked = others.find(entry => entry.visible && entry.enabled && entry.marked);
+            if (marked)
+                marked.forceActiveFocus(Qt.TabFocusReason);
+            else
+                focusCurrent();
+        }
+
         spacing: Kirigami.Units.smallSpacing / 2
         // The entries report the page tab role: this column is the list they belong to
         Accessible.role: Accessible.PageTabList
@@ -557,20 +561,6 @@ Item {
         GroupDivider {
             objectName: list.namePrefix + "Divider"
             visible: root.navigation.groupsDivided
-        }
-
-        // The rail has no room for it: its divider stands for the group
-        QQC2.Label {
-            objectName: list.namePrefix + "PersonalCaption"
-            visible: list.labelled && root.navigation.groupsDivided
-            text: i18nc("@title:group the sidebar group with Favorites, Playlists and Downloads", "Personal")
-            font: Kirigami.Theme.smallFont
-            color: Kirigami.Theme.disabledTextColor
-            textFormat: Text.PlainText
-            Layout.fillWidth: true
-            Layout.leftMargin: Kirigami.Units.largeSpacing + Kirigami.Units.smallSpacing
-            Layout.rightMargin: Kirigami.Units.largeSpacing
-            Layout.bottomMargin: Kirigami.Units.smallSpacing
         }
 
         Repeater {
@@ -608,10 +598,6 @@ Item {
                 }
                 Keys.onUpPressed: list.moveRequested(entry, -1)
                 Keys.onDownPressed: list.moveRequested(entry, 1)
-                onActiveFocusChanged: {
-                    if (activeFocus)
-                        list.entryFocused(entry);
-                }
             }
         }
     }
@@ -628,6 +614,7 @@ Item {
         }
 
         ColumnLayout {
+            id: railColumn
             anchors.fill: parent
             // The line on the trailing edge
             anchors.rightMargin: 1
@@ -645,24 +632,22 @@ Item {
 
             // Search is no section: the line sets it apart from Home and the others
             GroupDivider {
+                id: searchDivider
                 objectName: "sidebarSearchDivider"
             }
 
-            // A window as short as the minimum with a large font cannot show every entry: the column scrolls, and the entries below it stay in reach
-            ScrollingList {
-                id: entriesView
-                contentHeight: sidebarEntries.implicitHeight
-
-                Entries {
-                    id: sidebarEntries
-                    x: entriesView.mirrored ? entriesView.barInset : 0
-                    width: entriesView.width - entriesView.barInset
-                    onMoveRequested: (from, step) => root.stepFocus(root.railButtons(), from, step)
-                    onEntryFocused: entry => entriesView.reveal(entry)
-                }
+            Entries {
+                id: sidebarEntries
+                Layout.fillWidth: true
+                onMoveRequested: (from, step) => root.stepFocus(root.railButtons(), from, step)
             }
 
-            // The queue, the remote sessions, SyncPlay, the main menu and the user: what stays in reach whatever the height of the window, below the entries that scroll
+            // The room the window leaves between the sections and the foot
+            Item {
+                Layout.fillHeight: true
+            }
+
+            // The queue, the remote sessions, SyncPlay, the main menu and the user, at the foot of the rail
             ColumnLayout {
                 id: bottomGroup
                 Layout.fillWidth: true
@@ -723,14 +708,18 @@ Item {
         // What a row that opens a popup of its own runs once the drawer has gone: over the fading drawer the popup would lose the keyboard to it
         property var afterClose: null
 
-        // A section or the queue was chosen: the page it opened takes the keyboard
+        // A section was chosen: the page it opened takes the keyboard
         function choose() {
             chosen = true;
             close();
         }
 
-        // The keyboard goes back to the button that opened the drawer, then `action` opens its popup
+        // The keyboard goes back to the button that opened the drawer, then `action` opens its popup; a drawer already gone runs it at once
         function closeThen(action) {
+            if (!visible) {
+                Qt.callLater(action);
+                return;
+            }
             afterClose = action;
             close();
         }
@@ -751,7 +740,8 @@ Item {
         bottomPadding: Kirigami.Units.smallSpacing
 
         onAboutToShow: chosen = false
-        onOpened: drawerEntries.focusCurrent()
+        onAboutToHide: root.shell.header?.dismissDrawerMenu()
+        onOpened: drawerEntries.focusMarked([drawerSearch, drawerQueue, drawerRemote, drawerSyncPlay, drawerMenu, drawerUser])
         onClosed: {
             const next = afterClose;
             afterClose = null;
@@ -773,54 +763,47 @@ Item {
             }
         }
 
+        // The rail's entries in the rail's order, with the labels beside the icons
         contentItem: ColumnLayout {
             spacing: Kirigami.Units.smallSpacing / 2
 
-            // The sections scroll in a window too short for all of them, as the rail's do
-            ScrollingList {
-                id: drawerView
-                namePrefix: "drawer"
-                contentHeight: drawerEntries.implicitHeight
-
-                Entries {
-                    id: drawerEntries
-                    x: drawerView.mirrored ? drawerView.barInset : 0
-                    width: drawerView.width - drawerView.barInset
-                    labelled: true
-                    namePrefix: "drawer"
-                    onMoveRequested: (from, step) => root.stepFocus(root.drawerButtons(), from, step)
-                    onEntryFocused: entry => drawerView.reveal(entry)
-                    onChosen: navigationDrawer.choose()
-                }
+            SearchEntry {
+                id: drawerSearch
+                objectName: "drawerSearch"
+                labelled: true
+                onClicked: navigationDrawer.closeThen(() => root.shell.openSearch())
+                Keys.onUpPressed: root.stepFocus(root.drawerButtons(), drawerSearch, -1)
+                Keys.onDownPressed: root.stepFocus(root.drawerButtons(), drawerSearch, 1)
             }
 
             GroupDivider {
-                objectName: "drawerActionsDivider"
+                objectName: "drawerSearchDivider"
             }
 
-            // Search, the queue, the remote sessions, SyncPlay, the main menu and the user: in reach whatever the height of the window
+            Entries {
+                id: drawerEntries
+                Layout.fillWidth: true
+                labelled: true
+                namePrefix: "drawer"
+                onMoveRequested: (from, step) => root.stepFocus(root.drawerButtons(), from, step)
+                onChosen: navigationDrawer.choose()
+            }
+
+            Item {
+                Layout.fillHeight: true
+            }
+
             ColumnLayout {
                 Layout.fillWidth: true
                 spacing: Kirigami.Units.smallSpacing / 2
 
-                SearchEntry {
-                    id: drawerSearch
-                    objectName: "drawerSearch"
-                    labelled: true
-                    onClicked: navigationDrawer.closeThen(() => root.shell.openSearch())
-                    Keys.onUpPressed: root.stepFocus(root.drawerButtons(), drawerSearch, -1)
-                    Keys.onDownPressed: root.stepFocus(root.drawerButtons(), drawerSearch, 1)
-                }
-
+                // The dialog opens once the drawer has gone
                 QueueEntry {
                     id: drawerQueue
                     objectName: "drawerQueue"
                     rowBadgeObjectName: "drawerQueueBadge"
                     labelled: true
-                    onClicked: {
-                        root.openQueue();
-                        navigationDrawer.choose();
-                    }
+                    onClicked: navigationDrawer.closeThen(() => root.openQueue())
                     Keys.onUpPressed: root.stepFocus(root.drawerButtons(), drawerQueue, -1)
                     Keys.onDownPressed: root.stepFocus(root.drawerButtons(), drawerQueue, 1)
                 }
@@ -852,13 +835,13 @@ Item {
                     Keys.onDownPressed: root.stepFocus(root.drawerButtons(), drawerSyncPlay, 1)
                 }
 
-                // The main menu is the header's: the drawer goes first, and the menu opens under the floating button
+                // The main menu is the header's: it hangs beside the row with the drawer open under it, and a choice runs once the drawer has gone
                 MenuEntry {
                     id: drawerMenu
                     objectName: "drawerMenu"
                     chevronObjectName: "drawerMenuChevron"
                     labelled: true
-                    onClicked: navigationDrawer.closeThen(() => root.openMainMenu())
+                    onClicked: root.shell.header?.openMainMenuFromDrawer(drawerMenu, choice => navigationDrawer.closeThen(choice))
                     Keys.onUpPressed: root.stepFocus(root.drawerButtons(), drawerMenu, -1)
                     Keys.onDownPressed: root.stepFocus(root.drawerButtons(), drawerMenu, 1)
                 }

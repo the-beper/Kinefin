@@ -73,7 +73,7 @@ It needs:
 - Plasma on Wayland.
 - Flatpak, the only way Kinefin is packaged.
 
-Kinefin covers movies and shows. Music and audiobooks are not built yet: those libraries show on Home but stay disabled with "Not supported yet", and their rail entries open a page that says they are coming soon.
+Kinefin covers movies and shows. Music and audiobooks are not supported: those libraries show on Home but stay disabled with "Not supported yet", and they have no rail entries.
 
 Server administration is not part of Kinefin. If you are an administrator, **Admin Dashboard** in the main menu opens the server's web interface in your browser. User management, library management, plugins and Live TV setup happen there.
 
@@ -161,7 +161,7 @@ Each user you sign in as is saved with the server. What happens at the next star
 | One, set to **Ask for Password** | Password prompt                                                                                           |
 | Two or more                      | The user picker: centred rows of avatars that wrap with the window, and an **Add User** button under them |
 
-In the picker, arrows move between the tiles and down to **Add User**, Return or Space chooses, and a lock badge marks a user without a stored token. **Switch Server**, beside the server address, returns to the **Servers** page and keeps the sessions.
+In the picker, arrows move between the tiles and down to **Add User** and then to **Switch Server**, Return or Space chooses, and a lock badge marks a user without a stored token. The server address and **Switch Server** stand centred at the foot of the page (above the mini player when one shows); in a short window the tiles scroll above them. **Switch Server** returns to the **Servers** page and keeps the sessions.
 
 While you are signed in, your avatar at the foot of the left rail (your row of the drawer in a [Compact window](#browse)) opens the user picker, the **Who is watching?** page, with **Signed in** under your tile. Choosing yourself goes back to Home and the session goes on. Choosing another user leaves the current session (its token and queue stay) and switches to that user. You are asked for the password if that user has no stored session or is set to **Ask for Password**.
 
@@ -182,8 +182,8 @@ A rail down the left edge of the window holds the entries, each icon with its la
 | Place   | Entries                                                                                                                                      |
 | ------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | Top     | **Search**                                                                                                                                   |
-| Middle  | **Home**, **Movies** and **Shows** (each only when the server has a library of that type), **Music**, **Audiobooks**, then **Favorites**, **Playlists** and **Downloads** |
-| Foot    | **Queue** with its count, **Remote** (opens Remote Sessions), **SyncPlay**, **Menu** (opens the main menu beside it) and your avatar, larger than the icons and without a label, which opens the user picker |
+| Middle  | **Home**, **Movies** and **Shows** (each only when the server has a library of that type), then **Favorites**, **Playlists** and **Downloads** |
+| Foot    | **Queue** with its count (opens the queue), **Remote** (opens Remote Sessions), **SyncPlay**, **Menu** (opens the main menu beside it) and your avatar, larger than the icons and without a label, which opens the user picker |
 
 The main menu has these entries:
 
@@ -198,11 +198,11 @@ The main menu has these entries:
 
 It opens from **Menu** in the rail and from the **Main Menu** row of the drawer; the offline bar and the **Servers** and sign-in pages have a button of their own (see below).
 
-**Music** and **Audiobooks** open a page that says they are coming soon. **Downloads** also shows how many downloads are not finished. In a short window the middle entries scroll, with a scroll bar that shows when some are out of view and takes its own strip beside the entries, and the foot stays in view.
+**Downloads** also shows how many downloads are not finished. The rail never scrolls. In a window too short for the rail with its labels, it becomes a narrower compact rail with the same entries as square, icon-only boxes; the names show in the tooltips (on hover and on keyboard focus) and are the accessible names. The window cannot be made shorter than the compact rail, so every entry shows. At the first start the window opens tall enough for the labels (less if the screen is shorter); later starts restore the saved size.
 
-Ctrl+1 to Ctrl+8 open the middle entries by their position among the visible ones, so without a Movies library **Shows** is Ctrl+2.
+Ctrl+1 to Ctrl+6 open the middle entries by their position among the visible ones, so without a Movies library **Shows** is Ctrl+2, and with both video libraries **Favorites** is Ctrl+4, **Playlists** Ctrl+5 and **Downloads** Ctrl+6.
 
-In a window narrower than the smallest window plus the rail (Compact), the rail gives way to a drawer, and the window has no bar. A button in the top left corner (top right in a right-to-left layout) opens the drawer, and so does a swipe from the window edge. The pages leave the corner free: the toolbar of a page starts after the button, and a page without one keeps room above its content. The drawer repeats the rail as rows with the labels beside the icons: the sections, **Search**, **Queue** with its count, **Remote Sessions**, **SyncPlay**, **Main Menu** and a row with your avatar and name, which opens the user picker. The **SyncPlay** row works like the rail entry (see [Watch together with SyncPlay](#watch-together-with-syncplay)): in a group it shows the state under its label, and the group's menu hangs from the row while the drawer stays open. The rows that open a menu end with an arrow, and the main menu opens under the corner button. In a short window the sections of the drawer scroll and the rows below them stay in view. While you work offline Downloads is the only section, so the window has no drawer, only a bar with the main menu button, and the **Servers** and sign-in pages have only the main menu button in the top corner. The toolbar of every page has framed buttons and a full-width line under it, with a soft shadow below.
+In a window narrower than the smallest window plus the rail (Compact), the rail gives way to a drawer, and the window has no bar. A button in the top left corner (top right in a right-to-left layout) opens the drawer, and so does a swipe from the window edge. The pages leave the corner free: the toolbar of a page starts after the button, and a page without one keeps room above its content. The drawer has the rail's entries in the rail's order, as rows with the labels beside the icons: **Search**, a line, **Home**, **Movies** and **Shows**, a line, **Favorites**, **Playlists** and **Downloads**, then **Queue** with its count, **Remote Sessions**, **SyncPlay**, **Main Menu** and, at the foot, a row with your avatar and name and **Switch User** under it, which opens the user picker. The **SyncPlay** row works like the rail entry (see [Watch together with SyncPlay](#watch-together-with-syncplay)): in a group it shows the state under its label, and the group's menu hangs from the row while the drawer stays open. The rows that open a menu end with an arrow. The main menu hangs from its row too, with the drawer open under it: Escape or a click outside closes only the menu, and a choice closes the drawer before it runs. The drawer never scrolls: the least window height shows every row. While you work offline Downloads is the only section, so the window has no drawer, only a bar with the main menu button, and the **Servers** and sign-in pages have only the main menu button in the top corner. The toolbar of every page has framed buttons and a full-width line under it, with a soft shadow below.
 
 Escape and Alt+Left go back. The mouse back button does too. Ctrl+R reloads the page in front.
 
@@ -395,7 +395,7 @@ The **Show All** pages have **Filters…** in their toolbar, the dialog of [Movi
 
 ### Playlists
 
-The **Playlists** tab lists your video playlists. A playlist page shows its entries in order, with **Play** and **Shuffle** at the top. **Play** and **Shuffle** replace the queue with the playlist, and the Queue page's **Undo** takes that back.
+The **Playlists** tab lists your video playlists. A playlist page shows its entries in order, with **Play** and **Shuffle** at the top. **Play** and **Shuffle** replace the queue with the playlist, and the queue's **Undo** takes that back.
 
 To add an item to a playlist, choose **Add to Playlist…** in a card menu, or **Playlist…** in the **Add to** submenu of a details page, then pick a playlist or **New Playlist…**. A video that is already in the playlist is not added twice.
 
@@ -414,7 +414,7 @@ The queue is an ordered list of up to 500 movies, episodes and videos, each at m
 
 To add to it, use **Play Next** (top of the queue) or **Add to Queue** (end) on a card or a details page. On a season, series or collection they add the playable episodes or children: a season from its first unplayed episode, a series from its Next Up episode.
 
-**Queue** at the foot of the rail (a row of the drawer in a Compact window) opens the page. Its toolbar has **Resume Queue**, **Play From Here**, **Undo** and **Clear Queue** (with confirmation). In the list:
+**Queue** at the foot of the rail (a row of the drawer in a Compact window) opens the queue in a dialog over the page in front. Its buttons are **Resume Queue**, **Undo** and **Clear Queue**, which empties the queue at once: **Undo** brings it back. Playing and opening an item close the dialog first. In the list:
 
 | Key                | Action               |
 | ------------------ | -------------------- |
@@ -423,7 +423,7 @@ To add to it, use **Play Next** (top of the queue) or **Add to Queue** (end) on 
 | Delete             | Remove the item      |
 | Ctrl+Z             | Undo the last change |
 
-The row menu offers **Move Up**, **Move Down**, **Remove** and **Go to Item**. Dragging rows is not supported.
+The row menu offers **Play From Here**, **Move Up**, **Move Down**, **Remove** and **Go to Item**. Dragging rows is not supported.
 
 An episode played on its own is not added to the queue. The player still lets you step through its series with **Next** and **Previous**.
 
@@ -618,7 +618,7 @@ To download an item, choose **Download** on its details page or in a card menu. 
 
 To download a whole series or season, choose **Download** in the toolbar of its page, then **Download All…**. A dialog reads the episodes and says how many it will fetch and how much space they take together (when the server gives every size). **Only unwatched episodes** is on by default; switch it off to include the ones you watched. When every episode has been watched, the dialog says so and offers that switch. Episodes that are already on this device or have no file are left out, a series of more than 1000 episodes is cut at 1000, and nothing starts before you press **Download**. The batch joins the queue in order, and a notification names how many entered it.
 
-The Downloads page has an active section and a completed one. A row shows the poster, the title, a second line with the year or the season and episode, and a progress bar until the download is finished or has failed. The line under it gives the size written of the total, the percentage, the speed (an average over the last few seconds) and the time left; a queued, paused, waiting or failed download says so in words instead. The buttons at the end of a row depend on its state:
+The Downloads page has an active section and a completed one, each a grid of cards: two to a row when the window is wide enough, one below that. A card shows the poster, the title, a second line (the series, the season and episode and the running time for an episode; the year and the running time for a movie), then a status line, with a progress bar under it until the download is finished or has failed. While it downloads, the status line gives the size written of the total, the percentage, the speed (an average over the last few seconds) and the time left; a queued, paused, waiting or failed download says so in words instead. A downloaded card gives its size, "watched" once you watched it, and the day it was added to the queue. The buttons at the end of a card depend on its state:
 
 | State                          | Buttons                                       |
 | ------------------------------ | --------------------------------------------- |
@@ -626,7 +626,7 @@ The Downloads page has an active section and a completed one. A row shows the po
 | Paused or failed               | **Resume** or **Retry**, **Delete Download…** |
 | Downloaded or exported         | **Play**, **Export…**, **Delete Download…**   |
 
-The buttons show icons only, and their names are the tooltips. **Cancel Download** acts at once, and **Delete Download…** asks first. A click on a completed row plays it. The footer shows the number of downloads (or "No downloads"), the speed of the running ones together, the storage used and the number of changes waiting to sync.
+The buttons show icons only, and their names are the tooltips. **Cancel Download** acts at once, and **Delete Download…** asks first. A click on a completed card plays it. With the keyboard, each section's grid is one Tab stop and the buttons of its cards come after it. The arrows move between the cards. Down from the last row goes to the first row of the next section, in the same column, and Up from the first row goes back to the last row of the previous one. Return plays a downloaded card and Delete asks to delete it. The footer shows the number of downloads (or "No downloads"), the speed of the running ones together, the storage used, the free space on the disk that holds the downloads and the number of changes waiting to sync.
 
 **Settings**, **Downloads** sets how many downloads run at once.
 
@@ -702,10 +702,10 @@ Ctrl+Shift+/ opens the shortcuts dialog, which lists the keys below and, while a
 | Escape, Alt+Left                                                 | Go back                                 |
 | Ctrl+F                                                           | Search                                  |
 | Ctrl+R                                                           | Refresh                                 |
-| Ctrl+1 to Ctrl+8                                                 | Rail entry by position                  |
+| Ctrl+1 to Ctrl+6                                                 | Rail entry by position                  |
 | Ctrl+PgUp, Ctrl+PgDown, Ctrl+[, Ctrl+], Ctrl+Shift+Tab, Ctrl+Tab | Previous or next entry, wrapping        |
 | Menu, Shift+F10                                                  | Open the item menu                      |
-| Ctrl+Z                                                           | Undo the last change on the Queue page  |
+| Ctrl+Z                                                           | Undo the last change in the queue       |
 | Ctrl+Up, Ctrl+Down, Delete                                       | Move or remove a queue or playlist item |
 | F2                                                               | Rename a playlist                       |
 | Ctrl+S                                                           | Save user preferences                   |

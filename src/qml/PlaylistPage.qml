@@ -5,7 +5,7 @@ import QtQuick.Controls as Controls
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 
-// One playlist in its order, read again every time the page comes to the front. Play and Shuffle make the playlist the saved queue (Undo on the Queue page brings the old one back) and start it; the rows move at once (a removal after its confirmation) and their writes follow (see PlaylistEntriesModel)
+// One playlist in its order, read again every time the page comes to the front. Play and Shuffle make the playlist the saved queue (Undo in the queue brings the old one back) and start it; the rows move at once (a removal after its confirmation) and their writes follow (see PlaylistEntriesModel)
 Kirigami.ScrollablePage {
     id: page
     objectName: "playlistPage"
@@ -25,7 +25,7 @@ Kirigami.ScrollablePage {
     readonly property PlayQueue queue: connection.queue
     readonly property bool loading: entries.status === PlaylistEntriesModel.Loading
     readonly property bool failed: entries.status === PlaylistEntriesModel.Failed
-    // A queue that could not be read back stays untouched until it is (the Queue page offers Retry); the queue reads the playlist from the server, so not while edits are on their way
+    // A queue that could not be read back stays untouched until it is (the queue offers Retry); the queue reads the playlist from the server, so not while edits are on their way
     readonly property bool canPlay: entries.count > 0 && !entries.writing && !queue.busy && !queue.restoreFailed && !!page.Window.window?.player && !shell.playlistWaiting && !shell.remotePlayWaiting
     // One write of a playlist at a time: a rename or a delete waits for the edits of the rows, and the other way round
     readonly property bool canChangePlaylist: !entries.writing && !connection.playlists.writing

@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "DownloadsModel.h"
 
+#include <QSet>
+
 #include <algorithm>
 
 namespace Kinefin {
@@ -114,6 +116,12 @@ QVariant DownloadsModel::data(const QModelIndex &index, int role) const
         return record.ruleId;
     case BytesPerSecondRole:
         return m_manager->bytesPerSecond(record);
+    case RuntimeTicksRole:
+        return record.runtimeTicks;
+    case PlayedRole:
+        return record.played;
+    case AddedAtRole:
+        return record.addedAt;
     }
     return {};
 }
@@ -139,7 +147,10 @@ QHash<int, QByteArray> DownloadsModel::roleNames() const
             {SectionRole, "section"},
             {PrimaryTagRole, "primaryTag"},
             {RuleIdRole, "ruleId"},
-            {BytesPerSecondRole, "bytesPerSecond"}};
+            {BytesPerSecondRole, "bytesPerSecond"},
+            {RuntimeTicksRole, "runtimeTicks"},
+            {PlayedRole, "played"},
+            {AddedAtRole, "addedAt"}};
 }
 
 void DownloadsModel::updateRecord(const DownloadRecord &record)
@@ -186,9 +197,42 @@ void DownloadsModel::refresh()
               });
     if (rows == m_rows)
         return;
-    beginResetModel();
-    m_rows = std::move(rows);
-    endResetModel();
+    // Row by row rather than a reset: the page's grids then rebuild only the cards that changed, not every card at each completion
+    QSet<QString> kept;
+    for (const DownloadRecord &record : std::as_const(rows))
+        kept.insert(record.key());
+    for (int row = int(m_rows.size()) - 1; row >= 0; --row) {
+        if (kept.contains(m_rows.at(row).key()))
+            continue;
+        beginRemoveRows({}, row, row);
+        m_rows.removeAt(row);
+        endRemoveRows();
+    }
+    for (int target = 0; target < rows.size(); ++target) {
+        const QString wanted = rows.at(target).key();
+        int found = -1;
+        for (int row = target; row < m_rows.size(); ++row) {
+            if (m_rows.at(row).key() == wanted) {
+                found = row;
+                break;
+            }
+        }
+        if (found < 0) {
+            beginInsertRows({}, target, target);
+            m_rows.insert(target, rows.at(target));
+            endInsertRows();
+            continue;
+        }
+        if (found != target) {
+            beginMoveRows({}, found, found, {}, target);
+            m_rows.move(found, target);
+            endMoveRows();
+        }
+        if (!(m_rows.at(target) == rows.at(target))) {
+            m_rows[target] = rows.at(target);
+            Q_EMIT dataChanged(index(target), index(target));
+        }
+    }
     Q_EMIT countsChanged();
 }
 } // namespace Kinefin

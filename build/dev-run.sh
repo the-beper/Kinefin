@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: 2026 Kinefin contributors
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Usage: build/dev-run.sh [--shots=step,step,...] [kinefin options...]
-# --shots signs in, walks the steps (home, movies, shows, music, audiobooks, favorites, playlists, downloads, search, item:<id>) offscreen, saves one PNG of the window per step in tmp/shots (KINEFIN_DEV_SIZE=WxH, default 1280x800) and exits: nothing appears on the desktop.
+# --shots signs in, walks the steps (home, movies, shows, favorites, playlists, downloads, search, item:<id>) offscreen, saves one PNG of the window per step in tmp/shots (KINEFIN_DEV_SIZE=WxH, default 1280x800) and exits: nothing appears on the desktop.
 # Builds the dev tree (/buildtmp/dev, the volume build-env.sh uses) and runs it from the build container on the desktop's Wayland session, with its data on a tmpfs: nothing outlives the run and the Flatpak's ~/.var/app is never read or written. KINEFIN_DEV_NO_BUILD=1 skips the build step.
 # The server under test comes from `.env` in the repository root (git-ignored, mode 600, `KEY=value` lines read by podman; KINEFIN_DEV_ENV names another file): KINEFIN_DEV_SERVER, KINEFIN_DEV_USER and KINEFIN_DEV_PASSWORD sign the dev build in at every start. Without them, sign in from the window.
 # Not representative of the Flatpak: the container has its own Mesa, FFmpeg and Qt, no VA-API decoders (hardware decoding stays off), no portals and no session bus of the desktop (a private one: no MPRIS, no notifications).

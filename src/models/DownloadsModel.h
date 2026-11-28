@@ -37,7 +37,11 @@ class DownloadsModel final : public QAbstractListModel {
         SectionRole,
         PrimaryTagRole,
         RuleIdRole,
-        BytesPerSecondRole
+        BytesPerSecondRole,
+        RuntimeTicksRole,
+        PlayedRole,
+        // When the item was put in the queue, in milliseconds since the epoch
+        AddedAtRole
     };
 
     explicit DownloadsModel(DownloadManager *manager, QObject *parent = nullptr);

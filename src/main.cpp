@@ -490,7 +490,7 @@ int main(int argc, char *argv[])
             });
         connection.connectToWithFallback(server);
     }
-    // build/dev-run.sh --shots: once the session is open, walks the steps of KINEFIN_DEV_STEPS (home, movies, shows, music, audiobooks, favorites, playlists, downloads, search, item:<id>), saves a PNG of the window after each one into KINEFIN_DEV_SHOTS and quits
+    // build/dev-run.sh --shots: once the session is open, walks the steps of KINEFIN_DEV_STEPS (home, movies, shows, favorites, playlists, downloads, search, item:<id>), saves a PNG of the window after each one into KINEFIN_DEV_SHOTS and quits
     if (const QString directory = qEnvironmentVariable("KINEFIN_DEV_SHOTS"); !directory.isEmpty()) {
         const QStringList steps =
             qEnvironmentVariable("KINEFIN_DEV_STEPS").split(u',', Qt::SkipEmptyParts);
@@ -502,8 +502,6 @@ int main(int argc, char *argv[])
             {QStringLiteral("home"), QStringLiteral("homeTabAction")},
             {QStringLiteral("movies"), QStringLiteral("moviesTabAction")},
             {QStringLiteral("shows"), QStringLiteral("tvShowsTabAction")},
-            {QStringLiteral("music"), QStringLiteral("musicTabAction")},
-            {QStringLiteral("audiobooks"), QStringLiteral("audiobooksTabAction")},
             {QStringLiteral("favorites"), QStringLiteral("favoritesTabAction")},
             {QStringLiteral("playlists"), QStringLiteral("playlistsTabAction")},
             {QStringLiteral("downloads"), QStringLiteral("downloadsTabAction")}};

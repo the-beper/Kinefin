@@ -5,7 +5,7 @@ import QtQuick.Controls as Controls
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 
-// Who is watching: the server's address with Switch Server, one tile per user saved for the server and an Add User button under them. A user without a stored session, or set to ask for the password, shows a lock and leads to the sign-in page. Signed out it is the page of the picker state; in a session it is the section the sidebar's avatar opens, with the signed-in user marked, and the session goes on until another user is chosen, added or signed out
+// Who is watching: one tile per user saved for the server, an Add User button under them and, at the foot of the page, the server's address with Switch Server. A user without a stored session, or set to ask for the password, shows a lock and leads to the sign-in page. Signed out it is the page of the picker state; in a session it is the section the sidebar's avatar opens, with the signed-in user marked, and the session goes on until another user is chosen, added or signed out
 Kirigami.ScrollablePage {
     id: page
     objectName: "userPickerPage"
@@ -206,46 +206,13 @@ Kirigami.ScrollablePage {
     ColumnLayout {
         spacing: 0
 
-        // The heading and the address are one block, set apart from the tiles
-        ColumnLayout {
+        Kirigami.Heading {
             Layout.fillWidth: true
             Layout.bottomMargin: Kirigami.Units.gridUnit
-            spacing: Kirigami.Units.largeSpacing
-
-            Kirigami.Heading {
-                Layout.fillWidth: true
-                horizontalAlignment: Text.AlignHCenter
-                wrapMode: Text.Wrap
-                level: 1
-                text: page.title
-            }
-
-            // The server and the way to another one, in a row of its own width, centred (a layout fills the width by default)
-            RowLayout {
-                Layout.fillWidth: false
-                Layout.alignment: Qt.AlignHCenter
-                Layout.maximumWidth: parent.width
-                spacing: Kirigami.Units.largeSpacing
-
-                // The server address is server text: plain
-                Controls.Label {
-                    objectName: "userPickerServer"
-                    Layout.fillWidth: true
-                    Layout.maximumWidth: implicitWidth
-                    elide: Text.ElideMiddle
-                    textFormat: Text.PlainText
-                    color: Kirigami.Theme.disabledTextColor
-                    text: page.connection.serverUrl
-                }
-                Controls.Button {
-                    objectName: "userSwitchServerButton"
-                    text: i18nc("@action:button Goes back to the list of servers", "Switch Server")
-                    icon.name: "network-server"
-                    onClicked: page.connection.cancel()
-                    Keys.onReturnPressed: clicked()
-                    Keys.onEnterPressed: clicked()
-                }
-            }
+            horizontalAlignment: Text.AlignHCenter
+            wrapMode: Text.Wrap
+            level: 1
+            text: page.title
         }
 
         // The tiles are one tab stop with the arrow keys inside; the row is as wide as its columns, centred, and wraps when the page is narrower
@@ -388,6 +355,49 @@ Kirigami.ScrollablePage {
                 event.accepted = grid.count > 0;
                 if (event.accepted)
                     grid.forceActiveFocus(Qt.BacktabFocusReason);
+            }
+            Keys.onDownPressed: switchServer.forceActiveFocus(Qt.TabFocusReason)
+        }
+    }
+
+    // The server and the way to another one, at the foot of the page as far from the bottom as the heading is from the top, and above the mini player while one is docked; the tiles scroll above it in a short window
+    footer: Item {
+        implicitHeight: serverRow.implicitHeight + page.topPadding + (page.Window.window?.miniPlayerSpace ?? 0)
+
+        // A row of its own width, centred, never wider than the page's content; whole pixels, so that a fraction never elides the address
+        RowLayout {
+            id: serverRow
+            anchors.top: parent.top
+            anchors.horizontalCenter: parent.horizontalCenter
+            width: Math.min(Math.ceil(implicitWidth), parent.width - page.leftPadding - page.rightPadding)
+            spacing: Kirigami.Units.largeSpacing
+
+            // The server address is server text: plain, and whole in its tooltip when the row has to cut it
+            Controls.Label {
+                id: serverLabel
+                objectName: "userPickerServer"
+                Layout.fillWidth: true
+                Layout.maximumWidth: Math.ceil(implicitWidth)
+                elide: Text.ElideMiddle
+                textFormat: Text.PlainText
+                color: Kirigami.Theme.disabledTextColor
+                text: page.connection.serverUrl
+
+                HoverHandler { id: serverHover }
+                PlainToolTip {
+                    visible: serverLabel.truncated && serverHover.hovered
+                    text: serverLabel.text
+                }
+            }
+            Controls.Button {
+                id: switchServer
+                objectName: "userSwitchServerButton"
+                text: i18nc("@action:button Goes back to the list of servers", "Switch Server")
+                icon.name: "network-server"
+                onClicked: page.connection.cancel()
+                Keys.onReturnPressed: clicked()
+                Keys.onEnterPressed: clicked()
+                Keys.onUpPressed: addUser.forceActiveFocus(Qt.BacktabFocusReason)
             }
         }
     }
