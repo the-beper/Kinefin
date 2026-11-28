@@ -874,6 +874,21 @@ struct Ui {
     }
 
     // The drawer of a Compact window: opened with the button floating in the top corner, closed on a choice
+    // The offscreen platform's pointer rests at (10, 10), on the rail's Search entry or the corner button, whose tooltip opens after its delay: it counts as an open popup for a remote Back and takes the press meant for the button. The pointer leaves the window, as a user's hand on a remote does
+    bool pointerLeaves()
+    {
+        QEvent leave(QEvent::Leave);
+        QCoreApplication::sendEvent(window, &leave);
+        // A tooltip still takes a press while it fades out
+        return qWaitForScaled(
+            [this] {
+                QVariant open;
+                return QMetaObject::invokeMethod(window, "popupOpen", Q_RETURN_ARG(QVariant, open))
+                       && !open.toBool();
+            },
+            3000);
+    }
+
     bool openNavigationDrawer()
     {
         QObject *drawer = popup(QStringLiteral("navigationDrawer"));
@@ -888,6 +903,8 @@ struct Ui {
                         return button && button->isVisible() && button->width() > 0;
                     },
                     5000))
+                return false;
+            if (!pointerLeaves())
                 return false;
             clickCenter(button);
         }
@@ -10068,6 +10085,7 @@ class TestUiPages : public QObject {
         QTRY_VERIFY(drawer->property("dragMargin").toReal() > 0);
         // The button opens the drawer; Escape closes it without a choice and the keyboard goes back to the button
         QVERIFY(!drawer->property("visible").toBool());
+        QVERIFY(ui.pointerLeaves());
         ui.clickCenter(button);
         QTRY_VERIFY(drawer->property("opened").toBool());
         QTest::keyClick(ui.window, Qt::Key_Escape);
@@ -10328,6 +10346,7 @@ class TestUiPages : public QObject {
         QQuickItem *hamburger = ui.item(QStringLiteral("navigationButton"));
         QVERIFY(hamburger && hamburger->isVisible());
         // The button opens the drawer: the same entries in the same order, the personal group after its line with no caption, the current section marked and holding the keyboard
+        QVERIFY(ui.pointerLeaves());
         ui.clickCenter(hamburger);
         QTRY_VERIFY(drawer->property("opened").toBool());
         QTRY_COMPARE(ui.tabNames(), rail);
@@ -30429,6 +30448,7 @@ class TestUiPages : public QObject {
         QVERIFY(ui.signIn());
         QVERIFY(attach(ui, "remoteInput", &remote));
         QTRY_VERIFY(ui.item(QStringLiteral("homePage")) != nullptr);
+        QVERIFY(ui.pointerLeaves());
 
         // Back on the first page has nowhere to go
         Q_EMIT remote.actionRequested(QStringLiteral("back"));
